@@ -86,3 +86,68 @@ fn shell_module_manifest_parallel_loading_beats_serial_benchmark() {
         "parallel shell manifest loading should beat serial loading"
     );
 }
+
+#[test]
+fn invalid_icon_pack_assets_are_rejected_before_binding_creation() {
+    let module = tempfile::tempdir().unwrap();
+    std::fs::write(
+        module.path().join("codepoints.json"),
+        r#"{"settings":"\uE000"}"#,
+    )
+    .unwrap();
+    std::fs::write(module.path().join("icons.ttf"), b"not a font").unwrap();
+    let section = mesh_core_module::manifest::IconPackSection {
+        id: "broken".into(),
+        requires: mesh_core_module::manifest::IconPackRequires {
+            fonts: vec![mesh_core_module::manifest::IconPackFontRequirement {
+                alias: "icons".into(),
+                family: "Broken Icons".into(),
+                file: Some("icons.ttf".into()),
+                version: None,
+                glyph_map: Some("codepoints.json".into()),
+            }],
+            themes: Vec::new(),
+        },
+        mappings: std::collections::HashMap::from([(
+            "settings".into(),
+            mesh_core_module::manifest::IconMappingTarget {
+                target: "icons/settings".into(),
+                multicolor: false,
+            },
+        )]),
+        ..Default::default()
+    };
+
+    let error = super::super::prepare_icon_pack_bindings("@test/broken", module.path(), &section)
+        .unwrap_err();
+    assert!(error.contains("invalid font"), "unexpected error: {error}");
+}
+
+#[test]
+fn font_registry_publishes_role_and_qualified_theme_tokens() {
+    let mut registry = mesh_core_resources::FontRegistry::new(["Inter".into()]);
+    registry
+        .replace(
+            vec![mesh_core_resources::FontPackBindings {
+                module_id: "@test/fonts".into(),
+                pack_id: "default".into(),
+                required_families: Vec::new(),
+                covers: std::collections::BTreeMap::new(),
+                mappings: std::collections::BTreeMap::from([("body".into(), "Inter".into())]),
+                faces: Vec::new(),
+            }],
+            vec!["@test/fonts".into()],
+        )
+        .unwrap();
+    let mut theme = mesh_core_theme::default_theme();
+    super::super::discovery::apply_font_registry_tokens(&mut theme, &registry);
+
+    assert_eq!(
+        theme.token("font.body"),
+        Some(&mesh_core_theme::TokenValue::String("Inter".into()))
+    );
+    assert_eq!(
+        theme.token("mesh.font.default.body"),
+        Some(&mesh_core_theme::TokenValue::String("Inter".into()))
+    );
+}

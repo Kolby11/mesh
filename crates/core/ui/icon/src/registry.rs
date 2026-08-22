@@ -2,6 +2,7 @@ use crate::bindings::{FrontendIconBindings, IconPackBindings, parse_target};
 use crate::config::{IconConfig, IconPackRoot};
 use crate::xdg;
 use anyhow::{Result, bail};
+use mesh_core_resources::resource_revision;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
@@ -98,6 +99,7 @@ fn canonical_pack_id(value: &str) -> Result<&str> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct IconCacheKey {
     generation: u64,
+    resource_revision: u64,
     module_id: String,
     semantic_name: String,
     size: u32,
@@ -210,6 +212,7 @@ impl IconRegistry {
         self.frontends = next_frontends;
         self.shell_default_pack_module = shell_default_pack;
         self.bump_generation();
+        mesh_core_resources::advance_resource_revision();
         Ok(())
     }
 
@@ -279,6 +282,7 @@ impl IconRegistry {
     ) -> IconResolution {
         let cache_key = IconCacheKey {
             generation: self.generation,
+            resource_revision: resource_revision(),
             module_id: module_id.to_string(),
             semantic_name: semantic_name.to_string(),
             size,
@@ -604,8 +608,12 @@ impl IconRegistry {
         if !font_path.is_file() {
             return None;
         }
-        let glyph_map_path = font_asset.glyph_map_path.as_ref()?;
-        let codepoint = crate::xdg::lookup_glyph_codepoint(glyph_map_path, glyph_name)?;
+        let codepoint = if let Some(glyphs) = &font_asset.prepared_glyphs {
+            glyphs.get(glyph_name).copied()
+        } else {
+            let glyph_map_path = font_asset.glyph_map_path.as_ref()?;
+            crate::xdg::lookup_glyph_codepoint(glyph_map_path, glyph_name)
+        }?;
         Some(ResolvedTarget::Glyph {
             font_path,
             codepoint,
@@ -692,6 +700,7 @@ nothing = ["system:nothing"]
                     family: "Material Symbols Rounded".into(),
                     glyph_map_path: Some(glyph_map_path),
                     resolved_font_path: Some(font_path.clone()),
+                    prepared_glyphs: None,
                 },
             )]),
         });
@@ -763,6 +772,46 @@ nothing = ["system:nothing"]
             } => assert!(path.ends_with("home.svg")),
             other => panic!("expected file resolution, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn resource_revision_retries_registry_negative_resolution() {
+        let td = tempdir().unwrap();
+        let mut reg = registry();
+        reg.register_pack(IconPackRoot {
+            id: "files".into(),
+            root: Some(td.path().to_path_buf()),
+            theme: "hicolor".into(),
+            kind: crate::IconPackKind::Xdg,
+        })
+        .unwrap();
+        reg.set_icon_pack(IconPackBindings {
+            pack_id: "files-pack".into(),
+            module_id: "@mesh/files-pack".into(),
+            mappings: HashMap::from([("appears-later".into(), "files/appears-later".into())]),
+            axes: SupportedAxes::default(),
+            font_aliases: HashMap::new(),
+        });
+        reg.set_shell_default_pack(Some("@mesh/files-pack".into()));
+
+        assert!(matches!(
+            reg.resolve("appears-later", 24),
+            IconResolution::Missing { .. }
+        ));
+        fs::write(
+            td.path().join("appears-later.svg"),
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>"#,
+        )
+        .unwrap();
+
+        mesh_core_resources::advance_resource_revision();
+        assert!(matches!(
+            reg.resolve("appears-later", 24),
+            IconResolution::Found {
+                target: ResolvedTarget::File(_),
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -972,6 +1021,7 @@ nothing = ["system:nothing"]
             family: "Material Symbols Rounded".into(),
             glyph_map_path: Some(glyph_map_path),
             resolved_font_path: Some(font_path.clone()),
+            prepared_glyphs: None,
         };
         let mut registry = registry();
         registry

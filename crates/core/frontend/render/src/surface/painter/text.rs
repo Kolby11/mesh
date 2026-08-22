@@ -1,6 +1,7 @@
 use crate::display_list::{DisplayPaintNode, DisplayTextPaint};
 use mesh_core_elements::Edges;
 use mesh_core_elements::lru::LruCache;
+use mesh_core_resources::resource_revision;
 use skia_safe::Canvas;
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
@@ -358,6 +359,7 @@ impl TextRenderCache for SharedTextMeasurer {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct EllipsisCacheEntry {
+    resource_revision: u64,
     text: String,
     font_family: String,
     font_size: u32,
@@ -370,6 +372,7 @@ struct EllipsisCacheEntry {
 impl EllipsisCacheEntry {
     fn matches(
         &self,
+        resource_revision: u64,
         text: &str,
         font_family: &str,
         font_size: u32,
@@ -377,7 +380,8 @@ impl EllipsisCacheEntry {
         line_height: u32,
         max_width: u32,
     ) -> bool {
-        self.text == text
+        self.resource_revision == resource_revision
+            && self.text == text
             && self.font_family == font_family
             && self.font_size == font_size
             && self.font_weight == font_weight
@@ -414,6 +418,7 @@ fn ellipsis_cache_key(
     font_weight: u16,
     line_height: u32,
     max_width: u32,
+    resource_revision: u64,
 ) -> u64 {
     let mut state = EllipsisHasher::default();
     text.hash(&mut state);
@@ -422,6 +427,7 @@ fn ellipsis_cache_key(
     font_weight.hash(&mut state);
     line_height.hash(&mut state);
     max_width.hash(&mut state);
+    resource_revision.hash(&mut state);
     state.finish()
 }
 
@@ -433,12 +439,14 @@ fn insert_ellipsis_cache_entry(
     font_weight: u16,
     line_height_bits: u32,
     max_width_bits: u32,
+    resource_revision: u64,
     value: String,
 ) {
     if let Ok(mut guard) = ellipsis_cache().lock() {
         guard.insert(
             cache_key,
             EllipsisCacheEntry {
+                resource_revision,
                 text: text.to_string(),
                 font_family: font_family.to_string(),
                 font_size: font_size_bits,
@@ -774,6 +782,7 @@ pub(super) fn truncate_with_ellipsis(
     let font_size_bits = font_size.to_bits();
     let line_height_bits = line_height.to_bits();
     let max_width_bits = max_width.to_bits();
+    let resource_revision = resource_revision();
     let cache_key = ellipsis_cache_key(
         text,
         font_family,
@@ -781,11 +790,13 @@ pub(super) fn truncate_with_ellipsis(
         font_weight,
         line_height_bits,
         max_width_bits,
+        resource_revision,
     );
     let cache = ellipsis_cache();
     if let Ok(mut guard) = cache.lock()
         && let Some(cached) = guard.get(&cache_key)
         && cached.matches(
+            resource_revision,
             text,
             font_family,
             font_size_bits,
@@ -829,6 +840,7 @@ pub(super) fn truncate_with_ellipsis(
             font_weight,
             line_height_bits,
             max_width_bits,
+            resource_revision,
             output.clone(),
         );
         return output;
@@ -870,6 +882,7 @@ pub(super) fn truncate_with_ellipsis(
         font_weight,
         line_height_bits,
         max_width_bits,
+        resource_revision,
         output.clone(),
     );
     output

@@ -108,7 +108,10 @@ pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
     ),
     FieldSpec::new(
         "fonts",
-        FieldKind::Section(&[FieldSpec::new("ui_family", FieldKind::Str)]),
+        FieldKind::Section(&[
+            FieldSpec::new("ui_family", FieldKind::Str),
+            FieldSpec::new("packs", FieldKind::StrArray),
+        ]),
     ),
     FieldSpec::new(
         "render",
@@ -172,6 +175,8 @@ pub struct IconSettings {
 pub struct FontSettings {
     #[serde(default)]
     pub ui_family: Option<String>,
+    #[serde(default)]
+    pub packs: Vec<String>,
 }
 
 /// User overrides layered on the frontend manifest, read from the module's own
@@ -180,6 +185,8 @@ pub struct FontSettings {
 pub struct ModuleSettingsOverrides {
     #[serde(default)]
     pub icons: Option<ModuleIconOverrides>,
+    #[serde(default)]
+    pub fonts: Option<ModuleFontOverrides>,
 }
 
 impl ModuleSettingsOverrides {
@@ -188,8 +195,21 @@ impl ModuleSettingsOverrides {
         let icons = namespace
             .get("icons")
             .and_then(|icons| serde_json::from_value(icons.clone()).ok());
-        Self { icons }
+        let fonts = namespace
+            .get("fonts")
+            .and_then(|fonts| serde_json::from_value(fonts.clone()).ok());
+        Self { icons, fonts }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct ModuleFontOverrides {
+    /// Replaces the frontend's declared `mesh.uses.resources.fonts` chain.
+    #[serde(default)]
+    pub use_packs: Option<Vec<String>>,
+    /// Logical role or family reference → another role/family reference.
+    #[serde(default)]
+    pub overrides: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]

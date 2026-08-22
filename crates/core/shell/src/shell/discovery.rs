@@ -54,6 +54,7 @@ pub(in crate::shell) struct ResourceSnapshot {
 pub(in crate::shell) struct PreparedResourceSnapshot {
     pub snapshot: ResourceSnapshot,
     pub icon_packs: Vec<mesh_core_icon::IconPackBindings>,
+    pub font_registry: mesh_core_resources::FontRegistry,
     pub frontends: Vec<(String, mesh_core_icon::FrontendIconBindings)>,
 }
 
@@ -65,49 +66,17 @@ impl Shell {
     ) -> Result<PreparedResourceSnapshot, ShellRunError> {
         let icon_chain = graph.icon_pack_chain().to_vec();
         let font_chain = graph.font_pack_chain().to_vec();
-        let icon_ids = icon_chain.iter().collect::<std::collections::HashSet<_>>();
-        let font_ids = font_chain.iter().collect::<std::collections::HashSet<_>>();
-        let asset_paths =
-            |resources: &[mesh_core_module::package::ContributedPathResource],
-             selected: &std::collections::HashSet<&String>| {
-                resources
-                    .iter()
-                    .filter(|resource| selected.contains(&resource.module_id))
-                    .map(|resource| {
-                        let root = resource.source.manifest_path.parent().ok_or_else(|| {
-                            ShellRunError::FrontendComposition {
-                                message: format!(
-                                    "resource {} has no owning module root",
-                                    resource.source.scoped_id
-                                ),
-                            }
-                        })?;
-                        let handle =
-                            mesh_core_resources::ResourceAssetHandle::new(root, &resource.path)
-                                .map_err(|error| ShellRunError::FrontendComposition {
-                                    message: format!(
-                                        "resource {} is unsafe: {error}",
-                                        resource.source.scoped_id
-                                    ),
-                                })?;
-                        handle
-                            .read_bounded(mesh_core_resources::DEFAULT_MAX_RESOURCE_BYTES)
-                            .map_err(|error| ShellRunError::FrontendComposition {
-                                message: format!(
-                                    "resource {} is unreadable: {error}",
-                                    resource.source.scoped_id
-                                ),
-                            })?;
-                        Ok(ResourceAsset {
-                            module_id: resource.module_id.clone(),
-                            id: resource.id.clone(),
-                            handle,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, ShellRunError>>()
-            };
-        let icon_assets = asset_paths(graph.contributed_icons(), &icon_ids)?;
-        let font_assets = asset_paths(graph.contributed_fonts(), &font_ids)?;
+        let shell_font_chain = settings_store.shell().fonts.packs.clone();
+        let icon_ids = icon_chain
+            .iter()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>();
+        let font_ids = font_chain
+            .iter()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>();
+        let icon_contributions = graph.contributed_icons().to_vec();
+        let font_contributions = graph.contributed_fonts().to_vec();
 
         let mut pack_inputs = Vec::new();
         for module_id in &icon_chain {
@@ -131,29 +100,34 @@ impl Shell {
             })?;
             pack_inputs.push((module_id.clone(), root.to_path_buf(), section));
         }
-        let worker = std::thread::Builder::new()
-            .name("mesh-resource-prepare".into())
-            .spawn(move || {
-                pack_inputs
-                    .into_iter()
-                    .map(|(module_id, root, section)| {
-                        prepare_icon_pack_bindings(&module_id, &root, &section)
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .map_err(|error| ShellRunError::FrontendComposition {
-                message: format!("failed to start resource preparation: {error}"),
+
+        let mut font_pack_inputs = Vec::new();
+        for module_id in &font_chain {
+            let module =
+                graph
+                    .module(module_id)
+                    .ok_or_else(|| ShellRunError::FrontendComposition {
+                        message: format!("font-pack {module_id} disappeared from the graph"),
+                    })?;
+            let section = module.manifest.mesh.font_pack.clone().ok_or_else(|| {
+                ShellRunError::FrontendComposition {
+                    message: format!(
+                        "font-pack {module_id} is selected but has no mesh.font_pack declaration"
+                    ),
+                }
             })?;
-        let icon_packs = worker
-            .join()
-            .map_err(|_| ShellRunError::FrontendComposition {
-                message: "resource preparation worker panicked".into(),
-            })?
-            .map_err(|error| ShellRunError::FrontendComposition { message: error })?;
+            let root = module.manifest_path.parent().ok_or_else(|| {
+                ShellRunError::FrontendComposition {
+                    message: format!("font-pack {module_id} has no module root"),
+                }
+            })?;
+            font_pack_inputs.push((module_id.clone(), root.to_path_buf(), section));
+        }
 
         let mut frontends = Vec::new();
+        let mut font_frontends = Vec::new();
         for module in graph.enabled_modules() {
-            if module.kind != ModuleKind::Frontend {
+            if !matches!(module.kind, ModuleKind::Frontend | ModuleKind::Component) {
                 continue;
             }
             let overrides =
@@ -185,25 +159,202 @@ impl Shell {
                     ignore_shell_default_user: user.is_some_and(|icons| icons.ignore_shell_default),
                 },
             ));
+            let font_author = module
+                .manifest
+                .mesh
+                .fonts
+                .as_ref()
+                .map(|fonts| fonts.overrides.clone())
+                .unwrap_or_default();
+            let font_user = overrides.fonts.as_ref();
+            font_frontends.push((
+                module.id.clone(),
+                mesh_core_resources::FontFrontendBindings {
+                    declared_pack_chain: module.manifest.mesh.uses.resources.fonts.clone(),
+                    author_overrides: font_author.into_iter().collect(),
+                    user_pack_chain: font_user.and_then(|fonts| fonts.use_packs.clone()),
+                    user_overrides: font_user
+                        .map(|fonts| fonts.overrides.clone())
+                        .unwrap_or_default()
+                        .into_iter()
+                        .collect(),
+                },
+            ));
         }
 
-        Ok(PreparedResourceSnapshot {
-            snapshot: ResourceSnapshot {
-                revision: self.resource_snapshot.revision.saturating_add(1),
-                icon_pack_chain: icon_chain,
-                font_pack_chain: font_chain,
-                icon_assets,
-                font_assets,
-            },
-            icon_packs,
-            frontends,
-        })
+        let revision = self.resource_snapshot.revision.saturating_add(1);
+        let worker = std::thread::Builder::new()
+            .name("mesh-resource-prepare".into())
+            .spawn(move || {
+                // Refresh host roots before preparing any icon or font asset so
+                // every consumer in this candidate reads the same catalog.
+                let host_catalog = mesh_core_resources::refresh_system_resource_catalog();
+                let asset_paths =
+                    |resources: Vec<mesh_core_module::package::ContributedPathResource>,
+                     selected: std::collections::HashSet<String>| {
+                        resources
+                            .into_iter()
+                            .filter(|resource| selected.contains(&resource.module_id))
+                            .map(|resource| {
+                                let root =
+                                    resource.source.manifest_path.parent().ok_or_else(|| {
+                                        ShellRunError::FrontendComposition {
+                                            message: format!(
+                                                "resource {} has no owning module root",
+                                                resource.source.scoped_id
+                                            ),
+                                        }
+                                    })?;
+                                let handle = mesh_core_resources::ResourceAssetHandle::new(
+                                    root,
+                                    &resource.path,
+                                )
+                                .map_err(|error| {
+                                    ShellRunError::FrontendComposition {
+                                        message: format!(
+                                            "resource {} is unsafe: {error}",
+                                            resource.source.scoped_id
+                                        ),
+                                    }
+                                })?;
+                                handle
+                                    .read_bounded(mesh_core_resources::DEFAULT_MAX_RESOURCE_BYTES)
+                                    .map_err(|error| ShellRunError::FrontendComposition {
+                                        message: format!(
+                                            "resource {} is unreadable: {error}",
+                                            resource.source.scoped_id
+                                        ),
+                                    })?;
+                                Ok(ResourceAsset {
+                                    module_id: resource.module_id,
+                                    id: resource.id,
+                                    handle,
+                                })
+                            })
+                            .collect::<Result<Vec<_>, ShellRunError>>()
+                    };
+                let icon_assets = asset_paths(icon_contributions, icon_ids)?;
+                let font_assets = asset_paths(font_contributions, font_ids)?;
+                let icon_packs = pack_inputs
+                    .into_iter()
+                    .map(|(module_id, root, section)| {
+                        prepare_icon_pack_bindings(&module_id, &root, &section)
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|error| ShellRunError::FrontendComposition { message: error })?;
+                let font_packs = font_pack_inputs
+                    .into_iter()
+                    .map(|(module_id, root, section)| {
+                        let faces = section
+                            .faces
+                            .into_iter()
+                            .map(|face| {
+                                let asset = mesh_core_resources::ResourceAssetHandle::new(
+                                    &root, &face.file,
+                                )
+                                .map_err(|error| ShellRunError::FrontendComposition {
+                                    message: format!(
+                                        "font-pack {module_id} face '{}' has an unsafe asset: {error}",
+                                        face.family
+                                    ),
+                                })?;
+                                mesh_core_resources::validate_font_face(&asset, &face.family)
+                                    .map_err(|error| ShellRunError::FrontendComposition {
+                                        message: format!(
+                                            "font-pack {module_id} face '{}' is invalid: {error}",
+                                            face.family
+                                        ),
+                                    })?;
+                                Ok(mesh_core_resources::FontFaceBinding {
+                                    family: face.family,
+                                    asset,
+                                    weight: face.weight,
+                                    style: match face.style {
+                                        mesh_core_module::manifest::FontPackFaceStyle::Normal => {
+                                            "normal"
+                                        }
+                                        mesh_core_module::manifest::FontPackFaceStyle::Italic => {
+                                            "italic"
+                                        }
+                                        mesh_core_module::manifest::FontPackFaceStyle::Oblique => {
+                                            "oblique"
+                                        }
+                                    }
+                                    .into(),
+                                    stretch: face.stretch,
+                                    coverage: face.coverage.into_iter().collect(),
+                                })
+                            })
+                            .collect::<Result<Vec<_>, ShellRunError>>()?;
+                        Ok(mesh_core_resources::FontPackBindings {
+                            module_id,
+                            pack_id: section.id,
+                            required_families: section
+                                .requires
+                                .fonts
+                                .into_iter()
+                                .map(|requirement| requirement.family)
+                                .collect(),
+                            covers: section.covers.into_iter().collect(),
+                            mappings: section.mappings.into_iter().collect(),
+                            faces,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, ShellRunError>>()?;
+                let mut font_registry =
+                    mesh_core_resources::FontRegistry::from_catalog(&host_catalog);
+                font_registry
+                    .replace(font_packs, font_chain.clone())
+                    .map_err(|error| ShellRunError::FrontendComposition {
+                        message: format!("invalid font-pack resource snapshot: {error}"),
+                    })?;
+                font_registry
+                    .set_shell_pack_chain(&shell_font_chain)
+                    .map_err(|error| ShellRunError::FrontendComposition {
+                        message: format!("invalid shell font-pack chain: {error}"),
+                    })?;
+                font_registry
+                    .set_frontend_bindings(font_frontends)
+                    .map_err(|error| ShellRunError::FrontendComposition {
+                        message: format!("invalid frontend font-pack bindings: {error}"),
+                    })?;
+                for (pack_id, family) in font_registry.missing_requirements() {
+                    tracing::warn!(
+                        pack_id = %pack_id,
+                        family = %family,
+                        "font-pack requirement is not installed; role resolution will use fallback"
+                    );
+                }
+
+                Ok(PreparedResourceSnapshot {
+                    snapshot: ResourceSnapshot {
+                        revision,
+                        icon_pack_chain: icon_chain,
+                        font_pack_chain: font_chain,
+                        icon_assets,
+                        font_assets,
+                    },
+                    icon_packs,
+                    font_registry,
+                    frontends,
+                })
+            })
+            .map_err(|error| ShellRunError::FrontendComposition {
+                message: format!("failed to start resource preparation: {error}"),
+            })?;
+        worker
+            .join()
+            .map_err(|_| ShellRunError::FrontendComposition {
+                message: "resource preparation worker panicked".into(),
+            })?
     }
 
     pub(in crate::shell) fn commit_resource_snapshot(
         &mut self,
         prepared: &PreparedResourceSnapshot,
     ) -> Result<(), ShellRunError> {
+        let font_revision_changed =
+            self.font_registry.revision() != prepared.font_registry.revision();
         mesh_core_icon::replace_default_bindings(
             prepared.icon_packs.clone(),
             prepared.frontends.clone(),
@@ -212,8 +363,45 @@ impl Shell {
         .map_err(|error| ShellRunError::FrontendComposition {
             message: format!("failed to publish resource snapshot: {error}"),
         })?;
+        self.font_registry = prepared.font_registry.clone();
         self.resource_snapshot = Arc::new(prepared.snapshot.clone());
+        let font_registry = &self.font_registry;
+        self.theme.update_active(|theme| {
+            apply_font_registry_tokens(theme, font_registry);
+        });
+        self.theme_watch.revision = self.theme.active_snapshot().revision;
+        if font_revision_changed {
+            self.mark_components_theme_changed()?;
+        }
         Ok(())
+    }
+}
+
+/// Project the active font resource binding into the theme snapshot consumed
+/// by every style resolver. `font.*` contains the standard role tokens and
+/// `mesh.font.*` is an internal namespace for pack-qualified escape hatches.
+pub(in crate::shell) fn apply_font_registry_tokens(
+    theme: &mut mesh_core_theme::Theme,
+    registry: &mesh_core_resources::FontRegistry,
+) {
+    theme.remove_tokens_with_prefix("mesh.font.");
+    for (css_name, family) in registry.role_tokens() {
+        let token_name = css_name
+            .strip_prefix("--")
+            .unwrap_or(&css_name)
+            .replace('-', ".");
+        theme.set_token(
+            token_name,
+            mesh_core_theme::TokenValue::String(family),
+            mesh_core_theme::ThemeProvenance::BaseRecovery,
+        );
+    }
+    for (token_name, family) in registry.qualified_role_tokens() {
+        theme.set_token(
+            token_name,
+            mesh_core_theme::TokenValue::String(family),
+            mesh_core_theme::ThemeProvenance::BaseRecovery,
+        );
     }
 }
 
@@ -540,6 +728,16 @@ fn module_settings_properties() -> serde_json::Map<String, serde_json::Value> {
                     "additionalProperties": { "type": "string" }
                 },
                 "ignore_shell_default": { "type": "boolean" }
+            }
+        },
+        "fonts": {
+            "type": "object",
+            "properties": {
+                "use_packs": { "type": "array", "items": { "type": "string" } },
+                "overrides": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string" }
+                }
             }
         },
         "i18n": {
@@ -873,6 +1071,8 @@ impl Shell {
             effective_capabilities: Arc::new(HashMap::new()),
             installed_module_graph: None,
             resource_snapshot: Arc::new(ResourceSnapshot::default()),
+            font_registry: mesh_core_resources::FontRegistry::default(),
+            font_renderer_revision: 0,
             active_profile_id,
             modules: HashMap::new(),
             frontend_catalog: FrontendCatalogHandle::default(),

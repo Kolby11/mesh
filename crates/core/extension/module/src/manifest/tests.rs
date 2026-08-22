@@ -832,6 +832,38 @@ fn icon_pack_mappings_preserve_typed_color_policy() {
 }
 
 #[test]
+fn font_pack_mappings_preserve_roles_and_soft_requirements() {
+    let section: FontPackSection = serde_json::from_value(serde_json::json!({
+        "id": "default",
+        "covers": {"latin": "Latin and Latin-1"},
+        "requires": {
+            "fonts": [{"family": "Inter", "version": ">=4.0"}]
+        },
+        "faces": [{
+            "family": "Inter",
+            "file": "fonts/Inter-Regular.ttf",
+            "weight": 400,
+            "style": "normal",
+            "stretch": 100,
+            "coverage": ["latin", "latin-ext"]
+        }],
+        "mappings": {
+            "body": "Inter",
+            "mono": "JetBrains Mono"
+        }
+    }))
+    .unwrap();
+
+    assert_eq!(section.id, "default");
+    assert_eq!(section.covers["latin"], "Latin and Latin-1");
+    assert_eq!(section.requires.fonts[0].family, "Inter");
+    assert_eq!(section.faces[0].file, "fonts/Inter-Regular.ttf");
+    assert_eq!(section.faces[0].coverage, ["latin", "latin-ext"]);
+    assert_eq!(section.mappings["body"], "Inter");
+    assert_eq!(section.mappings["mono"], "JetBrains Mono");
+}
+
+#[test]
 fn icons_default_module_parses_as_icon_pack() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../../modules/icon-packs/default");

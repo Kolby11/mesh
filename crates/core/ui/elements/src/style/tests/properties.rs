@@ -44,6 +44,27 @@ fn unresolved_prop_reference_is_empty() {
 }
 
 #[test]
+fn pack_qualified_font_family_uses_runtime_theme_binding() {
+    let mut theme = mesh_core_theme::default_theme();
+    theme.set_token(
+        "mesh.font.default.body",
+        mesh_core_theme::TokenValue::String("Inter".into()),
+        mesh_core_theme::ThemeProvenance::BaseRecovery,
+    );
+    let resolver = StyleResolver::new(&theme);
+    let rules = parse_fixture_style(
+        r#"
+<style>
+.text { font-family: default/body; }
+</style>
+"#,
+    );
+    let (style, diagnostics) = resolve_class(&resolver, &rules, "text");
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(&*style.font_family, "Inter");
+}
+
+#[test]
 fn indexed_module_style_resolution_matches_non_indexed_resolution() {
     let theme = mesh_core_theme::default_theme();
     let resolver = StyleResolver::new(&theme);

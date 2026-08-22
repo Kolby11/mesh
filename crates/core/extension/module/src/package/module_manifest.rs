@@ -240,7 +240,11 @@ pub struct MeshModuleSection {
     #[serde(default)]
     pub icons: Option<manifest::IconsSection>,
     #[serde(default)]
+    pub fonts: Option<manifest::FontsSection>,
+    #[serde(default)]
     pub icon_pack: Option<manifest::IconPackSection>,
+    #[serde(default)]
+    pub font_pack: Option<manifest::FontPackSection>,
     #[serde(default, rename = "iconRequirements", alias = "icon_requirements")]
     pub icon_requirements: manifest::IconRequirementsSection,
     #[serde(default)]
@@ -482,6 +486,77 @@ impl MeshModuleSection {
             return Err(ModuleManifestError::Validation(
                 "mesh.icon_pack is only supported for icon-pack modules".into(),
             ));
+        }
+        if self.fonts.is_some()
+            && !matches!(self.kind, ModuleKind::Frontend | ModuleKind::Component)
+        {
+            return Err(ModuleManifestError::Validation(
+                "mesh.fonts is only supported for frontend or component modules".into(),
+            ));
+        }
+        if self.font_pack.is_some() && self.kind != ModuleKind::FontPack {
+            return Err(ModuleManifestError::Validation(
+                "mesh.font_pack is only supported for font-pack modules".into(),
+            ));
+        }
+        if let Some(font_pack) = &self.font_pack {
+            if font_pack.id.trim().is_empty() {
+                return Err(ModuleManifestError::Validation(
+                    "mesh.font_pack.id must not be empty".into(),
+                ));
+            }
+            for (role, family) in &font_pack.mappings {
+                if role.trim().is_empty() || role.contains('/') {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "mesh.font_pack.mappings role '{role}' is invalid"
+                    )));
+                }
+                if family.trim().is_empty() {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "mesh.font_pack.mappings role '{role}' has an empty family"
+                    )));
+                }
+            }
+            for (coverage, description) in &font_pack.covers {
+                if coverage.trim().is_empty() || description.trim().is_empty() {
+                    return Err(ModuleManifestError::Validation(
+                        "mesh.font_pack.covers entries must have non-empty names and descriptions"
+                            .into(),
+                    ));
+                }
+            }
+            for face in &font_pack.faces {
+                if face.family.trim().is_empty() || face.file.trim().is_empty() {
+                    return Err(ModuleManifestError::Validation(
+                        "mesh.font_pack.faces family and file must not be empty".into(),
+                    ));
+                }
+                if !(1..=1000).contains(&face.weight) {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "mesh.font_pack.faces '{}' weight must be between 1 and 1000",
+                        face.family
+                    )));
+                }
+                if !(50..=200).contains(&face.stretch) {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "mesh.font_pack.faces '{}' stretch must be between 50 and 200",
+                        face.family
+                    )));
+                }
+                if face.coverage.iter().any(|entry| entry.trim().is_empty()) {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "mesh.font_pack.faces '{}' has an empty coverage entry",
+                        face.family
+                    )));
+                }
+            }
+            for requirement in &font_pack.requires.fonts {
+                if requirement.family.trim().is_empty() {
+                    return Err(ModuleManifestError::Validation(
+                        "mesh.font_pack.requires.fonts family must not be empty".into(),
+                    ));
+                }
+            }
         }
         if !self.contributes.icons.is_empty() && self.kind != ModuleKind::IconPack {
             return Err(ModuleManifestError::Validation(

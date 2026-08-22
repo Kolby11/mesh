@@ -57,10 +57,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/06-host-resources-and-icon-packs/improvements.md)
 
-- [ ] Validate complete packs off the render thread and publish them atomically without partial registry state.
-- [ ] Propagate resource revisions/fingerprints through negative lookup, glyph, font, text-layout, and renderer caches.
-- [ ] Implement font-pack runtime resolution with logical roles, pack-qualified roles, faces, coverage, and typography tokens.
-- [ ] Unify XDG icon/font discovery and lookup into one ordered, refreshable host catalog.
 - [ ] Prepare resource parsing and asset handles away from shell/render threads with bounded cancellation.
 - [ ] Generate runtime, CLI, LSP, doctor, and debug resource explanations from one effective snapshot.
 - [ ] Add a resource coverage advisor for semantic vocabulary and font-script gaps without silently reordering user chains.
@@ -359,12 +355,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 - [ ] Make icon resolution deterministic and complete: canonical owner-scoped
       pack IDs/aliases, typed multicolor mappings, semantic/dash fallbacks,
       ordered chains, and required/optional results with provenance.
-- [ ] Complete font-pack runtime support with logical and pack-qualified roles,
-      ordered profile/module chains, bundled face validation, fallback coverage,
-      and typography-token integration.
-- [ ] Unify XDG and font discovery into a refreshable host catalog; propagate
-      resource revisions/fingerprints through negative lookup, glyph, font,
-      text-layout, and renderer caches.
 - [ ] Remove legacy icon config and discovery authorities, and drive bounded
       pack validation, effective-state diagnostics, CLI/LSP/doctor inspection,
       and resource coverage previews from the canonical snapshot.

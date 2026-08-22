@@ -30,6 +30,25 @@ and Linux profiling tools.
 Prefix commands with `nix develop -c` when not already inside the development
 shell.
 
+## Codex implementation loop
+
+`./codex-until-limit.sh` supports three modes and creates one commit after each
+successful implementation turn:
+
+```bash
+./codex-until-limit.sh --mode backlog --once
+./codex-until-limit.sh --mode refactor
+./codex-until-limit.sh --mode feature "Implement one focused increment"
+```
+
+`backlog` finishes one unchecked `docs/BACKLOG.md` item per turn. `refactor`
+first audits the package sections in `.planning/log/sections.md` and creates
+`docs/REFACTORING-RULES.md`, then applies one rules-guided section increment per
+turn. The default `feature` mode uses the supplied task. The loop keeps its
+operational log and context handoff outside feature commits; set
+`CODEX_LOOP_LOG` or `CODEX_HANDOFF_FILE` to override those paths. A clean
+worktree is required unless `--allow-dirty` is explicitly supplied.
+
 ## Code style
 
 Rust code follows `rustfmt`. The workspace uses Rust edition 2024 and declares

@@ -1878,6 +1878,7 @@ dependencies = [
  "mesh-core-frontend",
  "mesh-core-icon",
  "mesh-core-module",
+ "mesh-core-resources",
  "mesh-core-theme",
  "parley",
  "peniko 0.6.1",

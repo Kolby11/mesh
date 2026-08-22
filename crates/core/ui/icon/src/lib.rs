@@ -17,6 +17,9 @@ pub use fallback::{
 pub use registry::{
     IconRegistry, IconResolution, IconResolutionProvenance, ResolvedTarget, SupportedAxes,
 };
+pub use xdg::{
+    MAX_GLYPH_MAP_BYTES, MAX_GLYPH_MAP_ENTRIES, parse_glyph_map_bytes, validate_font_bytes,
+};
 
 fn default_icon_config() -> IconConfig {
     IconConfig::builtin_xdg().expect("builtin xdg icon config should be valid")

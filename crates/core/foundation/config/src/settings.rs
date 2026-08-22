@@ -1345,13 +1345,13 @@ mod tests {
     fn an_unknown_shell_section_is_reported_without_losing_its_siblings() {
         let store = store(json!({
             "shell": {
-                "fonts": { "packs": ["@mesh/fonts-default"] },
+                "fontz": { "packs": ["@mesh/fonts-default"] },
                 "theme": { "active": "gruvbox-dark" }
             }
         }));
 
         let diagnostic = only(store.diagnostics());
-        assert_eq!(diagnostic.key_path, "fonts.packs");
+        assert_eq!(diagnostic.key_path, "fontz");
         assert_eq!(store.shell().theme.active, "gruvbox-dark");
     }
 

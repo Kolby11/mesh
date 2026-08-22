@@ -23,6 +23,7 @@ use mesh_core_wayland::{ClipboardWriter, Layer, StubSurface, WaylandClipboard};
 
 use std::collections::{HashMap, VecDeque};
 use std::env;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -73,13 +74,6 @@ pub use types::{
 
 use service::{service_capabilities, service_name_from_interface};
 
-/// If `assets.icons` is declared in a module manifest, register an icon pack
-/// at `<module_id>` rooted at `<module_dir>/<assets.icons.path>`. The pack
-/// kind comes from the manifest — XDG directory layout by default, or a
-/// font-glyph pack when `kind = "font"`. Authors can then reference module
-/// assets via candidates like `<module_id>:<name>` in `icons.toml`. No-op
-/// when the manifest doesn't ship icons. Failures log but don't abort
-/// module discovery — a module with bad icons should still load.
 /// Translates the user's blur settings into the painter's quality knobs.
 /// Values outside the painter's supported range are clamped rather than
 /// rejected: a settings file asking for eight passes gets the most the painter
@@ -90,164 +84,6 @@ fn blur_quality_from_settings(
     mesh_core_render::BlurQuality {
         passes: settings.passes.clamp(1, mesh_core_render::MAX_BLUR_PASSES),
         max_radius: settings.max_radius.max(0.0),
-    }
-}
-
-fn register_module_icon_pack(
-    module_id: &str,
-    module_dir: &Path,
-    assets: Option<&mesh_core_module::manifest::AssetsSection>,
-) {
-    use mesh_core_module::manifest::{IconAssets, IconAssetsKind};
-
-    let Some(icons) = assets.and_then(|a| a.icons.as_ref()) else {
-        return;
-    };
-    let root = module_dir.join(icons.path());
-    if !root.is_dir() {
-        tracing::warn!(
-            "module {} declares assets.icons={} but {} is not a directory; skipping pack",
-            module_id,
-            icons.path(),
-            root.display()
-        );
-        return;
-    }
-
-    let kind = match icons {
-        IconAssets::Path(_) => mesh_core_icon::IconPackKind::Xdg,
-        IconAssets::Detailed(detailed) => match detailed.kind {
-            IconAssetsKind::Xdg => mesh_core_icon::IconPackKind::Xdg,
-            IconAssetsKind::Font => {
-                let Some(font_file) = detailed.font_file.clone() else {
-                    tracing::warn!(
-                        "module {} declares font icon pack at {} but is missing assets.icons.font_file; skipping",
-                        module_id,
-                        root.display()
-                    );
-                    return;
-                };
-                let Some(glyph_map) = detailed.glyph_map.clone() else {
-                    tracing::warn!(
-                        "module {} declares font icon pack at {} but is missing assets.icons.glyph_map; skipping",
-                        module_id,
-                        root.display()
-                    );
-                    return;
-                };
-                mesh_core_icon::IconPackKind::Font {
-                    font_file,
-                    glyph_map,
-                }
-            }
-        },
-    };
-
-    let pack = mesh_core_icon::IconPackRoot {
-        id: module_id.to_string(),
-        root: Some(root.clone()),
-        theme: "hicolor".into(),
-        kind,
-    };
-    match mesh_core_icon::register_default_pack(pack) {
-        Ok(true) => tracing::info!(
-            "registered icon pack '{}' from {}",
-            module_id,
-            root.display()
-        ),
-        Ok(false) => tracing::debug!(
-            "icon pack '{}' already registered; leaving existing root in place",
-            module_id
-        ),
-        Err(err) => tracing::warn!(
-            "failed to register icon pack '{}' from {}: {err}",
-            module_id,
-            root.display()
-        ),
-    }
-}
-
-/// Register a frontend module's icon resolution context with the shared
-/// icon registry. Combines the frontend's declared `dependencies.icon_packs`
-/// + author overrides from the manifest with the user's per-module override
-/// of the pack chain and per-icon overrides from shell `settings.json`.
-/// The shell-default pack is composed in by the registry itself at lookup
-/// time.
-fn register_frontend_icon_bindings(
-    module_id: &str,
-    manifest: &mesh_core_module::manifest::Manifest,
-    user_overrides: Option<&mesh_core_config::ModuleIconOverrides>,
-) {
-    let declared_pack_chain: Vec<String> = manifest
-        .dependencies
-        .icon_packs
-        .required
-        .iter()
-        .chain(manifest.dependencies.icon_packs.optional.iter())
-        .cloned()
-        .collect();
-    let author_overrides = manifest
-        .icons
-        .as_ref()
-        .map(|i| i.overrides.clone())
-        .unwrap_or_default();
-    let ignore_default_frontend = manifest
-        .icons
-        .as_ref()
-        .map(|i| i.ignore_shell_default)
-        .unwrap_or(false);
-    let user_pack_chain = user_overrides.and_then(|u| u.use_packs.clone());
-    let user_overrides_map = user_overrides
-        .map(|u| u.overrides.clone())
-        .unwrap_or_default();
-    let ignore_default_user = user_overrides
-        .map(|u| u.ignore_shell_default)
-        .unwrap_or(false);
-
-    if declared_pack_chain.is_empty()
-        && author_overrides.is_empty()
-        && user_pack_chain.is_none()
-        && user_overrides_map.is_empty()
-        && !ignore_default_frontend
-        && !ignore_default_user
-    {
-        return;
-    }
-
-    tracing::info!(
-        "registered frontend icon bindings for '{}' (chain={:?}, author_overrides={}, user_overrides={})",
-        module_id,
-        declared_pack_chain,
-        author_overrides.len(),
-        user_overrides_map.len(),
-    );
-    mesh_core_icon::set_default_frontend_bindings(
-        module_id.to_string(),
-        mesh_core_icon::FrontendIconBindings {
-            declared_pack_chain,
-            author_overrides,
-            user_pack_chain,
-            user_overrides: user_overrides_map,
-            ignore_shell_default_frontend: ignore_default_frontend,
-            ignore_shell_default_user: ignore_default_user,
-        },
-    );
-}
-
-/// Register an icon-pack module's binding table with the shared icon
-/// registry. Reads `mesh.icon_pack` from the manifest. Soft-warns when
-/// declared `requires.fonts` entries can't be matched against any
-/// fontconfig family on the system, but still registers the pack so the
-/// resolver can produce useful diagnostics for the missing assets.
-fn register_icon_pack_module(
-    module_id: &str,
-    module_dir: &Path,
-    icon_pack: Option<&mesh_core_module::manifest::IconPackSection>,
-) {
-    let Some(section) = icon_pack else { return };
-    match prepare_icon_pack_bindings(module_id, module_dir, section) {
-        Ok(bindings) => mesh_core_icon::set_default_icon_pack(bindings),
-        Err(error) => tracing::warn!(%error, "skipping invalid icon-pack module"),
     }
 }
 
@@ -270,7 +106,16 @@ pub(crate) fn prepare_icon_pack_bindings(
     let mut seen_aliases = std::collections::HashSet::new();
     for req in &section.requires.fonts {
         if req.alias.trim().is_empty() {
-            continue;
+            return Err(format!(
+                "icon-pack '{}' declares a font with an empty alias",
+                module_id
+            ));
+        }
+        if req.family.trim().is_empty() {
+            return Err(format!(
+                "icon-pack '{}' declares font alias '{}' with an empty family",
+                module_id, req.alias
+            ));
         }
         if !seen_aliases.insert(req.alias.clone()) {
             return Err(format!(
@@ -278,44 +123,117 @@ pub(crate) fn prepare_icon_pack_bindings(
                 module_id, req.alias
             ));
         }
-        let glyph_map_path = req.glyph_map.as_deref().and_then(|path| {
-            prepare_module_resource_path(module_id, module_dir, path, "glyph map")
-        });
-        if req.glyph_map.is_some() && glyph_map_path.is_none() {
-            tracing::warn!(
-                "icon-pack '{}' declares glyph_map for font alias '{}' but file is missing",
+
+        let (glyph_map_path, prepared_glyphs) = match req.glyph_map.as_deref() {
+            Some(path) => {
+                let (glyph_map_path, bytes) = read_module_resource(
+                    module_id,
+                    module_dir,
+                    path,
+                    "glyph map",
+                    mesh_core_icon::MAX_GLYPH_MAP_BYTES,
+                )?;
+                let glyphs = mesh_core_icon::parse_glyph_map_bytes(&bytes).map_err(|error| {
+                    format!(
+                        "icon-pack '{}' font alias '{}' has an invalid glyph map '{}': {error}",
+                        module_id, req.alias, path
+                    )
+                })?;
+                (Some(glyph_map_path), Some(std::sync::Arc::new(glyphs)))
+            }
+            None => (None, None),
+        };
+
+        let resolved_font_path = if let Some(path) = req.file.as_deref() {
+            let (font_path, bytes) = read_module_resource(
                 module_id,
-                req.alias
-            );
-        }
-        let bundled_font_path = req.file.as_deref().and_then(|path| {
-            prepare_module_resource_path(module_id, module_dir, path, "font file")
-        });
-        if req.file.is_some() && bundled_font_path.is_none() {
-            tracing::warn!(
-                "icon-pack '{}' declares bundled font for alias '{}' but the file is missing",
-                module_id,
-                req.alias
-            );
-        }
-        let resolved_font_path =
-            bundled_font_path.or_else(|| resolve_font_family_path(&req.family));
-        if resolved_font_path.is_none() {
-            tracing::warn!(
-                "icon-pack '{}' has no bundled font for alias '{}' and font family '{}' is not installed",
-                module_id,
-                req.alias,
-                req.family
-            );
-        }
+                module_dir,
+                path,
+                "font file",
+                mesh_core_resources::DEFAULT_MAX_RESOURCE_BYTES,
+            )?;
+            mesh_core_icon::validate_font_bytes(&bytes).map_err(|error| {
+                format!(
+                    "icon-pack '{}' font alias '{}' has an invalid font '{}': {error}",
+                    module_id, req.alias, path
+                )
+            })?;
+            Some(font_path)
+        } else {
+            let path = mesh_core_resources::system_resource_catalog()
+                .font_path_for_family(&req.family)
+                .ok_or_else(|| {
+                format!(
+                    "icon-pack '{}' font alias '{}' requires installed font family '{}', but it was not found",
+                    module_id, req.alias, req.family
+                )
+            })?;
+            let bytes = read_host_resource(&path).map_err(|error| {
+                format!(
+                    "icon-pack '{}' font alias '{}' cannot read resolved font '{}': {error}",
+                    module_id,
+                    req.alias,
+                    path.display()
+                )
+            })?;
+            mesh_core_icon::validate_font_bytes(&bytes).map_err(|error| {
+                format!(
+                    "icon-pack '{}' font alias '{}' has an invalid resolved font '{}': {error}",
+                    module_id,
+                    req.alias,
+                    path.display()
+                )
+            })?;
+            Some(path)
+        };
+
         font_aliases.insert(
             req.alias.clone(),
             mesh_core_icon::FontAsset {
                 family: req.family.clone(),
                 glyph_map_path,
                 resolved_font_path,
+                prepared_glyphs,
             },
         );
+    }
+
+    for (name, mapping) in &section.mappings {
+        if name.trim().is_empty() || mapping.target.trim().is_empty() {
+            return Err(format!(
+                "icon-pack '{}' declares an icon mapping with an empty name or target",
+                module_id
+            ));
+        }
+        if std::path::Path::new(&mapping.target).is_absolute()
+            || mapping.target.trim_start().starts_with("~/")
+        {
+            return Err(format!(
+                "icon-pack '{}' mapping '{}' uses an absolute or home-relative target",
+                module_id, name
+            ));
+        }
+        let (alias, glyph_name) =
+            mesh_core_icon::parse_target(&mapping.target).ok_or_else(|| {
+                format!(
+                    "icon-pack '{}' mapping '{}' has malformed target '{}'; expected pack/name",
+                    module_id, name, mapping.target
+                )
+            })?;
+        if let Some(font) = font_aliases.get(alias) {
+            let glyphs = font.prepared_glyphs.as_ref().ok_or_else(|| {
+                format!(
+                    "icon-pack '{}' mapping '{}' references font alias '{}' without a glyph map",
+                    module_id, name, alias
+                )
+            })?;
+            if !glyphs.contains_key(glyph_name) {
+                return Err(format!(
+                    "icon-pack '{}' mapping '{}' references missing glyph '{}' in font alias '{}'",
+                    module_id, name, glyph_name, alias
+                ));
+            }
+        }
     }
     let axes = mesh_core_icon::SupportedAxes {
         fill: section.axes.fill,
@@ -352,74 +270,43 @@ pub(crate) fn prepare_icon_pack_bindings(
     Ok(bindings)
 }
 
-fn prepare_module_resource_path(
+fn read_module_resource(
     module_id: &str,
     module_dir: &Path,
     declared: &str,
     label: &str,
-) -> Option<std::path::PathBuf> {
-    let handle = match mesh_core_resources::ResourceAssetHandle::new(module_dir, declared) {
-        Ok(handle) => handle,
-        Err(error) => {
-            tracing::warn!(
-                "module {} declares unsafe {} '{}': {}",
-                module_id,
-                label,
-                declared,
-                error
-            );
-            return None;
-        }
-    };
-    if let Err(error) = handle.read_bounded(mesh_core_resources::DEFAULT_MAX_RESOURCE_BYTES) {
-        tracing::warn!(
-            "module {} declares unreadable {} '{}': {}",
-            module_id,
-            label,
-            declared,
-            error
-        );
-        return None;
-    }
-    Some(handle.candidate_path())
+    max_bytes: usize,
+) -> Result<(PathBuf, Vec<u8>), String> {
+    let handle =
+        mesh_core_resources::ResourceAssetHandle::new(module_dir, declared).map_err(|error| {
+            format!("module {module_id} declares unsafe {label} '{declared}': {error}")
+        })?;
+    let bytes = handle.read_bounded(max_bytes).map_err(|error| {
+        format!("module {module_id} declares unreadable {label} '{declared}': {error}")
+    })?;
+    Ok((handle.candidate_path(), bytes))
 }
 
-/// Resolve a fontconfig family name to its `.ttf`/`.otf` path on disk.
-/// Returns `None` when the family is not installed. We shell out to
-/// `fc-match -f %{file}` for portability — fontconfig handles family
-/// aliases, weights, and synthetic styles for us.
-fn resolve_font_family_path(family: &str) -> Option<std::path::PathBuf> {
-    let output = std::process::Command::new("fc-match")
-        .arg("-f")
-        .arg("%{file}")
-        .arg(family)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+fn read_host_resource(path: &Path) -> Result<Vec<u8>, String> {
+    let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
+    if !metadata.file_type().is_file() {
+        return Err("resource is not a regular file".into());
     }
-    let path = String::from_utf8(output.stdout).ok()?.trim().to_string();
-    if path.is_empty() {
-        return None;
+    let mut bytes = Vec::new();
+    std::io::Read::take(
+        file,
+        (mesh_core_resources::DEFAULT_MAX_RESOURCE_BYTES + 1) as u64,
+    )
+    .read_to_end(&mut bytes)
+    .map_err(|error| error.to_string())?;
+    if bytes.len() > mesh_core_resources::DEFAULT_MAX_RESOURCE_BYTES {
+        return Err(format!(
+            "resource exceeds {} bytes",
+            mesh_core_resources::DEFAULT_MAX_RESOURCE_BYTES
+        ));
     }
-    let pb = std::path::PathBuf::from(path);
-    if !pb.is_file() {
-        return None;
-    }
-    // fc-match falls back to *some* font if the requested family isn't
-    // installed. Verify the resolved file's basename mentions a sanitized
-    // form of the requested family to avoid silent fallback to e.g.
-    // DejaVu when Material Symbols isn't installed.
-    let needle = family.replace(' ', "").to_lowercase();
-    let basename = pb
-        .file_name()
-        .and_then(|n| n.to_str())
-        .map(|s| s.to_lowercase().replace(' ', ""))
-        .unwrap_or_default();
-    if !basename.contains(&needle) {
-        return None;
-    }
-    Some(pb)
+    Ok(bytes)
 }
 
 fn shell_global_shortcut_request(
@@ -477,6 +364,8 @@ pub struct Shell {
     effective_capabilities: Arc<HashMap<String, EffectiveCapabilities>>,
     installed_module_graph: Option<InstalledModuleGraph>,
     resource_snapshot: Arc<discovery::ResourceSnapshot>,
+    pub font_registry: mesh_core_resources::FontRegistry,
+    font_renderer_revision: u64,
     active_profile_id: Option<String>,
     modules: HashMap<String, ModuleInstance>,
     frontend_catalog: component::FrontendCatalogHandle,

@@ -2,12 +2,13 @@
 
 use super::{PixelBuffer, PixelCanvasSession};
 use cosmic_text::{
-    Align, Attrs, Buffer, CacheKey, Cursor, Family, FontSystem, Metrics, PhysicalGlyph, Renderer,
-    Shaping, Style as CosmicStyle, SwashCache, SwashContent, Weight, Wrap,
+    Align, Attrs, AttrsOwned, Buffer, CacheKey, Cursor, Family, FamilyOwned, FontSystem, Metrics,
+    PhysicalGlyph, Renderer, Shaping, Style as CosmicStyle, SwashCache, SwashContent, Weight, Wrap,
 };
 use mesh_core_elements::Color;
 use mesh_core_elements::lru::LruCache;
 use mesh_core_elements::style::TextAlign;
+use mesh_core_resources::resource_revision;
 use skia_safe::{
     AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images,
 };
@@ -44,8 +45,12 @@ pub struct TextRenderer {
 
 struct TextEngine {
     font_system: FontSystem,
+    locale: String,
+    font_database: Option<fontdb::Database>,
+    font_aliases: HashMap<String, String>,
     swash_cache: SwashCache,
     layout_cache: LruCache<u64, TextLayoutEntry>,
+    resource_revision: u64,
     metrics: TextCacheMetrics,
 }
 
@@ -66,6 +71,7 @@ pub struct TextCacheMetrics {
 }
 
 struct TextLayoutEntry {
+    resource_revision: u64,
     text: String,
     font_family: String,
     font_size: u32,
@@ -107,6 +113,7 @@ struct TextLayoutParams<'a> {
     max_width: Option<u32>,
     align: TextAlign,
     cache_key: u64,
+    resource_revision: u64,
 }
 
 impl<'a> TextLayoutParams<'a> {
@@ -122,6 +129,7 @@ impl<'a> TextLayoutParams<'a> {
         let font_size = font_size.to_bits();
         let line_height = line_height.to_bits();
         let max_width = max_width.map(f32::to_bits);
+        let resource_revision = resource_revision();
         let cache_key = text_layout_cache_key(
             text,
             font_family,
@@ -130,6 +138,7 @@ impl<'a> TextLayoutParams<'a> {
             line_height,
             max_width,
             align,
+            resource_revision,
         );
         Self {
             text,
@@ -140,13 +149,15 @@ impl<'a> TextLayoutParams<'a> {
             max_width,
             align,
             cache_key,
+            resource_revision,
         }
     }
 }
 
 impl TextLayoutEntry {
     fn matches(&self, params: &TextLayoutParams<'_>) -> bool {
-        self.text == params.text
+        self.resource_revision == params.resource_revision
+            && self.text == params.text
             && self.font_family == params.font_family
             && self.font_size == params.font_size
             && self.font_weight == params.font_weight
@@ -164,6 +175,7 @@ fn text_layout_cache_key(
     line_height: u32,
     max_width: Option<u32>,
     align: TextAlign,
+    resource_revision: u64,
 ) -> u64 {
     let mut state = TextLayoutHasher::default();
     text.hash(&mut state);
@@ -178,6 +190,7 @@ fn text_layout_cache_key(
         TextAlign::Right => 2u8,
     }
     .hash(&mut state);
+    resource_revision.hash(&mut state);
     state.finish()
 }
 
@@ -199,11 +212,17 @@ pub struct TextSelectionGeometry {
 
 impl TextRenderer {
     pub fn new() -> Self {
+        let font_system = FontSystem::new();
+        let locale = font_system.locale().to_owned();
         Self {
             engine: RefCell::new(TextEngine {
-                font_system: FontSystem::new(),
+                font_system,
+                locale,
+                font_database: None,
+                font_aliases: HashMap::new(),
                 swash_cache: SwashCache::new(),
                 layout_cache: LruCache::new(TEXT_LAYOUT_CACHE_CAPACITY),
+                resource_revision: resource_revision(),
                 metrics: TextCacheMetrics {
                     glyph_cache_active: true,
                     ..Default::default()
@@ -214,18 +233,28 @@ impl TextRenderer {
 
     pub fn cache_metrics(&self) -> TextCacheMetrics {
         let mut engine = self.engine.borrow_mut();
+        engine.ensure_resource_revision();
         engine.metrics.shaped_entries = engine.layout_cache.len() as u64;
         engine.metrics
     }
 
     pub fn reset_cache_metrics(&self) {
         let mut engine = self.engine.borrow_mut();
+        engine.ensure_resource_revision();
         let shaped_entries = engine.layout_cache.len() as u64;
         engine.metrics = TextCacheMetrics {
             shaped_entries,
             glyph_cache_active: true,
             ..Default::default()
         };
+    }
+
+    pub fn set_font_database(&self, database: fontdb::Database) {
+        self.engine.borrow_mut().set_font_database(database);
+    }
+
+    pub fn set_font_aliases(&self, aliases: HashMap<String, String>) {
+        self.engine.borrow_mut().set_font_aliases(aliases);
     }
 
     pub fn measure(
@@ -294,6 +323,7 @@ impl TextRenderer {
         max_width: Option<f32>,
     ) {
         let mut engine = self.engine.borrow_mut();
+        engine.ensure_resource_revision();
         let (_, metrics, width, text_align) = text_config(
             &engine.font_system,
             font_family,
@@ -354,6 +384,7 @@ impl TextRenderer {
         max_width: Option<f32>,
     ) -> (f32, f32) {
         let mut engine = self.engine.borrow_mut();
+        engine.ensure_resource_revision();
         let (_, metrics, width, _) = text_config(
             &engine.font_system,
             font_family,
@@ -408,6 +439,7 @@ impl TextRenderer {
         const ELLIPSIS: &str = "…";
 
         let mut engine = self.engine.borrow_mut();
+        engine.ensure_resource_revision();
         let (_, metrics, width, align) = text_config(
             &engine.font_system,
             font_family,
@@ -489,6 +521,7 @@ impl TextRenderer {
         focus: (f32, f32),
     ) -> Option<TextSelectionGeometry> {
         let mut engine = self.engine.borrow_mut();
+        engine.ensure_resource_revision();
         let (_, metrics, width, text_align) = text_config(
             &engine.font_system,
             font_family,
@@ -663,6 +696,47 @@ fn build_glyph_atlas_entry(
 }
 
 impl TextEngine {
+    fn set_font_database(&mut self, database: fontdb::Database) {
+        self.font_database = Some(database.clone());
+        self.font_system = FontSystem::new_with_locale_and_db(self.locale.clone(), database);
+        self.swash_cache = SwashCache::new();
+        self.layout_cache.clear();
+        GLYPH_ATLAS.with(|atlas| atlas.borrow_mut().clear());
+        NAMED_FONT_AVAILABILITY.with(|cache| cache.borrow_mut().clear());
+        self.metrics.layout_invalidations = self.metrics.layout_invalidations.saturating_add(1);
+    }
+
+    fn set_font_aliases(&mut self, aliases: HashMap<String, String>) {
+        if self.font_aliases == aliases {
+            return;
+        }
+        self.font_aliases = aliases;
+        self.layout_cache.clear();
+        GLYPH_ATLAS.with(|atlas| atlas.borrow_mut().clear());
+        self.metrics.layout_invalidations = self.metrics.layout_invalidations.saturating_add(1);
+    }
+
+    fn ensure_resource_revision(&mut self) {
+        let revision = resource_revision();
+        if self.resource_revision == revision {
+            return;
+        }
+
+        self.resource_revision = revision;
+        self.font_system = self
+            .font_database
+            .as_ref()
+            .map(|database| {
+                FontSystem::new_with_locale_and_db(self.locale.clone(), database.clone())
+            })
+            .unwrap_or_else(FontSystem::new);
+        self.swash_cache = SwashCache::new();
+        self.layout_cache.clear();
+        GLYPH_ATLAS.with(|atlas| atlas.borrow_mut().clear());
+        NAMED_FONT_AVAILABILITY.with(|cache| cache.borrow_mut().clear());
+        self.metrics.layout_invalidations = self.metrics.layout_invalidations.saturating_add(1);
+    }
+
     fn take_layout(
         &mut self,
         params: &TextLayoutParams<'_>,
@@ -679,21 +753,23 @@ impl TextEngine {
 
         self.metrics.layout_misses = self.metrics.layout_misses.saturating_add(1);
         let shaping_started = std::time::Instant::now();
-        let (attrs, _, _, _) = text_config(
+        let attrs = text_attrs(
             &self.font_system,
+            &self.font_aliases,
             params.font_family,
-            f32::from_bits(params.font_size),
             params.font_weight,
-            f32::from_bits(params.line_height),
-            params.max_width.map(f32::from_bits),
-            params.align,
         );
         let mut cosmic = Buffer::new(&mut self.font_system, metrics);
         {
             let mut cosmic_borrow = cosmic.borrow_with(&mut self.font_system);
             cosmic_borrow.set_wrap(wrap_for(params.max_width.map(f32::from_bits)));
             cosmic_borrow.set_size(width, None);
-            cosmic_borrow.set_text(params.text, &attrs, Shaping::Advanced, Some(align));
+            cosmic_borrow.set_text(
+                params.text,
+                &attrs.as_attrs(),
+                Shaping::Advanced,
+                Some(align),
+            );
         }
         self.metrics.shaping_micros = self.metrics.shaping_micros.saturating_add(
             shaping_started
@@ -710,6 +786,7 @@ impl TextEngine {
         self.layout_cache.insert(
             params.cache_key,
             TextLayoutEntry {
+                resource_revision: params.resource_revision,
                 text: params.text.to_string(),
                 font_family: params.font_family.to_string(),
                 font_size: params.font_size,
@@ -778,6 +855,14 @@ impl mesh_core_elements::TextMeasurer for SharedTextMeasurer {
 }
 
 impl SharedTextMeasurer {
+    pub fn set_font_database(&self, database: fontdb::Database) {
+        RENDERER.with(|renderer| renderer.borrow().set_font_database(database));
+    }
+
+    pub fn set_font_aliases(&self, aliases: HashMap<String, String>) {
+        RENDERER.with(|renderer| renderer.borrow().set_font_aliases(aliases));
+    }
+
     pub fn cache_metrics(&self) -> TextCacheMetrics {
         RENDERER.with(|renderer| renderer.borrow().cache_metrics())
     }
@@ -950,6 +1035,47 @@ fn text_config<'a>(
         TextAlign::Right => Align::Right,
     };
     (attrs, metrics, width, align)
+}
+
+fn text_attrs(
+    font_system: &FontSystem,
+    aliases: &HashMap<String, String>,
+    font_family: &str,
+    font_weight: u16,
+) -> AttrsOwned {
+    let family = primary_family_owned(font_system, aliases, font_family);
+    let attrs = Attrs::new()
+        .family(family.as_family())
+        .style(CosmicStyle::Normal)
+        .weight(Weight(font_weight.max(100)));
+    AttrsOwned::new(&attrs)
+}
+
+fn primary_family_owned(
+    font_system: &FontSystem,
+    aliases: &HashMap<String, String>,
+    font_family: &str,
+) -> FamilyOwned {
+    for family in font_family
+        .split(',')
+        .map(|part| part.trim().trim_matches('"').trim_matches('\''))
+        .filter(|part| !part.is_empty())
+    {
+        let family = aliases.get(family).map(String::as_str).unwrap_or(family);
+        match family.to_ascii_lowercase().as_str() {
+            "serif" => return FamilyOwned::Serif,
+            "sans-serif" | "sans" | "system-ui" => return FamilyOwned::SansSerif,
+            "monospace" | "mono" => return FamilyOwned::Monospace,
+            "cursive" => return FamilyOwned::Cursive,
+            "fantasy" => return FamilyOwned::Fantasy,
+            _ if named_family_is_available(font_system, family) => {
+                return FamilyOwned::new(Family::Name(family));
+            }
+            _ => {}
+        }
+    }
+
+    FamilyOwned::new(fallback_text_family(font_system))
 }
 
 fn primary_family<'a>(font_system: &FontSystem, font_family: &'a str) -> Family<'a> {
@@ -1132,6 +1258,31 @@ mod tests {
         assert_eq!(metrics.layout_hits, 1);
         assert_eq!(metrics.shaped_entries, 1);
         assert!(metrics.glyph_cache_active);
+    }
+
+    #[test]
+    fn text_layout_cache_key_includes_resource_revision() {
+        let base = text_layout_cache_key(
+            "revisioned text",
+            "Inter",
+            14.0f32.to_bits(),
+            400,
+            1.2f32.to_bits(),
+            Some(120.0f32.to_bits()),
+            TextAlign::Left,
+            7,
+        );
+        let changed = text_layout_cache_key(
+            "revisioned text",
+            "Inter",
+            14.0f32.to_bits(),
+            400,
+            1.2f32.to_bits(),
+            Some(120.0f32.to_bits()),
+            TextAlign::Left,
+            8,
+        );
+        assert_ne!(base, changed);
     }
 
     #[test]

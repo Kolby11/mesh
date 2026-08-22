@@ -208,6 +208,7 @@ impl Shell {
             }
         };
         apply_font_family(&mut theme, self.settings.fonts.ui_family.as_deref());
+        crate::shell::discovery::apply_font_registry_tokens(&mut theme, &self.font_registry);
         candidate_watch.revision = theme.revision();
         tracing::info!(
             "reloaded active theme '{}' from {}",
@@ -286,6 +287,8 @@ impl Shell {
                 return Ok(VecDeque::new());
             }
         };
+        let mut theme = theme;
+        crate::shell::discovery::apply_font_registry_tokens(&mut theme, &self.font_registry);
         self.theme.replace_active(theme);
         self.theme_watch = watch;
         tracing::info!("active theme changed to '{theme_id}'");
@@ -589,6 +592,10 @@ impl Shell {
                 let (engine, watch) = load_active_theme(&new_settings);
                 (engine, watch)
             };
+            let mut theme = theme;
+            theme.update_active(|active| {
+                crate::shell::discovery::apply_font_registry_tokens(active, &self.font_registry);
+            });
             let active_theme_id = theme.active().id.clone();
             tracing::info!(
                 "active theme changed: {} -> {}",

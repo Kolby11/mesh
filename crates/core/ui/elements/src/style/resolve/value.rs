@@ -10,6 +10,22 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 impl<'a> StyleResolver<'a> {
+    pub(super) fn resolve_font_family_reference(&self, family: &str) -> String {
+        let Some((pack_id, role)) = family.split_once('/') else {
+            return family.to_owned();
+        };
+        if pack_id.is_empty() || role.is_empty() {
+            return family.to_owned();
+        }
+        let token_name = format!("mesh.font.{pack_id}.{role}");
+        match self.theme.resolve_token_value(&token_name) {
+            Ok(Some(TokenValue::String(resolved))) => resolved,
+            Ok(Some(TokenValue::Number(_))) | Ok(Some(TokenValue::Bool(_))) | Ok(None) | Err(_) => {
+                family.to_owned()
+            }
+        }
+    }
+
     pub fn resolve_value(&self, value: &StyleValue) -> String {
         self.resolve_value_with_variables(value, empty_variables())
     }

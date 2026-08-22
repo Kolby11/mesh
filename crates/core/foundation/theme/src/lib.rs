@@ -962,6 +962,29 @@ impl Theme {
         self.revision = next_theme_revision();
     }
 
+    /// Remove generated tokens owned by a runtime resource binding.
+    ///
+    /// Resource-derived tokens are recomputed when the active resource
+    /// snapshot changes. Removing them as a group prevents a pack-qualified
+    /// font reference from retaining a family after its pack is uninstalled.
+    pub fn remove_tokens_with_prefix(&mut self, prefix: &str) -> bool {
+        let names = self
+            .tokens
+            .keys()
+            .filter(|name| name.starts_with(prefix))
+            .cloned()
+            .collect::<Vec<_>>();
+        if names.is_empty() {
+            return false;
+        }
+        for name in names {
+            self.tokens.remove(&name);
+            self.provenance.remove(&name);
+        }
+        self.revision = next_theme_revision();
+        true
+    }
+
     pub fn defaults(&self) -> &ThemeDefaults {
         &self.defaults
     }

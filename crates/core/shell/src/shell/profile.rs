@@ -1022,6 +1022,10 @@ impl Shell {
                 });
             self.theme = theme;
             self.theme_watch = watch;
+            self.theme.update_active(|active| {
+                super::discovery::apply_font_registry_tokens(active, &self.font_registry);
+            });
+            self.theme_watch.revision = self.theme.active_snapshot().revision;
             if let Err(error) = self.mark_components_theme_changed() {
                 tracing::warn!("profile theme refresh failed after commit: {error}");
             }

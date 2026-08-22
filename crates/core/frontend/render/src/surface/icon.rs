@@ -9,6 +9,7 @@ use image::imageops::FilterType;
 use mesh_core_elements::lru::LruCache;
 use mesh_core_elements::style::Color;
 use mesh_core_icon::{IconResolution, MISSING_ICON_SVG, ResolvedTarget, resolve_icon_result};
+use mesh_core_resources::{ResourceFingerprint, resource_fingerprint, resource_revision};
 use skia_safe::{
     AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images,
 };
@@ -17,7 +18,6 @@ use std::path::Path;
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::SystemTime;
 
 static IMAGE_CACHE: OnceLock<Mutex<LruCache<Arc<Path>, CachedImage>>> = OnceLock::new();
 static RASTER_CACHE: OnceLock<Mutex<LruCache<RasterCacheKey, RasterVariant>>> = OnceLock::new();
@@ -65,32 +65,32 @@ fn icon_file_kind(path: &Path) -> Option<IconFileKind> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct FileFreshness {
-    len: u64,
-    modified_nanos: u128,
-}
+type FileFreshness = ResourceFingerprint;
 
 #[derive(Debug, Clone)]
 struct CachedImage {
+    resource_revision: u64,
     freshness: FileFreshness,
     image: Arc<image::RgbaImage>,
 }
 
 #[derive(Debug, Clone)]
 struct CachedSourceIdentity {
+    resource_revision: u64,
     freshness: Option<FileFreshness>,
     identity: Arc<Path>,
 }
 
 #[derive(Debug, Clone)]
 struct CachedSvgCacheability {
+    resource_revision: u64,
     freshness: FileFreshness,
     cacheable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct RasterCacheKey {
+    resource_revision: u64,
     source_kind: RasterSourceKind,
     source_identity: Arc<Path>,
     width: u32,
@@ -127,6 +127,7 @@ fn svg_cacheability_cache() -> &'static Mutex<LruCache<Arc<Path>, CachedSvgCache
 }
 
 fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
+    let resource_revision = resource_revision();
     let Some(freshness) = file_freshness(path) else {
         return image::open(path)
             .ok()
@@ -134,6 +135,7 @@ fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
     };
     if let Ok(mut guard) = image_cache().lock()
         && let Some(cached) = guard.get(path)
+        && cached.resource_revision == resource_revision
         && cached.freshness == freshness
     {
         return Some(Arc::clone(&cached.image));
@@ -143,6 +145,7 @@ fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
         guard.insert(
             Arc::from(path),
             CachedImage {
+                resource_revision,
                 freshness,
                 image: Arc::clone(&img),
             },
@@ -163,22 +166,15 @@ fn file_freshness(path: &Path) -> Option<FileFreshness> {
     #[cfg(test)]
     FILE_FRESHNESS_STAT_PROBES.fetch_add(1, Ordering::Relaxed);
 
-    let metadata = std::fs::metadata(path).ok()?;
-    let modified = metadata.modified().ok()?;
-    let modified_nanos = modified
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .ok()?
-        .as_nanos();
-    Some(FileFreshness {
-        len: metadata.len(),
-        modified_nanos,
-    })
+    resource_fingerprint(path)
 }
 
 fn source_identity(path: &Path, freshness: Option<FileFreshness>) -> Arc<Path> {
+    let resource_revision = resource_revision();
     let cache = source_identity_cache();
     if let Ok(mut guard) = cache.lock()
         && let Some(cached) = guard.get(path)
+        && cached.resource_revision == resource_revision
         && cached.freshness == freshness
     {
         return Arc::clone(&cached.identity);
@@ -198,6 +194,7 @@ fn source_identity(path: &Path, freshness: Option<FileFreshness>) -> Arc<Path> {
         guard.insert(
             Arc::from(path),
             CachedSourceIdentity {
+                resource_revision,
                 freshness,
                 identity: Arc::clone(&identity),
             },
@@ -229,6 +226,7 @@ fn raster_file_key_with_freshness(
     freshness: FileFreshness,
 ) -> RasterCacheKey {
     RasterCacheKey {
+        resource_revision: resource_revision(),
         source_kind: RasterSourceKind::File,
         source_identity: source_identity(path, Some(freshness)),
         width,
@@ -240,10 +238,12 @@ fn raster_file_key_with_freshness(
 }
 
 fn svg_file_cacheability(path: &Path) -> Option<(bool, FileFreshness)> {
+    let resource_revision = resource_revision();
     let freshness = file_freshness(path)?;
     let cache = svg_cacheability_cache();
     if let Ok(mut guard) = cache.lock()
         && let Some(cached) = guard.get(path)
+        && cached.resource_revision == resource_revision
         && cached.freshness == freshness
     {
         return Some((cached.cacheable, freshness));
@@ -257,6 +257,7 @@ fn svg_file_cacheability(path: &Path) -> Option<(bool, FileFreshness)> {
         guard.insert(
             Arc::from(path),
             CachedSvgCacheability {
+                resource_revision,
                 freshness,
                 cacheable,
             },
@@ -311,6 +312,7 @@ fn svg_has_external_resource_reference(svg_data: &str) -> bool {
 
 fn missing_icon_key(width: u32, height: u32, tint: Color) -> RasterCacheKey {
     RasterCacheKey {
+        resource_revision: resource_revision(),
         source_kind: RasterSourceKind::MissingIcon,
         source_identity: Arc::from(Path::new("builtin:missing-icon")),
         width,
@@ -1090,16 +1092,7 @@ mod tests {
     }
 
     fn file_freshness_uncached_for_benchmark(path: &Path) -> Option<FileFreshness> {
-        let metadata = std::fs::metadata(path).ok()?;
-        let modified = metadata.modified().ok()?;
-        let modified_nanos = modified
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .ok()?
-            .as_nanos();
-        Some(FileFreshness {
-            len: metadata.len(),
-            modified_nanos,
-        })
+        resource_fingerprint(path)
     }
 
     fn write_test_svg(path: &Path) {
@@ -1238,6 +1231,7 @@ mod tests {
                 now.duration_since(checked_at) < std::time::Duration::from_secs(1),
             );
             std::hint::black_box(RasterCacheKey {
+                resource_revision: resource_revision(),
                 source_kind: RasterSourceKind::File,
                 source_identity: Arc::clone(&identity),
                 width: 16,

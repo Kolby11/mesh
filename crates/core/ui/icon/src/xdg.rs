@@ -1,23 +1,23 @@
 use crate::config::{IconPackKind, IconPackRoot};
 use crate::registry::{ResolvedTarget, SupportedAxes};
+use mesh_core_resources::{ResourceFingerprint, resource_fingerprint, resource_revision};
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use std::time::SystemTime;
+
+pub const MAX_GLYPH_MAP_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_GLYPH_MAP_ENTRIES: usize = 100_000;
 
 static SUPPORTED_AXES_CACHE: OnceLock<Mutex<SupportedAxesCache>> = OnceLock::new();
 static XDG_ICON_LOOKUP_CACHE: OnceLock<Mutex<XdgIconLookupCache>> = OnceLock::new();
 const SUPPORTED_AXES_CACHE_CAPACITY: usize = 128;
 const XDG_ICON_LOOKUP_CACHE_CAPACITY: usize = 2048;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct FontFreshness {
-    len: u64,
-    modified_nanos: u128,
-}
+type FontFreshness = ResourceFingerprint;
 
 #[derive(Debug, Clone, Copy)]
 struct CachedSupportedAxes {
+    revision: u64,
     freshness: FontFreshness,
     axes: SupportedAxes,
 }
@@ -29,11 +29,16 @@ struct SupportedAxesCache {
 }
 
 impl SupportedAxesCache {
-    fn get(&mut self, path: &Path, freshness: FontFreshness) -> Option<SupportedAxes> {
+    fn get(
+        &mut self,
+        path: &Path,
+        revision: u64,
+        freshness: FontFreshness,
+    ) -> Option<SupportedAxes> {
         let axes = self
             .entries
             .get(path)
-            .filter(|cached| cached.freshness == freshness)
+            .filter(|cached| cached.revision == revision && cached.freshness == freshness)
             .map(|cached| cached.axes);
         if axes.is_some() {
             self.order.retain(|existing| existing != path);
@@ -57,6 +62,7 @@ impl SupportedAxesCache {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct XdgIconLookupKey {
+    revision: u64,
     root: Option<PathBuf>,
     theme: String,
     asset_name: String,
@@ -112,6 +118,7 @@ pub fn find_icon_in_pack(
 
 fn lookup_xdg_icon_in_pack(pack: &IconPackRoot, asset_name: &str, size: u32) -> Option<PathBuf> {
     let key = XdgIconLookupKey {
+        revision: resource_revision(),
         root: pack.root.clone(),
         theme: theme_name(pack).to_string(),
         asset_name: asset_name.to_string(),
@@ -144,11 +151,129 @@ pub fn lookup_glyph_codepoint(glyph_map_path: &Path, glyph_name: &str) -> Option
     lookup_codepoint(glyph_map_path, glyph_name)
 }
 
+/// Parse a complete glyph map during resource preparation. JSON maps contain
+/// one Unicode scalar per glyph; the text fallback is Google's `name hex`
+/// format. A malformed entry rejects the complete map so a candidate cannot
+/// publish a pack whose aliases only fail later during rendering.
+pub fn parse_glyph_map_bytes(bytes: &[u8]) -> Result<HashMap<String, u32>, String> {
+    if bytes.len() > MAX_GLYPH_MAP_BYTES {
+        return Err(format!("glyph map exceeds {} bytes", MAX_GLYPH_MAP_BYTES));
+    }
+    let raw = std::str::from_utf8(bytes).map_err(|_| "glyph map is not UTF-8".to_string())?;
+    let trimmed = raw.trim_start();
+    if trimmed.starts_with('{') {
+        let value: serde_json::Value = serde_json::from_str(raw)
+            .map_err(|error| format!("glyph map JSON is invalid: {error}"))?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| "glyph map JSON must be an object".to_string())?;
+        if object.len() > MAX_GLYPH_MAP_ENTRIES {
+            return Err(format!(
+                "glyph map contains more than {} entries",
+                MAX_GLYPH_MAP_ENTRIES
+            ));
+        }
+        let mut result = HashMap::with_capacity(object.len());
+        for (name, value) in object {
+            if name.trim().is_empty() {
+                return Err("glyph map contains an empty glyph name".into());
+            }
+            let value = value
+                .as_str()
+                .ok_or_else(|| format!("glyph '{name}' must map to one Unicode character"))?;
+            let mut chars = value.chars();
+            let Some(character) = chars.next() else {
+                return Err(format!("glyph '{name}' maps to an empty value"));
+            };
+            if chars.next().is_some() {
+                return Err(format!(
+                    "glyph '{name}' must map to exactly one Unicode character"
+                ));
+            }
+            if result.insert(name.clone(), character as u32).is_some() {
+                return Err(format!("glyph map contains duplicate glyph '{name}'"));
+            }
+        }
+        if result.is_empty() {
+            return Err("glyph map contains no entries".into());
+        }
+        return Ok(result);
+    }
+
+    let mut result = HashMap::new();
+    for (line_number, line) in raw.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        let name = parts
+            .next()
+            .ok_or_else(|| format!("glyph map line {} is missing a name", line_number + 1))?;
+        let codepoint = parts
+            .next()
+            .ok_or_else(|| format!("glyph map line {} is missing a codepoint", line_number + 1))?;
+        if parts.next().is_some() {
+            return Err(format!(
+                "glyph map line {} has more than two fields",
+                line_number + 1
+            ));
+        }
+        if result.len() >= MAX_GLYPH_MAP_ENTRIES {
+            return Err(format!(
+                "glyph map contains more than {} entries",
+                MAX_GLYPH_MAP_ENTRIES
+            ));
+        }
+        if name.trim().is_empty() {
+            return Err(format!(
+                "glyph map line {} has an empty name",
+                line_number + 1
+            ));
+        }
+        let codepoint = u32::from_str_radix(codepoint, 16).map_err(|_| {
+            format!(
+                "glyph map line {} has an invalid codepoint",
+                line_number + 1
+            )
+        })?;
+        if codepoint > char::MAX as u32
+            || (0xD800..=0xDFFF).contains(&codepoint)
+            || char::from_u32(codepoint).is_none()
+        {
+            return Err(format!(
+                "glyph map line {} has an invalid Unicode codepoint",
+                line_number + 1
+            ));
+        }
+        if result.insert(name.to_string(), codepoint).is_some() {
+            return Err(format!("glyph map contains duplicate glyph '{name}'"));
+        }
+    }
+    if result.is_empty() {
+        return Err("glyph map contains no entries".into());
+    }
+    Ok(result)
+}
+
+/// Validate a complete font file while the resource candidate is being
+/// prepared. Rendering still owns rasterization, but it should never be the
+/// first code path to discover that a published pack is not a font.
+pub fn validate_font_bytes(bytes: &[u8]) -> Result<(), String> {
+    let face = ttf_parser::Face::parse(bytes, 0)
+        .map_err(|error| format!("font file is invalid: {error:?}"))?;
+    if face.number_of_glyphs() == 0 {
+        return Err("font file contains no glyphs".into());
+    }
+    Ok(())
+}
+
 /// Look up an icon in any installed theme on the system XDG search path.
 /// Used as a last-resort fallback when neither module bindings nor the
 /// active profile produce a hit.
 pub fn find_icon_in_theme(theme: &str, asset_name: &str, size: u32) -> Option<PathBuf> {
     let key = XdgIconLookupKey {
+        revision: resource_revision(),
         root: None,
         theme: theme.to_string(),
         asset_name: asset_name.to_string(),
@@ -161,7 +286,8 @@ pub fn find_icon_in_theme(theme: &str, asset_name: &str, size: u32) -> Option<Pa
         return cached;
     }
 
-    let path = icon::IconSearch::new()
+    let catalog = mesh_core_resources::system_resource_catalog();
+    let path = icon::IconSearch::new_from(catalog.icon_dirs.clone())
         .search()
         .icons()
         .find_icon(asset_name, key.size, 1, &key.theme)
@@ -213,29 +339,36 @@ fn resolve_pack_path(root: &Path, declared: &str) -> PathBuf {
 static CODEPOINTS_CACHE: OnceLock<Mutex<CodepointsCache>> = OnceLock::new();
 const CODEPOINTS_CACHE_CAPACITY: usize = 128;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct CodepointsCacheKey {
+    path: PathBuf,
+    revision: u64,
+    fingerprint: FontFreshness,
+}
+
 #[derive(Debug, Default)]
 struct CodepointsCache {
-    entries: HashMap<PathBuf, HashMap<String, u32>>,
-    order: VecDeque<PathBuf>,
+    entries: HashMap<CodepointsCacheKey, HashMap<String, u32>>,
+    order: VecDeque<CodepointsCacheKey>,
 }
 
 impl CodepointsCache {
-    fn get(&mut self, path: &Path, glyph_name: &str) -> Option<Option<u32>> {
+    fn get(&mut self, key: &CodepointsCacheKey, glyph_name: &str) -> Option<Option<u32>> {
         let value = self
             .entries
-            .get(path)
+            .get(key)
             .map(|codepoints| codepoints.get(glyph_name).copied());
         if value.is_some() {
-            self.order.retain(|existing| existing != path);
-            self.order.push_back(path.to_path_buf());
+            self.order.retain(|existing| existing != key);
+            self.order.push_back(key.clone());
         }
         value
     }
 
-    fn insert(&mut self, path: PathBuf, value: HashMap<String, u32>) {
-        self.order.retain(|existing| existing != &path);
-        self.order.push_back(path.clone());
-        self.entries.insert(path, value);
+    fn insert(&mut self, key: CodepointsCacheKey, value: HashMap<String, u32>) {
+        self.order.retain(|existing| existing != &key);
+        self.order.push_back(key.clone());
+        self.entries.insert(key, value);
         while self.entries.len() > CODEPOINTS_CACHE_CAPACITY {
             let Some(evicted) = self.order.pop_front() else {
                 break;
@@ -246,17 +379,23 @@ impl CodepointsCache {
 }
 
 fn lookup_codepoint(path: &Path, glyph_name: &str) -> Option<u32> {
+    let fingerprint = font_freshness(path)?;
+    let key = CodepointsCacheKey {
+        path: path.to_path_buf(),
+        revision: resource_revision(),
+        fingerprint,
+    };
     let cache = CODEPOINTS_CACHE.get_or_init(|| Mutex::new(CodepointsCache::default()));
     {
         let mut guard = cache.lock().ok()?;
-        if let Some(codepoint) = guard.get(path, glyph_name) {
+        if let Some(codepoint) = guard.get(&key, glyph_name) {
             return codepoint;
         }
     }
     let parsed = parse_codepoints_file(path)?;
     let codepoint = parsed.get(glyph_name).copied();
     if let Ok(mut guard) = cache.lock() {
-        guard.insert(path.to_path_buf(), parsed);
+        guard.insert(key, parsed);
     }
     codepoint
 }
@@ -303,11 +442,12 @@ fn parse_codepoints_file(path: &Path) -> Option<HashMap<String, u32>> {
 /// when the font can't be parsed; the painter then silently ignores
 /// CSS `--icon-*` properties that don't match.
 fn detect_supported_axes(font_path: &Path) -> SupportedAxes {
+    let revision = resource_revision();
     let freshness = font_freshness(font_path);
     if let Some(freshness) = freshness {
         let cache = SUPPORTED_AXES_CACHE.get_or_init(|| Mutex::new(SupportedAxesCache::default()));
         if let Ok(mut guard) = cache.lock()
-            && let Some(axes) = guard.get(font_path, freshness)
+            && let Some(axes) = guard.get(font_path, revision, freshness)
         {
             return axes;
         }
@@ -337,7 +477,11 @@ fn detect_supported_axes(font_path: &Path) -> SupportedAxes {
         if let Ok(mut guard) = cache.lock() {
             guard.insert(
                 font_path.to_path_buf(),
-                CachedSupportedAxes { freshness, axes },
+                CachedSupportedAxes {
+                    revision,
+                    freshness,
+                    axes,
+                },
             );
         }
     }
@@ -345,22 +489,16 @@ fn detect_supported_axes(font_path: &Path) -> SupportedAxes {
 }
 
 fn font_freshness(path: &Path) -> Option<FontFreshness> {
-    let metadata = std::fs::metadata(path).ok()?;
-    let modified = metadata.modified().ok()?;
-    let modified_nanos = modified
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .ok()?
-        .as_nanos();
-    Some(FontFreshness {
-        len: metadata.len(),
-        modified_nanos,
-    })
+    resource_fingerprint(path)
 }
 
 fn search_for_pack(pack: &IconPackRoot) -> icon::IconSearch {
     match &pack.root {
         Some(root) => icon::IconSearch::new_from(vec![xdg_base_dir_for_root(root)]),
-        None => icon::IconSearch::new(),
+        None => {
+            let catalog = mesh_core_resources::system_resource_catalog();
+            icon::IconSearch::new_from(catalog.icon_dirs.clone())
+        }
     }
 }
 
@@ -392,4 +530,68 @@ fn find_direct_file(pack: &IconPackRoot, asset_name: &str) -> Option<PathBuf> {
         .into_iter()
         .map(|ext| root.join(format!("{asset_name}.{ext}")))
         .find(|candidate| candidate.is_file())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_json_glyph_maps_without_truncating_unicode() {
+        let glyphs =
+            parse_glyph_map_bytes(r#"{"settings":"\uE000","wide":"😀"}"#.as_bytes()).unwrap();
+        assert_eq!(glyphs.get("settings"), Some(&0xE000));
+        assert_eq!(glyphs.get("wide"), Some(&0x1F600));
+    }
+
+    #[test]
+    fn rejects_multi_character_json_values() {
+        let error = parse_glyph_map_bytes(br#"{"settings":"ab"}"#).unwrap_err();
+        assert!(error.contains("exactly one Unicode character"));
+    }
+
+    #[test]
+    fn rejects_malformed_middle_text_entries() {
+        let error =
+            parse_glyph_map_bytes(b"settings e000\nvolume not-hex\nclose e001").unwrap_err();
+        assert!(error.contains("line 2"));
+    }
+
+    #[test]
+    fn rejects_invalid_font_bytes() {
+        let error = validate_font_bytes(b"not a font").unwrap_err();
+        assert!(error.contains("invalid"));
+    }
+
+    #[test]
+    fn resource_revision_invalidates_negative_icon_lookup() {
+        let temp = tempfile::tempdir().unwrap();
+        let pack = IconPackRoot {
+            id: "revision-test".into(),
+            root: Some(temp.path().to_path_buf()),
+            theme: "hicolor".into(),
+            kind: IconPackKind::Xdg,
+        };
+
+        assert!(find_icon_in_pack(&pack, "appears-later", 24).is_none());
+        std::fs::write(temp.path().join("appears-later.svg"), b"<svg/>").unwrap();
+
+        mesh_core_resources::advance_resource_revision();
+        assert_eq!(
+            find_icon_in_pack(&pack, "appears-later", 24),
+            Some(ResolvedTarget::File(temp.path().join("appears-later.svg")))
+        );
+    }
+
+    #[test]
+    fn resource_revision_invalidates_cached_glyph_maps() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("codepoints.json");
+        std::fs::write(&path, r#"{"settings":"\uE000"}"#).unwrap();
+        assert_eq!(lookup_glyph_codepoint(&path, "settings"), Some(0xE000));
+
+        std::fs::write(&path, r#"{"settings":"\uE001"}"#).unwrap();
+        mesh_core_resources::advance_resource_revision();
+        assert_eq!(lookup_glyph_codepoint(&path, "settings"), Some(0xE001));
+    }
 }

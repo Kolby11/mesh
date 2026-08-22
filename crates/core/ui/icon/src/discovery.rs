@@ -13,8 +13,9 @@ use std::path::Path;
 pub fn discover_xdg_packs() -> Vec<IconPackRoot> {
     let mut packs = Vec::new();
     let mut seen_ids = std::collections::HashSet::new();
+    let catalog = mesh_core_resources::system_resource_catalog();
 
-    for base in mesh_core_resources::xdg_icon_base_dirs() {
+    for base in &catalog.icon_dirs {
         let entries = match std::fs::read_dir(&base) {
             Ok(entries) => entries,
             Err(_) => continue,

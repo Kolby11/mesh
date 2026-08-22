@@ -47,6 +47,6 @@ pub use surface::{
     paint_selected_display_list_for_module_with_profiling_metrics,
     paint_selected_display_list_for_module_with_profiling_metrics_and_attribution,
     paint_selected_display_list_regions_for_module_with_profiling_metrics_and_attribution,
-    set_blur_quality, set_tooltip_center_x, set_tooltip_paint_colors, set_tooltip_paint_opacity,
-    set_tooltip_paint_scale,
+    set_blur_quality, set_font_aliases, set_font_database, set_tooltip_center_x,
+    set_tooltip_paint_colors, set_tooltip_paint_opacity, set_tooltip_paint_scale,
 };

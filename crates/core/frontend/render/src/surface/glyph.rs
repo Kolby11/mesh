@@ -11,6 +11,7 @@ use super::profiling;
 use mesh_core_elements::lru::LruCache;
 use mesh_core_elements::style::Color;
 use mesh_core_icon::SupportedAxes;
+use mesh_core_resources::{ResourceFingerprint, resource_fingerprint, resource_revision};
 use skia_safe::{
     AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images,
 };
@@ -48,6 +49,8 @@ impl GlyphAxes {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct GlyphCacheKey {
     font_path: u64,
+    resource_revision: u64,
+    font_fingerprint: Option<ResourceFingerprint>,
     codepoint: u32,
     px: u32,
     color: u32,
@@ -65,7 +68,14 @@ struct CachedGlyph {
     pixels: Arc<[u8]>,
 }
 
-type FontBytesCache = Mutex<LruCache<Arc<Path>, Arc<[u8]>>>;
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct FontBytesCacheKey {
+    path: Arc<Path>,
+    resource_revision: u64,
+    fingerprint: ResourceFingerprint,
+}
+
+type FontBytesCache = Mutex<LruCache<FontBytesCacheKey, Arc<[u8]>>>;
 
 static FONT_BYTES: OnceLock<FontBytesCache> = OnceLock::new();
 static GLYPH_CACHE: OnceLock<Mutex<LruCache<GlyphCacheKey, Option<CachedGlyph>>>> = OnceLock::new();
@@ -89,11 +99,18 @@ fn glyph_cache() -> &'static Mutex<LruCache<GlyphCacheKey, Option<CachedGlyph>>>
 }
 
 fn font_bytes(path: &Path) -> Option<Arc<[u8]>> {
+    let revision = resource_revision();
+    let fingerprint = resource_fingerprint(path)?;
+    let key = FontBytesCacheKey {
+        path: Arc::from(path),
+        resource_revision: revision,
+        fingerprint,
+    };
     let cache = font_bytes_cache();
     let entries = match cache.lock() {
         Ok(mut guard) => {
             let entries = guard.len();
-            if let Some(bytes) = guard.get(path) {
+            if let Some(bytes) = guard.get(&key) {
                 profiling::record_font_bytes_cache_lookup(true, entries, FONT_BYTES_CACHE_CAPACITY);
                 return Some(Arc::clone(bytes));
             }
@@ -104,7 +121,7 @@ fn font_bytes(path: &Path) -> Option<Arc<[u8]>> {
     profiling::record_font_bytes_cache_lookup(false, entries, FONT_BYTES_CACHE_CAPACITY);
     let bytes: Arc<[u8]> = std::fs::read(path).ok()?.into();
     if let Ok(mut guard) = cache.lock() {
-        guard.insert(Arc::from(path), Arc::clone(&bytes));
+        guard.insert(key, Arc::clone(&bytes));
         profiling::update_font_bytes_cache_entries(guard.len(), FONT_BYTES_CACHE_CAPACITY);
     }
     Some(bytes)
@@ -206,26 +223,18 @@ fn quantize(value: Option<f32>) -> i32 {
     }
 }
 
-/// Render a glyph from a font pack into the buffer at the given destination
-/// rectangle, recoloring the alpha mask to `tint`. Returns `false` when the
-/// glyph couldn't be rasterized (font missing, unmapped codepoint, color
-/// glyph) so the caller can fall back to the built-in missing-icon glyph.
-#[cfg(test)]
-pub fn draw_font_glyph(
-    buffer: &mut PixelBuffer,
+fn glyph_cache_key(
     font_path: &Path,
     codepoint: u32,
+    px: u32,
     supported_axes: SupportedAxes,
     axes: GlyphAxes,
-    dest_x: i32,
-    dest_y: i32,
-    dest_w: i32,
-    dest_h: i32,
     tint: Color,
-) -> bool {
-    let px = dest_w.max(dest_h).max(1) as u32;
-    let key = GlyphCacheKey {
+) -> GlyphCacheKey {
+    GlyphCacheKey {
         font_path: hash_path(font_path),
+        resource_revision: resource_revision(),
+        font_fingerprint: resource_fingerprint(font_path),
         codepoint,
         px,
         color: encode_color(tint),
@@ -249,7 +258,28 @@ pub fn draw_font_glyph(
         } else {
             i32::MIN
         },
-    };
+    }
+}
+
+/// Render a glyph from a font pack into the buffer at the given destination
+/// rectangle, recoloring the alpha mask to `tint`. Returns `false` when the
+/// glyph couldn't be rasterized (font missing, unmapped codepoint, color
+/// glyph) so the caller can fall back to the built-in missing-icon glyph.
+#[cfg(test)]
+pub fn draw_font_glyph(
+    buffer: &mut PixelBuffer,
+    font_path: &Path,
+    codepoint: u32,
+    supported_axes: SupportedAxes,
+    axes: GlyphAxes,
+    dest_x: i32,
+    dest_y: i32,
+    dest_w: i32,
+    dest_h: i32,
+    tint: Color,
+) -> bool {
+    let px = dest_w.max(dest_h).max(1) as u32;
+    let key = glyph_cache_key(font_path, codepoint, px, supported_axes, axes, tint);
 
     let glyph = match cache_lookup(key) {
         Some(value) => value,
@@ -312,32 +342,7 @@ pub fn draw_font_glyph_on_canvas(
     tint: Color,
 ) -> bool {
     let px = dest_w.max(dest_h).max(1) as u32;
-    let key = GlyphCacheKey {
-        font_path: hash_path(font_path),
-        codepoint,
-        px,
-        color: encode_color(tint),
-        fill_q: if supported_axes.fill {
-            quantize(axes.fill)
-        } else {
-            i32::MIN
-        },
-        weight_q: if supported_axes.weight {
-            quantize(axes.weight)
-        } else {
-            i32::MIN
-        },
-        grade_q: if supported_axes.grade {
-            quantize(axes.grade)
-        } else {
-            i32::MIN
-        },
-        opsz_q: if supported_axes.optical_size {
-            quantize(axes.optical_size)
-        } else {
-            i32::MIN
-        },
-    };
+    let key = glyph_cache_key(font_path, codepoint, px, supported_axes, axes, tint);
 
     let glyph = match cache_lookup(key) {
         Some(value) => value,
@@ -425,32 +430,7 @@ mod tests {
         supported_axes: SupportedAxes,
         axes: GlyphAxes,
     ) -> GlyphCacheKey {
-        GlyphCacheKey {
-            font_path: hash_path(font_path),
-            codepoint: 'a' as u32,
-            px,
-            color: encode_color(tint),
-            fill_q: if supported_axes.fill {
-                quantize(axes.fill)
-            } else {
-                i32::MIN
-            },
-            weight_q: if supported_axes.weight {
-                quantize(axes.weight)
-            } else {
-                i32::MIN
-            },
-            grade_q: if supported_axes.grade {
-                quantize(axes.grade)
-            } else {
-                i32::MIN
-            },
-            opsz_q: if supported_axes.optical_size {
-                quantize(axes.optical_size)
-            } else {
-                i32::MIN
-            },
-        }
+        glyph_cache_key(font_path, 'a' as u32, px, supported_axes, axes, tint)
     }
 
     #[test]

@@ -32,14 +32,40 @@ entries. Atomic icon binding replacement requires canonical pack IDs and
 rejects duplicate pack/module ownership; font aliases resolve only within the
 pack that owns each mapping, and duplicate aliases are rejected during
 preparation. Module assets are validated through contained, no-follow,
-bounded handles before entering a candidate snapshot. Icon fallback resolution
-uses the canonical semantic table and dash generalization, while typed
-multicolor mappings preserve source color and successful resolutions retain
+bounded handles before entering a candidate snapshot. Complete selected icon
+packs now read and validate bundled fonts and glyph maps on the resource
+preparation worker, retain parsed glyph maps in immutable bindings, reject
+malformed mappings or missing glyphs as whole-candidate failures, and publish
+only through the atomic registry replacement. Icon fallback resolution uses
+the canonical semantic table and dash generalization, while typed multicolor
+mappings preserve source color and successful resolutions retain
 owner/pack/candidate/fallback provenance.
 
-The next open item is to validate complete packs off the render thread and
-publish them atomically without partial registry state. Focused resource,
-icon, diagnostics, locale, and config suites pass; the full workspace now
-passes `cargo check` and all test targets compile with `cargo test --workspace
---no-run`. The shell still emits its existing dead-code/private-interface
-warnings.
+Resource caches now share a monotonic revision and metadata fingerprint.
+Atomic icon binding publication advances the revision; registry and XDG
+negative lookups, glyph maps, variable-font axes, icon font bytes, glyph
+rasters, file image/raster caches, text layout/font-system state, and ellipsis
+shaping keys all carry the revision/fingerprint needed to reject stale
+results. Focused resource, icon, text, glyph, renderer, and config tests pass;
+the full config suite retains one existing repository-fixture failure for its
+top-level `revision` metadata, and the broader shell icon slice retains three
+existing navigation integration failures. The shell still emits its existing
+dead-code/private-interface warnings.
+
+Font-pack runtime resolution is complete. Manifests carry validated role
+mappings, soft host-font requirements, bundled face metadata, and script
+coverage. Resource preparation translates profile and module chains to
+pack-qualified IDs, validates contained font bytes off the shell/render path,
+and publishes an ordered `FontRegistry` with prepared font databases. Logical
+roles generate `--font-*` typography tokens, `pack/role` references use an
+internal theme binding, and per-module overrides retain exact-family and
+system-fallback resolution with coverage and missing-requirement diagnostics.
+
+The host resource catalog now owns ordered XDG data, icon, and font roots,
+theme inheritance order, and the shared host font database. Icon discovery and
+lookup, icon-pack host-font resolution, and resource preparation consume the
+same immutable refreshable snapshot; a changed host catalog is published with
+the resource revision while unchanged refreshes retain the existing snapshot.
+
+The next open item is to prepare resource parsing and asset handles away from
+shell/render threads with bounded cancellation.

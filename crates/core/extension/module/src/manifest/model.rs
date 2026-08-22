@@ -924,6 +924,21 @@ impl IconsSection {
     }
 }
 
+/// Frontend-side font configuration. Font-pack mappings stay owned by
+/// `FontPackSection`; a frontend may only choose an ordered chain and pin a
+/// role to another role/family reference.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FontsSection {
+    #[serde(default)]
+    pub overrides: HashMap<String, String>,
+}
+
+impl FontsSection {
+    pub fn is_empty(&self) -> bool {
+        self.overrides.is_empty()
+    }
+}
+
 /// Icon-pack module section (`mesh.kind = "icon-pack"`): mapping table and
 /// metadata only, no shipped assets.
 ///
@@ -954,6 +969,66 @@ pub struct IconPackSection {
     pub mappings: HashMap<String, IconMappingTarget>,
     #[serde(default)]
     pub vocabularies: HashMap<String, HashMap<String, IconMappingTarget>>,
+}
+
+/// Font-pack module section. Mappings are semantic role names (for example
+/// `body` or `mono`) to exact installed family names; chain composition and
+/// pack-qualified resolution belong to the resource runtime.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FontPackSection {
+    pub id: String,
+    #[serde(default)]
+    pub covers: HashMap<String, String>,
+    #[serde(default)]
+    pub requires: FontPackRequires,
+    #[serde(default)]
+    pub faces: Vec<FontPackFace>,
+    #[serde(default)]
+    pub mappings: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FontPackFace {
+    pub family: String,
+    pub file: String,
+    #[serde(default = "default_font_face_weight")]
+    pub weight: u16,
+    #[serde(default)]
+    pub style: FontPackFaceStyle,
+    #[serde(default = "default_font_face_stretch")]
+    pub stretch: u16,
+    #[serde(default)]
+    pub coverage: Vec<String>,
+}
+
+fn default_font_face_weight() -> u16 {
+    400
+}
+
+fn default_font_face_stretch() -> u16 {
+    100
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FontPackFaceStyle {
+    #[default]
+    Normal,
+    Italic,
+    Oblique,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FontPackRequires {
+    #[serde(default)]
+    pub fonts: Vec<FontPackFontRequirement>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FontPackFontRequirement {
+    pub family: String,
+    #[serde(default)]
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

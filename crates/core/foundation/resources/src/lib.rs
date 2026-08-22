@@ -3,18 +3,80 @@
 //! This crate describes what the desktop has installed. MESH resource-pack
 //! modules remain semantic mapping and composition units layered above it.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+mod font;
+
+pub use font::{
+    FontFaceBinding, FontFrontendBindings, FontPackBindings, FontRegistry, FontRegistryError,
+    FontResolution, FontResolutionSource,
+};
+
+use std::collections::{BTreeMap, HashSet};
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock, RwLock};
 #[cfg(unix)]
 use std::{
     ffi::CString,
     os::unix::ffi::OsStrExt,
+    os::unix::fs::MetadataExt,
     os::unix::io::{AsRawFd, FromRawFd},
 };
 
 pub const DEFAULT_MAX_RESOURCE_BYTES: usize = 64 * 1024 * 1024;
+
+/// A cheap identity for a resource file. The revision token below covers
+/// changes that are not visible through a single file's metadata (for
+/// example, a newly installed icon in a theme directory); this fingerprint
+/// avoids retaining stale bytes when an existing file is replaced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ResourceFingerprint {
+    pub len: u64,
+    pub modified_nanos: u128,
+    #[cfg(unix)]
+    pub device: u64,
+    #[cfg(unix)]
+    pub inode: u64,
+}
+
+/// Return the current process-wide resource revision used by resource and
+/// renderer caches.
+pub fn resource_revision() -> u64 {
+    RESOURCE_REVISION.load(Ordering::Acquire)
+}
+
+/// Advance the resource revision after an atomic resource/catalog change.
+/// Cache keys include this value so negative lookups and derived render data
+/// cannot survive a committed resource replacement.
+pub fn advance_resource_revision() -> u64 {
+    RESOURCE_REVISION
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |revision| {
+            Some(revision.saturating_add(1))
+        })
+        .expect("resource revision update always returns a value")
+        .saturating_add(1)
+}
+
+/// Return metadata identifying the current contents at `path`.
+pub fn resource_fingerprint(path: &Path) -> Option<ResourceFingerprint> {
+    let metadata = std::fs::metadata(path).ok()?;
+    let modified_nanos = metadata
+        .modified()
+        .ok()?
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    Some(ResourceFingerprint {
+        len: metadata.len(),
+        modified_nanos,
+        #[cfg(unix)]
+        device: metadata.dev(),
+        #[cfg(unix)]
+        inode: metadata.ino(),
+    })
+}
+
+static RESOURCE_REVISION: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, thiserror::Error)]
 pub enum ResourceAssetError {
@@ -30,6 +92,8 @@ pub enum ResourceAssetError {
         #[source]
         source: std::io::Error,
     },
+    #[error("font resource {path} has no face named '{family}'")]
+    InvalidFont { path: PathBuf, family: String },
     #[error("safe resource opening is unavailable on this platform: {path}")]
     UnsupportedPlatform { path: PathBuf },
 }
@@ -127,6 +191,30 @@ impl ResourceAssetHandle {
                 path: self.candidate_path(),
             })
         }
+    }
+}
+
+/// Validate a module-bundled font face while the resource snapshot is being
+/// prepared. The renderer later receives the contained handle and never has
+/// to parse an untrusted font file on its paint path.
+pub fn validate_font_face(
+    handle: &ResourceAssetHandle,
+    expected_family: &str,
+) -> Result<(), ResourceAssetError> {
+    let bytes = handle.read_bounded(DEFAULT_MAX_RESOURCE_BYTES)?;
+    let mut database = fontdb::Database::new();
+    database.load_font_data(bytes);
+    if database.faces().any(|face| {
+        face.families
+            .iter()
+            .any(|(family, _)| family.eq_ignore_ascii_case(expected_family))
+    }) {
+        Ok(())
+    } else {
+        Err(ResourceAssetError::InvalidFont {
+            path: handle.candidate_path(),
+            family: expected_family.to_owned(),
+        })
     }
 }
 
@@ -241,11 +329,33 @@ fn read_resource_bounded(
     Ok(bytes)
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct SystemResourceCatalog {
+    pub revision: u64,
+    /// Ordered XDG data roots used to derive icon and font lookup roots.
+    pub data_dirs: Vec<PathBuf>,
+    /// Ordered icon roots. Earlier roots have precedence over later roots.
+    pub icon_dirs: Vec<PathBuf>,
+    /// Ordered font roots used to build the shared host font database.
+    pub font_dirs: Vec<PathBuf>,
     pub icon_themes: Vec<SystemIconTheme>,
     pub font_families: Vec<SystemFontFamily>,
+    fingerprints: BTreeMap<PathBuf, ResourceFingerprint>,
+    font_database: Arc<fontdb::Database>,
 }
+
+impl PartialEq for SystemResourceCatalog {
+    fn eq(&self, other: &Self) -> bool {
+        self.data_dirs == other.data_dirs
+            && self.icon_dirs == other.icon_dirs
+            && self.font_dirs == other.font_dirs
+            && self.icon_themes == other.icon_themes
+            && self.font_families == other.font_families
+            && self.fingerprints == other.fingerprints
+    }
+}
+
+impl Eq for SystemResourceCatalog {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemIconTheme {
@@ -263,26 +373,94 @@ pub struct SystemFontFamily {
     pub monospace: bool,
 }
 
-static SYSTEM_RESOURCES: OnceLock<SystemResourceCatalog> = OnceLock::new();
+static SYSTEM_RESOURCES: OnceLock<RwLock<Arc<SystemResourceCatalog>>> = OnceLock::new();
 
-/// Cached process-wide host catalog. Font scanning is intentionally performed
-/// once: fontdb follows the platform font directories and can inspect hundreds
-/// of files on a typical desktop.
-pub fn system_resource_catalog() -> &'static SystemResourceCatalog {
-    SYSTEM_RESOURCES.get_or_init(discover_system_resources)
+/// Return the current immutable host catalog. Consumers clone the `Arc`, so a
+/// refresh can publish a new snapshot without invalidating an in-flight
+/// lookup or renderer preparation.
+pub fn system_resource_catalog() -> Arc<SystemResourceCatalog> {
+    SYSTEM_RESOURCES
+        .get_or_init(|| RwLock::new(Arc::new(discover_system_resources())))
+        .read()
+        .expect("host resource catalog lock is not poisoned")
+        .clone()
 }
 
 pub fn discover_system_resources() -> SystemResourceCatalog {
+    let roots = host_resource_roots();
+    let font_database = discover_font_database(&roots.font_dirs);
+    let icon_themes = discover_icon_themes_in(&roots.icon_dirs);
+    let fingerprints = catalog_fingerprints(&roots, &icon_themes, &font_database);
     SystemResourceCatalog {
-        icon_themes: discover_icon_themes_in(&xdg_icon_base_dirs()),
-        font_families: discover_font_families(),
+        revision: resource_revision(),
+        data_dirs: roots.data_dirs,
+        icon_themes,
+        font_families: discover_font_families(&font_database),
+        icon_dirs: roots.icon_dirs,
+        font_dirs: roots.font_dirs,
+        fingerprints,
+        font_database,
     }
 }
 
-fn discover_font_families() -> Vec<SystemFontFamily> {
-    let mut database = fontdb::Database::new();
-    database.load_system_fonts();
+/// Refresh the process-wide host snapshot when the ordered roots, installed
+/// themes, or available font faces changed. An unchanged refresh retains the
+/// existing revision and allocation.
+pub fn refresh_system_resource_catalog() -> Arc<SystemResourceCatalog> {
+    let store = SYSTEM_RESOURCES.get_or_init(|| RwLock::new(Arc::new(discover_system_resources())));
+    let mut current = store
+        .write()
+        .expect("host resource catalog lock is not poisoned");
+    let mut candidate = discover_system_resources();
+    if current.as_ref() == &candidate {
+        return current.clone();
+    }
+    candidate.revision = advance_resource_revision();
+    let next = Arc::new(candidate);
+    *current = next.clone();
+    next
+}
 
+impl SystemResourceCatalog {
+    /// Reuse the exact font database that produced `font_families` rather than
+    /// invoking font discovery again in a consumer-specific path.
+    pub fn font_database(&self) -> fontdb::Database {
+        self.font_database.as_ref().clone()
+    }
+
+    /// Resolve an installed family to one of the file-backed faces in this
+    /// snapshot. Missing families remain missing; there is no fontconfig
+    /// fallback subprocess hidden behind this lookup.
+    pub fn font_path_for_family(&self, family: &str) -> Option<PathBuf> {
+        self.font_database.faces().find_map(|face| {
+            if !face
+                .families
+                .iter()
+                .any(|(candidate, _)| candidate.eq_ignore_ascii_case(family))
+            {
+                return None;
+            }
+            match &face.source {
+                fontdb::Source::File(path) => Some(path.clone()),
+                _ => None,
+            }
+        })
+    }
+}
+
+fn discover_font_database(font_dirs: &[PathBuf]) -> Arc<fontdb::Database> {
+    let mut database = fontdb::Database::new();
+    // Load explicit XDG roots first so a user-local face wins when the same
+    // family is also present in a system directory. `load_system_fonts` then
+    // fills in platform-specific roots that are not represented by XDG.
+    for font_dir in font_dirs {
+        database.load_fonts_dir(font_dir);
+    }
+    database.load_system_fonts();
+    Arc::new(database)
+}
+
+fn discover_font_families(database: &fontdb::Database) -> Vec<SystemFontFamily> {
     let mut families: BTreeMap<String, (usize, bool)> = BTreeMap::new();
     for face in database.faces() {
         for (family, _) in &face.families {
@@ -302,36 +480,108 @@ fn discover_font_families() -> Vec<SystemFontFamily> {
         .collect()
 }
 
-/// FreeDesktop icon base directories in lookup precedence order.
+fn catalog_fingerprints(
+    roots: &HostResourceRoots,
+    icon_themes: &[SystemIconTheme],
+    font_database: &fontdb::Database,
+) -> BTreeMap<PathBuf, ResourceFingerprint> {
+    let mut paths = roots
+        .data_dirs
+        .iter()
+        .chain(&roots.icon_dirs)
+        .chain(&roots.font_dirs)
+        .cloned()
+        .collect::<HashSet<_>>();
+    paths.extend(
+        icon_themes
+            .iter()
+            .map(|theme| theme.path.join("index.theme")),
+    );
+    paths.extend(font_database.faces().filter_map(|face| match &face.source {
+        fontdb::Source::File(path) => Some(path.clone()),
+        _ => None,
+    }));
+    paths
+        .into_iter()
+        .filter_map(|path| resource_fingerprint(&path).map(|fingerprint| (path, fingerprint)))
+        .collect()
+}
+
+/// FreeDesktop icon base directories in the current host-catalog order.
 /// Both catalog discovery and icon resolution use this one authority.
 pub fn xdg_icon_base_dirs() -> Vec<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    let mut dirs = Vec::new();
-    if let Some(data_home) =
-        non_empty_env_value(std::env::var_os("XDG_DATA_HOME")).map(PathBuf::from)
-    {
-        dirs.push(data_home.join("icons"));
-    } else if let Some(home) = &home {
-        dirs.push(home.join(".local/share/icons"));
-    }
-    if let Some(home) = home {
-        dirs.push(home.join(".icons"));
-    }
-    let data_dirs = non_empty_env_value(std::env::var_os("XDG_DATA_DIRS"))
-        .map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
-        .filter(|dirs| !dirs.is_empty())
-        .unwrap_or_else(|| {
-            vec![
-                PathBuf::from("/usr/local/share"),
-                PathBuf::from("/usr/share"),
-            ]
-        });
-    dirs.extend(data_dirs.into_iter().map(|dir| dir.join("icons")));
+    host_resource_roots().icon_dirs
+}
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostResourceRoots {
+    pub data_dirs: Vec<PathBuf>,
+    pub icon_dirs: Vec<PathBuf>,
+    pub font_dirs: Vec<PathBuf>,
+}
+
+fn host_resource_roots() -> HostResourceRoots {
+    let home = absolute_env_path("HOME");
+    let data_home = absolute_env_path("XDG_DATA_HOME")
+        .or_else(|| home.as_ref().map(|home| home.join(".local/share")));
+    let data_dirs = absolute_env_paths("XDG_DATA_DIRS").unwrap_or_else(|| {
+        vec![
+            PathBuf::from("/usr/local/share"),
+            PathBuf::from("/usr/share"),
+        ]
+    });
+
+    let mut ordered_data_dirs = Vec::new();
+    if let Some(data_home) = data_home {
+        ordered_data_dirs.push(data_home);
+    }
+    ordered_data_dirs.extend(data_dirs);
+    let data_dirs = existing_unique_paths(ordered_data_dirs);
+
+    let mut icon_candidates = Vec::new();
+    if let Some(data_home) = data_dirs.first() {
+        icon_candidates.push(data_home.join("icons"));
+    }
+    if let Some(home) = &home {
+        icon_candidates.push(home.join(".icons"));
+    }
+    icon_candidates.extend(data_dirs.iter().map(|dir| dir.join("icons")));
+
+    let mut font_candidates = Vec::new();
+    if let Some(data_home) = data_dirs.first() {
+        font_candidates.push(data_home.join("fonts"));
+    }
+    if let Some(home) = &home {
+        font_candidates.push(home.join(".fonts"));
+    }
+    font_candidates.extend(data_dirs.iter().map(|dir| dir.join("fonts")));
+
+    HostResourceRoots {
+        data_dirs,
+        icon_dirs: existing_unique_paths(icon_candidates),
+        font_dirs: existing_unique_paths(font_candidates),
+    }
+}
+
+fn existing_unique_paths(paths: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
     let mut seen = HashSet::new();
-    dirs.into_iter()
+    paths
+        .into_iter()
         .filter(|path| path.is_dir() && seen.insert(path.clone()))
         .collect()
+}
+
+fn absolute_env_path(name: &str) -> Option<PathBuf> {
+    let path = PathBuf::from(non_empty_env_value(std::env::var_os(name))?);
+    path.is_absolute().then_some(path)
+}
+
+fn absolute_env_paths(name: &str) -> Option<Vec<PathBuf>> {
+    let value = non_empty_env_value(std::env::var_os(name))?;
+    let paths = std::env::split_paths(&value)
+        .filter(|path| path.is_absolute())
+        .collect::<Vec<_>>();
+    (!paths.is_empty()).then_some(paths)
 }
 
 fn non_empty_env_value(value: Option<std::ffi::OsString>) -> Option<std::ffi::OsString> {
@@ -339,21 +589,30 @@ fn non_empty_env_value(value: Option<std::ffi::OsString>) -> Option<std::ffi::Os
 }
 
 fn discover_icon_themes_in(base_dirs: &[PathBuf]) -> Vec<SystemIconTheme> {
-    let mut themes = BTreeMap::new();
+    let mut themes = Vec::new();
+    let mut seen_ids = HashSet::new();
     for base in base_dirs {
-        let Ok(entries) = std::fs::read_dir(base) else {
+        let Ok(mut entries) = std::fs::read_dir(base) else {
             continue;
         };
-        for entry in entries.flatten() {
-            let Some(theme) = read_icon_theme(&entry.path()) else {
+        let mut paths = entries
+            .by_ref()
+            .flatten()
+            .map(|entry| entry.path())
+            .collect::<Vec<_>>();
+        paths.sort();
+        for path in paths {
+            let Some(theme) = read_icon_theme(&path) else {
                 continue;
             };
             // XDG directory precedence is user first, then system. Preserve
             // the first definition when the same theme id occurs in both.
-            themes.entry(theme.id.clone()).or_insert(theme);
+            if seen_ids.insert(theme.id.clone()) {
+                themes.push(theme);
+            }
         }
     }
-    themes.into_values().collect()
+    themes
 }
 
 fn read_icon_theme(path: &Path) -> Option<SystemIconTheme> {
@@ -361,7 +620,7 @@ fn read_icon_theme(path: &Path) -> Option<SystemIconTheme> {
     let raw = std::fs::read_to_string(path.join("index.theme")).ok()?;
     let mut in_icon_theme = false;
     let mut name = None;
-    let mut inherits = BTreeSet::new();
+    let mut inherits = Vec::new();
     let mut hidden = false;
 
     for raw_line in raw.lines() {
@@ -378,13 +637,17 @@ fn read_icon_theme(path: &Path) -> Option<SystemIconTheme> {
         };
         match key.trim() {
             "Name" => name = Some(value.trim().to_owned()),
-            "Inherits" => inherits.extend(
-                value
+            "Inherits" => {
+                for inherited in value
                     .split(',')
                     .map(str::trim)
                     .filter(|value| !value.is_empty())
-                    .map(str::to_owned),
-            ),
+                {
+                    if !inherits.iter().any(|existing| existing == inherited) {
+                        inherits.push(inherited.to_owned());
+                    }
+                }
+            }
             "Hidden" => hidden = value.trim().eq_ignore_ascii_case("true"),
             _ => {}
         }
@@ -394,7 +657,7 @@ fn read_icon_theme(path: &Path) -> Option<SystemIconTheme> {
         name: name.unwrap_or_else(|| id.clone()),
         id,
         path: path.to_owned(),
-        inherits: inherits.into_iter().collect(),
+        inherits,
         hidden,
     })
 }
@@ -410,6 +673,79 @@ mod tests {
             non_empty_env_value(Some(std::ffi::OsString::from("/tmp/mesh-data"))),
             Some(std::ffi::OsString::from("/tmp/mesh-data"))
         );
+    }
+
+    #[test]
+    fn resource_revision_advances_and_fingerprints_existing_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("resource.bin");
+        std::fs::write(&path, b"resource").unwrap();
+
+        let first_revision = resource_revision();
+        let first_fingerprint = resource_fingerprint(&path).unwrap();
+        let next_revision = advance_resource_revision();
+
+        assert_eq!(next_revision, first_revision.saturating_add(1));
+        assert_eq!(resource_revision(), next_revision);
+        assert_eq!(resource_fingerprint(&path), Some(first_fingerprint));
+        assert!(resource_fingerprint(&temp.path().join("missing")).is_none());
+    }
+
+    #[test]
+    fn discovered_catalog_carries_the_resource_revision() {
+        let catalog = discover_system_resources();
+        assert!(catalog.revision <= resource_revision());
+    }
+
+    #[test]
+    fn unchanged_host_catalog_refresh_reuses_the_snapshot() {
+        let first = system_resource_catalog();
+        let second = refresh_system_resource_catalog();
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn catalog_font_lookup_uses_a_file_backed_face() {
+        let catalog = discover_system_resources();
+        let (family, path) = catalog
+            .font_database()
+            .faces()
+            .find_map(|face| match (&face.families.first(), &face.source) {
+                (Some((family, _)), fontdb::Source::File(path)) => {
+                    Some((family.clone(), path.clone()))
+                }
+                _ => None,
+            })
+            .expect("test environment should provide a file-backed font");
+        assert_eq!(catalog.font_path_for_family(&family), Some(path));
+    }
+
+    #[test]
+    fn catalog_fingerprints_detect_changed_theme_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let icon_root = temp.path().join("icons");
+        let theme = icon_root.join("ocean");
+        std::fs::create_dir_all(&theme).unwrap();
+        let index = theme.join("index.theme");
+        std::fs::write(&index, "[Icon Theme]\nName=Ocean\n").unwrap();
+        let roots = HostResourceRoots {
+            data_dirs: vec![temp.path().to_path_buf()],
+            icon_dirs: vec![icon_root],
+            font_dirs: Vec::new(),
+        };
+        let database = fontdb::Database::new();
+        let before = catalog_fingerprints(
+            &roots,
+            &discover_icon_themes_in(&roots.icon_dirs),
+            &database,
+        );
+        std::fs::write(&index, "[Icon Theme]\nName=Ocean Updated\n").unwrap();
+        let after = catalog_fingerprints(
+            &roots,
+            &discover_icon_themes_in(&roots.icon_dirs),
+            &database,
+        );
+        assert_ne!(before, after);
     }
 
     #[test]
@@ -435,7 +771,7 @@ mod tests {
         let themes = discover_icon_themes_in(&[user, system]);
         assert_eq!(themes.len(), 1);
         assert_eq!(themes[0].name, "Ocean User");
-        assert_eq!(themes[0].inherits, ["Adwaita", "hicolor"]);
+        assert_eq!(themes[0].inherits, ["hicolor", "Adwaita"]);
     }
 
     #[test]
@@ -465,5 +801,16 @@ mod tests {
 
         let handle = ResourceAssetHandle::new(temp.path(), "font.ttf").unwrap();
         assert!(handle.read_bounded(64).is_err());
+    }
+
+    #[test]
+    fn bundled_font_validation_rejects_malformed_face_data() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("font.ttf"), b"not a font").unwrap();
+        let handle = ResourceAssetHandle::new(temp.path(), "font.ttf").unwrap();
+        assert!(matches!(
+            validate_font_face(&handle, "Inter"),
+            Err(ResourceAssetError::InvalidFont { .. })
+        ));
     }
 }

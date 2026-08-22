@@ -27,6 +27,12 @@ impl Shell {
         self.drain_dismissed_popups()?;
         self.drain_window_close_requests()?;
 
+        let font_revision = self.font_registry.revision();
+        if self.font_renderer_revision != font_revision {
+            mesh_core_render::set_font_database(self.font_registry.font_database());
+            self.font_renderer_revision = font_revision;
+        }
+
         if self.debug.enabled {
             let mut debug_requests = self.publish_debug_snapshot()?;
             self.drain_requests(&mut debug_requests)?;
@@ -569,6 +575,10 @@ impl Shell {
                     });
                 }
 
+                let module_id = self.components[index].component.id().to_string();
+                mesh_core_render::set_font_aliases(
+                    self.font_registry.reference_aliases_for_module(&module_id),
+                );
                 let runtime = &mut self.components[index];
                 if runtime
                     .parent

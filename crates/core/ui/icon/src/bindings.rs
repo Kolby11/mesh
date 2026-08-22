@@ -1,6 +1,7 @@
 use crate::registry::SupportedAxes;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// One loaded icon-pack module's bindings, registered with the icon
 /// registry. Pure mapping — no assets shipped here. The mapping target
@@ -52,6 +53,9 @@ pub struct FontAsset {
     pub family: String,
     pub glyph_map_path: Option<PathBuf>,
     pub resolved_font_path: Option<PathBuf>,
+    /// Parsed during resource preparation so resolution never has to read or
+    /// parse a module-owned glyph map on the render path.
+    pub prepared_glyphs: Option<Arc<HashMap<String, u32>>>,
 }
 
 /// Per-frontend icon resolution context, registered with the icon

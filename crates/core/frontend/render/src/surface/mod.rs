@@ -7,7 +7,7 @@ mod profiling;
 mod text;
 
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use mesh_core_elements::NodeId;
 
@@ -133,6 +133,20 @@ pub fn set_blur_quality(quality: BlurQuality) {
 /// The blur quality the next paint on this thread will use.
 pub fn blur_quality() -> BlurQuality {
     FRONTEND_RENDERER.with(|engine| engine.borrow().blur_quality())
+}
+
+/// Install the prepared host and bundled font database on this thread's text
+/// renderer. Resource preparation owns font file reads; painting only gets a
+/// parsed database and never reopens module assets.
+pub fn set_font_database(database: fontdb::Database) {
+    SharedTextMeasurer.set_font_database(database);
+}
+
+/// Set the aliases for the frontend currently being painted. The renderer
+/// keeps the aliases thread-local because each component may declare a
+/// different font-pack chain and override policy.
+pub fn set_font_aliases(aliases: BTreeMap<String, String>) {
+    SharedTextMeasurer.set_font_aliases(aliases.into_iter().collect());
 }
 
 /// Set the colors used by the next tooltip paint on this thread's renderer.
