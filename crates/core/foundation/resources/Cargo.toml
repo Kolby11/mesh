@@ -6,6 +6,8 @@ license.workspace = true
 
 [dependencies]
 fontdb = "0.23"
+libc = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

@@ -61,14 +61,22 @@ fn diagnostics_from_error(err: &ParseError, source: &str) -> Vec<Diagnostic> {
             DiagnosticSeverity::ERROR,
         )],
 
-        ParseError::InvalidI18n(msg) => vec![make_diag(
-            source,
-            "i18n",
-            0,
-            0,
-            format!("i18n error: {msg}"),
-            DiagnosticSeverity::ERROR,
-        )],
+        ParseError::InvalidI18n { message, line } => vec![Diagnostic {
+            range: Range {
+                start: Position {
+                    line: line.saturating_sub(1) as u32,
+                    character: 0,
+                },
+                end: Position {
+                    line: line.saturating_sub(1) as u32,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::ERROR),
+            message: format!("i18n error: {message}"),
+            source: Some("mesh-tools-lsp".to_string()),
+            ..Default::default()
+        }],
 
         ParseError::InvalidImport { line, message } => vec![make_diag(
             source,

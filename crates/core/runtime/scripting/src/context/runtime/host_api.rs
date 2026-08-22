@@ -389,6 +389,9 @@ impl ScriptContext {
         let optional_interfaces_for_require = Arc::clone(&self.optional_interfaces);
         let i18n_translations = Arc::clone(&self.i18n_translations);
         let i18n_locale = Arc::clone(&self.i18n_locale);
+        let i18n_snapshot_revision = Arc::clone(&self.i18n_snapshot_revision);
+        let localized_misses = Arc::clone(&self.localized_misses);
+        let i18n_owner_module_id = self.module_id.clone();
         // The per-instance _ENV is the channel-registry scope so interface event
         // channels stay private when components share one thread VM.
         let scope_for_require = globals.clone();
@@ -412,6 +415,9 @@ impl ScriptContext {
                         lua,
                         Arc::clone(&i18n_translations),
                         Arc::clone(&i18n_locale),
+                        Arc::clone(&i18n_snapshot_revision),
+                        i18n_owner_module_id.clone(),
+                        Arc::clone(&localized_misses),
                     )
                     .map(LuaValue::Table);
                 }

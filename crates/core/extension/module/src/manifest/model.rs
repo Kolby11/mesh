@@ -929,23 +929,85 @@ impl IconsSection {
 ///
 /// - `id` — short alias for pack-qualified syntax (`<pack-id>/<asset-name>`),
 ///   kept distinct from the module id so it can stay short and stable.
+/// - `kind` — the asset-source kind behind this pack: `xdg`, `font`, or
+///   `file`.
+/// - `covers` — advisory vocabulary coverage and version constraints.
 /// - `requires` — system assets the pack resolves against. All version
 ///   constraints are **soft**: a missing or older asset warns at discovery but
 ///   never blocks loading.
 /// - `axes` — variable-font axes the assets expose; the painter gates CSS
 ///   `--icon-*` custom properties on these.
-/// - `mappings` — flat logical name → `<asset-pack>/<asset-name>`, where
-///   `asset-pack` is an installed XDG icon theme, an alias from
-///   `requires.fonts`, or an absolute path.
+/// - `mappings` — flat logical name → typed `<asset-pack>/<asset-name>` target,
+///   where `multicolor` controls source-color preservation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IconPackSection {
     pub id: String,
+    #[serde(default)]
+    pub kind: IconPackSourceKind,
+    #[serde(default)]
+    pub covers: HashMap<String, String>,
     #[serde(default)]
     pub requires: IconPackRequires,
     #[serde(default)]
     pub axes: IconPackAxes,
     #[serde(default)]
-    pub mappings: HashMap<String, String>,
+    pub mappings: HashMap<String, IconMappingTarget>,
+    #[serde(default)]
+    pub vocabularies: HashMap<String, HashMap<String, IconMappingTarget>>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum IconPackSourceKind {
+    #[default]
+    Xdg,
+    Font,
+    File,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct IconMappingTarget {
+    pub target: String,
+    #[serde(default)]
+    pub multicolor: bool,
+}
+
+impl From<String> for IconMappingTarget {
+    fn from(target: String) -> Self {
+        Self {
+            target,
+            multicolor: false,
+        }
+    }
+}
+
+impl From<&str> for IconMappingTarget {
+    fn from(target: &str) -> Self {
+        target.to_string().into()
+    }
+}
+
+impl<'de> Deserialize<'de> for IconMappingTarget {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Wire {
+            Shorthand(String),
+            Detailed {
+                target: String,
+                #[serde(default)]
+                multicolor: bool,
+            },
+        }
+
+        match Wire::deserialize(deserializer)? {
+            Wire::Shorthand(target) => Ok(target.into()),
+            Wire::Detailed { target, multicolor } => Ok(Self { target, multicolor }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -64,7 +64,7 @@ impl ModuleRegistry {
         }
 
         registry.themes = discover_themes(workspace_root, &registry);
-        registry.locales = discover_locales(&registry);
+        registry.locales = discover_locales(workspace_root);
 
         registry
     }
@@ -298,30 +298,33 @@ fn discover_themes(workspace_root: &Path, registry: &ModuleRegistry) -> Vec<Stri
     ids
 }
 
-/// Locale codes with a catalog somewhere in the graph: every `config/i18n/*.json`
-/// a module ships, plus the default locales modules declare.
-fn discover_locales(registry: &ModuleRegistry) -> Vec<String> {
+/// Locale codes from the resolved installed graph. Catalog paths are arbitrary
+/// contained paths, so directory naming is not a source of truth for LSP
+/// completion. The graph also supplies enabled language-pack contributions and
+/// module defaults consistently with the runtime.
+fn discover_locales(workspace_root: &Path) -> Vec<String> {
     let mut locales: Vec<String> = Vec::new();
 
-    for dir in registry.module_dirs.values() {
-        let Ok(entries) = std::fs::read_dir(dir.join("config/i18n")) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "json")
-                && let Some(stem) = path.file_stem().and_then(|stem| stem.to_str())
-            {
-                locales.push(stem.to_string());
-            }
-        }
-    }
-
-    for manifest in registry.manifests.values() {
-        if let Some(i18n) = &manifest.i18n {
-            locales.push(i18n.default_locale.clone());
-        }
-    }
+    let root_graph = std::env::var_os("MESH_MODULE_GRAPH_PATH")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| workspace_root.join("config/module.json"));
+    let Ok(graph) = mesh_core_module::package::load_installed_module_graph(&root_graph) else {
+        return locales;
+    };
+    locales.extend(
+        graph
+            .contributed_i18n()
+            .iter()
+            .map(|catalog| catalog.locale.clone()),
+    );
+    locales.extend(
+        graph
+            .modules()
+            .into_iter()
+            .filter(|module| module.enabled)
+            .filter_map(|module| module.manifest.mesh.i18n.default_locale.clone()),
+    );
 
     locales.sort();
     locales.dedup();

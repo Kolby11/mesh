@@ -5,7 +5,7 @@ use super::super::proxy::interface_event_channel;
 use super::*;
 use crate::host_api::InterfaceProxy;
 use mesh_core_elements::VariableStore;
-use mlua::{Function, LuaSerdeExt, Table, Value as LuaValue};
+use mlua::{Function, LuaSerdeExt, Value as LuaValue};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

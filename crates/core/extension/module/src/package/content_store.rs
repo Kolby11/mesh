@@ -266,7 +266,7 @@ impl ModuleStore {
             path: path.clone(),
             source,
         })?;
-        let snapshot =
+        let snapshot: ActivationSnapshot =
             serde_json::from_str(&content).map_err(|source| ModuleManifestError::Json {
                 path: path.clone(),
                 source,

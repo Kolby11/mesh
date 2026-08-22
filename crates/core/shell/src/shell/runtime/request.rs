@@ -1,4 +1,5 @@
 use super::super::*;
+use super::service_state;
 use crate::shell::types::TabFocusTarget;
 use mesh_core_debug::{
     BenchmarkScenarioId, BenchmarkScenarioStatus, DebugBenchmarkRunState, ProfilingBackendStage,
@@ -1401,8 +1402,9 @@ impl Shell {
         let Some(route) = self.pending_service_call_routes.get(&call_id) else {
             return;
         };
-        let required = service_capabilities(interface).control;
-        if !source_capabilities.is_granted(&required)
+        let capabilities = service_capabilities(interface);
+        let required = &capabilities.control;
+        if !source_capabilities.is_granted(required)
             || route.instance_id != source_instance_id
             || route.module_id != source_module_id
         {

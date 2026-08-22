@@ -9,14 +9,14 @@ use mesh_core_debug::{
 };
 use mesh_core_diagnostics::DiagnosticsCollector;
 use mesh_core_locale::LocaleEngine;
+use mesh_core_module::DependencyGraphError;
 use mesh_core_module::lifecycle::{ModuleInstance, ModuleState};
 use mesh_core_module::package::{
     InstalledModuleGraph, ModuleKind, RootModuleGraphManifest, load_installed_module_graph,
 };
-use mesh_core_module::{DependencyGraphError, validate_module_dependency_graph};
 use mesh_core_service::{
-    InterfaceContract, InterfaceProvider, InterfaceRegistry, canonical_interface_name,
-    canonical_interface_name_cow, canonical_interface_name_owned,
+    InterfaceProvider, InterfaceRegistry, canonical_interface_name, canonical_interface_name_cow,
+    canonical_interface_name_owned,
 };
 use mesh_core_theme::ThemeEngine;
 use mesh_core_wayland::{ClipboardWriter, Layer, StubSurface, WaylandClipboard};
@@ -245,23 +245,42 @@ fn register_icon_pack_module(
     icon_pack: Option<&mesh_core_module::manifest::IconPackSection>,
 ) {
     let Some(section) = icon_pack else { return };
+    match prepare_icon_pack_bindings(module_id, module_dir, section) {
+        Ok(bindings) => mesh_core_icon::set_default_icon_pack(bindings),
+        Err(error) => tracing::warn!(%error, "skipping invalid icon-pack module"),
+    }
+}
+
+pub(crate) fn prepare_icon_pack_bindings(
+    module_id: &str,
+    module_dir: &Path,
+    section: &mesh_core_module::manifest::IconPackSection,
+) -> Result<mesh_core_icon::IconPackBindings, String> {
     if section.id.trim().is_empty() {
         tracing::warn!(
             "module {} declares mesh.icon_pack but icon_pack.id is empty; skipping",
             module_id
         );
-        return;
+        return Err(format!(
+            "module {} declares mesh.icon_pack with an empty id",
+            module_id
+        ));
     }
     let mut font_aliases = std::collections::HashMap::new();
+    let mut seen_aliases = std::collections::HashSet::new();
     for req in &section.requires.fonts {
         if req.alias.trim().is_empty() {
             continue;
         }
-        let glyph_map_path = req
-            .glyph_map
-            .as_deref()
-            .map(|p| module_dir.join(p))
-            .filter(|p| p.is_file());
+        if !seen_aliases.insert(req.alias.clone()) {
+            return Err(format!(
+                "icon-pack '{}' declares duplicate font alias '{}'",
+                module_id, req.alias
+            ));
+        }
+        let glyph_map_path = req.glyph_map.as_deref().and_then(|path| {
+            prepare_module_resource_path(module_id, module_dir, path, "glyph map")
+        });
         if req.glyph_map.is_some() && glyph_map_path.is_none() {
             tracing::warn!(
                 "icon-pack '{}' declares glyph_map for font alias '{}' but file is missing",
@@ -269,11 +288,9 @@ fn register_icon_pack_module(
                 req.alias
             );
         }
-        let bundled_font_path = req
-            .file
-            .as_deref()
-            .map(|path| module_dir.join(path))
-            .filter(|path| path.is_file());
+        let bundled_font_path = req.file.as_deref().and_then(|path| {
+            prepare_module_resource_path(module_id, module_dir, path, "font file")
+        });
         if req.file.is_some() && bundled_font_path.is_none() {
             tracing::warn!(
                 "icon-pack '{}' declares bundled font for alias '{}' but the file is missing",
@@ -306,20 +323,65 @@ fn register_icon_pack_module(
         grade: section.axes.grade,
         optical_size: section.axes.optical_size,
     };
-    mesh_core_icon::set_default_icon_pack(mesh_core_icon::IconPackBindings {
+    let bindings = mesh_core_icon::IconPackBindings {
         pack_id: section.id.clone(),
         module_id: module_id.to_string(),
-        mappings: section.mappings.clone(),
+        mappings: section
+            .mappings
+            .iter()
+            .map(|(name, mapping)| {
+                (
+                    name.clone(),
+                    mesh_core_icon::IconMapping {
+                        target: mapping.target.clone(),
+                        multicolor: mapping.multicolor,
+                    },
+                )
+            })
+            .collect(),
         axes,
         font_aliases,
-    });
+    };
     tracing::info!(
-        "registered icon-pack '{}' (id={}, mappings={}, font_aliases={})",
+        "prepared icon-pack '{}' (id={}, mappings={}, font_aliases={})",
         module_id,
         section.id,
         section.mappings.len(),
         section.requires.fonts.len()
     );
+    Ok(bindings)
+}
+
+fn prepare_module_resource_path(
+    module_id: &str,
+    module_dir: &Path,
+    declared: &str,
+    label: &str,
+) -> Option<std::path::PathBuf> {
+    let handle = match mesh_core_resources::ResourceAssetHandle::new(module_dir, declared) {
+        Ok(handle) => handle,
+        Err(error) => {
+            tracing::warn!(
+                "module {} declares unsafe {} '{}': {}",
+                module_id,
+                label,
+                declared,
+                error
+            );
+            return None;
+        }
+    };
+    if let Err(error) = handle.read_bounded(mesh_core_resources::DEFAULT_MAX_RESOURCE_BYTES) {
+        tracing::warn!(
+            "module {} declares unreadable {} '{}': {}",
+            module_id,
+            label,
+            declared,
+            error
+        );
+        return None;
+    }
+    Some(handle.candidate_path())
 }
 
 /// Resolve a fontconfig family name to its `.ttf`/`.otf` path on disk.
@@ -414,6 +476,7 @@ pub struct Shell {
     /// construction must consume this map rather than manifest declarations.
     effective_capabilities: Arc<HashMap<String, EffectiveCapabilities>>,
     installed_module_graph: Option<InstalledModuleGraph>,
+    resource_snapshot: Arc<discovery::ResourceSnapshot>,
     active_profile_id: Option<String>,
     modules: HashMap<String, ModuleInstance>,
     frontend_catalog: component::FrontendCatalogHandle,

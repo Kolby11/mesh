@@ -5,12 +5,14 @@ use super::super::{
     SlotOverride, TrustPolicy, TrustTier, apply_slot_override, parse_module_entrypoint,
     resolve_closure,
 };
+use super::scan::{scan_mesh_files_recursive, scan_mesh_source};
 use super::*;
 use crate::manifest;
 use mesh_core_service::{
     InterfaceContract, parse_contract_version, parse_interface_contract, parse_version_req,
 };
 use mesh_core_theme::{ThemeCatalog, ThemeMetadata, ThemePackDescriptor};
+use std::collections::HashSet;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
@@ -302,6 +304,8 @@ pub struct InstalledModuleGraph {
     node_slots:
         std::collections::BTreeMap<String, std::collections::BTreeMap<String, NodeSlotOverride>>,
     layout_entrypoint: Option<ResolvedLayoutEntrypoint>,
+    icon_pack_chain: Vec<String>,
+    font_pack_chain: Vec<String>,
     language_pack_chain: Vec<String>,
 }
 
@@ -348,11 +352,56 @@ pub struct CompositionContext {
     pub node_slots:
         std::collections::BTreeMap<String, std::collections::BTreeMap<String, NodeSlotOverride>>,
     pub orphaned_overrides: Vec<String>,
-    /// Ordered language-pack module ids selected by the active profile. `None`
+    /// Ordered resource-pack module ids selected by the active profile. `None`
     /// means legacy/no-profile operation, where enabled packs are sorted by
     /// module id for deterministic behavior; `Some(empty)` intentionally
-    /// selects no language packs.
+    /// selects no packs.
+    pub icon_pack_chain: Option<Vec<String>>,
+    pub font_pack_chain: Option<Vec<String>>,
     pub language_pack_chain: Option<Vec<String>>,
+}
+
+fn select_resource_chain(
+    configured: Option<Vec<String>>,
+    modules: &HashMap<String, InstalledModuleNode>,
+    kind: ModuleKind,
+    label: &str,
+) -> Result<Vec<String>, ModuleManifestError> {
+    let Some(configured) = configured else {
+        let mut defaults = modules
+            .values()
+            .filter(|module| module.enabled && module.kind == kind)
+            .map(|module| module.id.clone())
+            .collect::<Vec<_>>();
+        defaults.sort();
+        return Ok(defaults);
+    };
+
+    let mut seen = BTreeSet::new();
+    for module_id in &configured {
+        if !seen.insert(module_id) {
+            return Err(ModuleManifestError::Validation(format!(
+                "{label} chain contains duplicate module '{module_id}', which would make precedence ambiguous"
+            )));
+        }
+        let Some(module) = modules.get(module_id) else {
+            return Err(ModuleManifestError::Validation(format!(
+                "{label} chain references missing module {module_id}"
+            )));
+        };
+        if module.kind != kind {
+            return Err(ModuleManifestError::Validation(format!(
+                "{label} chain entry {module_id} is {:?}, not a {label}",
+                module.kind
+            )));
+        }
+        if !module.enabled {
+            return Err(ModuleManifestError::Validation(format!(
+                "{label} chain entry {module_id} is not active"
+            )));
+        }
+    }
+    Ok(configured)
 }
 
 impl InstalledModuleGraph {
@@ -813,45 +862,24 @@ impl InstalledModuleGraph {
             }
         }
 
-        let language_pack_chain = if composition.language_pack_chain.is_none() {
-            let mut defaults = graph_modules
-                .values()
-                .filter(|module| module.enabled && module.kind == ModuleKind::LanguagePack)
-                .map(|module| module.id.clone())
-                .collect::<Vec<_>>();
-            defaults.sort();
-            defaults
-        } else {
-            let mut seen = BTreeSet::new();
-            let configured = composition
-                .language_pack_chain
-                .as_ref()
-                .expect("checked that the language-pack chain is configured");
-            for module_id in configured {
-                if !seen.insert(module_id) {
-                    return Err(ModuleManifestError::Validation(format!(
-                        "language-pack chain contains duplicate module '{module_id}', which would make precedence ambiguous"
-                    )));
-                }
-                let Some(module) = graph_modules.get(module_id) else {
-                    return Err(ModuleManifestError::Validation(format!(
-                        "language-pack chain references missing module {module_id}"
-                    )));
-                };
-                if module.kind != ModuleKind::LanguagePack {
-                    return Err(ModuleManifestError::Validation(format!(
-                        "language-pack chain entry {module_id} is {:?}, not a language-pack",
-                        module.kind
-                    )));
-                }
-                if !module.enabled {
-                    return Err(ModuleManifestError::Validation(format!(
-                        "language-pack chain entry {module_id} is not active"
-                    )));
-                }
-            }
-            configured.clone()
-        };
+        let icon_pack_chain = select_resource_chain(
+            composition.icon_pack_chain,
+            &graph_modules,
+            ModuleKind::IconPack,
+            "icon-pack",
+        )?;
+        let font_pack_chain = select_resource_chain(
+            composition.font_pack_chain,
+            &graph_modules,
+            ModuleKind::FontPack,
+            "font-pack",
+        )?;
+        let language_pack_chain = select_resource_chain(
+            composition.language_pack_chain,
+            &graph_modules,
+            ModuleKind::LanguagePack,
+            "language-pack",
+        )?;
 
         for contribution in &contributions.i18n {
             if contribution.target_module_id == contribution.module_id {
@@ -894,7 +922,7 @@ impl InstalledModuleGraph {
                 )
                 .and_then(|descriptor| {
                     descriptor.with_mode_metadata(theme.mode_metadata.iter().map(
-                        |(mode, metadata)| {
+                        |(mode, metadata): (&String, &super::super::ThemeModeMetadata)| {
                             (
                                 mode.clone(),
                                 ThemeMetadata::new(
@@ -1036,6 +1064,8 @@ impl InstalledModuleGraph {
             extension_points,
             node_slots: composition.node_slots,
             layout_entrypoint,
+            icon_pack_chain,
+            font_pack_chain,
             language_pack_chain,
         })
     }
@@ -1112,6 +1142,20 @@ impl InstalledModuleGraph {
                 "layout: {} -> {}",
                 before_layout.as_deref().unwrap_or("none"),
                 after_layout.as_deref().unwrap_or("none")
+            ));
+        }
+        if self.icon_pack_chain != next.icon_pack_chain {
+            diff.profile_effects.push(format!(
+                "icons: {} -> {}",
+                self.icon_pack_chain.join(","),
+                next.icon_pack_chain.join(",")
+            ));
+        }
+        if self.font_pack_chain != next.font_pack_chain {
+            diff.profile_effects.push(format!(
+                "fonts: {} -> {}",
+                self.font_pack_chain.join(","),
+                next.font_pack_chain.join(",")
             ));
         }
         if self.language_pack_chain != next.language_pack_chain {
@@ -1295,9 +1339,149 @@ impl InstalledModuleGraph {
         &self.contributions.i18n
     }
 
+    /// Return the graph-authorized catalog inputs in the same order used by
+    /// the shell. Tooling must consume this read model instead of scanning
+    /// conventional directories: modules may place catalogs anywhere under
+    /// their contained root, and profiles choose the language-pack chain.
+    pub fn locale_catalog_sources(
+        &self,
+    ) -> Result<
+        (
+            Vec<mesh_core_locale::CatalogSource>,
+            HashMap<String, String>,
+        ),
+        String,
+    > {
+        let selected_packs = self
+            .language_pack_chain
+            .iter()
+            .cloned()
+            .collect::<HashSet<_>>();
+        let mut bundled = self
+            .contributions
+            .i18n
+            .iter()
+            .filter(|catalog| {
+                catalog.target_module_id == catalog.module_id
+                    && !self
+                        .module(&catalog.module_id)
+                        .is_some_and(|module| module.kind == ModuleKind::LanguagePack)
+            })
+            .collect::<Vec<_>>();
+        bundled.sort_by(|left, right| {
+            left.target_module_id
+                .cmp(&right.target_module_id)
+                .then_with(|| left.locale.cmp(&right.locale))
+                .then_with(|| left.id.cmp(&right.id))
+        });
+
+        let mut sources = Vec::with_capacity(self.contributions.i18n.len());
+        for catalog in bundled {
+            sources.push(catalog_source(catalog, false)?);
+        }
+
+        for pack_module_id in &self.language_pack_chain {
+            let mut pack_catalogs = self
+                .contributions
+                .i18n
+                .iter()
+                .filter(|catalog| {
+                    catalog.module_id == *pack_module_id
+                        && selected_packs.contains(&catalog.module_id)
+                        && catalog.target_module_id != catalog.module_id
+                        && self
+                            .module(&catalog.target_module_id)
+                            .is_some_and(|module| module.enabled)
+                })
+                .collect::<Vec<_>>();
+            pack_catalogs.sort_by(|left, right| left.id.cmp(&right.id));
+            for catalog in pack_catalogs {
+                sources.push(catalog_source(catalog, true)?);
+            }
+        }
+
+        let defaults = self
+            .modules()
+            .into_iter()
+            .filter(|module| module.enabled)
+            .filter_map(|module| {
+                module
+                    .manifest
+                    .mesh
+                    .i18n
+                    .default_locale
+                    .clone()
+                    .map(|locale| (module.id.clone(), locale))
+            })
+            .collect();
+
+        Ok((sources, defaults))
+    }
+
+    /// Extract static translation keys from one enabled module's canonical
+    /// source tree. Dynamic keys are intentionally absent: callers can report
+    /// only what the parser can prove, while runtime misses cover the rest.
+    pub fn localized_keys(&self, module_id: &str) -> Vec<String> {
+        let Some(module) = self.module(module_id) else {
+            return Vec::new();
+        };
+        let module_dir = module
+            .manifest_path
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let src_dir = module_dir.join("src");
+        let scan_root = if src_dir.is_dir() {
+            src_dir.as_path()
+        } else {
+            module_dir
+        };
+        let mut keys = scan_mesh_files_recursive(scan_root)
+            .into_iter()
+            .flat_map(|(_, content)| scan_mesh_source(&content).static_calls.t_keys)
+            .collect::<Vec<_>>();
+        keys.sort();
+        keys.dedup();
+        keys
+    }
+
+    /// Return source-located component parse failures for graph-authorized
+    /// module files. This lets doctor and authoring tools report rejected
+    /// blocks such as inline `<i18n>` instead of silently dropping the file.
+    pub fn component_source_errors(&self, module_id: &str) -> Vec<(PathBuf, String)> {
+        let Some(module) = self.module(module_id) else {
+            return Vec::new();
+        };
+        let module_dir = module
+            .manifest_path
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let src_dir = module_dir.join("src");
+        let scan_root = if src_dir.is_dir() {
+            src_dir.as_path()
+        } else {
+            module_dir
+        };
+        scan_mesh_files_recursive(scan_root)
+            .into_iter()
+            .filter_map(|(path, content)| {
+                mesh_core_component::parse_component(&content)
+                    .err()
+                    .map(|error| (path, error.to_string()))
+            })
+            .collect()
+    }
+
     /// The effective ordered language-pack chain for the active graph.
     pub fn language_pack_chain(&self) -> &[String] {
         &self.language_pack_chain
+    }
+
+    pub fn icon_pack_chain(&self) -> &[String] {
+        &self.icon_pack_chain
+    }
+
+    pub fn font_pack_chain(&self) -> &[String] {
+        &self.font_pack_chain
     }
 
     pub fn contributed_libraries(&self) -> &[ContributedLibrary] {
@@ -1418,6 +1602,38 @@ impl InstalledModuleGraph {
         });
         providers
     }
+}
+
+fn catalog_source(
+    catalog: &ContributedI18n,
+    language_pack: bool,
+) -> Result<mesh_core_locale::CatalogSource, String> {
+    let module_dir = catalog.source.manifest_path.parent().ok_or_else(|| {
+        format!(
+            "i18n catalog {} has no module root: {}",
+            catalog.id,
+            catalog.source.manifest_path.display()
+        )
+    })?;
+    let result = if language_pack {
+        mesh_core_locale::CatalogSource::language_pack_from_root(
+            catalog.module_id.clone(),
+            catalog.target_module_id.clone(),
+            catalog.id.clone(),
+            catalog.locale.clone(),
+            module_dir.to_path_buf(),
+            &catalog.path,
+        )
+    } else {
+        mesh_core_locale::CatalogSource::module_from_root(
+            catalog.module_id.clone(),
+            catalog.id.clone(),
+            catalog.locale.clone(),
+            module_dir.to_path_buf(),
+            &catalog.path,
+        )
+    };
+    result.map_err(|reason| format!("invalid i18n catalog {}: {reason}", catalog.id))
 }
 
 #[derive(Debug, Clone)]

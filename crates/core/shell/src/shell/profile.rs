@@ -176,6 +176,7 @@ pub(super) struct PendingProfileSwitch {
     graph: InstalledModuleGraph,
     locale: LocaleEngine,
     settings: Arc<SettingsStore>,
+    resources: super::discovery::PreparedResourceSnapshot,
     prepared_theme: Option<(mesh_core_theme::Theme, ThemeWatchState)>,
     catalog: FrontendCatalog,
     desired_surfaces: HashSet<String>,
@@ -497,7 +498,8 @@ impl Shell {
             )?;
         }
         self.settings_store = Arc::new(effective);
-        self.settings = self.settings_store.shell().clone();
+        self.settings =
+            mesh_core_config::resolve_shell_locale_settings(self.settings_store.shell());
         self.settings_watch.modified_at = std::fs::metadata(&self.settings_watch.path)
             .ok()
             .and_then(|metadata| metadata.modified().ok());
@@ -579,6 +581,18 @@ impl Shell {
                 self.reject_profile_switch(
                     profile_id,
                     format!("candidate locale catalogs are invalid: {error}"),
+                );
+                return VecDeque::new();
+            }
+        };
+        let resolved_shell_settings =
+            mesh_core_config::resolve_shell_locale_settings(settings.shell());
+        let resources = match self.prepare_resource_snapshot(&graph, &settings) {
+            Ok(resources) => resources,
+            Err(error) => {
+                self.reject_profile_switch(
+                    profile_id,
+                    format!("candidate resources are invalid: {error}"),
                 );
                 return VecDeque::new();
             }
@@ -720,7 +734,7 @@ impl Shell {
             Self::apply_runtime_settings(
                 candidate,
                 &candidate_theme_id,
-                &settings.shell().i18n.locale,
+                &resolved_shell_settings.i18n.locale,
             );
         }
         let desired_providers = candidates
@@ -773,6 +787,7 @@ impl Shell {
             graph,
             locale,
             settings,
+            resources,
             prepared_theme,
             catalog,
             desired_surfaces,
@@ -935,6 +950,10 @@ impl Shell {
             self.abort_profile_candidate(pending, error.to_string());
             return VecDeque::new();
         }
+        if let Err(error) = self.commit_resource_snapshot(&pending.resources) {
+            self.abort_profile_candidate(pending, error.to_string());
+            return VecDeque::new();
+        }
 
         self.frontend_catalog.replace(pending.catalog, None);
         for prepared in &mut pending.prepared_frontends {
@@ -990,7 +1009,8 @@ impl Shell {
         let old_locale_catalog_revision = self.locale.catalog_snapshot().revision();
         let prepared_theme = pending.prepared_theme.take();
         self.settings_store = pending.settings;
-        self.settings = self.settings_store.shell().clone();
+        self.settings =
+            mesh_core_config::resolve_shell_locale_settings(self.settings_store.shell());
         mesh_core_icon::set_default_shell_pack(self.settings.icons.default_pack.clone());
         mesh_core_render::set_blur_quality(blur_quality_from_settings(&self.settings.render.blur));
         if old_theme != self.settings.theme || old_fonts != self.settings.fonts {
@@ -1012,6 +1032,7 @@ impl Shell {
         self.locale = pending.locale;
         if old_locale.locale != self.settings.i18n.locale
             || old_locale.fallback_locale != self.settings.i18n.fallback_locale
+            || old_locale.policy != self.settings.i18n.policy
             || old_locale_catalog_revision != self.locale.catalog_snapshot().revision()
         {
             if let Err(error) = self.mark_components_locale_changed() {

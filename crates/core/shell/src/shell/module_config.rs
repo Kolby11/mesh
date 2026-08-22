@@ -124,6 +124,7 @@ pub(super) fn write_composed_provider_selection(
         .insert(interface.to_string(), provider_id.to_string());
     paths
         .save_if_revision(&profile_id, &profile, expected_revision)
+        .map(|_| ())
         .map_err(|error| ModuleConfigWriteError::InvalidSelection(error.to_string()))
 }
 

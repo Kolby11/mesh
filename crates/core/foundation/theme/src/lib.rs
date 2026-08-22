@@ -667,7 +667,7 @@ fn open_file_at(
 
 #[cfg(unix)]
 fn read_bounded_utf8(
-    mut file: std::fs::File,
+    file: std::fs::File,
     path: &Path,
     max_bytes: usize,
 ) -> Result<String, ThemeSourceError> {
@@ -1243,8 +1243,10 @@ pub enum ThemeTokenError {
 }
 
 fn canonical_token_name(name: &str) -> String {
-    let name = name.trim().strip_prefix("--").unwrap_or(name.trim());
-    name.replace('-', ".")
+    let name = name.trim();
+    name.strip_prefix("--")
+        .map(css_custom_property_to_token_name)
+        .unwrap_or_else(|| name.to_string())
 }
 
 fn exact_var_reference(value: &str) -> Option<&str> {
@@ -2428,6 +2430,10 @@ mod tests {
                 "spacing.medium".into(),
                 TokenValue::String("var(--spacing-small)".into()),
             ),
+            (
+                "animation.curves.bezier.emphasized-decelerate".into(),
+                TokenValue::String("cubic-bezier(0.05, 0.7, 0.1, 1)".into()),
+            ),
         ]);
 
         assert!(matches!(
@@ -2446,6 +2452,16 @@ mod tests {
                 .expect("aliases resolve"),
             "linear-gradient(#123456, #123456)"
         );
+        assert_eq!(
+            theme
+                .resolve_token_references("var(--animation-curves-bezier-emphasized-decelerate)")
+                .expect("hyphenated animation token resolves"),
+            "cubic-bezier(0.05, 0.7, 0.1, 1)"
+        );
+        assert!(matches!(
+            theme.resolve_token_value("animation.curves.bezier.emphasized-decelerate"),
+            Ok(Some(TokenValue::String(value))) if value == "cubic-bezier(0.05, 0.7, 0.1, 1)"
+        ));
     }
 
     #[test]

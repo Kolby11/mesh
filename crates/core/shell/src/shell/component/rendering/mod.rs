@@ -265,10 +265,11 @@ impl FrontendSurfaceComponent {
         let state = self
             .runtime_state(self.root_instance_key())
             .unwrap_or_default();
-        let bound = LocaleBoundState::new(
+        let bound = LocaleBoundState::with_localized_misses(
             &state,
             self.locale
                 .module_translator(&self.compiled.manifest.package.id),
+            self.localized_misses_handle(self.root_instance_key()),
         );
         mesh_core_frontend::resolve_css_props(self.compiled.component.props.as_ref(), Some(&bound))
     }
@@ -305,10 +306,11 @@ impl FrontendSurfaceComponent {
         let root_state = self
             .runtime_state(self.root_instance_key())
             .unwrap_or_default();
-        let bound = LocaleBoundState::new(
+        let bound = LocaleBoundState::with_localized_misses(
             &root_state,
             self.locale
                 .module_translator(&self.compiled.manifest.package.id),
+            self.localized_misses_handle(self.root_instance_key()),
         );
         {
             let mut stack = self.render_stack.borrow_mut();
@@ -361,6 +363,16 @@ impl FrontendSurfaceComponent {
         // empty dependency set from the pre-first-paint unknown state.
         for runtime in self.runtimes.lock().unwrap().values_mut() {
             runtime.script_ctx.mark_template_dependencies_ready();
+        }
+        let localized_misses = self
+            .runtimes
+            .lock()
+            .unwrap()
+            .values_mut()
+            .flat_map(|runtime| runtime.script_ctx.drain_localized_misses())
+            .collect::<Vec<_>>();
+        for resolution in localized_misses {
+            self.record_localized_miss(&resolution, None);
         }
         self.render_stack.borrow_mut().clear();
         self.finalize_tree(

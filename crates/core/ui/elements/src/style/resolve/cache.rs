@@ -220,15 +220,6 @@ pub(super) enum CachedThemeTokenValue {
 }
 
 impl CachedThemeTokenValue {
-    pub(super) fn from_token(value: Option<&TokenValue>) -> Self {
-        match value {
-            Some(TokenValue::String(value)) => Self::String(Arc::from(value.as_str())),
-            Some(TokenValue::Number(value)) => Self::Number(*value),
-            Some(TokenValue::Bool(value)) => Self::Bool(*value),
-            None => Self::Missing,
-        }
-    }
-
     pub(super) fn from_resolution(value: Result<Option<TokenValue>, ThemeTokenError>) -> Self {
         match value {
             Ok(Some(TokenValue::String(value))) => Self::String(Arc::from(value)),

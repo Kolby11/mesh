@@ -54,7 +54,7 @@ impl TooltipAnimationSample {
 /// not declare one — the tooltip then shows instantly.
 pub(super) fn tooltip_animation_from_theme(theme: &Theme) -> Option<TooltipAnimation> {
     let raw = theme.component_defaults("tooltip")?.get("animation")?;
-    let resolved = resolve_theme_value_tokens(theme, raw);
+    let resolved = resolve_theme_animation_tokens(theme, raw);
     let shorthand = parse_animation_shorthand(&resolved);
     let style = shorthand.first()?;
     let name = style.name.as_deref()?;
@@ -167,6 +167,53 @@ fn resolve_theme_value_tokens(theme: &Theme, raw: &str) -> String {
     } else {
         resolved
     }
+}
+
+/// Resolve an animation shorthand while preserving the project's convention
+/// that numeric theme duration tokens represent milliseconds. The generic
+/// theme resolver intentionally preserves scalar types and therefore returns
+/// `150` for `var(--animation-duration-short)`; in this CSS time position it
+/// must become `150ms` before the shorthand parser sees it.
+fn resolve_theme_animation_tokens(theme: &Theme, raw: &str) -> String {
+    let mut output = String::with_capacity(raw.len());
+    let mut rest = raw;
+
+    while let Some(start) = rest.find("var(") {
+        output.push_str(&rest[..start]);
+        let reference_start = start + "var(".len();
+        let Some(end) = find_matching_parenthesis(&rest[reference_start..]) else {
+            output.push_str(&rest[start..]);
+            return output;
+        };
+        let reference_end = reference_start + end + 1;
+        let reference = &rest[start..reference_end];
+        let resolved = theme
+            .resolve_token_references(reference)
+            .unwrap_or_else(|_| reference.to_string());
+        if resolved.trim().parse::<f64>().is_ok() {
+            output.push_str(resolved.trim());
+            output.push_str("ms");
+        } else {
+            output.push_str(&resolved);
+        }
+        rest = &rest[reference_end..];
+    }
+
+    output.push_str(rest);
+    output
+}
+
+fn find_matching_parenthesis(value: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    for (offset, byte) in value.bytes().enumerate() {
+        match byte {
+            b'(' => depth += 1,
+            b')' if depth == 0 => return Some(offset),
+            b')' => depth -= 1,
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Result of tooltip placement computation.

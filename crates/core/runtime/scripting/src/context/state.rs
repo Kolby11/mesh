@@ -1,5 +1,5 @@
 use mesh_core_elements::VariableStore;
-use mesh_core_locale::ModuleTranslator;
+use mesh_core_locale::{LocalizedTextResolution, ModuleTranslator};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
@@ -60,6 +60,7 @@ impl ServiceContextState {
         self.payloads.get(service).map(|payload| payload.generation)
     }
 
+    #[cfg(test)]
     pub fn fingerprint(&self, service: &str) -> Option<u64> {
         self.payloads
             .get(service)
@@ -484,11 +485,28 @@ impl fmt::Debug for ScriptState {
 pub struct LocaleBoundState<'state, 'locale> {
     state: &'state ScriptState,
     translator: ModuleTranslator<'locale>,
+    localized_misses: Option<Arc<Mutex<Vec<LocalizedTextResolution>>>>,
 }
 
 impl<'state, 'locale> LocaleBoundState<'state, 'locale> {
     pub fn new(state: &'state ScriptState, translator: ModuleTranslator<'locale>) -> Self {
-        Self { state, translator }
+        Self {
+            state,
+            translator,
+            localized_misses: None,
+        }
+    }
+
+    pub fn with_localized_misses(
+        state: &'state ScriptState,
+        translator: ModuleTranslator<'locale>,
+        localized_misses: Arc<Mutex<Vec<LocalizedTextResolution>>>,
+    ) -> Self {
+        Self {
+            state,
+            translator,
+            localized_misses: Some(localized_misses),
+        }
     }
 }
 
@@ -506,6 +524,12 @@ impl VariableStore for LocaleBoundState<'_, '_> {
     }
 
     fn translate(&self, key: &str) -> Option<String> {
-        Some(self.translator.resolve(key, None).text)
+        let resolution = self.translator.resolve(key, None);
+        if resolution.missing
+            && let Some(localized_misses) = &self.localized_misses
+        {
+            localized_misses.lock().unwrap().push(resolution.clone());
+        }
+        Some(resolution.text)
     }
 }

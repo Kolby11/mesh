@@ -4,8 +4,242 @@
 //! modules remain semantic mapping and composition units layered above it.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::path::{Path, PathBuf};
+use std::io::Read;
+use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
+#[cfg(unix)]
+use std::{
+    ffi::CString,
+    os::unix::ffi::OsStrExt,
+    os::unix::io::{AsRawFd, FromRawFd},
+};
+
+pub const DEFAULT_MAX_RESOURCE_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Debug, thiserror::Error)]
+pub enum ResourceAssetError {
+    #[error("resource path is unsafe {path}: {reason}")]
+    UnsafePath { path: PathBuf, reason: String },
+    #[error("resource is not a regular file: {path}")]
+    NotRegularFile { path: PathBuf },
+    #[error("resource exceeds {max_bytes} bytes: {path}")]
+    TooLarge { path: PathBuf, max_bytes: usize },
+    #[error("resource read failed for {path}: {source}")]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("safe resource opening is unavailable on this platform: {path}")]
+    UnsupportedPlatform { path: PathBuf },
+}
+
+/// A module-rooted resource file whose path cannot escape through traversal or
+/// symlink components. The candidate path is for provenance only; reads use a
+/// descriptor-relative no-follow walk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResourceAssetHandle {
+    module_root: PathBuf,
+    relative_path: PathBuf,
+}
+
+impl ResourceAssetHandle {
+    pub fn new(
+        module_root: impl Into<PathBuf>,
+        relative_path: impl AsRef<Path>,
+    ) -> Result<Self, ResourceAssetError> {
+        let module_root = module_root.into();
+        let relative_path = relative_path.as_ref();
+        if module_root.as_os_str().is_empty() {
+            return Err(ResourceAssetError::UnsafePath {
+                path: module_root,
+                reason: "module root is empty".into(),
+            });
+        }
+        if relative_path.as_os_str().is_empty() || relative_path.is_absolute() {
+            return Err(ResourceAssetError::UnsafePath {
+                path: relative_path.to_path_buf(),
+                reason: "resource path must be non-empty and relative".into(),
+            });
+        }
+        if relative_path.components().any(|component| {
+            matches!(
+                component,
+                Component::CurDir
+                    | Component::ParentDir
+                    | Component::RootDir
+                    | Component::Prefix(_)
+            )
+        }) {
+            return Err(ResourceAssetError::UnsafePath {
+                path: relative_path.to_path_buf(),
+                reason: "resource path contains an unsafe component".into(),
+            });
+        }
+        Ok(Self {
+            module_root,
+            relative_path: relative_path.to_path_buf(),
+        })
+    }
+
+    pub fn module_root(&self) -> &Path {
+        &self.module_root
+    }
+
+    pub fn relative_path(&self) -> &Path {
+        &self.relative_path
+    }
+
+    pub fn candidate_path(&self) -> PathBuf {
+        self.module_root.join(&self.relative_path)
+    }
+
+    pub fn read_bounded(&self, max_bytes: usize) -> Result<Vec<u8>, ResourceAssetError> {
+        #[cfg(unix)]
+        {
+            let mut directory = open_resource_directory(&self.module_root)?;
+            let mut components = self.relative_path.components().peekable();
+            while let Some(component) = components.next() {
+                let Component::Normal(component) = component else {
+                    return Err(ResourceAssetError::UnsafePath {
+                        path: self.candidate_path(),
+                        reason: "non-normal path component".into(),
+                    });
+                };
+                if components.peek().is_some() {
+                    directory =
+                        open_resource_directory_at(&directory, component, &self.candidate_path())?;
+                } else {
+                    let file =
+                        open_resource_file_at(&directory, component, &self.candidate_path())?;
+                    return read_resource_bounded(file, &self.candidate_path(), max_bytes);
+                }
+            }
+            Err(ResourceAssetError::UnsafePath {
+                path: self.candidate_path(),
+                reason: "empty relative path".into(),
+            })
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = max_bytes;
+            Err(ResourceAssetError::UnsupportedPlatform {
+                path: self.candidate_path(),
+            })
+        }
+    }
+}
+
+#[cfg(unix)]
+fn open_resource_directory(path: &Path) -> Result<std::fs::File, ResourceAssetError> {
+    let name =
+        CString::new(path.as_os_str().as_bytes()).map_err(|_| ResourceAssetError::UnsafePath {
+            path: path.to_path_buf(),
+            reason: "path contains NUL".into(),
+        })?;
+    let fd = unsafe {
+        libc::open(
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW,
+        )
+    };
+    if fd < 0 {
+        return Err(ResourceAssetError::Read {
+            path: path.to_path_buf(),
+            source: std::io::Error::last_os_error(),
+        });
+    }
+    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+}
+
+#[cfg(unix)]
+fn open_resource_directory_at(
+    parent: &std::fs::File,
+    component: &std::ffi::OsStr,
+    path: &Path,
+) -> Result<std::fs::File, ResourceAssetError> {
+    let name = CString::new(component.as_bytes()).map_err(|_| ResourceAssetError::UnsafePath {
+        path: path.to_path_buf(),
+        reason: "path contains NUL".into(),
+    })?;
+    let fd = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW,
+            0,
+        )
+    };
+    if fd < 0 {
+        return Err(ResourceAssetError::Read {
+            path: path.to_path_buf(),
+            source: std::io::Error::last_os_error(),
+        });
+    }
+    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+}
+
+#[cfg(unix)]
+fn open_resource_file_at(
+    parent: &std::fs::File,
+    component: &std::ffi::OsStr,
+    path: &Path,
+) -> Result<std::fs::File, ResourceAssetError> {
+    let name = CString::new(component.as_bytes()).map_err(|_| ResourceAssetError::UnsafePath {
+        path: path.to_path_buf(),
+        reason: "path contains NUL".into(),
+    })?;
+    let fd = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+            0,
+        )
+    };
+    if fd < 0 {
+        return Err(ResourceAssetError::Read {
+            path: path.to_path_buf(),
+            source: std::io::Error::last_os_error(),
+        });
+    }
+    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+}
+
+#[cfg(unix)]
+fn read_resource_bounded(
+    file: std::fs::File,
+    path: &Path,
+    max_bytes: usize,
+) -> Result<Vec<u8>, ResourceAssetError> {
+    if !file
+        .metadata()
+        .map_err(|source| ResourceAssetError::Read {
+            path: path.to_path_buf(),
+            source,
+        })?
+        .file_type()
+        .is_file()
+    {
+        return Err(ResourceAssetError::NotRegularFile {
+            path: path.to_path_buf(),
+        });
+    }
+    let mut bytes = Vec::new();
+    file.take(max_bytes.saturating_add(1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|source| ResourceAssetError::Read {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    if bytes.len() > max_bytes {
+        return Err(ResourceAssetError::TooLarge {
+            path: path.to_path_buf(),
+            max_bytes,
+        });
+    }
+    Ok(bytes)
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SystemResourceCatalog {
@@ -202,5 +436,34 @@ mod tests {
         assert_eq!(themes.len(), 1);
         assert_eq!(themes[0].name, "Ocean User");
         assert_eq!(themes[0].inherits, ["Adwaita", "hicolor"]);
+    }
+
+    #[test]
+    fn resource_handles_reject_traversal_and_bound_reads() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("icon.svg"), b"svg").unwrap();
+        let handle = ResourceAssetHandle::new(temp.path(), "icon.svg").unwrap();
+        assert_eq!(handle.read_bounded(16).unwrap(), b"svg");
+        assert!(ResourceAssetHandle::new(temp.path(), "../icon.svg").is_err());
+        assert!(matches!(
+            handle.read_bounded(2),
+            Err(ResourceAssetError::TooLarge { .. })
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resource_handles_do_not_follow_symlinked_components() {
+        let temp = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.ttf"), b"font").unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("secret.ttf"),
+            temp.path().join("font.ttf"),
+        )
+        .unwrap();
+
+        let handle = ResourceAssetHandle::new(temp.path(), "font.ttf").unwrap();
+        assert!(handle.read_bounded(64).is_err());
     }
 }

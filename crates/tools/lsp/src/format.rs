@@ -1,7 +1,7 @@
 //! Structural formatter for `.mesh` single-file components.
 //!
 //! `.mesh` files contain up to four top-level blocks — `<template>`,
-//! `<script lang="luau">`, `<style>`, and `<i18n>` — each authored in a
+//! `<script lang="luau">` and `<style>` — each authored in a
 //! different sub-language. The formatter is block-aware:
 //!
 //! - **template** (XHTML-like): re-indented from element/`{#block}` nesting.
@@ -10,7 +10,7 @@
 //!   If stylua cannot parse the block (e.g. a mid-edit syntax error), it falls
 //!   back to rebasing the block flush-left while preserving the author's
 //!   relative indentation.
-//! - **i18n / other**: preserved verbatim (only trailing whitespace stripped).
+//! - **unsupported/other**: preserved verbatim (only trailing whitespace stripped).
 //!
 //! Top-level block tags and their closers sit at column 0; template and style
 //! content starts one indent level in; script content is flush-left, matching

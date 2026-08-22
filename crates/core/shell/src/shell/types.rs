@@ -280,7 +280,7 @@ pub(super) struct PendingServiceCommand {
 /// the provider snapshot that confirms the desired value. The previous value
 /// is captured at admission time so a failed write can restore exactly what
 /// the caller saw, while a newer write can take ownership of the field.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct PendingBoundServiceState {
     pub(super) call_id: mesh_core_backend::CallId,
     pub(super) interface: String,

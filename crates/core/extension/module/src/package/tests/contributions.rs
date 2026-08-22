@@ -28,7 +28,7 @@ fn contribution_index_records_source_metadata_and_scoped_ids() {
                 .into(),
             mappings: HashMap::from([(
                 "audio-volume-high".into(),
-                format!("{module_id}/audio-volume-high"),
+                format!("{module_id}/audio-volume-high").into(),
             )]),
             ..crate::manifest::IconPackSection::default()
         });
@@ -235,7 +235,7 @@ fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_r
         graph.icon_pack_contributions()[0]
             .mappings
             .get("audio-volume-high")
-            .map(String::as_str),
+            .map(|mapping| mapping.target.as_str()),
         Some("material-symbols/volume_up")
     );
     assert_eq!(graph.declared_interfaces()[0].name, "mesh.example");

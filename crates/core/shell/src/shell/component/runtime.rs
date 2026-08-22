@@ -1,3 +1,4 @@
+use super::diagnostics::record_localized_miss as record_localized_miss_diagnostic;
 use super::*;
 
 fn scheduled_handler_target(instance_key: &str, handler: &str) -> HandlerTarget {
@@ -249,6 +250,12 @@ impl FrontendSurfaceComponent {
         diagnostics: &Option<Diagnostics>,
         runtime: &mut EmbeddedFrontendRuntime,
     ) {
+        let localized_misses = runtime.script_ctx.drain_localized_misses();
+        if diagnostics.is_some() {
+            for resolution in localized_misses {
+                record_localized_miss_diagnostic(diagnostics, &resolution, None);
+            }
+        }
         let Some(diagnostics) = diagnostics else {
             return;
         };
@@ -275,6 +282,18 @@ impl FrontendSurfaceComponent {
         let snapshot = Arc::new(runtime.script_ctx.state().clone());
         runtime.cached_state_clone = Some((generation, Arc::clone(&snapshot)));
         Some(snapshot)
+    }
+
+    pub(super) fn localized_misses_handle(
+        &self,
+        instance_key: &str,
+    ) -> Arc<Mutex<Vec<mesh_core_locale::LocalizedTextResolution>>> {
+        self.runtimes
+            .lock()
+            .unwrap()
+            .get(instance_key)
+            .map(|runtime| runtime.script_ctx.localized_misses_handle())
+            .unwrap_or_else(|| Arc::new(Mutex::new(Vec::new())))
     }
 
     pub(super) fn load_graph_i18n_catalogs(&mut self) {
@@ -638,7 +657,11 @@ impl FrontendSurfaceComponent {
 
         let theme = self.active_theme.borrow().clone();
         let state = self.runtime_state(instance_key).unwrap_or_default();
-        let bound = LocaleBoundState::new(&state, self.locale.module_translator(&host.package.id));
+        let bound = LocaleBoundState::with_localized_misses(
+            &state,
+            self.locale.module_translator(&host.package.id),
+            self.localized_misses_handle(instance_key),
+        );
         let prepared_styles = {
             let cached = self.prepared_component_styles.borrow();
             cached
@@ -715,7 +738,11 @@ impl FrontendSurfaceComponent {
         }
 
         let state = self.runtime_state(instance_key).unwrap_or_default();
-        let bound = LocaleBoundState::new(&state, self.locale.module_translator(module_id));
+        let bound = LocaleBoundState::with_localized_misses(
+            &state,
+            self.locale.module_translator(module_id),
+            self.localized_misses_handle(instance_key),
+        );
         let active_theme = self.active_theme.borrow().clone();
         self.render_stack.borrow_mut().push(module_id.to_string());
         let measurer = SharedTextMeasurer;
@@ -1566,21 +1593,11 @@ impl FrontendSurfaceComponent {
             }
             mesh_core_module::LocalizedText::Translation { key, fallback } => {
                 let translator = self.locale.module_translator(module_id);
-                let resolution = translator.resolve(key, Some(fallback));
+                let resolution = translator
+                    .resolve(key, Some(fallback))
+                    .with_field_path(field_path);
                 if resolution.missing {
-                    if let Some(diagnostics) = &self.diagnostics {
-                        let source = resolution
-                            .source
-                            .as_ref()
-                            .map(|source| source.path.display().to_string())
-                            .unwrap_or_else(|| "missing".to_string());
-                        diagnostics.degraded(format!(
-                            "missing localized manifest text: owner='{}' field_path='{field_path}' key='{key}' fallback='{fallback}' source='{source}' snapshot_revision={}"
-                            ,
-                            resolution.owner_module_id,
-                            resolution.snapshot_revision,
-                        ));
-                    }
+                    self.record_localized_miss(&resolution, None);
                 }
                 resolution
             }
@@ -1714,6 +1731,9 @@ fn insert_resolved_manifest_text(
     }
     if let Some(fallback) = resolved.fallback {
         descriptor.insert(format!("{field}_fallback"), serde_json::json!(fallback));
+    }
+    if let Some(field_path) = resolved.field_path {
+        descriptor.insert(format!("{field}_field_path"), serde_json::json!(field_path));
     }
 }
 

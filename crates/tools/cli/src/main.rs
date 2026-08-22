@@ -41,6 +41,7 @@ fn main() {
         Some("uninstall") => cmd_uninstall(&args[2..]),
         Some("lock") => cmd_lock(&args[2..]),
         Some("status") => cmd_status(),
+        Some("locale") => cmd_locale(&args[2..]),
         Some("version") => cmd_version(),
         Some("help") | Some("--help") | Some("-h") => cmd_help(),
         Some(other) => {
@@ -155,6 +156,253 @@ fn cmd_status() {
     println!("MESH v{}", env!("CARGO_PKG_VERSION"));
     println!("theme: {}", shell.theme.active().name);
     println!("locale: {}", shell.locale.current());
+}
+
+fn locale_read_model() -> (
+    mesh_core_module::package::InstalledModuleGraph,
+    mesh_core_locale::LocaleEngine,
+    Vec<mesh_core_locale::CatalogSourceDiagnostics>,
+    mesh_core_config::LocalePolicy,
+) {
+    let graph = mesh_core_module::package::load_installed_module_graph(&root_module_graph_path())
+        .unwrap_or_else(|error| exit_error(format!("failed to resolve locale graph: {error}")));
+    let settings = mesh_core_config::load_shell_settings()
+        .unwrap_or_else(|error| exit_error(format!("failed to load locale settings: {error}")));
+    let policy = settings.i18n.policy;
+    let settings = mesh_core_config::resolve_shell_locale_settings(&settings);
+    let mut engine = mesh_core_locale::LocaleEngine::try_with_fallback_locale(
+        settings.i18n.locale,
+        settings.i18n.fallback_locale,
+    )
+    .unwrap_or_else(|error| exit_error(format!("invalid locale settings: {error}")));
+    let (sources, defaults) = graph
+        .locale_catalog_sources()
+        .unwrap_or_else(|error| exit_error(error));
+    let prepared = engine
+        .prepare_catalog_snapshot_off_thread(sources, defaults)
+        .unwrap_or_else(|error| exit_error(format!("failed to prepare locale catalogs: {error}")));
+    let diagnostics = prepared.diagnostics().to_vec();
+    engine.replace_catalog_snapshot(prepared.snapshot());
+    (graph, engine, diagnostics, policy)
+}
+
+fn cmd_locale(args: &[String]) {
+    match args.first().map(String::as_str) {
+        Some("list") | None => {
+            let graph =
+                mesh_core_module::package::load_installed_module_graph(&root_module_graph_path())
+                    .unwrap_or_else(|error| {
+                        exit_error(format!("failed to resolve locale graph: {error}"))
+                    });
+            let (sources, defaults) = graph
+                .locale_catalog_sources()
+                .unwrap_or_else(|error| exit_error(error));
+            let mut locales = sources
+                .into_iter()
+                .map(|source| source.locale)
+                .chain(defaults.into_values())
+                .collect::<Vec<_>>();
+            locales.sort();
+            locales.dedup();
+            if locales.is_empty() {
+                println!("no locales available");
+            } else {
+                for locale in locales {
+                    println!("{locale}");
+                }
+            }
+        }
+        Some("active") => {
+            let (_, engine, _, policy) = locale_read_model();
+            println!("policy: {}", policy.as_str());
+            println!("locale: {}", engine.current());
+            println!("chain: {}", engine.fallback_chain().join(", "));
+            println!("direction: {}", engine.direction().as_str());
+            println!("revision: {}", engine.revision());
+            println!("catalog_revision: {}", engine.catalog_snapshot().revision());
+        }
+        Some("set") => cmd_locale_set(args),
+        Some("set-system") => cmd_locale_set_system(),
+        Some("which") => {
+            let module_id = required_arg(args, 1, "mesh-shell locale which <module> <key>");
+            let key = required_arg(args, 2, "mesh-shell locale which <module> <key>");
+            let (_, engine, _, _) = locale_read_model();
+            match engine.module_translator(module_id).source(key) {
+                Some(source) => println!(
+                    "{} {} {} {} {}",
+                    source.kind_name(),
+                    source.owner_module_id,
+                    source.target_module_id,
+                    source.locale,
+                    source.path.display()
+                ),
+                None => println!("missing {module_id} {key}"),
+            }
+        }
+        Some("missing") => {
+            let module_id = required_arg(args, 1, "mesh-shell locale missing <module>");
+            let (graph, engine, _, _) = locale_read_model();
+            let translator = engine.module_translator(module_id);
+            for key in graph.localized_keys(module_id) {
+                if translator.translate(&key).is_none() {
+                    println!("{key}");
+                }
+            }
+        }
+        Some("extract") => {
+            let module_id = required_arg(args, 1, "mesh-shell locale extract <module>");
+            let graph =
+                mesh_core_module::package::load_installed_module_graph(&root_module_graph_path())
+                    .unwrap_or_else(|error| {
+                        exit_error(format!("failed to resolve locale graph: {error}"))
+                    });
+            let mut catalog = serde_json::Map::new();
+            for key in graph.localized_keys(module_id) {
+                catalog.insert(key, serde_json::Value::String(String::new()));
+            }
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::Value::Object(catalog))
+                    .expect("locale extraction serialization")
+            );
+        }
+        Some("doctor") => {
+            let (graph, engine, catalog_diagnostics, _) = locale_read_model();
+            let mut issues = 0;
+            for source in catalog_diagnostics {
+                for diagnostic in source.diagnostics {
+                    issues += 1;
+                    println!(
+                        "error {} {} {}: {}",
+                        source.module_id, source.locale, diagnostic.key, diagnostic.message
+                    );
+                }
+            }
+            for module in graph.enabled_modules() {
+                for (path, error) in graph.component_source_errors(&module.id) {
+                    issues += 1;
+                    println!("error {} {}: {}", module.id, path.display(), error);
+                }
+                let translator = engine.module_translator(&module.id);
+                for key in graph.localized_keys(&module.id) {
+                    if translator.translate(&key).is_none() {
+                        issues += 1;
+                        println!(
+                            "warning {}: static key '{}' has no entry in the active locale chain",
+                            module.id, key
+                        );
+                    }
+                }
+            }
+            if issues == 0 {
+                println!("locale catalogs and static keys are healthy");
+            }
+        }
+        Some(other) => exit_error(format!(
+            "unknown locale subcommand: {other}\nsubcommands: list, active, set, set-system, which, missing, extract, doctor"
+        )),
+    }
+}
+
+fn cmd_locale_set(args: &[String]) {
+    let requested = required_arg(args, 1, "mesh-shell locale set <code>");
+    cmd_locale_set_with_policy(
+        Some(requested.to_string()),
+        mesh_core_config::LocalePolicy::Manual,
+    );
+}
+
+fn cmd_locale_set_system() {
+    cmd_locale_set_with_policy(None, mesh_core_config::LocalePolicy::FollowSystem);
+}
+
+fn cmd_locale_set_with_policy(requested: Option<String>, policy: mesh_core_config::LocalePolicy) {
+    let shared = load_settings_store();
+    let shared_revision = shared.revision();
+    let paths = profile_paths();
+    let active_profile_id = paths
+        .active_profile_id()
+        .unwrap_or_else(|error| exit_error(error));
+    let (settings, mut profile_commit) = if let Some(profile_id) = active_profile_id {
+        let profile = paths
+            .load(&profile_id)
+            .unwrap_or_else(|error| exit_error(error));
+        let mut effective = shared.to_value();
+        let root = effective
+            .as_object_mut()
+            .expect("settings store serializes an object");
+        for (namespace, overrides) in &profile.settings {
+            let target = root
+                .entry(namespace.clone())
+                .or_insert_with(|| serde_json::json!({}));
+            mesh_core_config::merge_json(target, overrides);
+        }
+        let effective =
+            mesh_core_config::SettingsStore::from_value(shared.path().to_path_buf(), effective)
+                .unwrap_or_else(|error| {
+                    exit_error(format!("failed to resolve profile settings: {error}"))
+                });
+        let expected_revision = profile.revision;
+        (
+            effective.shell().clone(),
+            Some((profile_id, profile, expected_revision)),
+        )
+    } else {
+        (shared.shell().clone(), None)
+    };
+    let settings = mesh_core_config::resolve_shell_locale_settings(&settings);
+    let requested = requested.unwrap_or_else(|| {
+        mesh_core_locale::system_locale().unwrap_or_else(|| settings.i18n.locale.clone())
+    });
+    let mut candidate = mesh_core_locale::LocaleEngine::try_with_fallback_locale(
+        requested,
+        settings.i18n.fallback_locale.clone(),
+    )
+    .unwrap_or_else(|error| exit_error(format!("invalid locale: {error}")));
+    let graph = mesh_core_module::package::load_installed_module_graph(&root_module_graph_path())
+        .unwrap_or_else(|error| exit_error(format!("failed to resolve locale graph: {error}")));
+    let (sources, defaults) = graph
+        .locale_catalog_sources()
+        .unwrap_or_else(|error| exit_error(error));
+    let prepared = candidate
+        .prepare_catalog_snapshot_off_thread(sources, defaults)
+        .unwrap_or_else(|error| exit_error(format!("failed to prepare locale catalogs: {error}")));
+    candidate.replace_catalog_snapshot(prepared.snapshot());
+
+    let locale_settings = serde_json::json!({
+        "i18n": {
+            "policy": policy.as_str(),
+            "locale": candidate.current(),
+            "fallback_locale": candidate.fallback_locale(),
+        }
+    });
+    if let Some((profile_id, mut profile, expected_revision)) = profile_commit.take() {
+        mesh_core_config::SettingsStore::load_from(shared.path())
+            .unwrap_or_else(|error| exit_error(format!("failed to recheck settings: {error}")))
+            .check_revision(shared_revision)
+            .unwrap_or_else(|error| {
+                exit_error(format!(
+                    "locale settings changed during preparation: {error}"
+                ))
+            });
+        let shell = profile
+            .settings
+            .entry(mesh_core_config::SHELL_NAMESPACE.to_string())
+            .or_insert_with(|| serde_json::json!({}));
+        mesh_core_config::merge_json(shell, &locale_settings);
+        paths
+            .save_if_revision(&profile_id, &profile, expected_revision)
+            .unwrap_or_else(|error| {
+                exit_error(format!("failed to persist profile locale: {error}"))
+            });
+    } else {
+        let mut store = shared;
+        store.merge_namespace(mesh_core_config::SHELL_NAMESPACE, &locale_settings);
+        store
+            .save_if_revision(shared_revision)
+            .unwrap_or_else(|error| exit_error(format!("failed to persist locale: {error}")));
+    }
+    println!("active locale: {}", candidate.current());
 }
 
 fn cmd_debug(args: &[String]) {
@@ -1693,6 +1941,15 @@ fn cmd_help() {
     );
     println!("            flags: --available-only, --profile <id>, --allow-elevated, --allow-high");
     println!("  status    Show shell status");
+    println!("  locale    Inspect graph-backed catalogs");
+    println!("            list                 list available locales");
+    println!("            active               show locale and fallback chain");
+    println!("            set <code>           persist a locale selection");
+    println!("            set-system           follow the host locale");
+    println!("            which <module> <key> show the winning catalog source");
+    println!("            missing <module>    list statically used missing keys");
+    println!("            extract <module>    print a translator catalog template");
+    println!("            doctor              check catalogs and static keys");
     println!("  version   Print version");
     println!("  help      Show this help");
 }

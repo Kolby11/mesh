@@ -1533,7 +1533,7 @@ pub struct ThemeContribution {
     pub mode_metadata: HashMap<String, ThemeModeMetadata>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ThemeModeMetadata {
     #[serde(default)]
     pub color_scheme: String,

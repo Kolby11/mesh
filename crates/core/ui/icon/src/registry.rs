@@ -15,11 +15,23 @@ pub enum IconResolution {
         candidate: String,
         target: ResolvedTarget,
         multicolor: bool,
+        provenance: IconResolutionProvenance,
     },
     Missing {
         semantic_name: String,
         tried: Vec<String>,
     },
+}
+
+/// Explain the effective snapshot path that produced a resolved icon.
+/// Keeping this beside the resolution makes runtime, diagnostics, and future
+/// CLI/LSP explanations consume the same owner and fallback facts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IconResolutionProvenance {
+    pub owner_module: Option<String>,
+    pub pack_id: Option<String>,
+    pub candidate: String,
+    pub fallback_stage: String,
 }
 
 /// Where a resolved icon's pixels come from. `File` is an SVG/PNG/JPEG
@@ -68,6 +80,20 @@ pub struct IconRegistry {
 
 const ICON_REGISTRY_CACHE_CAPACITY: usize = 2048;
 const ICON_WARNED_MISS_CAPACITY: usize = 2048;
+
+fn canonical_pack_id(value: &str) -> Result<&str> {
+    if value.is_empty()
+        || value.trim() != value
+        || value != value.to_ascii_lowercase()
+        || value.contains('/')
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        bail!("icon pack id '{value}' is not canonical");
+    }
+    Ok(value)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct IconCacheKey {
@@ -136,6 +162,55 @@ impl IconRegistry {
         }
         self.icon_packs.insert(pack_id, bindings);
         self.bump_generation();
+    }
+
+    /// Atomically replace all graph-authorized binding modules. The system XDG
+    /// config remains installed, while module-owned packs and frontend
+    /// contexts are swapped as one candidate so a failed graph/profile
+    /// preparation cannot leave a mixed registry.
+    pub fn replace_bindings(
+        &mut self,
+        icon_packs: Vec<IconPackBindings>,
+        frontends: Vec<(String, FrontendIconBindings)>,
+        shell_default_pack: Option<String>,
+    ) -> Result<()> {
+        let mut next_packs = HashMap::new();
+        let mut next_pack_by_module = HashMap::new();
+        for bindings in icon_packs {
+            canonical_pack_id(&bindings.pack_id)?;
+            if bindings.module_id.trim().is_empty() {
+                bail!("icon pack module id must not be empty");
+            }
+            if next_packs
+                .insert(bindings.pack_id.clone(), bindings.clone())
+                .is_some()
+            {
+                bail!("duplicate icon pack id '{}'", bindings.pack_id);
+            }
+            if next_pack_by_module
+                .insert(bindings.module_id.clone(), bindings.pack_id.clone())
+                .is_some()
+            {
+                bail!("duplicate icon pack module '{}'", bindings.module_id);
+            }
+        }
+
+        let mut next_frontends = HashMap::new();
+        for (module_id, bindings) in frontends {
+            if module_id.trim().is_empty() {
+                bail!("frontend icon binding module id must not be empty");
+            }
+            if next_frontends.insert(module_id.clone(), bindings).is_some() {
+                bail!("duplicate frontend icon binding module '{module_id}'");
+            }
+        }
+
+        self.icon_packs = next_packs;
+        self.pack_id_by_module = next_pack_by_module;
+        self.frontends = next_frontends;
+        self.shell_default_pack_module = shell_default_pack;
+        self.bump_generation();
+        Ok(())
     }
 
     pub fn remove_icon_pack(&mut self, module_id: &str) {
@@ -275,15 +350,31 @@ impl IconRegistry {
         // 1. User override
         if let Some(frontend) = frontend {
             if let Some(target) = frontend.user_overrides.get(semantic_name)
-                && let Some(found) =
-                    self.try_target(target, semantic_name, size, &mut tried, "user-override")
+                && let Some(found) = self.try_target(
+                    target,
+                    false,
+                    semantic_name,
+                    size,
+                    &mut tried,
+                    "user-override",
+                    None,
+                    "user-override",
+                )
             {
                 return found;
             }
             // 2. Author override
             if let Some(target) = frontend.author_overrides.get(semantic_name)
-                && let Some(found) =
-                    self.try_target(target, semantic_name, size, &mut tried, "author-override")
+                && let Some(found) = self.try_target(
+                    target,
+                    false,
+                    semantic_name,
+                    size,
+                    &mut tried,
+                    "author-override",
+                    None,
+                    "author-override",
+                )
             {
                 return found;
             }
@@ -291,41 +382,67 @@ impl IconRegistry {
 
         // 3. Pack-qualified template name (`<pack-id>/<logical-name>`)
         if let Some((pack_id, inner)) = parse_target(semantic_name)
-            && let Some(found) =
-                self.try_pack_lookup(pack_id, inner, semantic_name, size, &mut tried)
+            && let Some(found) = self.try_pack_lookup(
+                pack_id,
+                inner,
+                semantic_name,
+                size,
+                &mut tried,
+                "pack-qualified",
+            )
         {
             return found;
         }
 
         // 4. Effective dependency chain. A chain entry may be a MESH icon-pack
-        // module or a system XDG theme id selected directly by the user.
+        // module or a system XDG theme id selected directly by the user. Each
+        // shorter freedesktop name retries the entire chain in order.
         let chain = frontend
             .map(|frontend| frontend.effective_chain(self.shell_default_pack_module.as_deref()))
             .unwrap_or_else(|| self.shell_default_pack_module.iter().cloned().collect());
-        for chain_id in chain {
-            if let Some(pack_id) = self.pack_id_by_module.get(&chain_id)
-                && let Some(found) =
-                    self.try_pack_lookup(pack_id, semantic_name, semantic_name, size, &mut tried)
-            {
-                return found;
+        for fallback_name in crate::fallback::semantic_fallback_names(semantic_name) {
+            for chain_id in &chain {
+                if let Some(pack_id) = self.pack_id_by_module.get(chain_id)
+                    && let Some(found) = self.try_pack_lookup(
+                        pack_id,
+                        &fallback_name,
+                        semantic_name,
+                        size,
+                        &mut tried,
+                        crate::fallback::fallback_stage(semantic_name, &fallback_name),
+                    )
+                {
+                    return found;
+                }
+                if let Some(found) = self.try_system_pack_lookup(
+                    chain_id,
+                    &fallback_name,
+                    semantic_name,
+                    size,
+                    &mut tried,
+                ) {
+                    return found;
+                }
             }
-            if let Some(found) =
-                self.try_system_pack_lookup(&chain_id, semantic_name, size, &mut tried)
-            {
-                return found;
-            }
-        }
 
-        // 5. Hicolor system fallback (bare logical name as freedesktop name)
-        if let Some(found) = xdg::find_icon_in_theme("hicolor", semantic_name, size) {
-            let mapping = format!("hicolor:{semantic_name}");
-            tried.push(mapping.clone());
-            return IconResolution::Found {
-                semantic_name: semantic_name.into(),
-                candidate: mapping,
-                target: ResolvedTarget::File(found),
-                multicolor: false,
-            };
+            // 5. Hicolor system fallback (bare logical name as freedesktop
+            // name), after the active chain has had the same candidate.
+            if let Some(found) = xdg::find_icon_in_theme("hicolor", &fallback_name, size) {
+                let mapping = format!("hicolor:{fallback_name}");
+                tried.push(mapping.clone());
+                return IconResolution::Found {
+                    semantic_name: semantic_name.into(),
+                    candidate: mapping.clone(),
+                    target: ResolvedTarget::File(found),
+                    multicolor: false,
+                    provenance: IconResolutionProvenance {
+                        owner_module: None,
+                        pack_id: Some("hicolor".into()),
+                        candidate: mapping,
+                        fallback_stage: "hicolor".into(),
+                    },
+                };
+            }
         }
 
         IconResolution::Missing {
@@ -344,34 +461,45 @@ impl IconRegistry {
         semantic_name: &str,
         size: u32,
         tried: &mut Vec<String>,
+        fallback_stage: &str,
     ) -> Option<IconResolution> {
         let pack = self.icon_packs.get(pack_id)?;
         let target = pack.mappings.get(logical_name)?;
         self.try_target(
-            target,
+            &target.target,
+            target.multicolor,
             semantic_name,
             size,
             tried,
             &format!("pack:{pack_id}"),
+            Some(pack_id),
+            fallback_stage,
         )
     }
 
     fn try_system_pack_lookup(
         &self,
         pack_id: &str,
+        lookup_name: &str,
         semantic_name: &str,
         size: u32,
         tried: &mut Vec<String>,
     ) -> Option<IconResolution> {
         let pack = self.config.pack(pack_id)?;
-        let mapping = format!("system-pack:{pack_id}/{semantic_name}");
+        let mapping = format!("system-pack:{pack_id}/{lookup_name}");
         tried.push(mapping.clone());
-        let target = xdg::find_icon_in_pack(pack, semantic_name, size)?;
+        let target = xdg::find_icon_in_pack(pack, lookup_name, size)?;
         Some(IconResolution::Found {
             semantic_name: semantic_name.into(),
-            candidate: mapping,
+            candidate: mapping.clone(),
             target,
             multicolor: false,
+            provenance: IconResolutionProvenance {
+                owner_module: None,
+                pack_id: Some(pack_id.into()),
+                candidate: mapping,
+                fallback_stage: crate::fallback::fallback_stage(semantic_name, lookup_name).into(),
+            },
         })
     }
 
@@ -381,10 +509,13 @@ impl IconRegistry {
     fn try_target(
         &self,
         target: &str,
+        multicolor: bool,
         semantic_name: &str,
         size: u32,
         tried: &mut Vec<String>,
         source: &str,
+        owner_pack: Option<&str>,
+        fallback_stage: &str,
     ) -> Option<IconResolution> {
         let mapping_label = format!("{source}:{target}");
         tried.push(mapping_label.clone());
@@ -394,26 +525,30 @@ impl IconRegistry {
         if p.is_absolute() && p.is_file() {
             return Some(IconResolution::Found {
                 semantic_name: semantic_name.into(),
-                candidate: mapping_label,
+                candidate: mapping_label.clone(),
                 target: ResolvedTarget::File(p.to_path_buf()),
-                multicolor: false,
+                multicolor,
+                provenance: self.provenance(owner_pack, mapping_label, fallback_stage),
             });
         }
 
         let (asset_pack, asset_name) = parse_target(target)?;
 
-        // Asset-pack registered as a font alias inside any loaded icon-pack
-        for icon_pack in self.icon_packs.values() {
-            if let Some(font_asset) = icon_pack.font_aliases.get(asset_pack)
-                && let Some(target) = self.try_font_glyph(font_asset, asset_name, icon_pack.axes)
-            {
-                return Some(IconResolution::Found {
-                    semantic_name: semantic_name.into(),
-                    candidate: mapping_label,
-                    target,
-                    multicolor: false,
-                });
-            }
+        // Font aliases are scoped to the icon pack that owns the mapping.
+        // Searching every pack would make an alias collision depend on
+        // HashMap iteration order.
+        if let Some(owner_pack) = owner_pack
+            && let Some(icon_pack) = self.icon_packs.get(owner_pack)
+            && let Some(font_asset) = icon_pack.font_aliases.get(asset_pack)
+            && let Some(target) = self.try_font_glyph(font_asset, asset_name, icon_pack.axes)
+        {
+            return Some(IconResolution::Found {
+                semantic_name: semantic_name.into(),
+                candidate: mapping_label.clone(),
+                target,
+                multicolor,
+                provenance: self.provenance(Some(owner_pack), mapping_label, fallback_stage),
+            });
         }
 
         // Asset-pack registered as an XDG/file pack in the IconConfig
@@ -422,9 +557,10 @@ impl IconRegistry {
         {
             return Some(IconResolution::Found {
                 semantic_name: semantic_name.into(),
-                candidate: mapping_label,
+                candidate: mapping_label.clone(),
                 target,
-                multicolor: false,
+                multicolor,
+                provenance: self.provenance(owner_pack, mapping_label, fallback_stage),
             });
         }
 
@@ -432,13 +568,30 @@ impl IconRegistry {
         if let Some(path) = xdg::find_icon_in_theme(asset_pack, asset_name, size) {
             return Some(IconResolution::Found {
                 semantic_name: semantic_name.into(),
-                candidate: mapping_label,
+                candidate: mapping_label.clone(),
                 target: ResolvedTarget::File(path),
-                multicolor: false,
+                multicolor,
+                provenance: self.provenance(owner_pack, mapping_label, fallback_stage),
             });
         }
 
         None
+    }
+
+    fn provenance(
+        &self,
+        owner_pack: Option<&str>,
+        candidate: String,
+        fallback_stage: &str,
+    ) -> IconResolutionProvenance {
+        IconResolutionProvenance {
+            owner_module: owner_pack
+                .and_then(|pack_id| self.icon_packs.get(pack_id))
+                .map(|pack| pack.module_id.clone()),
+            pack_id: owner_pack.map(str::to_string),
+            candidate,
+            fallback_stage: fallback_stage.into(),
+        }
     }
 
     fn try_font_glyph(
@@ -483,7 +636,7 @@ impl IconResolution {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bindings::FontAsset;
+    use crate::bindings::{FontAsset, IconMapping};
     use std::collections::HashMap;
     use std::fs;
     use tempfile::tempdir;
@@ -613,6 +766,41 @@ nothing = ["system:nothing"]
     }
 
     #[test]
+    fn semantic_resolution_generalizes_dash_suffixes_in_chain_order() {
+        let td = tempdir().unwrap();
+        let icon = td.path().join("base.svg");
+        fs::write(
+            &icon,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>"#,
+        )
+        .unwrap();
+        let mut registry = registry();
+        registry
+            .register_pack(IconPackRoot {
+                id: "files".into(),
+                root: Some(td.path().to_path_buf()),
+                theme: "hicolor".into(),
+                kind: crate::IconPackKind::Xdg,
+            })
+            .unwrap();
+        registry.set_icon_pack(IconPackBindings {
+            pack_id: "fallbacks".into(),
+            module_id: "@mesh/fallbacks".into(),
+            mappings: HashMap::from([("network-wireless".into(), "files/base".into())]),
+            axes: SupportedAxes::default(),
+            font_aliases: HashMap::new(),
+        });
+        registry.set_shell_default_pack(Some("@mesh/fallbacks".into()));
+
+        let result = registry.resolve("network-wireless-signal-weak", 24);
+        assert!(matches!(result, IconResolution::Found { .. }));
+        assert!(matches!(
+            result,
+            IconResolution::Found { candidate, .. } if candidate == "pack:fallbacks:files/base"
+        ));
+    }
+
+    #[test]
     fn user_override_wins_over_author_and_pack_chain() {
         let td = tempdir().unwrap();
         let user_icon = td.path().join("user.svg");
@@ -717,6 +905,125 @@ nothing = ["system:nothing"]
             panic!("expected file target");
         };
         assert!(path.ends_with("default.svg"), "got {}", path.display());
+    }
+
+    #[test]
+    fn replacement_rejects_duplicate_pack_ids_without_touching_live_bindings() {
+        let mut registry = IconRegistry::from_config(empty_config()).unwrap();
+        registry.set_icon_pack(IconPackBindings {
+            pack_id: "stable".into(),
+            module_id: "@mesh/stable-icons".into(),
+            mappings: HashMap::new(),
+            axes: SupportedAxes::default(),
+            font_aliases: HashMap::new(),
+        });
+
+        let result = registry.replace_bindings(
+            vec![
+                IconPackBindings {
+                    pack_id: "duplicate".into(),
+                    module_id: "@mesh/one".into(),
+                    mappings: HashMap::new(),
+                    axes: SupportedAxes::default(),
+                    font_aliases: HashMap::new(),
+                },
+                IconPackBindings {
+                    pack_id: "duplicate".into(),
+                    module_id: "@mesh/two".into(),
+                    mappings: HashMap::new(),
+                    axes: SupportedAxes::default(),
+                    font_aliases: HashMap::new(),
+                },
+            ],
+            Vec::new(),
+            None,
+        );
+
+        assert!(result.is_err());
+        assert!(registry.icon_pack("stable").is_some());
+        assert!(registry.icon_pack("duplicate").is_none());
+
+        let result = registry.replace_bindings(
+            vec![IconPackBindings {
+                pack_id: "Not-Canonical".into(),
+                module_id: "@mesh/not-canonical".into(),
+                mappings: HashMap::new(),
+                axes: SupportedAxes::default(),
+                font_aliases: HashMap::new(),
+            }],
+            Vec::new(),
+            None,
+        );
+        assert!(result.is_err());
+        assert!(registry.icon_pack("stable").is_some());
+    }
+
+    #[test]
+    fn font_aliases_resolve_only_from_the_mapping_owner_pack() {
+        let pack_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../modules/icon-packs/material-symbols");
+        let font_path = pack_dir.join("assets/MaterialSymbolsRounded.ttf");
+        let glyph_map_path = pack_dir.join("codepoints.json");
+        let other_map = tempdir().unwrap();
+        let other_glyph_map = other_map.path().join("codepoints.json");
+        fs::write(&other_glyph_map, r#"{"settings":""}"#).unwrap();
+
+        let font_asset = |glyph_map_path| FontAsset {
+            family: "Material Symbols Rounded".into(),
+            glyph_map_path: Some(glyph_map_path),
+            resolved_font_path: Some(font_path.clone()),
+        };
+        let mut registry = registry();
+        registry
+            .replace_bindings(
+                vec![
+                    IconPackBindings {
+                        pack_id: "pack-a".into(),
+                        module_id: "@mesh/pack-a".into(),
+                        mappings: HashMap::from([(
+                            "settings".into(),
+                            IconMapping {
+                                target: "ms/settings".into(),
+                                multicolor: true,
+                            },
+                        )]),
+                        axes: SupportedAxes::default(),
+                        font_aliases: HashMap::from([("ms".into(), font_asset(glyph_map_path))]),
+                    },
+                    IconPackBindings {
+                        pack_id: "pack-b".into(),
+                        module_id: "@mesh/pack-b".into(),
+                        mappings: HashMap::new(),
+                        axes: SupportedAxes::default(),
+                        font_aliases: HashMap::from([("ms".into(), font_asset(other_glyph_map))]),
+                    },
+                ],
+                vec![(
+                    "frontend".into(),
+                    FrontendIconBindings {
+                        declared_pack_chain: vec!["@mesh/pack-a".into()],
+                        ..Default::default()
+                    },
+                )],
+                None,
+            )
+            .unwrap();
+
+        let result = registry.resolve_for_module("frontend", "settings", 24);
+        let IconResolution::Found {
+            target: ResolvedTarget::Glyph { codepoint, .. },
+            multicolor,
+            provenance,
+            ..
+        } = result
+        else {
+            panic!("expected owner-scoped font alias resolution");
+        };
+        assert_eq!(codepoint, 0xe8b8);
+        assert!(multicolor);
+        assert_eq!(provenance.owner_module.as_deref(), Some("@mesh/pack-a"));
+        assert_eq!(provenance.pack_id.as_deref(), Some("pack-a"));
+        assert_eq!(provenance.fallback_stage, "exact");
     }
 
     #[test]

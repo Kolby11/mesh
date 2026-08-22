@@ -127,6 +127,9 @@ pub(super) fn create_i18n_library(
     lua: &Lua,
     translations: Arc<Mutex<HashMap<String, CatalogEntry>>>,
     locale: Arc<Mutex<String>>,
+    snapshot_revision: Arc<Mutex<u64>>,
+    owner_module_id: String,
+    localized_misses: Arc<Mutex<Vec<LocalizedTextResolution>>>,
 ) -> mlua::Result<Table> {
     let exports = lua.create_table()?;
     exports.set(
@@ -149,7 +152,16 @@ pub(super) fn create_i18n_library(
                 .unwrap()
                 .get(&key)
                 .and_then(|entry| entry.render(&locale, &args))
-                .unwrap_or_else(|| LocalizedTextResolution::missing_marker(&key));
+                .unwrap_or_else(|| {
+                    let resolution = LocalizedTextResolution::missing(
+                        owner_module_id.clone(),
+                        key.clone(),
+                        None,
+                        *snapshot_revision.lock().unwrap(),
+                    );
+                    localized_misses.lock().unwrap().push(resolution.clone());
+                    resolution.text
+                });
             Ok(translated)
         })?,
     )?;

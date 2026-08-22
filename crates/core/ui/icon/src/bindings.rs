@@ -14,13 +14,37 @@ pub struct IconPackBindings {
     /// Full module id (e.g. `@mesh/icons-material-rounded`).
     pub module_id: String,
     /// Logical name → asset reference (`<asset-pack>/<asset-name>`).
-    pub mappings: HashMap<String, String>,
+    pub mappings: HashMap<String, IconMapping>,
     /// Variable-font axes the underlying assets expose.
     pub axes: SupportedAxes,
     /// Font aliases declared in `mesh.icon_pack.requires.fonts`.
     /// Keyed by alias; the right-hand `FontAsset` carries fontconfig
     /// family name, resolved font path, and an optional codepoints map path.
     pub font_aliases: HashMap<String, FontAsset>,
+}
+
+/// A typed logical-icon mapping. `multicolor` is a source-color policy: when
+/// true, renderers preserve the asset's colors instead of applying the
+/// inherited symbolic tint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IconMapping {
+    pub target: String,
+    pub multicolor: bool,
+}
+
+impl From<String> for IconMapping {
+    fn from(target: String) -> Self {
+        Self {
+            target,
+            multicolor: false,
+        }
+    }
+}
+
+impl From<&str> for IconMapping {
+    fn from(target: &str) -> Self {
+        target.to_string().into()
+    }
 }
 
 #[derive(Debug, Clone)]

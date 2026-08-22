@@ -1,11 +1,54 @@
 use super::*;
 
+pub(super) fn record_localized_miss(
+    diagnostics: &Option<Diagnostics>,
+    resolution: &mesh_core_locale::LocalizedTextResolution,
+    field_path: Option<&str>,
+) -> bool {
+    let Some(key) = resolution.key.as_deref() else {
+        return false;
+    };
+    let Some(diagnostics) = diagnostics else {
+        return false;
+    };
+    let field = resolution
+        .field_path
+        .as_deref()
+        .or(field_path)
+        .unwrap_or("runtime");
+    let subject = if resolution.field_path.is_some() || field_path.is_some() {
+        "missing localized manifest text"
+    } else {
+        "missing localized text"
+    };
+    diagnostics.record_issue(
+        format!("i18n-missing:{}:{key}", resolution.owner_module_id),
+        mesh_core_diagnostics::IssueSeverity::Warning,
+        format!(
+            "{subject}: owner='{}' field_path='{field}' key='{key}' fallback='{}' source='{}' snapshot_revision={}",
+            resolution.owner_module_id,
+            resolution.fallback.as_deref().unwrap_or(""),
+            resolution
+                .source
+                .as_ref()
+                .map(|source| source.path.display().to_string())
+                .unwrap_or_else(|| "missing".to_string()),
+            resolution.snapshot_revision,
+        ),
+    )
+}
+
 impl FrontendSurfaceComponent {
+    pub(super) fn record_localized_miss(
+        &self,
+        resolution: &mesh_core_locale::LocalizedTextResolution,
+        field_path: Option<&str>,
+    ) -> bool {
+        record_localized_miss(&self.diagnostics, resolution, field_path)
+    }
+
     pub(super) fn record_declared_missing_icon_diagnostics(&self) {
         let required = &self.compiled.manifest.icon_requirements.required;
-        if required.is_empty() {
-            return;
-        }
         let module_id = self.compiled.manifest.package.id.as_str();
         for semantic_name in required {
             match mesh_core_icon::resolve_icon_for_module(module_id, semantic_name, 24) {
@@ -13,6 +56,14 @@ impl FrontendSurfaceComponent {
                 mesh_core_icon::IconResolution::Missing { tried, .. } => {
                     self.record_missing_icon_diagnostic(semantic_name, tried);
                 }
+            }
+        }
+        for semantic_name in &self.compiled.manifest.icon_requirements.optional {
+            if let mesh_core_icon::IconResolution::Missing { tried, .. } =
+                mesh_core_icon::resolve_icon_for_module(module_id, semantic_name, 24)
+                && let Some(diagnostics) = &self.diagnostics
+            {
+                diagnostics.record_optional_missing_icon(semantic_name.clone(), tried);
             }
         }
     }

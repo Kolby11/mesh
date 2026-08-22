@@ -204,8 +204,9 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                     .get("call_id")
                     .and_then(|value| value.as_u64())
             })?;
-            let required = service_capabilities(interface).control;
-            if !event.source_capabilities.is_granted(&required) {
+            let capabilities = service_capabilities(interface);
+            let required = &capabilities.control;
+            if !event.source_capabilities.is_granted(required) {
                 return Some(CoreRequest::PublishDiagnostics {
                     message: format!(
                         "Denied service call cancellation for '{}' from '{}' without {}",
@@ -525,7 +526,7 @@ mod tests {
             payload: serde_json::json!({ "percent": 55 }),
             source_module_id: "@mesh/audio-popover".into(),
             source_capabilities: capabilities.clone(),
-            call_id: Some(1 << 63),
+            call_id: Some(1u64 << 63),
             source_instance_id: Some("@mesh/audio-popover#bottom".into()),
         }]);
 
@@ -535,18 +536,18 @@ mod tests {
                 call_id,
                 source_instance_id,
                 ..
-            }] if *call_id == 1 << 63 && source_instance_id == "@mesh/audio-popover#bottom"
+            }] if *call_id == 1u64 << 63 && source_instance_id == "@mesh/audio-popover#bottom"
         ));
 
         let cancel_requests = script_events_to_requests(vec![PublishedEvent {
             channel: "mesh.service.cancel".into(),
             payload: serde_json::json!({
                 "interface": "mesh.audio",
-                "call_id": 1 << 63,
+                "call_id": 1u64 << 63,
             }),
             source_module_id: "@mesh/audio-popover".into(),
             source_capabilities: capabilities,
-            call_id: Some(1 << 63),
+            call_id: Some(1u64 << 63),
             source_instance_id: Some("@mesh/audio-popover#bottom".into()),
         }]);
         assert!(matches!(
@@ -555,7 +556,7 @@ mod tests {
                 call_id,
                 source_instance_id,
                 ..
-            }] if *call_id == 1 << 63 && source_instance_id == "@mesh/audio-popover#bottom"
+            }] if *call_id == 1u64 << 63 && source_instance_id == "@mesh/audio-popover#bottom"
         ));
     }
 

@@ -8,11 +8,15 @@ mod fallback;
 mod registry;
 mod xdg;
 
-pub use bindings::{FontAsset, FrontendIconBindings, IconPackBindings, parse_target};
+pub use bindings::{FontAsset, FrontendIconBindings, IconMapping, IconPackBindings, parse_target};
 pub use config::{IconCandidate, IconConfig, IconPackKind, IconPackRoot, IconProfile};
 pub use discovery::discover_xdg_packs;
-pub use fallback::{BuiltInIconFallback, MISSING_ICON_SVG};
-pub use registry::{IconRegistry, IconResolution, ResolvedTarget, SupportedAxes};
+pub use fallback::{
+    BuiltInIconFallback, MISSING_ICON_SVG, fallback_stage, semantic_fallback_names,
+};
+pub use registry::{
+    IconRegistry, IconResolution, IconResolutionProvenance, ResolvedTarget, SupportedAxes,
+};
 
 fn default_icon_config() -> IconConfig {
     IconConfig::builtin_xdg().expect("builtin xdg icon config should be valid")
@@ -45,6 +49,12 @@ pub fn resolve_icon_result(name: &str, size: u32) -> IconResolution {
             candidate: p.display().to_string(),
             target: ResolvedTarget::File(p.to_path_buf()),
             multicolor: false,
+            provenance: IconResolutionProvenance {
+                owner_module: None,
+                pack_id: None,
+                candidate: p.display().to_string(),
+                fallback_stage: "direct-path".into(),
+            },
         };
     }
 
@@ -72,6 +82,12 @@ pub fn resolve_icon_for_module(module_id: &str, name: &str, size: u32) -> IconRe
             candidate: p.display().to_string(),
             target: ResolvedTarget::File(p.to_path_buf()),
             multicolor: false,
+            provenance: IconResolutionProvenance {
+                owner_module: None,
+                pack_id: None,
+                candidate: p.display().to_string(),
+                fallback_stage: "direct-path".into(),
+            },
         };
     }
     default_registry()
@@ -101,6 +117,19 @@ pub fn remove_default_frontend_bindings(module_id: &str) {
 /// Install or replace a loaded icon-pack module's bindings.
 pub fn set_default_icon_pack(bindings: IconPackBindings) {
     default_registry().lock().unwrap().set_icon_pack(bindings);
+}
+
+/// Atomically replace graph-authorized icon-pack and frontend bindings while
+/// retaining the process-wide system XDG pack configuration.
+pub fn replace_default_bindings(
+    icon_packs: Vec<IconPackBindings>,
+    frontends: Vec<(String, FrontendIconBindings)>,
+    shell_default_pack: Option<String>,
+) -> anyhow::Result<()> {
+    default_registry()
+        .lock()
+        .unwrap()
+        .replace_bindings(icon_packs, frontends, shell_default_pack)
 }
 
 pub fn remove_default_icon_pack(module_id: &str) {

@@ -29,6 +29,7 @@ pub(super) fn load_active_theme(settings: &ShellSettings) -> (ThemeEngine, Theme
         }
     };
     apply_font_family(&mut theme, settings.fonts.ui_family.as_deref());
+    let revision = theme.revision();
     let modified_at = std::fs::metadata(&theme_path)
         .ok()
         .and_then(|metadata| metadata.modified().ok());
@@ -42,7 +43,7 @@ pub(super) fn load_active_theme(settings: &ShellSettings) -> (ThemeEngine, Theme
                 .ok()
                 .map(|bytes| fingerprint_bytes(&bytes)),
             mode: None,
-            revision: theme.revision(),
+            revision,
         },
     )
 }

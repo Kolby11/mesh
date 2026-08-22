@@ -150,6 +150,7 @@ impl EffectiveComposition {
             .collect();
         ShellProfile {
             schema_version: super::PROFILE_SCHEMA_VERSION,
+            revision: 0,
             from: self.source_module.as_ref().map(|module| CompositionRef {
                 module: module.clone(),
                 version: self.source_version.clone(),

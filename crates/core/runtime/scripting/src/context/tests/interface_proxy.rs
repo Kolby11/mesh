@@ -256,14 +256,14 @@ end
         serde_json::json!({ "ok": true, "percent": 55 }),
     );
     ctx.call_handler("inspect", &[]).unwrap();
-    assert_eq!(ctx.state.get("completed"), Some(&serde_json::json!(true)));
+    assert_eq!(ctx.state.get("completed"), Some(serde_json::json!(true)));
     assert_eq!(
         ctx.state.get("completion_status"),
-        Some(&serde_json::json!("completed"))
+        Some(serde_json::json!("completed"))
     );
     assert_eq!(
         ctx.state.get("completion_value"),
-        Some(&serde_json::json!(55))
+        Some(serde_json::json!(55))
     );
 }
 
@@ -330,7 +330,7 @@ end
     .unwrap();
 
     ctx.call_handler("invoke", &[]).unwrap();
-    assert_eq!(ctx.state.get("cancelled"), Some(&serde_json::json!(true)));
+    assert_eq!(ctx.state.get("cancelled"), Some(serde_json::json!(true)));
     let events = ctx.drain_published_events();
     assert_eq!(events.len(), 2);
     let call_id = events[0].call_id.expect("service call id");

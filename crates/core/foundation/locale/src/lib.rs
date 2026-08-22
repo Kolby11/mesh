@@ -3,12 +3,20 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::path::PathBuf;
+use std::io::Read;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+#[cfg(unix)]
+use std::{
+    ffi::CString,
+    os::unix::ffi::OsStrExt,
+    os::unix::io::{AsRawFd, FromRawFd},
+};
 
 const MAX_CATALOG_ENTRIES: usize = 4096;
 const MAX_VARIANTS_PER_ENTRY: usize = 32;
 const MAX_MESSAGE_LENGTH: usize = 16 * 1024;
+pub const DEFAULT_MAX_CATALOG_SOURCE_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -83,6 +91,42 @@ impl LocaleSelection {
     pub fn revision(&self) -> u64 {
         self.revision
     }
+}
+
+/// Normalize a locale advertised by the host environment. POSIX locale
+/// modifiers and encodings are not BCP 47 subtags, so they are removed before
+/// the same canonical validator used by catalog selection is applied.
+pub fn normalize_system_locale(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let raw = raw.split(':').next().unwrap_or_default();
+    let raw = raw.split(['.', '@']).next().unwrap_or_default();
+    if raw.is_empty() || raw.eq_ignore_ascii_case("c") || raw.eq_ignore_ascii_case("posix") {
+        return None;
+    }
+    canonicalize_locale_tag(&raw.replace('_', "-")).ok()
+}
+
+/// Return the first usable locale from the standard POSIX environment
+/// precedence. `LANGUAGE` may contain a colon-separated preference list.
+pub fn system_locale() -> Option<String> {
+    for key in ["LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"] {
+        let Ok(value) = std::env::var(key) else {
+            continue;
+        };
+        if key == "LANGUAGE" {
+            for candidate in value.split(':') {
+                if let Some(locale) = normalize_system_locale(candidate) {
+                    return Some(locale);
+                }
+            }
+        } else if let Some(locale) = normalize_system_locale(&value) {
+            return Some(locale);
+        }
+    }
+    None
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,6 +207,20 @@ pub enum LocaleCatalogLoadError {
         path: PathBuf,
         source: serde_json::Error,
     },
+    #[error("catalog source path is unsafe {path}: {reason}")]
+    UnsafePath { path: PathBuf, reason: String },
+    #[error("catalog source is not a regular file: {path}")]
+    NotRegularFile { path: PathBuf },
+    #[error("catalog source exceeds {max_bytes} bytes: {path}")]
+    TooLarge { path: PathBuf, max_bytes: usize },
+    #[error("catalog source is not valid UTF-8: {path}")]
+    InvalidUtf8 { path: PathBuf },
+    #[error("safe catalog source opening is unavailable on this platform: {path}")]
+    UnsupportedPlatform { path: PathBuf },
+    #[error("failed to start the locale catalog worker: {source}")]
+    WorkerSpawn { source: std::io::Error },
+    #[error("locale catalog worker panicked")]
+    WorkerPanic,
     #[error("invalid locale '{locale}' in {context}")]
     InvalidLocale { locale: String, context: String },
 }
@@ -183,6 +241,218 @@ pub enum CatalogSourceKind {
     LanguagePack,
 }
 
+/// A graph-authorized catalog file rooted at one module directory.
+///
+/// The relative path is validated before it becomes a handle. Reads traverse
+/// the root and every relative component with `O_NOFOLLOW`, so a catalog
+/// cannot escape through `..` or a replaced symlink. The handle exposes the
+/// candidate path for provenance only; opening always uses the contained
+/// descriptor walk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogSourceHandle {
+    module_root: PathBuf,
+    relative_path: PathBuf,
+}
+
+impl CatalogSourceHandle {
+    pub fn new(
+        module_root: impl Into<PathBuf>,
+        relative_path: impl AsRef<Path>,
+    ) -> Result<Self, String> {
+        let module_root = module_root.into();
+        if module_root.as_os_str().is_empty() {
+            return Err("catalog source module root cannot be empty".into());
+        }
+        let relative_path = relative_path.as_ref();
+        if relative_path.as_os_str().is_empty() || relative_path.is_absolute() {
+            return Err(format!(
+                "catalog source path must be a non-empty relative path: {}",
+                relative_path.display()
+            ));
+        }
+        if relative_path.components().any(|component| {
+            matches!(
+                component,
+                Component::CurDir
+                    | Component::ParentDir
+                    | Component::RootDir
+                    | Component::Prefix(_)
+            )
+        }) {
+            return Err(format!(
+                "catalog source path contains an unsafe component: {}",
+                relative_path.display()
+            ));
+        }
+        Ok(Self {
+            module_root,
+            relative_path: relative_path.to_path_buf(),
+        })
+    }
+
+    pub fn module_root(&self) -> &Path {
+        &self.module_root
+    }
+
+    pub fn relative_path(&self) -> &Path {
+        &self.relative_path
+    }
+
+    pub fn candidate_path(&self) -> PathBuf {
+        self.module_root.join(&self.relative_path)
+    }
+
+    pub fn read_utf8_bounded(&self, max_bytes: usize) -> Result<String, LocaleCatalogLoadError> {
+        #[cfg(unix)]
+        {
+            let mut directory = open_catalog_directory(&self.module_root)?;
+            let mut components = self.relative_path.components().peekable();
+            while let Some(component) = components.next() {
+                let Component::Normal(component) = component else {
+                    return Err(LocaleCatalogLoadError::UnsafePath {
+                        path: self.candidate_path(),
+                        reason: "non-normal path component".into(),
+                    });
+                };
+                if components.peek().is_some() {
+                    directory =
+                        open_catalog_directory_at(&directory, component, &self.candidate_path())?;
+                } else {
+                    let file = open_catalog_file_at(&directory, component, &self.candidate_path())?;
+                    return read_catalog_utf8_bounded(file, &self.candidate_path(), max_bytes);
+                }
+            }
+            Err(LocaleCatalogLoadError::UnsafePath {
+                path: self.candidate_path(),
+                reason: "empty relative path".into(),
+            })
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = max_bytes;
+            Err(LocaleCatalogLoadError::UnsupportedPlatform {
+                path: self.candidate_path(),
+            })
+        }
+    }
+}
+
+#[cfg(unix)]
+fn open_catalog_directory(path: &Path) -> Result<std::fs::File, LocaleCatalogLoadError> {
+    let name = CString::new(path.as_os_str().as_bytes()).map_err(|_| {
+        LocaleCatalogLoadError::UnsafePath {
+            path: path.to_path_buf(),
+            reason: "path contains NUL".into(),
+        }
+    })?;
+    let fd = unsafe {
+        libc::open(
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW,
+        )
+    };
+    if fd < 0 {
+        return Err(LocaleCatalogLoadError::Read {
+            path: path.to_path_buf(),
+            source: std::io::Error::last_os_error(),
+        });
+    }
+    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+}
+
+#[cfg(unix)]
+fn open_catalog_directory_at(
+    parent: &std::fs::File,
+    component: &std::ffi::OsStr,
+    path: &Path,
+) -> Result<std::fs::File, LocaleCatalogLoadError> {
+    let name =
+        CString::new(component.as_bytes()).map_err(|_| LocaleCatalogLoadError::UnsafePath {
+            path: path.to_path_buf(),
+            reason: "path contains NUL".into(),
+        })?;
+    let fd = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW,
+            0,
+        )
+    };
+    if fd < 0 {
+        return Err(LocaleCatalogLoadError::Read {
+            path: path.to_path_buf(),
+            source: std::io::Error::last_os_error(),
+        });
+    }
+    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+}
+
+#[cfg(unix)]
+fn open_catalog_file_at(
+    parent: &std::fs::File,
+    component: &std::ffi::OsStr,
+    path: &Path,
+) -> Result<std::fs::File, LocaleCatalogLoadError> {
+    let name =
+        CString::new(component.as_bytes()).map_err(|_| LocaleCatalogLoadError::UnsafePath {
+            path: path.to_path_buf(),
+            reason: "path contains NUL".into(),
+        })?;
+    let fd = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+            0,
+        )
+    };
+    if fd < 0 {
+        return Err(LocaleCatalogLoadError::Read {
+            path: path.to_path_buf(),
+            source: std::io::Error::last_os_error(),
+        });
+    }
+    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+}
+
+#[cfg(unix)]
+fn read_catalog_utf8_bounded(
+    file: std::fs::File,
+    path: &Path,
+    max_bytes: usize,
+) -> Result<String, LocaleCatalogLoadError> {
+    if !file
+        .metadata()
+        .map_err(|source| LocaleCatalogLoadError::Read {
+            path: path.to_path_buf(),
+            source,
+        })?
+        .file_type()
+        .is_file()
+    {
+        return Err(LocaleCatalogLoadError::NotRegularFile {
+            path: path.to_path_buf(),
+        });
+    }
+    let mut bytes = Vec::new();
+    file.take(max_bytes.saturating_add(1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|source| LocaleCatalogLoadError::Read {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    if bytes.len() > max_bytes {
+        return Err(LocaleCatalogLoadError::TooLarge {
+            path: path.to_path_buf(),
+            max_bytes,
+        });
+    }
+    String::from_utf8(bytes).map_err(|_| LocaleCatalogLoadError::InvalidUtf8 {
+        path: path.to_path_buf(),
+    })
+}
+
 /// A graph-authorized catalog input. Language-pack sources target another
 /// module, while module-bundled sources target their owning module.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,6 +463,7 @@ pub struct CatalogSource {
     pub locale: String,
     pub path: PathBuf,
     pub kind: CatalogSourceKind,
+    handle: CatalogSourceHandle,
 }
 
 impl CatalogSource {
@@ -202,15 +473,50 @@ impl CatalogSource {
         locale: impl Into<String>,
         path: PathBuf,
     ) -> Self {
+        Self::try_module(module_id, contribution_id, locale, path)
+            .expect("catalog source path must name a file")
+    }
+
+    pub fn try_module(
+        module_id: impl Into<String>,
+        contribution_id: impl Into<String>,
+        locale: impl Into<String>,
+        path: PathBuf,
+    ) -> Result<Self, String> {
+        let relative_path = path
+            .file_name()
+            .ok_or_else(|| format!("catalog source path has no filename: {}", path.display()))?;
+        let module_root = path
+            .parent()
+            .filter(|root| !root.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        Self::module_from_root(
+            module_id,
+            contribution_id,
+            locale,
+            module_root.to_path_buf(),
+            relative_path,
+        )
+    }
+
+    pub fn module_from_root(
+        module_id: impl Into<String>,
+        contribution_id: impl Into<String>,
+        locale: impl Into<String>,
+        module_root: impl Into<PathBuf>,
+        relative_path: impl AsRef<Path>,
+    ) -> Result<Self, String> {
         let module_id = module_id.into();
-        Self {
+        let handle = CatalogSourceHandle::new(module_root, relative_path)?;
+        Ok(Self {
             owner_module_id: module_id.clone(),
             target_module_id: module_id,
             contribution_id: contribution_id.into(),
             locale: locale.into(),
-            path,
+            path: handle.candidate_path(),
             kind: CatalogSourceKind::ModuleBundled,
-        }
+            handle,
+        })
     }
 
     pub fn language_pack(
@@ -220,14 +526,58 @@ impl CatalogSource {
         locale: impl Into<String>,
         path: PathBuf,
     ) -> Self {
-        Self {
+        Self::try_language_pack(
+            pack_module_id,
+            target_module_id,
+            contribution_id,
+            locale,
+            path,
+        )
+        .expect("catalog source path must name a file")
+    }
+
+    pub fn try_language_pack(
+        pack_module_id: impl Into<String>,
+        target_module_id: impl Into<String>,
+        contribution_id: impl Into<String>,
+        locale: impl Into<String>,
+        path: PathBuf,
+    ) -> Result<Self, String> {
+        let relative_path = path
+            .file_name()
+            .ok_or_else(|| format!("catalog source path has no filename: {}", path.display()))?;
+        let module_root = path
+            .parent()
+            .filter(|root| !root.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        Self::language_pack_from_root(
+            pack_module_id,
+            target_module_id,
+            contribution_id,
+            locale,
+            module_root.to_path_buf(),
+            relative_path,
+        )
+    }
+
+    pub fn language_pack_from_root(
+        pack_module_id: impl Into<String>,
+        target_module_id: impl Into<String>,
+        contribution_id: impl Into<String>,
+        locale: impl Into<String>,
+        module_root: impl Into<PathBuf>,
+        relative_path: impl AsRef<Path>,
+    ) -> Result<Self, String> {
+        let handle = CatalogSourceHandle::new(module_root, relative_path)?;
+        Ok(Self {
             owner_module_id: pack_module_id.into(),
             target_module_id: target_module_id.into(),
             contribution_id: contribution_id.into(),
             locale: locale.into(),
-            path,
+            path: handle.candidate_path(),
             kind: CatalogSourceKind::LanguagePack,
-        }
+            handle,
+        })
     }
 }
 
@@ -244,6 +594,15 @@ pub struct CatalogProvenance {
     pub path: PathBuf,
 }
 
+impl CatalogProvenance {
+    pub fn kind_name(&self) -> &'static str {
+        match self.kind {
+            CatalogSourceKind::ModuleBundled => "module",
+            CatalogSourceKind::LanguagePack => "language-pack",
+        }
+    }
+}
+
 /// The one resolved representation shared by localized metadata and runtime
 /// lookups. `text` is always display-safe: it is the winning translation, the
 /// declared fallback, or the visible `!!key` miss marker. A missing result
@@ -255,6 +614,7 @@ pub struct LocalizedTextResolution {
     pub key: Option<String>,
     pub text: String,
     pub fallback: Option<String>,
+    pub field_path: Option<String>,
     pub source: Option<CatalogProvenance>,
     pub snapshot_revision: u64,
     pub missing: bool,
@@ -271,6 +631,7 @@ impl LocalizedTextResolution {
             key: None,
             text: text.into(),
             fallback: None,
+            field_path: None,
             source: None,
             snapshot_revision: revision,
             missing: false,
@@ -279,6 +640,33 @@ impl LocalizedTextResolution {
 
     pub fn missing_marker(key: &str) -> String {
         format!("!!{key}")
+    }
+
+    /// Build the canonical visible result for a key that was not supplied by
+    /// the active snapshot. Consumers can enqueue this value without having
+    /// to reconstruct the owning module or snapshot identity later.
+    pub fn missing(
+        owner_module_id: impl Into<String>,
+        key: impl Into<String>,
+        fallback: Option<String>,
+        snapshot_revision: u64,
+    ) -> Self {
+        let key = key.into();
+        Self {
+            owner_module_id: owner_module_id.into(),
+            text: Self::missing_marker(&key),
+            key: Some(key),
+            fallback,
+            field_path: None,
+            source: None,
+            snapshot_revision,
+            missing: true,
+        }
+    }
+
+    pub fn with_field_path(mut self, field_path: impl Into<String>) -> Self {
+        self.field_path = Some(field_path.into());
+        self
     }
 }
 
@@ -532,6 +920,7 @@ impl ModuleTranslator<'_> {
             key: Some(key.to_owned()),
             text,
             fallback: fallback.map(str::to_owned),
+            field_path: None,
             missing: source.is_none(),
             source,
             snapshot_revision: self.snapshot_revision(),
@@ -554,6 +943,7 @@ impl ModuleTranslator<'_> {
             key: Some(key.to_owned()),
             text,
             fallback: fallback.map(str::to_owned),
+            field_path: None,
             missing: source.is_none(),
             source,
             snapshot_revision: self.snapshot_revision(),
@@ -677,14 +1067,18 @@ impl LocaleEngine {
         let sources = sources
             .iter()
             .map(|(module_id, locale, path)| {
-                CatalogSource::module(
+                CatalogSource::try_module(
                     module_id.clone(),
                     locale.clone(),
                     locale.clone(),
                     path.clone(),
                 )
+                .map_err(|reason| LocaleCatalogLoadError::UnsafePath {
+                    path: path.clone(),
+                    reason,
+                })
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
         self.prepare_catalog_snapshot(&sources, &HashMap::new())
     }
 
@@ -722,12 +1116,9 @@ impl LocaleEngine {
                     context: format!("catalog {}", source.path.display()),
                 }
             })?;
-            let content = std::fs::read_to_string(&source.path).map_err(|source_error| {
-                LocaleCatalogLoadError::Read {
-                    path: source.path.clone(),
-                    source: source_error,
-                }
-            })?;
+            let content = source
+                .handle
+                .read_utf8_bounded(DEFAULT_MAX_CATALOG_SOURCE_BYTES)?;
             let value = serde_json::from_str(&content).map_err(|source_error| {
                 LocaleCatalogLoadError::Parse {
                     path: source.path.clone(),
@@ -779,6 +1170,25 @@ impl LocaleEngine {
             snapshot: Arc::new(snapshot),
             diagnostics,
         })
+    }
+
+    /// Prepare a complete catalog candidate away from the shell thread.
+    ///
+    /// The engine is cheap to clone because its current snapshot is shared;
+    /// the worker owns the graph-authorized source handles and returns an
+    /// immutable candidate for the caller to commit atomically.
+    pub fn prepare_catalog_snapshot_off_thread(
+        &self,
+        sources: Vec<CatalogSource>,
+        module_defaults: HashMap<String, String>,
+    ) -> Result<PreparedLocaleCatalogSnapshot, LocaleCatalogLoadError> {
+        let engine = self.clone();
+        std::thread::Builder::new()
+            .name("mesh-locale-catalog".into())
+            .spawn(move || engine.prepare_catalog_snapshot(&sources, &module_defaults))
+            .map_err(|source| LocaleCatalogLoadError::WorkerSpawn { source })?
+            .join()
+            .map_err(|_| LocaleCatalogLoadError::WorkerPanic)?
     }
 
     pub fn try_set_locale(&mut self, locale: impl AsRef<str>) -> Result<bool, LocaleError> {
@@ -1395,6 +1805,20 @@ mod tests {
     }
 
     #[test]
+    fn system_locale_normalization_removes_posix_details() {
+        assert_eq!(
+            normalize_system_locale("sk_SK.UTF-8@euro"),
+            Some("sk-SK".to_string())
+        );
+        assert_eq!(normalize_system_locale("C.UTF-8"), None);
+        assert_eq!(normalize_system_locale("POSIX"), None);
+        assert_eq!(
+            normalize_system_locale(" zh-Hant "),
+            Some("zh-Hant".to_string())
+        );
+    }
+
+    #[test]
     fn typed_catalogs_keep_valid_siblings_and_resolve_variants() {
         let compiled = compile_catalog(
             "sk",
@@ -1565,6 +1989,7 @@ mod tests {
         assert_eq!(translated.key.as_deref(), Some("hello"));
         assert_eq!(translated.text, "Hello");
         assert_eq!(translated.fallback.as_deref(), Some("Fallback"));
+        assert_eq!(translated.field_path, None);
         assert!(!translated.missing);
         assert_eq!(translated.snapshot_revision, 1);
         assert_eq!(
@@ -1584,6 +2009,68 @@ mod tests {
         assert_eq!(marker.text, "!!missing");
         assert!(marker.missing);
         assert_eq!(marker.snapshot_revision, 1);
+        assert_eq!(
+            marker
+                .with_field_path("mesh.keybinds.mute.label")
+                .field_path,
+            Some("mesh.keybinds.mute.label".into())
+        );
+    }
+
+    #[test]
+    fn catalog_source_handle_rejects_escape_paths() {
+        assert!(CatalogSourceHandle::new("/modules/example", "../outside.json").is_err());
+        assert!(CatalogSourceHandle::new("/modules/example", "/outside.json").is_err());
+        assert!(CatalogSourceHandle::new("/modules/example", "config/i18n/en.json").is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn catalog_source_handle_is_bounded_utf8_and_symlink_safe() {
+        use std::os::unix::fs::symlink;
+
+        let root =
+            std::env::temp_dir().join(format!("mesh-locale-source-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("config/i18n")).unwrap();
+        std::fs::write(root.join("config/i18n/en.json"), "{\"hello\":\"Hello\"}").unwrap();
+
+        let source = CatalogSourceHandle::new(&root, "config/i18n/en.json").unwrap();
+        assert_eq!(
+            source.read_utf8_bounded(1024).unwrap(),
+            "{\"hello\":\"Hello\"}"
+        );
+        assert!(matches!(
+            source.read_utf8_bounded(4),
+            Err(LocaleCatalogLoadError::TooLarge { .. })
+        ));
+
+        std::fs::write(root.join("config/i18n/binary.json"), [0xff, 0xfe]).unwrap();
+        let binary = CatalogSourceHandle::new(&root, "config/i18n/binary.json").unwrap();
+        assert!(matches!(
+            binary.read_utf8_bounded(1024),
+            Err(LocaleCatalogLoadError::InvalidUtf8 { .. })
+        ));
+
+        symlink(root.join("config/i18n"), root.join("link")).unwrap();
+        let escaped = CatalogSourceHandle::new(&root, "link/en.json").unwrap();
+        assert!(escaped.read_utf8_bounded(1024).is_err());
+
+        symlink(
+            root.join("config/i18n/en.json"),
+            root.join("config/i18n/link.json"),
+        )
+        .unwrap();
+        let linked = CatalogSourceHandle::new(&root, "config/i18n/link.json").unwrap();
+        assert!(linked.read_utf8_bounded(1024).is_err());
+
+        let directory = CatalogSourceHandle::new(&root, "config/i18n").unwrap();
+        assert!(matches!(
+            directory.read_utf8_bounded(1024),
+            Err(LocaleCatalogLoadError::NotRegularFile { .. })
+        ));
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     fn test_catalog_path(name: &str) -> std::path::PathBuf {
@@ -1654,6 +2141,35 @@ mod tests {
                 .module_translator("@mesh/example")
                 .translate("broken"),
             None
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn catalog_preparation_off_thread_returns_an_atomic_candidate() {
+        let path = test_catalog_path("worker");
+        std::fs::write(&path, serde_json::json!({ "hello": "Hello" }).to_string()).unwrap();
+        let engine = LocaleEngine::new("en");
+        let prepared = engine
+            .prepare_catalog_snapshot_off_thread(
+                vec![CatalogSource::module(
+                    "@mesh/example",
+                    "en",
+                    "en",
+                    path.clone(),
+                )],
+                HashMap::new(),
+            )
+            .unwrap();
+
+        assert_eq!(prepared.snapshot().revision(), 1);
+        let mut committed = engine;
+        committed.replace_catalog_snapshot(prepared.snapshot());
+        assert_eq!(
+            committed
+                .module_translator("@mesh/example")
+                .translate("hello"),
+            Some("Hello")
         );
         let _ = std::fs::remove_file(path);
     }

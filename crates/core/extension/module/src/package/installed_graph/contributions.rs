@@ -1,6 +1,6 @@
 use super::super::{
-    ModuleKind, ModuleManifest, ModuleManifestError, PathContribution, contained_path,
-    dependency_spec_to_string, validate_relative_path,
+    ModuleKind, ModuleManifest, ModuleManifestError, PathContribution, ThemeModeMetadata,
+    contained_path, dependency_spec_to_string, validate_relative_path,
 };
 use super::*;
 use crate::manifest;
@@ -351,7 +351,7 @@ pub struct ContributedTheme {
     pub label: Option<manifest::LocalizedText>,
     pub modes: HashMap<String, String>,
     pub default_mode: Option<String>,
-    pub mode_metadata: HashMap<String, manifest::ThemeModeMetadata>,
+    pub mode_metadata: HashMap<String, ThemeModeMetadata>,
 }
 
 impl ContributedTheme {
@@ -727,5 +727,5 @@ pub struct ContributedIconPack {
     pub source: ContributionSource,
     pub module_id: String,
     pub id: String,
-    pub mappings: HashMap<String, String>,
+    pub mappings: HashMap<String, crate::manifest::IconMappingTarget>,
 }

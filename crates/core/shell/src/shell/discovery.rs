@@ -25,88 +25,196 @@ fn load_installed_module_graph_candidate(
 
 pub(in crate::shell) fn graph_i18n_catalog_sources(
     graph: &InstalledModuleGraph,
-) -> (
-    Vec<mesh_core_locale::CatalogSource>,
-    HashMap<String, String>,
-) {
-    let selected_packs = graph
-        .language_pack_chain()
-        .iter()
-        .cloned()
-        .collect::<HashSet<_>>();
-    let mut bundled = graph
-        .contributed_i18n()
-        .iter()
-        .filter(|catalog| {
-            catalog.target_module_id == catalog.module_id
-                && !graph
-                    .module(&catalog.module_id)
-                    .is_some_and(|module| module.kind == mesh_core_module::ModuleKind::LanguagePack)
-        })
-        .collect::<Vec<_>>();
-    bundled.sort_by(|left, right| {
-        left.target_module_id
-            .cmp(&right.target_module_id)
-            .then_with(|| left.locale.cmp(&right.locale))
-            .then_with(|| left.id.cmp(&right.id))
-    });
+) -> Result<
+    (
+        Vec<mesh_core_locale::CatalogSource>,
+        HashMap<String, String>,
+    ),
+    String,
+> {
+    graph.locale_catalog_sources()
+}
 
-    let mut sources = bundled
-        .into_iter()
-        .filter_map(|catalog| {
-            let module_dir = catalog.source.manifest_path.parent()?;
-            Some(mesh_core_locale::CatalogSource::module(
-                catalog.module_id.clone(),
-                catalog.id.clone(),
-                catalog.locale.clone(),
-                module_dir.join(&catalog.path),
-            ))
-        })
-        .collect::<Vec<_>>();
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::shell) struct ResourceAsset {
+    pub module_id: String,
+    pub id: String,
+    pub handle: mesh_core_resources::ResourceAssetHandle,
+}
 
-    for pack_module_id in graph.language_pack_chain() {
-        let mut pack_catalogs = graph
-            .contributed_i18n()
-            .iter()
-            .filter(|catalog| {
-                catalog.module_id == *pack_module_id
-                    && selected_packs.contains(&catalog.module_id)
-                    && catalog.target_module_id != catalog.module_id
-                    && graph
-                        .module(&catalog.target_module_id)
-                        .is_some_and(|module| module.enabled)
-            })
-            .collect::<Vec<_>>();
-        pack_catalogs.sort_by(|left, right| left.id.cmp(&right.id));
-        for catalog in pack_catalogs {
-            let Some(module_dir) = catalog.source.manifest_path.parent() else {
-                continue;
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(in crate::shell) struct ResourceSnapshot {
+    pub revision: u64,
+    pub icon_pack_chain: Vec<String>,
+    pub font_pack_chain: Vec<String>,
+    pub icon_assets: Vec<ResourceAsset>,
+    pub font_assets: Vec<ResourceAsset>,
+}
+
+pub(in crate::shell) struct PreparedResourceSnapshot {
+    pub snapshot: ResourceSnapshot,
+    pub icon_packs: Vec<mesh_core_icon::IconPackBindings>,
+    pub frontends: Vec<(String, mesh_core_icon::FrontendIconBindings)>,
+}
+
+impl Shell {
+    pub(in crate::shell) fn prepare_resource_snapshot(
+        &self,
+        graph: &InstalledModuleGraph,
+        settings_store: &SettingsStore,
+    ) -> Result<PreparedResourceSnapshot, ShellRunError> {
+        let icon_chain = graph.icon_pack_chain().to_vec();
+        let font_chain = graph.font_pack_chain().to_vec();
+        let icon_ids = icon_chain.iter().collect::<std::collections::HashSet<_>>();
+        let font_ids = font_chain.iter().collect::<std::collections::HashSet<_>>();
+        let asset_paths =
+            |resources: &[mesh_core_module::package::ContributedPathResource],
+             selected: &std::collections::HashSet<&String>| {
+                resources
+                    .iter()
+                    .filter(|resource| selected.contains(&resource.module_id))
+                    .map(|resource| {
+                        let root = resource.source.manifest_path.parent().ok_or_else(|| {
+                            ShellRunError::FrontendComposition {
+                                message: format!(
+                                    "resource {} has no owning module root",
+                                    resource.source.scoped_id
+                                ),
+                            }
+                        })?;
+                        let handle =
+                            mesh_core_resources::ResourceAssetHandle::new(root, &resource.path)
+                                .map_err(|error| ShellRunError::FrontendComposition {
+                                    message: format!(
+                                        "resource {} is unsafe: {error}",
+                                        resource.source.scoped_id
+                                    ),
+                                })?;
+                        handle
+                            .read_bounded(mesh_core_resources::DEFAULT_MAX_RESOURCE_BYTES)
+                            .map_err(|error| ShellRunError::FrontendComposition {
+                                message: format!(
+                                    "resource {} is unreadable: {error}",
+                                    resource.source.scoped_id
+                                ),
+                            })?;
+                        Ok(ResourceAsset {
+                            module_id: resource.module_id.clone(),
+                            id: resource.id.clone(),
+                            handle,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, ShellRunError>>()
             };
-            sources.push(mesh_core_locale::CatalogSource::language_pack(
-                catalog.module_id.clone(),
-                catalog.target_module_id.clone(),
-                catalog.id.clone(),
-                catalog.locale.clone(),
-                module_dir.join(&catalog.path),
-            ));
-        }
-    }
+        let icon_assets = asset_paths(graph.contributed_icons(), &icon_ids)?;
+        let font_assets = asset_paths(graph.contributed_fonts(), &font_ids)?;
 
-    let defaults = graph
-        .modules()
-        .into_iter()
-        .filter(|module| module.enabled)
-        .filter_map(|module| {
-            module
+        let mut pack_inputs = Vec::new();
+        for module_id in &icon_chain {
+            let module =
+                graph
+                    .module(module_id)
+                    .ok_or_else(|| ShellRunError::FrontendComposition {
+                        message: format!("icon-pack {module_id} disappeared from the graph"),
+                    })?;
+            let root = module.manifest_path.parent().ok_or_else(|| {
+                ShellRunError::FrontendComposition {
+                    message: format!("icon-pack {module_id} has no module root"),
+                }
+            })?;
+            let section = module.manifest.mesh.icon_pack.clone().ok_or_else(|| {
+                ShellRunError::FrontendComposition {
+                    message: format!(
+                        "icon-pack {module_id} is selected but has no mesh.icon_pack declaration"
+                    ),
+                }
+            })?;
+            pack_inputs.push((module_id.clone(), root.to_path_buf(), section));
+        }
+        let worker = std::thread::Builder::new()
+            .name("mesh-resource-prepare".into())
+            .spawn(move || {
+                pack_inputs
+                    .into_iter()
+                    .map(|(module_id, root, section)| {
+                        prepare_icon_pack_bindings(&module_id, &root, &section)
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .map_err(|error| ShellRunError::FrontendComposition {
+                message: format!("failed to start resource preparation: {error}"),
+            })?;
+        let icon_packs = worker
+            .join()
+            .map_err(|_| ShellRunError::FrontendComposition {
+                message: "resource preparation worker panicked".into(),
+            })?
+            .map_err(|error| ShellRunError::FrontendComposition { message: error })?;
+
+        let mut frontends = Vec::new();
+        for module in graph.enabled_modules() {
+            if module.kind != ModuleKind::Frontend {
+                continue;
+            }
+            let overrides =
+                ModuleSettingsOverrides::from_namespace(&settings_store.namespace(&module.id));
+            let author = module
                 .manifest
                 .mesh
-                .i18n
-                .default_locale
-                .clone()
-                .map(|locale| (module.id.clone(), locale))
+                .icons
+                .as_ref()
+                .map(|icons| icons.overrides.clone())
+                .unwrap_or_default();
+            let ignore_default_frontend = module
+                .manifest
+                .mesh
+                .icons
+                .as_ref()
+                .is_some_and(|icons| icons.ignore_shell_default);
+            let user = overrides.icons.as_ref();
+            frontends.push((
+                module.id.clone(),
+                mesh_core_icon::FrontendIconBindings {
+                    declared_pack_chain: module.manifest.mesh.uses.resources.icons.clone(),
+                    author_overrides: author,
+                    user_pack_chain: user.and_then(|icons| icons.use_packs.clone()),
+                    user_overrides: user
+                        .map(|icons| icons.overrides.clone())
+                        .unwrap_or_default(),
+                    ignore_shell_default_frontend: ignore_default_frontend,
+                    ignore_shell_default_user: user.is_some_and(|icons| icons.ignore_shell_default),
+                },
+            ));
+        }
+
+        Ok(PreparedResourceSnapshot {
+            snapshot: ResourceSnapshot {
+                revision: self.resource_snapshot.revision.saturating_add(1),
+                icon_pack_chain: icon_chain,
+                font_pack_chain: font_chain,
+                icon_assets,
+                font_assets,
+            },
+            icon_packs,
+            frontends,
         })
-        .collect();
-    (sources, defaults)
+    }
+
+    pub(in crate::shell) fn commit_resource_snapshot(
+        &mut self,
+        prepared: &PreparedResourceSnapshot,
+    ) -> Result<(), ShellRunError> {
+        mesh_core_icon::replace_default_bindings(
+            prepared.icon_packs.clone(),
+            prepared.frontends.clone(),
+            self.settings.icons.default_pack.clone(),
+        )
+        .map_err(|error| ShellRunError::FrontendComposition {
+            message: format!("failed to publish resource snapshot: {error}"),
+        })?;
+        self.resource_snapshot = Arc::new(prepared.snapshot.clone());
+        Ok(())
+    }
 }
 
 fn log_locale_catalog_diagnostics(diagnostics: &[mesh_core_locale::CatalogSourceDiagnostics]) {
@@ -503,7 +611,7 @@ impl Shell {
         // it is reported and skipped, never fatal: the shell starts on declared
         // defaults with the reason on stderr.
         mesh_core_config::log_settings_diagnostics("settings", settings_store.diagnostics());
-        let settings = settings_store.shell().clone();
+        let settings = mesh_core_config::resolve_shell_locale_settings(settings_store.shell());
 
         // Discover and register XDG icon themes installed on the system.
         // Icon-pack binding modules reference them by name in their
@@ -610,6 +718,7 @@ impl Shell {
                 ("locale", "string"),
                 ("chain", "string[]"),
                 ("direction", "string"),
+                ("policy", "string"),
                 ("revision", "string"),
             ],
         ));
@@ -763,6 +872,7 @@ impl Shell {
             capability_policy,
             effective_capabilities: Arc::new(HashMap::new()),
             installed_module_graph: None,
+            resource_snapshot: Arc::new(ResourceSnapshot::default()),
             active_profile_id,
             modules: HashMap::new(),
             frontend_catalog: FrontendCatalogHandle::default(),
@@ -893,9 +1003,10 @@ impl Shell {
         graph: &InstalledModuleGraph,
     ) -> Result<LocaleEngine, ShellRunError> {
         let mut candidate = self.locale.clone();
-        let (sources, defaults) = graph_i18n_catalog_sources(graph);
+        let (sources, defaults) =
+            graph_i18n_catalog_sources(graph).map_err(ShellRunError::LocaleCatalog)?;
         let prepared = candidate
-            .prepare_catalog_snapshot(&sources, &defaults)
+            .prepare_catalog_snapshot_off_thread(sources, defaults)
             .map_err(|error| ShellRunError::LocaleCatalog(error.to_string()))?;
         log_locale_catalog_diagnostics(prepared.diagnostics());
         candidate.replace_catalog_snapshot(prepared.snapshot());
@@ -908,9 +1019,10 @@ impl Shell {
         graph: &InstalledModuleGraph,
     ) -> Result<LocaleEngine, ShellRunError> {
         let mut candidate = self.prepare_locale_selection_for_settings(settings)?;
-        let (sources, defaults) = graph_i18n_catalog_sources(graph);
+        let (sources, defaults) =
+            graph_i18n_catalog_sources(graph).map_err(ShellRunError::LocaleCatalog)?;
         let prepared = candidate
-            .prepare_catalog_snapshot(&sources, &defaults)
+            .prepare_catalog_snapshot_off_thread(sources, defaults)
             .map_err(|error| ShellRunError::LocaleCatalog(error.to_string()))?;
         log_locale_catalog_diagnostics(prepared.diagnostics());
         candidate.replace_catalog_snapshot(prepared.snapshot());
@@ -921,9 +1033,10 @@ impl Shell {
         &self,
         settings: &ShellSettings,
     ) -> Result<LocaleEngine, ShellRunError> {
+        let settings = mesh_core_config::resolve_shell_locale_settings(settings);
         let requested = mesh_core_locale::LocaleSelection::try_new(
-            settings.i18n.locale.clone(),
-            settings.i18n.fallback_locale.clone(),
+            settings.i18n.locale,
+            settings.i18n.fallback_locale,
             1,
         )
         .map_err(|error| ShellRunError::LocaleCatalog(error.to_string()))?;
@@ -1025,7 +1138,7 @@ impl Shell {
         let mut settings = self.settings_store.as_ref().clone();
         match register_graph_settings_schemas(&mut settings, graph) {
             Ok(()) => {
-                self.settings = settings.shell().clone();
+                self.settings = mesh_core_config::resolve_shell_locale_settings(settings.shell());
                 self.settings_store = Arc::new(settings);
                 mesh_core_config::log_settings_diagnostics(
                     "registered settings schemas",
@@ -1064,13 +1177,6 @@ impl Shell {
             loaded.manifest.package.module_type,
             loaded.source
         );
-        register_module_icon_pack(&id, dir, loaded.manifest.assets.as_ref());
-        register_icon_pack_module(&id, dir, loaded.manifest.icon_pack.as_ref());
-        // Per-module icon overrides live in the module's own settings
-        // namespace, alongside its surface and prop overrides.
-        let icon_overrides =
-            ModuleSettingsOverrides::from_namespace(&self.settings_store.namespace(&id));
-        register_frontend_icon_bindings(&id, &loaded.manifest, icon_overrides.icons.as_ref());
         self.modules.insert(
             id,
             ModuleInstance::new(
@@ -1084,6 +1190,8 @@ impl Shell {
 
     pub fn resolve_modules(&mut self) -> Result<(), ShellRunError> {
         let active_graph = self.load_installed_module_graph_cached()?.clone();
+        let resources = self.prepare_resource_snapshot(&active_graph, &self.settings_store)?;
+        self.commit_resource_snapshot(&resources)?;
         self.sync_module_graph_health(&active_graph);
         let mut effective_capabilities = HashMap::with_capacity(self.modules.len());
         for (module_id, module) in &self.modules {

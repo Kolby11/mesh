@@ -799,9 +799,36 @@ fn material_symbols_module_parses_with_font_requirement() {
     assert!(dir.join("LICENSE.google-material-icons").is_file());
     assert!(ip.axes.fill);
     assert_eq!(
-        ip.mappings.get("audio-volume-high").map(String::as_str),
+        ip.mappings
+            .get("audio-volume-high")
+            .map(|mapping| mapping.target.as_str()),
         Some("ms/volume_up")
     );
+}
+
+#[test]
+fn icon_pack_mappings_preserve_typed_color_policy() {
+    let section: IconPackSection = serde_json::from_value(serde_json::json!({
+        "id": "brand",
+        "kind": "file",
+        "covers": {"mesh.brand": ">=1.0"},
+        "mappings": {
+            "logo": {"target": "brand/logo.svg", "multicolor": true},
+            "settings": "hicolor/preferences-system"
+        },
+        "vocabularies": {
+            "@community/weather": {
+                "weather-clear": {"target": "brand/sunny.svg", "multicolor": true}
+            }
+        }
+    }))
+    .unwrap();
+
+    assert_eq!(section.kind, IconPackSourceKind::File);
+    assert_eq!(section.covers["mesh.brand"], ">=1.0");
+    assert!(section.mappings["logo"].multicolor);
+    assert!(!section.mappings["settings"].multicolor);
+    assert!(section.vocabularies["@community/weather"]["weather-clear"].multicolor);
 }
 
 #[test]
@@ -815,11 +842,14 @@ fn icons_default_module_parses_as_icon_pack() {
         icon_pack
             .mappings
             .get("audio-volume-high")
-            .map(String::as_str),
+            .map(|mapping| mapping.target.as_str()),
         Some("hicolor/audio-volume-high")
     );
     assert_eq!(
-        icon_pack.mappings.get("settings").map(String::as_str),
+        icon_pack
+            .mappings
+            .get("settings")
+            .map(|mapping| mapping.target.as_str()),
         Some("hicolor/preferences-system")
     );
 }

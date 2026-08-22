@@ -233,6 +233,27 @@ impl Diagnostics {
         )
     }
 
+    pub fn record_optional_missing_icon(
+        &self,
+        semantic_name: impl Into<String>,
+        tried: Vec<String>,
+    ) -> bool {
+        let semantic_name = semantic_name.into();
+        let details = if tried.is_empty() {
+            "no configured candidates".to_string()
+        } else {
+            format!("tried {}", tried.join(", "))
+        };
+        self.record_issue(
+            format!("missing-optional-icon:{semantic_name}"),
+            IssueSeverity::Warning,
+            format!(
+                "missing optional icon '{semantic_name}' for module '{}': {details}",
+                self.module_id
+            ),
+        )
+    }
+
     pub fn record_lifecycle_error(
         &self,
         provider_id: impl Into<String>,

@@ -534,7 +534,7 @@ impl Shell {
                 store.diagnostics(),
             ),
         );
-        let new_settings = store.shell().clone();
+        let new_settings = mesh_core_config::resolve_shell_locale_settings(store.shell());
 
         let old_theme = self.settings.theme.clone();
         let old_i18n = self.settings.i18n.clone();
@@ -542,7 +542,8 @@ impl Shell {
         let old_fonts = self.settings.fonts.clone();
         let new_i18n = &new_settings.i18n;
         let locale_changed = old_i18n.locale != new_i18n.locale
-            || old_i18n.fallback_locale != new_i18n.fallback_locale;
+            || old_i18n.fallback_locale != new_i18n.fallback_locale
+            || old_i18n.policy != new_i18n.policy;
 
         let prepared_locale = if locale_changed {
             let result = if let Some(graph) = self.installed_module_graph.as_ref() {
@@ -578,14 +579,15 @@ impl Shell {
                         .is_some()
                 }) {
                 match prepare_theme_for_graph(&new_settings, graph) {
-                    Ok(candidate) => candidate,
+                    Ok((theme, watch)) => (self.theme.with_active(theme), watch),
                     Err(error) => {
                         self.record_theme_reload_failure(&error);
                         return Ok(requests);
                     }
                 }
             } else {
-                load_active_theme(&new_settings)
+                let (engine, watch) = load_active_theme(&new_settings);
+                (engine, watch)
             };
             let active_theme_id = theme.active().id.clone();
             tracing::info!(
@@ -691,7 +693,8 @@ impl Shell {
 
         tracing::info!("active locale changed to '{}'", locale.current());
         self.settings_store = Arc::new(settings);
-        self.settings = self.settings_store.shell().clone();
+        self.settings =
+            mesh_core_config::resolve_shell_locale_settings(self.settings_store.shell());
         self.locale = locale;
         self.settings_watch.modified_at = std::fs::metadata(&self.settings_watch.path)
             .ok()
@@ -736,6 +739,7 @@ impl Shell {
             .map_err(|error| ShellRunError::LocaleCatalog(error.to_string()))?;
             if normalized.active() == self.locale.current()
                 && normalized.fallback() == self.locale.fallback_locale()
+                && self.settings.i18n.policy == mesh_core_config::LocalePolicy::Manual
             {
                 return Ok(None);
             }
@@ -748,6 +752,7 @@ impl Shell {
                 shell,
                 &serde_json::json!({
                     "i18n": {
+                        "policy": "manual",
                         "locale": normalized.active(),
                         "fallback_locale": normalized.fallback(),
                     }
@@ -769,6 +774,7 @@ impl Shell {
             .map_err(|error| ShellRunError::LocaleCatalog(error.to_string()))?;
             if normalized.active() == self.locale.current()
                 && normalized.fallback() == self.locale.fallback_locale()
+                && self.settings.i18n.policy == mesh_core_config::LocalePolicy::Manual
             {
                 return Ok(None);
             }
@@ -777,6 +783,7 @@ impl Shell {
                 mesh_core_config::SHELL_NAMESPACE,
                 &serde_json::json!({
                     "i18n": {
+                        "policy": "manual",
                         "locale": normalized.active(),
                         "fallback_locale": normalized.fallback(),
                     }
@@ -827,6 +834,7 @@ impl Shell {
         let locale = selection.active().to_string();
         let chain = selection.chain().to_vec();
         let direction = selection.direction().as_str();
+        let policy = self.settings.i18n.policy.as_str();
         let revision = selection.revision().to_string();
         // As with theme, the shell supplies the host-derived snapshot while
         // the selected provider owns the interface state observed by modules.
@@ -839,6 +847,7 @@ impl Shell {
                 "current": locale,
                 "chain": chain,
                 "direction": direction,
+                "policy": policy,
                 "revision": revision,
             }),
         })

@@ -224,10 +224,7 @@ impl InterfaceRegistry {
                 .map(|(name, providers)| {
                     (
                         name.clone(),
-                        providers
-                            .iter()
-                            .map(|provider| (**provider).clone())
-                            .collect(),
+                        providers.iter().map(|provider| provider.clone()).collect(),
                     )
                 })
                 .collect(),

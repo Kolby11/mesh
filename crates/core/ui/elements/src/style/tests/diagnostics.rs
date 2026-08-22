@@ -188,6 +188,49 @@ fn animation_variable_duration_resolves_from_theme() {
 }
 
 #[test]
+fn transition_hyphenated_animation_curve_resolves_from_theme() {
+    let mut theme = mesh_core_theme::Theme::new("animation-test", "Animation test");
+    theme.tokens_mut().extend([
+        (
+            "animation.duration.short".into(),
+            mesh_core_theme::TokenValue::Number(150.0),
+        ),
+        (
+            "animation.curves.bezier.emphasized-decelerate".into(),
+            mesh_core_theme::TokenValue::String("cubic-bezier(0.05, 0.7, 0.1, 1)".into()),
+        ),
+    ]);
+    let resolver = StyleResolver::new(&theme);
+    let rules = vec![StyleRule {
+        selector: Selector::Class("panel".to_string()),
+        declarations: vec![Declaration {
+            property: "transition".to_string(),
+            value: StyleValue::Literal(
+                "opacity var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate)"
+                    .into(),
+            ),
+        }],
+        container_query: None,
+    }];
+
+    let (style, diagnostics) = resolver.resolve_node_style_with_diagnostics(
+        &rules,
+        "box",
+        &["panel".to_string()],
+        None,
+        StyleContext::default(),
+        ElementState::default(),
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(style.transitions[0].duration_ms, 150);
+    assert_eq!(
+        style.transitions[0].easing,
+        TransitionEasing::CubicBezier(0.05, 0.7, 0.1, 1.0)
+    );
+}
+
+#[test]
 fn invalid_animation_variable_produces_diagnostic_and_skips_declaration() {
     let theme = mesh_core_theme::default_theme();
     let resolver = StyleResolver::new(&theme);

@@ -53,20 +53,10 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/05-localization-i18n/improvements.md)
 
-- [ ] Centralize localized metadata and visible miss handling with owner, fallback, source, and snapshot revision.
-- [ ] Open bounded catalogs through contained no-follow source handles and compile them off the shell thread.
-- [ ] Drive locale CLI/LSP/extraction/doctor tooling from the canonical graph, and implement or explicitly reject `<i18n>` blocks.
-- [ ] Add manual, follow-system, and per-profile locale policies through the same prepare/persist/commit path.
-
 ### 6. Host resources and icon packs
 
 [Audit](../.planning/log/sections/06-host-resources-and-icon-packs/improvements.md)
 
-- [ ] Build icon and font resources only from the prepared graph/profile and atomically retain the last-known-good resource snapshot.
-- [ ] Preserve declared pack order and reject duplicate canonical IDs, aliases, and ambiguous ownership deterministically.
-- [ ] Open module resource assets through contained, no-follow, bounded handles.
-- [ ] Implement canonical semantic and dash-generalized icon fallback resolution with required/optional diagnostics.
-- [ ] Preserve typed multicolor mappings, source color policy, and mapping provenance.
 - [ ] Validate complete packs off the render thread and publish them atomically without partial registry state.
 - [ ] Propagate resource revisions/fingerprints through negative lookup, glyph, font, text-layout, and renderer caches.
 - [ ] Implement font-pack runtime resolution with logical roles, pack-qualified roles, faces, coverage, and typography tokens.

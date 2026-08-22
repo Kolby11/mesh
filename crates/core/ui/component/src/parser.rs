@@ -30,8 +30,8 @@ pub enum ParseError {
     #[error("invalid props block: {message}")]
     InvalidProps { message: String },
 
-    #[error("invalid i18n block: {0}")]
-    InvalidI18n(String),
+    #[error("invalid i18n block at line {line}: {message}")]
+    InvalidI18n { message: String, line: usize },
 
     #[error("invalid import at line {line}: {message}")]
     InvalidImport { line: usize, message: String },
@@ -112,6 +112,14 @@ fn extract_blocks(source: &str) -> Result<HashMap<String, String>, ParseError> {
             continue;
         }
 
+        if tag_name == "i18n" {
+            return Err(ParseError::InvalidI18n {
+                message: "inline catalogs are not supported; declare files in mesh.provides.i18n"
+                    .into(),
+                line: line_offset,
+            });
+        }
+
         let close_tag = format!("</{tag_name}>");
         let body_start = open_start + 1 + open_end + 1;
         let body_source = &remaining[body_start..];
@@ -184,6 +192,19 @@ mod tests {
         );
         assert_eq!(props.props[1].ty, PropType::Duration);
         assert_eq!(props.props[1].max, Some(600.0));
+    }
+
+    #[test]
+    fn rejects_inline_i18n_with_a_migration_message_and_source_line() {
+        let source = "\n<template><text>Hello</text></template>\n\n<i18n>\n{}\n</i18n>\n";
+        let error = parse_component(source).expect_err("inline catalogs must be rejected");
+        assert!(matches!(error, ParseError::InvalidI18n { .. }));
+        let message = error.to_string();
+        assert!(
+            message.contains("line 5"),
+            "unexpected source location: {message}"
+        );
+        assert!(message.contains("mesh.provides.i18n"));
     }
 
     #[test]

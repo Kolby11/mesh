@@ -617,10 +617,10 @@ fn create_service_call_ticket(
                     "interface": interface,
                     "call_id": call_id,
                 }),
-                source_module_id: cancel_module,
-                source_capabilities: cancel_capabilities,
+                source_module_id: cancel_module.clone(),
+                source_capabilities: cancel_capabilities.clone(),
                 call_id: Some(call_id),
-                source_instance_id: Some(cancel_instance),
+                source_instance_id: Some(cancel_instance.clone()),
             });
             Ok(true)
         })?,

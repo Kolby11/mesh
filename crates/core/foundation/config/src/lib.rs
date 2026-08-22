@@ -62,6 +62,13 @@ pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
     FieldSpec::new(
         "i18n",
         FieldKind::Section(&[
+            FieldSpec::new(
+                "policy",
+                FieldKind::Enum {
+                    canonicalize: canonical_locale_policy,
+                    values: LOCALE_POLICIES,
+                },
+            ),
             FieldSpec::new("locale", FieldKind::Str),
             FieldSpec::new("fallback_locale", FieldKind::Str),
         ]),
@@ -272,8 +279,43 @@ impl Default for ThemeSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalePolicy {
+    #[serde(rename = "manual")]
+    Manual,
+    #[serde(rename = "follow_system")]
+    FollowSystem,
+}
+
+impl Default for LocalePolicy {
+    fn default() -> Self {
+        Self::Manual
+    }
+}
+
+impl LocalePolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::FollowSystem => "follow_system",
+        }
+    }
+}
+
+pub const LOCALE_POLICIES: &[&str] = &["manual", "follow_system"];
+
+fn canonical_locale_policy(value: &str) -> Option<&'static str> {
+    LOCALE_POLICIES
+        .iter()
+        .copied()
+        .find(|candidate| *candidate == value.trim())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct I18nSettings {
+    #[serde(default)]
+    pub policy: LocalePolicy,
     #[serde(default = "default_locale")]
     pub locale: String,
     #[serde(default = "default_fallback_locale")]
@@ -283,10 +325,30 @@ pub struct I18nSettings {
 impl Default for I18nSettings {
     fn default() -> Self {
         Self {
+            policy: LocalePolicy::Manual,
             locale: default_locale(),
             fallback_locale: default_fallback_locale(),
         }
     }
+}
+
+/// Resolve host-dependent locale policy for runtime consumers without
+/// changing the sparse durable settings document. A missing or POSIX host
+/// locale falls back to the declared locale default, while the policy itself
+/// remains `follow_system` for later re-evaluation.
+pub fn resolve_shell_locale_settings(settings: &ShellSettings) -> ShellSettings {
+    resolve_shell_locale_settings_with_host_locale(settings, mesh_core_locale::system_locale())
+}
+
+fn resolve_shell_locale_settings_with_host_locale(
+    settings: &ShellSettings,
+    host_locale: Option<String>,
+) -> ShellSettings {
+    let mut resolved = settings.clone();
+    if resolved.i18n.policy == LocalePolicy::FollowSystem {
+        resolved.i18n.locale = host_locale.unwrap_or_else(default_locale);
+    }
+    resolved
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -592,5 +654,42 @@ mod tests {
         let overrides =
             ModuleSettingsOverrides::from_namespace(&json!({ "surface": { "anchor": "top" } }));
         assert!(overrides.icons.is_none());
+    }
+
+    #[test]
+    fn locale_policy_is_backward_compatible_and_explicit() {
+        let legacy: I18nSettings = serde_json::from_value(json!({
+            "locale": "sk",
+            "fallback_locale": "en"
+        }))
+        .unwrap();
+        assert_eq!(legacy.policy, LocalePolicy::Manual);
+
+        let follow_system: I18nSettings = serde_json::from_value(json!({
+            "policy": "follow_system",
+            "locale": "sk",
+            "fallback_locale": "en"
+        }))
+        .unwrap();
+        assert_eq!(follow_system.policy, LocalePolicy::FollowSystem);
+        assert_eq!(follow_system.policy.as_str(), "follow_system");
+    }
+
+    #[test]
+    fn locale_policy_resolution_changes_only_follow_system_runtime_values() {
+        let mut settings = ShellSettings::default();
+        settings.i18n.locale = "sk".into();
+        settings.i18n.fallback_locale = "en".into();
+
+        let manual = resolve_shell_locale_settings_with_host_locale(&settings, Some("de".into()));
+        assert_eq!(manual.i18n.locale, "sk");
+        assert_eq!(manual.i18n.policy, LocalePolicy::Manual);
+
+        settings.i18n.policy = LocalePolicy::FollowSystem;
+        let follow_system =
+            resolve_shell_locale_settings_with_host_locale(&settings, Some("de-DE".into()));
+        assert_eq!(follow_system.i18n.locale, "de-DE");
+        assert_eq!(follow_system.i18n.fallback_locale, "en");
+        assert_eq!(follow_system.i18n.policy, LocalePolicy::FollowSystem);
     }
 }

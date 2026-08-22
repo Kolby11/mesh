@@ -165,6 +165,7 @@ fn node_from_kind(kind: &'static FieldKind, path: &str, found: &Discovered) -> N
         // the LSP does not read yet, so anything goes rather than everything
         // being flagged. See `docs/spec/03-components.md`.
         FieldKind::Opaque => map(doc, "object", scalar("A declared prop value.", "any")),
+        FieldKind::Token => scalar(doc, "string, number, or boolean"),
     }
 }
 
@@ -215,6 +216,9 @@ fn doc_for(path: &str) -> &'static str {
 
         // shell.i18n
         "shell.i18n" => "Locale selection for shell and module text.",
+        "shell.i18n.policy" => {
+            "Locale policy: `manual` keeps the selected locale; `follow_system` resolves the host locale."
+        }
         "shell.i18n.locale" => "Active locale, e.g. `en` or `sk-SK`.",
         "shell.i18n.fallback_locale" => {
             "Locale used for keys the active locale has no translation for."

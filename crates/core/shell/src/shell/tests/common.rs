@@ -196,12 +196,12 @@ pub(super) fn graph_with_theme_source(
                 "apiVersion": "0.1",
                 "kind": "theme",
                 "provides": {{
-                    "themes": [{
+                    "themes": [{{
                         "id": "{theme_id}",
                         "label": "Test theme",
                         "modes": {{ "default": "{source_path}" }},
                         "default_mode": "default"
-                    }]
+                    }}]
                 }}
             }}
         }}"#

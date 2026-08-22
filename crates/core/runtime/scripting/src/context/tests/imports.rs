@@ -233,6 +233,36 @@ end
 }
 
 #[test]
+fn missing_i18n_keys_are_visible_and_carry_owner_and_snapshot_metadata() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("locale.read"));
+    let mut ctx = ScriptContext::new("@mesh/i18n-miss", caps).unwrap();
+    ctx.set_i18n_translations(HashMap::new());
+    ctx.load_script(
+        r#"
+function init()
+    label = import("mesh.i18n", "t")("nav.missing")
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+
+    assert_eq!(
+        ctx.state.get("label"),
+        Some(serde_json::json!("!!nav.missing"))
+    );
+    let misses = ctx.drain_localized_misses();
+    assert_eq!(misses.len(), 1);
+    assert_eq!(misses[0].owner_module_id, "@mesh/i18n-miss");
+    assert_eq!(misses[0].key.as_deref(), Some("nav.missing"));
+    assert_eq!(misses[0].text, "!!nav.missing");
+    assert_eq!(misses[0].snapshot_revision, 0);
+    assert!(misses[0].missing);
+}
+
+#[test]
 fn require_component_definition_specifier_returns_placeholder() {
     let caps = CapabilitySet::new();
     let mut ctx = ScriptContext::new("@mesh/component-host", caps).unwrap();

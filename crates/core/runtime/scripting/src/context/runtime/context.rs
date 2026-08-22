@@ -10,7 +10,7 @@ use crate::pool;
 use crate::storage::{ScopedStorage, StorageManager, StorageScope};
 use crate::util::default_runtime_storage_root;
 use mesh_core_capability::CapabilitySet;
-use mesh_core_locale::{CatalogEntry, ModuleTranslator};
+use mesh_core_locale::{CatalogEntry, LocalizedTextResolution, ModuleTranslator};
 use mesh_core_service::{InterfaceCatalog, InterfaceResolution};
 use mlua::{Lua, Table, Value as LuaValue};
 use std::collections::{HashMap, HashSet};
@@ -102,6 +102,12 @@ pub struct ScriptContext {
     /// The shell replaces this snapshot when its locale changes.
     pub(super) i18n_translations: Arc<Mutex<HashMap<String, CatalogEntry>>>,
     pub(super) i18n_locale: Arc<Mutex<String>>,
+    /// Revision associated with `i18n_translations`; retained so a runtime
+    /// miss can be diagnosed against the exact catalog snapshot it observed.
+    pub(super) i18n_snapshot_revision: Arc<Mutex<u64>>,
+    /// Structured missing-key observations from Luau and template consumers.
+    /// The shell drains these into stable per-key diagnostics.
+    pub(super) localized_misses: Arc<Mutex<Vec<LocalizedTextResolution>>>,
 }
 
 impl Drop for ScriptContext {
@@ -256,7 +262,7 @@ impl ScriptContext {
         let storage = StorageManager::new(storage_root.into()).open(StorageScope::frontend(
             module_id.clone(),
             component_id,
-            instance_id,
+            instance_id.clone(),
         ));
         let storage_diagnostics = storage
             .diagnostics()
@@ -314,6 +320,8 @@ impl ScriptContext {
             service_call_completions: Arc::new(Mutex::new(HashMap::new())),
             i18n_translations: Arc::new(Mutex::new(HashMap::new())),
             i18n_locale: Arc::new(Mutex::new("en".into())),
+            i18n_snapshot_revision: Arc::new(Mutex::new(0)),
+            localized_misses: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
@@ -333,6 +341,7 @@ impl ScriptContext {
             .map(|(key, value)| (key, CatalogEntry::Text(value)))
             .collect();
         *self.i18n_locale.lock().unwrap() = "en".into();
+        *self.i18n_snapshot_revision.lock().unwrap() = 0;
     }
 
     /// Replace the catalog behind `mesh.i18n.t()` with the owning module's
@@ -340,6 +349,17 @@ impl ScriptContext {
     pub fn set_i18n_translator(&mut self, translator: &ModuleTranslator<'_>) {
         *self.i18n_translations.lock().unwrap() = translator.entries();
         *self.i18n_locale.lock().unwrap() = translator.locale().to_string();
+        *self.i18n_snapshot_revision.lock().unwrap() = translator.snapshot_revision();
+    }
+
+    /// Shared sink used by template evaluation while the Rust state snapshot
+    /// is being rendered. It keeps template and Luau misses on one path.
+    pub fn localized_misses_handle(&self) -> Arc<Mutex<Vec<LocalizedTextResolution>>> {
+        Arc::clone(&self.localized_misses)
+    }
+
+    pub fn drain_localized_misses(&mut self) -> Vec<LocalizedTextResolution> {
+        self.localized_misses.lock().unwrap().drain(..).collect()
     }
 
     /// Clone the thread VM, create a per-component `_ENV`, install host APIs,
@@ -422,6 +442,7 @@ impl ScriptContext {
         self.cached_self_table = None;
         self.service_context_state.lock().unwrap().clear();
         self.service_call_completions.lock().unwrap().clear();
+        self.localized_misses.lock().unwrap().clear();
         if let Some(env) = self.env_table.take() {
             // One realm per thread, so sever the _ENV graph explicitly to make
             // host callbacks and script closures collectible. Errors are
@@ -493,6 +514,7 @@ impl ScriptContext {
         self.shared_published_events.lock().unwrap().clear();
         self.service_call_completions.lock().unwrap().clear();
         self.shared_diagnostics.lock().unwrap().clear();
+        self.localized_misses.lock().unwrap().clear();
         self.shared_element_actions.lock().unwrap().clear();
         self.changed_storage_keys.lock().unwrap().clear();
         self.pending_side_channels.store(false, Ordering::Release);
