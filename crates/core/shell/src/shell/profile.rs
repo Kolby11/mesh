@@ -4,7 +4,7 @@ use super::backend::{
 use super::component::{FrontendCatalog, FrontendCatalogHandle, FrontendSurfaceComponent};
 use super::*;
 use mesh_core_module::package::{
-    ComponentPlacement, InstalledModuleGraph, NodeSlotOverride, ProfilePaths,
+    ComponentPlacement, InstalledModuleGraph, NodeSlotOverride, ProfilePaths, ShellProfile,
     load_installed_module_graph_for_profile,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -188,7 +188,20 @@ pub(super) struct PendingProfileSwitch {
     candidate_initial_states: HashMap<String, serde_json::Value>,
 }
 
+pub(super) struct PendingResourcePreparation {
+    profile_id: String,
+    profile: ShellProfile,
+    graph: InstalledModuleGraph,
+    locale: LocaleEngine,
+    settings: Arc<SettingsStore>,
+    resource_job: super::discovery::ResourcePreparationJob,
+}
+
 impl Shell {
+    pub(in crate::shell) fn profile_transition_pending(&self) -> bool {
+        self.pending_resource_preparation.is_some() || self.pending_profile_switch.is_some()
+    }
+
     pub(in crate::shell) fn profile_candidate_is_pending(
         &self,
         interface: &str,
@@ -214,7 +227,7 @@ impl Shell {
         nodes: Option<serde_json::Value>,
         expected_generation: &str,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
-        if self.pending_profile_switch.is_some() {
+        if self.profile_transition_pending() {
             return Err(ShellRunError::Package(
                 "node edit rejected while a profile switch is pending".into(),
             ));
@@ -519,6 +532,13 @@ impl Shell {
             );
             return VecDeque::new();
         }
+        if let Some(pending) = self.pending_resource_preparation.take() {
+            pending.resource_job.cancel();
+            self.reject_profile_switch(
+                &pending.profile_id,
+                format!("profile switch was superseded by '{profile_id}'"),
+            );
+        }
         if !self.pending_backend_runtimes.is_empty() {
             self.reject_profile_switch(
                 profile_id,
@@ -585,10 +605,8 @@ impl Shell {
                 return VecDeque::new();
             }
         };
-        let resolved_shell_settings =
-            mesh_core_config::resolve_shell_locale_settings(settings.shell());
-        let resources = match self.prepare_resource_snapshot(&graph, &settings) {
-            Ok(resources) => resources,
+        let resource_job = match self.start_resource_preparation_job(&graph, &settings) {
+            Ok(job) => job,
             Err(error) => {
                 self.reject_profile_switch(
                     profile_id,
@@ -597,7 +615,81 @@ impl Shell {
                 return VecDeque::new();
             }
         };
+        self.pending_resource_preparation = Some(PendingResourcePreparation {
+            profile_id: profile_id.to_string(),
+            profile,
+            graph,
+            locale,
+            settings,
+            resource_job,
+        });
+        self.poll_pending_resource_preparation()
+    }
 
+    pub(in crate::shell) fn poll_pending_resource_preparation(&mut self) -> VecDeque<CoreRequest> {
+        let Some(pending) = self.pending_resource_preparation.take() else {
+            return VecDeque::new();
+        };
+        let PendingResourcePreparation {
+            profile_id,
+            profile,
+            graph,
+            locale,
+            settings,
+            mut resource_job,
+        } = pending;
+        let Some(result) = resource_job.try_wait() else {
+            self.pending_resource_preparation = Some(PendingResourcePreparation {
+                profile_id,
+                profile,
+                graph,
+                locale,
+                settings,
+                resource_job,
+            });
+            return VecDeque::new();
+        };
+        match result {
+            Ok(resources)
+                if resources
+                    .resource_lease
+                    .as_ref()
+                    .is_some_and(mesh_core_resources::ResourcePreparationLease::is_current) =>
+            {
+                self.continue_profile_switch(
+                    profile_id, profile, graph, locale, settings, resources,
+                )
+            }
+            Ok(_) => {
+                resource_job.retire();
+                self.reject_profile_switch(
+                    &profile_id,
+                    "candidate resources were superseded".into(),
+                );
+                VecDeque::new()
+            }
+            Err(error) => {
+                resource_job.retire();
+                self.reject_profile_switch(
+                    &profile_id,
+                    format!("candidate resources are invalid: {error}"),
+                );
+                VecDeque::new()
+            }
+        }
+    }
+
+    fn continue_profile_switch(
+        &mut self,
+        profile_id: String,
+        profile: ShellProfile,
+        graph: InstalledModuleGraph,
+        locale: LocaleEngine,
+        settings: Arc<SettingsStore>,
+        resources: super::discovery::PreparedResourceSnapshot,
+    ) -> VecDeque<CoreRequest> {
+        let resolved_shell_settings =
+            mesh_core_config::resolve_shell_locale_settings(settings.shell());
         let previous_catalog = self.frontend_catalog.snapshot().catalog;
         let catalog = match FrontendCatalog::from_modules_reusing(
             &self.modules,
@@ -606,7 +698,7 @@ impl Shell {
         ) {
             Ok(catalog) => catalog,
             Err(error) => {
-                self.reject_profile_switch(profile_id, error.to_string());
+                self.reject_profile_switch(&profile_id, error.to_string());
                 return VecDeque::new();
             }
         };
@@ -634,7 +726,7 @@ impl Shell {
             }
             let Some(entry) = entries.get(&root.module) else {
                 self.reject_profile_switch(
-                    profile_id,
+                    &profile_id,
                     format!("profile root {instance_id} has no mountable frontend entrypoint"),
                 );
                 return VecDeque::new();
@@ -659,12 +751,12 @@ impl Shell {
             }) {
                 Ok(requests) => VecDeque::from(requests),
                 Err(error) => {
-                    self.reject_profile_switch(profile_id, error.to_string());
+                    self.reject_profile_switch(&profile_id, error.to_string());
                     return VecDeque::new();
                 }
             };
             if let Err(error) = component.locale_changed(&locale) {
-                self.reject_profile_switch(profile_id, error.to_string());
+                self.reject_profile_switch(&profile_id, error.to_string());
                 return VecDeque::new();
             }
             for state in self.latest_service_state.values() {
@@ -677,7 +769,7 @@ impl Shell {
                     match component.handle_service_event(&event) {
                         Ok(next) => requests.extend(next),
                         Err(error) => {
-                            self.reject_profile_switch(profile_id, error.to_string());
+                            self.reject_profile_switch(&profile_id, error.to_string());
                             return VecDeque::new();
                         }
                     }
@@ -702,7 +794,7 @@ impl Shell {
                 "optional_backend_unavailable" | "optional_backend_inactive"
             )
         }) {
-            self.reject_profile_switch(profile_id, status.message.clone());
+            self.reject_profile_switch(&profile_id, status.message.clone());
             return VecDeque::new();
         }
         let theme_changed = self.settings.theme != settings.shell().theme
@@ -716,7 +808,7 @@ impl Shell {
                     Ok(prepared) => Some(prepared),
                     Err(error) => {
                         self.reject_profile_switch(
-                            profile_id,
+                            &profile_id,
                             format!("candidate theme is invalid: {error}"),
                         );
                         return VecDeque::new();
@@ -783,7 +875,7 @@ impl Shell {
             .collect::<Vec<_>>();
 
         let mut pending = PendingProfileSwitch {
-            profile_id: profile_id.to_string(),
+            profile_id: profile_id.clone(),
             graph,
             locale,
             settings,
@@ -801,7 +893,7 @@ impl Shell {
         if !changed.is_empty() {
             let Some(ctx) = self.backend_respawn.clone() else {
                 self.reject_profile_switch(
-                    profile_id,
+                    &profile_id,
                     "backend runtime is unavailable while candidate providers need preparation"
                         .into(),
                 );
@@ -1119,6 +1211,9 @@ impl Shell {
     }
 
     fn abort_profile_candidate(&mut self, pending: PendingProfileSwitch, message: String) {
+        if let Some(lease) = pending.resources.resource_lease.as_ref() {
+            lease.retire();
+        }
         for slot in pending.candidate_backends.into_values() {
             slot.task.abort();
         }

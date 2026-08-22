@@ -53,6 +53,7 @@ pub(in crate::shell) struct ResourceSnapshot {
 
 pub(in crate::shell) struct PreparedResourceSnapshot {
     pub(in crate::shell) generation: u64,
+    pub(in crate::shell) resource_lease: Option<mesh_core_resources::ResourcePreparationLease>,
     pub snapshot: ResourceSnapshot,
     pub icon_packs: Vec<mesh_core_icon::IconPackBindings>,
     pub font_registry: mesh_core_resources::FontRegistry,
@@ -65,7 +66,7 @@ pub(in crate::shell) struct PreparedResourceSnapshot {
 pub(in crate::shell) struct ResourcePreparationJob {
     worker: Option<std::thread::JoinHandle<Result<PreparedResourceSnapshot, ShellRunError>>>,
     token: mesh_core_resources::ResourcePreparationToken,
-    lease: mesh_core_resources::ResourcePreparationLease,
+    lease: Option<mesh_core_resources::ResourcePreparationLease>,
 }
 
 impl ResourcePreparationJob {
@@ -77,22 +78,20 @@ impl ResourcePreparationJob {
         Self {
             worker: Some(worker),
             token: lease.token().clone(),
-            lease,
+            lease: Some(lease),
         }
     }
 
     pub(in crate::shell) fn generation(&self) -> u64 {
-        self.lease.generation()
+        self.lease
+            .as_ref()
+            .map_or(0, mesh_core_resources::ResourcePreparationLease::generation)
     }
 
     pub(in crate::shell) fn is_finished(&self) -> bool {
         self.worker
             .as_ref()
             .is_some_and(std::thread::JoinHandle::is_finished)
-    }
-
-    pub(in crate::shell) fn is_current(&self) -> bool {
-        self.lease.is_current()
     }
 
     pub(in crate::shell) fn cancel(&self) {
@@ -117,7 +116,9 @@ impl ResourcePreparationJob {
     }
 
     pub(in crate::shell) fn retire(&self) {
-        self.lease.retire();
+        if let Some(lease) = self.lease.as_ref() {
+            lease.retire();
+        }
     }
 
     fn join_worker(&mut self) -> Result<PreparedResourceSnapshot, ShellRunError> {
@@ -127,13 +128,32 @@ impl ResourcePreparationJob {
             .ok_or_else(|| ShellRunError::FrontendComposition {
                 message: "resource preparation job was already completed".into(),
             })?;
-        let mut prepared = worker
-            .join()
-            .map_err(|_| ShellRunError::FrontendComposition {
-                message: "resource preparation worker panicked".into(),
-            })??;
-        prepared.generation = self.lease.generation();
-        Ok(prepared)
+        let lease = self
+            .lease
+            .take()
+            .ok_or_else(|| ShellRunError::FrontendComposition {
+                message: "resource preparation generation was already released".into(),
+            })?;
+        let result = match worker.join() {
+            Ok(result) => result,
+            Err(_) => {
+                lease.retire();
+                return Err(ShellRunError::FrontendComposition {
+                    message: "resource preparation worker panicked".into(),
+                });
+            }
+        };
+        match result {
+            Ok(mut prepared) => {
+                prepared.generation = lease.generation();
+                prepared.resource_lease = Some(lease);
+                Ok(prepared)
+            }
+            Err(error) => {
+                lease.retire();
+                Err(error)
+            }
+        }
     }
 }
 
@@ -141,6 +161,17 @@ impl Drop for ResourcePreparationJob {
     fn drop(&mut self) {
         if self.worker.is_some() {
             self.cancel();
+        }
+        if let Some(lease) = self.lease.as_ref() {
+            lease.retire();
+        }
+    }
+}
+
+impl Drop for PreparedResourceSnapshot {
+    fn drop(&mut self) {
+        if let Some(lease) = self.resource_lease.as_ref() {
+            lease.retire();
         }
     }
 }
@@ -155,8 +186,12 @@ impl Shell {
         let generation = job.generation();
         let result = job.wait();
         match result {
-            Ok(prepared) if job.is_current() => {
-                job.retire();
+            Ok(prepared)
+                if prepared
+                    .resource_lease
+                    .as_ref()
+                    .is_some_and(mesh_core_resources::ResourcePreparationLease::is_current) =>
+            {
                 Ok(prepared)
             }
             Ok(_) => {
@@ -497,6 +532,7 @@ impl Shell {
 
                 Ok(PreparedResourceSnapshot {
                     generation: 0,
+                    resource_lease: None,
                     snapshot: ResourceSnapshot {
                         revision,
                         icon_pack_chain: icon_chain,
@@ -515,7 +551,7 @@ impl Shell {
         Ok(ResourcePreparationJob {
             worker: Some(worker),
             token: cancellation,
-            lease,
+            lease: Some(lease),
         })
     }
 
@@ -523,7 +559,11 @@ impl Shell {
         &mut self,
         prepared: &PreparedResourceSnapshot,
     ) -> Result<(), ShellRunError> {
-        if !self.resource_preparation.is_current(prepared.generation) {
+        let current = prepared.resource_lease.as_ref().map_or_else(
+            || self.resource_preparation.is_current(prepared.generation),
+            mesh_core_resources::ResourcePreparationLease::is_current,
+        );
+        if !current {
             return Err(ShellRunError::FrontendComposition {
                 message: format!(
                     "resource preparation generation {} is no longer current",
@@ -551,7 +591,11 @@ impl Shell {
         if font_revision_changed {
             self.mark_components_theme_changed()?;
         }
-        self.resource_preparation.retire(prepared.generation);
+        if let Some(lease) = prepared.resource_lease.as_ref() {
+            lease.retire();
+        } else {
+            self.resource_preparation.retire(prepared.generation);
+        }
         Ok(())
     }
 }
@@ -1283,6 +1327,7 @@ impl Shell {
             service_handlers: HashMap::new(),
             backend_runtimes: HashMap::new(),
             pending_backend_runtimes: HashMap::new(),
+            pending_resource_preparation: None,
             pending_profile_switch: None,
             deferred_requests: VecDeque::new(),
             backend_runtime_statuses: HashMap::new(),

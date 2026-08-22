@@ -110,6 +110,9 @@ impl Shell {
         {
             return Duration::ZERO;
         }
+        if self.pending_resource_preparation.is_some() {
+            return Duration::from_millis(1);
+        }
 
         let now = std::time::Instant::now();
         if now >= self.next_frontend_reload_check
@@ -317,6 +320,8 @@ impl Shell {
             if !pending.is_empty() {
                 self.presented_last_frame = true;
             }
+            self.drain_requests(&mut pending)?;
+            pending.extend(self.poll_pending_resource_preparation());
             self.drain_requests(&mut pending)?;
             self.flush_throttled_commands();
             self.render_components()?;

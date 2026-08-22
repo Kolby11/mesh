@@ -451,6 +451,7 @@ pub struct Shell {
     service_handlers: HashMap<String, mpsc::UnboundedSender<ServiceCommandMsg>>,
     backend_runtimes: HashMap<String, BackendRuntimeSlot>,
     pending_backend_runtimes: HashMap<String, PendingBackendRuntime>,
+    pending_resource_preparation: Option<profile::PendingResourcePreparation>,
     pending_profile_switch: Option<profile::PendingProfileSwitch>,
     deferred_requests: VecDeque<CoreRequest>,
     backend_runtime_statuses: BackendRuntimeStatusMap,

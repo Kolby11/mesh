@@ -37,7 +37,7 @@ impl Shell {
         module_id: &str,
         enabled: bool,
     ) -> VecDeque<CoreRequest> {
-        if self.pending_profile_switch.is_some() {
+        if self.profile_transition_pending() {
             tracing::warn!(
                 module_id,
                 enabled,
@@ -218,7 +218,7 @@ impl Shell {
     }
 
     fn apply_set_provider(&mut self, interface: &str, provider_id: &str) {
-        if self.pending_profile_switch.is_some() {
+        if self.profile_transition_pending() {
             tracing::warn!(
                 interface,
                 provider_id,

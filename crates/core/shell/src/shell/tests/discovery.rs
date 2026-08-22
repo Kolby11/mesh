@@ -171,6 +171,30 @@ fn resource_preparation_job_cancels_and_polls_without_blocking_the_caller() {
 }
 
 #[test]
+fn panicking_resource_preparation_worker_retires_generation() {
+    let coordinator = mesh_core_resources::ResourcePreparationCoordinator::default();
+    let lease = coordinator.begin();
+    let generation = lease.generation();
+    let worker = std::thread::spawn(
+        || -> Result<super::super::discovery::PreparedResourceSnapshot, crate::shell::ShellRunError> {
+            panic!("test resource preparation worker panic");
+        },
+    );
+    let mut job = super::super::discovery::ResourcePreparationJob::from_test_worker(worker, lease);
+
+    let error = match job.wait() {
+        Ok(_) => panic!("panicking worker unexpectedly returned a resource candidate"),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        error,
+        crate::shell::ShellRunError::FrontendComposition { message }
+            if message == "resource preparation worker panicked"
+    ));
+    assert!(!coordinator.is_current(generation));
+}
+
+#[test]
 fn font_registry_publishes_role_and_qualified_theme_tokens() {
     let mut registry = mesh_core_resources::FontRegistry::new(["Inter".into()]);
     registry

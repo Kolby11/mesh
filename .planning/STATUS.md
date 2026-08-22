@@ -79,9 +79,13 @@ commit boundary, and stale generations are rejected before publication.
 
 The shell worker is now exposed as a pollable `ResourcePreparationJob` with
 cooperative cancellation, current-generation checks, and safe retirement;
-the existing synchronous callers use its blocking wait.
+the existing synchronous callers use its blocking wait. Profile switching now
+stores that job in a pending candidate, polls it between shell turns with a
+bounded wake-up, and only advances to frontend/backend candidate preparation
+after the resource lease is still current. A newer resource-only profile
+request cancels and rejects the superseded candidate; prepared leases retire on
+commit, rejection, cancellation, or worker failure.
 
-The next open item is to store that job in the pending profile candidate and
-advance profile preparation from the shell loop instead of joining
-synchronously, then move the remaining XDG/SVG decode and raster preparation
-away from shell/render-thread paths.
+The next open item is to move the remaining XDG/SVG decode and raster
+preparation away from shell/render-thread paths. Frontend and backend candidate
+preparation after the resource stage is still shell-loop work.
