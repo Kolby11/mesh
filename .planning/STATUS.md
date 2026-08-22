@@ -112,6 +112,15 @@ after preparation, stale results are rejected at the render handoff, and stale
 one-shot SVG results are purged. This prevents an older resource snapshot from
 publishing derived pixels after a replacement is committed.
 
-The next open item is to unify these queues with the full resource broker and
-explicit cancellation/byte-budget contract, then continue frontend/backend
-candidate preparation after the resource stage.
+Derived render resources now also have explicit byte bounds. A shared byte-
+aware LRU limits decoded icon images, raster variants, metadata, icon-font
+bytes, glyph masks, and Skia icon uploads; icon and glyph workers reserve from
+one 32 MiB handoff budget, and checked dimension helpers reject oversized
+requests before allocation. The full elements suite still carries its
+existing 8 theme-fixture expectation failures; focused resource/render checks
+and workspace compilation pass with the existing shell warnings.
+
+The next open item is to extract queue ownership and linked-resource
+invalidation into the full generation-aware resource broker, then extend
+byte/dimension accounting to text layout/glyph atlas, PixelBuffer, and SHM
+resources before continuing frontend/backend candidate preparation.

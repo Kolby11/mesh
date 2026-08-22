@@ -5,8 +5,10 @@ use super::PixelCanvasSession;
 use super::glyph::draw_font_glyph;
 use super::glyph::{GlyphAxes, draw_font_glyph_on_canvas};
 use super::profiling;
-use super::resource_generation_is_current;
+use super::{checked_pixel_bytes, reserve_render_resource_work, resource_generation_is_current};
 use image::imageops::FilterType;
+use mesh_core_elements::lru::ByteLruCache;
+#[cfg(test)]
 use mesh_core_elements::lru::LruCache;
 use mesh_core_elements::style::Color;
 use mesh_core_icon::{IconResolution, MISSING_ICON_SVG, ResolvedTarget, resolve_icon_result};
@@ -23,16 +25,23 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex, OnceLock};
 
-static IMAGE_CACHE: OnceLock<Mutex<LruCache<Arc<Path>, CachedImage>>> = OnceLock::new();
-static RASTER_CACHE: OnceLock<Mutex<LruCache<RasterCacheKey, RasterVariant>>> = OnceLock::new();
-static SOURCE_IDENTITY_CACHE: OnceLock<Mutex<LruCache<Arc<Path>, CachedSourceIdentity>>> =
+static IMAGE_CACHE: OnceLock<Mutex<ByteLruCache<Arc<Path>, CachedImage>>> = OnceLock::new();
+static RASTER_CACHE: OnceLock<Mutex<ByteLruCache<RasterCacheKey, RasterVariant>>> = OnceLock::new();
+static SOURCE_IDENTITY_CACHE: OnceLock<Mutex<ByteLruCache<Arc<Path>, CachedSourceIdentity>>> =
     OnceLock::new();
-static SVG_CACHEABILITY_CACHE: OnceLock<Mutex<LruCache<Arc<Path>, CachedSvgCacheability>>> =
+static SVG_CACHEABILITY_CACHE: OnceLock<Mutex<ByteLruCache<Arc<Path>, CachedSvgCacheability>>> =
     OnceLock::new();
 const RASTER_CACHE_CAPACITY: usize = 256;
 const IMAGE_CACHE_CAPACITY: usize = 256;
 const SOURCE_IDENTITY_CACHE_CAPACITY: usize = 1024;
 const SVG_CACHEABILITY_CACHE_CAPACITY: usize = 1024;
+const RASTER_CACHE_MAX_BYTES: usize = 16 * 1024 * 1024;
+const IMAGE_CACHE_MAX_BYTES: usize = 32 * 1024 * 1024;
+const METADATA_CACHE_MAX_BYTES: usize = 256 * 1024;
+const MAX_ICON_DIMENSION: u32 = 2048;
+const MAX_ICON_RASTER_BYTES: usize = 16 * 1024 * 1024;
+const MAX_SOURCE_IMAGE_DIMENSION: u32 = 8192;
+const MAX_SOURCE_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 #[cfg(test)]
 static FILE_FRESHNESS_STAT_PROBES: AtomicUsize = AtomicUsize::new(0);
 
@@ -121,6 +130,7 @@ struct RasterJob {
     height: u32,
     tint: Color,
     multicolor: bool,
+    _budget: mesh_core_resources::ResourceByteReservation,
 }
 
 struct RasterJobResult {
@@ -129,13 +139,14 @@ struct RasterJobResult {
     cacheable: bool,
     cancelled: bool,
     elapsed: std::time::Duration,
+    _budget: mesh_core_resources::ResourceByteReservation,
 }
 
 struct IconRasterQueue {
     sender: Option<mpsc::SyncSender<RasterJob>>,
     receiver: Receiver<RasterJobResult>,
     pending: HashSet<RasterCacheKey>,
-    ready: HashMap<RasterCacheKey, RasterVariant>,
+    ready: HashMap<RasterCacheKey, (RasterVariant, mesh_core_resources::ResourceByteReservation)>,
 }
 
 static ICON_RASTER_QUEUE: OnceLock<Mutex<IconRasterQueue>> = OnceLock::new();
@@ -170,6 +181,7 @@ fn icon_raster_queue() -> &'static Mutex<IconRasterQueue> {
                             cacheable,
                             cancelled,
                             elapsed: started.elapsed(),
+                            _budget: job._budget,
                         })
                         .is_err()
                     {
@@ -196,6 +208,30 @@ fn rasterize_file_job(job: &RasterJob) -> (Option<RasterVariant>, bool) {
         ),
         IconFileKind::Svg => rasterize_svg_job(job),
     }
+}
+
+fn icon_raster_bytes(width: u32, height: u32) -> Option<usize> {
+    if width == 0 || height == 0 || width > MAX_ICON_DIMENSION || height > MAX_ICON_DIMENSION {
+        return None;
+    }
+    let bytes = checked_pixel_bytes(width, height, 4)?;
+    (bytes <= MAX_ICON_RASTER_BYTES).then_some(bytes)
+}
+
+fn source_image_is_bounded(path: &Path) -> bool {
+    let Ok((width, height)) = image::image_dimensions(path) else {
+        return false;
+    };
+    width <= MAX_SOURCE_IMAGE_DIMENSION
+        && height <= MAX_SOURCE_IMAGE_DIMENSION
+        && checked_pixel_bytes(width, height, 4)
+            .is_some_and(|bytes| bytes <= MAX_SOURCE_IMAGE_BYTES)
+}
+
+fn icon_dimensions(dest_w: i32, dest_h: i32) -> Option<(u32, u32)> {
+    let width = u32::try_from(dest_w.max(1)).ok()?;
+    let height = u32::try_from(dest_h.max(1)).ok()?;
+    icon_raster_bytes(width, height).map(|_| (width, height))
 }
 
 fn rasterize_svg_job(job: &RasterJob) -> (Option<RasterVariant>, bool) {
@@ -248,24 +284,25 @@ fn drain_icon_raster_jobs() -> bool {
         }
         if let Some(variant) = result.variant {
             if result.cacheable {
-                cached_results.push((result.key, variant));
+                cached_results.push((result.key, variant, result._budget));
             } else {
-                ready_results.push((result.key, variant));
+                ready_results.push((result.key, variant, result._budget));
             }
         }
     }
 
     let cached_completed = !cached_results.is_empty();
-    for (key, variant) in cached_results {
+    for (key, variant, budget) in cached_results {
         store_variant(key, variant);
+        drop(budget);
     }
     let mut completed = cached_completed;
     if !ready_results.is_empty()
         && let Some(queue) = ICON_RASTER_QUEUE.get()
         && let Ok(mut queue) = queue.lock()
     {
-        for (key, variant) in ready_results {
-            queue.ready.insert(key, variant);
+        for (key, variant, budget) in ready_results {
+            queue.ready.insert(key, (variant, budget));
         }
         completed = true;
     }
@@ -277,7 +314,12 @@ fn drain_icon_raster_jobs() -> bool {
 
 fn take_ready_variant(key: &RasterCacheKey) -> Option<RasterVariant> {
     let queue = ICON_RASTER_QUEUE.get()?;
-    queue.lock().ok()?.ready.remove(key)
+    queue
+        .lock()
+        .ok()?
+        .ready
+        .remove(key)
+        .map(|(variant, _budget)| variant)
 }
 
 pub fn poll_icon_raster_jobs() -> bool {
@@ -304,6 +346,9 @@ fn schedule_icon_raster_job(
     tint: Color,
     multicolor: bool,
 ) -> Option<bool> {
+    let Some(work_bytes) = icon_raster_bytes(width, height) else {
+        return Some(false);
+    };
     let Ok(mut queue) = icon_raster_queue().lock() else {
         return None;
     };
@@ -313,6 +358,10 @@ fn schedule_icon_raster_job(
     if !queue.pending.insert(key.clone()) {
         return Some(false);
     }
+    let Some(budget) = reserve_render_resource_work(work_bytes) else {
+        queue.pending.remove(&key);
+        return Some(false);
+    };
     let job = RasterJob {
         key: key.clone(),
         path: path.to_path_buf(),
@@ -321,6 +370,7 @@ fn schedule_icon_raster_job(
         height,
         tint,
         multicolor,
+        _budget: budget,
     };
     match sender.try_send(job) {
         Ok(()) => Some(true),
@@ -335,24 +385,46 @@ fn schedule_icon_raster_job(
     }
 }
 
-fn image_cache() -> &'static Mutex<LruCache<Arc<Path>, CachedImage>> {
-    IMAGE_CACHE.get_or_init(|| Mutex::new(LruCache::new(IMAGE_CACHE_CAPACITY)))
+fn image_cache() -> &'static Mutex<ByteLruCache<Arc<Path>, CachedImage>> {
+    IMAGE_CACHE.get_or_init(|| {
+        Mutex::new(ByteLruCache::new(
+            IMAGE_CACHE_CAPACITY,
+            IMAGE_CACHE_MAX_BYTES,
+        ))
+    })
 }
 
-fn raster_cache() -> &'static Mutex<LruCache<RasterCacheKey, RasterVariant>> {
-    RASTER_CACHE.get_or_init(|| Mutex::new(LruCache::new(RASTER_CACHE_CAPACITY)))
+fn raster_cache() -> &'static Mutex<ByteLruCache<RasterCacheKey, RasterVariant>> {
+    RASTER_CACHE.get_or_init(|| {
+        Mutex::new(ByteLruCache::new(
+            RASTER_CACHE_CAPACITY,
+            RASTER_CACHE_MAX_BYTES,
+        ))
+    })
 }
 
-fn source_identity_cache() -> &'static Mutex<LruCache<Arc<Path>, CachedSourceIdentity>> {
-    SOURCE_IDENTITY_CACHE.get_or_init(|| Mutex::new(LruCache::new(SOURCE_IDENTITY_CACHE_CAPACITY)))
+fn source_identity_cache() -> &'static Mutex<ByteLruCache<Arc<Path>, CachedSourceIdentity>> {
+    SOURCE_IDENTITY_CACHE.get_or_init(|| {
+        Mutex::new(ByteLruCache::new(
+            SOURCE_IDENTITY_CACHE_CAPACITY,
+            METADATA_CACHE_MAX_BYTES,
+        ))
+    })
 }
 
-fn svg_cacheability_cache() -> &'static Mutex<LruCache<Arc<Path>, CachedSvgCacheability>> {
-    SVG_CACHEABILITY_CACHE
-        .get_or_init(|| Mutex::new(LruCache::new(SVG_CACHEABILITY_CACHE_CAPACITY)))
+fn svg_cacheability_cache() -> &'static Mutex<ByteLruCache<Arc<Path>, CachedSvgCacheability>> {
+    SVG_CACHEABILITY_CACHE.get_or_init(|| {
+        Mutex::new(ByteLruCache::new(
+            SVG_CACHEABILITY_CACHE_CAPACITY,
+            METADATA_CACHE_MAX_BYTES,
+        ))
+    })
 }
 
 fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
+    if !source_image_is_bounded(path) {
+        return None;
+    }
     let resource_revision = resource_revision();
     let Some(freshness) = file_freshness(path) else {
         return image::open(path)
@@ -375,6 +447,7 @@ fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
                 freshness,
                 image: Arc::clone(&img),
             },
+            img.as_raw().len(),
         );
     }
     Some(img)
@@ -424,6 +497,7 @@ fn source_identity(path: &Path, freshness: Option<FileFreshness>) -> Arc<Path> {
                 freshness,
                 identity: Arc::clone(&identity),
             },
+            metadata_cache_weight(path).saturating_add(identity.as_os_str().len()),
         );
     }
 
@@ -487,6 +561,7 @@ fn svg_file_cacheability(path: &Path) -> Option<(bool, FileFreshness)> {
                 freshness,
                 cacheable,
             },
+            metadata_cache_weight(path),
         );
     }
     Some((cacheable, freshness))
@@ -579,11 +654,19 @@ pub(crate) fn cached_file_resource_opacity(
 
 fn store_variant(key: RasterCacheKey, variant: RasterVariant) {
     if let Ok(mut cache) = raster_cache().lock() {
-        cache.insert(key, variant);
+        let weight = variant.pixels.len();
+        cache.insert(key, variant, weight);
     }
 }
 
+fn metadata_cache_weight(path: &Path) -> usize {
+    std::mem::size_of::<usize>()
+        .saturating_mul(4)
+        .saturating_add(path.as_os_str().len())
+}
+
 const ICON_SKIA_CACHE_CAPACITY: usize = 256;
+const ICON_SKIA_CACHE_MAX_BYTES: usize = 16 * 1024 * 1024;
 
 struct CachedIconImage {
     _keep_alive: Arc<[u8]>,
@@ -596,8 +679,8 @@ thread_local! {
     /// same logical icon (same variant Arc) share one Skia upload. Hits
     /// reuse the Image; the cache holds a strong `Arc` reference so the
     /// underlying allocation cannot be freed while the Image is live.
-    static ICON_SKIA_CACHE: RefCell<LruCache<usize, CachedIconImage>> =
-        RefCell::new(LruCache::new(ICON_SKIA_CACHE_CAPACITY));
+    static ICON_SKIA_CACHE: RefCell<ByteLruCache<usize, CachedIconImage>> =
+        RefCell::new(ByteLruCache::new(ICON_SKIA_CACHE_CAPACITY, ICON_SKIA_CACHE_MAX_BYTES));
 }
 
 fn cached_skia_image_for_variant(variant: &RasterVariant) -> Option<skia_safe::Image> {
@@ -630,6 +713,7 @@ fn cached_skia_image_for_variant(variant: &RasterVariant) -> Option<skia_safe::I
                 _keep_alive: Arc::clone(&variant.pixels),
                 image: image.clone(),
             },
+            variant.pixels.len().saturating_mul(2),
         );
         Some(image)
     })
@@ -742,9 +826,10 @@ fn raster_bitmap_variant(
     tint: Color,
     multicolor: bool,
 ) -> Option<RasterVariant> {
+    let pixel_bytes = icon_raster_bytes(width, height)?;
     let img = get_or_load(path)?;
     let scaled = image::imageops::resize(img.as_ref(), width, height, FilterType::Lanczos3);
-    let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+    let mut pixels = Vec::with_capacity(pixel_bytes);
     for y in 0..height {
         for x in 0..width {
             let p = scaled.get_pixel(x, y);
@@ -765,6 +850,7 @@ fn raster_svg_variant(
     tint: Color,
     multicolor: bool,
 ) -> Option<RasterVariant> {
+    icon_raster_bytes(width, height)?;
     let svg_data = std::fs::read_to_string(path).ok()?;
     raster_svg_variant_from_data(path, &svg_data, width, height, tint, multicolor)
 }
@@ -777,6 +863,7 @@ fn raster_svg_variant_from_data(
     tint: Color,
     multicolor: bool,
 ) -> Option<RasterVariant> {
+    icon_raster_bytes(width, height)?;
     let opt = resvg::usvg::Options {
         resources_dir: path.parent().map(|p| p.to_path_buf()),
         ..Default::default()
@@ -797,6 +884,7 @@ fn raster_svg_variant_from_data(
 }
 
 fn raster_missing_icon_variant(width: u32, height: u32, tint: Color) -> Option<RasterVariant> {
+    icon_raster_bytes(width, height)?;
     let opt = resvg::usvg::Options::default();
     let tree = resvg::usvg::Tree::from_str(MISSING_ICON_SVG, &opt).ok()?;
     let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)?;
@@ -820,7 +908,7 @@ fn variant_from_pixmap(
     tint: Color,
     multicolor: bool,
 ) -> RasterVariant {
-    let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+    let mut pixels = Vec::with_capacity(checked_pixel_bytes(width, height, 4).unwrap_or_default());
     for py in 0..height {
         for px in 0..width {
             let idx = (py * width + px) as usize * 4;
@@ -909,8 +997,7 @@ fn resolve_file_variant_sync(
     multicolor: bool,
 ) -> Option<RasterVariant> {
     let kind = icon_file_kind(path)?;
-    let width = dest_w.max(1) as u32;
-    let height = dest_h.max(1) as u32;
+    let (width, height) = icon_dimensions(dest_w, dest_h)?;
     let key = match kind {
         IconFileKind::Svg => {
             let (cacheable, freshness) = svg_file_cacheability(path)?;
@@ -971,8 +1058,7 @@ fn resolve_file_variant_async(
     multicolor: bool,
 ) -> Option<RasterVariant> {
     let kind = icon_file_kind(path)?;
-    let width = dest_w.max(1) as u32;
-    let height = dest_h.max(1) as u32;
+    let (width, height) = icon_dimensions(dest_w, dest_h)?;
     let freshness = file_freshness(path)?;
     let key = raster_file_key_with_freshness(path, width, height, tint, multicolor, freshness);
 
@@ -1023,8 +1109,7 @@ pub fn draw_missing_icon_fallback_on_canvas(
 }
 
 fn resolve_missing_icon_variant(dest_w: i32, dest_h: i32, tint: Color) -> Option<RasterVariant> {
-    let width = dest_w.max(1) as u32;
-    let height = dest_h.max(1) as u32;
+    let (width, height) = icon_dimensions(dest_w, dest_h)?;
     let key = missing_icon_key(width, height, tint);
     if let Some(variant) = cached_variant(&key) {
         profiling::record_raster_cache_hit(variant.fully_opaque);
@@ -1897,5 +1982,20 @@ missing-proof = ["material:not-present"]
                 .all(|(x, y, _)| *x >= 4 && *x < 34 && *y >= 3 && *y < 31)
         );
         assert!(pixels.iter().any(|(x, _, _)| *x >= 22));
+    }
+
+    #[test]
+    fn icon_raster_dimensions_reject_overflow_and_oversized_assets() {
+        assert_eq!(icon_dimensions(0, 0), Some((1, 1)));
+        assert!(icon_dimensions((MAX_ICON_DIMENSION + 1) as i32, 16).is_none());
+        assert!(icon_raster_bytes(u32::MAX, 1).is_none());
+        assert!(icon_raster_bytes(MAX_ICON_DIMENSION, MAX_ICON_DIMENSION).is_some());
+
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source.png");
+        ImageBuffer::from_fn(1, 1, |_, _| Rgba([0_u8, 0, 0, 255]))
+            .save(&source)
+            .unwrap();
+        assert!(source_image_is_bounded(&source));
     }
 }

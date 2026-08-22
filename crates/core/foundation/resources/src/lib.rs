@@ -26,6 +26,84 @@ use std::{
 pub const DEFAULT_MAX_RESOURCE_BYTES: usize = 64 * 1024 * 1024;
 const RESOURCE_READ_CHUNK_BYTES: usize = 64 * 1024;
 
+/// A shared byte budget for bounded derived-resource work.
+///
+/// Reservations cover work that is queued or waiting for the render-thread
+/// handoff. The reservation is released automatically when the job or result
+/// is dropped, so queue length cannot hide a collection of large assets.
+#[derive(Debug, Clone)]
+pub struct ResourceByteBudget {
+    max_bytes: usize,
+    used_bytes: Arc<AtomicU64>,
+}
+
+#[derive(Debug)]
+pub struct ResourceByteReservation {
+    budget: ResourceByteBudget,
+    bytes: usize,
+}
+
+impl ResourceByteBudget {
+    pub fn new(max_bytes: usize) -> Self {
+        Self {
+            max_bytes,
+            used_bytes: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    pub fn max_bytes(&self) -> usize {
+        self.max_bytes
+    }
+
+    pub fn used_bytes(&self) -> usize {
+        let max_usize = u64::try_from(usize::MAX).unwrap_or(u64::MAX);
+        self.used_bytes.load(Ordering::Acquire).min(max_usize) as usize
+    }
+
+    pub fn try_reserve(&self, bytes: usize) -> Option<ResourceByteReservation> {
+        let bytes_u64 = u64::try_from(bytes).ok()?;
+        let max_bytes = u64::try_from(self.max_bytes).ok()?;
+        if bytes_u64 > max_bytes {
+            return None;
+        }
+
+        let mut used = self.used_bytes.load(Ordering::Acquire);
+        loop {
+            let next = used.checked_add(bytes_u64)?;
+            if next > max_bytes {
+                return None;
+            }
+            match self.used_bytes.compare_exchange_weak(
+                used,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    return Some(ResourceByteReservation {
+                        budget: self.clone(),
+                        bytes,
+                    });
+                }
+                Err(observed) => used = observed,
+            }
+        }
+    }
+}
+
+impl ResourceByteReservation {
+    pub fn bytes(&self) -> usize {
+        self.bytes
+    }
+}
+
+impl Drop for ResourceByteReservation {
+    fn drop(&mut self) {
+        let bytes = u64::try_from(self.bytes).unwrap_or(u64::MAX);
+        self.budget.used_bytes.fetch_sub(bytes, Ordering::AcqRel);
+    }
+}
+
 /// Cooperative cancellation shared by an in-flight resource candidate.
 ///
 /// Resource work is deliberately bounded by input size, but a candidate may
@@ -1036,6 +1114,31 @@ mod tests {
         coordinator.cancel_active();
         assert!(second.token().is_cancelled());
         assert!(!second.is_current());
+    }
+
+    #[test]
+    fn byte_budget_rejects_overcommit_and_releases_reservations() {
+        let budget = ResourceByteBudget::new(10);
+        let first = budget.try_reserve(6).expect("first reservation fits");
+        assert_eq!(first.bytes(), 6);
+        assert_eq!(budget.used_bytes(), 6);
+        assert!(budget.try_reserve(5).is_none());
+
+        let second = budget.try_reserve(4).expect("remaining budget fits");
+        assert_eq!(budget.used_bytes(), 10);
+        drop(first);
+        assert_eq!(budget.used_bytes(), 4);
+        drop(second);
+        assert_eq!(budget.used_bytes(), 0);
+    }
+
+    #[test]
+    fn byte_budget_zero_reservations_are_accounted_safely() {
+        let budget = ResourceByteBudget::new(0);
+        let reservation = budget.try_reserve(0).expect("zero work is harmless");
+        assert_eq!(reservation.bytes(), 0);
+        assert_eq!(budget.used_bytes(), 0);
+        assert!(budget.try_reserve(1).is_none());
     }
 
     #[cfg(unix)]

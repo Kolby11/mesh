@@ -126,6 +126,16 @@ where
         Some(node.value)
     }
 
+    /// Remove and return the least-recently-used entry.
+    pub fn pop_lru(&mut self) -> Option<(K, V)> {
+        let tail = self.tail?;
+        self.detach(tail);
+        let node = self.nodes[tail].take()?;
+        self.map.remove(&node.key);
+        self.free.push(tail);
+        Some((node.key, node.value))
+    }
+
     /// Return true if `key` is present, without updating recency.
     pub fn contains_key<Q>(&self, key: &Q) -> bool
     where
@@ -202,14 +212,124 @@ where
     }
 
     fn evict_tail(&mut self) {
-        let Some(tail) = self.tail else {
-            return;
-        };
-        self.detach(tail);
-        if let Some(node) = self.nodes[tail].take() {
-            self.map.remove(&node.key);
-            self.free.push(tail);
+        let _ = self.pop_lru();
+    }
+}
+
+/// An LRU cache with both entry-count and resident-byte limits.
+///
+/// The caller supplies the weight of each value because the cache is used for
+/// decoded resources whose allocation size is not derivable from `V` alone.
+/// An entry larger than the byte budget is rejected rather than temporarily
+/// exceeding the limit. Replacing an existing key and evicting old entries
+/// update the accounting before the new value becomes visible.
+pub struct ByteLruCache<K, V> {
+    entries: LruCache<K, (V, usize)>,
+    max_entries: usize,
+    max_bytes: usize,
+    bytes: usize,
+}
+
+impl<K, V> std::fmt::Debug for ByteLruCache<K, V>
+where
+    K: Eq + Hash + Clone,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ByteLruCache")
+            .field("max_entries", &self.max_entries)
+            .field("max_bytes", &self.max_bytes)
+            .field("entries", &self.len())
+            .field("bytes", &self.bytes)
+            .finish()
+    }
+}
+
+impl<K, V> ByteLruCache<K, V>
+where
+    K: Eq + Hash + Clone,
+{
+    pub fn new(max_entries: usize, max_bytes: usize) -> Self {
+        Self {
+            entries: LruCache::new(max_entries),
+            max_entries,
+            max_bytes,
+            bytes: 0,
         }
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn bytes(&self) -> usize {
+        self.bytes
+    }
+
+    pub fn max_bytes(&self) -> usize {
+        self.max_bytes
+    }
+
+    pub fn get<Q>(&mut self, key: &Q) -> Option<&V>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        self.entries.get(key).map(|(value, _)| value)
+    }
+
+    pub fn contains_key<Q>(&self, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        self.entries.contains_key(key)
+    }
+
+    pub fn remove<Q>(&mut self, key: &Q) -> Option<V>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        let (value, weight) = self.entries.remove(key)?;
+        self.bytes = self.bytes.saturating_sub(weight);
+        Some(value)
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.bytes = 0;
+    }
+
+    /// Insert a value, evicting least-recent entries until both budgets hold.
+    /// Returns `false` when the value cannot fit or this cache is disabled.
+    pub fn insert(&mut self, key: K, value: V, weight: usize) -> bool {
+        if self.max_entries == 0 || self.max_bytes == 0 || weight > self.max_bytes {
+            let _ = self.remove(&key);
+            return false;
+        }
+
+        if let Some((_, previous_weight)) = self.entries.remove(&key) {
+            self.bytes = self.bytes.saturating_sub(previous_weight);
+        }
+
+        while self.len() >= self.max_entries || self.bytes.saturating_add(weight) > self.max_bytes {
+            let Some((_, (_, evicted_weight))) = self.entries.pop_lru() else {
+                break;
+            };
+            self.bytes = self.bytes.saturating_sub(evicted_weight);
+        }
+
+        if self.len() >= self.max_entries || self.bytes.saturating_add(weight) > self.max_bytes {
+            return false;
+        }
+
+        self.entries.insert(key, (value, weight));
+        self.bytes = self.bytes.saturating_add(weight);
+        true
     }
 }
 
@@ -280,5 +400,33 @@ mod tests {
         // Should still be functional
         cache.insert(9999, 9999);
         assert_eq!(cache.get(&9999), Some(&9999));
+    }
+
+    #[test]
+    fn byte_cache_evicts_oldest_entries_before_exceeding_budget() {
+        let mut cache = ByteLruCache::new(3, 10);
+        assert!(cache.insert(1, "one", 4));
+        assert!(cache.insert(2, "two", 4));
+        assert_eq!(cache.get(&1), Some(&"one"));
+        assert!(cache.insert(3, "three", 6));
+
+        assert_eq!(cache.get(&2), None);
+        assert_eq!(cache.get(&1), Some(&"one"));
+        assert_eq!(cache.get(&3), Some(&"three"));
+        assert_eq!(cache.bytes(), 10);
+    }
+
+    #[test]
+    fn byte_cache_rejects_oversized_values_and_accounts_for_replacement() {
+        let mut cache = ByteLruCache::new(2, 8);
+        assert!(!cache.insert(1, "too large", 9));
+        assert!(cache.is_empty());
+
+        assert!(cache.insert(1, "old", 5));
+        assert!(cache.insert(1, "new", 3));
+        assert_eq!(cache.get(&1), Some(&"new"));
+        assert_eq!(cache.bytes(), 3);
+        cache.clear();
+        assert_eq!(cache.bytes(), 0);
     }
 }

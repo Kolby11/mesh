@@ -8,8 +8,8 @@
 #[cfg(test)]
 use super::PixelBuffer;
 use super::profiling;
-use super::resource_generation_is_current;
-use mesh_core_elements::lru::LruCache;
+use super::{checked_pixel_bytes, reserve_render_resource_work, resource_generation_is_current};
+use mesh_core_elements::lru::ByteLruCache;
 use mesh_core_elements::style::Color;
 use mesh_core_icon::SupportedAxes;
 use mesh_core_resources::{ResourceFingerprint, resource_fingerprint, resource_revision};
@@ -79,6 +79,7 @@ struct GlyphJob {
     px: u32,
     axes: GlyphAxes,
     supported: SupportedAxes,
+    _budget: mesh_core_resources::ResourceByteReservation,
 }
 
 struct GlyphJobResult {
@@ -86,6 +87,7 @@ struct GlyphJobResult {
     glyph: Option<CachedGlyph>,
     cancelled: bool,
     elapsed: std::time::Duration,
+    _budget: mesh_core_resources::ResourceByteReservation,
 }
 
 struct GlyphRasterQueue {
@@ -128,6 +130,7 @@ fn glyph_raster_queue() -> &'static Mutex<GlyphRasterQueue> {
                             glyph: if cancelled { None } else { glyph },
                             cancelled,
                             elapsed: started.elapsed(),
+                            _budget: job._budget,
                         })
                         .is_err()
                     {
@@ -199,6 +202,9 @@ fn schedule_glyph_raster_job(
     axes: GlyphAxes,
     supported: SupportedAxes,
 ) -> Option<bool> {
+    let Some(work_bytes) = glyph_work_bytes(px) else {
+        return Some(false);
+    };
     let Ok(mut queue) = glyph_raster_queue().lock() else {
         return None;
     };
@@ -208,6 +214,10 @@ fn schedule_glyph_raster_job(
     if !queue.pending.insert(key.clone()) {
         return Some(false);
     }
+    let Some(budget) = reserve_render_resource_work(work_bytes) else {
+        queue.pending.remove(&key);
+        return Some(false);
+    };
     let job = GlyphJob {
         key,
         font_path: font_path.to_path_buf(),
@@ -215,6 +225,7 @@ fn schedule_glyph_raster_job(
         px,
         axes,
         supported,
+        _budget: budget,
     };
     match sender.try_send(job) {
         Ok(()) => Some(true),
@@ -236,27 +247,42 @@ struct FontBytesCacheKey {
     fingerprint: ResourceFingerprint,
 }
 
-type FontBytesCache = Mutex<LruCache<FontBytesCacheKey, Arc<[u8]>>>;
+type FontBytesCache = Mutex<ByteLruCache<FontBytesCacheKey, Arc<[u8]>>>;
 
 static FONT_BYTES: OnceLock<FontBytesCache> = OnceLock::new();
-static GLYPH_CACHE: OnceLock<Mutex<LruCache<GlyphCacheKey, Option<CachedGlyph>>>> = OnceLock::new();
+static GLYPH_CACHE: OnceLock<Mutex<ByteLruCache<GlyphCacheKey, Option<CachedGlyph>>>> =
+    OnceLock::new();
 const FONT_BYTES_CACHE_CAPACITY: usize = 32;
 const GLYPH_CACHE_CAPACITY: usize = 1024;
+const FONT_BYTES_CACHE_MAX_BYTES: usize = 32 * 1024 * 1024;
+const GLYPH_CACHE_MAX_BYTES: usize = 8 * 1024 * 1024;
+const MAX_GLYPH_PX: u32 = 2048;
 
 // Thread-local Skia image cache for icon-font glyph renders, keyed by GlyphCacheKey.
 // Avoids rebuilding Skia A8 images on every paint frame.
 const ICON_GLYPH_SKIA_CAPACITY: usize = 512;
+const ICON_GLYPH_SKIA_MAX_BYTES: usize = 8 * 1024 * 1024;
 thread_local! {
-    static ICON_GLYPH_SKIA: RefCell<LruCache<GlyphCacheKey, skia_safe::Image>> =
-        RefCell::new(LruCache::new(ICON_GLYPH_SKIA_CAPACITY));
+    static ICON_GLYPH_SKIA: RefCell<ByteLruCache<GlyphCacheKey, skia_safe::Image>> =
+        RefCell::new(ByteLruCache::new(ICON_GLYPH_SKIA_CAPACITY, ICON_GLYPH_SKIA_MAX_BYTES));
 }
 
 fn font_bytes_cache() -> &'static FontBytesCache {
-    FONT_BYTES.get_or_init(|| Mutex::new(LruCache::new(FONT_BYTES_CACHE_CAPACITY)))
+    FONT_BYTES.get_or_init(|| {
+        Mutex::new(ByteLruCache::new(
+            FONT_BYTES_CACHE_CAPACITY,
+            FONT_BYTES_CACHE_MAX_BYTES,
+        ))
+    })
 }
 
-fn glyph_cache() -> &'static Mutex<LruCache<GlyphCacheKey, Option<CachedGlyph>>> {
-    GLYPH_CACHE.get_or_init(|| Mutex::new(LruCache::new(GLYPH_CACHE_CAPACITY)))
+fn glyph_cache() -> &'static Mutex<ByteLruCache<GlyphCacheKey, Option<CachedGlyph>>> {
+    GLYPH_CACHE.get_or_init(|| {
+        Mutex::new(ByteLruCache::new(
+            GLYPH_CACHE_CAPACITY,
+            GLYPH_CACHE_MAX_BYTES,
+        ))
+    })
 }
 
 fn font_bytes(path: &Path) -> Option<Arc<[u8]>> {
@@ -282,7 +308,7 @@ fn font_bytes(path: &Path) -> Option<Arc<[u8]>> {
     profiling::record_font_bytes_cache_lookup(false, entries, FONT_BYTES_CACHE_CAPACITY);
     let bytes: Arc<[u8]> = std::fs::read(path).ok()?.into();
     if let Ok(mut guard) = cache.lock() {
-        guard.insert(key, Arc::clone(&bytes));
+        guard.insert(key, Arc::clone(&bytes), bytes.len());
         profiling::update_font_bytes_cache_entries(guard.len(), FONT_BYTES_CACHE_CAPACITY);
     }
     Some(bytes)
@@ -295,6 +321,7 @@ fn rasterize(
     axes: GlyphAxes,
     supported: SupportedAxes,
 ) -> Option<CachedGlyph> {
+    glyph_work_bytes(px)?;
     let bytes = font_bytes(font_path)?;
     let font = FontRef::from_index(bytes.as_ref(), 0)?;
     let glyph_id = font.charmap().map(char::from_u32(codepoint)?);
@@ -360,9 +387,17 @@ fn cache_lookup(key: GlyphCacheKey) -> Option<Option<CachedGlyph>> {
 fn cache_store(key: GlyphCacheKey, value: Option<CachedGlyph>) {
     let cache = glyph_cache();
     if let Ok(mut guard) = cache.lock() {
-        guard.insert(key, value);
+        let weight = value.as_ref().map_or(1, |glyph| glyph.pixels.len().max(1));
+        guard.insert(key, value, weight);
         profiling::update_glyph_cache_entries(guard.len(), GLYPH_CACHE_CAPACITY);
     }
+}
+
+fn glyph_work_bytes(px: u32) -> Option<usize> {
+    if px == 0 || px > MAX_GLYPH_PX {
+        return None;
+    }
+    checked_pixel_bytes(px, px, 1)
 }
 
 fn hash_path(path: &Path) -> u64 {
@@ -554,7 +589,7 @@ pub fn draw_font_glyph_on_canvas(
         let row_bytes = glyph.width as usize;
         let data = Data::new_copy(&glyph.pixels);
         let img = images::raster_from_data(&info, data, row_bytes)?;
-        atlas.insert(key, img.clone());
+        atlas.insert(key, img.clone(), glyph.pixels.len());
         profiling::update_skia_glyph_cache_entries(atlas.len(), ICON_GLYPH_SKIA_CAPACITY);
         Some(img)
     });
@@ -812,5 +847,12 @@ mod tests {
             alternate_tint,
         ));
         assert!(matches!(cache_lookup(alternate_tint_key), Some(None)));
+    }
+
+    #[test]
+    fn glyph_work_budget_rejects_oversized_raster_requests() {
+        assert_eq!(glyph_work_bytes(1), Some(1));
+        assert!(glyph_work_bytes(MAX_GLYPH_PX).is_some());
+        assert!(glyph_work_bytes(MAX_GLYPH_PX + 1).is_none());
     }
 }
