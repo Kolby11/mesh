@@ -245,7 +245,8 @@ impl Shell {
                     != Some(&config);
                 if changed {
                     self.presentation_engine
-                        .configure(&child_surface_id, config.clone());
+                        .configure(&child_surface_id, config.clone())
+                        .map_err(ShellRunError::Presentation)?;
                     self.components[index].children[child_index]
                         .target
                         .last_surface_config = Some(config);

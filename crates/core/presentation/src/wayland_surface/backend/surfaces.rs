@@ -117,25 +117,43 @@ impl WaylandSurfaceBackend {
     /// presentation layer (component VM, retained tree, Lua state, service
     /// subscriptions) is untouched: only the Wayland object is swapped, which is
     /// what makes promoting a widget into a window non-destructive.
-    pub fn configure(&mut self, surface_id: &str, cfg: SurfaceConfig) {
+    pub fn configure(
+        &mut self,
+        surface_id: &str,
+        cfg: SurfaceConfig,
+    ) -> Result<(), PresentationError> {
         let cfg = self.clamp_surface_config(surface_id, cfg);
-        if cfg.keyboard_mode != KeyboardMode::OnDemand {
-            self.state.release_surface_focus_grab(surface_id);
-        }
         let qh = self.state.qh.clone();
         let effective_keyboard_mode = self
             .state
             .effective_keyboard_mode_for(surface_id, cfg.keyboard_mode);
 
-        if let Some(entry) = self.state.surfaces.get(surface_id)
-            && entry.role.is_window() != (cfg.role == SurfaceRole::Window)
-        {
+        let role_changed = self
+            .state
+            .surfaces
+            .get(surface_id)
+            .is_some_and(|entry| entry.role.is_window() != (cfg.role == SurfaceRole::Window));
+        if role_changed {
             tracing::info!(
                 surface_id,
                 role = ?cfg.role,
                 "surface role changed; recreating the compositor surface"
             );
+            // Create the replacement while the last-known-good role is still
+            // installed. A missing protocol global or compositor allocation
+            // failure must leave the existing surface usable for the next
+            // retry, rather than turning a failed configure into a teardown.
+            let role = self.create_surface_role(&cfg, &qh)?;
+            if cfg.keyboard_mode != KeyboardMode::OnDemand {
+                self.state.release_surface_focus_grab(surface_id);
+            }
             self.destroy_surface(surface_id);
+            self.install_surface_role(surface_id, role, cfg, effective_keyboard_mode);
+            return Ok(());
+        }
+
+        if cfg.keyboard_mode != KeyboardMode::OnDemand {
+            self.state.release_surface_focus_grab(surface_id);
         }
 
         match self.state.surfaces.get_mut(surface_id) {
@@ -152,50 +170,55 @@ impl WaylandSurfaceBackend {
                 }
             }
             None => {
-                let role = match self.create_surface_role(&cfg, &qh) {
-                    Ok(role) => role,
-                    Err(error) => {
-                        tracing::error!(surface_id, "failed to create surface: {error}");
-                        return;
-                    }
-                };
-                self.state.insert_surface(
-                    surface_id.to_string(),
-                    SurfaceEntry::new(role, cfg, effective_keyboard_mode),
-                );
-                if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
-                    let cfg = entry.cfg.clone();
-                    entry.apply_config(cfg, effective_keyboard_mode);
-                }
-                let wl_surface = self
-                    .state
-                    .surfaces
-                    .get(surface_id)
-                    .map(|entry| entry.wl_surface().clone());
-                let qh = self.state.qh.clone();
-                if let Some(wl_surface) = wl_surface
-                    && let Some(fs) =
-                        self.state
-                            .bind_fractional_scale(&wl_surface, &qh, surface_id.to_string())
-                    && let Some(entry) = self.state.surfaces.get_mut(surface_id)
-                {
-                    entry.fractional_scale = Some(fs);
-                }
-                if let Some(ref viewporter) = self.state.viewporter {
-                    if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
-                        let wl_surface = entry.wl_surface().clone();
-                        let qh = self.state.qh.clone();
-                        entry.viewport = Some(viewporter.get_viewport(&wl_surface, &qh, ()));
-                    }
-                }
-                // The kde_blur object is created lazily when the first
-                // non-empty blur region is committed in `present_with_damage`.
-                // Creating it eagerly here would enable the compositor's default
-                // whole-surface blur on every surface — including ones with no
-                // `backdrop-filter` at all — because an org_kde_kwin_blur object
-                // with no region set blurs the entire surface.
+                let role = self.create_surface_role(&cfg, &qh)?;
+                self.install_surface_role(surface_id, role, cfg, effective_keyboard_mode);
             }
         }
+        Ok(())
+    }
+
+    fn install_surface_role(
+        &mut self,
+        surface_id: &str,
+        role: WaylandRole,
+        cfg: SurfaceConfig,
+        effective_keyboard_mode: KeyboardMode,
+    ) {
+        self.state.insert_surface(
+            surface_id.to_string(),
+            SurfaceEntry::new(role, cfg, effective_keyboard_mode),
+        );
+        if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
+            let cfg = entry.cfg.clone();
+            entry.apply_config(cfg, effective_keyboard_mode);
+        }
+        let wl_surface = self
+            .state
+            .surfaces
+            .get(surface_id)
+            .map(|entry| entry.wl_surface().clone());
+        let qh = self.state.qh.clone();
+        if let Some(wl_surface) = wl_surface
+            && let Some(fs) =
+                self.state
+                    .bind_fractional_scale(&wl_surface, &qh, surface_id.to_string())
+            && let Some(entry) = self.state.surfaces.get_mut(surface_id)
+        {
+            entry.fractional_scale = Some(fs);
+        }
+        if let Some(ref viewporter) = self.state.viewporter {
+            if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
+                let wl_surface = entry.wl_surface().clone();
+                let qh = self.state.qh.clone();
+                entry.viewport = Some(viewporter.get_viewport(&wl_surface, &qh, ()));
+            }
+        }
+        // The kde_blur object is created lazily when the first non-empty blur
+        // region is committed in `present_with_damage`. Creating it eagerly
+        // would enable the compositor's default whole-surface blur on every
+        // surface — including ones with no `backdrop-filter` at all — because
+        // an org_kde_kwin_blur object with no region set blurs the entire
+        // surface.
     }
 
     /// Create the compositor object backing a new surface.

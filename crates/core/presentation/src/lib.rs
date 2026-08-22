@@ -102,6 +102,7 @@ enum Backend {
 #[derive(Default)]
 struct TestingBackend {
     popup_supported: bool,
+    configure_error: Option<String>,
     popup_configs: HashMap<String, PopupConfig>,
     surface_configs: HashMap<String, SurfaceConfig>,
     surface_config_history: Vec<(String, SurfaceConfig)>,
@@ -190,6 +191,13 @@ impl PresentationEngine {
     }
 
     #[doc(hidden)]
+    pub fn testing_fail_next_configure(&mut self, message: impl Into<String>) {
+        if let Backend::Testing(backend) = &mut self.backend {
+            backend.configure_error = Some(message.into());
+        }
+    }
+
+    #[doc(hidden)]
     pub fn testing_popup_config(&self, surface_id: &str) -> Option<&PopupConfig> {
         match &self.backend {
             Backend::Testing(backend) => backend.popup_configs.get(surface_id),
@@ -250,16 +258,24 @@ impl PresentationEngine {
         }
     }
 
-    pub fn configure(&mut self, surface_id: &str, cfg: SurfaceConfig) {
+    pub fn configure(
+        &mut self,
+        surface_id: &str,
+        cfg: SurfaceConfig,
+    ) -> Result<(), PresentationError> {
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => bridge.configure(surface_id, cfg),
-            Backend::DevWindow(_) => {}
+            Backend::DevWindow(_) => Ok(()),
             Backend::Testing(backend) => {
+                if let Some(message) = backend.configure_error.take() {
+                    return Err(PresentationError::SurfaceCreate(message));
+                }
                 backend.missing_surfaces.remove(surface_id);
                 backend
                     .surface_config_history
                     .push((surface_id.to_string(), cfg.clone()));
                 backend.surface_configs.insert(surface_id.to_string(), cfg);
+                Ok(())
             }
         }
     }
@@ -1059,6 +1075,36 @@ mod tests {
             PresentStatus::SurfaceMissing
         );
         assert!(engine.testing_presented_surfaces().is_empty());
+    }
+
+    #[test]
+    fn failed_configure_does_not_replace_the_last_accepted_config() {
+        let mut engine = PresentationEngine::testing_with_popup_support(false);
+        let accepted = SurfaceConfig::default();
+        engine
+            .configure("panel", accepted.clone())
+            .expect("the initial config should be accepted");
+        engine.testing_fail_next_configure("synthetic surface creation failure");
+
+        let replacement = SurfaceConfig {
+            width: 640,
+            height: 480,
+            ..accepted.clone()
+        };
+        let error = engine
+            .configure("panel", replacement)
+            .expect_err("the injected creation failure must be observable");
+        assert!(
+            matches!(error, PresentationError::SurfaceCreate(message) if message == "synthetic surface creation failure")
+        );
+        assert_eq!(
+            engine.testing_surface_configs(),
+            [("panel".to_string(), accepted.clone())]
+        );
+        assert_eq!(
+            engine.testing_surface_config_history(),
+            [("panel".to_string(), accepted)]
+        );
     }
 
     #[test]

@@ -248,6 +248,72 @@ fn hidden_surface_reconfigures_and_presents_when_shown_again() {
     );
 }
 
+#[test]
+fn failed_surface_configure_is_not_cached_and_can_be_retried() {
+    const SURFACE: &str = "@test/configure-retry";
+
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(SurfaceConfigLifecycleComponent::new(
+        SURFACE,
+        (920, 700),
+    )));
+    let mut emitted = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: SURFACE.into(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    shell
+        .presentation_engine
+        .testing_fail_next_configure("synthetic configure failure");
+
+    let error = shell
+        .render_components()
+        .expect_err("a failed configure must reach the shell runtime");
+    assert!(matches!(
+        error,
+        crate::ShellRunError::Presentation(mesh_core_presentation::PresentationError::SurfaceCreate(
+            message
+        )) if message == "synthetic configure failure"
+    ));
+    let runtime = shell
+        .components
+        .iter()
+        .find(|runtime| runtime.surface_id == SURFACE)
+        .expect("registered surface runtime");
+    assert!(
+        runtime.parent.last_surface_config.is_none(),
+        "a rejected configure must not be recorded as the accepted surface generation"
+    );
+    assert!(
+        shell
+            .presentation_engine
+            .testing_surface_config_history()
+            .is_empty()
+    );
+
+    shell
+        .render_components()
+        .expect("the next frame should retry the rejected configure");
+    let runtime = shell
+        .components
+        .iter()
+        .find(|runtime| runtime.surface_id == SURFACE)
+        .expect("registered surface runtime after retry");
+    assert!(runtime.parent.last_surface_config.is_some());
+    assert_eq!(
+        shell
+            .presentation_engine
+            .testing_surface_config_history()
+            .iter()
+            .filter(|(surface_id, _)| surface_id == SURFACE)
+            .count(),
+        1
+    );
+}
+
 /// The invariant: a layer-surface configure never carries a size the protocol
 /// layer would have to invent.
 ///

@@ -9,21 +9,23 @@ returns typed copy and SHM attach failures, and restores the selected buffer's
 copied pending damage when a copy or attach transaction fails. Visible presents
 for missing compositor surfaces return `SurfaceMissing`; the shell retains the
 damage, clears the accepted-config cache, and retries surface creation instead
-of acknowledging an unshown frame.
+of acknowledging an unshown frame. Surface configuration now returns typed
+creation failures, prepares a replacement role before destroying the last-good
+role, and updates shell config caches only after acceptance.
 
 Icon bitmap/SVG and font-glyph preparation still share a bounded render resource
 broker, with revision-aware cache handoff and linked-file invalidation. Typed
 icon/glyph caches and shell polling remain separate at the handoff boundary.
 Text shaping remains synchronous and outside that broker.
 
-Focused presentation tests and `cargo check --workspace` pass. Existing shell
-dead-code/private-interface warnings remain. The focused real-surface navigation
-raster fixture still has the known 1280px layout overflow. The broad workspace
-lib test run remains blocked by the pre-existing repository-settings fixture,
-which rejects its `revision` key as unknown.
+Focused presentation and shell tests plus `cargo check --workspace` pass.
+Existing shell dead-code/private-interface warnings remain. The focused
+real-surface navigation raster fixture still has the known 1280px layout
+overflow. The broad workspace lib test run remains blocked by the pre-existing
+repository-settings fixture, which rejects its `revision` key as unknown.
 
 ## Next
 
-Return typed create/configure/present/lost outcomes, preserve the last-known-good
-surface on failed role replacement, and centralize idempotent presentation
-teardown. Resource preparation and text shaping remain separate follow-up work.
+Return typed lost outcomes and centralize idempotent presentation teardown,
+including the remaining close, dismiss, parent-destruction, and connection-loss
+paths. Resource preparation and text shaping remain separate follow-up work.

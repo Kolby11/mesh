@@ -542,7 +542,10 @@ impl Shell {
             }
         };
 
-        self.presentation_engine.configure(surface_id, cfg.clone());
+        if let Err(error) = self.presentation_engine.configure(surface_id, cfg.clone()) {
+            tracing::warn!(%error, %surface_id, "failed to configure surface keyboard mode");
+            return;
+        }
         if let Some(index) = self.component_index_for_surface(surface_id) {
             self.components[index].parent.last_surface_config = Some(cfg);
         }

@@ -370,7 +370,9 @@ impl Shell {
                         rerender_attempts,
                         "sending layer-surface configure"
                     );
-                    self.presentation_engine.configure(&surface_id, cfg.clone());
+                    self.presentation_engine
+                        .configure(&surface_id, cfg.clone())
+                        .map_err(ShellRunError::Presentation)?;
                     self.components[index].parent.last_surface_config = Some(cfg);
                     // A geometry-changing configure invalidates the
                     // compositor's previously-acked size: `apply_config`
