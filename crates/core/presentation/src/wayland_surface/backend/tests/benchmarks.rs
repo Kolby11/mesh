@@ -258,7 +258,8 @@ fn disjoint_damage_copy_beats_bounding_union_copy() {
             height,
             width,
             union,
-        );
+        )
+        .unwrap();
     }
     let union_elapsed = started.elapsed();
 
@@ -272,7 +273,8 @@ fn disjoint_damage_copy_beats_bounding_union_copy() {
                 height,
                 width,
                 rect,
-            );
+            )
+            .unwrap();
         }
     }
     let disjoint_elapsed = started.elapsed();
@@ -311,7 +313,8 @@ fn fractional_sparse_damage_copy_beats_full_surface_upload() {
             height,
             width,
             full_damage(width, height),
-        );
+        )
+        .unwrap();
     }
     let full_time = full_started.elapsed();
 
@@ -324,7 +327,8 @@ fn fractional_sparse_damage_copy_beats_full_surface_upload() {
             height,
             width,
             physical_damage,
-        );
+        )
+        .unwrap();
     }
     let sparse_time = sparse_started.elapsed();
 

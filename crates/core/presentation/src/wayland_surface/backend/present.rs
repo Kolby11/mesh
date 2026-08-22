@@ -57,8 +57,10 @@ impl WaylandSurfaceBackend {
         }
 
         if !self.state.surfaces.contains_key(surface_id) {
-            // present() called before configure() — nothing to do.
-            return Ok(PresentStatus::Presented);
+            // A visible frame for a surface that was closed or failed to be
+            // created did not reach the compositor. Keep its damage alive so
+            // the shell can recreate the role and retry the frame.
+            return Ok(PresentStatus::SurfaceMissing);
         }
         if !self.surface_ready_to_present(surface_id) {
             return Ok(PresentStatus::NotReady);
@@ -71,7 +73,7 @@ impl WaylandSurfaceBackend {
             .as_mut()
             .ok_or_else(|| PresentationError::BufferAlloc("shm pool not initialised".into()))?;
         let Some(entry) = state.surfaces.get_mut(surface_id) else {
-            return Ok(PresentStatus::Presented);
+            return Ok(PresentStatus::SurfaceMissing);
         };
         if !entry.configured {
             return Ok(PresentStatus::NotReady);
@@ -197,7 +199,7 @@ impl WaylandSurfaceBackend {
             width: logical_w,
             height: logical_h,
         }));
-        entry.attach_shm_buffer(
+        if let Err(error) = entry.attach_shm_buffer(
             &qh,
             buffer_index,
             logical_w,
@@ -207,7 +209,18 @@ impl WaylandSurfaceBackend {
             damage_rects,
             &copy_damage,
             scale,
-        );
+        ) {
+            // copy_into_shm_buffer consumes the selected slot's accumulated
+            // damage before copying it. Put it back when activation/attach
+            // fails, otherwise a retry would publish a partially refreshed
+            // SHM buffer as if the frame had been delivered.
+            entry.restore_copied_damage(
+                buffer_index,
+                &copy_damage,
+                full_damage(physical_w, physical_h),
+            );
+            return Err(error);
+        }
 
         Ok(PresentStatus::Presented)
     }

@@ -60,6 +60,9 @@ pub enum PresentStatus {
     /// The compositor has not configured the surface yet. The caller must keep
     /// the frame and retry after presentation events are dispatched.
     NotReady,
+    /// The compositor surface is no longer present. The caller must retain the
+    /// frame and retry configuration before treating a later frame as delivered.
+    SurfaceMissing,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -75,6 +78,12 @@ pub enum PresentationError {
 
     #[error("buffer allocation failed: {0}")]
     BufferAlloc(String),
+
+    #[error("buffer copy failed: {0}")]
+    BufferCopy(String),
+
+    #[error("buffer attach failed: {0}")]
+    BufferAttach(String),
 }
 
 pub struct PresentationEngine {
@@ -106,6 +115,7 @@ struct TestingBackend {
     completed_frames: usize,
     window_states: HashMap<String, WindowStates>,
     unconfigured_surfaces: HashSet<String>,
+    missing_surfaces: HashSet<String>,
 }
 
 impl PresentationEngine {
@@ -164,6 +174,17 @@ impl PresentationEngine {
                 backend.unconfigured_surfaces.remove(surface_id);
             } else {
                 backend.unconfigured_surfaces.insert(surface_id.to_string());
+            }
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn testing_set_surface_missing(&mut self, surface_id: &str, missing: bool) {
+        if let Backend::Testing(backend) = &mut self.backend {
+            if missing {
+                backend.missing_surfaces.insert(surface_id.to_string());
+            } else {
+                backend.missing_surfaces.remove(surface_id);
             }
         }
     }
@@ -234,6 +255,7 @@ impl PresentationEngine {
             Backend::WaylandSurface(bridge) => bridge.configure(surface_id, cfg),
             Backend::DevWindow(_) => {}
             Backend::Testing(backend) => {
+                backend.missing_surfaces.remove(surface_id);
                 backend
                     .surface_config_history
                     .push((surface_id.to_string(), cfg.clone()));
@@ -453,6 +475,9 @@ impl PresentationEngine {
             }
             Backend::DevWindow(bridge) => bridge.present(surface_id, title, visible, buffer),
             Backend::Testing(backend) => {
+                if visible && backend.missing_surfaces.contains(surface_id) {
+                    return Ok(PresentStatus::SurfaceMissing);
+                }
                 if visible && backend.unconfigured_surfaces.contains(surface_id) {
                     return Ok(PresentStatus::NotReady);
                 }
@@ -1013,6 +1038,27 @@ mod tests {
             PresentStatus::Presented
         );
         assert_eq!(engine.testing_presented_surfaces(), ["panel"]);
+    }
+
+    #[test]
+    fn missing_surface_returns_non_delivery_without_recording_present() {
+        let mut engine = PresentationEngine::testing_with_popup_support(false);
+        engine.testing_set_surface_missing("panel", true);
+        let buffer = PixelBuffer::new(32, 16);
+        let damage = [DamageRect {
+            x: 0,
+            y: 0,
+            width: 32,
+            height: 16,
+        }];
+
+        assert_eq!(
+            engine
+                .present_with_damage("panel", "Panel", true, &buffer, &damage)
+                .unwrap(),
+            PresentStatus::SurfaceMissing
+        );
+        assert!(engine.testing_presented_surfaces().is_empty());
     }
 
     #[test]

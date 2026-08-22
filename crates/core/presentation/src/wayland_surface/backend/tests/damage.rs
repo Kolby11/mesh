@@ -355,3 +355,27 @@ fn pending_buffer_damage_collapses_when_rect_cap_is_exceeded() {
     assert_eq!(pending[0].x, 0);
     assert_eq!(pending[0].width, 165);
 }
+
+#[test]
+fn restoring_copied_damage_uses_the_same_bounded_accumulator() {
+    let bounds = full_damage(100, 40);
+    let copied = [
+        DamageRect {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 40,
+        },
+        DamageRect {
+            x: 90,
+            y: 0,
+            width: 10,
+            height: 40,
+        },
+    ];
+    let mut pending = SmallVec::new();
+
+    restore_pending_damage(&mut pending, &copied, bounds);
+
+    assert_eq!(pending.as_slice(), copied.as_slice());
+}

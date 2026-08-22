@@ -77,7 +77,13 @@ fn full_copy_uses_the_allocation_stride_for_size_class_buffers() {
     let src: Vec<u8> = (0..width * height * 4).map(|value| value as u8).collect();
     let mut canvas = vec![0xff; canvas_width as usize * height as usize * 4];
 
-    copy_bgra_to_canvas(&src, &mut canvas, width, height, canvas_width);
+    copy_bgra_to_canvas(&src, &mut canvas, width, height, canvas_width).unwrap();
+
+    let short_src = &src[..src.len() - 1];
+    assert_eq!(
+        copy_bgra_to_canvas(short_src, &mut canvas, width, height, canvas_width),
+        Err(BufferCopyError::SourceTooShort)
+    );
 
     for row in 0..height as usize {
         let src_start = row * width as usize * 4;

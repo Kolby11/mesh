@@ -179,7 +179,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 - [ ] Preserve release batch/barrier metrics in diagnostics and debug telemetry.
 - [ ] Validate caller lineage before trusting generation shortcuts.
 - [ ] Include resource revisions in retained-present decisions and cache invalidation.
-- [ ] Preserve pending damage and avoid acknowledging unshown frames after presentation errors.
 - [ ] Move resource decode and rasterization off the frame thread through a bounded resource broker.
 - [ ] Enforce byte- and dimension-based cache budgets for decoded assets, fonts, glyphs, text, Skia, PixelBuffer, and SHM allocations.
 - [ ] Introduce a typed frame paint plan with immutable inputs, topology, transforms, effect regions, replay spans, and exact logical/device damage.

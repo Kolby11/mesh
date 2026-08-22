@@ -1026,13 +1026,37 @@ impl Shell {
                         .expect("paint buffer initialised"),
                 );
             }
-            match present_result.map_err(ShellRunError::Presentation)? {
-                PresentStatus::Presented => presented = true,
-                PresentStatus::NotReady => {
+            match present_result {
+                Ok(PresentStatus::Presented) => presented = true,
+                Ok(PresentStatus::NotReady) => {
                     self.components[index]
                         .target_mut(target)
                         .pending_present_damage = present_damage;
                     self.components[index].component.request_paint();
+                }
+                Ok(PresentStatus::SurfaceMissing) => {
+                    let target = self.components[index].target_mut(target);
+                    target.pending_present_damage = present_damage;
+                    // A compositor close or failed role creation invalidates
+                    // the shell's cached accepted config as well as the
+                    // pixels. Clearing it lets the next render issue a fresh
+                    // create/configure attempt instead of acknowledging every
+                    // retry against an object that no longer exists.
+                    target.last_surface_config = None;
+                    target.known_surface_size = None;
+                    target.last_region_state = None;
+                    self.components[index].component.request_paint();
+                }
+                Err(error) => {
+                    // The presentation backend may have rejected a copy or
+                    // attach after render damage was taken. Keep the frame at
+                    // the shell seam too, so every failure path remains
+                    // retryable and no unshown frame is acknowledged.
+                    self.components[index]
+                        .target_mut(target)
+                        .pending_present_damage = present_damage;
+                    self.components[index].component.request_paint();
+                    return Err(ShellRunError::Presentation(error));
                 }
             }
         }

@@ -2,29 +2,60 @@ use mesh_core_render::DamageRect;
 use smallvec::SmallVec;
 use std::borrow::Cow;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum BufferCopyError {
+    SourceTooShort,
+    CanvasTooShort,
+    ArithmeticOverflow,
+}
+
+impl std::fmt::Display for BufferCopyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::SourceTooShort => "source storage is shorter than its declared dimensions",
+            Self::CanvasTooShort => "SHM canvas is shorter than its declared dimensions",
+            Self::ArithmeticOverflow => "buffer dimensions overflow the byte-length calculation",
+        };
+        f.write_str(message)
+    }
+}
+
 pub(super) fn copy_bgra_to_canvas(
     src: &[u8],
     canvas: &mut [u8],
     width: u32,
     height: u32,
     canvas_width: u32,
-) {
+) -> Result<(), BufferCopyError> {
     // wl_shm Argb8888 is B,G,R,A in little-endian memory, matching PixelBuffer.
-    let row_bytes = width as usize * 4;
-    let src_len = row_bytes * height as usize;
-    let canvas_stride = canvas_width as usize * 4;
-    if src.len() < src_len || canvas_stride < row_bytes {
-        return;
+    let row_bytes = usize::try_from(width)
+        .ok()
+        .and_then(|width| width.checked_mul(4))
+        .ok_or(BufferCopyError::ArithmeticOverflow)?;
+    let row_count = usize::try_from(height).map_err(|_| BufferCopyError::ArithmeticOverflow)?;
+    let src_len = row_bytes
+        .checked_mul(row_count)
+        .ok_or(BufferCopyError::ArithmeticOverflow)?;
+    let canvas_stride = usize::try_from(canvas_width)
+        .ok()
+        .and_then(|width| width.checked_mul(4))
+        .ok_or(BufferCopyError::ArithmeticOverflow)?;
+    let canvas_len = canvas_stride
+        .checked_mul(row_count)
+        .ok_or(BufferCopyError::ArithmeticOverflow)?;
+    if src.len() < src_len {
+        return Err(BufferCopyError::SourceTooShort);
+    }
+    if canvas_stride < row_bytes || canvas.len() < canvas_len {
+        return Err(BufferCopyError::CanvasTooShort);
     }
     for row in 0..height as usize {
         let src_start = row * row_bytes;
         let canvas_start = row * canvas_stride;
         let canvas_end = canvas_start + row_bytes;
-        if canvas_end > canvas.len() {
-            return;
-        }
         canvas[canvas_start..canvas_end].copy_from_slice(&src[src_start..src_start + row_bytes]);
     }
+    Ok(())
 }
 
 pub(super) fn full_damage(width: u32, height: u32) -> DamageRect {
@@ -88,6 +119,17 @@ pub(super) fn extend_pending_damage(
         pending.clear();
         pending.push(union);
     }
+}
+
+/// Restore the copied portion of a frame after a later presentation step
+/// failed. Use the same bounded accumulation rule as new damage so retries do
+/// not grow a slot's pending list without limit.
+pub(super) fn restore_pending_damage(
+    pending: &mut SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]>,
+    copied_damage: &[DamageRect],
+    bounds: DamageRect,
+) {
+    extend_pending_damage(pending, copied_damage, bounds);
 }
 
 /// Maximum number of `wl_surface::damage_buffer` calls allowed per commit.
@@ -188,21 +230,61 @@ pub(super) fn copy_bgra_damage_to_canvas(
     height: u32,
     canvas_width: u32,
     damage: DamageRect,
-) {
-    let Some(damage) = clip_damage(damage, full_damage(width, height)) else {
-        return;
-    };
-    let src_stride = width as usize * 4;
-    let canvas_stride = canvas_width as usize * 4;
-    let row_bytes = damage.width as usize * 4;
-    let x_offset = damage.x as usize * 4;
-    for row in damage.y as usize..damage.y.saturating_add(damage.height) as usize {
-        let src_start = row * src_stride + x_offset;
-        let canvas_start = row * canvas_stride + x_offset;
-        let src_end = src_start + row_bytes;
-        let canvas_end = canvas_start + row_bytes;
-        if src_end <= src.len() && canvas_end <= canvas.len() {
-            canvas[canvas_start..canvas_end].copy_from_slice(&src[src_start..src_end]);
-        }
+) -> Result<(), BufferCopyError> {
+    let src_stride = usize::try_from(width)
+        .ok()
+        .and_then(|width| width.checked_mul(4))
+        .ok_or(BufferCopyError::ArithmeticOverflow)?;
+    let canvas_stride = usize::try_from(canvas_width)
+        .ok()
+        .and_then(|width| width.checked_mul(4))
+        .ok_or(BufferCopyError::ArithmeticOverflow)?;
+    let row_count = usize::try_from(height).map_err(|_| BufferCopyError::ArithmeticOverflow)?;
+    let source_len = src_stride
+        .checked_mul(row_count)
+        .ok_or(BufferCopyError::ArithmeticOverflow)?;
+    let canvas_len = canvas_stride
+        .checked_mul(row_count)
+        .ok_or(BufferCopyError::ArithmeticOverflow)?;
+    if src.len() < source_len {
+        return Err(BufferCopyError::SourceTooShort);
     }
+    if canvas_width < width || canvas.len() < canvas_len {
+        return Err(BufferCopyError::CanvasTooShort);
+    }
+    let Some(damage) = clip_damage(damage, full_damage(width, height)) else {
+        return Ok(());
+    };
+    let row_bytes = usize::try_from(damage.width)
+        .ok()
+        .and_then(|width| width.checked_mul(4))
+        .ok_or(BufferCopyError::ArithmeticOverflow)?;
+    let x_offset = usize::try_from(damage.x)
+        .ok()
+        .and_then(|x| x.checked_mul(4))
+        .ok_or(BufferCopyError::ArithmeticOverflow)?;
+    for row in damage.y as usize..damage.y.saturating_add(damage.height) as usize {
+        let src_start = row
+            .checked_mul(src_stride)
+            .and_then(|offset| offset.checked_add(x_offset))
+            .ok_or(BufferCopyError::ArithmeticOverflow)?;
+        let canvas_start = row
+            .checked_mul(canvas_stride)
+            .and_then(|offset| offset.checked_add(x_offset))
+            .ok_or(BufferCopyError::ArithmeticOverflow)?;
+        let src_end = src_start
+            .checked_add(row_bytes)
+            .ok_or(BufferCopyError::ArithmeticOverflow)?;
+        let canvas_end = canvas_start
+            .checked_add(row_bytes)
+            .ok_or(BufferCopyError::ArithmeticOverflow)?;
+        if src_end > src.len() {
+            return Err(BufferCopyError::SourceTooShort);
+        }
+        if canvas_end > canvas.len() {
+            return Err(BufferCopyError::CanvasTooShort);
+        }
+        canvas[canvas_start..canvas_end].copy_from_slice(&src[src_start..src_end]);
+    }
+    Ok(())
 }

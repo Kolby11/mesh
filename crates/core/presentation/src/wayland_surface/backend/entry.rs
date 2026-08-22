@@ -376,14 +376,21 @@ impl SurfaceEntry {
             if let Some(canvas) = pool.canvas(&self.shm_buffers[index].buffer) {
                 let copy_damage = std::mem::take(&mut self.shm_buffers[index].pending_damage);
                 for rect in &copy_damage {
-                    copy_bgra_damage_to_canvas(
+                    if let Err(error) = copy_bgra_damage_to_canvas(
                         src,
                         canvas,
                         width,
                         height,
                         pool_config.width,
                         *rect,
-                    );
+                    ) {
+                        restore_pending_damage(
+                            &mut self.shm_buffers[index].pending_damage,
+                            &copy_damage,
+                            full,
+                        );
+                        return Err(PresentationError::BufferCopy(error.to_string()));
+                    }
                 }
                 self.next_shm_buffer = (index + 1) % self.shm_buffers.len();
                 // When a buffer is reused while older frame callbacks are still
@@ -422,7 +429,8 @@ impl SurfaceEntry {
                 wl_shm::Format::Argb8888,
             )
             .map_err(|e| PresentationError::BufferAlloc(format!("create_buffer: {e}")))?;
-        copy_bgra_to_canvas(src, canvas, width, height, pool_config.width);
+        copy_bgra_to_canvas(src, canvas, width, height, pool_config.width)
+            .map_err(|error| PresentationError::BufferCopy(error.to_string()))?;
         self.shm_buffers.push(SurfaceShmBuffer {
             buffer: wl_buffer,
             pending_damage: SmallVec::new(),
@@ -443,9 +451,16 @@ impl SurfaceEntry {
         damage_rects: &[DamageRect],
         copy_damage: &[DamageRect],
         scale: f32,
-    ) {
+    ) -> Result<(), PresentationError> {
         let buffer = &self.shm_buffers[index].buffer;
         let wl_surface = self.role.wl_surface();
+
+        // Activate the slot before staging any other surface state. If the
+        // activation fails, the caller restores the copied damage and no
+        // partially prepared commit is acknowledged as presented.
+        buffer
+            .attach_to(wl_surface)
+            .map_err(|error| PresentationError::BufferAttach(error.to_string()))?;
 
         // Scale and clip in one pass. Keep the common <=16 rect path inline so
         // ordinary presents avoid heap allocation entirely.
@@ -506,13 +521,24 @@ impl SurfaceEntry {
             viewport.set_destination(logical_width as i32, logical_height as i32);
         }
 
-        buffer.attach_to(wl_surface).ok();
         wl_surface.frame(qh, wl_surface.clone());
         wl_surface.commit();
         self.frame_pending = true;
         self.frame_pending_since = Some(Instant::now());
         self.width = logical_width;
         self.height = logical_height;
+        Ok(())
+    }
+
+    pub(super) fn restore_copied_damage(
+        &mut self,
+        index: usize,
+        copied_damage: &[DamageRect],
+        bounds: DamageRect,
+    ) {
+        if let Some(buffer) = self.shm_buffers.get_mut(index) {
+            restore_pending_damage(&mut buffer.pending_damage, copied_damage, bounds);
+        }
     }
 
     pub(in crate::wayland_surface) fn waiting_for_frame_callback(&self) -> bool {
