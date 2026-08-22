@@ -6,8 +6,8 @@ use super::*;
 
 #[test]
 fn viewport_shm_size_classes_absorb_small_content_resizes() {
-    let first = shm_pool_config_for(401, 199, true);
-    let second = shm_pool_config_for(447, 223, true);
+    let first = try_shm_pool_config_for(401, 199, true).unwrap();
+    let second = try_shm_pool_config_for(447, 223, true).unwrap();
 
     assert_eq!(first, second);
     assert_eq!((first.width, first.height), (448, 256));
@@ -26,7 +26,9 @@ fn viewport_size_classes_eliminate_content_resize_pool_churn() {
     let config_changes = |viewport_available| {
         sizes
             .into_iter()
-            .map(|(width, height)| shm_pool_config_for(width, height, viewport_available))
+            .map(|(width, height)| {
+                try_shm_pool_config_for(width, height, viewport_available).unwrap()
+            })
             .fold((None, 0usize), |(previous, changes), next| {
                 (Some(next), changes + usize::from(previous != Some(next)))
             })
@@ -39,11 +41,26 @@ fn viewport_size_classes_eliminate_content_resize_pool_churn() {
 
 #[test]
 fn shm_buffers_stay_exact_without_a_viewporter_crop() {
-    let config = shm_pool_config_for(401, 199, false);
+    let config = try_shm_pool_config_for(401, 199, false).unwrap();
 
     assert_eq!(config.width, 401);
     assert_eq!(config.height, 199);
     assert_eq!(config.stride, 401 * 4);
+    assert_eq!(config.bytes, 401 * 199 * 4);
+}
+
+#[test]
+fn shm_config_rejects_oversized_dimensions_and_byte_lengths() {
+    assert!(try_shm_pool_config_for(MAX_SHM_DIMENSION + 1, 1, false).is_err());
+    assert!(try_shm_pool_config_for(16_384, 1_025, false).is_err());
+    assert!(try_shm_pool_config_for(u32::MAX, 1, true).is_err());
+}
+
+#[test]
+fn shm_pool_growth_budget_accounts_for_slot_pool_doubling() {
+    assert!(shm_pool_growth_allowed(256 * 1024, 4 * 1024 * 1024));
+    assert!(!shm_pool_growth_allowed(MAX_SHM_POOL_BYTES / 2 + 1, 1));
+    assert!(!shm_pool_growth_allowed(MAX_SHM_POOL_BYTES, 0));
 }
 
 #[test]

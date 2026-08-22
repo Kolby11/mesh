@@ -113,6 +113,7 @@ pub(in crate::wayland_surface) struct SurfaceEntry {
     /// was constructed with, so identity would otherwise never be sent.
     applied_window_identity_pending: bool,
     shm_buffers: Vec<SurfaceShmBuffer>,
+    shm_buffer_bytes: usize,
     shm_pool_config: Option<ShmPoolConfig>,
     next_shm_buffer: usize,
     pub(in crate::wayland_surface) frame_pending: bool,
@@ -161,6 +162,7 @@ impl SurfaceEntry {
             configured: false,
             applied_window_identity_pending: true,
             shm_buffers: Vec::new(),
+            shm_buffer_bytes: 0,
             shm_pool_config: None,
             next_shm_buffer: 0,
             frame_pending: false,
@@ -342,16 +344,26 @@ impl SurfaceEntry {
         let width = width.max(1);
         let height = height.max(1);
         let full = full_damage(width, height);
-        let pool_config = shm_pool_config_for(width, height, self.viewport.is_some());
+        let pool_config = try_shm_pool_config_for(width, height, self.viewport.is_some())?;
         if self.shm_pool_config != Some(pool_config) {
             self.shm_buffers.clear();
+            self.shm_buffer_bytes = 0;
             self.next_shm_buffer = 0;
             self.shm_pool_config = Some(pool_config);
         }
 
         while self.shm_buffers.len() < SHM_BUFFER_POOL_DEPTH {
+            if self.shm_buffer_bytes > MAX_SHM_SURFACE_BYTES.saturating_sub(pool_config.bytes)
+                || !shm_pool_growth_allowed(pool.len(), pool_config.bytes)
+            {
+                return Err(PresentationError::BufferAlloc(format!(
+                    "SHM pool budget exceeded while allocating {}x{} ({} bytes)",
+                    pool_config.width, pool_config.height, pool_config.bytes
+                )));
+            }
             self.shm_buffers
                 .push(create_surface_shm_buffer(pool, pool_config, full)?);
+            self.shm_buffer_bytes += pool_config.bytes;
         }
 
         for slot in &mut self.shm_buffers {
@@ -392,6 +404,15 @@ impl SurfaceEntry {
             return Ok(None);
         }
 
+        if self.shm_buffer_bytes > MAX_SHM_SURFACE_BYTES.saturating_sub(pool_config.bytes)
+            || !shm_pool_growth_allowed(pool.len(), pool_config.bytes)
+        {
+            return Err(PresentationError::BufferAlloc(format!(
+                "SHM pool budget exceeded while allocating {}x{} ({} bytes)",
+                pool_config.width, pool_config.height, pool_config.bytes
+            )));
+        }
+
         let index = self.shm_buffers.len();
         let (wl_buffer, canvas) = pool
             .create_buffer(
@@ -406,6 +427,7 @@ impl SurfaceEntry {
             buffer: wl_buffer,
             pending_damage: SmallVec::new(),
         });
+        self.shm_buffer_bytes += pool_config.bytes;
         self.next_shm_buffer = (index + 1) % self.shm_buffers.len();
         Ok(Some((index, smallvec![full])))
     }

@@ -31,12 +31,17 @@ fallible allocation. Dynamic shell surface and child-surface allocation uses
 that fallible path, so a live `PixelCanvasSession` cannot observe a backing
 allocation replacement.
 
+Wayland SHM pool configurations now validate rounded dimensions, stride, and
+byte length before entering `SlotPool`. Each surface accounts for retained SHM
+bytes, and shared pool growth is capped at 512 MiB while per-buffer and
+per-surface limits reject oversized allocations deterministically.
+
 Focused render/resource tests and `cargo check --workspace` pass. Existing
 shell dead-code/private-interface warnings remain. The focused real-surface
 navigation raster fixture still has the known 1280px layout overflow.
 
 ## Next
 
-Extend the generation-aware resource broker and byte/dimension accounting to
-SHM pool resources before continuing frontend/backend candidate preparation.
-Text shaping remains synchronous and is not yet broker-owned.
+Make Wayland presentation transactional across copy/attach failures: retain
+pending damage, propagate attach errors, and avoid acknowledging an unshown
+frame. Text shaping remains synchronous and is not yet broker-owned.

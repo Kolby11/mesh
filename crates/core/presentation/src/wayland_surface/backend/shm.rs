@@ -8,33 +8,81 @@ pub(super) const SHM_BUFFER_POOL_MAX: usize = 3;
 /// compositor sees it. This absorbs the small resize jitter emitted by
 /// content-measured surfaces without changing their visible geometry.
 pub(super) const SHM_SIZE_CLASS_STEP: u32 = 64;
+pub(super) const MAX_SHM_DIMENSION: u32 = 16_384;
+pub(super) const MAX_SHM_BUFFER_BYTES: usize = 64 * 1024 * 1024;
+pub(super) const MAX_SHM_SURFACE_BYTES: usize = MAX_SHM_BUFFER_BYTES * SHM_BUFFER_POOL_MAX;
+pub(super) const MAX_SHM_POOL_BYTES: usize = 512 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ShmPoolConfig {
     pub(super) width: u32,
     pub(super) height: u32,
     pub(super) stride: i32,
+    pub(super) bytes: usize,
 }
 
-pub(super) fn shm_pool_config_for(
+pub(super) fn try_shm_pool_config_for(
     width: u32,
     height: u32,
     viewport_available: bool,
-) -> ShmPoolConfig {
+) -> Result<ShmPoolConfig, PresentationError> {
     let round_up = |value: u32| {
-        value.max(1).saturating_add(SHM_SIZE_CLASS_STEP - 1) / SHM_SIZE_CLASS_STEP
-            * SHM_SIZE_CLASS_STEP
+        value
+            .max(1)
+            .checked_add(SHM_SIZE_CLASS_STEP - 1)?
+            .checked_div(SHM_SIZE_CLASS_STEP)?
+            .checked_mul(SHM_SIZE_CLASS_STEP)
     };
     let (width, height) = if viewport_available {
-        (round_up(width), round_up(height))
+        (
+            round_up(width).ok_or_else(|| invalid_shm_config(width, height, "width overflow"))?,
+            round_up(height).ok_or_else(|| invalid_shm_config(width, height, "height overflow"))?,
+        )
     } else {
         (width.max(1), height.max(1))
     };
-    ShmPoolConfig {
+
+    if width > MAX_SHM_DIMENSION || height > MAX_SHM_DIMENSION {
+        return Err(invalid_shm_config(
+            width,
+            height,
+            "dimensions exceed the SHM limit",
+        ));
+    }
+
+    let stride_u32 = width
+        .checked_mul(4)
+        .ok_or_else(|| invalid_shm_config(width, height, "stride overflow"))?;
+    let stride = i32::try_from(stride_u32)
+        .map_err(|_| invalid_shm_config(width, height, "stride exceeds protocol range"))?;
+    let bytes = usize::try_from(stride_u32)
+        .ok()
+        .and_then(|stride| stride.checked_mul(usize::try_from(height).ok()?))
+        .ok_or_else(|| invalid_shm_config(width, height, "byte length overflow"))?;
+    if bytes > MAX_SHM_BUFFER_BYTES {
+        return Err(invalid_shm_config(
+            width,
+            height,
+            "buffer bytes exceed the SHM limit",
+        ));
+    }
+
+    Ok(ShmPoolConfig {
         width,
         height,
-        stride: width as i32 * 4,
-    }
+        stride,
+        bytes,
+    })
+}
+
+fn invalid_shm_config(width: u32, height: u32, reason: &str) -> PresentationError {
+    PresentationError::BufferAlloc(format!("SHM buffer {width}x{height} rejected: {reason}"))
+}
+
+pub(super) fn shm_pool_growth_allowed(pool_len: usize, allocation_bytes: usize) -> bool {
+    let doubled_len = pool_len.saturating_mul(2);
+    let required_len = pool_len.saturating_add(allocation_bytes);
+    doubled_len.max(required_len) <= MAX_SHM_POOL_BYTES
 }
 
 pub(super) fn viewport_source_dimensions(
