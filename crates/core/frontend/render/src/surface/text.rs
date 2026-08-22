@@ -2,11 +2,12 @@
 
 use super::{PixelBuffer, PixelCanvasSession, checked_pixel_bytes};
 use cosmic_text::{
-    Align, Attrs, AttrsOwned, Buffer, CacheKey, Cursor, Family, FamilyOwned, FontSystem, Metrics,
-    PhysicalGlyph, Renderer, Shaping, Style as CosmicStyle, SwashCache, SwashContent, Weight, Wrap,
+    Align, Attrs, AttrsOwned, Buffer, BufferLine, CacheKey, Cursor, Family, FamilyOwned,
+    FontSystem, LayoutGlyph, LayoutLine, Metrics, PhysicalGlyph, Renderer, Shaping,
+    Style as CosmicStyle, SwashCache, SwashContent, Weight, Wrap,
 };
 use mesh_core_elements::Color;
-use mesh_core_elements::lru::{ByteLruCache, LruCache};
+use mesh_core_elements::lru::ByteLruCache;
 use mesh_core_elements::style::TextAlign;
 use mesh_core_resources::resource_revision;
 use skia_safe::{
@@ -16,8 +17,15 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::mem::size_of;
 
 const TEXT_LAYOUT_CACHE_CAPACITY: usize = 512;
+const TEXT_LAYOUT_CACHE_MAX_BYTES: usize = 16 * 1024 * 1024;
+const MAX_TEXT_LAYOUT_TEXT_BYTES: usize = 4 * 1024 * 1024;
+const MAX_TEXT_LAYOUT_FAMILY_BYTES: usize = 4096;
+const TEXT_LAYOUT_LINE_OVERHEAD_BYTES: usize = 512;
+const TEXT_LAYOUT_ATTRIBUTE_SPAN_OVERHEAD_BYTES: usize = 512;
+const TEXT_LAYOUT_GLYPH_OVERHEAD_BYTES: usize = size_of::<LayoutGlyph>() + 16 * size_of::<usize>();
 const GLYPH_ATLAS_CAPACITY: usize = 2048;
 const GLYPH_ATLAS_MAX_BYTES: usize = 8 * 1024 * 1024;
 const MAX_GLYPH_ATLAS_DIMENSION: u32 = 4096;
@@ -59,7 +67,7 @@ struct TextEngine {
     font_database: Option<fontdb::Database>,
     font_aliases: HashMap<String, String>,
     swash_cache: SwashCache,
-    layout_cache: LruCache<u64, TextLayoutEntry>,
+    layout_cache: ByteLruCache<u64, TextLayoutEntry>,
     resource_revision: u64,
     metrics: TextCacheMetrics,
 }
@@ -76,6 +84,8 @@ pub struct TextCacheMetrics {
     pub layout_misses: u64,
     pub layout_invalidations: u64,
     pub shaped_entries: u64,
+    pub layout_cache_bytes: u64,
+    pub layout_cache_max_bytes: u64,
     pub glyph_cache_active: bool,
     pub shaping_micros: u64,
 }
@@ -175,6 +185,73 @@ impl TextLayoutEntry {
             && self.max_width == params.max_width
             && self.align == params.align
     }
+
+    fn estimated_bytes(&self) -> Option<usize> {
+        estimated_text_layout_bytes(
+            self.text.capacity(),
+            self.font_family.capacity(),
+            &self.buffer,
+        )
+    }
+}
+
+/// Estimate the resident storage of one shaped layout conservatively. The
+/// public cosmic-text API exposes the line and glyph counts but not the
+/// private shape/layout vectors, so fixed per-line, per-span, and per-glyph
+/// charges cover those internal allocations while the visible strings and
+/// vector capacities account for the storage we can inspect directly.
+fn estimated_text_layout_bytes(
+    text_bytes: usize,
+    font_family_bytes: usize,
+    buffer: &Buffer,
+) -> Option<usize> {
+    if text_bytes > MAX_TEXT_LAYOUT_TEXT_BYTES || font_family_bytes > MAX_TEXT_LAYOUT_FAMILY_BYTES {
+        return None;
+    }
+
+    let mut bytes = size_of::<TextLayoutEntry>()
+        .checked_add(text_bytes)?
+        .checked_add(font_family_bytes)?
+        .checked_add(
+            buffer
+                .lines
+                .capacity()
+                .checked_mul(size_of::<BufferLine>())?,
+        )?;
+
+    let mut line_text_bytes = 0usize;
+    let mut attribute_span_count = 0usize;
+    for line in &buffer.lines {
+        line_text_bytes = line_text_bytes.checked_add(line.text().len())?;
+        attribute_span_count =
+            attribute_span_count.checked_add(line.attrs_list().spans_iter().count())?;
+    }
+    bytes = bytes
+        .checked_add(line_text_bytes)?
+        .checked_add(
+            buffer
+                .lines
+                .len()
+                .checked_mul(TEXT_LAYOUT_LINE_OVERHEAD_BYTES)?,
+        )?
+        .checked_add(
+            attribute_span_count.checked_mul(TEXT_LAYOUT_ATTRIBUTE_SPAN_OVERHEAD_BYTES)?,
+        )?;
+
+    let (run_count, glyph_count) =
+        buffer
+            .layout_runs()
+            .fold((0usize, 0usize), |(runs, glyphs), run| {
+                (
+                    runs.saturating_add(1),
+                    glyphs.saturating_add(run.glyphs.len()),
+                )
+            });
+    bytes = bytes
+        .checked_add(run_count.checked_mul(size_of::<LayoutLine>())?)?
+        .checked_add(glyph_count.checked_mul(TEXT_LAYOUT_GLYPH_OVERHEAD_BYTES)?)?;
+
+    (bytes <= TEXT_LAYOUT_CACHE_MAX_BYTES).then_some(bytes)
 }
 
 fn text_layout_cache_key(
@@ -231,9 +308,13 @@ impl TextRenderer {
                 font_database: None,
                 font_aliases: HashMap::new(),
                 swash_cache: SwashCache::new(),
-                layout_cache: LruCache::new(TEXT_LAYOUT_CACHE_CAPACITY),
+                layout_cache: ByteLruCache::new(
+                    TEXT_LAYOUT_CACHE_CAPACITY,
+                    TEXT_LAYOUT_CACHE_MAX_BYTES,
+                ),
                 resource_revision: resource_revision(),
                 metrics: TextCacheMetrics {
+                    layout_cache_max_bytes: TEXT_LAYOUT_CACHE_MAX_BYTES as u64,
                     glyph_cache_active: true,
                     ..Default::default()
                 },
@@ -245,6 +326,8 @@ impl TextRenderer {
         let mut engine = self.engine.borrow_mut();
         engine.ensure_resource_revision();
         engine.metrics.shaped_entries = engine.layout_cache.len() as u64;
+        engine.metrics.layout_cache_bytes = engine.layout_cache.bytes() as u64;
+        engine.metrics.layout_cache_max_bytes = engine.layout_cache.max_bytes() as u64;
         engine.metrics
     }
 
@@ -252,8 +335,12 @@ impl TextRenderer {
         let mut engine = self.engine.borrow_mut();
         engine.ensure_resource_revision();
         let shaped_entries = engine.layout_cache.len() as u64;
+        let layout_cache_bytes = engine.layout_cache.bytes() as u64;
+        let layout_cache_max_bytes = engine.layout_cache.max_bytes() as u64;
         engine.metrics = TextCacheMetrics {
             shaped_entries,
+            layout_cache_bytes,
+            layout_cache_max_bytes,
             glyph_cache_active: true,
             ..Default::default()
         };
@@ -822,26 +909,39 @@ impl TextEngine {
     }
 
     fn store_layout(&mut self, params: &TextLayoutParams<'_>, cosmic: Buffer) {
-        let evicting = self.layout_cache.len() >= TEXT_LAYOUT_CACHE_CAPACITY
-            && !self.layout_cache.contains_key(&params.cache_key);
-        self.layout_cache.insert(
-            params.cache_key,
-            TextLayoutEntry {
-                resource_revision: params.resource_revision,
-                text: params.text.to_string(),
-                font_family: params.font_family.to_string(),
-                font_size: params.font_size,
-                font_weight: params.font_weight,
-                line_height: params.line_height,
-                max_width: params.max_width,
-                align: params.align,
-                buffer: cosmic,
-            },
-        );
-        if evicting {
+        let entry = TextLayoutEntry {
+            resource_revision: params.resource_revision,
+            text: params.text.to_string(),
+            font_family: params.font_family.to_string(),
+            font_size: params.font_size,
+            font_weight: params.font_weight,
+            line_height: params.line_height,
+            max_width: params.max_width,
+            align: params.align,
+            buffer: cosmic,
+        };
+        let Some(weight) = entry.estimated_bytes() else {
             self.metrics.layout_invalidations = self.metrics.layout_invalidations.saturating_add(1);
+            self.metrics.shaped_entries = self.layout_cache.len() as u64;
+            self.metrics.layout_cache_bytes = self.layout_cache.bytes() as u64;
+            self.metrics.layout_cache_max_bytes = self.layout_cache.max_bytes() as u64;
+            return;
+        };
+
+        let previous_len = self.layout_cache.len();
+        let inserted = self.layout_cache.insert(params.cache_key, entry, weight);
+        let evicted = previous_len
+            .saturating_add(usize::from(inserted))
+            .saturating_sub(self.layout_cache.len());
+        if evicted > 0 {
+            self.metrics.layout_invalidations = self
+                .metrics
+                .layout_invalidations
+                .saturating_add(evicted as u64);
         }
         self.metrics.shaped_entries = self.layout_cache.len() as u64;
+        self.metrics.layout_cache_bytes = self.layout_cache.bytes() as u64;
+        self.metrics.layout_cache_max_bytes = self.layout_cache.max_bytes() as u64;
     }
 }
 
@@ -1299,6 +1399,34 @@ mod tests {
         assert_eq!(metrics.layout_hits, 1);
         assert_eq!(metrics.shaped_entries, 1);
         assert!(metrics.glyph_cache_active);
+    }
+
+    #[test]
+    fn text_layout_cache_reports_bounded_resident_bytes() {
+        let renderer = TextRenderer::new();
+        renderer.reset_cache_metrics();
+
+        renderer.measure_styled("cached text", "Inter", 14.0, 400, 1.2, Some(120.0));
+        let metrics = renderer.cache_metrics();
+
+        assert_eq!(metrics.shaped_entries, 1);
+        assert!(metrics.layout_cache_bytes > 0);
+        assert_eq!(
+            metrics.layout_cache_max_bytes,
+            TEXT_LAYOUT_CACHE_MAX_BYTES as u64
+        );
+        assert!(metrics.layout_cache_bytes <= metrics.layout_cache_max_bytes);
+    }
+
+    #[test]
+    fn oversized_text_layouts_are_not_admitted_to_the_cache() {
+        let buffer = Buffer::new_empty(Metrics::new(14.0, 18.0));
+
+        assert!(estimated_text_layout_bytes(32, 8, &buffer).is_some());
+        assert!(estimated_text_layout_bytes(MAX_TEXT_LAYOUT_TEXT_BYTES + 1, 8, &buffer).is_none());
+        assert!(
+            estimated_text_layout_bytes(32, MAX_TEXT_LAYOUT_FAMILY_BYTES + 1, &buffer).is_none()
+        );
     }
 
     #[test]

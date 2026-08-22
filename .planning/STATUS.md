@@ -20,6 +20,11 @@ The text renderer's Skia glyph atlas now keys cached images by resource
 revision and cosmic glyph identity, bounds entries at 8 MiB with an LRU byte
 budget, and rejects oversized or malformed raster dimensions before upload.
 
+The shaped-text layout cache now uses a conservative 16 MiB byte budget in
+addition to its 512-entry cap. It reports resident/max bytes, counts
+byte-driven evictions, and leaves layouts above safe input or estimate bounds
+renderable without retaining them.
+
 Focused render/resource tests and `cargo check --workspace` pass. Existing
 shell dead-code/private-interface warnings remain. The focused real-surface
 navigation raster fixture still has the known 1280px layout overflow.
@@ -27,5 +32,5 @@ navigation raster fixture still has the known 1280px layout overflow.
 ## Next
 
 Extend the generation-aware resource broker and byte/dimension accounting to
-text layout `Buffer` storage, then `PixelBuffer` and SHM resources before
-continuing frontend/backend candidate preparation.
+`PixelBuffer` and SHM resources before continuing frontend/backend candidate
+preparation. Text shaping remains synchronous and is not yet broker-owned.
