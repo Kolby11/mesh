@@ -415,6 +415,7 @@ pub struct Shell {
     resource_snapshot: Arc<discovery::ResourceSnapshot>,
     pub font_registry: mesh_core_resources::FontRegistry,
     font_renderer_revision: u64,
+    resource_preparation: mesh_core_resources::ResourcePreparationCoordinator,
     active_profile_id: Option<String>,
     modules: HashMap<String, ModuleInstance>,
     frontend_catalog: component::FrontendCatalogHandle,

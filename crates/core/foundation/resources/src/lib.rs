@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 #[cfg(unix)]
 use std::{
     ffi::CString,
@@ -49,6 +49,131 @@ impl ResourcePreparationToken {
 
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Acquire)
+    }
+}
+
+/// Owns the currently active resource-preparation generation.
+///
+/// Starting a new lease cancels the previous one before publishing the new
+/// generation. The lease remains cheap to clone and can be moved into a
+/// worker; callers must check [`ResourcePreparationLease::is_current`] before
+/// committing the resulting candidate so cancellation races cannot publish an
+/// older result after a newer preparation has started.
+#[derive(Debug, Clone, Default)]
+pub struct ResourcePreparationCoordinator {
+    inner: Arc<ResourcePreparationCoordinatorInner>,
+}
+
+#[derive(Debug, Default)]
+struct ResourcePreparationCoordinatorInner {
+    next_generation: AtomicU64,
+    active: Mutex<Option<ActiveResourcePreparation>>,
+}
+
+#[derive(Debug, Clone)]
+struct ActiveResourcePreparation {
+    generation: u64,
+    token: ResourcePreparationToken,
+}
+
+/// A generation-scoped resource preparation lease.
+#[derive(Debug, Clone)]
+pub struct ResourcePreparationLease {
+    coordinator: ResourcePreparationCoordinator,
+    generation: u64,
+    token: ResourcePreparationToken,
+}
+
+impl ResourcePreparationCoordinator {
+    /// Begin a new generation and cancel any older in-flight preparation.
+    pub fn begin(&self) -> ResourcePreparationLease {
+        let mut active = self
+            .inner
+            .active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let generation = self
+            .inner
+            .next_generation
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |generation| {
+                Some(generation.saturating_add(1))
+            })
+            .expect("resource preparation generation update always returns a value")
+            .saturating_add(1);
+        let token = ResourcePreparationToken::new();
+        if let Some(previous) = active.as_ref() {
+            previous.token.cancel();
+        }
+        *active = Some(ActiveResourcePreparation {
+            generation,
+            token: token.clone(),
+        });
+        ResourcePreparationLease {
+            coordinator: self.clone(),
+            generation,
+            token,
+        }
+    }
+
+    /// Cancel the current generation, if one exists.
+    pub fn cancel_active(&self) {
+        let active = self
+            .inner
+            .active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(active) = active.as_ref() {
+            active.token.cancel();
+        }
+    }
+
+    pub fn is_current(&self, generation: u64) -> bool {
+        let active = self
+            .inner
+            .active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        active
+            .as_ref()
+            .is_some_and(|active| active.generation == generation && !active.token.is_cancelled())
+    }
+
+    /// Retire a completed generation without affecting a newer lease.
+    pub fn retire(&self, generation: u64) {
+        let mut active = self
+            .inner
+            .active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if active
+            .as_ref()
+            .is_some_and(|active| active.generation == generation)
+        {
+            *active = None;
+        }
+    }
+}
+
+impl ResourcePreparationLease {
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub fn token(&self) -> &ResourcePreparationToken {
+        &self.token
+    }
+
+    pub fn cancel(&self) {
+        self.token.cancel();
+    }
+
+    pub fn is_current(&self) -> bool {
+        self.coordinator.is_current(self.generation)
+    }
+
+    /// Retire this generation without affecting a newer lease.
+    pub fn retire(&self) {
+        self.coordinator.retire(self.generation);
     }
 }
 
@@ -890,6 +1015,27 @@ mod tests {
             handle.read_bounded_with_cancellation(256 * 1024, &cancellation),
             Err(ResourceAssetError::Cancelled { .. })
         ));
+    }
+
+    #[test]
+    fn preparation_coordinator_supersedes_only_the_active_generation() {
+        let coordinator = ResourcePreparationCoordinator::default();
+        let first = coordinator.begin();
+        assert_eq!(first.generation(), 1);
+        assert!(first.is_current());
+
+        let second = coordinator.begin();
+        assert!(first.token().is_cancelled());
+        assert!(!first.is_current());
+        assert!(second.generation() > first.generation());
+        assert!(second.is_current());
+
+        first.retire();
+        assert!(second.is_current());
+
+        coordinator.cancel_active();
+        assert!(second.token().is_cancelled());
+        assert!(!second.is_current());
     }
 
     #[cfg(unix)]

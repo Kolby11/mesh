@@ -52,6 +52,7 @@ pub(in crate::shell) struct ResourceSnapshot {
 }
 
 pub(in crate::shell) struct PreparedResourceSnapshot {
+    pub(in crate::shell) generation: u64,
     pub snapshot: ResourceSnapshot,
     pub icon_packs: Vec<mesh_core_icon::IconPackBindings>,
     pub font_registry: mesh_core_resources::FontRegistry,
@@ -64,11 +65,29 @@ impl Shell {
         graph: &InstalledModuleGraph,
         settings_store: &SettingsStore,
     ) -> Result<PreparedResourceSnapshot, ShellRunError> {
-        self.prepare_resource_snapshot_with_cancellation(
+        let lease = self.resource_preparation.begin();
+        let generation = lease.generation();
+        let result = self.prepare_resource_snapshot_with_cancellation(
             graph,
             settings_store,
-            mesh_core_resources::ResourcePreparationToken::new(),
-        )
+            lease.token().clone(),
+        );
+        match result {
+            Ok(mut prepared) if lease.is_current() => {
+                prepared.generation = generation;
+                Ok(prepared)
+            }
+            Ok(_) => {
+                lease.retire();
+                Err(ShellRunError::FrontendComposition {
+                    message: format!("resource preparation generation {generation} was superseded"),
+                })
+            }
+            Err(error) => {
+                lease.retire();
+                Err(error)
+            }
+        }
     }
 
     /// Prepare all graph-authorized resource inputs on a worker. The caller
@@ -381,6 +400,7 @@ impl Shell {
                 }
 
                 Ok(PreparedResourceSnapshot {
+                    generation: 0,
                     snapshot: ResourceSnapshot {
                         revision,
                         icon_pack_chain: icon_chain,
@@ -407,6 +427,14 @@ impl Shell {
         &mut self,
         prepared: &PreparedResourceSnapshot,
     ) -> Result<(), ShellRunError> {
+        if !self.resource_preparation.is_current(prepared.generation) {
+            return Err(ShellRunError::FrontendComposition {
+                message: format!(
+                    "resource preparation generation {} is no longer current",
+                    prepared.generation
+                ),
+            });
+        }
         let font_revision_changed =
             self.font_registry.revision() != prepared.font_registry.revision();
         mesh_core_icon::replace_default_bindings(
@@ -427,6 +455,7 @@ impl Shell {
         if font_revision_changed {
             self.mark_components_theme_changed()?;
         }
+        self.resource_preparation.retire(prepared.generation);
         Ok(())
     }
 }
@@ -1127,6 +1156,7 @@ impl Shell {
             resource_snapshot: Arc::new(ResourceSnapshot::default()),
             font_registry: mesh_core_resources::FontRegistry::default(),
             font_renderer_revision: 0,
+            resource_preparation: mesh_core_resources::ResourcePreparationCoordinator::default(),
             active_profile_id,
             modules: HashMap::new(),
             frontend_catalog: FrontendCatalogHandle::default(),

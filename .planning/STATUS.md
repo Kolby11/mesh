@@ -73,7 +73,11 @@ registry construction, and shell icon-pack candidates. Cancellation cannot
 publish partial state because resource registries remain candidate-built and
 atomically committed.
 
-The next open item is to connect that token to a generation-aware asynchronous
-resource job owner so superseded profile work is cancelled in practice, then
-move the remaining XDG/SVG decode and raster preparation away from
-shell/render-thread paths.
+Resource preparation now also has a shared generation coordinator. New
+candidates cancel older leases, carry a monotonic generation to the shell
+commit boundary, and stale generations are rejected before publication.
+
+The next open item is to move profile-switch resource preparation from its
+synchronous worker join into a resumable asynchronous job state so superseded
+profile work can be cancelled while in flight, then move the remaining
+XDG/SVG decode and raster preparation away from shell/render-thread paths.
