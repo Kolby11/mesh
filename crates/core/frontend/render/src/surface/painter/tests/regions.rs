@@ -50,8 +50,8 @@ fn multi_region_selected_paint_matches_repeated_single_region_replay() {
         None,
     );
 
-    assert_eq!(batched.data, repeated.data);
-    assert_eq!(attributed.data, repeated.data);
+    assert_eq!(batched.data(), repeated.data());
+    assert_eq!(attributed.data(), repeated.data());
     assert!(attribution.get(PaintCommandClass::Primitive).command_count > 0);
 }
 
@@ -91,7 +91,7 @@ fn overlapping_multi_region_paint_preserves_region_major_replay() {
         None,
     );
 
-    assert_eq!(batched.data, repeated.data);
+    assert_eq!(batched.data(), repeated.data());
 }
 
 #[test]
@@ -153,7 +153,7 @@ fn batched_damage_regions_beat_repeated_raster_sessions() {
             }
         }
 
-        assert_eq!(batched.data, repeated.data);
+        assert_eq!(batched.data(), repeated.data());
         black_box(batched.get_pixel(4, 4));
         let speedup = repeated_total.as_secs_f64() / batched_total.as_secs_f64();
         eprintln!(
@@ -218,7 +218,7 @@ fn attributed_selected_paint_preserves_pixels_and_classifies_commands() {
         None,
     );
 
-    assert_eq!(attributed.data, normal.data);
+    assert_eq!(attributed.data(), normal.data());
     assert!(
         metrics.get(PaintCommandClass::Primitive).command_count > 0,
         "the root's batched self paint must be attributed as a primitive"

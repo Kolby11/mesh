@@ -25,6 +25,12 @@ addition to its 512-entry cap. It reports resident/max bytes, counts
 byte-driven evictions, and leaves layouts above safe input or estimate bounds
 renderable without retaining them.
 
+`PixelBuffer` now keeps dimensions and backing storage private, exposes only
+read-only dimensions and slice access, and provides checked, bounded,
+fallible allocation. Dynamic shell surface and child-surface allocation uses
+that fallible path, so a live `PixelCanvasSession` cannot observe a backing
+allocation replacement.
+
 Focused render/resource tests and `cargo check --workspace` pass. Existing
 shell dead-code/private-interface warnings remain. The focused real-surface
 navigation raster fixture still has the known 1280px layout overflow.
@@ -32,5 +38,5 @@ navigation raster fixture still has the known 1280px layout overflow.
 ## Next
 
 Extend the generation-aware resource broker and byte/dimension accounting to
-`PixelBuffer` and SHM resources before continuing frontend/backend candidate
-preparation. Text shaping remains synchronous and is not yet broker-owned.
+SHM pool resources before continuing frontend/backend candidate preparation.
+Text shaping remains synchronous and is not yet broker-owned.

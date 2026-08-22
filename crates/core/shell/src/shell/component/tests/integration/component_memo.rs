@@ -136,7 +136,7 @@ label = ""
     // pixels.
     let second = rebuild(&mut component, 160, 60);
     assert_eq!(component.component_memo_hit_count(), hits_before + 1);
-    assert_eq!(first.data, second.data);
+    assert_eq!(first.data(), second.data());
     let memoized_child =
         node_with_content(component.last_tree.as_ref().unwrap(), "static").unwrap();
     assert_eq!(
@@ -557,7 +557,7 @@ fn unchanged_slot_contribution_reuses_memoized_subtree() {
     let second = rebuild(&mut component, 160, 60);
 
     assert_eq!(component.component_memo_hit_count(), hits_before + 1);
-    assert_eq!(initial.data, second.data);
+    assert_eq!(initial.data(), second.data());
     assert!(node_with_content(component.last_tree.as_ref().unwrap(), "static slot 0").is_some());
 }
 

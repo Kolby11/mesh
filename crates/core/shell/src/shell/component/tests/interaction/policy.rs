@@ -170,7 +170,7 @@ slider {
     component
         .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
-    let after_first_drag = buffer.data.clone();
+    let after_first_drag = buffer.data().to_vec();
 
     component
         .handle_input(
@@ -185,7 +185,8 @@ slider {
         .unwrap();
 
     assert_ne!(
-        buffer.data, after_first_drag,
+        buffer.data(),
+        after_first_drag,
         "subsequent drag paints should track the latest slider position"
     );
 }

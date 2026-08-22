@@ -674,7 +674,7 @@ mod tests {
         assert_eq!(metrics.glyph_cache_entries, 1);
         assert_eq!(metrics.glyph_cache_capacity, GLYPH_CACHE_CAPACITY as u64);
         assert!(
-            buffer.data.iter().any(|channel| *channel > 0),
+            buffer.data().iter().any(|channel| *channel > 0),
             "cached glyph draw should still paint into the destination buffer"
         );
 

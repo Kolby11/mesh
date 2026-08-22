@@ -115,7 +115,7 @@ impl Shell {
                         .target(target)
                         .paint_buffer
                         .as_ref()
-                        .map(|buffer| (buffer.width.max(1), buffer.height.max(1)))
+                        .map(|buffer| (buffer.width().max(1), buffer.height().max(1)))
                 })
                 .or_else(|| {
                     self.presentation_engine

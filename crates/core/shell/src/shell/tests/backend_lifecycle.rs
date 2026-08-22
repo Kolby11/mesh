@@ -860,7 +860,7 @@ fn frontend_module_activation_mounts_shipped_surface_live() {
         .as_ref()
         .expect("settings surface should have a full-shell paint buffer");
     let opaque_pixels = buffer
-        .data
+        .data()
         .chunks_exact(4)
         .filter(|pixel| pixel[3] != 0)
         .count();

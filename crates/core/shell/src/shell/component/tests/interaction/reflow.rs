@@ -642,7 +642,7 @@ slider {
     component
         .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
-    let initial = buffer.data.clone();
+    let initial = buffer.data().to_vec();
 
     component
         .handle_input(
@@ -667,7 +667,7 @@ slider {
     component
         .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
-    let after_first_drag = buffer.data.clone();
+    let after_first_drag = buffer.data().to_vec();
 
     component
         .handle_input(
@@ -680,7 +680,7 @@ slider {
     component
         .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
-    let after_second_drag = buffer.data.clone();
+    let after_second_drag = buffer.data().to_vec();
 
     assert_ne!(after_first_drag, initial);
     assert_ne!(
@@ -805,7 +805,7 @@ fn real_navigation_bar_repaints_when_theme_changes() {
             1.0,
         )
         .unwrap();
-    let dark_snapshot = buffer.data.clone();
+    let dark_snapshot = buffer.data().to_vec();
 
     component.theme_changed().unwrap();
     component
@@ -818,7 +818,8 @@ fn real_navigation_bar_repaints_when_theme_changes() {
         .unwrap();
 
     assert_ne!(
-        buffer.data, dark_snapshot,
+        buffer.data(),
+        dark_snapshot,
         "navigation bar should repaint when the active theme changes"
     );
 }

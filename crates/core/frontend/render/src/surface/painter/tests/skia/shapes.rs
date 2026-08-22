@@ -695,7 +695,7 @@ fn skia_text_highlight_selection_background_uses_theme_color() {
     let mut buffer = PixelBuffer::new(180, 80);
     FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
 
-    let saw_selection_background = buffer.data.chunks_exact(4).any(|px| {
+    let saw_selection_background = buffer.data().chunks_exact(4).any(|px| {
         Color {
             b: px[0],
             g: px[1],

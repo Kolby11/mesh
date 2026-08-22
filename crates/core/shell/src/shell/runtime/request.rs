@@ -2089,7 +2089,7 @@ impl Shell {
                     .target
                     .paint_buffer
                     .as_ref()
-                    .map(|buffer| (buffer.width.max(1), buffer.height.max(1)))
+                    .map(|buffer| (buffer.width().max(1), buffer.height().max(1)))
             })
             .or_else(|| self.presentation_engine.surface_size_if_known(surface_id))
             .unwrap_or((1, 1));

@@ -605,18 +605,20 @@ impl PaintBackend for SkiaPaintBackend {
         quality: BlurQuality,
         clip: ClipRect,
     ) {
-        if source.width == 0 || source.height == 0 || clip.width <= 0 || clip.height <= 0 {
+        if source.width() == 0 || source.height() == 0 || clip.width <= 0 || clip.height <= 0 {
             return;
         }
         let info = ImageInfo::new(
-            (source.width as i32, source.height as i32),
+            (source.width() as i32, source.height() as i32),
             skia_safe::ColorType::BGRA8888,
             skia_safe::AlphaType::Premul,
             None,
         );
-        let Some(image) =
-            images::raster_from_data(&info, Data::new_copy(&source.data), source.stride as usize)
-        else {
+        let Some(image) = images::raster_from_data(
+            &info,
+            Data::new_copy(source.data()),
+            source.stride() as usize,
+        ) else {
             return;
         };
         let mut paint = skia_safe::Paint::default();

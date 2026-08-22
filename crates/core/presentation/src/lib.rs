@@ -431,8 +431,8 @@ impl PresentationEngine {
         let full = DamageRect {
             x: 0,
             y: 0,
-            width: buffer.width.max(1),
-            height: buffer.height.max(1),
+            width: buffer.width().max(1),
+            height: buffer.height().max(1),
         };
         self.present_with_damage(surface_id, title, visible, buffer, &[full])
     }

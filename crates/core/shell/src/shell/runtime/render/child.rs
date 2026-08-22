@@ -404,7 +404,7 @@ impl Shell {
         let physical_w = ((width as f32 * scale).ceil() as u32).max(1);
         let physical_h = ((height as f32 * scale).ceil() as u32).max(1);
 
-        const MAX_BUFFER_BYTES: u64 = 512 * 1024 * 1024;
+        const MAX_BUFFER_BYTES: u64 = PixelBuffer::MAX_BYTES as u64;
         let requested_bytes = (physical_w as u64) * (physical_h as u64) * 4;
         if requested_bytes > MAX_BUFFER_BYTES {
             return Err(ShellRunError::BufferAlloc {
@@ -425,10 +425,22 @@ impl Shell {
                 .target
                 .paint_buffer
                 .as_ref()
-                .map(|buffer| buffer.width != physical_w || buffer.height != physical_h)
+                .map(|buffer| buffer.width() != physical_w || buffer.height() != physical_h)
                 .unwrap_or(true)
             {
-                child.target.paint_buffer = Some(PixelBuffer::new(physical_w, physical_h));
+                let buffer = PixelBuffer::try_new(physical_w, physical_h).ok_or_else(|| {
+                    ShellRunError::BufferAlloc {
+                        surface_id: child_surface_id.clone(),
+                        logical_w: width,
+                        logical_h: height,
+                        physical_w,
+                        physical_h,
+                        scale,
+                        requested_bytes,
+                        max_bytes: MAX_BUFFER_BYTES,
+                    }
+                })?;
+                child.target.paint_buffer = Some(buffer);
                 child.last_paint_generation = None;
                 child.last_paint_exiting = None;
                 child.last_paint_scale_bits = None;

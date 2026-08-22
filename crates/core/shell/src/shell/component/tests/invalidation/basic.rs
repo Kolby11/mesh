@@ -248,7 +248,7 @@ function toggle() expanded = not expanded end
     )
     .unwrap();
 
-    assert_eq!(narrow_buffer.data, full_buffer.data);
+    assert_eq!(narrow_buffer.data(), full_buffer.data());
     let snapshot = narrow
         .take_invalidation_snapshot()
         .expect("structural handler paint records invalidation");
@@ -387,8 +387,8 @@ function update() label0 = label0 == "row 00" and "changed" or "row 00" end
         "MESH_PERF metric=handler_sparse_vs_full_speedup value={:.6}",
         full_time.as_secs_f64() / narrow_time.as_secs_f64()
     );
-    assert_eq!(narrow_buffer.data, full_buffer.data);
-    assert_eq!(narrow_buffer.data, uncached_sparse_buffer.data);
+    assert_eq!(narrow_buffer.data(), full_buffer.data());
+    assert_eq!(narrow_buffer.data(), uncached_sparse_buffer.data());
     assert!(narrow_time < uncached_sparse_time);
     assert!(narrow_time < full_time);
 }
@@ -666,7 +666,7 @@ scroll { width: 80px; height: 40px; overflow-y: auto; }
         scoped.retained_tree.last_dirty(),
         full.retained_tree.last_dirty()
     );
-    assert_eq!(scoped_buffer.data, full_buffer.data);
+    assert_eq!(scoped_buffer.data(), full_buffer.data());
 }
 
 // cargo test -p mesh-core-shell --release -- paint_only_scoped_retained_end_to_end_benchmark --ignored --nocapture
@@ -756,7 +756,7 @@ fn paint_only_scoped_retained_end_to_end_benchmark() {
     }
 
     let speedup = full_time.as_secs_f64() / scoped_time.as_secs_f64();
-    assert_eq!(scoped_buffer.data, full_buffer.data);
+    assert_eq!(scoped_buffer.data(), full_buffer.data());
     eprintln!(
         "end-to-end paint-only updates over {iterations} clean 2,050-node frames: full retained fingerprints {full_time:?}; scoped {scoped_time:?}; ratio {speedup:.3}x"
     );

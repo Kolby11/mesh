@@ -168,7 +168,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/12-rendering-and-paint/improvements.md)
 
-- [ ] Make `PixelCanvasSession` storage-safe so mapped drawing surfaces cannot outlive backing allocations.
 - [ ] Lower asymmetric four-edge borders and four-corner radii correctly.
 - [ ] Use one cumulative affine transform/clip model across paint, damage, blur, descendants, and interaction.
 - [ ] Lower node opacity and blend mode as isolated compositing groups instead of per primitive.
@@ -595,9 +594,6 @@ gate where the win is structural.
 - [ ] Establish one canonical render-frame snapshot and transform/clip model;
       unify invalidation, display-list reuse, damage, blur regions, and hit
       testing around cumulative affine transforms. [Section 12 audit](../.planning/log/sections/12-rendering-and-paint/improvements.md).
-- [ ] Make `PixelBuffer` allocation fallible and bounded, and make
-      `PixelCanvasSession` storage-safe so a live Skia surface cannot outlive
-      its backing allocation. [Section 12 audit](../.planning/log/sections/12-rendering-and-paint/improvements.md).
 - [ ] Complete paint semantics for opacity layers, four-edge borders,
       four-corner radii, text physical scaling, and stable equal-z ordering;
       add retained and pixel regressions. [Section 12 audit](../.planning/log/sections/12-rendering-and-paint/improvements.md).

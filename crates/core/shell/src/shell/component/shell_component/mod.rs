@@ -696,10 +696,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         // never notices. Without forcing a full repaint here, only the dirty
         // diff gets drawn into the new buffer and everything else stays
         // transparent.
-        if self.last_painted_buffer_size != Some((buffer.width, buffer.height)) {
+        if self.last_painted_buffer_size != Some((buffer.width(), buffer.height())) {
             self.surface_pixels_invalid = true;
         }
-        self.last_painted_buffer_size = Some((buffer.width, buffer.height));
+        self.last_painted_buffer_size = Some((buffer.width(), buffer.height()));
         let use_retained_style_path = !requires_tree_rebuild
             && can_use_retained_path
             && self.last_tree.is_some()
@@ -1440,8 +1440,8 @@ impl ShellComponent for FrontendSurfaceComponent {
         // promoted target owns the node's pixels and must paint its subtree.
         let mut child_root = node.clone();
         child_root.attributes.remove("hidden");
-        let logical_width = ((buffer.width as f32) / scale.max(f32::EPSILON)).ceil() as u32;
-        let logical_height = ((buffer.height as f32) / scale.max(f32::EPSILON)).ceil() as u32;
+        let logical_width = ((buffer.width() as f32) / scale.max(f32::EPSILON)).ceil() as u32;
+        let logical_height = ((buffer.height() as f32) / scale.max(f32::EPSILON)).ceil() as u32;
         let retained_generation = self
             .retained_display_list
             .subtree_generation(node.id)
@@ -1482,7 +1482,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         );
         for damage in damage_rects {
             let physical_damage =
-                scale_damage_rect_to_buffer(damage, scale, buffer.width, buffer.height);
+                scale_damage_rect_to_buffer(damage, scale, buffer.width(), buffer.height());
             buffer.clear_rect(
                 physical_damage.x,
                 physical_damage.y,

@@ -498,7 +498,7 @@ fn fnv_hash_buffer(buffer: &PixelBuffer) -> u64 {
     const OFFSET: u64 = 14695981039346656037;
     const PRIME: u64 = 1099511628211;
     let mut hash: u64 = OFFSET;
-    for &byte in &buffer.data {
+    for &byte in buffer.data() {
         hash ^= u64::from(byte);
         hash = hash.wrapping_mul(PRIME);
     }

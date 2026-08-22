@@ -167,7 +167,7 @@ fn promoted_popover_first_measurement_uses_parent_surface_bound() {
         .as_ref()
         .expect("first popup measurement should allocate a paint buffer");
     assert_eq!(
-        (buffer.width, buffer.height),
+        (buffer.width(), buffer.height()),
         (1920, 56),
         "first popup layout must use the parent bound, not the 1x1 positioner placeholder"
     );
@@ -210,7 +210,7 @@ fn layer_surface_config_uses_content_size_not_stale_surface_size_on_first_show()
         .as_ref()
         .expect("layer surface should allocate a paint buffer on first show");
     assert_eq!(
-        (buffer.width, buffer.height),
+        (buffer.width(), buffer.height()),
         (480, 640),
         "first visible frame must allocate a paint buffer at the measured content size"
     );

@@ -233,7 +233,7 @@ impl Shell {
                         .parent
                         .paint_buffer
                         .as_ref()
-                        .map(|buffer| buffer.width != 1 || buffer.height != 1)
+                        .map(|buffer| buffer.width() != 1 || buffer.height() != 1)
                         .unwrap_or(true)
                     {
                         runtime.parent.paint_buffer = Some(PixelBuffer::new(1, 1));
@@ -567,7 +567,7 @@ impl Shell {
 
                 // Cap the buffer allocation so a bad measured size cannot ask
                 // for gigabytes.
-                const MAX_BUFFER_BYTES: u64 = 512 * 1024 * 1024;
+                const MAX_BUFFER_BYTES: u64 = PixelBuffer::MAX_BYTES as u64;
                 let requested_bytes = (physical_w as u64) * (physical_h as u64) * 4;
                 if requested_bytes > MAX_BUFFER_BYTES {
                     return Err(ShellRunError::BufferAlloc {
@@ -591,10 +591,22 @@ impl Shell {
                     .parent
                     .paint_buffer
                     .as_ref()
-                    .map(|buffer| buffer.width != physical_w || buffer.height != physical_h)
+                    .map(|buffer| buffer.width() != physical_w || buffer.height() != physical_h)
                     .unwrap_or(true)
                 {
-                    runtime.parent.paint_buffer = Some(PixelBuffer::new(physical_w, physical_h));
+                    let buffer = PixelBuffer::try_new(physical_w, physical_h).ok_or_else(|| {
+                        ShellRunError::BufferAlloc {
+                            surface_id: surface_id.clone(),
+                            logical_w: paint_width,
+                            logical_h: paint_height,
+                            physical_w,
+                            physical_h,
+                            scale,
+                            requested_bytes,
+                            max_bytes: MAX_BUFFER_BYTES,
+                        }
+                    })?;
+                    runtime.parent.paint_buffer = Some(buffer);
                     // A resized buffer starts fully transparent; `paint()` only
                     // repaints dirty regions against the retained tree, so
                     // without forcing a full present the untouched pixels of a

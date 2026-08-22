@@ -245,7 +245,7 @@ fn target_local_display_list_matches_transient_child_popup_pixels() {
         None,
     );
 
-    assert_eq!(retained.data, transient.data);
+    assert_eq!(retained.data(), transient.data());
 }
 
 // cargo test -p mesh-core-render --release -- retained_child_popup_replay_beats_transient_display_list --ignored --nocapture
@@ -320,7 +320,7 @@ fn retained_child_popup_replay_beats_transient_display_list() {
     }
     let retained_time = retained_started.elapsed();
 
-    assert_eq!(retained_buffer.data, transient_buffer.data);
+    assert_eq!(retained_buffer.data(), transient_buffer.data());
     eprintln!(
         "animated child popup raster: transient display-list {transient_time:?}; retained display-list {retained_time:?}; ratio {:.2}x",
         transient_time.as_secs_f64() / retained_time.as_secs_f64()

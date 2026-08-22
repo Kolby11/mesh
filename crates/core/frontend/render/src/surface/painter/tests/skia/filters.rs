@@ -117,7 +117,8 @@ fn sparse_repaint_with_backdrop_damage_expansion_matches_full_repaint() {
     engine.render_selected_display_list_for_module(&full, &mut full_buffer, 1.0, None, None, None);
 
     assert_eq!(
-        buffer.data, full_buffer.data,
+        buffer.data(),
+        full_buffer.data(),
         "sparse repaint with backdrop damage expansion must match a full repaint"
     );
 }

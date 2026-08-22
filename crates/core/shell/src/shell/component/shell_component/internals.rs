@@ -252,7 +252,7 @@ impl FrontendSurfaceComponent {
             smallvec::SmallVec::with_capacity(effective_damage.rects.len());
         for &damage in &effective_damage.rects {
             let physical_damage =
-                scale_damage_rect_to_buffer(damage, scale, buffer.width, buffer.height);
+                scale_damage_rect_to_buffer(damage, scale, buffer.width(), buffer.height());
             buffer.clear_rect(
                 physical_damage.x,
                 physical_damage.y,
@@ -299,7 +299,7 @@ impl FrontendSurfaceComponent {
         current_tooltip_damage: Option<DamageRect>,
     ) -> mesh_core_render::PaintProfilingMetrics {
         let physical_damage =
-            scale_damage_rect_to_buffer(damage, scale, buffer.width, buffer.height);
+            scale_damage_rect_to_buffer(damage, scale, buffer.width(), buffer.height());
         buffer.clear_rect(
             physical_damage.x,
             physical_damage.y,

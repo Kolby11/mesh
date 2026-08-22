@@ -142,13 +142,13 @@ fn opaque_pixels_in_bounds(
 ) -> u32 {
     let x0 = left.floor().max(0.0) as u32;
     let y0 = top.floor().max(0.0) as u32;
-    let x1 = (right.ceil() as u32).min(buffer.width);
-    let y1 = (bottom.ceil() as u32).min(buffer.height);
+    let x1 = (right.ceil() as u32).min(buffer.width());
+    let y1 = (bottom.ceil() as u32).min(buffer.height());
     let mut count = 0;
     for y in y0..y1 {
         for x in x0..x1 {
-            let offset = (y * buffer.stride + x * 4) as usize;
-            if buffer.data[offset + 3] != 0 {
+            let offset = (y * buffer.stride() + x * 4) as usize;
+            if buffer.data()[offset + 3] != 0 {
                 count += 1;
             }
         }

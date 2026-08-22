@@ -9,21 +9,66 @@ use skia_safe::{
 /// `wl_shm::Format::Argb8888` on little-endian hosts.
 #[derive(Debug, Clone)]
 pub struct PixelBuffer {
-    pub data: Vec<u8>,
-    pub width: u32,
-    pub height: u32,
-    pub stride: u32,
+    data: Vec<u8>,
+    width: u32,
+    height: u32,
+    stride: u32,
 }
 
 impl PixelBuffer {
-    pub fn new(width: u32, height: u32) -> Self {
-        let stride = width * 4;
-        Self {
-            data: vec![0u8; (stride * height) as usize],
+    /// Keep one software surface from consuming unbounded process memory.
+    /// The shell applies the same limit before requesting a surface-sized
+    /// buffer, while this type remains safe for all direct callers.
+    pub const MAX_BYTES: usize = 512 * 1024 * 1024;
+
+    /// Allocate a pixel buffer without panicking on overflow, an oversized
+    /// request, or allocator failure.
+    pub fn try_new(width: u32, height: u32) -> Option<Self> {
+        let stride = width.checked_mul(4)?;
+        let byte_len = usize::try_from(stride)
+            .ok()?
+            .checked_mul(usize::try_from(height).ok()?)?;
+        if byte_len > Self::MAX_BYTES {
+            return None;
+        }
+
+        let mut data = Vec::new();
+        data.try_reserve_exact(byte_len).ok()?;
+        data.resize(byte_len, 0);
+        Some(Self {
+            data,
             width,
             height,
             stride,
-        }
+        })
+    }
+
+    /// Allocate a normal render buffer. Callers handling untrusted or
+    /// compositor-provided dimensions should use [`Self::try_new`] so a
+    /// rejected allocation can be reported without unwinding.
+    pub fn new(width: u32, height: u32) -> Self {
+        Self::try_new(width, height)
+            .expect("PixelBuffer dimensions exceed the bounded render allocation")
+    }
+
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
+    pub(crate) fn data_mut(&mut self) -> &mut [u8] {
+        &mut self.data
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    pub fn stride(&self) -> u32 {
+        self.stride
     }
 
     /// Clear the buffer to a solid color.
@@ -338,11 +383,11 @@ mod tests {
     #[test]
     fn buffer_creation_and_clear() {
         let mut buf = PixelBuffer::new(10, 10);
-        assert_eq!(buf.data.len(), 400);
+        assert_eq!(buf.data().len(), 400);
 
         buf.clear(Color::WHITE);
         // Check first pixel is white (BGRA order).
-        assert_eq!(&buf.data[0..4], &[255, 255, 255, 255]);
+        assert_eq!(&buf.data()[0..4], &[255, 255, 255, 255]);
     }
 
     #[test]
@@ -358,16 +403,16 @@ mod tests {
         buf.clear(Color::WHITE);
         buf.clear_rect(1, 1, 2, 2, Color::TRANSPARENT);
 
-        assert_eq!(&buf.data[0..4], &[255, 255, 255, 255]);
-        let offset = ((buf.stride + 4) as usize)..((buf.stride + 8) as usize);
-        assert_eq!(&buf.data[offset], &[0, 0, 0, 0]);
+        assert_eq!(&buf.data()[0..4], &[255, 255, 255, 255]);
+        let offset = ((buf.stride() + 4) as usize)..((buf.stride() + 8) as usize);
+        assert_eq!(&buf.data()[offset], &[0, 0, 0, 0]);
     }
 
     #[test]
     fn blend_pixel_applies_coverage() {
         let mut buf = PixelBuffer::new(1, 1);
         buf.blend_pixel(0, 0, Color::WHITE, 128);
-        assert_eq!(&buf.data[0..4], &[128, 128, 128, 128]);
+        assert_eq!(&buf.data()[0..4], &[128, 128, 128, 128]);
     }
 
     #[test]
@@ -382,11 +427,45 @@ mod tests {
 
         buf.clear(color);
 
-        assert_eq!(&buf.data[0..4], &[7, 20, 90, 102]);
+        assert_eq!(&buf.data()[0..4], &[7, 20, 90, 102]);
         let round_trip = buf.get_pixel(0, 0);
         assert_eq!(round_trip.a, color.a);
         assert!((i16::from(round_trip.r) - i16::from(color.r)).abs() <= 1);
         assert!((i16::from(round_trip.g) - i16::from(color.g)).abs() <= 1);
         assert!((i16::from(round_trip.b) - i16::from(color.b)).abs() <= 1);
+    }
+
+    #[test]
+    fn try_new_rejects_overflow_and_oversized_allocations() {
+        assert!(PixelBuffer::try_new(u32::MAX, 2).is_none());
+        assert!(PixelBuffer::try_new(16_385, 8_192).is_none());
+        assert!(PixelBuffer::try_new(16, 16).is_some());
+    }
+
+    #[test]
+    fn canvas_session_keeps_backing_storage_stable() {
+        let mut buffer = PixelBuffer::try_new(2, 2).expect("small buffer must allocate");
+        let allocation = buffer.data().as_ptr();
+
+        {
+            let mut session = PixelCanvasSession::new(&mut buffer);
+            session.with_buffer(|buffer| {
+                buffer.set_pixel(0, 0, Color::WHITE);
+                assert_eq!(buffer.data().as_ptr(), allocation);
+            });
+            assert!(
+                session
+                    .with_canvas(|canvas| {
+                        canvas.clear(skia_color(Color::BLACK));
+                    })
+                    .is_some()
+            );
+            session.with_buffer(|buffer| {
+                buffer.set_pixel(1, 1, Color::WHITE);
+                assert_eq!(buffer.data().as_ptr(), allocation);
+            });
+        }
+
+        assert_eq!(buffer.data().as_ptr(), allocation);
     }
 }

@@ -164,8 +164,8 @@ impl DevWindowBackend {
             return Ok(PresentStatus::Presented);
         }
 
-        let width = buffer.width.max(1);
-        let height = buffer.height.max(1);
+        let width = buffer.width().max(1);
+        let height = buffer.height().max(1);
         let needs_new_window = self
             .windows
             .get(surface_id)
@@ -310,7 +310,7 @@ fn create_window_surface(title: &str, width: u32, height: u32) -> Result<WindowS
 }
 
 fn convert_bgra_to_u32(buffer: &PixelBuffer, out: &mut [u32]) {
-    for (chunk, pixel) in buffer.data.chunks_exact(4).zip(out.iter_mut()) {
+    for (chunk, pixel) in buffer.data().chunks_exact(4).zip(out.iter_mut()) {
         let b = chunk[0] as u32;
         let g = chunk[1] as u32;
         let r = chunk[2] as u32;

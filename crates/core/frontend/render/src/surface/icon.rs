@@ -826,14 +826,14 @@ fn blit_variant(buffer: &mut PixelBuffer, variant: &RasterVariant, dest_x: i32, 
     let dst_y = dest_y.max(0) as u32;
     if src_x >= variant.width
         || src_y >= variant.height
-        || dst_x >= buffer.width
-        || dst_y >= buffer.height
+        || dst_x >= buffer.width()
+        || dst_y >= buffer.height()
     {
         return;
     }
 
-    let copy_w = (variant.width - src_x).min(buffer.width - dst_x);
-    let copy_h = (variant.height - src_y).min(buffer.height - dst_y);
+    let copy_w = (variant.width - src_x).min(buffer.width() - dst_x);
+    let copy_h = (variant.height - src_y).min(buffer.height() - dst_y);
     if copy_w == 0 || copy_h == 0 {
         return;
     }
@@ -845,29 +845,29 @@ fn blit_variant(buffer: &mut PixelBuffer, variant: &RasterVariant, dest_x: i32, 
     if variant.fully_opaque {
         for row in 0..copy_h as usize {
             let src_start = (src_y as usize + row) * src_stride + src_x_offset;
-            let dst_start = (dst_y as usize + row) * buffer.stride as usize + dst_x_offset;
+            let dst_start = (dst_y as usize + row) * buffer.stride() as usize + dst_x_offset;
             let src_end = src_start + row_bytes;
             let dst_end = dst_start + row_bytes;
-            if src_end <= variant.pixels.len() && dst_end <= buffer.data.len() {
-                buffer.data[dst_start..dst_end]
+            if src_end <= variant.pixels.len() && dst_end <= buffer.data().len() {
+                buffer.data_mut()[dst_start..dst_end]
                     .copy_from_slice(&variant.pixels[src_start..src_end]);
             }
         }
         return;
     }
 
-    let dst_stride = buffer.stride as usize;
+    let dst_stride = buffer.stride() as usize;
     for row in 0..copy_h as usize {
         let src_row_start = (src_y as usize + row) * src_stride + src_x_offset;
         let dst_row_start = (dst_y as usize + row) * dst_stride + dst_x_offset;
         let src_row_end = src_row_start + row_bytes;
         let dst_row_end = dst_row_start + row_bytes;
-        if src_row_end > variant.pixels.len() || dst_row_end > buffer.data.len() {
+        if src_row_end > variant.pixels.len() || dst_row_end > buffer.data().len() {
             continue;
         }
 
         let src_row = &variant.pixels[src_row_start..src_row_end];
-        let dst_row = &mut buffer.data[dst_row_start..dst_row_end];
+        let dst_row = &mut buffer.data_mut()[dst_row_start..dst_row_end];
         for (src_px, dst_px) in src_row.chunks_exact(4).zip(dst_row.chunks_exact_mut(4)) {
             let src_alpha = u16::from(src_px[3]);
             if src_alpha == 0 {
@@ -1488,19 +1488,19 @@ mod tests {
     }
 
     fn pixel(buffer: &PixelBuffer, x: u32, y: u32) -> Color {
-        let offset = (y * buffer.stride + x * 4) as usize;
+        let offset = (y * buffer.stride() + x * 4) as usize;
         Color {
-            b: buffer.data[offset],
-            g: buffer.data[offset + 1],
-            r: buffer.data[offset + 2],
-            a: buffer.data[offset + 3],
+            b: buffer.data()[offset],
+            g: buffer.data()[offset + 1],
+            r: buffer.data()[offset + 2],
+            a: buffer.data()[offset + 3],
         }
     }
 
     fn non_transparent_pixels(buffer: &PixelBuffer) -> Vec<(u32, u32, Color)> {
         let mut pixels = Vec::new();
-        for y in 0..buffer.height {
-            for x in 0..buffer.width {
+        for y in 0..buffer.height() {
+            for x in 0..buffer.width() {
                 let color = pixel(buffer, x, y);
                 if color.a > 0 {
                     pixels.push((x, y, color));

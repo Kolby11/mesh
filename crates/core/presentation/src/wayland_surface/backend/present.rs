@@ -83,8 +83,8 @@ impl WaylandSurfaceBackend {
         let scale = entry.scale;
 
         // SHM copy must use physical buffer dimensions for the copy region
-        let physical_w = buffer.width.max(1);
-        let physical_h = buffer.height.max(1);
+        let physical_w = buffer.width().max(1);
+        let physical_h = buffer.height().max(1);
 
         // Damage rects arrive in logical/CSS coordinates; scale to physical
         // before the copy so each SHM buffer can retain disjoint pending
@@ -101,7 +101,7 @@ impl WaylandSurfaceBackend {
         }
         let Some((buffer_index, copy_damage)) = entry.copy_into_shm_buffer(
             pool,
-            &buffer.data,
+            buffer.data(),
             physical_w,
             physical_h,
             &shm_copy_damage,

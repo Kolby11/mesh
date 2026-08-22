@@ -574,7 +574,7 @@ pub enum ShellRunError {
     Theme(#[from] mesh_core_theme::ThemeError),
 
     #[error(
-        "buffer allocation exceeds {requested_bytes} bytes (max {max_bytes}); surface '{surface_id}' at scale {scale:.2} would require {logical_w}x{logical_h} logical -> {physical_w}x{physical_h} physical"
+        "buffer allocation rejected for {requested_bytes} bytes (max {max_bytes}); surface '{surface_id}' at scale {scale:.2} would require {logical_w}x{logical_h} logical -> {physical_w}x{physical_h} physical"
     )]
     BufferAlloc {
         surface_id: String,

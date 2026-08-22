@@ -471,7 +471,7 @@ fn affected_template_eval_beats_full_rebuild() {
         }
     }
 
-    assert_eq!(selective_buffer.data, full_buffer.data);
+    assert_eq!(selective_buffer.data(), full_buffer.data());
     assert!(selective.last_template_build_reused_nodes >= 1_024);
     let speedup = full_time.as_secs_f64() / selective_time.as_secs_f64();
     eprintln!(

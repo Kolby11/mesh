@@ -589,12 +589,12 @@ pub(super) fn test_frontend_component_with_manifest(
 }
 
 pub(super) fn buffer_pixel(buffer: &PixelBuffer, x: u32, y: u32) -> [u8; 4] {
-    let offset = (y * buffer.stride + x * 4) as usize;
+    let offset = (y * buffer.stride() + x * 4) as usize;
     [
-        buffer.data[offset],
-        buffer.data[offset + 1],
-        buffer.data[offset + 2],
-        buffer.data[offset + 3],
+        buffer.data()[offset],
+        buffer.data()[offset + 1],
+        buffer.data()[offset + 2],
+        buffer.data()[offset + 3],
     ]
 }
 

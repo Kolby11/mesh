@@ -108,8 +108,8 @@ impl FrontendRenderEngine {
             root,
             offset_x,
             offset_y,
-            buffer.width,
-            buffer.height,
+            buffer.width(),
+            buffer.height(),
             true,
             true,
         );
@@ -135,8 +135,8 @@ impl FrontendRenderEngine {
         let surface_clip = ClipRect {
             x: 0,
             y: 0,
-            width: buffer.width as i32,
-            height: buffer.height as i32,
+            width: buffer.width() as i32,
+            height: buffer.height() as i32,
         };
         let paint_clip = clip
             .map(|clip| {
@@ -200,8 +200,8 @@ impl FrontendRenderEngine {
         let surface_clip = ClipRect {
             x: 0,
             y: 0,
-            width: buffer.width as i32,
-            height: buffer.height as i32,
+            width: buffer.width() as i32,
+            height: buffer.height() as i32,
         };
         let paint_clip = clip
             .map(|clip| {
@@ -268,8 +268,8 @@ impl FrontendRenderEngine {
         let surface_clip = ClipRect {
             x: 0,
             y: 0,
-            width: buffer.width as i32,
-            height: buffer.height as i32,
+            width: buffer.width() as i32,
+            height: buffer.height() as i32,
         };
         let paint_clips = clipped_paint_regions(surface_clip, clips);
         if paint_clips.is_empty() {
@@ -386,8 +386,8 @@ impl FrontendRenderEngine {
         let surface_clip = ClipRect {
             x: 0,
             y: 0,
-            width: buffer.width as i32,
-            height: buffer.height as i32,
+            width: buffer.width() as i32,
+            height: buffer.height() as i32,
         };
         let paint_clip = clip
             .map(|clip| {
@@ -474,8 +474,8 @@ impl FrontendRenderEngine {
         let surface_clip = ClipRect {
             x: 0,
             y: 0,
-            width: buffer.width as i32,
-            height: buffer.height as i32,
+            width: buffer.width() as i32,
+            height: buffer.height() as i32,
         };
         let paint_clips = clipped_paint_regions(surface_clip, clips);
         if paint_clips.is_empty() {

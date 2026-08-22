@@ -53,8 +53,8 @@ fn selection_paint_uses_selection_colors() {
 
     let mut saw_selection_background = false;
     let mut saw_selection_foreground = false;
-    for y in 0..buffer.height {
-        for x in 0..buffer.width {
+    for y in 0..buffer.height() {
+        for x in 0..buffer.width() {
             let color = pixel(&buffer, x, y);
             if color == Color::from_hex("#00ff00").unwrap() {
                 saw_selection_background = true;
@@ -131,8 +131,8 @@ fn phase44_selection_paint_and_proof_use_theme_colors() {
 
     let mut saw_selection_background = false;
     let mut saw_selection_foreground = false;
-    for y in 0..buffer.height {
-        for x in 0..buffer.width {
+    for y in 0..buffer.height() {
+        for x in 0..buffer.width() {
             let color = pixel(&buffer, x, y);
             if color == Color::from_hex("#00ff00").unwrap() {
                 saw_selection_background = true;
@@ -243,7 +243,7 @@ fn selection_fixture_preview_tree_paints_nonempty_surface() {
     let mut buffer = PixelBuffer::new(380, 196);
     FrontendRenderEngine::new().render_tree(&tree, &mut buffer, 1.0);
 
-    let has_visible_pixels = buffer.data.chunks_exact(4).any(|px| px[3] != 0);
+    let has_visible_pixels = buffer.data().chunks_exact(4).any(|px| px[3] != 0);
     assert!(
         has_visible_pixels,
         "proof fixture should paint visible output"

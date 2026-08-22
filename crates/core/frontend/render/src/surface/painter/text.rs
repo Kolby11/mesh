@@ -623,9 +623,9 @@ impl FrontendRenderEngine {
         } else {
             ((paint_x) * scale) as i32
         };
-        let tx_full = tx_full_raw.min(buffer.width as i32 - box_w - 6).max(4);
+        let tx_full = tx_full_raw.min(buffer.width() as i32 - box_w - 6).max(4);
         let ty_full = ((paint_y) * scale) as i32;
-        let ty_full = ty_full.min(buffer.height as i32 - box_h - 6).max(4);
+        let ty_full = ty_full.min(buffer.height() as i32 - box_h - 6).max(4);
 
         // Center the animated box inside the final rect so the expand grows
         // outward from the middle — both sides move apart symmetrically.
@@ -635,8 +635,8 @@ impl FrontendRenderEngine {
         let full_clip = ClipRect {
             x: 0,
             y: 0,
-            width: buffer.width as i32,
-            height: buffer.height as i32,
+            width: buffer.width() as i32,
+            height: buffer.height() as i32,
         };
         let tooltip_clip = clip
             .map(|clip| {

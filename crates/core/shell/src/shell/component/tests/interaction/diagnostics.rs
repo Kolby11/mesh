@@ -473,7 +473,7 @@ fn icon_reliability_core_surfaces_proof() {
     };
     let mut svg_buffer = mesh_core_render::PixelBuffer::new(24, 24);
     mesh_core_render::paint_frontend_tree(&svg_node, &mut svg_buffer, 1.0, None);
-    assert!(svg_buffer.data.chunks_exact(4).any(|px| px[3] > 0));
+    assert!(svg_buffer.data().chunks_exact(4).any(|px| px[3] > 0));
 
     let td = tempfile::tempdir().unwrap();
     let raster_path = td.path().join("raster.bmp");
@@ -490,7 +490,7 @@ fn icon_reliability_core_surfaces_proof() {
     };
     let mut raster_buffer = mesh_core_render::PixelBuffer::new(20, 20);
     mesh_core_render::paint_frontend_tree(&raster_node, &mut raster_buffer, 1.0, None);
-    assert!(raster_buffer.data.chunks_exact(4).any(|px| px[3] > 0));
+    assert!(raster_buffer.data().chunks_exact(4).any(|px| px[3] > 0));
 
     let mut missing_node = WidgetNode::new("icon");
     missing_node
@@ -505,7 +505,7 @@ fn icon_reliability_core_surfaces_proof() {
     };
     let mut missing_buffer = mesh_core_render::PixelBuffer::new(24, 24);
     mesh_core_render::paint_frontend_tree(&missing_node, &mut missing_buffer, 1.0, None);
-    assert!(missing_buffer.data.chunks_exact(4).any(|px| px[3] > 0));
+    assert!(missing_buffer.data().chunks_exact(4).any(|px| px[3] > 0));
 
     let component = test_frontend_component(
         r#"

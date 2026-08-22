@@ -41,11 +41,11 @@ impl DebugOverlayRestore {
     pub fn restore(mut self, buffer: &mut PixelBuffer) {
         for region in self.regions.drain(..).rev() {
             for row in 0..region.height {
-                let destination = ((region.y + row) * buffer.stride + region.x * 4) as usize;
+                let destination = ((region.y + row) * buffer.stride() + region.x * 4) as usize;
                 let source = (row * region.width * 4) as usize;
                 let len = (region.width * 4) as usize;
-                if destination + len <= buffer.data.len() && source + len <= region.bytes.len() {
-                    buffer.data[destination..destination + len]
+                if destination + len <= buffer.data().len() && source + len <= region.bytes.len() {
+                    buffer.data_mut()[destination..destination + len]
                         .copy_from_slice(&region.bytes[source..source + len]);
                 }
             }
@@ -57,21 +57,23 @@ impl DebugOverlayRestore {
         let y = rect.y.max(0) as u32;
         let far_x = rect.x.saturating_add(rect.width).max(0) as u32;
         let far_y = rect.y.saturating_add(rect.height).max(0) as u32;
-        let width = far_x.min(buffer.width).saturating_sub(x.min(buffer.width));
+        let width = far_x
+            .min(buffer.width())
+            .saturating_sub(x.min(buffer.width()));
         let height = far_y
-            .min(buffer.height)
-            .saturating_sub(y.min(buffer.height));
+            .min(buffer.height())
+            .saturating_sub(y.min(buffer.height()));
         if width == 0 || height == 0 {
             return;
         }
         let mut bytes = Vec::with_capacity((width * height * 4) as usize);
         for row in 0..height {
-            let start = ((y + row) * buffer.stride + x * 4) as usize;
+            let start = ((y + row) * buffer.stride() + x * 4) as usize;
             let len = (width * 4) as usize;
-            if start + len > buffer.data.len() {
+            if start + len > buffer.data().len() {
                 return;
             }
-            bytes.extend_from_slice(&buffer.data[start..start + len]);
+            bytes.extend_from_slice(&buffer.data()[start..start + len]);
         }
         self.regions.push(DebugOverlayRestoreRegion {
             x,
@@ -179,8 +181,8 @@ impl DebugOverlay {
         buffer: &mut PixelBuffer,
         scale: f32,
     ) {
-        let bw = buffer.width as i32;
-        let bh = buffer.height as i32;
+        let bw = buffer.width() as i32;
+        let bh = buffer.height() as i32;
         let full = ClipRect {
             x: 0,
             y: 0,
@@ -212,8 +214,8 @@ impl DebugOverlay {
         let full = ClipRect {
             x: 0,
             y: 0,
-            width: buffer.width as i32,
-            height: buffer.height as i32,
+            width: buffer.width() as i32,
+            height: buffer.height() as i32,
         };
         paint_bounds_rect(
             &engine,
@@ -277,8 +279,8 @@ impl DebugOverlay {
         let full = ClipRect {
             x: 0,
             y: 0,
-            width: buffer.width as i32,
-            height: buffer.height as i32,
+            width: buffer.width() as i32,
+            height: buffer.height() as i32,
         };
 
         // Paint flashing is intentionally translucent and happens before the
@@ -653,8 +655,8 @@ fn paint_bounds_recursive(
     let h = (node.layout.height * scale) as i32;
 
     if w > 0 && h > 0 {
-        let bw = buffer.width as i32;
-        let bh = buffer.height as i32;
+        let bw = buffer.width() as i32;
+        let bh = buffer.height() as i32;
         let full = ClipRect {
             x: 0,
             y: 0,
@@ -773,9 +775,9 @@ mod tests {
         assert_ne!(buffer.get_pixel(2, 2), Color::TRANSPARENT);
         assert_ne!(buffer.get_pixel(200, 90), Color::TRANSPARENT);
         assert_eq!(buffer.get_pixel(220, 110), Color::TRANSPARENT);
-        assert!(buffer.data.iter().any(|channel| *channel != 0));
+        assert!(buffer.data().iter().any(|channel| *channel != 0));
         restore.restore(&mut buffer);
-        assert!(buffer.data.iter().all(|channel| *channel == 0));
+        assert!(buffer.data().iter().all(|channel| *channel == 0));
     }
 
     #[test]
@@ -796,10 +798,10 @@ mod tests {
                 height: 100,
             }],
         );
-        assert_eq!(buffer.data.len(), 8 * 6 * 4);
-        assert!(buffer.data.iter().any(|channel| *channel != 0));
+        assert_eq!(buffer.data().len(), 8 * 6 * 4);
+        assert!(buffer.data().iter().any(|channel| *channel != 0));
         restore.restore(&mut buffer);
-        assert!(buffer.data.iter().all(|channel| *channel == 0));
+        assert!(buffer.data().iter().all(|channel| *channel == 0));
     }
 
     // cargo test -p mesh-core-render --release -- performance_hud_native_paint_cost --ignored --nocapture
