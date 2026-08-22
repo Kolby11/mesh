@@ -106,6 +106,12 @@ but never entered into the persistent raster cache, preserving the existing
 no-cache behavior for mutable linked assets. Frontend/backend candidate
 preparation after the resource stage remains outside this increment.
 
-The next open item is to unify these queues with a generation-aware resource
-broker and explicit cancellation, then continue frontend/backend candidate
-preparation after the resource stage.
+Icon and glyph workers now use the committed resource revision as a
+cooperative cancellation generation: stale queued work is skipped before and
+after preparation, stale results are rejected at the render handoff, and stale
+one-shot SVG results are purged. This prevents an older resource snapshot from
+publishing derived pixels after a replacement is committed.
+
+The next open item is to unify these queues with the full resource broker and
+explicit cancellation/byte-budget contract, then continue frontend/backend
+candidate preparation after the resource stage.

@@ -8,6 +8,7 @@
 #[cfg(test)]
 use super::PixelBuffer;
 use super::profiling;
+use super::resource_generation_is_current;
 use mesh_core_elements::lru::LruCache;
 use mesh_core_elements::style::Color;
 use mesh_core_icon::SupportedAxes;
@@ -83,6 +84,7 @@ struct GlyphJob {
 struct GlyphJobResult {
     key: GlyphCacheKey,
     glyph: Option<CachedGlyph>,
+    cancelled: bool,
     elapsed: std::time::Duration,
 }
 
@@ -106,17 +108,25 @@ fn glyph_raster_queue() -> &'static Mutex<GlyphRasterQueue> {
             .spawn(move || {
                 while let Ok(job) = request_receiver.recv() {
                     let started = std::time::Instant::now();
-                    let glyph = rasterize(
-                        &job.font_path,
-                        job.codepoint,
-                        job.px,
-                        job.axes,
-                        job.supported,
-                    );
+                    let initial_current = resource_generation_is_current(job.key.resource_revision);
+                    let glyph = if initial_current {
+                        rasterize(
+                            &job.font_path,
+                            job.codepoint,
+                            job.px,
+                            job.axes,
+                            job.supported,
+                        )
+                    } else {
+                        None
+                    };
+                    let cancelled = !initial_current
+                        || !resource_generation_is_current(job.key.resource_revision);
                     if result_sender
                         .send(GlyphJobResult {
                             key: job.key,
-                            glyph,
+                            glyph: if cancelled { None } else { glyph },
+                            cancelled,
                             elapsed: started.elapsed(),
                         })
                         .is_err()
@@ -153,6 +163,9 @@ fn drain_glyph_raster_jobs() -> bool {
 
     let mut completed = false;
     for result in results {
+        if result.cancelled || !resource_generation_is_current(result.key.resource_revision) {
+            continue;
+        }
         profiling::record_icon_image_raster(result.elapsed);
         cache_store(result.key, result.glyph);
         completed = true;

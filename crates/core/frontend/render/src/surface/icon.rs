@@ -5,6 +5,7 @@ use super::PixelCanvasSession;
 use super::glyph::draw_font_glyph;
 use super::glyph::{GlyphAxes, draw_font_glyph_on_canvas};
 use super::profiling;
+use super::resource_generation_is_current;
 use image::imageops::FilterType;
 use mesh_core_elements::lru::LruCache;
 use mesh_core_elements::style::Color;
@@ -126,6 +127,7 @@ struct RasterJobResult {
     key: RasterCacheKey,
     variant: Option<RasterVariant>,
     cacheable: bool,
+    cancelled: bool,
     elapsed: std::time::Duration,
 }
 
@@ -150,12 +152,23 @@ fn icon_raster_queue() -> &'static Mutex<IconRasterQueue> {
             .spawn(move || {
                 while let Ok(job) = request_receiver.recv() {
                     let started = std::time::Instant::now();
-                    let (variant, cacheable) = rasterize_file_job(&job);
+                    let (variant, cacheable, cancelled) =
+                        if !resource_generation_is_current(job.key.resource_revision) {
+                            (None, false, true)
+                        } else {
+                            let (variant, cacheable) = rasterize_file_job(&job);
+                            if resource_generation_is_current(job.key.resource_revision) {
+                                (variant, cacheable, false)
+                            } else {
+                                (None, false, true)
+                            }
+                        };
                     if result_sender
                         .send(RasterJobResult {
                             key: job.key,
                             variant,
                             cacheable,
+                            cancelled,
                             elapsed: started.elapsed(),
                         })
                         .is_err()
@@ -209,6 +222,10 @@ fn drain_icon_raster_jobs() -> bool {
         let Ok(mut queue) = queue.lock() else {
             return false;
         };
+        let current_generation = mesh_core_resources::resource_revision();
+        queue
+            .ready
+            .retain(|key, _| key.resource_revision == current_generation);
         let mut results = Vec::new();
         while let Ok(result) = queue.receiver.try_recv() {
             queue.pending.remove(&result.key);
@@ -220,6 +237,9 @@ fn drain_icon_raster_jobs() -> bool {
     let mut cached_results = Vec::new();
     let mut ready_results = Vec::new();
     for result in results {
+        if result.cancelled || !resource_generation_is_current(result.key.resource_revision) {
+            continue;
+        }
         profiling::record_icon_image_raster(result.elapsed);
         if result.cacheable {
             profiling::record_raster_cache_miss();

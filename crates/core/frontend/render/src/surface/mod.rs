@@ -23,6 +23,13 @@ pub use painter::{
 pub use profiling::RasterMetrics;
 pub use text::{SharedTextMeasurer, TextCacheMetrics, TextRenderer};
 
+/// Return whether work prepared against `generation` still belongs to the
+/// active resource snapshot. Render workers use this as a cooperative
+/// cancellation gate before publishing derived assets.
+pub(crate) fn resource_generation_is_current(generation: u64) -> bool {
+    generation == mesh_core_resources::resource_revision()
+}
+
 /// Drain completed file-icon raster jobs and report whether any cache entries
 /// became available for the next paint.
 pub fn poll_icon_raster_jobs() -> bool {
@@ -586,6 +593,13 @@ pub fn paint_selected_display_list_regions_for_module_with_profiling_metrics_and
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resource_generation_gate_accepts_current_and_rejects_future_work() {
+        let current = mesh_core_resources::resource_revision();
+        assert!(resource_generation_is_current(current));
+        assert!(!resource_generation_is_current(current.saturating_add(1)));
+    }
 
     #[test]
     fn tooltip_overlay_does_not_dominate_paint_traversal_metric() {
