@@ -14,7 +14,7 @@ use skia_safe::{
     AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images,
 };
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
@@ -125,6 +125,7 @@ struct RasterJob {
 struct RasterJobResult {
     key: RasterCacheKey,
     variant: Option<RasterVariant>,
+    cacheable: bool,
     elapsed: std::time::Duration,
 }
 
@@ -132,6 +133,7 @@ struct IconRasterQueue {
     sender: Option<mpsc::SyncSender<RasterJob>>,
     receiver: Receiver<RasterJobResult>,
     pending: HashSet<RasterCacheKey>,
+    ready: HashMap<RasterCacheKey, RasterVariant>,
 }
 
 static ICON_RASTER_QUEUE: OnceLock<Mutex<IconRasterQueue>> = OnceLock::new();
@@ -148,11 +150,12 @@ fn icon_raster_queue() -> &'static Mutex<IconRasterQueue> {
             .spawn(move || {
                 while let Ok(job) = request_receiver.recv() {
                     let started = std::time::Instant::now();
-                    let variant = rasterize_file_job(&job);
+                    let (variant, cacheable) = rasterize_file_job(&job);
                     if result_sender
                         .send(RasterJobResult {
                             key: job.key,
                             variant,
+                            cacheable,
                             elapsed: started.elapsed(),
                         })
                         .is_err()
@@ -167,19 +170,35 @@ fn icon_raster_queue() -> &'static Mutex<IconRasterQueue> {
             sender: worker.map(|_| request_sender),
             receiver: result_receiver,
             pending: HashSet::new(),
+            ready: HashMap::new(),
         })
     })
 }
 
-fn rasterize_file_job(job: &RasterJob) -> Option<RasterVariant> {
+fn rasterize_file_job(job: &RasterJob) -> (Option<RasterVariant>, bool) {
     match job.kind {
-        IconFileKind::Bitmap => {
-            raster_bitmap_variant(&job.path, job.width, job.height, job.tint, job.multicolor)
-        }
-        IconFileKind::Svg => {
-            raster_svg_variant(&job.path, job.width, job.height, job.tint, job.multicolor)
-        }
+        IconFileKind::Bitmap => (
+            raster_bitmap_variant(&job.path, job.width, job.height, job.tint, job.multicolor),
+            true,
+        ),
+        IconFileKind::Svg => rasterize_svg_job(job),
     }
+}
+
+fn rasterize_svg_job(job: &RasterJob) -> (Option<RasterVariant>, bool) {
+    let Ok(svg_data) = std::fs::read_to_string(&job.path) else {
+        return (None, false);
+    };
+    let cacheable = !svg_has_external_resource_reference(&svg_data);
+    let variant = raster_svg_variant_from_data(
+        &job.path,
+        &svg_data,
+        job.width,
+        job.height,
+        job.tint,
+        job.multicolor,
+    );
+    (variant, cacheable)
 }
 
 fn drain_icon_raster_jobs() -> bool {
@@ -198,18 +217,47 @@ fn drain_icon_raster_jobs() -> bool {
         results
     };
 
-    let mut completed = false;
+    let mut cached_results = Vec::new();
+    let mut ready_results = Vec::new();
     for result in results {
         profiling::record_icon_image_raster(result.elapsed);
-        if let Some(variant) = result.variant {
-            store_variant(result.key, variant);
-            completed = true;
+        if result.cacheable {
+            profiling::record_raster_cache_miss();
+        } else {
+            profiling::record_raster_cache_bypass();
         }
+        if let Some(variant) = result.variant {
+            if result.cacheable {
+                cached_results.push((result.key, variant));
+            } else {
+                ready_results.push((result.key, variant));
+            }
+        }
+    }
+
+    let cached_completed = !cached_results.is_empty();
+    for (key, variant) in cached_results {
+        store_variant(key, variant);
+    }
+    let mut completed = cached_completed;
+    if !ready_results.is_empty()
+        && let Some(queue) = ICON_RASTER_QUEUE.get()
+        && let Ok(mut queue) = queue.lock()
+    {
+        for (key, variant) in ready_results {
+            queue.ready.insert(key, variant);
+        }
+        completed = true;
     }
     if completed {
         ICON_RASTER_RESULTS_READY.store(true, Ordering::Release);
     }
     completed
+}
+
+fn take_ready_variant(key: &RasterCacheKey) -> Option<RasterVariant> {
+    let queue = ICON_RASTER_QUEUE.get()?;
+    queue.lock().ok()?.ready.remove(key)
 }
 
 pub fn poll_icon_raster_jobs() -> bool {
@@ -224,7 +272,7 @@ pub fn icon_raster_jobs_pending() -> bool {
     pending || ICON_RASTER_RESULTS_READY.load(Ordering::Acquire)
 }
 
-/// Queue one cacheable file-backed icon for off-thread decode and rasterization.
+/// Queue one file-backed icon for off-thread decode and rasterization.
 /// `None` means the worker could not be started; `Some(false)` means an
 /// equivalent job is already in flight or the bounded queue is full.
 fn schedule_icon_raster_job(
@@ -492,23 +540,13 @@ pub(crate) fn cached_file_resource_opacity(
     tint: Color,
     multicolor: bool,
 ) -> CachedResourceOpacity {
-    let Some(kind) = icon_file_kind(path) else {
+    if icon_file_kind(path).is_none() {
+        return CachedResourceOpacity::Unknown;
+    }
+    let Some(freshness) = file_freshness(path) else {
         return CachedResourceOpacity::Unknown;
     };
-    let key = match kind {
-        IconFileKind::Svg => {
-            let Some((true, freshness)) = svg_file_cacheability(path) else {
-                return CachedResourceOpacity::Unknown;
-            };
-            raster_file_key_with_freshness(path, width, height, tint, multicolor, freshness)
-        }
-        IconFileKind::Bitmap => {
-            let Some(freshness) = file_freshness(path) else {
-                return CachedResourceOpacity::Unknown;
-            };
-            raster_file_key_with_freshness(path, width, height, tint, multicolor, freshness)
-        }
-    };
+    let key = raster_file_key_with_freshness(path, width, height, tint, multicolor, freshness);
     let Some(variant) = cached_variant(&key) else {
         return CachedResourceOpacity::Unknown;
     };
@@ -708,6 +746,17 @@ fn raster_svg_variant(
     multicolor: bool,
 ) -> Option<RasterVariant> {
     let svg_data = std::fs::read_to_string(path).ok()?;
+    raster_svg_variant_from_data(path, &svg_data, width, height, tint, multicolor)
+}
+
+fn raster_svg_variant_from_data(
+    path: &Path,
+    svg_data: &str,
+    width: u32,
+    height: u32,
+    tint: Color,
+    multicolor: bool,
+) -> Option<RasterVariant> {
     let opt = resvg::usvg::Options {
         resources_dir: path.parent().map(|p| p.to_path_buf()),
         ..Default::default()
@@ -904,19 +953,12 @@ fn resolve_file_variant_async(
     let kind = icon_file_kind(path)?;
     let width = dest_w.max(1) as u32;
     let height = dest_h.max(1) as u32;
-    let key = match kind {
-        IconFileKind::Svg => {
-            let (cacheable, freshness) = svg_file_cacheability(path)?;
-            if cacheable {
-                Some(raster_file_key_with_freshness(
-                    path, width, height, tint, multicolor, freshness,
-                ))
-            } else {
-                return resolve_file_variant_sync(path, dest_w, dest_h, tint, multicolor);
-            }
-        }
-        IconFileKind::Bitmap => raster_file_key(path, width, height, tint, multicolor),
-    }?;
+    let freshness = file_freshness(path)?;
+    let key = raster_file_key_with_freshness(path, width, height, tint, multicolor, freshness);
+
+    if let Some(variant) = take_ready_variant(&key) {
+        return Some(variant);
+    }
 
     if let Some(variant) = cached_variant(&key) {
         profiling::record_raster_cache_hit(variant.fully_opaque);
@@ -924,8 +966,7 @@ fn resolve_file_variant_async(
     }
 
     match schedule_icon_raster_job(key, path, kind, width, height, tint, multicolor) {
-        Some(true) => profiling::record_raster_cache_miss(),
-        Some(false) => {}
+        Some(true) | Some(false) => {}
         None => return resolve_file_variant_sync(path, dest_w, dest_h, tint, multicolor),
     }
     None
@@ -1299,6 +1340,10 @@ mod tests {
         if let Some(cache) = SVG_CACHEABILITY_CACHE.get() {
             cache.lock().unwrap().clear();
         }
+        if let Some(queue) = ICON_RASTER_QUEUE.get() {
+            queue.lock().unwrap().ready.clear();
+        }
+        ICON_RASTER_RESULTS_READY.store(false, Ordering::Release);
         FILE_FRESHNESS_STAT_PROBES.store(0, Ordering::Relaxed);
         profiling::reset_raster_metrics();
     }
@@ -1342,6 +1387,55 @@ mod tests {
             prepared.then_some(())
         });
         assert!(prepared.is_some(), "worker did not publish the SVG variant");
+        assert!(poll_icon_raster_jobs());
+        assert!(!icon_raster_jobs_pending());
+    }
+
+    #[test]
+    fn icon_raster_worker_returns_external_svg_without_caching() {
+        let _guard = icon_test_lock();
+        clear_icon_caches();
+        let td = tempfile::tempdir().unwrap();
+        let image_path = td.path().join("linked.png");
+        let svg_path = td.path().join("linked.svg");
+        ImageBuffer::from_fn(2, 2, |_, _| Rgba([255u8, 0, 0, 255]))
+            .save(&image_path)
+            .unwrap();
+        fs::write(
+            &svg_path,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><image href="linked.png" width="8" height="8"/></svg>"#,
+        )
+        .unwrap();
+        let key = raster_file_key(&svg_path, 8, 8, tint(), true).unwrap();
+
+        assert_eq!(
+            schedule_icon_raster_job(
+                key.clone(),
+                &svg_path,
+                IconFileKind::Svg,
+                8,
+                8,
+                tint(),
+                true,
+            ),
+            Some(true)
+        );
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let variant = loop {
+            drain_icon_raster_jobs();
+            if let Some(variant) = take_ready_variant(&key) {
+                break variant;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "worker did not publish the external SVG variant"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
+
+        assert_eq!(variant.pixels[0..4], [0, 0, 255, 255]);
+        assert!(cached_variant(&key).is_none());
         assert!(poll_icon_raster_jobs());
         assert!(!icon_raster_jobs_pending());
     }

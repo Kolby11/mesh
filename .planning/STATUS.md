@@ -99,7 +99,13 @@ upload remain on the render thread; the shell polls both queues and repaints
 when either resource is ready. Scheduler polling does not initialize idle
 workers.
 
-The next open item is to move the remaining XDG/SVG decode and raster
-preparation away from shell/render-thread paths. External-resource SVGs and
-frontend/backend candidate preparation after the resource stage remain outside
-this increment.
+External-resource SVGs now use the same bounded icon worker for SVG reads,
+external-reference detection, linked-resource loading, and rasterization.
+Their completed variants are delivered once through a render-thread handoff
+but never entered into the persistent raster cache, preserving the existing
+no-cache behavior for mutable linked assets. Frontend/backend candidate
+preparation after the resource stage remains outside this increment.
+
+The next open item is to unify these queues with a generation-aware resource
+broker and explicit cancellation, then continue frontend/backend candidate
+preparation after the resource stage.
