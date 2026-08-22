@@ -92,7 +92,14 @@ missing-icon placeholder until the result is published, and the shell polls
 completion to invalidate component paint without blocking the render thread.
 The worker queue and cache handoff are revision/freshness keyed.
 
+Font-pack glyph misses now enqueue bounded font-byte loading and swash
+rasterization jobs on a dedicated render worker. Completed alpha masks enter
+the revision/fingerprint-keyed glyph cache, while Skia A8 image creation and
+upload remain on the render thread; the shell polls both queues and repaints
+when either resource is ready. Scheduler polling does not initialize idle
+workers.
+
 The next open item is to move the remaining XDG/SVG decode and raster
-preparation away from shell/render-thread paths. External-resource SVGs,
-font-glyph rasterization, and frontend/backend candidate preparation after the
-resource stage remain outside this increment.
+preparation away from shell/render-thread paths. External-resource SVGs and
+frontend/backend candidate preparation after the resource stage remain outside
+this increment.

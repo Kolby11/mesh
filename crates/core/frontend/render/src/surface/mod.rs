@@ -35,6 +35,17 @@ pub fn icon_raster_jobs_pending() -> bool {
     icon::icon_raster_jobs_pending()
 }
 
+/// Drain completed font-glyph raster jobs and report whether any cache entries
+/// became available for the next paint.
+pub fn poll_glyph_raster_jobs() -> bool {
+    glyph::poll_glyph_raster_jobs()
+}
+
+/// Report whether a font-glyph raster job is still in flight.
+pub fn glyph_raster_jobs_pending() -> bool {
+    glyph::glyph_raster_jobs_pending()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PaintCommandClass {

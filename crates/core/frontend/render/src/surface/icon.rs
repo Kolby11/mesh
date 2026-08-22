@@ -184,7 +184,10 @@ fn rasterize_file_job(job: &RasterJob) -> Option<RasterVariant> {
 
 fn drain_icon_raster_jobs() -> bool {
     let results = {
-        let Ok(mut queue) = icon_raster_queue().lock() else {
+        let Some(queue) = ICON_RASTER_QUEUE.get() else {
+            return false;
+        };
+        let Ok(mut queue) = queue.lock() else {
             return false;
         };
         let mut results = Vec::new();
@@ -214,10 +217,10 @@ pub fn poll_icon_raster_jobs() -> bool {
 }
 
 pub fn icon_raster_jobs_pending() -> bool {
-    let pending = icon_raster_queue()
-        .lock()
-        .map(|queue| !queue.pending.is_empty())
-        .unwrap_or(false);
+    let pending = ICON_RASTER_QUEUE
+        .get()
+        .and_then(|queue| queue.lock().ok())
+        .is_some_and(|queue| !queue.pending.is_empty());
     pending || ICON_RASTER_RESULTS_READY.load(Ordering::Acquire)
 }
 

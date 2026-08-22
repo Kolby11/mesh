@@ -113,7 +113,9 @@ impl Shell {
         if self.pending_resource_preparation.is_some() {
             return Duration::from_millis(1);
         }
-        if mesh_core_render::icon_raster_jobs_pending() {
+        if mesh_core_render::icon_raster_jobs_pending()
+            || mesh_core_render::glyph_raster_jobs_pending()
+        {
             return Duration::from_millis(1);
         }
 

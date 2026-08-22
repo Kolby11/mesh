@@ -16,7 +16,10 @@ use skia_safe::{
     AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images,
 };
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex, OnceLock};
 use swash::scale::image::Content;
 use swash::scale::{Render, ScaleContext, Source, StrikeWith};
@@ -66,6 +69,151 @@ struct CachedGlyph {
     height: u32,
     placement_left: i32,
     pixels: Arc<[u8]>,
+}
+
+struct GlyphJob {
+    key: GlyphCacheKey,
+    font_path: std::path::PathBuf,
+    codepoint: u32,
+    px: u32,
+    axes: GlyphAxes,
+    supported: SupportedAxes,
+}
+
+struct GlyphJobResult {
+    key: GlyphCacheKey,
+    glyph: Option<CachedGlyph>,
+    elapsed: std::time::Duration,
+}
+
+struct GlyphRasterQueue {
+    sender: Option<mpsc::SyncSender<GlyphJob>>,
+    receiver: Receiver<GlyphJobResult>,
+    pending: HashSet<GlyphCacheKey>,
+}
+
+static GLYPH_RASTER_QUEUE: OnceLock<Mutex<GlyphRasterQueue>> = OnceLock::new();
+static GLYPH_RASTER_RESULTS_READY: AtomicBool = AtomicBool::new(false);
+
+fn glyph_raster_queue() -> &'static Mutex<GlyphRasterQueue> {
+    GLYPH_RASTER_QUEUE.get_or_init(|| {
+        const GLYPH_RASTER_QUEUE_CAPACITY: usize = 64;
+        let (request_sender, request_receiver) =
+            mpsc::sync_channel::<GlyphJob>(GLYPH_RASTER_QUEUE_CAPACITY);
+        let (result_sender, result_receiver) = mpsc::channel::<GlyphJobResult>();
+        let worker = std::thread::Builder::new()
+            .name("mesh-glyph-raster".into())
+            .spawn(move || {
+                while let Ok(job) = request_receiver.recv() {
+                    let started = std::time::Instant::now();
+                    let glyph = rasterize(
+                        &job.font_path,
+                        job.codepoint,
+                        job.px,
+                        job.axes,
+                        job.supported,
+                    );
+                    if result_sender
+                        .send(GlyphJobResult {
+                            key: job.key,
+                            glyph,
+                            elapsed: started.elapsed(),
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+            .ok();
+
+        Mutex::new(GlyphRasterQueue {
+            sender: worker.map(|_| request_sender),
+            receiver: result_receiver,
+            pending: HashSet::new(),
+        })
+    })
+}
+
+fn drain_glyph_raster_jobs() -> bool {
+    let results = {
+        let Some(queue) = GLYPH_RASTER_QUEUE.get() else {
+            return false;
+        };
+        let Ok(mut queue) = queue.lock() else {
+            return false;
+        };
+        let mut results = Vec::new();
+        while let Ok(result) = queue.receiver.try_recv() {
+            queue.pending.remove(&result.key);
+            results.push(result);
+        }
+        results
+    };
+
+    let mut completed = false;
+    for result in results {
+        profiling::record_icon_image_raster(result.elapsed);
+        cache_store(result.key, result.glyph);
+        completed = true;
+    }
+    if completed {
+        GLYPH_RASTER_RESULTS_READY.store(true, Ordering::Release);
+    }
+    completed
+}
+
+pub fn poll_glyph_raster_jobs() -> bool {
+    drain_glyph_raster_jobs() || GLYPH_RASTER_RESULTS_READY.swap(false, Ordering::AcqRel)
+}
+
+pub fn glyph_raster_jobs_pending() -> bool {
+    let pending = GLYPH_RASTER_QUEUE
+        .get()
+        .and_then(|queue| queue.lock().ok())
+        .is_some_and(|queue| !queue.pending.is_empty());
+    pending || GLYPH_RASTER_RESULTS_READY.load(Ordering::Acquire)
+}
+
+/// Queue one font glyph for off-thread byte loading and swash rasterization.
+/// `None` means the worker is unavailable; `Some(false)` means an equivalent
+/// job is already pending or the bounded queue is full.
+fn schedule_glyph_raster_job(
+    key: GlyphCacheKey,
+    font_path: &Path,
+    codepoint: u32,
+    px: u32,
+    axes: GlyphAxes,
+    supported: SupportedAxes,
+) -> Option<bool> {
+    let Ok(mut queue) = glyph_raster_queue().lock() else {
+        return None;
+    };
+    let Some(sender) = queue.sender.as_ref().cloned() else {
+        return None;
+    };
+    if !queue.pending.insert(key.clone()) {
+        return Some(false);
+    }
+    let job = GlyphJob {
+        key,
+        font_path: font_path.to_path_buf(),
+        codepoint,
+        px,
+        axes,
+        supported,
+    };
+    match sender.try_send(job) {
+        Ok(()) => Some(true),
+        Err(mpsc::TrySendError::Full(job)) => {
+            queue.pending.remove(&job.key);
+            Some(false)
+        }
+        Err(mpsc::TrySendError::Disconnected(job)) => {
+            queue.pending.remove(&job.key);
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -341,17 +489,35 @@ pub fn draw_font_glyph_on_canvas(
     dest_h: i32,
     tint: Color,
 ) -> bool {
+    drain_glyph_raster_jobs();
     let px = dest_w.max(dest_h).max(1) as u32;
     let key = glyph_cache_key(font_path, codepoint, px, supported_axes, axes, tint);
 
     let glyph = match cache_lookup(key) {
         Some(value) => value,
         None => {
-            let raster_started = std::time::Instant::now();
-            let value = rasterize(font_path, codepoint, px, axes, supported_axes);
-            profiling::record_icon_image_raster(raster_started.elapsed());
-            cache_store(key, value.clone());
-            value
+            #[cfg(test)]
+            {
+                let raster_started = std::time::Instant::now();
+                let value = rasterize(font_path, codepoint, px, axes, supported_axes);
+                profiling::record_icon_image_raster(raster_started.elapsed());
+                cache_store(key, value.clone());
+                value
+            }
+            #[cfg(not(test))]
+            {
+                match schedule_glyph_raster_job(key, font_path, codepoint, px, axes, supported_axes)
+                {
+                    Some(_) => None,
+                    None => {
+                        let raster_started = std::time::Instant::now();
+                        let value = rasterize(font_path, codepoint, px, axes, supported_axes);
+                        profiling::record_icon_image_raster(raster_started.elapsed());
+                        cache_store(key, value.clone());
+                        value
+                    }
+                }
+            }
         }
     };
     let Some(glyph) = glyph else {
@@ -518,6 +684,55 @@ mod tests {
 
         assert!(glyph.width > 0 && glyph.height > 0);
         assert!(glyph.pixels.iter().any(|alpha| *alpha > 0));
+    }
+
+    #[test]
+    fn glyph_raster_worker_transfers_font_glyph_to_cache() {
+        let _guard = glyph_test_lock();
+        clear_glyph_cache();
+        let font_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../../../modules/icon-packs/material-symbols/assets/MaterialSymbolsRounded.ttf",
+        );
+        let supported = SupportedAxes {
+            fill: true,
+            weight: true,
+            grade: true,
+            optical_size: true,
+        };
+        let axes = GlyphAxes {
+            fill: Some(1.0),
+            weight: Some(500.0),
+            grade: Some(0.0),
+            optical_size: Some(24.0),
+        };
+        let tint = Color {
+            r: 32,
+            g: 96,
+            b: 180,
+            a: 255,
+        };
+        let key = glyph_cache_key(&font_path, 0xe8b8, 24, supported, axes, tint);
+
+        assert_eq!(
+            schedule_glyph_raster_job(key, &font_path, 0xe8b8, 24, axes, supported,),
+            Some(true)
+        );
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let prepared = loop {
+            drain_glyph_raster_jobs();
+            if matches!(cache_lookup(key), Some(Some(_))) {
+                break true;
+            }
+            if std::time::Instant::now() >= deadline {
+                break false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
+        assert!(prepared, "worker did not publish the font glyph");
+        assert!(poll_glyph_raster_jobs());
+        assert!(!glyph_raster_jobs_pending());
+        clear_glyph_cache();
     }
 
     #[test]
