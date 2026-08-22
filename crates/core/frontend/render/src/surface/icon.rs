@@ -5,14 +5,17 @@ use super::PixelCanvasSession;
 use super::glyph::draw_font_glyph;
 use super::glyph::{GlyphAxes, draw_font_glyph_on_canvas};
 use super::profiling;
-use super::{checked_pixel_bytes, reserve_render_resource_work, resource_generation_is_current};
+use super::resource_broker::{ResourceBroker, ResourceBrokerContext};
+use super::{checked_pixel_bytes, resource_generation_is_current};
 use image::imageops::FilterType;
 use mesh_core_elements::lru::ByteLruCache;
 #[cfg(test)]
 use mesh_core_elements::lru::LruCache;
 use mesh_core_elements::style::Color;
 use mesh_core_icon::{IconResolution, MISSING_ICON_SVG, ResolvedTarget, resolve_icon_result};
-use mesh_core_resources::{ResourceFingerprint, resource_fingerprint, resource_revision};
+use mesh_core_resources::{
+    ResourceByteReservation, ResourceFingerprint, resource_fingerprint, resource_revision,
+};
 use skia_safe::{
     AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images,
 };
@@ -22,7 +25,7 @@ use std::path::Path;
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 
 static IMAGE_CACHE: OnceLock<Mutex<ByteLruCache<Arc<Path>, CachedImage>>> = OnceLock::new();
@@ -122,31 +125,34 @@ struct RasterVariant {
     fully_opaque: bool,
 }
 
-struct RasterJob {
-    key: RasterCacheKey,
-    path: std::path::PathBuf,
-    kind: IconFileKind,
-    width: u32,
-    height: u32,
-    tint: Color,
-    multicolor: bool,
-    _budget: mesh_core_resources::ResourceByteReservation,
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LinkedResourceFingerprint {
+    path: Arc<Path>,
+    fingerprint: Option<FileFreshness>,
 }
 
 struct RasterJobResult {
     key: RasterCacheKey,
     variant: Option<RasterVariant>,
     cacheable: bool,
+    linked_resources: Vec<LinkedResourceFingerprint>,
     cancelled: bool,
     elapsed: std::time::Duration,
-    _budget: mesh_core_resources::ResourceByteReservation,
+    _budget: ResourceByteReservation,
 }
 
 struct IconRasterQueue {
-    sender: Option<mpsc::SyncSender<RasterJob>>,
+    result_sender: Sender<RasterJobResult>,
     receiver: Receiver<RasterJobResult>,
     pending: HashSet<RasterCacheKey>,
-    ready: HashMap<RasterCacheKey, (RasterVariant, mesh_core_resources::ResourceByteReservation)>,
+    ready: HashMap<
+        RasterCacheKey,
+        (
+            RasterVariant,
+            Vec<LinkedResourceFingerprint>,
+            ResourceByteReservation,
+        ),
+    >,
 }
 
 static ICON_RASTER_QUEUE: OnceLock<Mutex<IconRasterQueue>> = OnceLock::new();
@@ -154,60 +160,14 @@ static ICON_RASTER_RESULTS_READY: AtomicBool = AtomicBool::new(false);
 
 fn icon_raster_queue() -> &'static Mutex<IconRasterQueue> {
     ICON_RASTER_QUEUE.get_or_init(|| {
-        const ICON_RASTER_QUEUE_CAPACITY: usize = 64;
-        let (request_sender, request_receiver) =
-            mpsc::sync_channel::<RasterJob>(ICON_RASTER_QUEUE_CAPACITY);
         let (result_sender, result_receiver) = mpsc::channel::<RasterJobResult>();
-        let worker = std::thread::Builder::new()
-            .name("mesh-icon-raster".into())
-            .spawn(move || {
-                while let Ok(job) = request_receiver.recv() {
-                    let started = std::time::Instant::now();
-                    let (variant, cacheable, cancelled) =
-                        if !resource_generation_is_current(job.key.resource_revision) {
-                            (None, false, true)
-                        } else {
-                            let (variant, cacheable) = rasterize_file_job(&job);
-                            if resource_generation_is_current(job.key.resource_revision) {
-                                (variant, cacheable, false)
-                            } else {
-                                (None, false, true)
-                            }
-                        };
-                    if result_sender
-                        .send(RasterJobResult {
-                            key: job.key,
-                            variant,
-                            cacheable,
-                            cancelled,
-                            elapsed: started.elapsed(),
-                            _budget: job._budget,
-                        })
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-            })
-            .ok();
-
         Mutex::new(IconRasterQueue {
-            sender: worker.map(|_| request_sender),
+            result_sender,
             receiver: result_receiver,
             pending: HashSet::new(),
             ready: HashMap::new(),
         })
     })
-}
-
-fn rasterize_file_job(job: &RasterJob) -> (Option<RasterVariant>, bool) {
-    match job.kind {
-        IconFileKind::Bitmap => (
-            raster_bitmap_variant(&job.path, job.width, job.height, job.tint, job.multicolor),
-            true,
-        ),
-        IconFileKind::Svg => rasterize_svg_job(job),
-    }
 }
 
 fn icon_raster_bytes(width: u32, height: u32) -> Option<usize> {
@@ -234,22 +194,6 @@ fn icon_dimensions(dest_w: i32, dest_h: i32) -> Option<(u32, u32)> {
     icon_raster_bytes(width, height).map(|_| (width, height))
 }
 
-fn rasterize_svg_job(job: &RasterJob) -> (Option<RasterVariant>, bool) {
-    let Ok(svg_data) = std::fs::read_to_string(&job.path) else {
-        return (None, false);
-    };
-    let cacheable = !svg_has_external_resource_reference(&svg_data);
-    let variant = raster_svg_variant_from_data(
-        &job.path,
-        &svg_data,
-        job.width,
-        job.height,
-        job.tint,
-        job.multicolor,
-    );
-    (variant, cacheable)
-}
-
 fn drain_icon_raster_jobs() -> bool {
     let results = {
         let Some(queue) = ICON_RASTER_QUEUE.get() else {
@@ -259,9 +203,10 @@ fn drain_icon_raster_jobs() -> bool {
             return false;
         };
         let current_generation = mesh_core_resources::resource_revision();
-        queue
-            .ready
-            .retain(|key, _| key.resource_revision == current_generation);
+        queue.ready.retain(|key, (_, linked_resources, _)| {
+            key.resource_revision == current_generation
+                && linked_resources_are_current(linked_resources)
+        });
         let mut results = Vec::new();
         while let Ok(result) = queue.receiver.try_recv() {
             queue.pending.remove(&result.key);
@@ -286,7 +231,7 @@ fn drain_icon_raster_jobs() -> bool {
             if result.cacheable {
                 cached_results.push((result.key, variant, result._budget));
             } else {
-                ready_results.push((result.key, variant, result._budget));
+                ready_results.push((result.key, variant, result.linked_resources, result._budget));
             }
         }
     }
@@ -301,8 +246,8 @@ fn drain_icon_raster_jobs() -> bool {
         && let Some(queue) = ICON_RASTER_QUEUE.get()
         && let Ok(mut queue) = queue.lock()
     {
-        for (key, variant, budget) in ready_results {
-            queue.ready.insert(key, (variant, budget));
+        for (key, variant, linked_resources, budget) in ready_results {
+            queue.ready.insert(key, (variant, linked_resources, budget));
         }
         completed = true;
     }
@@ -319,7 +264,9 @@ fn take_ready_variant(key: &RasterCacheKey) -> Option<RasterVariant> {
         .ok()?
         .ready
         .remove(key)
-        .map(|(variant, _budget)| variant)
+        .and_then(|(variant, linked_resources, _budget)| {
+            linked_resources_are_current(&linked_resources).then_some(variant)
+        })
 }
 
 pub fn poll_icon_raster_jobs() -> bool {
@@ -352,33 +299,79 @@ fn schedule_icon_raster_job(
     let Ok(mut queue) = icon_raster_queue().lock() else {
         return None;
     };
-    let Some(sender) = queue.sender.as_ref().cloned() else {
-        return None;
-    };
     if !queue.pending.insert(key.clone()) {
         return Some(false);
     }
-    let Some(budget) = reserve_render_resource_work(work_bytes) else {
+    let result_sender = queue.result_sender.clone();
+    let result_key = key.clone();
+    let cancellation_key = key.clone();
+    let cancellation_sender = result_sender.clone();
+    let job_path = path.to_path_buf();
+    let Some(broker) = ResourceBroker::global() else {
         queue.pending.remove(&key);
-        return Some(false);
+        return None;
     };
-    let job = RasterJob {
-        key: key.clone(),
-        path: path.to_path_buf(),
-        kind,
-        width,
-        height,
-        tint,
-        multicolor,
-        _budget: budget,
-    };
-    match sender.try_send(job) {
-        Ok(()) => Some(true),
-        Err(mpsc::TrySendError::Full(_)) => {
+    let scheduled = broker.submit(
+        work_bytes,
+        move |context: ResourceBrokerContext| {
+            let started = std::time::Instant::now();
+            let (variant, cacheable, linked_resources) = if !context.is_current() {
+                (None, false, Vec::new())
+            } else {
+                match kind {
+                    IconFileKind::Bitmap => (
+                        raster_bitmap_variant(&job_path, width, height, tint, multicolor),
+                        true,
+                        Vec::new(),
+                    ),
+                    IconFileKind::Svg => match std::fs::read_to_string(&job_path) {
+                        Ok(svg_data) => {
+                            let linked_resources =
+                                linked_resource_fingerprints(&job_path, &svg_data);
+                            (
+                                raster_svg_variant_from_data(
+                                    &job_path, &svg_data, width, height, tint, multicolor,
+                                ),
+                                !svg_has_external_resource_reference(&svg_data),
+                                linked_resources,
+                            )
+                        }
+                        Err(_) => (None, false, Vec::new()),
+                    },
+                }
+            };
+            let cancelled =
+                !context.is_current() || !linked_resources_are_current(&linked_resources);
+            let reservation = context.into_reservation();
+            let _ = result_sender.send(RasterJobResult {
+                key: result_key,
+                variant: if cancelled { None } else { variant },
+                cacheable: if cancelled { false } else { cacheable },
+                linked_resources,
+                cancelled,
+                elapsed: started.elapsed(),
+                _budget: reservation,
+            });
+        },
+        move |reservation| {
+            let _ = cancellation_sender.send(RasterJobResult {
+                key: cancellation_key,
+                variant: None,
+                cacheable: false,
+                linked_resources: Vec::new(),
+                cancelled: true,
+                elapsed: std::time::Duration::ZERO,
+                _budget: reservation,
+            });
+        },
+    );
+    match scheduled {
+        Some(true) => Some(true),
+        Some(false) => {
             queue.pending.remove(&key);
             Some(false)
         }
-        Err(mpsc::TrySendError::Disconnected(_)) => {
+        None => {
             queue.pending.remove(&key);
             None
         }
@@ -609,6 +602,91 @@ fn svg_has_external_resource_reference(svg_data: &str) -> bool {
     }
 
     false
+}
+
+fn linked_resource_fingerprints(svg_path: &Path, svg_data: &str) -> Vec<LinkedResourceFingerprint> {
+    let mut resources = Vec::new();
+    for reference in svg_external_resource_references(svg_data) {
+        let reference = reference.split('#').next().unwrap_or_default().trim();
+        if reference.is_empty()
+            || reference.starts_with("data:")
+            || (!reference.starts_with("file:") && reference.contains("://"))
+        {
+            continue;
+        }
+        let reference = reference.strip_prefix("file:").unwrap_or(reference);
+        let path = Path::new(reference);
+        let path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            svg_path
+                .parent()
+                .map_or_else(|| path.to_path_buf(), |parent| parent.join(path))
+        };
+        let path = std::fs::canonicalize(&path).unwrap_or(path);
+        let path: Arc<Path> = path.into();
+        if resources
+            .iter()
+            .any(|resource: &LinkedResourceFingerprint| resource.path.as_ref() == path.as_ref())
+        {
+            continue;
+        }
+        resources.push(LinkedResourceFingerprint {
+            fingerprint: resource_fingerprint(&path),
+            path,
+        });
+    }
+    resources
+}
+
+fn linked_resources_are_current(resources: &[LinkedResourceFingerprint]) -> bool {
+    resources
+        .iter()
+        .all(|resource| resource_fingerprint(&resource.path) == resource.fingerprint)
+}
+
+fn svg_external_resource_references(svg_data: &str) -> Vec<String> {
+    let mut references = Vec::new();
+    let mut remaining = svg_data;
+    while let Some(index) = remaining.find("href") {
+        remaining = &remaining[index + "href".len()..];
+        let trimmed = remaining.trim_start();
+        let trimmed = trimmed.strip_prefix('=').unwrap_or(trimmed).trim_start();
+        let Some(quote) = trimmed
+            .chars()
+            .next()
+            .filter(|ch| *ch == '"' || *ch == '\'')
+        else {
+            continue;
+        };
+        let value = &trimmed[quote.len_utf8()..];
+        let Some(end) = value.find(quote) else {
+            break;
+        };
+        let reference = value[..end].trim();
+        if !reference.is_empty() && !reference.starts_with('#') && !reference.starts_with("data:") {
+            references.push(reference.to_owned());
+        }
+        remaining = &value[end + quote.len_utf8()..];
+    }
+
+    let mut remaining = svg_data;
+    while let Some(index) = remaining.find("url(") {
+        let after = &remaining[index + "url(".len()..];
+        let Some(end) = after.find(')') else {
+            break;
+        };
+        let reference = after[..end]
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .trim();
+        if !reference.is_empty() && !reference.starts_with('#') && !reference.starts_with("data:") {
+            references.push(reference.to_owned());
+        }
+        remaining = &after[end + 1..];
+    }
+    references
 }
 
 fn missing_icon_key(width: u32, height: u32, tint: Color) -> RasterCacheKey {
@@ -1527,20 +1605,56 @@ mod tests {
         );
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        let variant = loop {
+        loop {
             drain_icon_raster_jobs();
-            if let Some(variant) = take_ready_variant(&key) {
-                break variant;
+            let ready = ICON_RASTER_QUEUE
+                .get()
+                .and_then(|queue| queue.lock().ok())
+                .is_some_and(|queue| queue.ready.contains_key(&key));
+            if ready {
+                break;
             }
             assert!(
                 std::time::Instant::now() < deadline,
                 "worker did not publish the external SVG variant"
             );
             std::thread::sleep(std::time::Duration::from_millis(1));
-        };
+        }
 
-        assert_eq!(variant.pixels[0..4], [0, 0, 255, 255]);
+        fs::remove_file(&image_path).unwrap();
+        ImageBuffer::from_fn(2, 2, |_, _| Rgba([0u8, 0, 255, 255]))
+            .save(&image_path)
+            .unwrap();
+        assert!(
+            take_ready_variant(&key).is_none(),
+            "a linked-file change must invalidate an in-flight SVG handoff"
+        );
         assert!(cached_variant(&key).is_none());
+
+        assert_eq!(
+            schedule_icon_raster_job(
+                key.clone(),
+                &svg_path,
+                IconFileKind::Svg,
+                8,
+                8,
+                tint(),
+                true,
+            ),
+            Some(true)
+        );
+        let variant = loop {
+            drain_icon_raster_jobs();
+            if let Some(variant) = take_ready_variant(&key) {
+                break variant;
+            }
+            assert!(
+                std::time::Instant::now() < deadline + std::time::Duration::from_secs(2),
+                "worker did not republish the linked SVG after invalidation"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
+        assert_eq!(variant.pixels[0..4], [255, 0, 0, 255]);
         assert!(poll_icon_raster_jobs());
         assert!(!icon_raster_jobs_pending());
     }

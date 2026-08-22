@@ -4,16 +4,14 @@ mod glyph;
 pub(crate) mod icon;
 mod painter;
 mod profiling;
+mod resource_broker;
 mod text;
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
-use std::sync::OnceLock;
-
-use mesh_core_elements::NodeId;
-use mesh_core_resources::{ResourceByteBudget, ResourceByteReservation};
 
 use crate::display_list::{DisplayPaintCommand, SelectedDisplayListPaint};
+use mesh_core_elements::NodeId;
 
 pub use buffer::{PixelBuffer, PixelCanvasSession};
 pub use debug_overlay::{DebugOverlay, DebugOverlayRestore, DebugPerfHudSnapshot};
@@ -30,22 +28,6 @@ pub use text::{SharedTextMeasurer, TextCacheMetrics, TextRenderer};
 /// cancellation gate before publishing derived assets.
 pub(crate) fn resource_generation_is_current(generation: u64) -> bool {
     generation == mesh_core_resources::resource_revision()
-}
-
-const RENDER_RESOURCE_WORK_BUDGET_BYTES: usize = 32 * 1024 * 1024;
-
-static RENDER_RESOURCE_WORK_BUDGET: OnceLock<ResourceByteBudget> = OnceLock::new();
-
-fn render_resource_work_budget() -> &'static ResourceByteBudget {
-    RENDER_RESOURCE_WORK_BUDGET
-        .get_or_init(|| ResourceByteBudget::new(RENDER_RESOURCE_WORK_BUDGET_BYTES))
-}
-
-/// Reserve space for one derived resource while it is queued or awaiting the
-/// render-thread handoff. Icon and glyph workers share this budget so their
-/// bounded queues cannot multiply a per-queue byte allowance.
-pub(crate) fn reserve_render_resource_work(bytes: usize) -> Option<ResourceByteReservation> {
-    render_resource_work_budget().try_reserve(bytes)
 }
 
 pub(crate) fn checked_pixel_bytes(

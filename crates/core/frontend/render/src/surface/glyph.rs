@@ -8,11 +8,14 @@
 #[cfg(test)]
 use super::PixelBuffer;
 use super::profiling;
-use super::{checked_pixel_bytes, reserve_render_resource_work, resource_generation_is_current};
+use super::resource_broker::{ResourceBroker, ResourceBrokerContext};
+use super::{checked_pixel_bytes, resource_generation_is_current};
 use mesh_core_elements::lru::ByteLruCache;
 use mesh_core_elements::style::Color;
 use mesh_core_icon::SupportedAxes;
-use mesh_core_resources::{ResourceFingerprint, resource_fingerprint, resource_revision};
+use mesh_core_resources::{
+    ResourceByteReservation, ResourceFingerprint, resource_fingerprint, resource_revision,
+};
 use skia_safe::{
     AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images,
 };
@@ -20,7 +23,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use swash::scale::image::Content;
 use swash::scale::{Render, ScaleContext, Source, StrikeWith};
@@ -72,26 +75,16 @@ struct CachedGlyph {
     pixels: Arc<[u8]>,
 }
 
-struct GlyphJob {
-    key: GlyphCacheKey,
-    font_path: std::path::PathBuf,
-    codepoint: u32,
-    px: u32,
-    axes: GlyphAxes,
-    supported: SupportedAxes,
-    _budget: mesh_core_resources::ResourceByteReservation,
-}
-
 struct GlyphJobResult {
     key: GlyphCacheKey,
     glyph: Option<CachedGlyph>,
     cancelled: bool,
     elapsed: std::time::Duration,
-    _budget: mesh_core_resources::ResourceByteReservation,
+    _budget: ResourceByteReservation,
 }
 
 struct GlyphRasterQueue {
-    sender: Option<mpsc::SyncSender<GlyphJob>>,
+    result_sender: Sender<GlyphJobResult>,
     receiver: Receiver<GlyphJobResult>,
     pending: HashSet<GlyphCacheKey>,
 }
@@ -101,47 +94,9 @@ static GLYPH_RASTER_RESULTS_READY: AtomicBool = AtomicBool::new(false);
 
 fn glyph_raster_queue() -> &'static Mutex<GlyphRasterQueue> {
     GLYPH_RASTER_QUEUE.get_or_init(|| {
-        const GLYPH_RASTER_QUEUE_CAPACITY: usize = 64;
-        let (request_sender, request_receiver) =
-            mpsc::sync_channel::<GlyphJob>(GLYPH_RASTER_QUEUE_CAPACITY);
         let (result_sender, result_receiver) = mpsc::channel::<GlyphJobResult>();
-        let worker = std::thread::Builder::new()
-            .name("mesh-glyph-raster".into())
-            .spawn(move || {
-                while let Ok(job) = request_receiver.recv() {
-                    let started = std::time::Instant::now();
-                    let initial_current = resource_generation_is_current(job.key.resource_revision);
-                    let glyph = if initial_current {
-                        rasterize(
-                            &job.font_path,
-                            job.codepoint,
-                            job.px,
-                            job.axes,
-                            job.supported,
-                        )
-                    } else {
-                        None
-                    };
-                    let cancelled = !initial_current
-                        || !resource_generation_is_current(job.key.resource_revision);
-                    if result_sender
-                        .send(GlyphJobResult {
-                            key: job.key,
-                            glyph: if cancelled { None } else { glyph },
-                            cancelled,
-                            elapsed: started.elapsed(),
-                            _budget: job._budget,
-                        })
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-            })
-            .ok();
-
         Mutex::new(GlyphRasterQueue {
-            sender: worker.map(|_| request_sender),
+            result_sender,
             receiver: result_receiver,
             pending: HashSet::new(),
         })
@@ -208,33 +163,55 @@ fn schedule_glyph_raster_job(
     let Ok(mut queue) = glyph_raster_queue().lock() else {
         return None;
     };
-    let Some(sender) = queue.sender.as_ref().cloned() else {
-        return None;
-    };
     if !queue.pending.insert(key.clone()) {
         return Some(false);
     }
-    let Some(budget) = reserve_render_resource_work(work_bytes) else {
+    let result_sender = queue.result_sender.clone();
+    let result_key = key.clone();
+    let cancellation_key = key.clone();
+    let cancellation_sender = result_sender.clone();
+    let job_font_path = font_path.to_path_buf();
+    let Some(broker) = ResourceBroker::global() else {
         queue.pending.remove(&key);
-        return Some(false);
+        return None;
     };
-    let job = GlyphJob {
-        key,
-        font_path: font_path.to_path_buf(),
-        codepoint,
-        px,
-        axes,
-        supported,
-        _budget: budget,
-    };
-    match sender.try_send(job) {
-        Ok(()) => Some(true),
-        Err(mpsc::TrySendError::Full(job)) => {
-            queue.pending.remove(&job.key);
+    let scheduled = broker.submit(
+        work_bytes,
+        move |context: ResourceBrokerContext| {
+            let started = std::time::Instant::now();
+            let glyph = if context.is_current() {
+                rasterize(&job_font_path, codepoint, px, axes, supported)
+            } else {
+                None
+            };
+            let cancelled = !context.is_current();
+            let reservation = context.into_reservation();
+            let _ = result_sender.send(GlyphJobResult {
+                key: result_key,
+                glyph: if cancelled { None } else { glyph },
+                cancelled,
+                elapsed: started.elapsed(),
+                _budget: reservation,
+            });
+        },
+        move |reservation| {
+            let _ = cancellation_sender.send(GlyphJobResult {
+                key: cancellation_key,
+                glyph: None,
+                cancelled: true,
+                elapsed: std::time::Duration::ZERO,
+                _budget: reservation,
+            });
+        },
+    );
+    match scheduled {
+        Some(true) => Some(true),
+        Some(false) => {
+            queue.pending.remove(&key);
             Some(false)
         }
-        Err(mpsc::TrySendError::Disconnected(job)) => {
-            queue.pending.remove(&job.key);
+        None => {
+            queue.pending.remove(&key);
             None
         }
     }
