@@ -67,5 +67,13 @@ lookup, icon-pack host-font resolution, and resource preparation consume the
 same immutable refreshable snapshot; a changed host catalog is published with
 the resource revision while unchanged refreshes retain the existing snapshot.
 
-The next open item is to prepare resource parsing and asset handles away from
-shell/render threads with bounded cancellation.
+Resource preparation now carries a cooperative cancellation token through
+bounded module/host reads, glyph-map parsing, bundled font validation, font
+registry construction, and shell icon-pack candidates. Cancellation cannot
+publish partial state because resource registries remain candidate-built and
+atomically committed.
+
+The next open item is to connect that token to a generation-aware asynchronous
+resource job owner so superseded profile work is cancelled in practice, then
+move the remaining XDG/SVG decode and raster preparation away from
+shell/render-thread paths.

@@ -13,7 +13,7 @@ pub use font::{
 use std::collections::{BTreeMap, HashSet};
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 #[cfg(unix)]
 use std::{
@@ -24,6 +24,33 @@ use std::{
 };
 
 pub const DEFAULT_MAX_RESOURCE_BYTES: usize = 64 * 1024 * 1024;
+const RESOURCE_READ_CHUNK_BYTES: usize = 64 * 1024;
+
+/// Cooperative cancellation shared by an in-flight resource candidate.
+///
+/// Resource work is deliberately bounded by input size, but a candidate may
+/// still contain many files or a large valid asset. Callers that supersede a
+/// candidate can set this token; preparation checks it between files, parser
+/// entries, and bounded read chunks. Cancellation never publishes a partial
+/// candidate because registries commit only after preparation succeeds.
+#[derive(Debug, Clone, Default)]
+pub struct ResourcePreparationToken {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl ResourcePreparationToken {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+}
 
 /// A cheap identity for a resource file. The revision token below covers
 /// changes that are not visible through a single file's metadata (for
@@ -94,6 +121,8 @@ pub enum ResourceAssetError {
     },
     #[error("font resource {path} has no face named '{family}'")]
     InvalidFont { path: PathBuf, family: String },
+    #[error("resource preparation was cancelled while reading: {path}")]
+    Cancelled { path: PathBuf },
     #[error("safe resource opening is unavailable on this platform: {path}")]
     UnsupportedPlatform { path: PathBuf },
 }
@@ -159,11 +188,29 @@ impl ResourceAssetHandle {
     }
 
     pub fn read_bounded(&self, max_bytes: usize) -> Result<Vec<u8>, ResourceAssetError> {
+        self.read_bounded_with_cancellation(max_bytes, &ResourcePreparationToken::new())
+    }
+
+    pub fn read_bounded_with_cancellation(
+        &self,
+        max_bytes: usize,
+        cancellation: &ResourcePreparationToken,
+    ) -> Result<Vec<u8>, ResourceAssetError> {
         #[cfg(unix)]
         {
+            if cancellation.is_cancelled() {
+                return Err(ResourceAssetError::Cancelled {
+                    path: self.candidate_path(),
+                });
+            }
             let mut directory = open_resource_directory(&self.module_root)?;
             let mut components = self.relative_path.components().peekable();
             while let Some(component) = components.next() {
+                if cancellation.is_cancelled() {
+                    return Err(ResourceAssetError::Cancelled {
+                        path: self.candidate_path(),
+                    });
+                }
                 let Component::Normal(component) = component else {
                     return Err(ResourceAssetError::UnsafePath {
                         path: self.candidate_path(),
@@ -176,7 +223,12 @@ impl ResourceAssetHandle {
                 } else {
                     let file =
                         open_resource_file_at(&directory, component, &self.candidate_path())?;
-                    return read_resource_bounded(file, &self.candidate_path(), max_bytes);
+                    return read_resource_bounded(
+                        file,
+                        &self.candidate_path(),
+                        max_bytes,
+                        cancellation,
+                    );
                 }
             }
             Err(ResourceAssetError::UnsafePath {
@@ -187,6 +239,7 @@ impl ResourceAssetHandle {
         #[cfg(not(unix))]
         {
             let _ = max_bytes;
+            let _ = cancellation;
             Err(ResourceAssetError::UnsupportedPlatform {
                 path: self.candidate_path(),
             })
@@ -201,9 +254,27 @@ pub fn validate_font_face(
     handle: &ResourceAssetHandle,
     expected_family: &str,
 ) -> Result<(), ResourceAssetError> {
-    let bytes = handle.read_bounded(DEFAULT_MAX_RESOURCE_BYTES)?;
+    validate_font_face_with_cancellation(handle, expected_family, &ResourcePreparationToken::new())
+}
+
+pub fn validate_font_face_with_cancellation(
+    handle: &ResourceAssetHandle,
+    expected_family: &str,
+    cancellation: &ResourcePreparationToken,
+) -> Result<(), ResourceAssetError> {
+    if cancellation.is_cancelled() {
+        return Err(ResourceAssetError::Cancelled {
+            path: handle.candidate_path(),
+        });
+    }
+    let bytes = handle.read_bounded_with_cancellation(DEFAULT_MAX_RESOURCE_BYTES, cancellation)?;
     let mut database = fontdb::Database::new();
     database.load_font_data(bytes);
+    if cancellation.is_cancelled() {
+        return Err(ResourceAssetError::Cancelled {
+            path: handle.candidate_path(),
+        });
+    }
     if database.faces().any(|face| {
         face.families
             .iter()
@@ -296,9 +367,10 @@ fn open_resource_file_at(
 
 #[cfg(unix)]
 fn read_resource_bounded(
-    file: std::fs::File,
+    mut file: std::fs::File,
     path: &Path,
     max_bytes: usize,
+    cancellation: &ResourcePreparationToken,
 ) -> Result<Vec<u8>, ResourceAssetError> {
     if !file
         .metadata()
@@ -313,13 +385,32 @@ fn read_resource_bounded(
             path: path.to_path_buf(),
         });
     }
-    let mut bytes = Vec::new();
-    file.take(max_bytes.saturating_add(1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|source| ResourceAssetError::Read {
+    let limit = max_bytes.saturating_add(1);
+    let mut bytes = Vec::with_capacity(limit.min(RESOURCE_READ_CHUNK_BYTES));
+    let mut chunk = [0_u8; RESOURCE_READ_CHUNK_BYTES];
+    while bytes.len() < limit {
+        if cancellation.is_cancelled() {
+            return Err(ResourceAssetError::Cancelled {
+                path: path.to_path_buf(),
+            });
+        }
+        let amount = (limit - bytes.len()).min(chunk.len());
+        let read = file
+            .read(&mut chunk[..amount])
+            .map_err(|source| ResourceAssetError::Read {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        if read == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&chunk[..read]);
+    }
+    if cancellation.is_cancelled() {
+        return Err(ResourceAssetError::Cancelled {
             path: path.to_path_buf(),
-            source,
-        })?;
+        });
+    }
     if bytes.len() > max_bytes {
         return Err(ResourceAssetError::TooLarge {
             path: path.to_path_buf(),
@@ -784,6 +875,20 @@ mod tests {
         assert!(matches!(
             handle.read_bounded(2),
             Err(ResourceAssetError::TooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn cancelled_resource_reads_fail_before_candidate_bytes_are_returned() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("asset.bin"), vec![0_u8; 128 * 1024]).unwrap();
+        let handle = ResourceAssetHandle::new(temp.path(), "asset.bin").unwrap();
+        let cancellation = ResourcePreparationToken::new();
+        cancellation.cancel();
+
+        assert!(matches!(
+            handle.read_bounded_with_cancellation(256 * 1024, &cancellation),
+            Err(ResourceAssetError::Cancelled { .. })
         ));
     }
 

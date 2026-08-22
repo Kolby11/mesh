@@ -124,6 +124,22 @@ fn invalid_icon_pack_assets_are_rejected_before_binding_creation() {
 }
 
 #[test]
+fn cancelled_icon_pack_preparation_never_returns_bindings() {
+    let module = tempfile::tempdir().unwrap();
+    let cancellation = mesh_core_resources::ResourcePreparationToken::new();
+    cancellation.cancel();
+
+    let error = super::super::prepare_icon_pack_bindings_with_cancellation(
+        "@test/cancelled",
+        module.path(),
+        &mesh_core_module::manifest::IconPackSection::default(),
+        &cancellation,
+    )
+    .unwrap_err();
+    assert_eq!(error, "resource preparation cancelled");
+}
+
+#[test]
 fn font_registry_publishes_role_and_qualified_theme_tokens() {
     let mut registry = mesh_core_resources::FontRegistry::new(["Inter".into()]);
     registry

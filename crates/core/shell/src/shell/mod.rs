@@ -92,6 +92,23 @@ pub(crate) fn prepare_icon_pack_bindings(
     module_dir: &Path,
     section: &mesh_core_module::manifest::IconPackSection,
 ) -> Result<mesh_core_icon::IconPackBindings, String> {
+    prepare_icon_pack_bindings_with_cancellation(
+        module_id,
+        module_dir,
+        section,
+        &mesh_core_resources::ResourcePreparationToken::new(),
+    )
+}
+
+pub(crate) fn prepare_icon_pack_bindings_with_cancellation(
+    module_id: &str,
+    module_dir: &Path,
+    section: &mesh_core_module::manifest::IconPackSection,
+    cancellation: &mesh_core_resources::ResourcePreparationToken,
+) -> Result<mesh_core_icon::IconPackBindings, String> {
+    if cancellation.is_cancelled() {
+        return Err("resource preparation cancelled".into());
+    }
     if section.id.trim().is_empty() {
         tracing::warn!(
             "module {} declares mesh.icon_pack but icon_pack.id is empty; skipping",
@@ -105,6 +122,9 @@ pub(crate) fn prepare_icon_pack_bindings(
     let mut font_aliases = std::collections::HashMap::new();
     let mut seen_aliases = std::collections::HashSet::new();
     for req in &section.requires.fonts {
+        if cancellation.is_cancelled() {
+            return Err("resource preparation cancelled".into());
+        }
         if req.alias.trim().is_empty() {
             return Err(format!(
                 "icon-pack '{}' declares a font with an empty alias",
@@ -126,31 +146,35 @@ pub(crate) fn prepare_icon_pack_bindings(
 
         let (glyph_map_path, prepared_glyphs) = match req.glyph_map.as_deref() {
             Some(path) => {
-                let (glyph_map_path, bytes) = read_module_resource(
+                let (glyph_map_path, bytes) = read_module_resource_with_cancellation(
                     module_id,
                     module_dir,
                     path,
                     "glyph map",
                     mesh_core_icon::MAX_GLYPH_MAP_BYTES,
+                    cancellation,
                 )?;
-                let glyphs = mesh_core_icon::parse_glyph_map_bytes(&bytes).map_err(|error| {
-                    format!(
-                        "icon-pack '{}' font alias '{}' has an invalid glyph map '{}': {error}",
-                        module_id, req.alias, path
-                    )
-                })?;
+                let glyphs =
+                    mesh_core_icon::parse_glyph_map_bytes_with_cancellation(&bytes, cancellation)
+                        .map_err(|error| {
+                        format!(
+                            "icon-pack '{}' font alias '{}' has an invalid glyph map '{}': {error}",
+                            module_id, req.alias, path
+                        )
+                    })?;
                 (Some(glyph_map_path), Some(std::sync::Arc::new(glyphs)))
             }
             None => (None, None),
         };
 
         let resolved_font_path = if let Some(path) = req.file.as_deref() {
-            let (font_path, bytes) = read_module_resource(
+            let (font_path, bytes) = read_module_resource_with_cancellation(
                 module_id,
                 module_dir,
                 path,
                 "font file",
                 mesh_core_resources::DEFAULT_MAX_RESOURCE_BYTES,
+                cancellation,
             )?;
             mesh_core_icon::validate_font_bytes(&bytes).map_err(|error| {
                 format!(
@@ -168,14 +192,15 @@ pub(crate) fn prepare_icon_pack_bindings(
                     module_id, req.alias, req.family
                 )
             })?;
-            let bytes = read_host_resource(&path).map_err(|error| {
-                format!(
-                    "icon-pack '{}' font alias '{}' cannot read resolved font '{}': {error}",
-                    module_id,
-                    req.alias,
-                    path.display()
-                )
-            })?;
+            let bytes =
+                read_host_resource_with_cancellation(&path, cancellation).map_err(|error| {
+                    format!(
+                        "icon-pack '{}' font alias '{}' cannot read resolved font '{}': {error}",
+                        module_id,
+                        req.alias,
+                        path.display()
+                    )
+                })?;
             mesh_core_icon::validate_font_bytes(&bytes).map_err(|error| {
                 format!(
                     "icon-pack '{}' font alias '{}' has an invalid resolved font '{}': {error}",
@@ -204,6 +229,9 @@ pub(crate) fn prepare_icon_pack_bindings(
                 "icon-pack '{}' declares an icon mapping with an empty name or target",
                 module_id
             ));
+        }
+        if cancellation.is_cancelled() {
+            return Err("resource preparation cancelled".into());
         }
         if std::path::Path::new(&mapping.target).is_absolute()
             || mapping.target.trim_start().starts_with("~/")
@@ -260,6 +288,9 @@ pub(crate) fn prepare_icon_pack_bindings(
         axes,
         font_aliases,
     };
+    if cancellation.is_cancelled() {
+        return Err("resource preparation cancelled".into());
+    }
     tracing::info!(
         "prepared icon-pack '{}' (id={}, mappings={}, font_aliases={})",
         module_id,
@@ -270,36 +301,54 @@ pub(crate) fn prepare_icon_pack_bindings(
     Ok(bindings)
 }
 
-fn read_module_resource(
+fn read_module_resource_with_cancellation(
     module_id: &str,
     module_dir: &Path,
     declared: &str,
     label: &str,
     max_bytes: usize,
+    cancellation: &mesh_core_resources::ResourcePreparationToken,
 ) -> Result<(PathBuf, Vec<u8>), String> {
     let handle =
         mesh_core_resources::ResourceAssetHandle::new(module_dir, declared).map_err(|error| {
             format!("module {module_id} declares unsafe {label} '{declared}': {error}")
         })?;
-    let bytes = handle.read_bounded(max_bytes).map_err(|error| {
-        format!("module {module_id} declares unreadable {label} '{declared}': {error}")
-    })?;
+    let bytes = handle
+        .read_bounded_with_cancellation(max_bytes, cancellation)
+        .map_err(|error| {
+            format!("module {module_id} declares unreadable {label} '{declared}': {error}")
+        })?;
     Ok((handle.candidate_path(), bytes))
 }
 
-fn read_host_resource(path: &Path) -> Result<Vec<u8>, String> {
-    let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+fn read_host_resource_with_cancellation(
+    path: &Path,
+    cancellation: &mesh_core_resources::ResourcePreparationToken,
+) -> Result<Vec<u8>, String> {
+    let mut file = std::fs::File::open(path).map_err(|error| error.to_string())?;
     let metadata = file.metadata().map_err(|error| error.to_string())?;
     if !metadata.file_type().is_file() {
         return Err("resource is not a regular file".into());
     }
     let mut bytes = Vec::new();
-    std::io::Read::take(
-        file,
-        (mesh_core_resources::DEFAULT_MAX_RESOURCE_BYTES + 1) as u64,
-    )
-    .read_to_end(&mut bytes)
-    .map_err(|error| error.to_string())?;
+    let mut chunk = [0_u8; 64 * 1024];
+    let limit = mesh_core_resources::DEFAULT_MAX_RESOURCE_BYTES.saturating_add(1);
+    while bytes.len() < limit {
+        if cancellation.is_cancelled() {
+            return Err("resource preparation cancelled".into());
+        }
+        let amount = (limit - bytes.len()).min(chunk.len());
+        let read = file
+            .read(&mut chunk[..amount])
+            .map_err(|error| error.to_string())?;
+        if read == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&chunk[..read]);
+    }
+    if cancellation.is_cancelled() {
+        return Err("resource preparation cancelled".into());
+    }
     if bytes.len() > mesh_core_resources::DEFAULT_MAX_RESOURCE_BYTES {
         return Err(format!(
             "resource exceeds {} bytes",

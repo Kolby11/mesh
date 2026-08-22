@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{ResourceAssetHandle, SystemResourceCatalog};
+use crate::{ResourceAssetHandle, ResourcePreparationToken, SystemResourceCatalog};
 
 const STANDARD_ROLES: &[&str] = &[
     "display", "headline", "title", "body", "label", "caption", "mono",
@@ -69,6 +69,8 @@ pub enum FontRegistryError {
     InvalidFace(String),
     #[error("font chain references unknown pack '{0}'")]
     UnknownPack(String),
+    #[error("resource preparation cancelled")]
+    Cancelled,
     #[error("font face asset could not be prepared: {0}")]
     Asset(String),
 }
@@ -179,9 +181,24 @@ impl FontRegistry {
         packs: Vec<FontPackBindings>,
         chain: Vec<String>,
     ) -> Result<(), FontRegistryError> {
+        self.replace_with_cancellation(packs, chain, &ResourcePreparationToken::new())
+    }
+
+    /// Build the complete font candidate without mutating the live registry.
+    /// The token is checked between packs and bounded face reads so a
+    /// superseded profile cannot finish expensive work and then publish.
+    pub fn replace_with_cancellation(
+        &mut self,
+        packs: Vec<FontPackBindings>,
+        chain: Vec<String>,
+        cancellation: &ResourcePreparationToken,
+    ) -> Result<(), FontRegistryError> {
         let mut next = BTreeMap::new();
         let mut next_pack_ids_by_module = BTreeMap::new();
         for pack in packs {
+            if cancellation.is_cancelled() {
+                return Err(FontRegistryError::Cancelled);
+            }
             validate_pack(&pack)?;
             let pack_id = pack.pack_id.clone();
             let module_id = pack.module_id.clone();
@@ -199,10 +216,16 @@ impl FontRegistry {
         let mut next_database = self.host_database.clone();
         for pack in next.values() {
             for face in &pack.faces {
+                if cancellation.is_cancelled() {
+                    return Err(FontRegistryError::Cancelled);
+                }
                 let bytes = face
                     .asset
-                    .read_bounded(crate::DEFAULT_MAX_RESOURCE_BYTES)
-                    .map_err(|error| FontRegistryError::Asset(error.to_string()))?;
+                    .read_bounded_with_cancellation(crate::DEFAULT_MAX_RESOURCE_BYTES, cancellation)
+                    .map_err(|error| match error {
+                        crate::ResourceAssetError::Cancelled { .. } => FontRegistryError::Cancelled,
+                        error => FontRegistryError::Asset(error.to_string()),
+                    })?;
                 let mut face_database = fontdb::Database::new();
                 face_database.load_font_data(bytes.clone());
                 if !face_database.faces().any(|candidate| {
@@ -219,6 +242,9 @@ impl FontRegistry {
                 }
                 next_database.load_font_data(bytes);
             }
+        }
+        if cancellation.is_cancelled() {
+            return Err(FontRegistryError::Cancelled);
         }
         self.packs = next;
         self.frontends.clear();
@@ -749,24 +775,37 @@ mod tests {
 
     #[test]
     fn replacement_rejects_ambiguous_or_unknown_pack_state() {
-        let mut registry = registry();
+        let mut registry_for_rejections = registry();
         let mut invalid = default_pack();
         invalid.mappings.insert("bad/role".into(), "Inter".into());
         assert_eq!(
-            registry.replace(vec![invalid], vec!["default".into()]),
+            registry_for_rejections.replace(vec![invalid], vec!["default".into()]),
             Err(FontRegistryError::QualifiedRole("bad/role".into()))
         );
         assert_eq!(
-            registry.replace(vec![default_pack()], vec!["missing".into()]),
+            registry_for_rejections.replace(vec![default_pack()], vec!["missing".into()]),
             Err(FontRegistryError::UnknownPack("missing".into()))
         );
         assert_eq!(
-            registry.replace(
+            registry_for_rejections.replace(
                 vec![default_pack()],
                 vec!["default".into(), "@mesh/fonts-default".into()]
             ),
             Err(FontRegistryError::DuplicatePackReference("default".into()))
         );
+
+        let cancellation = ResourcePreparationToken::new();
+        cancellation.cancel();
+        let mut unchanged = registry();
+        assert!(matches!(
+            unchanged.replace_with_cancellation(
+                vec![default_pack()],
+                vec!["default".into()],
+                &cancellation,
+            ),
+            Err(FontRegistryError::Cancelled)
+        ));
+        assert_eq!(unchanged.resolve("body").family, "sans-serif");
     }
 
     #[test]

@@ -18,7 +18,8 @@ pub use registry::{
     IconRegistry, IconResolution, IconResolutionProvenance, ResolvedTarget, SupportedAxes,
 };
 pub use xdg::{
-    MAX_GLYPH_MAP_BYTES, MAX_GLYPH_MAP_ENTRIES, parse_glyph_map_bytes, validate_font_bytes,
+    MAX_GLYPH_MAP_BYTES, MAX_GLYPH_MAP_ENTRIES, parse_glyph_map_bytes,
+    parse_glyph_map_bytes_with_cancellation, validate_font_bytes,
 };
 
 fn default_icon_config() -> IconConfig {

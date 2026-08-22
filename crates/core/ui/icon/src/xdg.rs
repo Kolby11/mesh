@@ -1,6 +1,8 @@
 use crate::config::{IconPackKind, IconPackRoot};
 use crate::registry::{ResolvedTarget, SupportedAxes};
-use mesh_core_resources::{ResourceFingerprint, resource_fingerprint, resource_revision};
+use mesh_core_resources::{
+    ResourceFingerprint, ResourcePreparationToken, resource_fingerprint, resource_revision,
+};
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -156,6 +158,20 @@ pub fn lookup_glyph_codepoint(glyph_map_path: &Path, glyph_name: &str) -> Option
 /// format. A malformed entry rejects the complete map so a candidate cannot
 /// publish a pack whose aliases only fail later during rendering.
 pub fn parse_glyph_map_bytes(bytes: &[u8]) -> Result<HashMap<String, u32>, String> {
+    parse_glyph_map_bytes_with_cancellation(bytes, &ResourcePreparationToken::new())
+}
+
+/// Parse a glyph map while allowing a superseded resource candidate to stop
+/// cooperatively. The input remains bounded by [`MAX_GLYPH_MAP_BYTES`], and
+/// the token is checked for every entry/line so a large valid map does not
+/// monopolize the preparation worker after cancellation.
+pub fn parse_glyph_map_bytes_with_cancellation(
+    bytes: &[u8],
+    cancellation: &ResourcePreparationToken,
+) -> Result<HashMap<String, u32>, String> {
+    if cancellation.is_cancelled() {
+        return Err("resource preparation cancelled".into());
+    }
     if bytes.len() > MAX_GLYPH_MAP_BYTES {
         return Err(format!("glyph map exceeds {} bytes", MAX_GLYPH_MAP_BYTES));
     }
@@ -175,6 +191,9 @@ pub fn parse_glyph_map_bytes(bytes: &[u8]) -> Result<HashMap<String, u32>, Strin
         }
         let mut result = HashMap::with_capacity(object.len());
         for (name, value) in object {
+            if cancellation.is_cancelled() {
+                return Err("resource preparation cancelled".into());
+            }
             if name.trim().is_empty() {
                 return Err("glyph map contains an empty glyph name".into());
             }
@@ -202,6 +221,9 @@ pub fn parse_glyph_map_bytes(bytes: &[u8]) -> Result<HashMap<String, u32>, Strin
 
     let mut result = HashMap::new();
     for (line_number, line) in raw.lines().enumerate() {
+        if cancellation.is_cancelled() {
+            return Err("resource preparation cancelled".into());
+        }
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
@@ -555,6 +577,18 @@ mod tests {
         let error =
             parse_glyph_map_bytes(b"settings e000\nvolume not-hex\nclose e001").unwrap_err();
         assert!(error.contains("line 2"));
+    }
+
+    #[test]
+    fn cancelled_glyph_map_preparation_does_not_return_partial_entries() {
+        let cancellation = ResourcePreparationToken::new();
+        cancellation.cancel();
+        let error = parse_glyph_map_bytes_with_cancellation(
+            br#"{"settings":"\uE000","volume":"\uE001"}"#,
+            &cancellation,
+        )
+        .unwrap_err();
+        assert_eq!(error, "resource preparation cancelled");
     }
 
     #[test]

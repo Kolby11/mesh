@@ -64,6 +64,23 @@ impl Shell {
         graph: &InstalledModuleGraph,
         settings_store: &SettingsStore,
     ) -> Result<PreparedResourceSnapshot, ShellRunError> {
+        self.prepare_resource_snapshot_with_cancellation(
+            graph,
+            settings_store,
+            mesh_core_resources::ResourcePreparationToken::new(),
+        )
+    }
+
+    /// Prepare all graph-authorized resource inputs on a worker. The caller
+    /// may cancel a superseded candidate; the worker checks between bounded
+    /// reads and parser units, and the resulting candidate is never visible
+    /// until [`Self::commit_resource_snapshot`] succeeds.
+    pub(in crate::shell) fn prepare_resource_snapshot_with_cancellation(
+        &self,
+        graph: &InstalledModuleGraph,
+        settings_store: &SettingsStore,
+        cancellation: mesh_core_resources::ResourcePreparationToken,
+    ) -> Result<PreparedResourceSnapshot, ShellRunError> {
         let icon_chain = graph.icon_pack_chain().to_vec();
         let font_chain = graph.font_pack_chain().to_vec();
         let shell_font_chain = settings_store.shell().fonts.packs.clone();
@@ -183,12 +200,23 @@ impl Shell {
         }
 
         let revision = self.resource_snapshot.revision.saturating_add(1);
+        let worker_cancellation = cancellation.clone();
         let worker = std::thread::Builder::new()
             .name("mesh-resource-prepare".into())
             .spawn(move || {
+                if worker_cancellation.is_cancelled() {
+                    return Err(ShellRunError::FrontendComposition {
+                        message: "resource preparation cancelled".into(),
+                    });
+                }
                 // Refresh host roots before preparing any icon or font asset so
                 // every consumer in this candidate reads the same catalog.
                 let host_catalog = mesh_core_resources::refresh_system_resource_catalog();
+                if worker_cancellation.is_cancelled() {
+                    return Err(ShellRunError::FrontendComposition {
+                        message: "resource preparation cancelled".into(),
+                    });
+                }
                 let asset_paths =
                     |resources: Vec<mesh_core_module::package::ContributedPathResource>,
                      selected: std::collections::HashSet<String>| {
@@ -196,6 +224,11 @@ impl Shell {
                             .into_iter()
                             .filter(|resource| selected.contains(&resource.module_id))
                             .map(|resource| {
+                                if worker_cancellation.is_cancelled() {
+                                    return Err(ShellRunError::FrontendComposition {
+                                        message: "resource preparation cancelled".into(),
+                                    });
+                                }
                                 let root =
                                     resource.source.manifest_path.parent().ok_or_else(|| {
                                         ShellRunError::FrontendComposition {
@@ -218,7 +251,10 @@ impl Shell {
                                     }
                                 })?;
                                 handle
-                                    .read_bounded(mesh_core_resources::DEFAULT_MAX_RESOURCE_BYTES)
+                                    .read_bounded_with_cancellation(
+                                        mesh_core_resources::DEFAULT_MAX_RESOURCE_BYTES,
+                                        &worker_cancellation,
+                                    )
                                     .map_err(|error| ShellRunError::FrontendComposition {
                                         message: format!(
                                             "resource {} is unreadable: {error}",
@@ -238,7 +274,12 @@ impl Shell {
                 let icon_packs = pack_inputs
                     .into_iter()
                     .map(|(module_id, root, section)| {
-                        prepare_icon_pack_bindings(&module_id, &root, &section)
+                        prepare_icon_pack_bindings_with_cancellation(
+                            &module_id,
+                            &root,
+                            &section,
+                            &worker_cancellation,
+                        )
                     })
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|error| ShellRunError::FrontendComposition { message: error })?;
@@ -258,7 +299,11 @@ impl Shell {
                                         face.family
                                     ),
                                 })?;
-                                mesh_core_resources::validate_font_face(&asset, &face.family)
+                                mesh_core_resources::validate_font_face_with_cancellation(
+                                    &asset,
+                                    &face.family,
+                                    &worker_cancellation,
+                                )
                                     .map_err(|error| ShellRunError::FrontendComposition {
                                         message: format!(
                                             "font-pack {module_id} face '{}' is invalid: {error}",
@@ -304,7 +349,11 @@ impl Shell {
                 let mut font_registry =
                     mesh_core_resources::FontRegistry::from_catalog(&host_catalog);
                 font_registry
-                    .replace(font_packs, font_chain.clone())
+                    .replace_with_cancellation(
+                        font_packs,
+                        font_chain.clone(),
+                        &worker_cancellation,
+                    )
                     .map_err(|error| ShellRunError::FrontendComposition {
                         message: format!("invalid font-pack resource snapshot: {error}"),
                     })?;
@@ -324,6 +373,11 @@ impl Shell {
                         family = %family,
                         "font-pack requirement is not installed; role resolution will use fallback"
                     );
+                }
+                if worker_cancellation.is_cancelled() {
+                    return Err(ShellRunError::FrontendComposition {
+                        message: "resource preparation cancelled".into(),
+                    });
                 }
 
                 Ok(PreparedResourceSnapshot {
