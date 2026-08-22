@@ -1,12 +1,12 @@
 //! Text measurement and rendering for the frontend render engine.
 
-use super::{PixelBuffer, PixelCanvasSession};
+use super::{PixelBuffer, PixelCanvasSession, checked_pixel_bytes};
 use cosmic_text::{
     Align, Attrs, AttrsOwned, Buffer, CacheKey, Cursor, Family, FamilyOwned, FontSystem, Metrics,
     PhysicalGlyph, Renderer, Shaping, Style as CosmicStyle, SwashCache, SwashContent, Weight, Wrap,
 };
 use mesh_core_elements::Color;
-use mesh_core_elements::lru::LruCache;
+use mesh_core_elements::lru::{ByteLruCache, LruCache};
 use mesh_core_elements::style::TextAlign;
 use mesh_core_resources::resource_revision;
 use skia_safe::{
@@ -19,6 +19,8 @@ use std::hash::{Hash, Hasher};
 
 const TEXT_LAYOUT_CACHE_CAPACITY: usize = 512;
 const GLYPH_ATLAS_CAPACITY: usize = 2048;
+const GLYPH_ATLAS_MAX_BYTES: usize = 8 * 1024 * 1024;
+const MAX_GLYPH_ATLAS_DIMENSION: u32 = 4096;
 const NAMED_FONT_AVAILABILITY_CACHE_CAPACITY: usize = 128;
 
 struct GlyphAtlasEntry {
@@ -26,15 +28,23 @@ struct GlyphAtlasEntry {
     placement_left: i32,
     placement_top: i32,
     is_color: bool,
+    bytes: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct GlyphAtlasKey {
+    resource_revision: u64,
+    cache_key: CacheKey,
 }
 
 thread_local! {
-    /// Cached Skia images for rasterized glyph masks. Keyed by cosmic-text's
-    /// `CacheKey` which already encodes font, glyph id, size, weight, and
-    /// subpixel bin. `Option` lets us cache "this glyph rasterizes to
-    /// nothing" (e.g. spaces) so we skip the swash lookup next time.
-    static GLYPH_ATLAS: RefCell<LruCache<CacheKey, Option<GlyphAtlasEntry>>> =
-        RefCell::new(LruCache::new(GLYPH_ATLAS_CAPACITY));
+    /// Cached Skia images for rasterized glyph masks. The explicit resource
+    /// revision keeps a font-catalog replacement from reusing an image made
+    /// by an older FontSystem, even if cosmic-text reuses the same glyph ID.
+    /// `Option` lets us cache "this glyph rasterizes to nothing" (e.g.
+    /// spaces) so we skip the swash lookup next time.
+    static GLYPH_ATLAS: RefCell<ByteLruCache<GlyphAtlasKey, Option<GlyphAtlasEntry>>> =
+        RefCell::new(ByteLruCache::new(GLYPH_ATLAS_CAPACITY, GLYPH_ATLAS_MAX_BYTES));
     static NAMED_FONT_AVAILABILITY: RefCell<HashMap<String, bool>> =
         RefCell::new(HashMap::new());
 }
@@ -351,6 +361,7 @@ impl TextRenderer {
 
         let save_count = canvas.save();
         canvas.clip_rect(clip_rect, None, false);
+        let resource_revision = engine.resource_revision;
         {
             let TextEngine {
                 font_system,
@@ -366,6 +377,7 @@ impl TextRenderer {
                     canvas,
                     base_x,
                     base_y,
+                    resource_revision,
                 };
                 cosmic.render(&mut renderer, cosmic_color(color));
             });
@@ -587,10 +599,11 @@ impl TextRenderer {
 struct SkiaGlyphRenderer<'a> {
     font_system: &'a mut FontSystem,
     swash_cache: &'a mut SwashCache,
-    atlas: &'a mut LruCache<CacheKey, Option<GlyphAtlasEntry>>,
+    atlas: &'a mut ByteLruCache<GlyphAtlasKey, Option<GlyphAtlasEntry>>,
     canvas: &'a Canvas,
     base_x: i32,
     base_y: i32,
+    resource_revision: u64,
 }
 
 impl Renderer for SkiaGlyphRenderer<'_> {
@@ -616,11 +629,16 @@ impl Renderer for SkiaGlyphRenderer<'_> {
         if a == 0 {
             return;
         }
-        let cache_key = physical_glyph.cache_key;
+        let cache_key = GlyphAtlasKey {
+            resource_revision: self.resource_revision,
+            cache_key: physical_glyph.cache_key,
+        };
         let needs_build = self.atlas.get(&cache_key).is_none();
         if needs_build {
-            let entry = build_glyph_atlas_entry(self.font_system, self.swash_cache, cache_key);
-            self.atlas.insert(cache_key, entry);
+            let entry =
+                build_glyph_atlas_entry(self.font_system, self.swash_cache, cache_key.cache_key);
+            let weight = entry.as_ref().map_or(1, |entry| entry.bytes);
+            self.atlas.insert(cache_key, entry, weight);
         }
         let Some(Some(entry)) = self.atlas.get(&cache_key) else {
             return;
@@ -661,10 +679,15 @@ fn build_glyph_atlas_entry(
     let image = swash_cache.get_image(font_system, cache_key).as_ref()?;
     let width = image.placement.width;
     let height = image.placement.height;
-    if width == 0 || height == 0 || image.data.is_empty() {
+    if width == 0
+        || height == 0
+        || width > MAX_GLYPH_ATLAS_DIMENSION
+        || height > MAX_GLYPH_ATLAS_DIMENSION
+        || image.data.is_empty()
+    {
         return None;
     }
-    let (info, row_bytes) = match image.content {
+    let (info, bytes_per_pixel) = match image.content {
         SwashContent::Mask => (
             ImageInfo::new(
                 (width as i32, height as i32),
@@ -672,7 +695,7 @@ fn build_glyph_atlas_entry(
                 AlphaType::Premul,
                 None,
             ),
-            width as usize,
+            1,
         ),
         SwashContent::Color => (
             ImageInfo::new(
@@ -681,10 +704,15 @@ fn build_glyph_atlas_entry(
                 AlphaType::Premul,
                 None,
             ),
-            (width as usize) * 4,
+            4,
         ),
         SwashContent::SubpixelMask => return None,
     };
+    let bytes = glyph_atlas_storage_bytes(width, height, bytes_per_pixel)?;
+    let row_bytes = checked_pixel_bytes(width, 1, bytes_per_pixel)?;
+    if image.data.len() != bytes {
+        return None;
+    }
     let data = Data::new_copy(image.data.as_slice());
     let sk_image = images::raster_from_data(&info, data, row_bytes)?;
     Some(GlyphAtlasEntry {
@@ -692,7 +720,20 @@ fn build_glyph_atlas_entry(
         placement_left: image.placement.left,
         placement_top: image.placement.top,
         is_color: matches!(image.content, SwashContent::Color),
+        bytes,
     })
+}
+
+fn glyph_atlas_storage_bytes(width: u32, height: u32, bytes_per_pixel: usize) -> Option<usize> {
+    if width == 0
+        || height == 0
+        || width > MAX_GLYPH_ATLAS_DIMENSION
+        || height > MAX_GLYPH_ATLAS_DIMENSION
+    {
+        return None;
+    }
+    let bytes = checked_pixel_bytes(width, height, bytes_per_pixel)?;
+    (bytes <= GLYPH_ATLAS_MAX_BYTES).then_some(bytes)
 }
 
 impl TextEngine {
@@ -1283,6 +1324,54 @@ mod tests {
             8,
         );
         assert_ne!(base, changed);
+    }
+
+    #[test]
+    fn glyph_atlas_key_includes_resource_revision() {
+        let (cache_key, _, _) = CacheKey::new(
+            fontdb::ID::dummy(),
+            1,
+            14.0,
+            (0.0, 0.0),
+            Weight::NORMAL,
+            cosmic_text::CacheKeyFlags::empty(),
+        );
+        let base = GlyphAtlasKey {
+            resource_revision: 7,
+            cache_key,
+        };
+        let changed = GlyphAtlasKey {
+            resource_revision: 8,
+            cache_key,
+        };
+
+        assert_ne!(base, changed);
+
+        let mut atlas = ByteLruCache::new(GLYPH_ATLAS_CAPACITY, GLYPH_ATLAS_MAX_BYTES);
+        assert!(atlas.insert(base, None::<GlyphAtlasEntry>, 1));
+        assert!(atlas.get(&base).is_some());
+        assert!(atlas.get(&changed).is_none());
+    }
+
+    #[test]
+    fn glyph_atlas_storage_rejects_oversized_or_overflowing_images() {
+        assert_eq!(glyph_atlas_storage_bytes(16, 16, 1), Some(256));
+        assert_eq!(
+            glyph_atlas_storage_bytes(MAX_GLYPH_ATLAS_DIMENSION, MAX_GLYPH_ATLAS_DIMENSION, 4),
+            None
+        );
+        assert_eq!(
+            glyph_atlas_storage_bytes(MAX_GLYPH_ATLAS_DIMENSION + 1, 1, 1),
+            None
+        );
+        assert_eq!(
+            glyph_atlas_storage_bytes(
+                MAX_GLYPH_ATLAS_DIMENSION,
+                MAX_GLYPH_ATLAS_DIMENSION,
+                usize::MAX
+            ),
+            None
+        );
     }
 
     #[test]

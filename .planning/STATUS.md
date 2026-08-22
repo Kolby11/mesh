@@ -16,6 +16,10 @@ mutable linked assets cannot publish pixels prepared from an older dependency
 set. The broker falls back to the existing synchronous path if its worker
 cannot be started.
 
+The text renderer's Skia glyph atlas now keys cached images by resource
+revision and cosmic glyph identity, bounds entries at 8 MiB with an LRU byte
+budget, and rejects oversized or malformed raster dimensions before upload.
+
 Focused render/resource tests and `cargo check --workspace` pass. Existing
 shell dead-code/private-interface warnings remain. The focused real-surface
 navigation raster fixture still has the known 1280px layout overflow.
@@ -23,5 +27,5 @@ navigation raster fixture still has the known 1280px layout overflow.
 ## Next
 
 Extend the generation-aware resource broker and byte/dimension accounting to
-text layout/glyph-atlas, `PixelBuffer`, and SHM resources before continuing
-frontend/backend candidate preparation.
+text layout `Buffer` storage, then `PixelBuffer` and SHM resources before
+continuing frontend/backend candidate preparation.
