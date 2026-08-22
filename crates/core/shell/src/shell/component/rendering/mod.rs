@@ -265,7 +265,11 @@ impl FrontendSurfaceComponent {
         let state = self
             .runtime_state(self.root_instance_key())
             .unwrap_or_default();
-        let bound = LocaleBoundState::new(&state, &self.locale);
+        let bound = LocaleBoundState::new(
+            &state,
+            self.locale
+                .module_translator(&self.compiled.manifest.package.id),
+        );
         mesh_core_frontend::resolve_css_props(self.compiled.component.props.as_ref(), Some(&bound))
     }
 
@@ -301,7 +305,11 @@ impl FrontendSurfaceComponent {
         let root_state = self
             .runtime_state(self.root_instance_key())
             .unwrap_or_default();
-        let bound = LocaleBoundState::new(&root_state, &self.locale);
+        let bound = LocaleBoundState::new(
+            &root_state,
+            self.locale
+                .module_translator(&self.compiled.manifest.package.id),
+        );
         {
             let mut stack = self.render_stack.borrow_mut();
             stack.clear();

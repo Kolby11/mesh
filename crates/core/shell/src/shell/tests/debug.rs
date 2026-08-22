@@ -245,12 +245,13 @@ fn debug_snapshot_resolves_module_graph_layout_label_with_active_locale() {
     );
     let mut shell = Shell::new();
     shell.installed_module_graph = Some(graph);
-    shell
-        .locale
-        .load_translations(mesh_core_locale::TranslationSet {
+    shell.locale.load_module_translations(
+        "@mesh/panel",
+        mesh_core_locale::TranslationSet {
             locale: "sk".into(),
             messages: HashMap::from([("layout.main.label".into(), "Hlavny panel".into())]),
-        });
+        },
+    );
     shell.locale.set_locale("sk");
 
     let snapshot = shell.build_debug_snapshot();
@@ -437,6 +438,7 @@ fn shell_registers_theme_provider_for_frontend_theme_proxy() {
             "current",
             "theme_id",
             "mode",
+            "mode_policy",
             "color_scheme",
             "contrast",
             "tokens",

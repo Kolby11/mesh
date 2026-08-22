@@ -104,7 +104,8 @@ static CALL_PARAMS: &[(&str, &str)] = &[
     ("events.subscribe", "(\"$1\", \"$2\")"),
     ("events.publish", "(\"$1\", $2)"),
     ("theme.token", "(\"$1\")"),
-    ("locale.translate", "(\"$1\")"),
+    ("locale.current", "()"),
+    ("locale.set", "(\"$1\")"),
     ("ui.request_redraw", "()"),
     ("exec", "(\"$1\", {$2})"),
     ("exec_shell", "(\"$1\")"),
@@ -513,7 +514,7 @@ static BUILTIN_IMPORT_SPECIFIERS: &[(&str, &str)] = &[
     ("mesh.i18n", "translation helpers (t)"),
     ("mesh.ui", "UI host API (request_redraw, …)"),
     ("mesh.log", "logging host API (info, warn, error)"),
-    ("mesh.locale", "locale host API (current, translate, set)"),
+    ("mesh.locale", "locale host API (current, set)"),
     ("mesh.events", "event bus (subscribe, publish)"),
     ("mesh.popover", "popover host API (activate, hide)"),
 ];
@@ -567,7 +568,7 @@ fn complete_import_member(
                 member_item(
                     m,
                     prefix,
-                    "i18n.t(key) -> string",
+                    "i18n.t(key, values?) -> string",
                     CompletionItemKind::METHOD,
                 )
             })

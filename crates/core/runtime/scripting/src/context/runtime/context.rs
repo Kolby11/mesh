@@ -10,6 +10,7 @@ use crate::pool;
 use crate::storage::{ScopedStorage, StorageManager, StorageScope};
 use crate::util::default_runtime_storage_root;
 use mesh_core_capability::CapabilitySet;
+use mesh_core_locale::{CatalogEntry, ModuleTranslator};
 use mesh_core_service::{InterfaceCatalog, InterfaceResolution};
 use mlua::{Lua, Table, Value as LuaValue};
 use std::collections::{HashMap, HashSet};
@@ -99,7 +100,8 @@ pub struct ScriptContext {
     pub(super) service_call_completions: Arc<Mutex<HashMap<u64, ServiceCallCompletion>>>,
     /// The module-scoped catalog currently visible to `mesh.i18n.t()`.
     /// The shell replaces this snapshot when its locale changes.
-    pub(super) i18n_translations: Arc<Mutex<HashMap<String, String>>>,
+    pub(super) i18n_translations: Arc<Mutex<HashMap<String, CatalogEntry>>>,
+    pub(super) i18n_locale: Arc<Mutex<String>>,
 }
 
 impl Drop for ScriptContext {
@@ -311,6 +313,7 @@ impl ScriptContext {
             service_context_state: Arc::new(Mutex::new(ServiceContextState::default())),
             service_call_completions: Arc::new(Mutex::new(HashMap::new())),
             i18n_translations: Arc::new(Mutex::new(HashMap::new())),
+            i18n_locale: Arc::new(Mutex::new("en".into())),
         })
     }
 
@@ -325,7 +328,18 @@ impl ScriptContext {
     /// Replace the catalog behind `mesh.i18n.t()`. Existing Luau handles share
     /// the map, so a locale switch takes effect immediately.
     pub fn set_i18n_translations(&mut self, translations: HashMap<String, String>) {
-        *self.i18n_translations.lock().unwrap() = translations;
+        *self.i18n_translations.lock().unwrap() = translations
+            .into_iter()
+            .map(|(key, value)| (key, CatalogEntry::Text(value)))
+            .collect();
+        *self.i18n_locale.lock().unwrap() = "en".into();
+    }
+
+    /// Replace the catalog behind `mesh.i18n.t()` with the owning module's
+    /// scoped translator snapshot.
+    pub fn set_i18n_translator(&mut self, translator: &ModuleTranslator<'_>) {
+        *self.i18n_translations.lock().unwrap() = translator.entries();
+        *self.i18n_locale.lock().unwrap() = translator.locale().to_string();
     }
 
     /// Clone the thread VM, create a per-component `_ENV`, install host APIs,

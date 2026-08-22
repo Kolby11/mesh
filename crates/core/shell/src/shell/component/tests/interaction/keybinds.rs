@@ -556,9 +556,9 @@ lua_label = this.keybinds.mute.label
 "#,
         manifest,
     );
-    component
-        .locale
-        .load_translations(mesh_core_locale::TranslationSet {
+    component.locale.load_module_translations(
+        "@test/keybind-descriptor",
+        mesh_core_locale::TranslationSet {
             locale: "sk".into(),
             messages: HashMap::from([
                 ("keybind.mute.label".into(), "Stlmit".into()),
@@ -568,7 +568,8 @@ lua_label = this.keybinds.mute.label
                 ),
                 ("keybind.category.audio".into(), "Zvuk".into()),
             ]),
-        });
+        },
+    );
     component.locale.set_locale("sk");
     component.runtimes.lock().unwrap().clear();
     component.init_root_runtime().unwrap();
@@ -1165,9 +1166,9 @@ fn keybind_debug_metadata_includes_resolved_manifest_text() {
 <script lang="luau"></script>
 "#,
     );
-    component
-        .locale
-        .load_translations(mesh_core_locale::TranslationSet {
+    component.locale.load_module_translations(
+        "@test/reactive-surface",
+        mesh_core_locale::TranslationSet {
             locale: "sk".into(),
             messages: HashMap::from([
                 ("keybind.mute.label".into(), "Stlmit".into()),
@@ -1177,7 +1178,8 @@ fn keybind_debug_metadata_includes_resolved_manifest_text() {
                 ),
                 ("keybind.category.audio".into(), "Zvuk".into()),
             ]),
-        });
+        },
+    );
     component.locale.set_locale("sk");
     component.compiled.manifest.keybinds.actions.insert(
         "mute".into(),

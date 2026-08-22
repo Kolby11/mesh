@@ -278,6 +278,15 @@ impl FrontendSurfaceComponent {
     }
 
     pub(super) fn load_graph_i18n_catalogs(&mut self) {
+        if self.locale_catalog_is_shared || self.graph_i18n_catalogs.is_empty() {
+            return;
+        }
+        let mut candidate = mesh_core_locale::LocaleEngine::with_fallback_locale(
+            self.locale.current(),
+            self.locale.fallback_locale(),
+        );
+        candidate.replace_selection(self.locale.selection());
+        let mut rejected = false;
         for (module_id, locale, path) in &self.graph_i18n_catalogs {
             let Ok(content) = std::fs::read_to_string(path) else {
                 tracing::warn!(
@@ -285,32 +294,47 @@ impl FrontendSurfaceComponent {
                     self.id(),
                     path.display()
                 );
+                rejected = true;
                 continue;
             };
-            let messages: HashMap<String, String> = match serde_json::from_str(&content) {
-                Ok(m) => m,
+            let value: serde_json::Value = match serde_json::from_str(&content) {
+                Ok(value) => value,
                 Err(_) => {
                     tracing::warn!(
                         "module '{}': failed to parse graph i18n catalog {}",
                         self.id(),
                         path.display()
                     );
+                    rejected = true;
                     continue;
                 }
             };
+            let catalog = mesh_core_locale::compile_catalog(locale.clone(), &value);
+            for diagnostic in &catalog.diagnostics {
+                tracing::warn!(
+                    "module '{}': i18n catalog '{}' entry '{}': {}",
+                    self.id(),
+                    path.display(),
+                    diagnostic.key,
+                    diagnostic.message
+                );
+            }
             tracing::debug!(
                 "module '{}': loaded {} graph translations for locale '{}'",
                 self.id(),
-                messages.len(),
+                catalog.messages.len(),
                 locale
             );
-            self.locale.load_module_translations(
-                module_id,
-                mesh_core_locale::TranslationSet {
-                    locale: locale.clone(),
-                    messages,
-                },
+            candidate.load_module_catalog(module_id, catalog);
+        }
+        if rejected {
+            tracing::warn!(
+                "module '{}': retaining last-known-good locale catalog snapshot",
+                self.id()
             );
+        } else {
+            self.locale
+                .replace_catalog_snapshot(candidate.catalog_snapshot());
         }
     }
 
@@ -341,10 +365,8 @@ impl FrontendSurfaceComponent {
         // live cross-component reference rather than a snapshot.
         script_ctx.attach_shared_vm(&self.surface_vm);
         script_ctx.set_interface_catalog(self.interface_catalog.clone());
-        script_ctx.set_i18n_translations(
-            self.locale
-                .effective_translations_for_module(&manifest.package.id),
-        );
+        let translator = self.locale.module_translator(&manifest.package.id);
+        script_ctx.set_i18n_translator(&translator);
         script_ctx.set_optional_interfaces(
             manifest
                 .dependencies
@@ -365,9 +387,13 @@ impl FrontendSurfaceComponent {
                 source,
             })?;
         if script_has_service_read(&script_ctx, "mesh.locale", "locale") {
+            let selection = self.locale.selection();
             let payload = serde_json::json!({
                 "locale": self.locale.current(),
-                "current": self.locale.current()
+                "current": self.locale.current(),
+                "chain": selection.chain(),
+                "direction": selection.direction().as_str(),
+                "revision": selection.revision().to_string(),
             });
             apply_service_update_with_name(
                 script_ctx.state_mut(),
@@ -612,7 +638,7 @@ impl FrontendSurfaceComponent {
 
         let theme = self.active_theme.borrow().clone();
         let state = self.runtime_state(instance_key).unwrap_or_default();
-        let bound = LocaleBoundState::new(&state, &self.locale);
+        let bound = LocaleBoundState::new(&state, self.locale.module_translator(&host.package.id));
         let prepared_styles = {
             let cached = self.prepared_component_styles.borrow();
             cached
@@ -689,7 +715,7 @@ impl FrontendSurfaceComponent {
         }
 
         let state = self.runtime_state(instance_key).unwrap_or_default();
-        let bound = LocaleBoundState::new(&state, &self.locale);
+        let bound = LocaleBoundState::new(&state, self.locale.module_translator(module_id));
         let active_theme = self.active_theme.borrow().clone();
         self.render_stack.borrow_mut().push(module_id.to_string());
         let measurer = SharedTextMeasurer;
@@ -947,13 +973,6 @@ fn node_handler_and_args<'a>(
     node.event_handlers
         .get(event_name)
         .map(|handler| (handler, std::borrow::Cow::Borrowed(event_args)))
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::shell::component) struct ResolvedManifestText {
-    pub(in crate::shell::component) text: String,
-    pub(in crate::shell::component) key: Option<String>,
-    pub(in crate::shell::component) fallback: Option<String>,
 }
 
 #[cfg(test)]
@@ -1536,31 +1555,34 @@ impl FrontendSurfaceComponent {
         module_id: &str,
         field_path: &str,
         text: &mesh_core_module::LocalizedText,
-    ) -> ResolvedManifestText {
+    ) -> mesh_core_locale::LocalizedTextResolution {
         match text {
-            mesh_core_module::LocalizedText::Literal(value) => ResolvedManifestText {
-                text: value.clone(),
-                key: None,
-                fallback: None,
-            },
+            mesh_core_module::LocalizedText::Literal(value) => {
+                mesh_core_locale::LocalizedTextResolution::literal(
+                    module_id,
+                    value,
+                    self.locale.catalog_snapshot().revision(),
+                )
+            }
             mesh_core_module::LocalizedText::Translation { key, fallback } => {
-                let resolved = self
-                    .locale
-                    .translate_for_module(key, module_id)
-                    .map(str::to_string)
-                    .unwrap_or_else(|| {
-                        if let Some(diagnostics) = &self.diagnostics {
-                            diagnostics.degraded(format!(
-                                "missing localized manifest text: module_id='{module_id}' field_path='{field_path}' key='{key}' fallback='{fallback}'"
-                            ));
-                        }
-                        text.fallback_text().to_string()
-                    });
-                ResolvedManifestText {
-                    text: resolved,
-                    key: Some(key.clone()),
-                    fallback: Some(fallback.clone()),
+                let translator = self.locale.module_translator(module_id);
+                let resolution = translator.resolve(key, Some(fallback));
+                if resolution.missing {
+                    if let Some(diagnostics) = &self.diagnostics {
+                        let source = resolution
+                            .source
+                            .as_ref()
+                            .map(|source| source.path.display().to_string())
+                            .unwrap_or_else(|| "missing".to_string());
+                        diagnostics.degraded(format!(
+                            "missing localized manifest text: owner='{}' field_path='{field_path}' key='{key}' fallback='{fallback}' source='{source}' snapshot_revision={}"
+                            ,
+                            resolution.owner_module_id,
+                            resolution.snapshot_revision,
+                        ));
+                    }
                 }
+                resolution
             }
         }
     }
@@ -1669,9 +1691,24 @@ pub(super) fn bounded_error_widget(message: impl Into<String>) -> WidgetNode {
 fn insert_resolved_manifest_text(
     descriptor: &mut serde_json::Map<String, serde_json::Value>,
     field: &str,
-    resolved: ResolvedManifestText,
+    resolved: mesh_core_locale::LocalizedTextResolution,
 ) {
     descriptor.insert(field.into(), serde_json::json!(resolved.text));
+    descriptor.insert(
+        format!("{field}_owner_module"),
+        serde_json::json!(resolved.owner_module_id),
+    );
+    descriptor.insert(
+        format!("{field}_missing"),
+        serde_json::json!(resolved.missing),
+    );
+    descriptor.insert(
+        format!("{field}_snapshot_revision"),
+        serde_json::json!(resolved.snapshot_revision),
+    );
+    if let Some(source) = resolved.source {
+        descriptor.insert(format!("{field}_source"), serde_json::json!(source));
+    }
     if let Some(key) = resolved.key {
         descriptor.insert(format!("{field}_key"), serde_json::json!(key));
     }

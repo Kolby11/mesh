@@ -46,6 +46,63 @@ fn theme_snapshot_is_published_by_the_shell() {
 }
 
 #[test]
+fn theme_revision_events_mirror_the_rendered_snapshot_and_token_delta() {
+    let mut shell = Shell::new();
+    let seen_events = Arc::new(Mutex::new(Vec::new()));
+    shell
+        .components
+        .push(super::types::ComponentRuntime::new(Box::new(
+            RecordingComponent::new(seen_events.clone()),
+        )));
+
+    shell.sync_theme_service_state().unwrap();
+    shell.theme.update_active(|theme| {
+        theme.set_render_metadata("sunset", "light", "high");
+        theme.set_token(
+            "color.primary",
+            mesh_core_theme::TokenValue::String("#123456".into()),
+            mesh_core_theme::ThemeProvenance::UserOverride,
+        );
+    });
+    shell.sync_theme_service_state().unwrap();
+
+    let state = shell.latest_service_state["mesh.theme"].state.clone();
+    let events = seen_events.lock().unwrap();
+    let theme_event = events.iter().find_map(|event| match event {
+        ServiceEvent::InterfaceEvent { name, payload, .. } if name == "ThemeChanged" => {
+            Some(payload)
+        }
+        _ => None,
+    });
+    let theme_event = theme_event.expect("theme changes must publish a named event");
+    assert_eq!(theme_event["theme_id"], state["theme_id"]);
+    assert_eq!(theme_event["mode"], serde_json::json!("sunset"));
+    assert_eq!(theme_event["color_scheme"], serde_json::json!("light"));
+    assert_eq!(theme_event["contrast"], serde_json::json!("high"));
+    assert_eq!(theme_event["revision"], state["revision"]);
+    assert_eq!(
+        theme_event["changed_tokens"][0]["name"],
+        serde_json::json!("color.primary")
+    );
+    assert_eq!(
+        theme_event["changed_tokens"][0]["provenance"],
+        serde_json::json!("UserOverride")
+    );
+
+    let token_event = events.iter().find_map(|event| match event {
+        ServiceEvent::InterfaceEvent { name, payload, .. }
+            if name == "TokenChanged" && payload["name"] == "color.primary" =>
+        {
+            Some(payload)
+        }
+        _ => None,
+    });
+    let token_event = token_event.expect("changed tokens must publish individual events");
+    assert_eq!(token_event["revision"], state["revision"]);
+    assert_eq!(token_event["value"], serde_json::json!("#123456"));
+}
+
+#[test]
 fn locale_snapshot_is_published_by_the_active_provider() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();
@@ -61,6 +118,29 @@ fn locale_snapshot_is_published_by_the_active_provider() {
 }
 
 #[test]
+fn manual_locale_change_commits_the_shared_settings_revision_before_broadcast() {
+    let _env_lock = settings_env_lock();
+    let dir = tempfile::tempdir().unwrap();
+    let settings_path = dir.path().join("settings.json");
+    fs::write(
+        &settings_path,
+        r#"{"shell":{"i18n":{"locale":"en","fallback_locale":"en"}}}"#,
+    )
+    .unwrap();
+    let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
+    let mut shell = Shell::new();
+
+    shell.apply_set_locale("sk-SK").unwrap();
+
+    assert_eq!(shell.locale.current(), "sk-SK");
+    assert_eq!(shell.settings_store.revision(), 1);
+    let persisted = mesh_core_config::SettingsStore::load_from(&settings_path).unwrap();
+    assert_eq!(persisted.revision(), 1);
+    assert_eq!(persisted.shell().i18n.locale, "sk-SK");
+    assert_eq!(persisted.shell().i18n.fallback_locale, "en");
+}
+
+#[test]
 fn theme_service_state_lists_every_registered_theme() {
     let mut shell = Shell::new();
     for (id, name) in [
@@ -71,7 +151,7 @@ fn theme_service_state_lists_every_registered_theme() {
         let mut theme = mesh_core_theme::default_theme();
         theme.id = id.to_string();
         theme.name = name.to_string();
-        shell.theme.register_theme(theme);
+        shell.theme.register_theme(theme).unwrap();
     }
 
     shell.sync_theme_service_state().unwrap();
@@ -229,10 +309,7 @@ fn shell_theme_fallback_backend_restart_keeps_latest_state_on_resolved_theme() {
 
     let latest = shell.latest_service_state.get("mesh.theme").unwrap();
     assert_eq!(shell.theme.active().id, "tokyo-night");
-    assert_eq!(
-        latest.state["current"],
-        serde_json::json!("tokyo-night")
-    );
+    assert_eq!(latest.state["current"], serde_json::json!("tokyo-night"));
     assert_eq!(latest.state["is_dark"], serde_json::json!(true));
 }
 
@@ -463,8 +540,7 @@ fn theme_file_recovery_syncs_mesh_theme_latest_state_and_components() {
 
     assert_eq!(shell.settings.theme.active, "mesh-recovered-light");
     assert_eq!(shell.theme.active().id, "tokyo-night");
-    let fallback_theme_id = shell.theme.active().id.clone();
-    shell.sync_theme_service_state(&fallback_theme_id).unwrap();
+    shell.sync_theme_service_state().unwrap();
     assert_eq!(
         shell
             .latest_service_state
@@ -505,10 +581,15 @@ fn theme_file_recovery_syncs_mesh_theme_latest_state_and_components() {
     );
 
     let events = seen_events.lock().unwrap();
-    assert_eq!(events.len(), 2);
-    let ServiceEvent::Updated { payload, .. } = events.last().unwrap() else {
-        panic!("expected theme service update");
-    };
+    let updates = events
+        .iter()
+        .filter_map(|event| match event {
+            ServiceEvent::Updated { payload, .. } => Some(payload),
+            ServiceEvent::InterfaceEvent { .. } => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(updates.len(), 2);
+    let payload = updates.last().unwrap();
     assert_eq!(
         payload["current"],
         serde_json::json!("mesh-recovered-light")

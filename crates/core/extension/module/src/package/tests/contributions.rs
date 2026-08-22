@@ -696,6 +696,7 @@ fn manifest_driven_extension_graph_indexes_provider_library_resource_and_fronten
                 id: "en".into(),
                 locale: "en".into(),
                 path: "i18n/en.json".into(),
+                module: Some("@mesh/example-widget".into()),
             }],
             ..MeshContributes::default()
         },
@@ -780,6 +781,11 @@ fn manifest_driven_extension_graph_indexes_provider_library_resource_and_fronten
     assert_eq!(graph.icon_pack_contributions()[0].id, "material");
     assert_eq!(graph.contributed_fonts()[0].id, "inter");
     assert_eq!(graph.contributed_i18n()[0].locale, "en");
+    assert_eq!(
+        graph.contributed_i18n()[0].target_module_id,
+        "@mesh/example-widget"
+    );
+    assert_eq!(graph.language_pack_chain(), &["@mesh/example-lang"]);
     assert_eq!(graph.contributed_themes()[0].id, "mesh-default");
     assert_eq!(graph.frontend_entrypoints()[0].path, "src/main.mesh");
 }

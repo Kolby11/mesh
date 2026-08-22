@@ -1705,8 +1705,8 @@ dependencies = [
 name = "mesh-core-component"
 version = "0.1.0"
 dependencies = [
- "cssparser 0.35.0",
  "lightningcss",
+ "mesh-core-theme",
  "quick-xml",
  "serde",
  "serde_json",
@@ -1718,6 +1718,7 @@ dependencies = [
 name = "mesh-core-config"
 version = "0.1.0"
 dependencies = [
+ "mesh-core-theme",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1988,6 +1989,8 @@ dependencies = [
 name = "mesh-core-theme"
 version = "0.1.0"
 dependencies = [
+ "cssparser 0.35.0",
+ "libc",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

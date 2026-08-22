@@ -10,6 +10,47 @@ use mesh_core_module::package::{
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 
+fn resolve_component_props_schema(
+    mut schema: serde_json::Value,
+    translator: &mesh_core_locale::ModuleTranslator<'_>,
+) -> serde_json::Value {
+    let Some(properties) = schema
+        .get_mut("properties")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return schema;
+    };
+
+    for definition in properties.values_mut() {
+        let Some(definition) = definition.as_object_mut() else {
+            continue;
+        };
+        for field in ["label", "description"] {
+            let Some(value) = definition.get_mut(field) else {
+                continue;
+            };
+            let Some(localized) = value.as_object() else {
+                continue;
+            };
+            let key = localized
+                .get("t")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
+            let fallback = localized
+                .get("fallback")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
+            if let Some(key) = key.as_deref() {
+                *value =
+                    serde_json::Value::String(translator.resolve(key, fallback.as_deref()).text);
+            } else if let Some(fallback) = fallback {
+                *value = serde_json::Value::String(fallback);
+            }
+        }
+    }
+    schema
+}
+
 pub(super) struct PreparedProfileFrontend {
     component: FrontendSurfaceComponent,
     requests: VecDeque<CoreRequest>,
@@ -133,6 +174,7 @@ mod tests {
 pub(super) struct PendingProfileSwitch {
     profile_id: String,
     graph: InstalledModuleGraph,
+    locale: LocaleEngine,
     settings: Arc<SettingsStore>,
     prepared_theme: Option<(mesh_core_theme::Theme, ThemeWatchState)>,
     catalog: FrontendCatalog,
@@ -179,6 +221,7 @@ impl Shell {
         let graph_path = self.installed_module_graph_path();
         let paths = ProfilePaths::from_root_graph(&graph_path)?;
         let mut profile = paths.load(profile_id)?;
+        let expected_revision = profile.revision;
         let generation = profile_generation(&profile)?;
         if generation != expected_generation {
             return Err(ShellRunError::Package(format!(
@@ -216,7 +259,7 @@ impl Shell {
             Some(&previous_catalog),
         )?;
 
-        paths.save(profile_id, &profile)?;
+        paths.save_if_revision(profile_id, &profile, expected_revision)?;
         if self.active_profile_id.as_deref() == Some(profile_id) {
             return Ok(self.apply_switch_profile(profile_id));
         }
@@ -314,14 +357,23 @@ impl Shell {
                             &contribution.contribution_id,
                         )
                         .expect("resolved contribution is compiled");
+                    let props_schema = mesh_core_component::props_settings_schema(
+                        compiled.component.props.as_ref(),
+                    )
+                    .map(|schema| {
+                        resolve_component_props_schema(
+                            schema,
+                            &self
+                                .locale
+                                .module_translator(&contribution.source_module_id),
+                        )
+                    });
                     palette.push(serde_json::json!({
                         "contract": point,
                         "use": format!("{}:{}", contribution.source_module_id, contribution.contribution_id),
                         "module": contribution.source_module_id,
                         "id": contribution.contribution_id,
-                        "props_schema": mesh_core_component::props_settings_schema(
-                            compiled.component.props.as_ref()
-                        ),
+                        "props_schema": props_schema,
                     }));
                 }
             }
@@ -400,6 +452,7 @@ impl Shell {
         let effective = if let Some(profile_id) = self.active_profile_id.clone() {
             let paths = ProfilePaths::from_root_graph(&self.installed_module_graph_path())?;
             let mut profile = paths.load(&profile_id)?;
+            let expected_revision = profile.revision;
             let namespace = profile
                 .settings
                 .entry(module_id.to_string())
@@ -408,7 +461,7 @@ impl Shell {
             if namespace.as_object().is_some_and(serde_json::Map::is_empty) {
                 profile.settings.remove(module_id);
             }
-            paths.save(&profile_id, &profile)?;
+            paths.save_if_revision(&profile_id, &profile, expected_revision)?;
             let shared =
                 SettingsStore::load().map_err(|error| ShellRunError::FrontendComposition {
                     message: format!("failed to reload shared settings: {error}"),
@@ -423,11 +476,12 @@ impl Shell {
                 SettingsStore::load().map_err(|error| ShellRunError::FrontendComposition {
                     message: format!("failed to load settings for update: {error}"),
                 })?;
+            let expected_revision = shared.revision();
             let mut namespace = shared.namespace(module_id);
             update_module_prop_override(&mut namespace, instance_id, prop, value);
             shared.set_namespace(module_id, namespace);
             shared
-                .save()
+                .save_if_revision(expected_revision)
                 .map_err(|error| ShellRunError::FrontendComposition {
                     message: format!("failed to save settings: {error}"),
                 })?;
@@ -519,6 +573,17 @@ impl Shell {
             }
         };
 
+        let locale = match self.prepare_locale_for_settings(settings.shell(), &graph) {
+            Ok(locale) => locale,
+            Err(error) => {
+                self.reject_profile_switch(
+                    profile_id,
+                    format!("candidate locale catalogs are invalid: {error}"),
+                );
+                return VecDeque::new();
+            }
+        };
+
         let previous_catalog = self.frontend_catalog.snapshot().catalog;
         let catalog = match FrontendCatalog::from_modules_reusing(
             &self.modules,
@@ -569,7 +634,7 @@ impl Shell {
             )
             .with_effective_capabilities(self.effective_capabilities.clone())
             .with_instance_id(instance_id)
-            .with_graph_i18n_catalogs(self.profile_i18n_catalog_paths(&graph));
+            .with_locale_catalog_snapshot(locale.catalog_snapshot());
             let diagnostics = self
                 .diagnostics
                 .register_instance(root.module.clone(), instance_id.clone());
@@ -584,7 +649,7 @@ impl Shell {
                     return VecDeque::new();
                 }
             };
-            if let Err(error) = component.locale_changed(&self.locale) {
+            if let Err(error) = component.locale_changed(&locale) {
                 self.reject_profile_switch(profile_id, error.to_string());
                 return VecDeque::new();
             }
@@ -706,6 +771,7 @@ impl Shell {
         let mut pending = PendingProfileSwitch {
             profile_id: profile_id.to_string(),
             graph,
+            locale,
             settings,
             prepared_theme,
             catalog,
@@ -921,6 +987,7 @@ impl Shell {
         let old_theme = self.settings.theme.clone();
         let old_fonts = self.settings.fonts.clone();
         let old_locale = self.settings.i18n.clone();
+        let old_locale_catalog_revision = self.locale.catalog_snapshot().revision();
         let prepared_theme = pending.prepared_theme.take();
         self.settings_store = pending.settings;
         self.settings = self.settings_store.shell().clone();
@@ -942,13 +1009,11 @@ impl Shell {
                 requests.extend(next);
             }
         }
+        self.locale = pending.locale;
         if old_locale.locale != self.settings.i18n.locale
             || old_locale.fallback_locale != self.settings.i18n.fallback_locale
+            || old_locale_catalog_revision != self.locale.catalog_snapshot().revision()
         {
-            self.locale = LocaleEngine::with_fallback_locale(
-                self.settings.i18n.locale.clone(),
-                self.settings.i18n.fallback_locale.clone(),
-            );
             if let Err(error) = self.mark_components_locale_changed() {
                 tracing::warn!("profile locale refresh failed after commit: {error}");
             }
@@ -1020,24 +1085,6 @@ impl Shell {
         }
         self.rebuild_component_surface_index();
         self.service_delivery_index.mark_dirty();
-    }
-
-    fn profile_i18n_catalog_paths(
-        &self,
-        graph: &InstalledModuleGraph,
-    ) -> Vec<(String, String, PathBuf)> {
-        graph
-            .contributed_i18n()
-            .iter()
-            .filter_map(|catalog| {
-                let module_dir = catalog.source.manifest_path.parent()?;
-                Some((
-                    catalog.module_id.clone(),
-                    catalog.locale.clone(),
-                    module_dir.join(&catalog.path),
-                ))
-            })
-            .collect()
     }
 
     fn abort_pending_profile_switch(&mut self, message: String) {

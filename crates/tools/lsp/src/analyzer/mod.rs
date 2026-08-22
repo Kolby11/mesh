@@ -415,6 +415,24 @@ local redraw = import("mesh.ui", "$0")
     }
 
     #[test]
+    fn locale_completion_matches_the_runtime_host_api() {
+        let (source, position) = fixture_with_cursor(
+            r#"<template></template>
+
+<script lang="luau">
+mesh.locale.$0
+</script>
+"#,
+        );
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source);
+        let labels = completion_labels(&doc, position);
+
+        assert!(labels.contains(&"current".to_string()));
+        assert!(labels.contains(&"set".to_string()));
+        assert!(!labels.contains(&"translate".to_string()));
+    }
+
+    #[test]
     fn import_default_binding_enables_member_completion() {
         // `local audio = import("mesh.audio")` (no extra names) should bind a
         // proxy var just like `require`, so `audio.` completes its members.

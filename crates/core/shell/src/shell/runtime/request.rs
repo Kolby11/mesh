@@ -161,10 +161,29 @@ impl Shell {
                 return VecDeque::new();
             }
         };
+        let locale = match self.prepare_locale_for_graph(&graph) {
+            Ok(locale) => locale,
+            Err(error) => {
+                let restore_error = rollback.restore().err();
+                let message = format!(
+                    "module {module_id} update produced an invalid locale catalog candidate: {error}{}",
+                    restore_error
+                        .map(|error| format!("; rollback also failed: {error}"))
+                        .unwrap_or_default()
+                );
+                tracing::warn!(module_id, enabled, "{message}");
+                self.diagnostics.record_lifecycle_error(
+                    "@mesh/settings",
+                    "module_enabled_locale_reload_failed",
+                    message,
+                );
+                return VecDeque::new();
+            }
+        };
         self.register_interfaces_from_graph(&graph);
         let runtime_result = if module_kind == ModuleKind::Frontend {
             if enabled {
-                self.activate_frontend_module(module_id, &graph)
+                self.activate_frontend_module_with_locale(module_id, &graph, locale.clone())
             } else {
                 self.deactivate_frontend_module(module_id, Some(&graph))
             }
@@ -173,7 +192,7 @@ impl Shell {
         };
         match runtime_result {
             Ok(requests) => {
-                self.commit_installed_module_graph(graph);
+                self.commit_installed_module_graph_with_locale(graph, locale);
                 tracing::info!(module_id, enabled, "applied module enabled state live");
                 requests
             }
@@ -283,7 +302,19 @@ impl Shell {
             ) {
                 Ok(()) => {
                     match self.load_installed_module_graph_candidate() {
-                        Ok(candidate) => self.commit_installed_module_graph(candidate),
+                        Ok(candidate) => {
+                            if let Err(error) = self.commit_installed_module_graph(candidate) {
+                                let message = format!(
+                                    "provider selection for {interface} was saved but locale catalogs could not be committed: {error}"
+                                );
+                                tracing::warn!(interface, provider_id, "{message}");
+                                self.diagnostics.record_lifecycle_error(
+                                    "@mesh/settings",
+                                    "provider_selection_locale_reload_failed",
+                                    message,
+                                );
+                            }
+                        }
                         Err(error) => {
                             let message = format!(
                                 "provider selection for {interface} was saved but the candidate graph could not be loaded: {error}"

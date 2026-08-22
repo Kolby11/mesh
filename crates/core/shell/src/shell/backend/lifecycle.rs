@@ -429,7 +429,18 @@ impl Shell {
                     return;
                 }
             };
-            self.commit_installed_module_graph(candidate_graph);
+            if let Err(error) = self.commit_installed_module_graph(candidate_graph) {
+                pending.slot.task.abort();
+                let message = format!(
+                    "provider selection was saved but locale catalogs could not be committed: {error}"
+                );
+                self.diagnostics.record_lifecycle_error(
+                    "@mesh/shell",
+                    "provider_selection_locale_commit_failed",
+                    message,
+                );
+                return;
+            }
         }
         self.backend_supervision.remove(interface);
         let initial_state = pending.initial_state;

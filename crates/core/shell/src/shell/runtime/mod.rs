@@ -215,7 +215,12 @@ impl Shell {
                             descriptor.id,
                             descriptor.default_mode
                         );
-                        self.theme.register_theme(theme);
+                        if let Err(error) = self.theme.register_theme(theme) {
+                            tracing::warn!(
+                                "skipping graph-authorized theme '{}' due to duplicate identity: {error}",
+                                descriptor.id
+                            );
+                        }
                     }
                     Err(error) => tracing::warn!(
                         "failed to load graph-authorized theme '{}' mode '{}': {error}",

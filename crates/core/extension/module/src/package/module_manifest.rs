@@ -505,7 +505,8 @@ impl MeshModuleSection {
             provided.validate()?;
         }
         self.provides.validate()?;
-        self.contributes.validate()
+        self.contributes.validate()?;
+        validate_i18n_contributions(self.kind, &self.contributes.i18n)
     }
 
     pub fn implementations(&self) -> impl Iterator<Item = &MeshProvidesDeclaration> {
@@ -1443,6 +1444,65 @@ fn validate_unique_contribution_ids<'a>(
     Ok(())
 }
 
+fn validate_i18n_contributions(
+    kind: ModuleKind,
+    contributions: &[I18nContribution],
+) -> Result<(), ModuleManifestError> {
+    let mut target_locales = Vec::new();
+    for contribution in contributions {
+        if contribution.id.trim().is_empty() {
+            return Err(ModuleManifestError::Validation(
+                "i18n contribution id cannot be empty".into(),
+            ));
+        }
+        if contribution.locale.trim().is_empty() {
+            return Err(ModuleManifestError::Validation(format!(
+                "i18n contribution '{}' locale cannot be empty",
+                contribution.id
+            )));
+        }
+        validate_relative_path("i18n contribution", &contribution.path)?;
+
+        match (kind, contribution.module.as_deref()) {
+            (ModuleKind::LanguagePack, Some(target)) => {
+                ModuleId::parse(target)?;
+                target_locales.push((target.to_string(), contribution.locale.to_ascii_lowercase()));
+            }
+            (ModuleKind::LanguagePack, None) => {
+                return Err(ModuleManifestError::Validation(format!(
+                    "language-pack i18n contribution '{}' must declare its target module",
+                    contribution.id
+                )));
+            }
+            (_, Some(_)) => {
+                return Err(ModuleManifestError::Validation(format!(
+                    "i18n contribution '{}' targets another module but its owner is not a language-pack",
+                    contribution.id
+                )));
+            }
+            (_, None) => {
+                target_locales.push((String::new(), contribution.locale.to_ascii_lowercase()));
+            }
+        }
+    }
+
+    target_locales.sort();
+    for pair in target_locales.windows(2) {
+        if pair[0] == pair[1] {
+            let target = if pair[0].0.is_empty() {
+                "the owning module".to_string()
+            } else {
+                pair[0].0.clone()
+            };
+            return Err(ModuleManifestError::Validation(format!(
+                "i18n contributions contain duplicate target/locale pair for {target} and {}",
+                pair[0].1
+            )));
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LayoutContribution {
     pub id: String,
@@ -1494,6 +1554,10 @@ pub struct I18nContribution {
     pub id: String,
     pub locale: String,
     pub path: String,
+    /// Language-pack contributions target another module's translation
+    /// namespace. Module-owned catalogs omit this field.
+    #[serde(default)]
+    pub module: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

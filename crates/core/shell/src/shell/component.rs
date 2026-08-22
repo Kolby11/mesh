@@ -859,6 +859,10 @@ pub(super) struct FrontendSurfaceComponent {
     last_painted_buffer_size: Option<(u32, u32)>,
     surface_pixels_invalid: bool,
     locale: LocaleEngine,
+    /// Shell-created components share the coordinator's immutable catalog
+    /// snapshot. Standalone component fixtures keep their local source-backed
+    /// catalog for authoring and integration tests.
+    locale_catalog_is_shared: bool,
     interface_catalog: Arc<mesh_core_service::InterfaceCatalog>,
     last_tree: Option<WidgetNode>,
     intrinsic_layout_cache: IntrinsicLayoutCache,
@@ -1165,6 +1169,7 @@ impl FrontendSurfaceComponent {
             last_painted_buffer_size: None,
             surface_pixels_invalid: true,
             locale: LocaleEngine::new("en"),
+            locale_catalog_is_shared: false,
             interface_catalog: interface_catalog.into(),
             last_tree: None,
             intrinsic_layout_cache: IntrinsicLayoutCache::default(),
@@ -1272,6 +1277,16 @@ impl FrontendSurfaceComponent {
         graph_i18n_catalogs: Vec<(String, String, PathBuf)>,
     ) -> Self {
         self.graph_i18n_catalogs = graph_i18n_catalogs;
+        self
+    }
+
+    pub(super) fn with_locale_catalog_snapshot(
+        mut self,
+        snapshot: std::sync::Arc<mesh_core_locale::LocaleCatalogSnapshot>,
+    ) -> Self {
+        self.locale.replace_catalog_snapshot(snapshot);
+        self.locale_catalog_is_shared = true;
+        self.graph_i18n_catalogs.clear();
         self
     }
 

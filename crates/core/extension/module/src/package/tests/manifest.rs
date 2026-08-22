@@ -122,6 +122,48 @@ fn module_manifest_parses_backend_module_json() {
 }
 
 #[test]
+fn language_pack_catalogs_require_one_target_per_locale() {
+    let missing_target = r#"
+{
+  "name": "@community/cs-pack",
+  "version": "1.0.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "language-pack",
+    "provides": {
+      "i18n": [{ "id": "cs", "locale": "cs", "path": "cs.json" }]
+    }
+  }
+}
+"#;
+    let error = ModuleManifest::from_json_str(missing_target)
+        .expect_err("a language pack without a target is ambiguous")
+        .to_string();
+    assert!(error.contains("must declare its target module"), "{error}");
+
+    let duplicate_locale = r#"
+{
+  "name": "@community/cs-pack",
+  "version": "1.0.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "language-pack",
+    "provides": {
+      "i18n": [
+        { "id": "first", "locale": "cs", "module": "@mesh/panel", "path": "first.json" },
+        { "id": "second", "locale": "CS", "module": "@mesh/panel", "path": "second.json" }
+      ]
+    }
+  }
+}
+"#;
+    let error = ModuleManifest::from_json_str(duplicate_locale)
+        .expect_err("one pack must not provide ambiguous duplicate target locales")
+        .to_string();
+    assert!(error.contains("duplicate target/locale pair"), "{error}");
+}
+
+#[test]
 fn compact_surface_block_normalizes_into_surface_layout() {
     let content = r#"
 {

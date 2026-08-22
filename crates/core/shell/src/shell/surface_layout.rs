@@ -55,12 +55,8 @@ pub(super) fn prepare_theme_for_graph(
         .theme_catalog()
         .get(&settings.theme.active)
         .ok_or_else(|| ThemeError::NotFound(settings.theme.active.clone()))?;
-    let mode = settings
-        .theme
-        .mode
-        .as_deref()
-        .unwrap_or(&descriptor.default_mode);
-    let mode_descriptor = descriptor.mode(mode).ok_or_else(|| {
+    let mode = selected_theme_mode(settings, descriptor)?;
+    let mode_descriptor = descriptor.mode(&mode).ok_or_else(|| {
         ThemeError::Composition(format!("theme '{}' has no mode '{mode}'", descriptor.id))
     })?;
     let pack = load_theme_from_source(&mode_descriptor.source)?;
@@ -124,12 +120,12 @@ pub(super) fn prepare_theme_for_graph(
         &base,
         &pack,
         descriptor.id.clone(),
-        mode.to_string(),
+        mode.clone(),
         module_layers,
         &user_overrides,
     )?;
     theme.set_render_metadata(
-        mode.to_string(),
+        mode.clone(),
         mode_descriptor.metadata.color_scheme.clone(),
         mode_descriptor.metadata.contrast.clone(),
     );
@@ -156,10 +152,32 @@ pub(super) fn prepare_theme_for_graph(
             path,
             modified_at,
             fingerprint: Some(fingerprint),
-            mode: Some(mode.to_string()),
+            mode: Some(mode),
             revision,
         },
     ))
+}
+
+pub(super) fn selected_theme_mode(
+    settings: &ShellSettings,
+    descriptor: &mesh_core_theme::ThemePackDescriptor,
+) -> Result<String, ThemeError> {
+    let system_color_scheme = std::env::var("MESH_SYSTEM_COLOR_SCHEME").ok();
+    let local_minute = std::env::var("MESH_LOCAL_MINUTE")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or_else(mesh_core_theme::local_minutes_since_midnight);
+    settings
+        .theme
+        .mode_policy
+        .select_mode(
+            &descriptor.modes,
+            &descriptor.default_mode,
+            settings.theme.mode.as_deref(),
+            system_color_scheme.as_deref(),
+            local_minute,
+        )
+        .map_err(ThemeError::Composition)
 }
 
 pub(super) fn apply_font_family(theme: &mut Theme, family: Option<&str>) {

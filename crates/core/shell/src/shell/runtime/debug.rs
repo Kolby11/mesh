@@ -342,7 +342,14 @@ impl Shell {
                     .contributed_i18n()
                     .iter()
                     .filter(|i18n| i18n.module_id == module.id)
-                    .map(|i18n| format!("{}:{}", i18n.locale, i18n.path))
+                    .map(|i18n| {
+                        let source = format!("{}:{}", i18n.locale, i18n.path);
+                        if i18n.target_module_id == i18n.module_id {
+                            source
+                        } else {
+                            format!("{source}->{}", i18n.target_module_id)
+                        }
+                    })
                     .collect::<Vec<_>>();
                 let required_icons = graph
                     .icon_requirements()
@@ -1291,32 +1298,22 @@ fn sorted_keys<T>(map: &std::collections::HashMap<String, T>) -> Vec<String> {
     keys
 }
 
-struct ResolvedDebugManifestText {
-    text: String,
-    key: Option<String>,
-    fallback: Option<String>,
-}
-
 fn resolve_debug_manifest_text(
     locale: &mesh_core_locale::LocaleEngine,
     module_id: &str,
     text: &mesh_core_module::LocalizedText,
-) -> ResolvedDebugManifestText {
+) -> mesh_core_locale::LocalizedTextResolution {
     match text {
-        mesh_core_module::LocalizedText::Literal(value) => ResolvedDebugManifestText {
-            text: value.clone(),
-            key: None,
-            fallback: None,
-        },
+        mesh_core_module::LocalizedText::Literal(value) => {
+            mesh_core_locale::LocalizedTextResolution::literal(
+                module_id,
+                value,
+                locale.catalog_snapshot().revision(),
+            )
+        }
         mesh_core_module::LocalizedText::Translation { key, fallback } => {
-            ResolvedDebugManifestText {
-                text: locale
-                    .translate_for_module(key, module_id)
-                    .map(str::to_string)
-                    .unwrap_or_else(|| fallback.clone()),
-                key: Some(key.clone()),
-                fallback: Some(fallback.clone()),
-            }
+            let translator = locale.module_translator(module_id);
+            translator.resolve(key, Some(fallback))
         }
     }
 }

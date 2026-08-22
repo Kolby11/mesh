@@ -37,6 +37,7 @@ pub const SETTINGS_SCHEMA_VERSION: u64 = 1;
 pub const SHELL_NAMESPACE: &str = "shell";
 
 const SCHEMA_VERSION_KEY: &str = "schemaVersion";
+const REVISION_KEY: &str = "revision";
 static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// A schema registered by the owner of one settings namespace.
@@ -156,6 +157,7 @@ impl SettingsSchemaRegistry {
 pub struct SettingsStore {
     path: PathBuf,
     root: JsonMap<String, JsonValue>,
+    revision: u64,
     schemas: SettingsSchemaRegistry,
     validated_root: JsonMap<String, JsonValue>,
     shell: ShellSettings,
@@ -168,6 +170,7 @@ impl Default for SettingsStore {
         Self {
             path: default_settings_path(),
             root: JsonMap::new(),
+            revision: 0,
             schemas: SettingsSchemaRegistry::default(),
             validated_root: JsonMap::new(),
             shell: ShellSettings::default(),
@@ -200,9 +203,11 @@ impl SettingsStore {
             (JsonMap::new(), Vec::new())
         };
 
+        let revision = document_revision(&root);
         let mut store = Self {
             path: path.to_path_buf(),
             root,
+            revision,
             schemas: SettingsSchemaRegistry::default(),
             validated_root: JsonMap::new(),
             shell: ShellSettings::default(),
@@ -223,9 +228,11 @@ impl SettingsStore {
                 vec![non_object_document_diagnostic("settings must be", &other)],
             ),
         };
+        let revision = document_revision(&root);
         let mut store = Self {
             path,
             root,
+            revision,
             schemas: SettingsSchemaRegistry::default(),
             validated_root: JsonMap::new(),
             shell: ShellSettings::default(),
@@ -238,6 +245,12 @@ impl SettingsStore {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Monotonic revision of the durable settings document. A missing or
+    /// legacy document starts at revision zero.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// Everything rejected while resolving the shell namespace, file top
@@ -378,6 +391,9 @@ impl SettingsStore {
             SCHEMA_VERSION_KEY.to_string(),
             JsonValue::from(SETTINGS_SCHEMA_VERSION),
         );
+        if self.revision > 0 {
+            root.insert(REVISION_KEY.to_string(), JsonValue::from(self.revision));
+        }
         JsonValue::Object(root)
     }
 
@@ -404,6 +420,43 @@ impl SettingsStore {
         if let Err(error) = result {
             let _ = fs::remove_file(&temporary);
             return Err(error.into());
+        }
+        Ok(())
+    }
+
+    /// Persist this candidate only if the file still has `expected_revision`.
+    ///
+    /// Callers prepare and validate a complete candidate first, then use this
+    /// method as the durable commit boundary. The in-memory store advances to
+    /// the committed revision only after the atomic replace succeeds.
+    pub fn save_if_revision(&mut self, expected_revision: u64) -> Result<(), ConfigError> {
+        self.check_revision(expected_revision)?;
+
+        let next_revision = expected_revision.saturating_add(1);
+        let mut committed = self.clone();
+        committed.revision = next_revision;
+        committed.save()?;
+        self.revision = next_revision;
+        Ok(())
+    }
+
+    /// Check both the candidate and its backing document without writing it.
+    /// This lets a profile-scoped transaction ensure that shared fallback
+    /// settings did not change while its profile candidate was prepared.
+    pub fn check_revision(&self, expected_revision: u64) -> Result<(), ConfigError> {
+        if self.revision != expected_revision {
+            return Err(ConfigError::RevisionConflict {
+                expected: expected_revision,
+                actual: self.revision,
+            });
+        }
+
+        let actual_revision = Self::load_from(&self.path)?.revision;
+        if actual_revision != expected_revision {
+            return Err(ConfigError::RevisionConflict {
+                expected: expected_revision,
+                actual: actual_revision,
+            });
         }
         Ok(())
     }
@@ -451,6 +504,12 @@ fn settings_parent(path: &Path) -> &Path {
     path.parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."))
+}
+
+fn document_revision(root: &JsonMap<String, JsonValue>) -> u64 {
+    root.get(REVISION_KEY)
+        .and_then(JsonValue::as_u64)
+        .unwrap_or_default()
 }
 
 fn ensure_settings_directory(parent: &Path) -> io::Result<()> {
@@ -701,7 +760,7 @@ fn resolve_shell_settings(
 
 /// Check the schema stamp and that other keys look like ownable namespaces.
 fn validate_settings_root(root: &JsonMap<String, JsonValue>) -> Vec<SettingsDiagnostic> {
-    const ROOT_KEYS: &[&str] = &[SHELL_NAMESPACE, SCHEMA_VERSION_KEY];
+    const ROOT_KEYS: &[&str] = &[SHELL_NAMESPACE, SCHEMA_VERSION_KEY, REVISION_KEY];
     let mut diagnostics = Vec::new();
 
     for (key, value) in root {
@@ -1009,6 +1068,46 @@ mod tests {
             loaded.namespace("@mesh/navigation-bar")["surface"]["exclusive_zone"],
             json!(48)
         );
+    }
+
+    #[test]
+    fn revision_checked_save_rejects_a_stale_settings_candidate() {
+        let root = std::env::temp_dir().join(format!(
+            "mesh-settings-revision-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let path = root.join("settings.json");
+
+        let mut first = SettingsStore::from_value(&path, json!({})).unwrap();
+        first.set_namespace("shell", json!({ "i18n": { "locale": "sk" } }));
+        first.save_if_revision(0).expect("initial revision commits");
+        assert_eq!(first.revision(), 1);
+
+        let stale = SettingsStore::load_from(&path).unwrap();
+        let mut current = stale.clone();
+        current.set_namespace("shell", json!({ "i18n": { "locale": "cs" } }));
+        current
+            .save_if_revision(1)
+            .expect("current revision commits");
+
+        let mut stale = stale;
+        stale.set_namespace("shell", json!({ "i18n": { "locale": "de" } }));
+        let error = stale
+            .save_if_revision(1)
+            .expect_err("stale locale writes must not overwrite a newer choice");
+        assert!(matches!(
+            error,
+            ConfigError::RevisionConflict {
+                expected: 1,
+                actual: 2
+            }
+        ));
+
+        let loaded = SettingsStore::load_from(&path).unwrap();
+        assert_eq!(loaded.revision(), 2);
+        assert_eq!(loaded.shell().i18n.locale, "cs");
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[cfg(unix)]

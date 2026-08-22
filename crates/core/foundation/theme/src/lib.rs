@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(unix)]
@@ -165,7 +166,7 @@ impl<'de> Deserialize<'de> for ComponentDefaults {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum TokenValue {
     String(String),
@@ -262,10 +263,155 @@ impl ThemeMetadata {
     }
 }
 
+/// Policy used to choose a declared theme mode before the normal theme
+/// prepare/commit transaction. The policy is configuration, not a second
+/// rendering path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ThemeModePolicy {
+    Manual,
+    FollowSystem,
+    Scheduled { entries: Vec<ThemeModeSchedule> },
+}
+
+impl Default for ThemeModePolicy {
+    fn default() -> Self {
+        Self::Manual
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThemeModeSchedule {
+    /// Local wall-clock time in `HH:MM` form at which this mode starts.
+    pub at: String,
+    pub mode: String,
+}
+
+impl ThemeModePolicy {
+    /// Resolve one declared mode from the policy inputs. Keeping this pure
+    /// makes manual settings, system changes, and schedule ticks share the
+    /// same candidate preparation path in the shell.
+    pub fn select_mode(
+        &self,
+        modes: &BTreeMap<String, ThemeModeDescriptor>,
+        default_mode: &str,
+        explicit_mode: Option<&str>,
+        system_color_scheme: Option<&str>,
+        local_minute: u16,
+    ) -> Result<String, String> {
+        if !modes.contains_key(default_mode) {
+            return Err(format!(
+                "theme policy default mode '{default_mode}' is not declared"
+            ));
+        }
+
+        match self {
+            Self::Manual => {
+                let mode = explicit_mode.unwrap_or(default_mode);
+                modes
+                    .contains_key(mode)
+                    .then(|| mode.to_string())
+                    .ok_or_else(|| format!("theme has no mode '{mode}'"))
+            }
+            Self::FollowSystem => {
+                let Some(system_color_scheme) = system_color_scheme
+                    .map(str::trim)
+                    .filter(|scheme| !scheme.is_empty())
+                else {
+                    return Ok(default_mode.to_string());
+                };
+                Ok(modes
+                    .iter()
+                    .find(|(_, descriptor)| {
+                        descriptor
+                            .metadata
+                            .color_scheme
+                            .eq_ignore_ascii_case(system_color_scheme)
+                    })
+                    .map(|(mode, _)| mode.clone())
+                    .unwrap_or_else(|| default_mode.to_string()))
+            }
+            Self::Scheduled { entries } => {
+                if entries.is_empty() {
+                    return Err("theme schedule must contain at least one entry".into());
+                }
+                let mut parsed = entries
+                    .iter()
+                    .map(|entry| {
+                        let minute = parse_clock_minute(&entry.at)?;
+                        if !modes.contains_key(&entry.mode) {
+                            return Err(format!(
+                                "theme schedule mode '{}' is not declared",
+                                entry.mode
+                            ));
+                        }
+                        Ok((minute, entry))
+                    })
+                    .collect::<Result<Vec<_>, String>>()?;
+                parsed.sort_by_key(|(minute, _)| *minute);
+                for pair in parsed.windows(2) {
+                    if pair[0].0 == pair[1].0 {
+                        return Err(format!(
+                            "theme schedule contains duplicate time {:02}:{:02}",
+                            pair[0].0 / 60,
+                            pair[0].0 % 60
+                        ));
+                    }
+                }
+                let Some((_, selected)) = parsed
+                    .iter()
+                    .rev()
+                    .find(|(minute, _)| *minute <= local_minute % (24 * 60))
+                    .or_else(|| parsed.last())
+                else {
+                    return Ok(default_mode.to_string());
+                };
+                Ok(selected.mode.clone())
+            }
+        }
+    }
+}
+
+fn parse_clock_minute(value: &str) -> Result<u16, String> {
+    let (hour, minute) = value
+        .trim()
+        .split_once(':')
+        .ok_or_else(|| format!("theme schedule time '{value}' must use HH:MM"))?;
+    let hour = hour
+        .parse::<u16>()
+        .map_err(|_| format!("theme schedule time '{value}' has an invalid hour"))?;
+    let minute = minute
+        .parse::<u16>()
+        .map_err(|_| format!("theme schedule time '{value}' has an invalid minute"))?;
+    if hour >= 24 || minute >= 60 {
+        return Err(format!(
+            "theme schedule time '{value}' is outside 24-hour time"
+        ));
+    }
+    Ok(hour * 60 + minute)
+}
+
+/// Current local wall-clock minute for schedule policy evaluation.
+#[cfg(unix)]
+pub fn local_minutes_since_midnight() -> u16 {
+    let now = unsafe { libc::time(std::ptr::null_mut()) };
+    let mut local = unsafe { std::mem::zeroed::<libc::tm>() };
+    let result = unsafe { libc::localtime_r(&now, &mut local) };
+    if result.is_null() {
+        return 0;
+    }
+    (local.tm_hour.clamp(0, 23) as u16) * 60 + local.tm_min.clamp(0, 59) as u16
+}
+
+#[cfg(not(unix))]
+pub fn local_minutes_since_midnight() -> u16 {
+    0
+}
+
 /// Immutable, serializable description of the exact theme state used by the
 /// renderer. The shell publishes this value as the authoritative `mesh.theme`
 /// state and as the payload of revisioned theme-change events.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ThemeSnapshot {
     pub id: String,
     pub name: String,
@@ -275,6 +421,26 @@ pub struct ThemeSnapshot {
     pub revision: u64,
     pub tokens: HashMap<String, TokenValue>,
     pub provenance: BTreeMap<String, ThemeProvenance>,
+}
+
+impl ThemeSnapshot {
+    /// Return token identities whose effective value or winning layer differs
+    /// from `previous` in deterministic order.
+    pub fn changed_token_names(&self, previous: &ThemeSnapshot) -> Vec<String> {
+        let names = self
+            .tokens
+            .keys()
+            .chain(previous.tokens.keys())
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        names
+            .into_iter()
+            .filter(|name| {
+                self.tokens.get(name) != previous.tokens.get(name)
+                    || self.provenance.get(name) != previous.provenance.get(name)
+            })
+            .collect()
+    }
 }
 
 fn normalize_metadata_value(value: String, fallback: &str) -> String {
@@ -1325,13 +1491,16 @@ fn flatten_module_tokens_into(
 pub struct ThemeEngine {
     active: Theme,
     available: Vec<Theme>,
+    active_snapshot: Arc<ThemeSnapshot>,
 }
 
 impl ThemeEngine {
     pub fn new(default_theme: Theme) -> Self {
+        let active_snapshot = Arc::new(default_theme.snapshot());
         Self {
             active: default_theme,
             available: Vec::new(),
+            active_snapshot,
         }
     }
 
@@ -1339,21 +1508,44 @@ impl ThemeEngine {
         &self.active
     }
 
-    pub fn active_mut(&mut self) -> &mut Theme {
-        &mut self.active
+    /// Return the immutable snapshot used for shell publication and cache
+    /// identity. It changes only when an active theme commit completes.
+    pub fn active_snapshot(&self) -> &ThemeSnapshot {
+        &self.active_snapshot
     }
 
-    pub fn register_theme(&mut self, theme: Theme) {
+    /// Apply a controlled edit to the active theme and publish one fresh
+    /// immutable snapshot after the edit completes.
+    pub fn update_active(&mut self, update: impl FnOnce(&mut Theme)) {
+        update(&mut self.active);
+        self.active_snapshot = Arc::new(self.active.snapshot());
+    }
+
+    pub fn register_theme(&mut self, theme: Theme) -> Result<(), ThemeError> {
+        let identity = theme.id.trim();
+        if identity.is_empty() {
+            return Err(ThemeError::InvalidIdentity(theme.id));
+        }
+        if self.active.id.trim() == identity
+            || self
+                .available
+                .iter()
+                .any(|candidate| candidate.id.trim() == identity)
+        {
+            return Err(ThemeError::DuplicateIdentity(identity.to_string()));
+        }
         self.available.push(theme);
+        Ok(())
     }
 
     pub fn set_active(&mut self, theme_id: &str) -> Result<(), ThemeError> {
         let theme = self
             .available
             .iter()
-            .find(|t| t.id == theme_id)
+            .find(|t| t.id.trim() == theme_id.trim())
             .ok_or_else(|| ThemeError::NotFound(theme_id.to_string()))?;
         self.active = theme.clone();
+        self.active_snapshot = Arc::new(self.active.snapshot());
         Ok(())
     }
 
@@ -1363,18 +1555,27 @@ impl ThemeEngine {
 
     pub fn replace_active(&mut self, theme: Theme) {
         self.active = theme;
+        self.active_snapshot = Arc::new(self.active.snapshot());
     }
 
     pub fn with_active(&self, theme: Theme) -> Self {
+        let active_snapshot = Arc::new(theme.snapshot());
         Self {
             active: theme,
             available: self.available.clone(),
+            active_snapshot,
         }
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum ThemeError {
+    #[error("theme identity is empty: {0}")]
+    InvalidIdentity(String),
+
+    #[error("theme identity is already registered: {0}")]
+    DuplicateIdentity(String),
+
     #[error("theme not found: {0}")]
     NotFound(String),
 
@@ -2477,6 +2678,38 @@ mod tests {
     }
 
     #[test]
+    fn theme_engine_publishes_immutable_snapshots_and_rejects_ambiguous_ids() {
+        let mut engine = ThemeEngine::new(Theme::new("active", "Active"));
+        assert!(matches!(
+            engine.register_theme(Theme::new("active", "Duplicate active")),
+            Err(ThemeError::DuplicateIdentity(identity)) if identity == "active"
+        ));
+        engine
+            .register_theme(Theme::new("pack", "Pack"))
+            .expect("first pack registration succeeds");
+        assert!(matches!(
+            engine.register_theme(Theme::new(" pack ", "Ambiguous pack")),
+            Err(ThemeError::DuplicateIdentity(identity)) if identity == "pack"
+        ));
+
+        let previous = engine.active_snapshot().clone();
+        engine.update_active(|theme| {
+            theme.set_token(
+                "color.primary",
+                TokenValue::String("#123456".into()),
+                ThemeProvenance::UserOverride,
+            );
+        });
+
+        assert!(previous.tokens.get("color.primary").is_none());
+        assert_eq!(
+            engine.active_snapshot().tokens.get("color.primary"),
+            Some(&TokenValue::String("#123456".into()))
+        );
+        assert_ne!(previous.revision, engine.active_snapshot().revision);
+    }
+
+    #[test]
     fn theme_composer_applies_layers_with_scoped_provenance() {
         let mut base = Theme::new("recovery", "Recovery");
         base.tokens_mut()
@@ -2565,6 +2798,132 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["@mesh/example-theme:desk"]
         );
+    }
+
+    #[test]
+    fn theme_mode_policies_share_declared_mode_selection_rules() {
+        let descriptor = ThemePackDescriptor::new(
+            "@mesh/example-theme:desk",
+            "@mesh/example-theme",
+            "desk",
+            Some("Desk".into()),
+            "/modules/@mesh/example-theme",
+            [
+                ("dark".into(), "themes/dark/theme.css".into()),
+                ("light".into(), "themes/light/theme.css".into()),
+            ],
+            Some("dark".into()),
+        )
+        .unwrap()
+        .with_mode_metadata([
+            ("dark".into(), ThemeMetadata::new("dark", "dark", "normal")),
+            (
+                "light".into(),
+                ThemeMetadata::new("light", "light", "normal"),
+            ),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            ThemeModePolicy::Manual
+                .select_mode(
+                    &descriptor.modes,
+                    &descriptor.default_mode,
+                    Some("light"),
+                    None,
+                    0
+                )
+                .unwrap(),
+            "light"
+        );
+        assert_eq!(
+            ThemeModePolicy::FollowSystem
+                .select_mode(
+                    &descriptor.modes,
+                    &descriptor.default_mode,
+                    None,
+                    Some("light"),
+                    0,
+                )
+                .unwrap(),
+            "light"
+        );
+        let scheduled = ThemeModePolicy::Scheduled {
+            entries: vec![
+                ThemeModeSchedule {
+                    at: "06:00".into(),
+                    mode: "light".into(),
+                },
+                ThemeModeSchedule {
+                    at: "18:00".into(),
+                    mode: "dark".into(),
+                },
+            ],
+        };
+        assert_eq!(
+            scheduled
+                .select_mode(
+                    &descriptor.modes,
+                    &descriptor.default_mode,
+                    None,
+                    None,
+                    12 * 60
+                )
+                .unwrap(),
+            "light"
+        );
+        assert_eq!(
+            scheduled
+                .select_mode(
+                    &descriptor.modes,
+                    &descriptor.default_mode,
+                    None,
+                    None,
+                    20 * 60
+                )
+                .unwrap(),
+            "dark"
+        );
+    }
+
+    #[test]
+    fn theme_mode_schedule_rejects_invalid_and_ambiguous_entries() {
+        let descriptor = ThemePackDescriptor::new(
+            "@mesh/example-theme:desk",
+            "@mesh/example-theme",
+            "desk",
+            None,
+            "/modules/@mesh/example-theme",
+            [("dark".into(), "themes/dark/theme.css".into())],
+            Some("dark".into()),
+        )
+        .unwrap();
+        for entries in [
+            vec![ThemeModeSchedule {
+                at: "noon".into(),
+                mode: "dark".into(),
+            }],
+            vec![ThemeModeSchedule {
+                at: "08:00".into(),
+                mode: "missing".into(),
+            }],
+            vec![
+                ThemeModeSchedule {
+                    at: "08:00".into(),
+                    mode: "dark".into(),
+                },
+                ThemeModeSchedule {
+                    at: "08:00".into(),
+                    mode: "dark".into(),
+                },
+            ],
+        ] {
+            assert!(
+                ThemeModePolicy::Scheduled { entries }
+                    .select_mode(&descriptor.modes, &descriptor.default_mode, None, None, 0)
+                    .is_err()
+            );
+        }
     }
 
     #[test]

@@ -818,6 +818,7 @@ fn installed_module_graph_indexes_theme_icon_font_i18n_contributions() {
             id: "en".into(),
             locale: "en".into(),
             path: "i18n/en.json".into(),
+            module: Some("@mesh/example-widget".into()),
         }],
         ..MeshContributes::default()
     };

@@ -31,7 +31,11 @@ impl ScriptContext {
 
         self.install_events_api(&mesh_core_events)?;
         self.install_ui_api(globals, &mesh_ui_api)?;
-        self.install_locale_api(&mesh_locale)?;
+        self.install_locale_api(
+            &mesh_locale,
+            manifest.has_locale_read,
+            manifest.has_locale_write,
+        )?;
         self.install_log_api(&mesh_log)?;
         self.install_popover_api(&mesh_popover)?;
 
@@ -120,47 +124,58 @@ impl ScriptContext {
             .map_err(lua_err)
     }
 
-    fn install_locale_api(&mut self, mesh_locale: &Table) -> Result<(), ScriptError> {
-        let service_context_state = Arc::clone(&self.service_context_state);
-        mesh_locale
-            .set(
-                "current",
-                self.lua()
-                    .create_function(move |_lua, ()| {
-                        let locale = {
-                            let state = service_context_state.lock().unwrap();
-                            state
-                                .field("locale", "locale")
-                                .or_else(|| state.field("locale", "current"))
-                        }
-                        .and_then(|value| value.as_str().map(str::to_owned));
-                        Ok(locale.unwrap_or_else(|| "en".to_string()))
-                    })
-                    .map_err(lua_err)?,
-            )
-            .map_err(lua_err)?;
+    fn install_locale_api(
+        &mut self,
+        mesh_locale: &Table,
+        has_locale_read: bool,
+        has_locale_write: bool,
+    ) -> Result<(), ScriptError> {
+        if has_locale_read {
+            let service_context_state = Arc::clone(&self.service_context_state);
+            mesh_locale
+                .set(
+                    "current",
+                    self.lua()
+                        .create_function(move |_lua, ()| {
+                            let locale = {
+                                let state = service_context_state.lock().unwrap();
+                                state
+                                    .field("locale", "locale")
+                                    .or_else(|| state.field("locale", "current"))
+                            }
+                            .and_then(|value| value.as_str().map(str::to_owned));
+                            Ok(locale.unwrap_or_else(|| "en".to_string()))
+                        })
+                        .map_err(lua_err)?,
+                )
+                .map_err(lua_err)?;
+        }
 
-        let published_events_for_locale = Arc::clone(&self.shared_published_events);
-        let pending_side_channels_for_locale = Arc::clone(&self.pending_side_channels);
-        let module_id_for_locale = self.module_id.clone();
-        let capabilities_for_locale = self.capabilities.clone();
-        mesh_locale
-            .set(
-                "set",
-                self.lua()
-                    .create_function(move |_lua, locale: String| {
-                        Self::queue_authorized_event(
-                            &published_events_for_locale,
-                            &pending_side_channels_for_locale,
-                            "shell.set-locale".to_string(),
-                            serde_json::json!({ "locale": locale }),
-                            &module_id_for_locale,
-                            &capabilities_for_locale,
-                        )
-                    })
-                    .map_err(lua_err)?,
-            )
-            .map_err(lua_err)
+        if has_locale_write {
+            let published_events_for_locale = Arc::clone(&self.shared_published_events);
+            let pending_side_channels_for_locale = Arc::clone(&self.pending_side_channels);
+            let module_id_for_locale = self.module_id.clone();
+            let capabilities_for_locale = self.capabilities.clone();
+            mesh_locale
+                .set(
+                    "set",
+                    self.lua()
+                        .create_function(move |_lua, locale: String| {
+                            Self::queue_authorized_event(
+                                &published_events_for_locale,
+                                &pending_side_channels_for_locale,
+                                "shell.set-locale".to_string(),
+                                serde_json::json!({ "locale": locale }),
+                                &module_id_for_locale,
+                                &capabilities_for_locale,
+                            )
+                        })
+                        .map_err(lua_err)?,
+                )
+                .map_err(lua_err)?;
+        }
+
+        Ok(())
     }
 
     fn install_log_api(&mut self, mesh_log: &Table) -> Result<(), ScriptError> {
@@ -359,6 +374,7 @@ impl ScriptContext {
         let allowed_interfaces = manifest.interface_capabilities.clone();
         let has_theme_read = manifest.has_theme_read;
         let has_locale_read = manifest.has_locale_read;
+        let has_locale_write = manifest.has_locale_write;
         let published_events = Arc::clone(&self.shared_published_events);
         let pending_side_channels = Arc::clone(&self.pending_side_channels);
         let tracked_service_fields = Arc::clone(&self.tracked_service_fields);
@@ -372,6 +388,7 @@ impl ScriptContext {
         let pending_diagnostics_for_require = Arc::clone(&self.pending_side_channels);
         let optional_interfaces_for_require = Arc::clone(&self.optional_interfaces);
         let i18n_translations = Arc::clone(&self.i18n_translations);
+        let i18n_locale = Arc::clone(&self.i18n_locale);
         // The per-instance _ENV is the channel-registry scope so interface event
         // channels stay private when components share one thread VM.
         let scope_for_require = globals.clone();
@@ -380,8 +397,35 @@ impl ScriptContext {
             .lua()
             .create_function(move |lua, module: String| {
                 if module == "@mesh/i18n" || module == "mesh.i18n" {
-                    return create_i18n_library(lua, Arc::clone(&i18n_translations))
-                        .map(LuaValue::Table);
+                    if !has_locale_read {
+                        return Err(record_lookup_diagnostic_lua(
+                            &diagnostics_for_require,
+                            &pending_diagnostics_for_require,
+                            &module_id_for_require,
+                            "mesh.i18n",
+                            None,
+                            "capability denied",
+                            ScriptError::CapabilityDenied("mesh.i18n".to_string()),
+                        ));
+                    }
+                    return create_i18n_library(
+                        lua,
+                        Arc::clone(&i18n_translations),
+                        Arc::clone(&i18n_locale),
+                    )
+                    .map(LuaValue::Table);
+                }
+
+                if module == "mesh.locale" && !(has_locale_read || has_locale_write) {
+                    return Err(record_lookup_diagnostic_lua(
+                        &diagnostics_for_require,
+                        &pending_diagnostics_for_require,
+                        &module_id_for_require,
+                        "mesh.locale",
+                        None,
+                        "capability denied",
+                        ScriptError::CapabilityDenied("mesh.locale".to_string()),
+                    ));
                 }
 
                 if let Some(host_api) = resolve_host_api(&mesh_for_require, &module)? {

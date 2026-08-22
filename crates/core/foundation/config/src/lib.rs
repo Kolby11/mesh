@@ -5,6 +5,8 @@ use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+pub use mesh_core_theme::ThemeModePolicy;
+
 pub mod settings;
 pub mod validate;
 
@@ -53,6 +55,7 @@ pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
         FieldKind::Section(&[
             FieldSpec::new("active", FieldKind::Str),
             FieldSpec::new("mode", FieldKind::Str),
+            FieldSpec::new("mode_policy", FieldKind::Opaque),
             FieldSpec::new("tokens", FieldKind::Map(&THEME_TOKEN_VALUE)),
         ]),
     ),
@@ -253,6 +256,8 @@ pub struct ThemeSettings {
     #[serde(default)]
     pub mode: Option<String>,
     #[serde(default)]
+    pub mode_policy: ThemeModePolicy,
+    #[serde(default)]
     pub tokens: HashMap<String, JsonValue>,
 }
 
@@ -261,6 +266,7 @@ impl Default for ThemeSettings {
         Self {
             active: default_theme_id(),
             mode: None,
+            mode_policy: ThemeModePolicy::Manual,
             tokens: HashMap::new(),
         }
     }
@@ -480,6 +486,9 @@ pub enum ConfigError {
 
     #[error("validation error: {0}")]
     Validation(String),
+
+    #[error("settings revision conflict: expected {expected}, found {actual}")]
+    RevisionConflict { expected: u64, actual: u64 },
 }
 
 pub fn default_config_path() -> PathBuf {

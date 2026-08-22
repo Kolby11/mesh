@@ -321,7 +321,11 @@ fn eval_compiled(expr: &CompiledExpr, store: &dyn mesh_core_elements::VariableSt
         }
         CompiledExpr::TranslateExpr(inner) => {
             let resolved = eval_compiled(inner, store).into_string();
-            ExprValue::String(store.translate(&resolved).unwrap_or(resolved))
+            ExprValue::String(
+                store
+                    .translate(&resolved)
+                    .unwrap_or_else(|| format!("!!{resolved}")),
+            )
         }
         CompiledExpr::Literal(s) => ExprValue::String(s.clone()),
         CompiledExpr::LiteralBool(value) => ExprValue::Bool(*value),

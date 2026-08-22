@@ -48,21 +48,11 @@ the monthly log, so they are intentionally absent from the open backlog.
 ### 4. Themes
 
 [Audit](../.planning/log/sections/04-themes/improvements.md)
-- [ ] Make the rendered theme snapshot authoritative for mode, color scheme, contrast, tokens, provenance, and revisioned events.
-- [ ] Make theme snapshots immutable and reject duplicate or ambiguous identities for deterministic caching.
-- [ ] Add explicit manual, follow-system, and scheduled theme mode policies through the same transaction coordinator.
 
 ### 5. Localization and i18n
 
 [Audit](../.planning/log/sections/05-localization-i18n/improvements.md)
 
-- [ ] Replace the global translation pool with owner-scoped translators for templates, scripts, manifests, props, debug data, and settings UI.
-- [ ] Implement an immutable normalized locale selection with BCP 47 parents, direction, complete fallback chain, and revision.
-- [ ] Compile bounded typed message/plural/select entries independently with checked placeholders and shared formatting.
-- [ ] Build one immutable catalog snapshot with atomic graph/profile/selection/reload commits and last-known-good recovery.
-- [ ] Add targeted ordered language-pack chains, per-module defaults, winning-source provenance, and duplicate precedence checks.
-- [ ] Route locale changes through one durable revision-checked settings/profile transaction.
-- [ ] Align `mesh.i18n`, `mesh.locale`, runtime/LSP ABI, and read/write capability enforcement.
 - [ ] Centralize localized metadata and visible miss handling with owner, fallback, source, and snapshot revision.
 - [ ] Open bounded catalogs through contained no-follow source handles and compile them off the shell thread.
 - [ ] Drive locale CLI/LSP/extraction/doctor tooling from the canonical graph, and implement or explicitly reject `<i18n>` blocks.

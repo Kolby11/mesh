@@ -133,8 +133,85 @@ end
 }
 
 #[test]
+fn locale_host_members_are_independently_capability_gated() {
+    fn member_types(caps: CapabilitySet) -> (Value, Value) {
+        let mut ctx = ScriptContext::new("@mesh/locale-capability-test", caps).unwrap();
+        ctx.load_script(
+            r#"
+current_type = type(mesh.locale.current)
+set_type = type(mesh.locale.set)
+"#,
+        )
+        .unwrap();
+        (
+            ctx.state.get("current_type").unwrap().clone(),
+            ctx.state.get("set_type").unwrap().clone(),
+        )
+    }
+
+    assert_eq!(
+        member_types(CapabilitySet::new()),
+        (serde_json::json!("nil"), serde_json::json!("nil"))
+    );
+
+    let mut read = CapabilitySet::new();
+    read.grant(Capability::new("locale.read"));
+    assert_eq!(
+        member_types(read),
+        (serde_json::json!("function"), serde_json::json!("nil"))
+    );
+
+    let mut write = CapabilitySet::new();
+    write.grant(Capability::new("locale.write"));
+    assert_eq!(
+        member_types(write),
+        (serde_json::json!("nil"), serde_json::json!("function"))
+    );
+}
+
+#[test]
+fn locale_and_i18n_requires_are_denied_without_locale_capabilities() {
+    let mut ctx = ScriptContext::new("@mesh/locale-capability-test", CapabilitySet::new()).unwrap();
+    ctx.load_script(
+        r#"
+function init()
+    i18n_ok = pcall(require, "mesh.i18n")
+    locale_ok = pcall(require, "mesh.locale")
+end
+"#,
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+
+    assert_eq!(ctx.state.get("i18n_ok"), Some(serde_json::json!(false)));
+    assert_eq!(ctx.state.get("locale_ok"), Some(serde_json::json!(false)));
+}
+
+#[test]
+fn locale_write_capability_exposes_only_the_write_operation() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("locale.write"));
+    let mut ctx = ScriptContext::new("@mesh/locale-write-test", caps).unwrap();
+    ctx.load_script(
+        r#"
+function init()
+    require("mesh.locale").set("sk")
+end
+"#,
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+
+    let events = ctx.drain_published_events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].channel, "shell.set-locale");
+    assert_eq!(events[0].payload, serde_json::json!({ "locale": "sk" }));
+}
+
+#[test]
 fn require_resolves_mesh_i18n_library_alias() {
-    let caps = CapabilitySet::new();
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("locale.read"));
     let mut ctx = ScriptContext::new("@mesh/i18n-test", caps).unwrap();
     ctx.set_i18n_translations(HashMap::from([(
         "nav.volume".to_string(),
@@ -178,7 +255,8 @@ module_source = ModuleChild.source
 
 #[test]
 fn import_named_returns_selected_field() {
-    let caps = CapabilitySet::new();
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("locale.read"));
     let mut ctx = ScriptContext::new("@mesh/import-test", caps).unwrap();
     ctx.set_i18n_translations(HashMap::from([(
         "nav.volume".to_string(),
@@ -203,6 +281,7 @@ end
 fn import_multiple_named_returns_in_order() {
     let mut caps = CapabilitySet::new();
     caps.grant(Capability::new("locale.read"));
+    caps.grant(Capability::new("locale.write"));
     let mut ctx = ScriptContext::new("@mesh/import-multi", caps).unwrap();
     ctx.load_script(
         r#"
@@ -229,7 +308,8 @@ end
 
 #[test]
 fn import_with_no_names_is_equivalent_to_require() {
-    let caps = CapabilitySet::new();
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("locale.read"));
     let mut ctx = ScriptContext::new("@mesh/import-default", caps).unwrap();
     ctx.set_i18n_translations(HashMap::from([(
         "nav.audio".to_string(),
@@ -252,7 +332,8 @@ end
 
 #[test]
 fn import_renames_freely() {
-    let caps = CapabilitySet::new();
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("locale.read"));
     let mut ctx = ScriptContext::new("@mesh/import-rename", caps).unwrap();
     ctx.set_i18n_translations(HashMap::from([(
         "nav.battery".to_string(),
@@ -275,7 +356,8 @@ end
 
 #[test]
 fn mesh_i18n_updates_existing_function_after_catalog_refresh() {
-    let caps = CapabilitySet::new();
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("locale.read"));
     let mut ctx = ScriptContext::new("@mesh/i18n-refresh", caps).unwrap();
     ctx.set_i18n_translations(HashMap::from([(
         "nav.volume".to_string(),

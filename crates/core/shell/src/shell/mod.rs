@@ -57,6 +57,7 @@ use mesh_core_render::{DebugOverlay, PixelBuffer};
 use sounds::{SoundKind, shell_sound_request};
 use surface_layout::{
     apply_font_family, default_surface_visibility, load_active_theme, prepare_theme_for_graph,
+    selected_theme_mode,
 };
 use types::{
     CommandThrottleState, CompiledContractField, ComponentRuntime, ContractValidationCache,
@@ -418,6 +419,9 @@ pub struct Shell {
     frontend_catalog: component::FrontendCatalogHandle,
     module_dirs: Vec<PathBuf>,
     core: ShellCoreState,
+    /// Last rendered snapshot sent through the authoritative theme interface.
+    /// It is the baseline for deterministic revisioned token events.
+    last_published_theme_snapshot: Option<mesh_core_theme::ThemeSnapshot>,
     components: Vec<ComponentRuntime>,
     components_want_render: bool,
     /// True after a component presented; false after a render pass with zero
@@ -541,6 +545,9 @@ pub enum ShellRunError {
 
     #[error(transparent)]
     ModuleGraph(#[from] mesh_core_module::package::ModuleManifestError),
+
+    #[error("locale catalog preparation failed: {0}")]
+    LocaleCatalog(String),
 
     #[error("{message}")]
     FrontendComposition { message: String },

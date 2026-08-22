@@ -302,6 +302,7 @@ pub struct InstalledModuleGraph {
     node_slots:
         std::collections::BTreeMap<String, std::collections::BTreeMap<String, NodeSlotOverride>>,
     layout_entrypoint: Option<ResolvedLayoutEntrypoint>,
+    language_pack_chain: Vec<String>,
 }
 
 /// The normalized, user-facing change set between two resolved graphs.
@@ -347,6 +348,11 @@ pub struct CompositionContext {
     pub node_slots:
         std::collections::BTreeMap<String, std::collections::BTreeMap<String, NodeSlotOverride>>,
     pub orphaned_overrides: Vec<String>,
+    /// Ordered language-pack module ids selected by the active profile. `None`
+    /// means legacy/no-profile operation, where enabled packs are sorted by
+    /// module id for deterministic behavior; `Some(empty)` intentionally
+    /// selects no language packs.
+    pub language_pack_chain: Option<Vec<String>>,
 }
 
 impl InstalledModuleGraph {
@@ -807,6 +813,66 @@ impl InstalledModuleGraph {
             }
         }
 
+        let language_pack_chain = if composition.language_pack_chain.is_none() {
+            let mut defaults = graph_modules
+                .values()
+                .filter(|module| module.enabled && module.kind == ModuleKind::LanguagePack)
+                .map(|module| module.id.clone())
+                .collect::<Vec<_>>();
+            defaults.sort();
+            defaults
+        } else {
+            let mut seen = BTreeSet::new();
+            let configured = composition
+                .language_pack_chain
+                .as_ref()
+                .expect("checked that the language-pack chain is configured");
+            for module_id in configured {
+                if !seen.insert(module_id) {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "language-pack chain contains duplicate module '{module_id}', which would make precedence ambiguous"
+                    )));
+                }
+                let Some(module) = graph_modules.get(module_id) else {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "language-pack chain references missing module {module_id}"
+                    )));
+                };
+                if module.kind != ModuleKind::LanguagePack {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "language-pack chain entry {module_id} is {:?}, not a language-pack",
+                        module.kind
+                    )));
+                }
+                if !module.enabled {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "language-pack chain entry {module_id} is not active"
+                    )));
+                }
+            }
+            configured.clone()
+        };
+
+        for contribution in &contributions.i18n {
+            if contribution.target_module_id == contribution.module_id {
+                continue;
+            }
+            if !graph_modules
+                .get(&contribution.target_module_id)
+                .is_some_and(|module| module.enabled)
+            {
+                manual_diagnostics.push(ModuleGraphDiagnostic {
+                    module_id: contribution.module_id.clone(),
+                    contribution_id: Some(contribution.source.scoped_id.clone()),
+                    status: "i18n_target_unavailable".into(),
+                    message: format!(
+                        "language-pack catalog {} targets {}, but that module is not active",
+                        contribution.source.scoped_id, contribution.target_module_id
+                    ),
+                });
+            }
+        }
+
         let theme_descriptors = contributions
             .themes
             .iter()
@@ -970,6 +1036,7 @@ impl InstalledModuleGraph {
             extension_points,
             node_slots: composition.node_slots,
             layout_entrypoint,
+            language_pack_chain,
         })
     }
 
@@ -1045,6 +1112,13 @@ impl InstalledModuleGraph {
                 "layout: {} -> {}",
                 before_layout.as_deref().unwrap_or("none"),
                 after_layout.as_deref().unwrap_or("none")
+            ));
+        }
+        if self.language_pack_chain != next.language_pack_chain {
+            diff.profile_effects.push(format!(
+                "languages: {} -> {}",
+                self.language_pack_chain.join(","),
+                next.language_pack_chain.join(",")
             ));
         }
 
@@ -1219,6 +1293,11 @@ impl InstalledModuleGraph {
 
     pub fn contributed_i18n(&self) -> &[ContributedI18n] {
         &self.contributions.i18n
+    }
+
+    /// The effective ordered language-pack chain for the active graph.
+    pub fn language_pack_chain(&self) -> &[String] {
+        &self.language_pack_chain
     }
 
     pub fn contributed_libraries(&self) -> &[ContributedLibrary] {

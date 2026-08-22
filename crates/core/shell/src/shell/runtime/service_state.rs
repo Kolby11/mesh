@@ -622,6 +622,31 @@ impl Shell {
         self.service_delivery_index = index;
     }
 
+    /// Deliver an interface event produced by the shell itself. Shell-owned
+    /// snapshots do not have to impersonate a backend provider, but they still
+    /// use the same contract validation and capability-filtered delivery path.
+    pub(in crate::shell) fn broadcast_shell_interface_event(
+        &mut self,
+        interface: &str,
+        name: &str,
+        payload: serde_json::Value,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let warnings = self.service_event_contract_warnings(interface, name, &payload);
+        if !warnings.is_empty() {
+            for warning in warnings {
+                self.record_service_contract_warning(interface, "@mesh/shell", warning);
+            }
+            return Ok(VecDeque::new());
+        }
+
+        self.deliver_service_event(&ServiceEvent::InterfaceEvent {
+            service: interface.to_string(),
+            source_module: "@mesh/shell".to_string(),
+            name: name.to_string(),
+            payload,
+        })
+    }
+
     pub(in crate::shell) fn broadcast_backend_interface_event(
         &mut self,
         interface: String,

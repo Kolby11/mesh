@@ -102,11 +102,18 @@ pub static MESH_API_ENTRIES: &[MeshApiEntry] = &[
         description: "Resolve a theme token to its current value (e.g. a color hex string).",
         backend_only: false,
     },
-    // Locale
+    // Locale selection. Translation is module-scoped and is exposed through
+    // `import("mesh.i18n", "t")`, not through the locale state API.
     MeshApiEntry {
-        path: "locale.translate",
-        signature: "mesh.locale.translate(key: string, params: table?) -> string",
-        description: "Translate a string key using the active locale.",
+        path: "locale.current",
+        signature: "mesh.locale.current() -> string",
+        description: "Read the active locale (requires the locale.read capability).",
+        backend_only: false,
+    },
+    MeshApiEntry {
+        path: "locale.set",
+        signature: "mesh.locale.set(locale: string)",
+        description: "Request a locale change (requires the locale.write capability).",
         backend_only: false,
     },
     // UI

@@ -191,6 +191,89 @@ fn invalid_graph_reload_keeps_the_last_known_good_graph() {
     );
 }
 
+fn locale_graph_fixture(root: &std::path::Path) -> InstalledModuleGraph {
+    let module_root = root.join("locale-module");
+    fs::create_dir_all(module_root.join("config/i18n")).unwrap();
+    let manifest = ModuleManifest::from_json_str(
+        r#"{
+            "name": "@test/locale",
+            "version": "0.1.0",
+            "mesh": {
+                "apiVersion": "0.1",
+                "kind": "library",
+                "provides": {
+                    "i18n": [
+                        { "id": "en", "locale": "en", "path": "config/i18n/en.json" }
+                    ]
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+    let loaded = LoadedModuleManifest {
+        manifest,
+        path: module_root.join("module.json"),
+        source: ModuleManifestSource::CanonicalModuleJson,
+        diagnostics: Vec::new(),
+    };
+    let root_manifest = RootModuleGraphManifest::from_json_str(
+        r#"{
+            "name": "@mesh/test-config",
+            "version": "0.1.0",
+            "mesh": {
+                "schemaVersion": 1,
+                "modulesDir": "modules",
+                "modules": {
+                    "@test/locale": {
+                        "kind": "library",
+                        "path": "locale-module",
+                        "enabled": true
+                    }
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+    InstalledModuleGraph::from_parts(root_manifest, vec![loaded]).unwrap()
+}
+
+#[test]
+fn graph_locale_commit_replaces_catalog_and_retains_last_known_good_on_failure() {
+    let root = tempfile::tempdir().unwrap();
+    let catalog_path = root.path().join("locale-module/config/i18n/en.json");
+    fs::write(&catalog_path, r#"{ "hello": "Hello" }"#).unwrap();
+    let graph = locale_graph_fixture(root.path());
+
+    let mut shell = Shell::new();
+    shell.commit_installed_module_graph(graph.clone()).unwrap();
+    let revision = shell.locale.catalog_snapshot().revision();
+    assert_eq!(
+        shell
+            .locale
+            .module_translator("@test/locale")
+            .translate("hello"),
+        Some("Hello")
+    );
+
+    fs::write(&catalog_path, "{ malformed").unwrap();
+    let replacement = locale_graph_fixture(root.path());
+    assert!(shell.commit_installed_module_graph(replacement).is_err());
+    assert_eq!(shell.locale.catalog_snapshot().revision(), revision);
+    assert_eq!(
+        shell
+            .locale
+            .module_translator("@test/locale")
+            .translate("hello"),
+        Some("Hello")
+    );
+    assert!(
+        shell
+            .installed_module_graph
+            .as_ref()
+            .is_some_and(|active| active.module("@test/locale").is_some())
+    );
+}
+
 #[test]
 fn core_crate_boundaries_do_not_regress() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");

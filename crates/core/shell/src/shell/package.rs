@@ -167,7 +167,7 @@ impl Shell {
         {
             self.module_dirs.push(modules_dir.clone());
         }
-        self.commit_installed_module_graph(graph);
+        self.commit_installed_module_graph(graph)?;
         self.discover_modules();
         self.resolve_modules()?;
 
@@ -268,6 +268,7 @@ impl Shell {
             let mut profile = paths
                 .load(&profile_id)
                 .map_err(|error| package_error(error.to_string()))?;
+            let expected_revision = profile.revision;
             if !profile_references_module(&profile, module_id) {
                 continue;
             }
@@ -278,7 +279,7 @@ impl Shell {
             }
             remove_module_from_profile(&mut profile, module_id);
             paths
-                .save(&profile_id, &profile)
+                .save_if_revision(&profile_id, &profile, expected_revision)
                 .map_err(|error| package_error(error.to_string()))?;
             changed_profiles.push(profile_id);
         }
@@ -344,8 +345,8 @@ impl Shell {
         // Do not remove the in-memory module or its live runtime until the
         // replacement graph has loaded successfully. A broken on-disk
         // candidate must leave the last-known-good activation coherent.
+        self.commit_installed_module_graph(new_graph.clone())?;
         self.modules.remove(module_id);
-        self.commit_installed_module_graph(new_graph.clone());
         self.discover_modules();
         self.resolve_modules()?;
         self.register_interfaces_from_graph(&new_graph);
@@ -427,12 +428,13 @@ impl Shell {
                 let mut profile = paths
                     .load_or_default(&profile_id)
                     .map_err(|error| package_error(error.to_string()))?;
+                let expected_revision = profile.revision;
                 profile.from = Some(mesh_core_module::package::CompositionRef {
                     module: manifest.name.clone(),
                     version: Some(manifest.version.clone()),
                 });
                 paths
-                    .save(&profile_id, &profile)
+                    .save_if_revision(&profile_id, &profile, expected_revision)
                     .map_err(|error| package_error(error.to_string()))?;
                 if self.active_profile_id.as_deref() == Some(profile_id.as_str())
                     || self.active_profile_id.is_none()
@@ -453,6 +455,7 @@ impl Shell {
                 let mut profile = paths
                     .load_or_default(&profile_id)
                     .map_err(|error| package_error(error.to_string()))?;
+                let expected_revision = profile.revision;
                 profile
                     .add_frontend(manifest)
                     .map_err(|error| package_error(error.to_string()))?;
@@ -467,7 +470,7 @@ impl Shell {
                     .active_module_ids(manifests.iter())
                     .map_err(|error| package_error(error.to_string()))?;
                 paths
-                    .save(&profile_id, &profile)
+                    .save_if_revision(&profile_id, &profile, expected_revision)
                     .map_err(|error| package_error(error.to_string()))?;
                 if self.active_profile_id.as_deref() == Some(profile_id.as_str())
                     || self.active_profile_id.is_none()

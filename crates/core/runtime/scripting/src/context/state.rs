@@ -1,5 +1,5 @@
 use mesh_core_elements::VariableStore;
-use mesh_core_locale::LocaleEngine;
+use mesh_core_locale::ModuleTranslator;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
@@ -481,18 +481,18 @@ impl fmt::Debug for ScriptState {
 ///
 /// Pass this to `build_preview_tree_with_state` so that template expressions
 /// like `{t("greeting")}` resolve through the active locale engine.
-pub struct LocaleBoundState<'a> {
-    state: &'a ScriptState,
-    locale: &'a LocaleEngine,
+pub struct LocaleBoundState<'state, 'locale> {
+    state: &'state ScriptState,
+    translator: ModuleTranslator<'locale>,
 }
 
-impl<'a> LocaleBoundState<'a> {
-    pub fn new(state: &'a ScriptState, locale: &'a LocaleEngine) -> Self {
-        Self { state, locale }
+impl<'state, 'locale> LocaleBoundState<'state, 'locale> {
+    pub fn new(state: &'state ScriptState, translator: ModuleTranslator<'locale>) -> Self {
+        Self { state, translator }
     }
 }
 
-impl<'a> VariableStore for LocaleBoundState<'a> {
+impl VariableStore for LocaleBoundState<'_, '_> {
     fn get(&self, name: &str) -> Option<Value> {
         self.state.get(name)
     }
@@ -506,6 +506,6 @@ impl<'a> VariableStore for LocaleBoundState<'a> {
     }
 
     fn translate(&self, key: &str) -> Option<String> {
-        self.locale.translate(key).map(str::to_string)
+        Some(self.translator.resolve(key, None).text)
     }
 }

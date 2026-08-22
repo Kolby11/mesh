@@ -118,11 +118,12 @@ pub(super) fn write_composed_provider_selection(
     let mut profile = paths
         .load(&profile_id)
         .map_err(|error| ModuleConfigWriteError::InvalidSelection(error.to_string()))?;
+    let expected_revision = profile.revision;
     profile
         .providers
         .insert(interface.to_string(), provider_id.to_string());
     paths
-        .save(&profile_id, &profile)
+        .save_if_revision(&profile_id, &profile, expected_revision)
         .map_err(|error| ModuleConfigWriteError::InvalidSelection(error.to_string()))
 }
 
@@ -227,6 +228,7 @@ pub(super) fn write_composed_module_enabled(
     let mut profile = paths
         .load(&profile_id)
         .map_err(|error| ModuleConfigWriteError::InvalidSelection(error.to_string()))?;
+    let expected_revision = profile.revision;
 
     match kind {
         ModuleKind::Frontend => {
@@ -270,7 +272,7 @@ pub(super) fn write_composed_module_enabled(
     }
 
     paths
-        .save(&profile_id, &profile)
+        .save_if_revision(&profile_id, &profile, expected_revision)
         .map_err(|error| ModuleConfigWriteError::InvalidSelection(error.to_string()))?;
     Ok(ModuleConfigRollback {
         path: profile_path,

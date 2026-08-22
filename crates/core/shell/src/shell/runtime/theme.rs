@@ -16,13 +16,8 @@ fn theme_source_fingerprint(shell: &Shell) -> Result<u64, mesh_core_theme::Theme
             .theme_catalog()
             .get(&shell.settings.theme.active)
             .expect("catalog presence checked");
-        let mode = shell
-            .settings
-            .theme
-            .mode
-            .as_deref()
-            .unwrap_or(&descriptor.default_mode);
-        let source = descriptor.mode(mode).ok_or_else(|| {
+        let mode = selected_theme_mode(&shell.settings, descriptor)?;
+        let source = descriptor.mode(&mode).ok_or_else(|| {
             mesh_core_theme::ThemeError::Composition(format!(
                 "theme '{}' has no mode '{mode}'",
                 descriptor.id
@@ -97,8 +92,9 @@ impl Shell {
 
         let path = self.settings_watch.path.clone();
         let result = SettingsStore::load_from(&path).and_then(|mut shared| {
+            let expected_revision = shared.revision();
             shared.merge_namespace(mesh_core_config::SHELL_NAMESPACE, &patch);
-            shared.save()
+            shared.save_if_revision(expected_revision)
         });
         match result {
             Ok(()) => {
@@ -153,12 +149,27 @@ impl Shell {
             }
         };
 
+        let selected_mode = self
+            .installed_module_graph
+            .as_ref()
+            .and_then(|graph| graph.theme_catalog().get(&self.settings.theme.active))
+            .map(|descriptor| selected_theme_mode(&self.settings, descriptor))
+            .transpose();
+        let selected_mode = match selected_mode {
+            Ok(mode) => mode,
+            Err(error) => {
+                self.record_theme_reload_failure(&error);
+                return Ok(VecDeque::new());
+            }
+        };
+
         let modified_at = std::fs::metadata(&self.theme_watch.path)
             .ok()
             .and_then(|metadata| metadata.modified().ok());
 
         if self.theme_watch.fingerprint == Some(fingerprint)
             && self.theme_watch.modified_at == modified_at
+            && self.theme_watch.mode == selected_mode
         {
             return Ok(VecDeque::new());
         }
@@ -232,7 +243,7 @@ impl Shell {
     }
 
     pub(in crate::shell) fn mark_components_theme_changed(&mut self) -> Result<(), ShellRunError> {
-        let snapshot = self.theme.active().snapshot();
+        let snapshot = self.theme.active_snapshot().clone();
         for runtime in &mut self.components {
             runtime
                 .component
@@ -330,8 +341,9 @@ impl Shell {
         self.persist_shell_appearance_override(serde_json::json!({
             "fonts": { "ui_family": family }
         }));
-        apply_font_family(self.theme.active_mut(), Some(family));
-        self.theme_watch.revision = self.theme.active().revision();
+        self.theme
+            .update_active(|theme| apply_font_family(theme, Some(family)));
+        self.theme_watch.revision = self.theme.active_snapshot().revision;
         self.mark_components_theme_changed()?;
         let mut requests = self.sync_theme_service_state()?;
         requests.extend(self.sync_settings_service_state()?);
@@ -341,7 +353,8 @@ impl Shell {
     pub(in crate::shell) fn sync_theme_service_state(
         &mut self,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
-        let snapshot = self.theme.active().snapshot();
+        let snapshot = self.theme.active_snapshot().clone();
+        let previous_snapshot = self.last_published_theme_snapshot.clone();
         let theme_id = snapshot.id.clone();
         let is_dark = snapshot.color_scheme.eq_ignore_ascii_case("dark");
         let mut themes = self
@@ -378,13 +391,14 @@ impl Shell {
             .map(str::to_owned)
             .collect::<Vec<_>>();
         let payload = serde_json::json!({
-            "current": snapshot.id,
-            "theme_id": snapshot.id,
-            "mode": snapshot.mode,
-            "color_scheme": snapshot.color_scheme,
-            "contrast": snapshot.contrast,
-            "tokens": snapshot.tokens,
-            "provenance": snapshot.provenance,
+            "current": snapshot.id.clone(),
+            "theme_id": snapshot.id.clone(),
+            "mode": snapshot.mode.clone(),
+            "mode_policy": self.settings.theme.mode_policy.clone(),
+            "color_scheme": snapshot.color_scheme.clone(),
+            "contrast": snapshot.contrast.clone(),
+            "tokens": snapshot.tokens.clone(),
+            "provenance": snapshot.provenance.clone(),
             "revision": format!("{:016x}", snapshot.revision),
             "fingerprint": self.theme_watch.fingerprint,
             "is_dark": is_dark,
@@ -403,11 +417,59 @@ impl Shell {
                 coalesce: true,
             });
         }
-        self.broadcast_service_event(ServiceEvent::Updated {
+        let mut requests = self.broadcast_service_event(ServiceEvent::Updated {
             service: "mesh.theme".into(),
             source_module: source_module.into(),
             payload,
-        })
+        })?;
+
+        if let Some(previous_snapshot) = previous_snapshot.as_ref()
+            && previous_snapshot != &snapshot
+        {
+            let changed_tokens = snapshot
+                .changed_token_names(previous_snapshot)
+                .into_iter()
+                .map(|name| {
+                    serde_json::json!({
+                        "name": name,
+                        "value": snapshot.tokens.get(&name),
+                        "provenance": snapshot.provenance.get(&name),
+                    })
+                })
+                .collect::<Vec<_>>();
+            let revision = format!("{:016x}", snapshot.revision);
+            requests.extend(self.broadcast_shell_interface_event(
+                "mesh.theme",
+                "ThemeChanged",
+                serde_json::json!({
+                    "theme_id": snapshot.id.clone(),
+                    "mode": snapshot.mode.clone(),
+                    "mode_policy": self.settings.theme.mode_policy.clone(),
+                    "color_scheme": snapshot.color_scheme.clone(),
+                    "contrast": snapshot.contrast.clone(),
+                    "revision": revision.clone(),
+                    "tokens": snapshot.tokens.clone(),
+                    "provenance": snapshot.provenance.clone(),
+                    "changed_tokens": changed_tokens,
+                }),
+            )?);
+            for name in snapshot.changed_token_names(previous_snapshot) {
+                requests.extend(self.broadcast_shell_interface_event(
+                    "mesh.theme",
+                    "TokenChanged",
+                    serde_json::json!({
+                        "theme_id": snapshot.id.clone(),
+                        "mode": snapshot.mode.clone(),
+                        "name": name,
+                        "value": snapshot.tokens.get(&name),
+                        "provenance": snapshot.provenance.get(&name),
+                        "revision": revision.clone(),
+                    }),
+                )?);
+            }
+        }
+        self.last_published_theme_snapshot = Some(snapshot);
+        Ok(requests)
     }
 
     pub(in crate::shell) fn reload_locale_if_settings_changed(
@@ -482,6 +544,30 @@ impl Shell {
         let locale_changed = old_i18n.locale != new_i18n.locale
             || old_i18n.fallback_locale != new_i18n.fallback_locale;
 
+        let prepared_locale = if locale_changed {
+            let result = if let Some(graph) = self.installed_module_graph.as_ref() {
+                self.prepare_locale_for_settings(&new_settings, graph)
+            } else {
+                self.prepare_locale_selection_for_settings(&new_settings)
+            };
+            match result {
+                Ok(candidate) => Some(candidate),
+                Err(error) => {
+                    tracing::warn!(
+                        "locale settings reload rejected; retaining prior snapshot: {error}"
+                    );
+                    self.diagnostics.record_lifecycle_error(
+                        "@mesh/shell",
+                        "locale_reload_rejected",
+                        error.to_string(),
+                    );
+                    return Ok(requests);
+                }
+            }
+        } else {
+            None
+        };
+
         let theme_changed = old_theme != new_settings.theme || old_fonts != new_settings.fonts;
         if theme_changed {
             let (theme, theme_watch) = if let Some(graph) =
@@ -528,10 +614,8 @@ impl Shell {
                 new_i18n.locale,
                 new_i18n.fallback_locale,
             );
-            self.locale = LocaleEngine::with_fallback_locale(
-                new_i18n.locale.clone(),
-                new_i18n.fallback_locale.clone(),
-            );
+            self.locale =
+                prepared_locale.expect("locale candidate was prepared when settings changed");
             self.mark_components_locale_changed()?;
             requests.extend(self.sync_locale_service_state()?);
         }
@@ -589,19 +673,161 @@ impl Shell {
             tracing::warn!("ignoring empty locale request");
             return Ok(VecDeque::new());
         }
-        if self.locale.current() == locale {
+        let candidate = match self.prepare_and_persist_locale_change(locale) {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                tracing::warn!(%error, "locale change transaction rejected");
+                self.diagnostics.record_lifecycle_error(
+                    "@mesh/shell",
+                    "locale_change_rejected",
+                    error.to_string(),
+                );
+                return self.sync_locale_service_state();
+            }
+        };
+        let Some((settings, locale)) = candidate else {
             return self.sync_locale_service_state();
-        }
-        tracing::info!("active locale changed to '{locale}'");
-        self.locale.set_locale(locale);
+        };
+
+        tracing::info!("active locale changed to '{}'", locale.current());
+        self.settings_store = Arc::new(settings);
+        self.settings = self.settings_store.shell().clone();
+        self.locale = locale;
+        self.settings_watch.modified_at = std::fs::metadata(&self.settings_watch.path)
+            .ok()
+            .and_then(|metadata| metadata.modified().ok());
         self.mark_components_locale_changed()?;
         self.sync_locale_service_state()
+    }
+
+    /// Prepare the normalized locale and complete catalog before committing a
+    /// durable shared-settings or active-profile write. The runtime remains
+    /// unchanged when validation, catalog preparation, or revision checking
+    /// rejects the candidate.
+    fn prepare_and_persist_locale_change(
+        &self,
+        requested_locale: &str,
+    ) -> Result<Option<(SettingsStore, LocaleEngine)>, ShellRunError> {
+        let graph = self.installed_module_graph.as_ref();
+        let shared_path = self.settings_store.path().to_path_buf();
+        let shared = SettingsStore::load_from(&shared_path).map_err(|error| {
+            ShellRunError::Package(format!("failed to load locale settings: {error}"))
+        })?;
+        let profile_id = self.active_profile_id.clone();
+
+        let shared_revision = shared.revision();
+        let (mut candidate, profile_commit) = if let Some(profile_id) = profile_id {
+            let paths = mesh_core_module::package::ProfilePaths::from_root_graph(
+                &self.installed_module_graph_path(),
+            )
+            .map_err(|error| ShellRunError::Package(error.to_string()))?;
+            let mut profile = paths
+                .load(&profile_id)
+                .map_err(|error| ShellRunError::Package(error.to_string()))?;
+            let expected_revision = profile.revision;
+            let effective_before =
+                super::super::discovery::effective_profile_settings(shared.clone(), Some(&profile))
+                    .map_err(|error| ShellRunError::Package(error.to_string()))?;
+            let normalized = mesh_core_locale::LocaleSelection::try_new(
+                requested_locale,
+                effective_before.shell().i18n.fallback_locale.clone(),
+                0,
+            )
+            .map_err(|error| ShellRunError::LocaleCatalog(error.to_string()))?;
+            if normalized.active() == self.locale.current()
+                && normalized.fallback() == self.locale.fallback_locale()
+            {
+                return Ok(None);
+            }
+
+            let shell = profile
+                .settings
+                .entry(mesh_core_config::SHELL_NAMESPACE.to_string())
+                .or_insert_with(|| serde_json::json!({}));
+            mesh_core_config::merge_json(
+                shell,
+                &serde_json::json!({
+                    "i18n": {
+                        "locale": normalized.active(),
+                        "fallback_locale": normalized.fallback(),
+                    }
+                }),
+            );
+            let candidate =
+                super::super::discovery::effective_profile_settings(shared, Some(&profile))
+                    .map_err(|error| ShellRunError::Package(error.to_string()))?;
+            (
+                candidate,
+                Some((paths, profile_id, profile, expected_revision)),
+            )
+        } else {
+            let normalized = mesh_core_locale::LocaleSelection::try_new(
+                requested_locale,
+                shared.shell().i18n.fallback_locale.clone(),
+                0,
+            )
+            .map_err(|error| ShellRunError::LocaleCatalog(error.to_string()))?;
+            if normalized.active() == self.locale.current()
+                && normalized.fallback() == self.locale.fallback_locale()
+            {
+                return Ok(None);
+            }
+            let mut candidate = shared;
+            candidate.merge_namespace(
+                mesh_core_config::SHELL_NAMESPACE,
+                &serde_json::json!({
+                    "i18n": {
+                        "locale": normalized.active(),
+                        "fallback_locale": normalized.fallback(),
+                    }
+                }),
+            );
+            (
+                candidate,
+                None::<(
+                    mesh_core_module::package::ProfilePaths,
+                    String,
+                    mesh_core_module::package::ShellProfile,
+                    u64,
+                )>,
+            )
+        };
+
+        if let Some(graph) = graph {
+            super::super::discovery::register_graph_settings_schemas(&mut candidate, graph)
+                .map_err(|error| ShellRunError::Package(error.to_string()))?;
+        }
+        let locale = if let Some(graph) = graph {
+            self.prepare_locale_for_settings(candidate.shell(), graph)?
+        } else {
+            self.prepare_locale_selection_for_settings(candidate.shell())?
+        };
+
+        if let Some((paths, profile_id, profile, expected_revision)) = profile_commit {
+            SettingsStore::load_from(&shared_path)
+                .map_err(|error| ShellRunError::Package(error.to_string()))?
+                .check_revision(shared_revision)
+                .map_err(|error| ShellRunError::Package(error.to_string()))?;
+            paths
+                .save_if_revision(&profile_id, &profile, expected_revision)
+                .map_err(|error| ShellRunError::Package(error.to_string()))?;
+        } else {
+            let expected_revision = candidate.revision();
+            candidate
+                .save_if_revision(expected_revision)
+                .map_err(|error| ShellRunError::Package(error.to_string()))?;
+        }
+        Ok(Some((candidate, locale)))
     }
 
     pub(in crate::shell) fn sync_locale_service_state(
         &mut self,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
-        let locale = self.locale.current().to_string();
+        let selection = self.locale.selection();
+        let locale = selection.active().to_string();
+        let chain = selection.chain().to_vec();
+        let direction = selection.direction().as_str();
+        let revision = selection.revision().to_string();
         // As with theme, the shell supplies the host-derived snapshot while
         // the selected provider owns the interface state observed by modules.
         let source_module = self.active_service_provider_or("mesh.locale", "@mesh/shell");
@@ -610,7 +836,10 @@ impl Shell {
             source_module,
             payload: serde_json::json!({
                 "locale": locale.clone(),
-                "current": locale
+                "current": locale,
+                "chain": chain,
+                "direction": direction,
+                "revision": revision,
             }),
         })
     }

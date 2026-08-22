@@ -2,7 +2,7 @@ use super::component::{FrontendCatalog, FrontendCatalogHandle, FrontendSurfaceCo
 use super::*;
 use mesh_core_module::ModuleHealthRecord;
 use rayon::prelude::*;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 const BUILTIN_DEBUG_INSPECTOR_ID: &str = "@mesh/debug-inspector";
 
@@ -21,6 +21,107 @@ fn load_installed_module_graph_candidate(
     root_module_graph_path: &Path,
 ) -> Result<InstalledModuleGraph, mesh_core_module::package::ModuleManifestError> {
     load_installed_module_graph(root_module_graph_path)
+}
+
+pub(in crate::shell) fn graph_i18n_catalog_sources(
+    graph: &InstalledModuleGraph,
+) -> (
+    Vec<mesh_core_locale::CatalogSource>,
+    HashMap<String, String>,
+) {
+    let selected_packs = graph
+        .language_pack_chain()
+        .iter()
+        .cloned()
+        .collect::<HashSet<_>>();
+    let mut bundled = graph
+        .contributed_i18n()
+        .iter()
+        .filter(|catalog| {
+            catalog.target_module_id == catalog.module_id
+                && !graph
+                    .module(&catalog.module_id)
+                    .is_some_and(|module| module.kind == mesh_core_module::ModuleKind::LanguagePack)
+        })
+        .collect::<Vec<_>>();
+    bundled.sort_by(|left, right| {
+        left.target_module_id
+            .cmp(&right.target_module_id)
+            .then_with(|| left.locale.cmp(&right.locale))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    let mut sources = bundled
+        .into_iter()
+        .filter_map(|catalog| {
+            let module_dir = catalog.source.manifest_path.parent()?;
+            Some(mesh_core_locale::CatalogSource::module(
+                catalog.module_id.clone(),
+                catalog.id.clone(),
+                catalog.locale.clone(),
+                module_dir.join(&catalog.path),
+            ))
+        })
+        .collect::<Vec<_>>();
+
+    for pack_module_id in graph.language_pack_chain() {
+        let mut pack_catalogs = graph
+            .contributed_i18n()
+            .iter()
+            .filter(|catalog| {
+                catalog.module_id == *pack_module_id
+                    && selected_packs.contains(&catalog.module_id)
+                    && catalog.target_module_id != catalog.module_id
+                    && graph
+                        .module(&catalog.target_module_id)
+                        .is_some_and(|module| module.enabled)
+            })
+            .collect::<Vec<_>>();
+        pack_catalogs.sort_by(|left, right| left.id.cmp(&right.id));
+        for catalog in pack_catalogs {
+            let Some(module_dir) = catalog.source.manifest_path.parent() else {
+                continue;
+            };
+            sources.push(mesh_core_locale::CatalogSource::language_pack(
+                catalog.module_id.clone(),
+                catalog.target_module_id.clone(),
+                catalog.id.clone(),
+                catalog.locale.clone(),
+                module_dir.join(&catalog.path),
+            ));
+        }
+    }
+
+    let defaults = graph
+        .modules()
+        .into_iter()
+        .filter(|module| module.enabled)
+        .filter_map(|module| {
+            module
+                .manifest
+                .mesh
+                .i18n
+                .default_locale
+                .clone()
+                .map(|locale| (module.id.clone(), locale))
+        })
+        .collect();
+    (sources, defaults)
+}
+
+fn log_locale_catalog_diagnostics(diagnostics: &[mesh_core_locale::CatalogSourceDiagnostics]) {
+    for source in diagnostics {
+        for diagnostic in &source.diagnostics {
+            tracing::warn!(
+                module_id = %source.module_id,
+                locale = %source.locale,
+                path = %source.path.display(),
+                key = %diagnostic.key,
+                "locale catalog entry rejected: {}",
+                diagnostic.message,
+            );
+        }
+    }
 }
 
 /// Layer a profile's sparse preferences and per-instance surface overrides on
@@ -435,12 +536,13 @@ impl Shell {
         };
 
         let interfaces = InterfaceRegistry::new();
-        interfaces.register_contract(builtin_contract(
+        let mut theme_contract = builtin_contract(
             "mesh.theme",
             &[
                 ("current", "string"),
                 ("theme_id", "string"),
                 ("mode", "string?"),
+                ("mode_policy", "object?"),
                 ("color_scheme", "string?"),
                 ("contrast", "string?"),
                 ("tokens", "object?"),
@@ -457,13 +559,59 @@ impl Shell {
                 ("set_icon_theme", &[("theme_id", "string")]),
                 ("set_font_family", &[("family", "string")]),
             ],
-        ));
+        );
+        theme_contract.events = vec![
+            mesh_core_service::InterfaceEvent {
+                name: "ThemeChanged".into(),
+                payload: [
+                    ("theme_id", "string"),
+                    ("mode", "string"),
+                    ("mode_policy", "object"),
+                    ("color_scheme", "string"),
+                    ("contrast", "string"),
+                    ("revision", "string"),
+                    ("tokens", "object"),
+                    ("provenance", "object"),
+                    ("changed_tokens", "object[]"),
+                ]
+                .into_iter()
+                .map(|(name, arg_type)| mesh_core_service::InterfaceArgument {
+                    name: name.into(),
+                    arg_type: arg_type.into(),
+                })
+                .collect(),
+            },
+            mesh_core_service::InterfaceEvent {
+                name: "TokenChanged".into(),
+                payload: [
+                    ("theme_id", "string"),
+                    ("mode", "string"),
+                    ("name", "string"),
+                    ("value", "any?"),
+                    ("provenance", "any?"),
+                    ("revision", "string"),
+                ]
+                .into_iter()
+                .map(|(name, arg_type)| mesh_core_service::InterfaceArgument {
+                    name: name.into(),
+                    arg_type: arg_type.into(),
+                })
+                .collect(),
+            },
+        ];
+        interfaces.register_contract(theme_contract);
         // Locale writes stay on the `mesh.locale.set` host API, which already
         // enforces `locale.write`. A second, service-shaped way in would mean
         // two capability names for one operation.
         interfaces.register_contract(builtin_state_contract(
             "mesh.locale",
-            &[("current", "string"), ("locale", "string")],
+            &[
+                ("current", "string"),
+                ("locale", "string"),
+                ("chain", "string[]"),
+                ("direction", "string"),
+                ("revision", "string"),
+            ],
         ));
         interfaces.register_contract(builtin_contract(
             "mesh.settings",
@@ -620,6 +768,7 @@ impl Shell {
             frontend_catalog: FrontendCatalogHandle::default(),
             module_dirs,
             core: ShellCoreState::default(),
+            last_published_theme_snapshot: None,
             components: Vec::new(),
             components_want_render: false,
             presented_last_frame: true,
@@ -671,7 +820,12 @@ impl Shell {
                 return;
             }
         };
-        self.commit_installed_module_graph(graph.clone());
+        if let Err(error) = self.commit_installed_module_graph(graph.clone()) {
+            tracing::error!(
+                "failed to prepare graph locale catalogs; retaining last-known-good discovery: {error}"
+            );
+            return;
+        }
         self.modules.clear();
         for node in graph.modules() {
             let Some(module_dir) = node.manifest_path.parent() else {
@@ -700,7 +854,11 @@ impl Shell {
     ) -> Result<&InstalledModuleGraph, mesh_core_module::package::ModuleManifestError> {
         if self.installed_module_graph.is_none() {
             let graph_path = self.installed_module_graph_path();
-            self.installed_module_graph = Some(load_installed_module_graph_candidate(&graph_path)?);
+            let candidate = load_installed_module_graph_candidate(&graph_path)?;
+            let locale = self.prepare_locale_for_graph(&candidate).map_err(|error| {
+                mesh_core_module::package::ModuleManifestError::Validation(error.to_string())
+            })?;
+            self.commit_installed_module_graph_with_locale(candidate, locale);
         }
         Ok(self
             .installed_module_graph
@@ -723,13 +881,89 @@ impl Shell {
         root_module_graph_path: &Path,
     ) -> Result<InstalledModuleGraph, mesh_core_module::package::ModuleManifestError> {
         let candidate = load_installed_module_graph_candidate(root_module_graph_path)?;
-        self.commit_installed_module_graph(candidate.clone());
+        self.commit_installed_module_graph(candidate.clone())
+            .map_err(|error| {
+                mesh_core_module::package::ModuleManifestError::Validation(error.to_string())
+            })?;
         Ok(candidate)
     }
 
-    /// Commit a graph only after its runtime candidate has been prepared.
-    pub(in crate::shell) fn commit_installed_module_graph(&mut self, graph: InstalledModuleGraph) {
+    pub(in crate::shell) fn prepare_locale_for_graph(
+        &self,
+        graph: &InstalledModuleGraph,
+    ) -> Result<LocaleEngine, ShellRunError> {
+        let mut candidate = self.locale.clone();
+        let (sources, defaults) = graph_i18n_catalog_sources(graph);
+        let prepared = candidate
+            .prepare_catalog_snapshot(&sources, &defaults)
+            .map_err(|error| ShellRunError::LocaleCatalog(error.to_string()))?;
+        log_locale_catalog_diagnostics(prepared.diagnostics());
+        candidate.replace_catalog_snapshot(prepared.snapshot());
+        Ok(candidate)
+    }
+
+    pub(in crate::shell) fn prepare_locale_for_settings(
+        &self,
+        settings: &ShellSettings,
+        graph: &InstalledModuleGraph,
+    ) -> Result<LocaleEngine, ShellRunError> {
+        let mut candidate = self.prepare_locale_selection_for_settings(settings)?;
+        let (sources, defaults) = graph_i18n_catalog_sources(graph);
+        let prepared = candidate
+            .prepare_catalog_snapshot(&sources, &defaults)
+            .map_err(|error| ShellRunError::LocaleCatalog(error.to_string()))?;
+        log_locale_catalog_diagnostics(prepared.diagnostics());
+        candidate.replace_catalog_snapshot(prepared.snapshot());
+        Ok(candidate)
+    }
+
+    pub(in crate::shell) fn prepare_locale_selection_for_settings(
+        &self,
+        settings: &ShellSettings,
+    ) -> Result<LocaleEngine, ShellRunError> {
+        let requested = mesh_core_locale::LocaleSelection::try_new(
+            settings.i18n.locale.clone(),
+            settings.i18n.fallback_locale.clone(),
+            1,
+        )
+        .map_err(|error| ShellRunError::LocaleCatalog(error.to_string()))?;
+        let revision = if requested.active() == self.locale.current()
+            && requested.fallback() == self.locale.fallback_locale()
+        {
+            self.locale.revision()
+        } else {
+            self.locale.revision().saturating_add(1)
+        };
+        let selection = mesh_core_locale::LocaleSelection::try_new(
+            requested.active(),
+            requested.fallback(),
+            revision,
+        )
+        .map_err(|error| ShellRunError::LocaleCatalog(error.to_string()))?;
+        let mut candidate = self.locale.clone();
+        candidate.replace_selection(&selection);
+        Ok(candidate)
+    }
+
+    /// Commit a graph and its prepared locale candidate as one in-memory
+    /// activation boundary. Callers that need to prepare runtime objects first
+    /// use `commit_installed_module_graph_with_locale` with the same candidate.
+    pub(in crate::shell) fn commit_installed_module_graph(
+        &mut self,
+        graph: InstalledModuleGraph,
+    ) -> Result<(), ShellRunError> {
+        let locale = self.prepare_locale_for_graph(&graph)?;
+        self.commit_installed_module_graph_with_locale(graph, locale);
+        Ok(())
+    }
+
+    pub(in crate::shell) fn commit_installed_module_graph_with_locale(
+        &mut self,
+        graph: InstalledModuleGraph,
+        locale: LocaleEngine,
+    ) {
         self.sync_module_graph_health(&graph);
+        self.locale = locale;
         self.installed_module_graph = Some(graph);
     }
 
@@ -900,7 +1134,7 @@ impl Shell {
         self.frontend_catalog.replace(frontend_catalog, None);
         let frontend_catalog = self.frontend_catalog.snapshot().catalog;
         let enabled_frontends = self.installed_enabled_frontend_ids();
-        let graph_i18n_catalogs = self.graph_i18n_catalog_paths();
+        let locale_catalog_snapshot = self.locale.catalog_snapshot();
         let interface_catalog = std::sync::Arc::new(self.interfaces.resolved_catalog());
         if let Some(profile_id) = self.active_profile_id.clone() {
             let paths = mesh_core_module::package::ProfilePaths::from_root_graph(
@@ -930,7 +1164,7 @@ impl Shell {
                     )
                     .with_effective_capabilities(self.effective_capabilities.clone())
                     .with_instance_id(instance_id)
-                    .with_graph_i18n_catalogs(graph_i18n_catalogs.clone()),
+                    .with_locale_catalog_snapshot(locale_catalog_snapshot.clone()),
                 ));
             }
             return Ok(());
@@ -945,7 +1179,7 @@ impl Shell {
                     self.settings_store.clone(),
                 )
                 .with_effective_capabilities(self.effective_capabilities.clone())
-                .with_graph_i18n_catalogs(graph_i18n_catalogs.clone()),
+                .with_locale_catalog_snapshot(locale_catalog_snapshot.clone()),
             ));
         }
 
@@ -956,6 +1190,16 @@ impl Shell {
         &mut self,
         module_id: &str,
         graph: &InstalledModuleGraph,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let locale = self.prepare_locale_for_graph(graph)?;
+        self.activate_frontend_module_with_locale(module_id, graph, locale)
+    }
+
+    pub(in crate::shell) fn activate_frontend_module_with_locale(
+        &mut self,
+        module_id: &str,
+        graph: &InstalledModuleGraph,
+        locale: LocaleEngine,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let previous_catalog = self.frontend_catalog.snapshot().catalog;
         let catalog = FrontendCatalog::from_modules_reusing(
@@ -971,6 +1215,7 @@ impl Shell {
 
         let Some(entry) = entry else {
             // Widgets and component-only frontend packages own no surface.
+            self.locale = locale;
             self.sync_frontend_catalog_components();
             return Ok(VecDeque::new());
         };
@@ -1017,7 +1262,7 @@ impl Shell {
                 )
                 .with_effective_capabilities(self.effective_capabilities.clone())
                 .with_instance_id(&instance_id)
-                .with_graph_i18n_catalogs(self.graph_i18n_catalog_paths());
+                .with_locale_catalog_snapshot(locale.catalog_snapshot());
                 let diagnostics = self
                     .diagnostics
                     .register_instance(module_id.to_string(), instance_id.clone());
@@ -1031,7 +1276,7 @@ impl Shell {
                         .map_err(ShellRunError::Component)?,
                 );
                 component
-                    .locale_changed(&self.locale)
+                    .locale_changed(&locale)
                     .map_err(ShellRunError::Component)?;
                 for state in self.latest_service_state.values() {
                     let event = ServiceEvent::Updated {
@@ -1076,6 +1321,7 @@ impl Shell {
                 }
             }
         }
+        self.locale = locale;
         self.sync_frontend_catalog_components();
         tracing::info!(module_id, "activated frontend module live");
         Ok(requests)
@@ -1086,6 +1332,10 @@ impl Shell {
         module_id: &str,
         graph: Option<&InstalledModuleGraph>,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let locale = match graph {
+            Some(graph) => self.prepare_locale_for_graph(graph)?,
+            None => self.locale.clone(),
+        };
         let previous_catalog = self.frontend_catalog.snapshot().catalog;
         let catalog =
             FrontendCatalog::from_modules_reusing(&self.modules, graph, Some(&previous_catalog))?;
@@ -1100,6 +1350,7 @@ impl Shell {
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
         if indices.is_empty() {
+            self.locale = locale;
             return Ok(VecDeque::new());
         }
         let mut removed_surfaces = Vec::new();
@@ -1129,6 +1380,7 @@ impl Shell {
         }
         self.rebuild_component_surface_index();
         self.service_delivery_index.mark_dirty();
+        self.locale = locale;
         tracing::info!(module_id, "deactivated frontend module live");
         let mut requests = VecDeque::new();
         for surface_id in removed_surfaces {
@@ -1156,24 +1408,6 @@ impl Shell {
             self.components_want_render = true;
         }
         invalidated
-    }
-
-    fn graph_i18n_catalog_paths(&self) -> Vec<(String, String, PathBuf)> {
-        let Some(graph) = self.installed_module_graph.as_ref() else {
-            return Vec::new();
-        };
-        graph
-            .contributed_i18n()
-            .iter()
-            .filter_map(|catalog| {
-                let module_dir = catalog.source.manifest_path.parent()?;
-                Some((
-                    catalog.module_id.clone(),
-                    catalog.locale.clone(),
-                    module_dir.join(&catalog.path),
-                ))
-            })
-            .collect()
     }
 
     fn installed_enabled_frontend_ids(&self) -> HashSet<String> {

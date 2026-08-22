@@ -8,15 +8,22 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub const PROFILE_SCHEMA_VERSION: u32 = 3;
 pub const DEFAULT_PROFILE_ID: &str = "default";
+
+static PROFILE_TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ShellProfile {
     #[serde(default = "default_profile_schema_version")]
     pub schema_version: u32,
+    /// Monotonic durable revision used by profile-scoped transactions.
+    /// Legacy profiles omit it and begin at zero.
+    #[serde(default, skip_serializing_if = "is_zero_revision")]
+    pub revision: u64,
     /// The composition module this profile instantiates. Absent means a
     /// hand-built composition: every field below is the whole decision rather
     /// than a delta over an installed composition.
@@ -74,12 +81,28 @@ fn default_profile_schema_version() -> u32 {
     PROFILE_SCHEMA_VERSION
 }
 
+fn is_zero_revision(revision: &u64) -> bool {
+    *revision == 0
+}
+
 fn default_entrypoint() -> String {
     "main".into()
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn validate_unique_ordered_ids(field: &str, values: &[String]) -> Result<(), ModuleManifestError> {
+    let mut seen = HashSet::new();
+    for value in values {
+        if !seen.insert(value) {
+            return Err(ModuleManifestError::Validation(format!(
+                "{field} contains duplicate module '{value}', which would make precedence ambiguous"
+            )));
+        }
+    }
+    Ok(())
 }
 
 impl Default for ProfileRootInstance {
@@ -97,6 +120,7 @@ impl ShellProfile {
     pub fn new() -> Self {
         Self {
             schema_version: PROFILE_SCHEMA_VERSION,
+            revision: 0,
             ..Self::default()
         }
     }
@@ -181,6 +205,7 @@ impl ShellProfile {
                 .chain(self.resources.languages.iter()),
             "resources",
         )?;
+        validate_unique_ordered_ids("resources.languages", &self.resources.languages)?;
         for (instance_id, slots) in &self.node_slots {
             if instance_id.trim().is_empty() {
                 return Err(ModuleManifestError::Validation(
@@ -304,6 +329,19 @@ impl ShellProfile {
             .as_ref()
             .map(|resolved| &resolved.spec)
             .unwrap_or(&profile_spec);
+        for language_pack in &activation_spec.resources.languages {
+            let manifest = manifests.get(language_pack.as_str()).ok_or_else(|| {
+                ModuleManifestError::Validation(format!(
+                    "profile references language pack {language_pack}, but it is not installed"
+                ))
+            })?;
+            if manifest.mesh.kind != ModuleKind::LanguagePack {
+                return Err(ModuleManifestError::Validation(format!(
+                    "profile resource {language_pack} is {:?}; resources.languages requires a language-pack module",
+                    manifest.mesh.kind
+                )));
+            }
+        }
         let orphaned = effective
             .as_ref()
             .map(|resolved| resolved.orphaned_overrides.as_slice())
@@ -458,6 +496,7 @@ impl Default for ShellProfile {
     fn default() -> Self {
         Self {
             schema_version: PROFILE_SCHEMA_VERSION,
+            revision: 0,
             from: None,
             roots: BTreeMap::new(),
             background_services: BTreeSet::new(),
@@ -559,6 +598,43 @@ impl ProfilePaths {
         atomic_write(&path, content.as_bytes())
     }
 
+    /// Persist a profile candidate only if the on-disk profile still has the
+    /// expected revision. The returned profile carries the newly committed
+    /// revision for callers that keep the candidate in memory.
+    pub fn save_if_revision(
+        &self,
+        profile_id: &str,
+        profile: &ShellProfile,
+        expected_revision: u64,
+    ) -> Result<ShellProfile, ModuleManifestError> {
+        if profile.revision != expected_revision {
+            return Err(ModuleManifestError::Validation(format!(
+                "profile revision conflict: expected {expected_revision}, found {}",
+                profile.revision
+            )));
+        }
+
+        let current_revision = match self.load(profile_id) {
+            Ok(current) => current.revision,
+            Err(ModuleManifestError::Io { source, .. })
+                if source.kind() == std::io::ErrorKind::NotFound =>
+            {
+                0
+            }
+            Err(error) => return Err(error),
+        };
+        if current_revision != expected_revision {
+            return Err(ModuleManifestError::Validation(format!(
+                "profile revision conflict: expected {expected_revision}, found {current_revision}"
+            )));
+        }
+
+        let mut committed = profile.clone();
+        committed.revision = expected_revision.saturating_add(1);
+        self.save(profile_id, &committed)?;
+        Ok(committed)
+    }
+
     pub fn set_active(&self, profile_id: &str) -> Result<(), ModuleManifestError> {
         let profile_path = self.profile_path(profile_id)?;
         if !profile_path.exists() {
@@ -653,31 +729,59 @@ fn validate_profile_id(profile_id: &str) -> Result<(), ModuleManifestError> {
 
 pub(super) fn atomic_write(path: &Path, content: &[u8]) -> Result<(), ModuleManifestError> {
     super::validate_no_symlink_path(path, "package write target")?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|source| ModuleManifestError::Io {
-            path: parent.to_path_buf(),
-            source,
-        })?;
-    }
-    let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
-    let result = (|| {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .truncate(true)
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).map_err(|source| ModuleManifestError::Io {
+        path: parent.to_path_buf(),
+        source,
+    })?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("profile.json");
+
+    for _ in 0..128 {
+        let sequence = PROFILE_TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let temporary = parent.join(format!(
+            ".{file_name}.tmp-{}-{sequence}",
+            std::process::id()
+        ));
+        let file = match OpenOptions::new()
+            .create_new(true)
             .write(true)
-            .open(&temporary)?;
-        file.write_all(content)?;
-        file.sync_all()?;
-        fs::rename(&temporary, path)
-    })();
-    if let Err(source) = result {
-        let _ = fs::remove_file(&temporary);
-        return Err(ModuleManifestError::Io {
-            path: path.to_path_buf(),
-            source,
-        });
+            .open(&temporary)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(source) => {
+                return Err(ModuleManifestError::Io {
+                    path: temporary,
+                    source,
+                });
+            }
+        };
+        let result = (|| {
+            let mut file = file;
+            file.write_all(content)?;
+            file.sync_all()?;
+            drop(file);
+            fs::rename(&temporary, path)?;
+            let directory = OpenOptions::new().read(true).open(parent)?;
+            directory.sync_all()
+        })();
+        if let Err(source) = result {
+            let _ = fs::remove_file(&temporary);
+            return Err(ModuleManifestError::Io {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+        return Ok(());
     }
-    Ok(())
+
+    Err(ModuleManifestError::Validation(format!(
+        "could not allocate a unique temporary profile file beside {}",
+        path.display()
+    )))
 }
 
 #[cfg(test)]
@@ -889,5 +993,77 @@ mod tests {
         .expect_err("placements must reference public contributions")
         .to_string();
         assert!(invalid.contains("module-id:contribution-id"), "{invalid}");
+    }
+
+    #[test]
+    fn language_pack_chains_reject_duplicate_order_and_non_pack_resources() {
+        let duplicate = ShellProfile::from_json_str(
+            r#"{
+                "schemaVersion": 3,
+                "resources": { "languages": ["@me/cs", "@me/cs"] }
+            }"#,
+        )
+        .expect_err("duplicate pack entries have ambiguous precedence")
+        .to_string();
+        assert!(duplicate.contains("resources.languages"), "{duplicate}");
+        assert!(duplicate.contains("ambiguous"), "{duplicate}");
+
+        let profile = ShellProfile::from_json_str(
+            r#"{
+                "schemaVersion": 3,
+                "resources": { "languages": ["@me/not-a-pack"] }
+            }"#,
+        )
+        .unwrap();
+        let frontend = manifest(
+            r#"{"name":"@me/not-a-pack","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend"}}"#,
+        );
+        let error = profile
+            .active_module_ids([&frontend])
+            .expect_err("resources.languages must name language-pack modules")
+            .to_string();
+        assert!(error.contains("requires a language-pack"), "{error}");
+    }
+
+    #[test]
+    fn revision_checked_profile_save_rejects_a_stale_locale_candidate() {
+        let root = std::env::temp_dir().join(format!(
+            "mesh-profile-revision-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let graph_path = root.join("module.json");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&graph_path, "{}").unwrap();
+        let paths = ProfilePaths::from_root_graph(&graph_path).unwrap();
+
+        let initial = ShellProfile::new();
+        let committed = paths
+            .save_if_revision("work", &initial, 0)
+            .expect("initial profile revision commits");
+        assert_eq!(committed.revision, 1);
+
+        let stale = paths.load("work").unwrap();
+        let mut current = stale.clone();
+        current.settings.insert(
+            "shell".into(),
+            serde_json::json!({ "i18n": { "locale": "cs" } }),
+        );
+        let committed = paths
+            .save_if_revision("work", &current, 1)
+            .expect("current profile revision commits");
+        assert_eq!(committed.revision, 2);
+
+        let mut stale = stale;
+        stale.settings.insert(
+            "shell".into(),
+            serde_json::json!({ "i18n": { "locale": "de" } }),
+        );
+        let error = paths
+            .save_if_revision("work", &stale, 1)
+            .expect_err("stale profile locale writes must not overwrite a newer choice");
+        assert!(error.to_string().contains("profile revision conflict"));
+        assert_eq!(paths.load("work").unwrap().revision, 2);
+        std::fs::remove_dir_all(root).ok();
     }
 }

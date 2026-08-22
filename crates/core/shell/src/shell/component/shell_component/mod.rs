@@ -1114,17 +1114,23 @@ impl ShellComponent for FrontendSurfaceComponent {
 
     fn locale_changed(&mut self, locale: &LocaleEngine) -> Result<(), ComponentError> {
         tracing::debug!("locale_changed for component '{}'", self.id());
-        self.locale.set_locale(locale.current());
+        if self.locale_catalog_is_shared {
+            self.locale
+                .replace_catalog_snapshot(locale.catalog_snapshot());
+        }
+        self.locale.replace_selection(locale.selection());
+        let selection = locale.selection();
         let payload = serde_json::json!({
             "locale": locale.current(),
             "current": locale.current(),
+            "chain": selection.chain(),
+            "direction": selection.direction().as_str(),
+            "revision": selection.revision().to_string(),
         });
         let mut generations = Vec::new();
         for (instance_key, runtime) in self.runtimes.lock().unwrap().iter_mut() {
-            runtime.script_ctx.set_i18n_translations(
-                self.locale
-                    .effective_translations_for_module(&runtime.script_ctx.module_id),
-            );
+            let translator = self.locale.module_translator(&runtime.script_ctx.module_id);
+            runtime.script_ctx.set_i18n_translator(&translator);
             runtime.script_ctx.apply_service_payload("locale", &payload);
             if script_has_service_read(&runtime.script_ctx, "mesh.locale", "locale") {
                 apply_service_update_with_name(
@@ -1219,27 +1225,6 @@ impl ShellComponent for FrontendSurfaceComponent {
             {
                 self.sync_runtime_generation(self.root_instance_key(), generation);
             }
-        }
-
-        let Some(locale) = self
-            .settings_json
-            .get("i18n")
-            .and_then(|i18n| i18n.get("default_locale"))
-            .and_then(|l| l.as_str())
-        else {
-            if layout_changed || settings_changed {
-                self.invalidate_surface_config();
-            }
-            return Ok(layout_changed || settings_changed);
-        };
-
-        if self.locale.current() != locale {
-            tracing::info!(
-                "module '{}': applying locale '{}' from module settings",
-                self.id(),
-                locale
-            );
-            self.locale.set_locale(locale);
         }
 
         if layout_changed || settings_changed {

@@ -1,5 +1,6 @@
 use super::super::lookup::lua_value_to_string;
 use super::super::proxy::create_event_channel;
+use mesh_core_locale::{CatalogEntry, LocalizedTextResolution};
 use mlua::{Function, Lua, MultiValue, Table, Value as LuaValue, Variadic};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -124,22 +125,32 @@ pub(super) fn parent_subscription_channel(
 
 pub(super) fn create_i18n_library(
     lua: &Lua,
-    translations: Arc<Mutex<HashMap<String, String>>>,
+    translations: Arc<Mutex<HashMap<String, CatalogEntry>>>,
+    locale: Arc<Mutex<String>>,
 ) -> mlua::Result<Table> {
     let exports = lua.create_table()?;
     exports.set(
         "t",
-        lua.create_function(move |_lua, key: LuaValue| match key {
-            LuaValue::String(value) => {
-                let key = value.to_str()?.to_string();
-                Ok(translations
-                    .lock()
-                    .unwrap()
-                    .get(&key)
-                    .cloned()
-                    .unwrap_or(key))
+        lua.create_function(move |_lua, (key, values): (LuaValue, Option<Table>)| {
+            let key = match key {
+                LuaValue::String(value) => value.to_str()?.to_string(),
+                other => lua_value_to_string(other),
+            };
+            let mut args = HashMap::new();
+            if let Some(values) = values {
+                for pair in values.pairs::<String, LuaValue>() {
+                    let (name, value) = pair?;
+                    args.insert(name, lua_value_to_string(value));
+                }
             }
-            other => Ok(lua_value_to_string(other)),
+            let locale = locale.lock().unwrap().clone();
+            let translated = translations
+                .lock()
+                .unwrap()
+                .get(&key)
+                .and_then(|entry| entry.render(&locale, &args))
+                .unwrap_or_else(|| LocalizedTextResolution::missing_marker(&key));
+            Ok(translated)
         })?,
     )?;
     Ok(exports)

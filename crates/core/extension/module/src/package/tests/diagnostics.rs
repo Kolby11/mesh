@@ -235,6 +235,7 @@ fn graph_diagnostics_report_undeclared_i18n_key() {
                 id: "en".into(),
                 locale: "en".into(),
                 path: "config/i18n/en.json".into(),
+                module: None,
             }],
             ..MeshContributes::default()
         },
@@ -386,6 +387,7 @@ fn graph_diagnostics_no_undeclared_i18n_key_when_all_present() {
                 id: "en".into(),
                 locale: "en".into(),
                 path: "config/i18n/en.json".into(),
+                module: None,
             }],
             ..MeshContributes::default()
         },

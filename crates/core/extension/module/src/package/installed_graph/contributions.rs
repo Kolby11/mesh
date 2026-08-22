@@ -206,9 +206,15 @@ impl ModuleContributionIndex {
         }
         for contribution in &manifest.mesh.contributes.i18n {
             validate_relative_path("i18n contribution", &contribution.path)?;
+            let target_module_id = contribution
+                .module
+                .as_deref()
+                .unwrap_or(module_id)
+                .to_string();
             self.i18n.push(ContributedI18n {
                 source: ContributionSource::new(module, &contribution.id),
                 module_id: module_id.into(),
+                target_module_id,
                 id: contribution.id.clone(),
                 locale: contribution.locale.clone(),
                 path: contribution.path.clone(),
@@ -390,7 +396,11 @@ impl ContributedPathResource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContributedI18n {
     pub source: ContributionSource,
+    /// Module that owns the source file (the language-pack module for a pack).
     pub module_id: String,
+    /// Translation namespace receiving this catalog. Module-owned catalogs
+    /// point at `module_id`; language packs explicitly target another module.
+    pub target_module_id: String,
     pub id: String,
     pub locale: String,
     pub path: String,
