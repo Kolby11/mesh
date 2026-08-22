@@ -77,7 +77,11 @@ Resource preparation now also has a shared generation coordinator. New
 candidates cancel older leases, carry a monotonic generation to the shell
 commit boundary, and stale generations are rejected before publication.
 
-The next open item is to move profile-switch resource preparation from its
-synchronous worker join into a resumable asynchronous job state so superseded
-profile work can be cancelled while in flight, then move the remaining
-XDG/SVG decode and raster preparation away from shell/render-thread paths.
+The shell worker is now exposed as a pollable `ResourcePreparationJob` with
+cooperative cancellation, current-generation checks, and safe retirement;
+the existing synchronous callers use its blocking wait.
+
+The next open item is to store that job in the pending profile candidate and
+advance profile preparation from the shell loop instead of joining
+synchronously, then move the remaining XDG/SVG decode and raster preparation
+away from shell/render-thread paths.

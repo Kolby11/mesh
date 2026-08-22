@@ -140,6 +140,37 @@ fn cancelled_icon_pack_preparation_never_returns_bindings() {
 }
 
 #[test]
+fn resource_preparation_job_cancels_and_polls_without_blocking_the_caller() {
+    let lease = mesh_core_resources::ResourcePreparationCoordinator::default().begin();
+    let token = lease.token().clone();
+    let worker = std::thread::spawn(move || {
+        while !token.is_cancelled() {
+            std::thread::yield_now();
+        }
+        Err(crate::shell::ShellRunError::FrontendComposition {
+            message: "resource preparation cancelled".into(),
+        })
+    });
+    let mut job = super::super::discovery::ResourcePreparationJob::from_test_worker(worker, lease);
+
+    assert!(!job.is_finished());
+    job.cancel();
+    let result = (0..1_000).find_map(|_| {
+        let result = job.try_wait();
+        if result.is_none() {
+            std::thread::yield_now();
+        }
+        result
+    });
+    assert!(matches!(
+        result,
+        Some(Err(crate::shell::ShellRunError::FrontendComposition { message }))
+            if message == "resource preparation cancelled"
+    ));
+    job.retire();
+}
+
+#[test]
 fn font_registry_publishes_role_and_qualified_theme_tokens() {
     let mut registry = mesh_core_resources::FontRegistry::new(["Inter".into()]);
     registry

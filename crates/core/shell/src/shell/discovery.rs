@@ -59,47 +59,143 @@ pub(in crate::shell) struct PreparedResourceSnapshot {
     pub frontends: Vec<(String, mesh_core_icon::FrontendIconBindings)>,
 }
 
+/// A worker-owned resource candidate that can be polled by a non-blocking
+/// profile transition. Dropping an unfinished job requests cancellation; the
+/// worker remains responsible for observing the token between bounded units.
+pub(in crate::shell) struct ResourcePreparationJob {
+    worker: Option<std::thread::JoinHandle<Result<PreparedResourceSnapshot, ShellRunError>>>,
+    token: mesh_core_resources::ResourcePreparationToken,
+    lease: mesh_core_resources::ResourcePreparationLease,
+}
+
+impl ResourcePreparationJob {
+    #[cfg(test)]
+    pub(in crate::shell) fn from_test_worker(
+        worker: std::thread::JoinHandle<Result<PreparedResourceSnapshot, ShellRunError>>,
+        lease: mesh_core_resources::ResourcePreparationLease,
+    ) -> Self {
+        Self {
+            worker: Some(worker),
+            token: lease.token().clone(),
+            lease,
+        }
+    }
+
+    pub(in crate::shell) fn generation(&self) -> u64 {
+        self.lease.generation()
+    }
+
+    pub(in crate::shell) fn is_finished(&self) -> bool {
+        self.worker
+            .as_ref()
+            .is_some_and(std::thread::JoinHandle::is_finished)
+    }
+
+    pub(in crate::shell) fn is_current(&self) -> bool {
+        self.lease.is_current()
+    }
+
+    pub(in crate::shell) fn cancel(&self) {
+        self.token.cancel();
+    }
+
+    pub(in crate::shell) fn try_wait(
+        &mut self,
+    ) -> Option<Result<PreparedResourceSnapshot, ShellRunError>> {
+        if !self.is_finished() {
+            return None;
+        }
+        Some(self.join_worker())
+    }
+
+    pub(in crate::shell) fn wait(&mut self) -> Result<PreparedResourceSnapshot, ShellRunError> {
+        if let Some(result) = self.try_wait() {
+            result
+        } else {
+            self.join_worker()
+        }
+    }
+
+    pub(in crate::shell) fn retire(&self) {
+        self.lease.retire();
+    }
+
+    fn join_worker(&mut self) -> Result<PreparedResourceSnapshot, ShellRunError> {
+        let worker = self
+            .worker
+            .take()
+            .ok_or_else(|| ShellRunError::FrontendComposition {
+                message: "resource preparation job was already completed".into(),
+            })?;
+        let mut prepared = worker
+            .join()
+            .map_err(|_| ShellRunError::FrontendComposition {
+                message: "resource preparation worker panicked".into(),
+            })??;
+        prepared.generation = self.lease.generation();
+        Ok(prepared)
+    }
+}
+
+impl Drop for ResourcePreparationJob {
+    fn drop(&mut self) {
+        if self.worker.is_some() {
+            self.cancel();
+        }
+    }
+}
+
 impl Shell {
     pub(in crate::shell) fn prepare_resource_snapshot(
         &self,
         graph: &InstalledModuleGraph,
         settings_store: &SettingsStore,
     ) -> Result<PreparedResourceSnapshot, ShellRunError> {
-        let lease = self.resource_preparation.begin();
-        let generation = lease.generation();
-        let result = self.prepare_resource_snapshot_with_cancellation(
-            graph,
-            settings_store,
-            lease.token().clone(),
-        );
+        let mut job = self.start_resource_preparation_job(graph, settings_store)?;
+        let generation = job.generation();
+        let result = job.wait();
         match result {
-            Ok(mut prepared) if lease.is_current() => {
-                prepared.generation = generation;
+            Ok(prepared) if job.is_current() => {
+                job.retire();
                 Ok(prepared)
             }
             Ok(_) => {
-                lease.retire();
+                job.retire();
                 Err(ShellRunError::FrontendComposition {
                     message: format!("resource preparation generation {generation} was superseded"),
                 })
             }
             Err(error) => {
-                lease.retire();
+                job.retire();
                 Err(error)
             }
         }
     }
 
-    /// Prepare all graph-authorized resource inputs on a worker. The caller
-    /// may cancel a superseded candidate; the worker checks between bounded
-    /// reads and parser units, and the resulting candidate is never visible
-    /// until [`Self::commit_resource_snapshot`] succeeds.
-    pub(in crate::shell) fn prepare_resource_snapshot_with_cancellation(
+    /// Start resource preparation without waiting for the worker. The job
+    /// owns the active generation lease, so starting a newer job cancels this
+    /// candidate and makes its eventual result ineligible for publication.
+    pub(in crate::shell) fn start_resource_preparation_job(
         &self,
         graph: &InstalledModuleGraph,
         settings_store: &SettingsStore,
-        cancellation: mesh_core_resources::ResourcePreparationToken,
-    ) -> Result<PreparedResourceSnapshot, ShellRunError> {
+    ) -> Result<ResourcePreparationJob, ShellRunError> {
+        let lease = self.resource_preparation.begin();
+        let result =
+            self.start_resource_preparation_job_with_lease(graph, settings_store, lease.clone());
+        if result.is_err() {
+            lease.retire();
+        }
+        result
+    }
+
+    fn start_resource_preparation_job_with_lease(
+        &self,
+        graph: &InstalledModuleGraph,
+        settings_store: &SettingsStore,
+        lease: mesh_core_resources::ResourcePreparationLease,
+    ) -> Result<ResourcePreparationJob, ShellRunError> {
+        let cancellation = lease.token().clone();
         let icon_chain = graph.icon_pack_chain().to_vec();
         let font_chain = graph.font_pack_chain().to_vec();
         let shell_font_chain = settings_store.shell().fonts.packs.clone();
@@ -416,11 +512,11 @@ impl Shell {
             .map_err(|error| ShellRunError::FrontendComposition {
                 message: format!("failed to start resource preparation: {error}"),
             })?;
-        worker
-            .join()
-            .map_err(|_| ShellRunError::FrontendComposition {
-                message: "resource preparation worker panicked".into(),
-            })?
+        Ok(ResourcePreparationJob {
+            worker: Some(worker),
+            token: cancellation,
+            lease,
+        })
     }
 
     pub(in crate::shell) fn commit_resource_snapshot(
