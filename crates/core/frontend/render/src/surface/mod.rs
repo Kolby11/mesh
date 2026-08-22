@@ -23,6 +23,18 @@ pub use painter::{
 pub use profiling::RasterMetrics;
 pub use text::{SharedTextMeasurer, TextCacheMetrics, TextRenderer};
 
+/// Drain completed file-icon raster jobs and report whether any cache entries
+/// became available for the next paint.
+pub fn poll_icon_raster_jobs() -> bool {
+    icon::poll_icon_raster_jobs()
+}
+
+/// Report whether a file-icon raster job is still in flight. The shell uses
+/// this to keep its scheduler polling without blocking the paint thread.
+pub fn icon_raster_jobs_pending() -> bool {
+    icon::icon_raster_jobs_pending()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PaintCommandClass {

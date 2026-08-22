@@ -14,9 +14,12 @@ use skia_safe::{
     AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images,
 };
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::path::Path;
 #[cfg(test)]
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex, OnceLock};
 
 static IMAGE_CACHE: OnceLock<Mutex<LruCache<Arc<Path>, CachedImage>>> = OnceLock::new();
@@ -107,6 +110,158 @@ struct RasterVariant {
     /// BGRA pixels matching `PixelBuffer` memory order.
     pixels: Arc<[u8]>,
     fully_opaque: bool,
+}
+
+struct RasterJob {
+    key: RasterCacheKey,
+    path: std::path::PathBuf,
+    kind: IconFileKind,
+    width: u32,
+    height: u32,
+    tint: Color,
+    multicolor: bool,
+}
+
+struct RasterJobResult {
+    key: RasterCacheKey,
+    variant: Option<RasterVariant>,
+    elapsed: std::time::Duration,
+}
+
+struct IconRasterQueue {
+    sender: Option<mpsc::SyncSender<RasterJob>>,
+    receiver: Receiver<RasterJobResult>,
+    pending: HashSet<RasterCacheKey>,
+}
+
+static ICON_RASTER_QUEUE: OnceLock<Mutex<IconRasterQueue>> = OnceLock::new();
+static ICON_RASTER_RESULTS_READY: AtomicBool = AtomicBool::new(false);
+
+fn icon_raster_queue() -> &'static Mutex<IconRasterQueue> {
+    ICON_RASTER_QUEUE.get_or_init(|| {
+        const ICON_RASTER_QUEUE_CAPACITY: usize = 64;
+        let (request_sender, request_receiver) =
+            mpsc::sync_channel::<RasterJob>(ICON_RASTER_QUEUE_CAPACITY);
+        let (result_sender, result_receiver) = mpsc::channel::<RasterJobResult>();
+        let worker = std::thread::Builder::new()
+            .name("mesh-icon-raster".into())
+            .spawn(move || {
+                while let Ok(job) = request_receiver.recv() {
+                    let started = std::time::Instant::now();
+                    let variant = rasterize_file_job(&job);
+                    if result_sender
+                        .send(RasterJobResult {
+                            key: job.key,
+                            variant,
+                            elapsed: started.elapsed(),
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+            .ok();
+
+        Mutex::new(IconRasterQueue {
+            sender: worker.map(|_| request_sender),
+            receiver: result_receiver,
+            pending: HashSet::new(),
+        })
+    })
+}
+
+fn rasterize_file_job(job: &RasterJob) -> Option<RasterVariant> {
+    match job.kind {
+        IconFileKind::Bitmap => {
+            raster_bitmap_variant(&job.path, job.width, job.height, job.tint, job.multicolor)
+        }
+        IconFileKind::Svg => {
+            raster_svg_variant(&job.path, job.width, job.height, job.tint, job.multicolor)
+        }
+    }
+}
+
+fn drain_icon_raster_jobs() -> bool {
+    let results = {
+        let Ok(mut queue) = icon_raster_queue().lock() else {
+            return false;
+        };
+        let mut results = Vec::new();
+        while let Ok(result) = queue.receiver.try_recv() {
+            queue.pending.remove(&result.key);
+            results.push(result);
+        }
+        results
+    };
+
+    let mut completed = false;
+    for result in results {
+        profiling::record_icon_image_raster(result.elapsed);
+        if let Some(variant) = result.variant {
+            store_variant(result.key, variant);
+            completed = true;
+        }
+    }
+    if completed {
+        ICON_RASTER_RESULTS_READY.store(true, Ordering::Release);
+    }
+    completed
+}
+
+pub fn poll_icon_raster_jobs() -> bool {
+    drain_icon_raster_jobs() || ICON_RASTER_RESULTS_READY.swap(false, Ordering::AcqRel)
+}
+
+pub fn icon_raster_jobs_pending() -> bool {
+    let pending = icon_raster_queue()
+        .lock()
+        .map(|queue| !queue.pending.is_empty())
+        .unwrap_or(false);
+    pending || ICON_RASTER_RESULTS_READY.load(Ordering::Acquire)
+}
+
+/// Queue one cacheable file-backed icon for off-thread decode and rasterization.
+/// `None` means the worker could not be started; `Some(false)` means an
+/// equivalent job is already in flight or the bounded queue is full.
+fn schedule_icon_raster_job(
+    key: RasterCacheKey,
+    path: &Path,
+    kind: IconFileKind,
+    width: u32,
+    height: u32,
+    tint: Color,
+    multicolor: bool,
+) -> Option<bool> {
+    let Ok(mut queue) = icon_raster_queue().lock() else {
+        return None;
+    };
+    let Some(sender) = queue.sender.as_ref().cloned() else {
+        return None;
+    };
+    if !queue.pending.insert(key.clone()) {
+        return Some(false);
+    }
+    let job = RasterJob {
+        key: key.clone(),
+        path: path.to_path_buf(),
+        kind,
+        width,
+        height,
+        tint,
+        multicolor,
+    };
+    match sender.try_send(job) {
+        Ok(()) => Some(true),
+        Err(mpsc::TrySendError::Full(_)) => {
+            queue.pending.remove(&key);
+            Some(false)
+        }
+        Err(mpsc::TrySendError::Disconnected(_)) => {
+            queue.pending.remove(&key);
+            None
+        }
+    }
 }
 
 fn image_cache() -> &'static Mutex<LruCache<Arc<Path>, CachedImage>> {
@@ -648,6 +803,8 @@ pub fn draw_icon_from_path_with_options_on_canvas(
 ) {
     if let Some(variant) = resolve_file_variant(path, dest_w, dest_h, tint, multicolor) {
         blit_variant_on_canvas(canvas, &variant, dest_x, dest_y);
+    } else {
+        draw_missing_icon_fallback_on_canvas(canvas, dest_x, dest_y, dest_w, dest_h, tint);
     }
 }
 
@@ -655,6 +812,24 @@ pub fn draw_icon_from_path_with_options_on_canvas(
 /// recording cache hit/miss/bypass metrics. Used by both the buffer and
 /// canvas blit paths so they share one rasterizer and cache.
 fn resolve_file_variant(
+    path: &Path,
+    dest_w: i32,
+    dest_h: i32,
+    tint: Color,
+    multicolor: bool,
+) -> Option<RasterVariant> {
+    drain_icon_raster_jobs();
+    #[cfg(test)]
+    {
+        resolve_file_variant_sync(path, dest_w, dest_h, tint, multicolor)
+    }
+    #[cfg(not(test))]
+    {
+        resolve_file_variant_async(path, dest_w, dest_h, tint, multicolor)
+    }
+}
+
+fn resolve_file_variant_sync(
     path: &Path,
     dest_w: i32,
     dest_h: i32,
@@ -713,6 +888,44 @@ fn resolve_file_variant(
         store_variant(key, variant.clone());
     }
     Some(variant)
+}
+
+#[cfg(not(test))]
+fn resolve_file_variant_async(
+    path: &Path,
+    dest_w: i32,
+    dest_h: i32,
+    tint: Color,
+    multicolor: bool,
+) -> Option<RasterVariant> {
+    let kind = icon_file_kind(path)?;
+    let width = dest_w.max(1) as u32;
+    let height = dest_h.max(1) as u32;
+    let key = match kind {
+        IconFileKind::Svg => {
+            let (cacheable, freshness) = svg_file_cacheability(path)?;
+            if cacheable {
+                Some(raster_file_key_with_freshness(
+                    path, width, height, tint, multicolor, freshness,
+                ))
+            } else {
+                return resolve_file_variant_sync(path, dest_w, dest_h, tint, multicolor);
+            }
+        }
+        IconFileKind::Bitmap => raster_file_key(path, width, height, tint, multicolor),
+    }?;
+
+    if let Some(variant) = cached_variant(&key) {
+        profiling::record_raster_cache_hit(variant.fully_opaque);
+        return Some(variant);
+    }
+
+    match schedule_icon_raster_job(key, path, kind, width, height, tint, multicolor) {
+        Some(true) => profiling::record_raster_cache_miss(),
+        Some(false) => {}
+        None => return resolve_file_variant_sync(path, dest_w, dest_h, tint, multicolor),
+    }
+    None
 }
 
 /// Draw the built-in "missing icon" glyph. Rasterizes the embedded SVG via
@@ -1101,6 +1314,33 @@ mod tests {
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect x="1" y="1" width="6" height="6" fill="black"/></svg>"#,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn icon_raster_worker_transfers_svg_variant_to_cache() {
+        let _guard = icon_test_lock();
+        clear_icon_caches();
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("worker.svg");
+        write_test_svg(&path);
+        let key = raster_file_key(&path, 8, 8, tint(), false).unwrap();
+
+        assert_eq!(
+            schedule_icon_raster_job(key.clone(), &path, IconFileKind::Svg, 8, 8, tint(), false,),
+            Some(true)
+        );
+
+        let prepared = (0..1_000).find_map(|_| {
+            drain_icon_raster_jobs();
+            let prepared = cached_variant(&key).is_some();
+            if !prepared {
+                std::thread::yield_now();
+            }
+            prepared.then_some(())
+        });
+        assert!(prepared.is_some(), "worker did not publish the SVG variant");
+        assert!(poll_icon_raster_jobs());
+        assert!(!icon_raster_jobs_pending());
     }
 
     #[test]

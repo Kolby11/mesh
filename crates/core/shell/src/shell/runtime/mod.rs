@@ -113,6 +113,9 @@ impl Shell {
         if self.pending_resource_preparation.is_some() {
             return Duration::from_millis(1);
         }
+        if mesh_core_render::icon_raster_jobs_pending() {
+            return Duration::from_millis(1);
+        }
 
         let now = std::time::Instant::now();
         if now >= self.next_frontend_reload_check

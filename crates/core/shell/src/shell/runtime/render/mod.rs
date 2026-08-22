@@ -24,6 +24,11 @@ const DEBUG_INSPECTOR_SURFACE_ID: &str = "@mesh/debug-inspector";
 
 impl Shell {
     pub(in crate::shell) fn render_components(&mut self) -> Result<(), ShellRunError> {
+        if mesh_core_render::poll_icon_raster_jobs() {
+            for runtime in &mut self.components {
+                runtime.component.request_paint();
+            }
+        }
         self.drain_dismissed_popups()?;
         self.drain_window_close_requests()?;
 

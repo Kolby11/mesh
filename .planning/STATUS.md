@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-08-22
+**Updated:** 2026-08-23
 
 ## Now
 
@@ -86,6 +86,13 @@ after the resource lease is still current. A newer resource-only profile
 request cancels and rejects the superseded candidate; prepared leases retire on
 commit, rejection, cancellation, or worker failure.
 
+Cacheable file-backed bitmap and SVG icon misses now enqueue bounded decode and
+raster jobs on a dedicated render worker. The paint path uses the built-in
+missing-icon placeholder until the result is published, and the shell polls
+completion to invalidate component paint without blocking the render thread.
+The worker queue and cache handoff are revision/freshness keyed.
+
 The next open item is to move the remaining XDG/SVG decode and raster
-preparation away from shell/render-thread paths. Frontend and backend candidate
-preparation after the resource stage is still shell-loop work.
+preparation away from shell/render-thread paths. External-resource SVGs,
+font-glyph rasterization, and frontend/backend candidate preparation after the
+resource stage remain outside this increment.
