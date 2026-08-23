@@ -7,7 +7,7 @@ IFS=$'\n\t'
 # implementation turn is a commit boundary owned by this script.
 #
 # Usage:
-#   ./codex-until-limit.sh --mode backlog "Implement the remaining project backlog"
+#   ./codex-until-limit.sh
 #
 # Configuration:
 #   CODEX_CONTEXT_WINDOW=128000      Fallback model context window in tokens
@@ -15,24 +15,20 @@ IFS=$'\n\t'
 #   CODEX_WORKDIR="$PWD"             Repository Codex should work in
 #   CODEX_HANDOFF_FILE                Handoff path; defaults outside the repository
 #   CODEX_LOOP_LOG                    Log path; defaults outside the repository
-#   CODEX_REFACTOR_RULES_FILE         Rules path (default: docs/REFACTORING-RULES.md)
 
 usage() {
     cat <<'EOF'
-Usage: ./codex-until-limit.sh [options] [TASK]
+Usage: ./codex-until-limit.sh [options]
 
 Continuously runs Codex until usage is exhausted, a stop file is created, or
 the loop cannot safely continue. Every successful turn is committed before the
 next turn starts.
 
-Modes:
-  feature                    Implement one coherent increment of TASK (default)
+Mode:
   backlog                    Implement and finish one unchecked backlog item per turn
-  refactor                   Audit the codebase by its existing sections, write
-                             refactoring rules, then implement one scoped increment
 
 Options:
-  --mode MODE                Select feature, backlog, or refactor
+  --mode backlog             Explicitly select the backlog mode
   --max-turns N              Stop after N committed turns
   --once                     Alias for --max-turns 1
   --allow-dirty              Allow an existing worktree; it may be included in
@@ -41,9 +37,8 @@ Options:
   -h, --help                 Show this help
 
 Examples:
+  ./codex-until-limit.sh --once
   ./codex-until-limit.sh --mode backlog --once
-  ./codex-until-limit.sh --mode refactor
-  ./codex-until-limit.sh --mode feature "Implement the next documented increment"
 
 Set CODEX_CONTEXT_WINDOW to the context-window value shown by Codex /status.
 EOF
@@ -54,16 +49,15 @@ die() {
     exit 1
 }
 
-MODE=feature
+MODE=backlog
 MAX_TURNS=0
 ALLOW_DIRTY=0
 DRY_RUN=0
-TASK_ARGS=()
 
 while (($# > 0)); do
     case "$1" in
         --mode)
-            (($# >= 2)) || die "--mode requires feature, backlog, or refactor"
+            (($# >= 2)) || die "--mode requires backlog"
             MODE=$2
             shift 2
             ;;
@@ -87,29 +81,19 @@ while (($# > 0)); do
             ;;
         --)
             shift
-            while (($# > 0)); do
-                TASK_ARGS+=("$1")
-                shift
-            done
+            (($# == 0)) || die "positional tasks are unsupported; select the next backlog item"
             ;;
         -h|--help)
             usage
             exit 0
             ;;
         *)
-            TASK_ARGS+=("$1")
-            shift
+            die "unknown option '$1'; this loop selects the next backlog item automatically"
             ;;
     esac
 done
 
-case "$MODE" in
-    feature|backlog|refactor)
-        ;;
-    *)
-        die "unknown mode '$MODE'; expected feature, backlog, or refactor"
-        ;;
-esac
+[[ "$MODE" == backlog ]] || die "only backlog mode can create commits"
 
 CODEX_BIN=${CODEX_BIN:-codex}
 WORKDIR=${CODEX_WORKDIR:-$PWD}
@@ -133,8 +117,6 @@ done
 
 REPO_ROOT=$(git -C "$WORKDIR" rev-parse --show-toplevel 2>/dev/null) \
     || die "CODEX_WORKDIR is not inside a Git repository: $WORKDIR"
-RULES_FILE=${CODEX_REFACTOR_RULES_FILE:-$REPO_ROOT/docs/REFACTORING-RULES.md}
-
 if [[ -n "${CODEX_HANDOFF_FILE:-}" ]]; then
     HANDOFF_FILE=$CODEX_HANDOFF_FILE
 else
@@ -149,12 +131,6 @@ fi
 [[ "$LOG_FILE" = /* ]] || LOG_FILE="$WORKDIR/$LOG_FILE"
 STOP_FILE="$WORKDIR/.codex-loop.stop"
 
-if ((${#TASK_ARGS[@]} > 0)); then
-    TASK="${TASK_ARGS[*]}"
-else
-    TASK="Implement one coherent, production-quality increment from the documented MESH work. Inspect the current repository state, run focused validation, and stop after this increment is complete."
-fi
-
 next_backlog_line() {
     awk '/^- \[ \] / { print NR; exit }' "$REPO_ROOT/docs/BACKLOG.md"
 }
@@ -162,6 +138,20 @@ next_backlog_line() {
 backlog_item_at() {
     local line=$1
     sed -n "${line}p" "$REPO_ROOT/docs/BACKLOG.md"
+}
+
+backlog_item_present() {
+    local item=$1
+    awk -v item="$item" '
+        /^- \[[ xX]\] / {
+            candidate = $0
+            sub(/^- \[[ xX]\] /, "", candidate)
+            if (candidate == item) {
+                found = 1
+            }
+        }
+        END { exit found ? 0 : 1 }
+    '
 }
 
 assert_git_state() {
@@ -186,70 +176,16 @@ print_configuration() {
     printf 'mode: %s\n' "$MODE"
     printf 'context window: %s tokens\n' "$CONTEXT_WINDOW"
     printf 'fresh-session threshold: %s tokens used (%s%% remaining)\n' "$rollover_at" "$MIN_CONTEXT_PERCENT"
-    printf 'automatic commits: enabled (operational log and handoff stay outside feature commits)\n'
+    printf 'automatic commits: enabled only after one backlog item is removed\n'
     printf 'allow dirty recovery: %s\n' "$ALLOW_DIRTY"
-}
-
-build_refactor_audit_prompt() {
-    cat <<EOF
-You are the audit/planning turn of the MESH refactoring loop.
-
-The goal is to keep a large Rust/Wayland/Luau codebase clean while refactoring
-it safely. Read AGENTS.md, docs/architecture/overview.md, docs/spec/README.md,
-.planning/README.md, and especially .planning/log/sections.md. Treat the
-existing package-oriented sections as the initial map; verify them against the
-actual source files instead of trusting stale documentation.
-
-Inspect every section's listed source roots and its existing improvements.md.
-Look for misplaced ownership, dependency-direction violations, duplicated
-contracts, overly broad modules, service-specific policy in generic core code,
-unsafe or lossy boundaries, and tests that do not protect the seams. Build a
-concise source-grounded set of refactoring rules in:
-
-  $RULES_FILE
-
-The rules document must describe section ownership, allowed dependency flow,
-when to split a module, what belongs in Rust versus Luau/modules, required
-contract/test boundaries, and a practical checklist for future changes. Include
-the evidence paths that led to each rule. Rules are durable guidance, not a
-second backlog or a dated progress tracker; open work still belongs in
-docs/BACKLOG.md and historical findings stay in .planning/log/.
-
-This turn is analysis and documentation only. Do not refactor production code,
-do not create a competing task list, do not edit .planning/archive/, and do not
-run broad speculative rewrites. The loop will commit this rules document after
-the turn.
-EOF
 }
 
 build_prompt() {
     local line item
-
-    case "$MODE" in
-        feature)
-            cat <<EOF
-You are one worker in the MESH implementation loop.
-
-Implement exactly one coherent increment for this task:
-
-$TASK
-
-Read AGENTS.md, docs/architecture/overview.md, docs/spec/README.md,
-docs/BACKLOG.md, .planning/STATUS.md, .planning/README.md, and the relevant
-source, tests, history, and planning records before editing. Preserve the
-documented architecture and terminology. Run focused tests and the broadest
-practical validation. Do not start unrelated work.
-
-Do not create a Git commit; the outer loop creates one commit for this turn.
-Leave the repository in a reviewable state and report the files changed, tests
-run, and any unresolved limitation in your final response.
-EOF
-            ;;
-        backlog)
-            line=$(next_backlog_line)
-            [[ -n "$line" ]] || return 1
-            item=$(backlog_item_at "$line")
-            cat <<EOF
+    line=$(next_backlog_line)
+    [[ -n "$line" ]] || return 1
+    item=$(backlog_item_at "$line")
+    cat <<EOF
 You are one worker in the MESH backlog implementation loop.
 
 Implement exactly this unchecked item from docs/BACKLOG.md:
@@ -269,56 +205,15 @@ Do not create a Git commit; the outer loop creates exactly one commit for this
 turn. If the item is blocked, make no fake completion and leave useful
 diagnostics instead of removing it.
 EOF
-            ;;
-        refactor)
-            if [[ ! -s "$RULES_FILE" ]]; then
-                build_refactor_audit_prompt
-            else
-                cat <<EOF
-You are one worker in the MESH section-by-section refactoring loop.
-
-Read AGENTS.md, docs/architecture/overview.md, docs/spec/README.md,
-.planning/README.md, .planning/log/sections.md, and $RULES_FILE. Use the
-existing section map and audit files as evidence, then inspect the current
-source before acting. Choose the single highest-value safe increment in one
-section. Improve ownership, dependency direction, contract clarity, or test
-coverage according to the rules. Keep public behavior stable unless the
-change is explicitly required by the relevant spec/backlog item.
-
-Implement only that one scoped increment. If it is a new backlog item, add it
-to docs/BACKLOG.md before starting and remove it only when complete; otherwise
-do not invent a second tracker. Run focused validation and record real failures
-in the normal planning log. Do not edit .planning/archive/.
-
-Do not create a Git commit; the outer loop creates one commit for this turn.
-Report the section, files changed, tests run, and the next safe increment.
-EOF
-            fi
-            ;;
-    esac
 }
 
 build_continuation_prompt() {
-    case "$MODE" in
-        feature)
-            printf 'Continue the feature-loop task. Inspect the current repository state, complete exactly one additional coherent increment of this task, run relevant tests, and do not commit because the outer loop commits each turn. Task: %s' "$TASK"
-            ;;
-        backlog)
-            printf 'Continue backlog mode. Re-read docs/BACKLOG.md, select its next unchecked item, implement only that item, run relevant tests, update required tracking files when complete, and do not commit because the outer loop commits each turn.'
-            ;;
-        refactor)
-            if [[ ! -s "$RULES_FILE" ]]; then
-                build_refactor_audit_prompt
-            else
-                printf 'Continue the MESH refactoring loop. Read the current section map and %s, choose one safe scoped increment in one section, implement it, run relevant tests, and do not commit because the outer loop commits each turn.' "$RULES_FILE"
-            fi
-            ;;
-    esac
+    printf 'Continue backlog mode. Re-read docs/BACKLOG.md, select its next unchecked item, implement only that item, run relevant tests, update required tracking files when complete, and do not commit because the outer loop commits each turn.'
 }
 
 if ((DRY_RUN)); then
     print_configuration
-    if [[ "$MODE" == backlog && -z "$(next_backlog_line)" ]]; then
+    if [[ -z "$(next_backlog_line)" ]]; then
         printf 'next prompt: no unchecked backlog items remain\n'
     else
         printf '\n--- next prompt ---\n'
@@ -473,7 +368,7 @@ git_pathspec_exclusions() {
     done
 }
 
-has_feature_changes() {
+has_implementation_changes() {
     local -a exclusions
     mapfile -t exclusions < <(git_pathspec_exclusions)
     if ! git -C "$REPO_ROOT" diff --quiet -- . "${exclusions[@]}"; then
@@ -487,32 +382,19 @@ has_feature_changes() {
 
 commit_subject() {
     local turn=$1 marker=${2:-}
-    case "$MODE" in
-        feature)
-            printf 'codex: feature turn %s' "$turn"
-            ;;
-        backlog)
-            marker=${marker#- \[ \] }
-            marker=$(printf '%s' "$marker" | tr '\n' ' ' | sed 's/[[:space:]][[:space:]]*/ /g' | cut -c1-60)
-            if [[ -n "$marker" ]]; then
-                printf 'codex: backlog - %s' "$marker"
-            else
-                printf 'codex: backlog turn %s' "$turn"
-            fi
-            ;;
-        refactor)
-            if ((REFRACTOR_AUDIT_TURN)); then
-                printf 'codex: refactor audit rules'
-            else
-                printf 'codex: refactor section increment %s' "$turn"
-            fi
-            ;;
-    esac
+    marker=${marker#- \[ \] }
+    marker=$(printf '%s' "$marker" | tr '\n' ' ' | sed 's/[[:space:]][[:space:]]*/ /g' | cut -c1-60)
+    if [[ -n "$marker" ]]; then
+        printf 'codex: backlog - %s' "$marker"
+    else
+        printf 'codex: backlog turn %s' "$turn"
+    fi
 }
 
 commit_turn() {
     local before=$1 turn=$2 marker=${3:-}
-    local after commit_count parent_count
+    local after commit_count parent_count before_item_count after_item_count marker_text
+    marker_text=${marker#- \[ \] }
 
     after=$(git -C "$REPO_ROOT" rev-parse HEAD)
     git -C "$REPO_ROOT" merge-base --is-ancestor "$before" "$after" \
@@ -520,19 +402,43 @@ commit_turn() {
     commit_count=$(git -C "$REPO_ROOT" rev-list --count "$before..$after")
     ((commit_count <= 1)) || die "Codex created more than one commit in a turn"
 
-    if [[ "$MODE" == backlog && -n "$marker" ]] \
-        && grep -Fq -- "$marker" "$REPO_ROOT/docs/BACKLOG.md"; then
-        die "backlog item was not completed; leaving Codex changes uncommitted for review"
-    fi
-    if [[ "$MODE" == refactor && ! -s "$RULES_FILE" ]]; then
-        die "refactor audit did not create a non-empty $RULES_FILE"
-    fi
-
     if ((commit_count == 1)); then
-        if has_feature_changes; then
+        if git -C "$REPO_ROOT" show "$after:docs/BACKLOG.md" | backlog_item_present "$marker_text"; then
+            die "backlog item was not completed in Codex's commit"
+        fi
+        before_item_count=$(git -C "$REPO_ROOT" show "$before:docs/BACKLOG.md" \
+            | awk '/^- \[ \] / { count++ } END { print count + 0 }')
+        after_item_count=$(git -C "$REPO_ROOT" show "$after:docs/BACKLOG.md" \
+            | awk '/^- \[ \] / { count++ } END { print count + 0 }')
+        if ((after_item_count != before_item_count - 1)); then
+            die "expected exactly one backlog item to be removed in Codex's commit (before=$before_item_count after=$after_item_count)"
+        fi
+        if git -C "$REPO_ROOT" diff --quiet "$before" "$after" -- docs/BACKLOG.md; then
+            die "Codex's commit did not change docs/BACKLOG.md"
+        fi
+        if git -C "$REPO_ROOT" diff --quiet "$before" "$after" -- .planning/log; then
+            die "Codex's commit did not add a planning log record"
+        fi
+        if has_implementation_changes; then
             die "Codex created a commit but left additional implementation changes uncommitted"
         fi
     else
+        if [[ -n "$marker" ]] && backlog_item_present "$marker_text" < "$REPO_ROOT/docs/BACKLOG.md"; then
+            die "backlog item was not completed; leaving Codex changes uncommitted for review"
+        fi
+        before_item_count=$(git -C "$REPO_ROOT" show "$before:docs/BACKLOG.md" \
+            | awk '/^- \[ \] / { count++ } END { print count + 0 }')
+        after_item_count=$(awk '/^- \[ \] / { count++ } END { print count + 0 }' \
+            "$REPO_ROOT/docs/BACKLOG.md")
+        if ((after_item_count != before_item_count - 1)); then
+            die "expected exactly one backlog item to be removed (before=$before_item_count after=$after_item_count)"
+        fi
+        if git -C "$REPO_ROOT" diff --quiet "$before" -- docs/BACKLOG.md; then
+            die "backlog completion did not change docs/BACKLOG.md"
+        fi
+        if git -C "$REPO_ROOT" diff --quiet "$before" -- .planning/log; then
+            die "backlog completion did not add a planning log record"
+        fi
         local -a exclusions
         mapfile -t exclusions < <(git_pathspec_exclusions)
         git -C "$REPO_ROOT" add -A -- . "${exclusions[@]}"
@@ -546,13 +452,13 @@ commit_turn() {
 
     after=$(git -C "$REPO_ROOT" rev-parse HEAD)
     parent_count=$(git -C "$REPO_ROOT" rev-list --parents -n 1 "$after" | awk '{ print NF - 1 }')
-    [[ "$parent_count" == 1 ]] || die "the feature commit must not be a merge commit"
+    [[ "$parent_count" == 1 ]] || die "the backlog commit must not be a merge commit"
     printf '%s\n' "$after"
 }
 
 if ((DRY_RUN)); then
     print_configuration
-    if [[ "$MODE" == backlog && -z "$(next_backlog_line)" ]]; then
+    if [[ -z "$(next_backlog_line)" ]]; then
         printf 'next prompt: no unchecked backlog items remain\n'
     else
         printf '\n--- next prompt ---\n'
@@ -566,8 +472,6 @@ assert_git_state
 thread_id=''
 committed_turns=0
 failures=0
-REFRACTOR_AUDIT_TURN=0
-
 printf 'Starting Codex loop in %s (mode: %s)\n' "$REPO_ROOT" "$MODE" | tee -a "$LOG_FILE"
 printf 'Fallback context rollover threshold: %s / %s tokens used\n' \
     "$FALLBACK_ROLLOVER_AT" "$CONTEXT_WINDOW" | tee -a "$LOG_FILE"
@@ -580,25 +484,17 @@ while [[ ! -e "$STOP_FILE" ]]; do
         exit 0
     fi
 
-    if [[ "$MODE" == backlog && -z "$(next_backlog_line)" ]]; then
+    if [[ -z "$(next_backlog_line)" ]]; then
         printf 'No unchecked backlog items remain.\n'
         exit 0
     fi
 
     before=$(git -C "$REPO_ROOT" rev-parse HEAD)
-    marker=''
-    if [[ "$MODE" == backlog ]]; then
-        marker=$(backlog_item_at "$(next_backlog_line)")
-    fi
-    if [[ "$MODE" == refactor && ! -s "$RULES_FILE" ]]; then
-        REFRACTOR_AUDIT_TURN=1
-    else
-        REFRACTOR_AUDIT_TURN=0
-    fi
+    marker=$(backlog_item_at "$(next_backlog_line)")
 
     if [[ -z "$thread_id" ]]; then
         prompt=$(build_prompt) || {
-            [[ "$MODE" == backlog ]] && printf 'No unchecked backlog items remain.\n'
+            printf 'No unchecked backlog items remain.\n'
             exit 0
         }
         command=(
