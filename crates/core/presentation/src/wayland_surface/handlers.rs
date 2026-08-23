@@ -2,7 +2,6 @@ use super::backend::WaylandRole;
 use super::state::GestureKind;
 use super::*;
 use std::borrow::Cow;
-use std::sync::Arc;
 
 impl CompositorHandler for State {
     fn scale_factor_changed(
@@ -259,7 +258,15 @@ impl SeatHandler for State {
         &mut self.seat_state
     }
 
-    fn new_seat(&mut self, _c: &Connection, _q: &QueueHandle<Self>, _s: wl_seat::WlSeat) {}
+    fn new_seat(&mut self, _c: &Connection, _q: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
+        let seat_id = seat.id();
+        if self.input_seats.contains_key(&seat_id) {
+            return;
+        }
+        self.input_seat_order.push(seat_id.clone());
+        self.input_seats
+            .insert(seat_id, super::state::SeatInputState::new(seat));
+    }
 
     fn new_capability(
         &mut self,
@@ -268,8 +275,21 @@ impl SeatHandler for State {
         seat: wl_seat::WlSeat,
         capability: SeatCapability,
     ) {
-        self.activation_seat = Some(seat.clone());
-        if capability == SeatCapability::Pointer && self.pointer.is_none() {
+        let seat_id = seat.id();
+        if !self.input_seats.contains_key(&seat_id) {
+            self.input_seat_order.push(seat_id.clone());
+            self.input_seats.insert(
+                seat_id.clone(),
+                super::state::SeatInputState::new(seat.clone()),
+            );
+        }
+        self.activation_seat = Some(seat_id.clone());
+        if capability == SeatCapability::Pointer
+            && self
+                .input_seats
+                .get(&seat_id)
+                .is_some_and(|input| input.pointer.is_none())
+        {
             let cursor_surface = self.compositor_state.create_surface(qh);
             if let Ok(ptr) = self.seat_state.get_pointer_with_theme(
                 qh,
@@ -279,26 +299,52 @@ impl SeatHandler for State {
                 ThemeSpec::default(),
             ) {
                 tracing::debug!("[hover] layer_shell: pointer capability acquired");
+                let pointer_id = ptr.pointer().id();
+                let mut gesture_handles = None;
                 if let Some(gestures) = self.pointer_gestures.as_ref() {
                     let wl_ptr = ptr.pointer();
-                    self.gesture_swipe = Some(gestures.get_swipe_gesture(wl_ptr, qh, GlobalData));
-                    self.gesture_pinch = Some(gestures.get_pinch_gesture(wl_ptr, qh, GlobalData));
-                    self.gesture_hold = Some(gestures.get_hold_gesture(wl_ptr, qh, GlobalData));
+                    let swipe = gestures.get_swipe_gesture(wl_ptr, qh, GlobalData);
+                    let pinch = gestures.get_pinch_gesture(wl_ptr, qh, GlobalData);
+                    let hold = gestures.get_hold_gesture(wl_ptr, qh, GlobalData);
+                    self.swipe_seats.insert(swipe.id(), seat_id.clone());
+                    self.pinch_seats.insert(pinch.id(), seat_id.clone());
+                    self.hold_seats.insert(hold.id(), seat_id.clone());
+                    gesture_handles = Some((swipe, pinch, hold));
                 }
-                self.pointer = Some(ptr);
+                self.pointer_seats.insert(pointer_id, seat_id.clone());
+                if let Some(input) = self.input_seats.get_mut(&seat_id) {
+                    input.pointer = Some(ptr);
+                    if let Some((swipe, pinch, hold)) = gesture_handles {
+                        input.gesture_swipe = Some(swipe);
+                        input.gesture_pinch = Some(pinch);
+                        input.gesture_hold = Some(hold);
+                    }
+                }
             }
         }
         if capability == SeatCapability::Touch
-            && self.touch.is_none()
+            && self
+                .input_seats
+                .get(&seat_id)
+                .is_some_and(|input| input.touch.is_none())
             && let Ok(touch) = self.seat_state.get_touch(qh, &seat)
         {
-            self.touch = Some(touch);
+            self.touch_seats.insert(touch.id(), seat_id.clone());
+            if let Some(input) = self.input_seats.get_mut(&seat_id) {
+                input.touch = Some(touch);
+            }
         }
         if capability == SeatCapability::Keyboard
-            && self.keyboard.is_none()
+            && self
+                .input_seats
+                .get(&seat_id)
+                .is_some_and(|input| input.keyboard.is_none())
             && let Ok(kbd) = self.seat_state.get_keyboard(qh, &seat, None)
         {
-            self.keyboard = Some(kbd);
+            self.keyboard_seats.insert(kbd.id(), seat_id.clone());
+            if let Some(input) = self.input_seats.get_mut(&seat_id) {
+                input.keyboard = Some(kbd);
+            }
         }
     }
 
@@ -306,46 +352,84 @@ impl SeatHandler for State {
         &mut self,
         _c: &Connection,
         _q: &QueueHandle<Self>,
-        _s: wl_seat::WlSeat,
+        seat: wl_seat::WlSeat,
         capability: SeatCapability,
     ) {
+        let seat_id = seat.id();
         if capability == SeatCapability::Pointer {
-            self.cancel_pointer_input();
-            self.gesture_swipe.take().map(|g| g.destroy());
-            self.gesture_pinch.take().map(|g| g.destroy());
-            self.gesture_hold.take().map(|g| g.destroy());
-            let _ = self.pointer.take();
+            self.cancel_pointer_input_for_seat(&seat_id);
+            if let Some(input) = self.input_seats.get_mut(&seat_id) {
+                if let Some(gesture) = input.gesture_swipe.take() {
+                    self.swipe_seats.remove(&gesture.id());
+                    gesture.destroy();
+                }
+                if let Some(gesture) = input.gesture_pinch.take() {
+                    self.pinch_seats.remove(&gesture.id());
+                    gesture.destroy();
+                }
+                if let Some(gesture) = input.gesture_hold.take() {
+                    self.hold_seats.remove(&gesture.id());
+                    gesture.destroy();
+                }
+                if let Some(pointer) = input.pointer.take() {
+                    self.pointer_seats.remove(&pointer.pointer().id());
+                }
+            }
         }
         if capability == SeatCapability::Touch {
-            self.cancel_touch_input();
-            if let Some(touch) = self.touch.take() {
+            self.cancel_touch_input_for_seat(&seat_id);
+            if let Some(input) = self.input_seats.get_mut(&seat_id)
+                && let Some(touch) = input.touch.take()
+            {
+                self.touch_seats.remove(&touch.id());
                 touch.release();
             }
         }
         if capability == SeatCapability::Keyboard {
-            self.cancel_keyboard_input();
-            self.release_focus_grab_for_seat_teardown();
-            if let Some(keyboard) = self.keyboard.take() {
+            self.cancel_keyboard_input_for_seat(&seat_id);
+            self.release_focus_grab_for_seat_teardown(&seat_id);
+            if let Some(input) = self.input_seats.get_mut(&seat_id)
+                && let Some(keyboard) = input.keyboard.take()
+            {
+                self.keyboard_seats.remove(&keyboard.id());
                 keyboard.release();
             }
         }
     }
 
     fn remove_seat(&mut self, _c: &Connection, _q: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
-        self.cancel_all_input();
-        self.release_focus_grab_for_seat_teardown();
-        self.gesture_swipe.take().map(|g| g.destroy());
-        self.gesture_pinch.take().map(|g| g.destroy());
-        self.gesture_hold.take().map(|g| g.destroy());
-        let _ = self.pointer.take();
-        if let Some(touch) = self.touch.take() {
-            touch.release();
+        let seat_id = seat.id();
+        self.cancel_all_input_for_seat(&seat_id);
+        self.release_focus_grab_for_seat_teardown(&seat_id);
+        if let Some(input) = self.input_seats.get_mut(&seat_id) {
+            if let Some(gesture) = input.gesture_swipe.take() {
+                self.swipe_seats.remove(&gesture.id());
+                gesture.destroy();
+            }
+            if let Some(gesture) = input.gesture_pinch.take() {
+                self.pinch_seats.remove(&gesture.id());
+                gesture.destroy();
+            }
+            if let Some(gesture) = input.gesture_hold.take() {
+                self.hold_seats.remove(&gesture.id());
+                gesture.destroy();
+            }
+            if let Some(pointer) = input.pointer.take() {
+                self.pointer_seats.remove(&pointer.pointer().id());
+            }
+            if let Some(touch) = input.touch.take() {
+                self.touch_seats.remove(&touch.id());
+                touch.release();
+            }
+            if let Some(keyboard) = input.keyboard.take() {
+                self.keyboard_seats.remove(&keyboard.id());
+                keyboard.release();
+            }
         }
-        if let Some(keyboard) = self.keyboard.take() {
-            keyboard.release();
-        }
-        if self.activation_seat.as_ref() == Some(&seat) {
-            self.activation_seat = None;
+        self.input_seats.remove(&seat_id);
+        self.input_seat_order.retain(|id| id != &seat_id);
+        if self.activation_seat.as_ref() == Some(&seat_id) {
+            self.activation_seat = self.input_seat_order.last().cloned();
         }
     }
 }
@@ -355,9 +439,12 @@ impl PointerHandler for State {
         &mut self,
         conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _pointer: &wl_pointer::WlPointer,
+        pointer: &wl_pointer::WlPointer,
         events: &[PointerEvent],
     ) {
+        let Some(seat_id) = self.seat_id_for_pointer(pointer) else {
+            return;
+        };
         for event in events {
             let surface_id = match self.surface_id_for_wl_surface(&event.surface) {
                 Some(id) => id,
@@ -366,8 +453,13 @@ impl PointerHandler for State {
             match event.kind {
                 PointerEventKind::Enter { .. } => {
                     tracing::debug!("[hover] layer_shell: pointer enter surface_id={surface_id}");
-                    self.pointer_focus = Some(surface_id.clone());
-                    if let Some(pointer) = self.pointer.as_ref()
+                    if let Some(input) = self.input_seats.get_mut(&seat_id) {
+                        input.pointer_focus = Some(surface_id.clone());
+                    }
+                    if let Some(pointer) = self
+                        .input_seats
+                        .get(&seat_id)
+                        .and_then(|input| input.pointer.as_ref())
                         && let Err(error) = pointer.set_cursor(
                             conn,
                             if self.pointer_interactive {
@@ -385,44 +477,56 @@ impl PointerHandler for State {
                     // cancels any pending hover-bridge hide immediately on entry rather
                     // than waiting for the first motion event.
                     let (x, y) = (event.position.0 as f32, event.position.1 as f32);
-                    self.events
-                        .push(DevWindowEvent::PointerMove { surface_id, x, y });
+                    self.queue_event(&seat_id, DevWindowEvent::PointerMove { surface_id, x, y });
                 }
                 PointerEventKind::Leave { .. } => {
                     tracing::debug!("[hover] layer_shell: pointer leave surface_id={surface_id}");
-                    if self.focus_grab_surface_id.as_deref() == Some(surface_id.as_ref()) {
+                    let focus_grabbed = self
+                        .input_seats
+                        .get(&seat_id)
+                        .and_then(|input| input.focus_grab_surface_id.as_deref())
+                        == Some(surface_id.as_ref());
+                    if focus_grabbed {
                         tracing::debug!(
                             "[focus] layer_shell: pointer left grabbed surface_id={surface_id}; releasing focus grab"
                         );
-                        self.release_surface_focus_grab(&surface_id);
+                        self.release_surface_focus_grab_for_seat(&seat_id, &surface_id, true);
                     }
-                    if self.pointer_focus.as_deref() == Some(&surface_id) {
-                        self.pointer_focus = None;
+                    if self
+                        .input_seats
+                        .get(&seat_id)
+                        .and_then(|input| input.pointer_focus.as_ref())
+                        == Some(&surface_id)
+                    {
+                        if let Some(input) = self.input_seats.get_mut(&seat_id) {
+                            input.pointer_focus = None;
+                        }
                     }
-                    self.events
-                        .push(DevWindowEvent::PointerLeave { surface_id });
+                    self.queue_event(&seat_id, DevWindowEvent::PointerLeave { surface_id });
                 }
                 PointerEventKind::Motion { .. } => {
                     let (x, y) = (event.position.0 as f32, event.position.1 as f32);
                     tracing::trace!(
                         "[hover] layer_shell: pointer motion surface_id={surface_id} x={x:.1} y={y:.1}"
                     );
-                    self.events
-                        .push(DevWindowEvent::PointerMove { surface_id, x, y });
+                    self.queue_event(&seat_id, DevWindowEvent::PointerMove { surface_id, x, y });
                 }
                 PointerEventKind::Press { button, .. } => {
                     if button == 0x110 {
-                        self.request_surface_focus(&surface_id, event);
+                        self.request_surface_focus(&seat_id, &surface_id, event);
                         let (x, y) = (event.position.0 as f32, event.position.1 as f32);
                         tracing::debug!(
                             "[hover] layer_shell: pointer press surface_id={surface_id} x={x:.1} y={y:.1}"
                         );
-                        self.events.push(DevWindowEvent::PointerButton {
-                            surface_id,
-                            x,
-                            y,
-                            pressed: true,
-                        });
+                        self.queue_event(
+                            &seat_id,
+                            DevWindowEvent::PointerButton {
+                                surface_id,
+                                x,
+                                y,
+                                pressed: true,
+                            },
+                        );
                     }
                 }
                 PointerEventKind::Release { button, .. } => {
@@ -431,12 +535,15 @@ impl PointerHandler for State {
                         tracing::debug!(
                             "[hover] layer_shell: pointer release surface_id={surface_id} x={x:.1} y={y:.1}"
                         );
-                        self.events.push(DevWindowEvent::PointerButton {
-                            surface_id,
-                            x,
-                            y,
-                            pressed: false,
-                        });
+                        self.queue_event(
+                            &seat_id,
+                            DevWindowEvent::PointerButton {
+                                surface_id,
+                                x,
+                                y,
+                                pressed: false,
+                            },
+                        );
                     }
                 }
                 PointerEventKind::Axis {
@@ -459,21 +566,27 @@ impl PointerHandler for State {
                             "Wayland pointer axis input"
                         );
                         if source == Some(wl_pointer::AxisSource::Finger) {
-                            self.events.push(DevWindowEvent::TwoFingerScroll {
-                                surface_id,
-                                x,
-                                y,
-                                dx,
-                                dy,
-                            });
+                            self.queue_event(
+                                &seat_id,
+                                DevWindowEvent::TwoFingerScroll {
+                                    surface_id,
+                                    x,
+                                    y,
+                                    dx,
+                                    dy,
+                                },
+                            );
                         } else {
-                            self.events.push(DevWindowEvent::Scroll {
-                                surface_id,
-                                x,
-                                y,
-                                dx,
-                                dy,
-                            });
+                            self.queue_event(
+                                &seat_id,
+                                DevWindowEvent::Scroll {
+                                    surface_id,
+                                    x,
+                                    y,
+                                    dx,
+                                    dy,
+                                },
+                            );
                         }
                     }
                 }
@@ -552,19 +665,30 @@ impl Dispatch<WpFractionalScaleManagerV1, GlobalData, State> for State {
 impl Dispatch<HyprlandFocusGrabV1, (), State> for State {
     fn event(
         state: &mut State,
-        _: &HyprlandFocusGrabV1,
+        grab: &HyprlandFocusGrabV1,
         event: hyprland_focus_grab_v1::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<State>,
     ) {
+        let Some(seat_id) = state.seat_id_for_focus_grab(grab) else {
+            return;
+        };
         if let hyprland_focus_grab_v1::Event::Cleared = event {
             tracing::debug!("[focus] layer_shell: compositor cleared focus grab");
-            if let Some(grab) = state.focus_grab.take() {
-                grab.destroy();
+            let surface_id = state
+                .input_seats
+                .get(&seat_id)
+                .and_then(|input| input.focus_grab_surface_id.clone());
+            if let Some(input) = state.input_seats.get_mut(&seat_id) {
+                if let Some(grab) = input.focus_grab.take() {
+                    state.focus_grab_seats.remove(&grab.id());
+                    grab.destroy();
+                }
+                input.focus_grab_requested_at = None;
+                input.focus_grab_surface_id = None;
             }
-            state.focus_grab_requested_at = None;
-            if let Some(surface_id) = state.focus_grab_surface_id.take() {
+            if let Some(surface_id) = surface_id {
                 state.reapply_surface_config(&surface_id);
             }
         }
@@ -607,24 +731,47 @@ impl KeyboardHandler for State {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _keyboard: &wl_keyboard::WlKeyboard,
+        keyboard: &wl_keyboard::WlKeyboard,
         surface: &wl_surface::WlSurface,
         _serial: u32,
         _raw: &[u32],
         _keysyms: &[Keysym],
     ) {
+        let Some(seat_id) = self.seat_id_for_keyboard(keyboard) else {
+            return;
+        };
         let focused = self.surface_id_for_wl_surface(surface);
-        if self.keyboard_focus != focused {
-            self.keyboard_repeat = None;
+        let release_grab = self.input_seats.get(&seat_id).is_some_and(|input| {
+            if input.keyboard_focus != focused {
+                // The previous focus is no longer eligible for repeats.
+                // The mutable clear happens just below, outside this
+                // predicate, to keep the seat lookup borrow short.
+                true
+            } else {
+                false
+            }
+        });
+        if release_grab {
+            if let Some(input) = self.input_seats.get_mut(&seat_id) {
+                input.keyboard_repeat = None;
+            }
         }
-        self.keyboard_focus = focused.clone();
+        let grabbed = focused.as_ref().is_some_and(|surface_id| {
+            self.input_seats
+                .get(&seat_id)
+                .and_then(|input| input.focus_grab_surface_id.as_deref())
+                == Some(surface_id.as_ref())
+        });
+        if let Some(input) = self.input_seats.get_mut(&seat_id) {
+            input.keyboard_focus = focused.clone();
+        }
         if let Some(surface_id) = focused
-            && self.focus_grab_surface_id.as_deref() == Some(surface_id.as_ref())
+            && grabbed
         {
             tracing::debug!(
                 "[focus] layer_shell: keyboard focus entered grabbed surface_id={surface_id}; releasing focus grab"
             );
-            self.release_surface_focus_grab(&surface_id);
+            self.release_surface_focus_grab_for_seat(&seat_id, &surface_id, true);
         }
     }
 
@@ -632,58 +779,84 @@ impl KeyboardHandler for State {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _keyboard: &wl_keyboard::WlKeyboard,
+        keyboard: &wl_keyboard::WlKeyboard,
         surface: &wl_surface::WlSurface,
         _serial: u32,
     ) {
+        let Some(seat_id) = self.seat_id_for_keyboard(keyboard) else {
+            return;
+        };
         if let Some(surface_id) = self.surface_id_for_wl_surface(surface)
-            && self.focus_grab_surface_id.as_deref() == Some(surface_id.as_ref())
+            && self
+                .input_seats
+                .get(&seat_id)
+                .and_then(|input| input.focus_grab_surface_id.as_deref())
+                == Some(surface_id.as_ref())
         {
             tracing::debug!(
                 "[focus] layer_shell: keyboard focus left grabbed surface_id={surface_id}; releasing focus grab"
             );
-            self.release_surface_focus_grab(&surface_id);
+            self.release_surface_focus_grab_for_seat(&seat_id, &surface_id, true);
         }
-        self.keyboard_focus = None;
-        self.keyboard_repeat = None;
+        if let Some(input) = self.input_seats.get_mut(&seat_id) {
+            input.keyboard_focus = None;
+            input.keyboard_repeat = None;
+        }
     }
 
     fn press_key(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _keyboard: &wl_keyboard::WlKeyboard,
+        keyboard: &wl_keyboard::WlKeyboard,
         _serial: u32,
         event: KeyEvent,
     ) {
-        let Some(surface_id) = self.keyboard_focus.clone() else {
+        let Some(seat_id) = self.seat_id_for_keyboard(keyboard) else {
+            return;
+        };
+        let Some(surface_id) = self
+            .input_seats
+            .get(&seat_id)
+            .and_then(|input| input.keyboard_focus.clone())
+        else {
             return;
         };
         let name = keysym_name(event.keysym);
-        let mods = KeyMods {
-            ctrl: self.keyboard_mods.ctrl,
-            shift: self.keyboard_mods.shift,
-            alt: self.keyboard_mods.alt,
-        };
+        let mods = self
+            .input_seats
+            .get(&seat_id)
+            .map_or_else(KeyMods::default, |input| KeyMods {
+                ctrl: input.keyboard_mods.ctrl,
+                shift: input.keyboard_mods.shift,
+                alt: input.keyboard_mods.alt,
+            });
         let ch = event
             .utf8
             .as_deref()
             .and_then(|s| s.chars().next())
             .filter(|ch| !ch.is_control());
-        self.keyboard_repeat = self.keyboard_repeat_state(
+        let repeat = self.keyboard_repeat_state(
+            &seat_id,
             &surface_id,
             name.as_ref(),
             mods.clone(),
             ch,
             Instant::now(),
         );
+        if let Some(input) = self.input_seats.get_mut(&seat_id) {
+            input.keyboard_repeat = repeat;
+        }
         let key_surface_id = surface_id.clone();
-        self.events.push(DevWindowEvent::Key {
-            surface_id: key_surface_id,
-            event: DevWindowKeyEvent::Pressed(name.into_owned(), mods),
-        });
+        self.queue_event(
+            &seat_id,
+            DevWindowEvent::Key {
+                surface_id: key_surface_id,
+                event: DevWindowKeyEvent::Pressed(name.into_owned(), mods),
+            },
+        );
         if let Some(ch) = ch {
-            self.events.push(DevWindowEvent::Char { surface_id, ch });
+            self.queue_event(&seat_id, DevWindowEvent::Char { surface_id, ch });
         }
     }
 
@@ -691,37 +864,54 @@ impl KeyboardHandler for State {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _keyboard: &wl_keyboard::WlKeyboard,
+        keyboard: &wl_keyboard::WlKeyboard,
         _serial: u32,
         event: KeyEvent,
     ) {
-        let Some(surface_id) = self.keyboard_focus.clone() else {
+        let Some(seat_id) = self.seat_id_for_keyboard(keyboard) else {
+            return;
+        };
+        let Some(surface_id) = self
+            .input_seats
+            .get(&seat_id)
+            .and_then(|input| input.keyboard_focus.clone())
+        else {
             return;
         };
         let name = keysym_name(event.keysym);
-        self.clear_keyboard_repeat_for_key(name.as_ref());
-        self.events.push(DevWindowEvent::Key {
-            surface_id,
-            event: DevWindowKeyEvent::Released(name.into_owned()),
-        });
+        self.clear_keyboard_repeat_for_key(&seat_id, name.as_ref());
+        self.queue_event(
+            &seat_id,
+            DevWindowEvent::Key {
+                surface_id,
+                event: DevWindowKeyEvent::Released(name.into_owned()),
+            },
+        );
     }
 
     fn update_modifiers(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _keyboard: &wl_keyboard::WlKeyboard,
+        keyboard: &wl_keyboard::WlKeyboard,
         _serial: u32,
         modifiers: Modifiers,
         _layout: u32,
     ) {
-        self.keyboard_mods = modifiers;
-        let mods = KeyMods {
-            ctrl: self.keyboard_mods.ctrl,
-            shift: self.keyboard_mods.shift,
-            alt: self.keyboard_mods.alt,
+        let Some(seat_id) = self.seat_id_for_keyboard(keyboard) else {
+            return;
         };
-        if let Some(repeat) = self.keyboard_repeat.as_mut() {
+        if let Some(input) = self.input_seats.get_mut(&seat_id) {
+            input.keyboard_mods = modifiers;
+        }
+        let mods = KeyMods {
+            ctrl: modifiers.ctrl,
+            shift: modifiers.shift,
+            alt: modifiers.alt,
+        };
+        if let Some(input) = self.input_seats.get_mut(&seat_id)
+            && let Some(repeat) = input.keyboard_repeat.as_mut()
+        {
             repeat.mods = mods;
         }
     }
@@ -730,12 +920,19 @@ impl KeyboardHandler for State {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _keyboard: &wl_keyboard::WlKeyboard,
+        keyboard: &wl_keyboard::WlKeyboard,
         info: RepeatInfo,
     ) {
-        self.keyboard_repeat_info = info;
+        let Some(seat_id) = self.seat_id_for_keyboard(keyboard) else {
+            return;
+        };
+        if let Some(input) = self.input_seats.get_mut(&seat_id) {
+            input.keyboard_repeat_info = info;
+        }
         if matches!(info, RepeatInfo::Disable) {
-            self.keyboard_repeat = None;
+            if let Some(input) = self.input_seats.get_mut(&seat_id) {
+                input.keyboard_repeat = None;
+            }
         }
     }
 }
@@ -914,12 +1111,15 @@ impl Dispatch<ZwpPointerGesturesV1, GlobalData> for State {
 impl Dispatch<ZwpPointerGestureSwipeV1, GlobalData> for State {
     fn event(
         state: &mut State,
-        _: &ZwpPointerGestureSwipeV1,
+        gesture: &ZwpPointerGestureSwipeV1,
         event: zwp_pointer_gesture_swipe_v1::Event,
         _: &GlobalData,
         _: &Connection,
         _: &QueueHandle<State>,
     ) {
+        let Some(seat_id) = state.seat_id_for_swipe(gesture) else {
+            return;
+        };
         match event {
             zwp_pointer_gesture_swipe_v1::Event::Begin {
                 surface, fingers, ..
@@ -927,32 +1127,50 @@ impl Dispatch<ZwpPointerGestureSwipeV1, GlobalData> for State {
                 let Some(surface_id) = state.surface_id_for_wl_surface(&surface) else {
                     return;
                 };
-                state.gesture_surface = Some(surface_id.clone());
-                state.gesture_kind = Some(GestureKind::Swipe);
-                state.events.push(DevWindowEvent::GestureSwipeBegin {
-                    surface_id,
-                    fingers,
-                });
+                if let Some(input) = state.input_seats.get_mut(&seat_id) {
+                    input.gesture_surface = Some(surface_id.clone());
+                    input.gesture_kind = Some(GestureKind::Swipe);
+                }
+                state.queue_event(
+                    &seat_id,
+                    DevWindowEvent::GestureSwipeBegin {
+                        surface_id,
+                        fingers,
+                    },
+                );
             }
             zwp_pointer_gesture_swipe_v1::Event::Update { dx, dy, .. } => {
-                let Some(surface_id) = state.gesture_surface.clone() else {
+                let Some(surface_id) = state
+                    .input_seats
+                    .get(&seat_id)
+                    .and_then(|input| input.gesture_surface.clone())
+                else {
                     return;
                 };
-                state.events.push(DevWindowEvent::GestureSwipeUpdate {
-                    surface_id,
-                    dx: dx as f32,
-                    dy: dy as f32,
-                });
+                state.queue_event(
+                    &seat_id,
+                    DevWindowEvent::GestureSwipeUpdate {
+                        surface_id,
+                        dx: dx as f32,
+                        dy: dy as f32,
+                    },
+                );
             }
             zwp_pointer_gesture_swipe_v1::Event::End { cancelled, .. } => {
-                let Some(surface_id) = state.gesture_surface.take() else {
+                let Some(input) = state.input_seats.get_mut(&seat_id) else {
                     return;
                 };
-                state.gesture_kind = None;
-                state.events.push(DevWindowEvent::GestureSwipeEnd {
-                    surface_id,
-                    cancelled: cancelled != 0,
-                });
+                let Some(surface_id) = input.gesture_surface.take() else {
+                    return;
+                };
+                input.gesture_kind = None;
+                state.queue_event(
+                    &seat_id,
+                    DevWindowEvent::GestureSwipeEnd {
+                        surface_id,
+                        cancelled: cancelled != 0,
+                    },
+                );
             }
             _ => {}
         }
@@ -962,12 +1180,15 @@ impl Dispatch<ZwpPointerGestureSwipeV1, GlobalData> for State {
 impl Dispatch<ZwpPointerGesturePinchV1, GlobalData> for State {
     fn event(
         state: &mut State,
-        _: &ZwpPointerGesturePinchV1,
+        gesture: &ZwpPointerGesturePinchV1,
         event: zwp_pointer_gesture_pinch_v1::Event,
         _: &GlobalData,
         _: &Connection,
         _: &QueueHandle<State>,
     ) {
+        let Some(seat_id) = state.seat_id_for_pinch(gesture) else {
+            return;
+        };
         match event {
             zwp_pointer_gesture_pinch_v1::Event::Begin {
                 surface, fingers, ..
@@ -975,12 +1196,17 @@ impl Dispatch<ZwpPointerGesturePinchV1, GlobalData> for State {
                 let Some(surface_id) = state.surface_id_for_wl_surface(&surface) else {
                     return;
                 };
-                state.gesture_surface = Some(surface_id.clone());
-                state.gesture_kind = Some(GestureKind::Pinch);
-                state.events.push(DevWindowEvent::GesturePinchBegin {
-                    surface_id,
-                    fingers,
-                });
+                if let Some(input) = state.input_seats.get_mut(&seat_id) {
+                    input.gesture_surface = Some(surface_id.clone());
+                    input.gesture_kind = Some(GestureKind::Pinch);
+                }
+                state.queue_event(
+                    &seat_id,
+                    DevWindowEvent::GesturePinchBegin {
+                        surface_id,
+                        fingers,
+                    },
+                );
             }
             zwp_pointer_gesture_pinch_v1::Event::Update {
                 dx,
@@ -989,26 +1215,39 @@ impl Dispatch<ZwpPointerGesturePinchV1, GlobalData> for State {
                 rotation,
                 ..
             } => {
-                let Some(surface_id) = state.gesture_surface.clone() else {
+                let Some(surface_id) = state
+                    .input_seats
+                    .get(&seat_id)
+                    .and_then(|input| input.gesture_surface.clone())
+                else {
                     return;
                 };
-                state.events.push(DevWindowEvent::GesturePinchUpdate {
-                    surface_id,
-                    dx: dx as f32,
-                    dy: dy as f32,
-                    scale: scale as f32,
-                    rotation: rotation as f32,
-                });
+                state.queue_event(
+                    &seat_id,
+                    DevWindowEvent::GesturePinchUpdate {
+                        surface_id,
+                        dx: dx as f32,
+                        dy: dy as f32,
+                        scale: scale as f32,
+                        rotation: rotation as f32,
+                    },
+                );
             }
             zwp_pointer_gesture_pinch_v1::Event::End { cancelled, .. } => {
-                let Some(surface_id) = state.gesture_surface.take() else {
+                let Some(input) = state.input_seats.get_mut(&seat_id) else {
                     return;
                 };
-                state.gesture_kind = None;
-                state.events.push(DevWindowEvent::GesturePinchEnd {
-                    surface_id,
-                    cancelled: cancelled != 0,
-                });
+                let Some(surface_id) = input.gesture_surface.take() else {
+                    return;
+                };
+                input.gesture_kind = None;
+                state.queue_event(
+                    &seat_id,
+                    DevWindowEvent::GesturePinchEnd {
+                        surface_id,
+                        cancelled: cancelled != 0,
+                    },
+                );
             }
             _ => {}
         }
@@ -1018,12 +1257,15 @@ impl Dispatch<ZwpPointerGesturePinchV1, GlobalData> for State {
 impl Dispatch<ZwpPointerGestureHoldV1, GlobalData> for State {
     fn event(
         state: &mut State,
-        _: &ZwpPointerGestureHoldV1,
+        gesture: &ZwpPointerGestureHoldV1,
         event: zwp_pointer_gesture_hold_v1::Event,
         _: &GlobalData,
         _: &Connection,
         _: &QueueHandle<State>,
     ) {
+        let Some(seat_id) = state.seat_id_for_hold(gesture) else {
+            return;
+        };
         match event {
             zwp_pointer_gesture_hold_v1::Event::Begin {
                 surface, fingers, ..
@@ -1031,22 +1273,33 @@ impl Dispatch<ZwpPointerGestureHoldV1, GlobalData> for State {
                 let Some(surface_id) = state.surface_id_for_wl_surface(&surface) else {
                     return;
                 };
-                state.gesture_surface = Some(surface_id.clone());
-                state.gesture_kind = Some(GestureKind::Hold);
-                state.events.push(DevWindowEvent::GestureHoldBegin {
-                    surface_id,
-                    fingers,
-                });
+                if let Some(input) = state.input_seats.get_mut(&seat_id) {
+                    input.gesture_surface = Some(surface_id.clone());
+                    input.gesture_kind = Some(GestureKind::Hold);
+                }
+                state.queue_event(
+                    &seat_id,
+                    DevWindowEvent::GestureHoldBegin {
+                        surface_id,
+                        fingers,
+                    },
+                );
             }
             zwp_pointer_gesture_hold_v1::Event::End { cancelled, .. } => {
-                let Some(surface_id) = state.gesture_surface.take() else {
+                let Some(input) = state.input_seats.get_mut(&seat_id) else {
                     return;
                 };
-                state.gesture_kind = None;
-                state.events.push(DevWindowEvent::GestureHoldEnd {
-                    surface_id,
-                    cancelled: cancelled != 0,
-                });
+                let Some(surface_id) = input.gesture_surface.take() else {
+                    return;
+                };
+                input.gesture_kind = None;
+                state.queue_event(
+                    &seat_id,
+                    DevWindowEvent::GestureHoldEnd {
+                        surface_id,
+                        cancelled: cancelled != 0,
+                    },
+                );
             }
             _ => {}
         }
@@ -1058,58 +1311,83 @@ impl TouchHandler for State {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _touch: &wl_touch::WlTouch,
+        touch: &wl_touch::WlTouch,
         _serial: u32,
         _time: u32,
         surface: wl_surface::WlSurface,
         id: i32,
         position: (f64, f64),
     ) {
+        let Some(seat_id) = self.seat_id_for_touch(touch) else {
+            return;
+        };
         let Some(surface_id) = self.surface_id_for_wl_surface(&surface) else {
             return;
         };
-        self.touch_surfaces.insert(id, surface_id.clone());
-        self.events.push(DevWindowEvent::TouchDown {
-            surface_id,
-            id,
-            x: position.0 as f32,
-            y: position.1 as f32,
-        });
+        if let Some(input) = self.input_seats.get_mut(&seat_id) {
+            input.touch_surfaces.insert(id, surface_id.clone());
+        }
+        self.queue_event(
+            &seat_id,
+            DevWindowEvent::TouchDown {
+                surface_id,
+                id,
+                x: position.0 as f32,
+                y: position.1 as f32,
+            },
+        );
     }
 
     fn up(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _touch: &wl_touch::WlTouch,
+        touch: &wl_touch::WlTouch,
         _serial: u32,
         _time: u32,
         id: i32,
     ) {
-        let Some(surface_id) = self.touch_surfaces.remove(&id) else {
+        let Some(seat_id) = self.seat_id_for_touch(touch) else {
             return;
         };
-        self.events.push(DevWindowEvent::TouchUp { surface_id, id });
+        let Some(surface_id) = self
+            .input_seats
+            .get_mut(&seat_id)
+            .and_then(|input| input.touch_surfaces.remove(&id))
+        else {
+            return;
+        };
+        self.queue_event(&seat_id, DevWindowEvent::TouchUp { surface_id, id });
     }
 
     fn motion(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _touch: &wl_touch::WlTouch,
+        touch: &wl_touch::WlTouch,
         _time: u32,
         id: i32,
         position: (f64, f64),
     ) {
-        let Some(surface_id) = self.touch_surfaces.get(&id).cloned() else {
+        let Some(seat_id) = self.seat_id_for_touch(touch) else {
             return;
         };
-        self.events.push(DevWindowEvent::TouchMove {
-            surface_id,
-            id,
-            x: position.0 as f32,
-            y: position.1 as f32,
-        });
+        let Some(surface_id) = self
+            .input_seats
+            .get(&seat_id)
+            .and_then(|input| input.touch_surfaces.get(&id).cloned())
+        else {
+            return;
+        };
+        self.queue_event(
+            &seat_id,
+            DevWindowEvent::TouchMove {
+                surface_id,
+                id,
+                x: position.0 as f32,
+                y: position.1 as f32,
+            },
+        );
     }
 
     fn shape(
@@ -1136,14 +1414,11 @@ impl TouchHandler for State {
         // Not surfaced; see `shape` above.
     }
 
-    fn cancel(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _touch: &wl_touch::WlTouch) {
-        let mut surfaces: Vec<Arc<str>> = self.touch_surfaces.values().cloned().collect();
-        surfaces.sort();
-        surfaces.dedup();
-        for surface_id in surfaces {
-            self.events.push(DevWindowEvent::TouchCancel { surface_id });
-        }
-        self.touch_surfaces.clear();
+    fn cancel(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, touch: &wl_touch::WlTouch) {
+        let Some(seat_id) = self.seat_id_for_touch(touch) else {
+            return;
+        };
+        self.cancel_touch_input_for_seat(&seat_id);
     }
 }
 

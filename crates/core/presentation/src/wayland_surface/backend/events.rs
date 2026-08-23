@@ -18,7 +18,10 @@ impl WaylandSurfaceBackend {
         self.dispatch_available()?;
         self.release_expired_surface_focus_grab()?;
         self.state.push_due_keyboard_repeats();
-        let events = std::mem::take(&mut self.state.events);
+        let events = std::mem::take(&mut self.state.events)
+            .into_iter()
+            .map(|queued| queued.event)
+            .collect::<Vec<_>>();
         if !events.is_empty() {
             tracing::trace!(
                 "[hover] layer_shell: draining {} input event(s)",

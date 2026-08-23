@@ -56,28 +56,20 @@ impl WaylandSurfaceBackend {
             pointer_gestures,
             seat_state,
             activation_seat: None,
-            focus_grab: None,
-            focus_grab_surface_id: None,
-            focus_grab_requested_at: None,
             qh,
             pool,
             surfaces: HashMap::new(),
             surface_ids_by_wl_id: HashMap::new(),
-            pointer: None,
             pointer_interactive: false,
-            gesture_swipe: None,
-            gesture_pinch: None,
-            gesture_hold: None,
-            touch: None,
-            touch_surfaces: HashMap::new(),
-            gesture_surface: None,
-            gesture_kind: None,
-            keyboard: None,
-            pointer_focus: None,
-            keyboard_focus: None,
-            keyboard_mods: Modifiers::default(),
-            keyboard_repeat_info: RepeatInfo::Disable,
-            keyboard_repeat: None,
+            input_seats: HashMap::new(),
+            input_seat_order: Vec::new(),
+            pointer_seats: HashMap::new(),
+            keyboard_seats: HashMap::new(),
+            touch_seats: HashMap::new(),
+            swipe_seats: HashMap::new(),
+            pinch_seats: HashMap::new(),
+            hold_seats: HashMap::new(),
+            focus_grab_seats: HashMap::new(),
             events: Vec::new(),
             xdg_shell,
             lifecycle_events: Vec::new(),
@@ -97,16 +89,17 @@ impl WaylandSurfaceBackend {
             return;
         }
         self.state.pointer_interactive = interactive;
-        let Some(pointer) = self.state.pointer.as_ref() else {
-            return;
-        };
         let icon = if interactive {
             CursorIcon::Pointer
         } else {
             CursorIcon::Default
         };
-        if let Err(error) = pointer.set_cursor(&self._conn, icon) {
-            tracing::debug!("layer_shell: failed to update cursor icon: {error}");
+        for seat in self.state.input_seats.values() {
+            if let Some(pointer) = seat.pointer.as_ref()
+                && let Err(error) = pointer.set_cursor(&self._conn, icon)
+            {
+                tracing::debug!("layer_shell: failed to update cursor icon: {error}");
+            }
         }
     }
 
@@ -407,9 +400,13 @@ impl WaylandSurfaceBackend {
             // A grab is only valid in response to a recent input serial. Hover-open
             // popovers pass `grab = false` and rely on the core hover-bridge.
             if config.grab {
-                if let (Some(seat), Some(serial)) =
-                    (self.state.activation_seat.as_ref(), config.grab_serial)
-                {
+                let seat = self
+                    .state
+                    .activation_seat
+                    .as_ref()
+                    .and_then(|seat_id| self.state.input_seats.get(seat_id))
+                    .map(|seat| seat.seat.clone());
+                if let (Some(seat), Some(serial)) = (seat.as_ref(), config.grab_serial) {
                     popup.xdg_popup().grab(seat, serial);
                 } else {
                     tracing::debug!(

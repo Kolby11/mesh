@@ -1,6 +1,5 @@
 use super::backend::{SurfaceEntry, WaylandRole, apply_config, surface_config_fingerprint};
 use super::*;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 const MAX_REPEAT_EVENTS_PER_POLL: usize = 64;
@@ -20,6 +19,59 @@ pub(super) struct KeyboardRepeatState {
     pub(super) ch: Option<char>,
     pub(super) next_at: Instant,
     pub(super) interval: Duration,
+}
+
+pub(super) type SeatId = ObjectId;
+
+pub(super) struct QueuedInputEvent {
+    pub(super) seat_id: Option<SeatId>,
+    pub(super) event: DevWindowEvent,
+}
+
+pub(super) struct SeatInputState {
+    pub(super) seat: wl_seat::WlSeat,
+    pub(super) pointer: Option<ThemedPointer>,
+    pub(super) gesture_swipe: Option<ZwpPointerGestureSwipeV1>,
+    pub(super) gesture_pinch: Option<ZwpPointerGesturePinchV1>,
+    pub(super) gesture_hold: Option<ZwpPointerGestureHoldV1>,
+    pub(super) touch: Option<wl_touch::WlTouch>,
+    pub(super) touch_surfaces: HashMap<i32, Arc<str>>,
+    pub(super) gesture_surface: Option<Arc<str>>,
+    pub(super) gesture_kind: Option<GestureKind>,
+    pub(super) keyboard: Option<wl_keyboard::WlKeyboard>,
+    pub(super) pointer_focus: Option<Arc<str>>,
+    pub(super) keyboard_focus: Option<Arc<str>>,
+    pub(super) keyboard_mods: Modifiers,
+    pub(super) keyboard_repeat_info: RepeatInfo,
+    pub(super) keyboard_repeat: Option<KeyboardRepeatState>,
+    pub(super) focus_grab: Option<HyprlandFocusGrabV1>,
+    pub(super) focus_grab_surface_id: Option<Arc<str>>,
+    pub(super) focus_grab_requested_at: Option<Instant>,
+}
+
+impl SeatInputState {
+    pub(super) fn new(seat: wl_seat::WlSeat) -> Self {
+        Self {
+            seat,
+            pointer: None,
+            gesture_swipe: None,
+            gesture_pinch: None,
+            gesture_hold: None,
+            touch: None,
+            touch_surfaces: HashMap::new(),
+            gesture_surface: None,
+            gesture_kind: None,
+            keyboard: None,
+            pointer_focus: None,
+            keyboard_focus: None,
+            keyboard_mods: Modifiers::default(),
+            keyboard_repeat_info: RepeatInfo::Disable,
+            keyboard_repeat: None,
+            focus_grab: None,
+            focus_grab_surface_id: None,
+            focus_grab_requested_at: None,
+        }
+    }
 }
 
 impl KeyboardRepeatState {
@@ -54,42 +106,34 @@ pub(super) struct State {
     pub(super) fractional_scale_manager: Option<WpFractionalScaleManagerV1>,
     pub(super) blur_manager: Option<OrgKdeKwinBlurManager>,
     pub(super) seat_state: SeatState,
-    pub(super) activation_seat: Option<wl_seat::WlSeat>,
-    pub(super) focus_grab: Option<HyprlandFocusGrabV1>,
-    pub(super) focus_grab_surface_id: Option<Arc<str>>,
-    pub(super) focus_grab_requested_at: Option<Instant>,
+    /// Most recently announced seat, used for legacy activation requests and
+    /// retained only as a selection hint. Ownership itself lives in
+    /// `input_seats`.
+    pub(super) activation_seat: Option<SeatId>,
     pub(super) qh: QueueHandle<State>,
     pub(super) pool: Option<SlotPool>,
     pub(super) surfaces: HashMap<String, SurfaceEntry>,
     pub(super) surface_ids_by_wl_id: HashMap<ObjectId, Arc<str>>,
-    pub(super) pointer: Option<ThemedPointer>,
     pub(super) pointer_interactive: bool,
     /// `zwp_pointer_gestures_v1` global, bound when the compositor advertises
     /// it. `None` on compositors without the protocol — gesture events simply
     /// never fire, matching the graceful-degradation pattern used for the
     /// other optional globals (`blur_manager`, `focus_grab_manager`, etc).
     pub(super) pointer_gestures: Option<ZwpPointerGesturesV1>,
-    pub(super) gesture_swipe: Option<ZwpPointerGestureSwipeV1>,
-    pub(super) gesture_pinch: Option<ZwpPointerGesturePinchV1>,
-    pub(super) gesture_hold: Option<ZwpPointerGestureHoldV1>,
-    pub(super) touch: Option<wl_touch::WlTouch>,
-    /// Surface each active touch id last landed on, so `TouchUp`/`Shape`/
-    /// `Orientation` (which carry no surface of their own past `Down`) and the
-    /// protocol-wide `Cancel` event can still be attributed to a surface id.
-    pub(super) touch_surfaces: HashMap<i32, Arc<str>>,
-    /// Surface the in-progress trackpad gesture (swipe/pinch/hold) began on.
-    /// `begin` carries the surface; `update`/`end` don't, so this threads it
-    /// through. Compositors recognize at most one gesture at a time, so a
-    /// single field is sufficient.
-    pub(super) gesture_surface: Option<Arc<str>>,
-    pub(super) gesture_kind: Option<GestureKind>,
-    pub(super) keyboard: Option<wl_keyboard::WlKeyboard>,
-    pub(super) pointer_focus: Option<Arc<str>>,
-    pub(super) keyboard_focus: Option<Arc<str>>,
-    pub(super) keyboard_mods: Modifiers,
-    pub(super) keyboard_repeat_info: RepeatInfo,
-    pub(super) keyboard_repeat: Option<KeyboardRepeatState>,
-    pub(super) events: Vec<DevWindowEvent>,
+    /// All input ownership and protocol handles are partitioned by the
+    /// originating `wl_seat`. The order vector makes repeat/cancellation
+    /// processing deterministic while the queued event carries its owner so a
+    /// capability teardown cannot discard another seat's event.
+    pub(super) input_seats: HashMap<SeatId, SeatInputState>,
+    pub(super) input_seat_order: Vec<SeatId>,
+    pub(super) pointer_seats: HashMap<ObjectId, SeatId>,
+    pub(super) keyboard_seats: HashMap<ObjectId, SeatId>,
+    pub(super) touch_seats: HashMap<ObjectId, SeatId>,
+    pub(super) swipe_seats: HashMap<ObjectId, SeatId>,
+    pub(super) pinch_seats: HashMap<ObjectId, SeatId>,
+    pub(super) hold_seats: HashMap<ObjectId, SeatId>,
+    pub(super) focus_grab_seats: HashMap<ObjectId, SeatId>,
+    pub(super) events: Vec<QueuedInputEvent>,
     /// `xdg_shell` (`xdg_wm_base`) global, bound when available. Required to
     /// create `xdg_positioner`/`xdg_popup` objects for promoted `<popover>`s.
     pub(super) xdg_shell: Option<XdgShell>,
@@ -109,32 +153,84 @@ pub(super) struct State {
 }
 
 impl State {
+    pub(super) fn seat_id_for_pointer(&self, pointer: &wl_pointer::WlPointer) -> Option<SeatId> {
+        self.pointer_seats.get(&pointer.id()).cloned()
+    }
+
+    pub(super) fn seat_id_for_keyboard(
+        &self,
+        keyboard: &wl_keyboard::WlKeyboard,
+    ) -> Option<SeatId> {
+        self.keyboard_seats.get(&keyboard.id()).cloned()
+    }
+
+    pub(super) fn seat_id_for_touch(&self, touch: &wl_touch::WlTouch) -> Option<SeatId> {
+        self.touch_seats.get(&touch.id()).cloned()
+    }
+
+    pub(super) fn seat_id_for_swipe(&self, gesture: &ZwpPointerGestureSwipeV1) -> Option<SeatId> {
+        self.swipe_seats.get(&gesture.id()).cloned()
+    }
+
+    pub(super) fn seat_id_for_pinch(&self, gesture: &ZwpPointerGesturePinchV1) -> Option<SeatId> {
+        self.pinch_seats.get(&gesture.id()).cloned()
+    }
+
+    pub(super) fn seat_id_for_hold(&self, gesture: &ZwpPointerGestureHoldV1) -> Option<SeatId> {
+        self.hold_seats.get(&gesture.id()).cloned()
+    }
+
+    pub(super) fn seat_id_for_focus_grab(&self, grab: &HyprlandFocusGrabV1) -> Option<SeatId> {
+        self.focus_grab_seats.get(&grab.id()).cloned()
+    }
+
+    pub(super) fn queue_event(&mut self, seat_id: &SeatId, event: DevWindowEvent) {
+        self.events.push(QueuedInputEvent {
+            seat_id: Some(seat_id.clone()),
+            event,
+        });
+    }
+
     pub(super) fn keyboard_repeat_state(
         &self,
+        seat_id: &SeatId,
         surface_id: &str,
         key: &str,
         mods: KeyMods,
         ch: Option<char>,
         now: Instant,
     ) -> Option<KeyboardRepeatState> {
-        keyboard_repeat_state_for(self.keyboard_repeat_info, surface_id, key, mods, ch, now)
+        let repeat_info = self.input_seats.get(seat_id)?.keyboard_repeat_info;
+        keyboard_repeat_state_for(repeat_info, surface_id, key, mods, ch, now)
     }
 
-    pub(super) fn clear_keyboard_repeat_for_key(&mut self, key: &str) {
+    pub(super) fn clear_keyboard_repeat_for_key(&mut self, seat_id: &SeatId, key: &str) {
         if self
-            .keyboard_repeat
-            .as_ref()
+            .input_seats
+            .get(seat_id)
+            .and_then(|seat| seat.keyboard_repeat.as_ref())
             .is_some_and(|repeat| repeat.key == key)
         {
-            self.keyboard_repeat = None;
+            if let Some(seat) = self.input_seats.get_mut(seat_id) {
+                seat.keyboard_repeat = None;
+            }
         }
     }
 
     pub(super) fn push_due_keyboard_repeats(&mut self) {
-        let Some(repeat) = self.keyboard_repeat.as_mut() else {
-            return;
-        };
-        repeat.push_due_events(Instant::now(), &mut self.events);
+        let now = Instant::now();
+        let seat_ids = self.input_seat_order.clone();
+        for seat_id in seat_ids {
+            let mut due = Vec::new();
+            if let Some(seat) = self.input_seats.get_mut(&seat_id)
+                && let Some(repeat) = seat.keyboard_repeat.as_mut()
+            {
+                repeat.push_due_events(now, &mut due);
+            }
+            for event in due {
+                self.queue_event(&seat_id, event);
+            }
+        }
     }
 
     pub(super) fn effective_keyboard_mode_for(
@@ -143,7 +239,10 @@ impl State {
         requested: KeyboardMode,
     ) -> KeyboardMode {
         if requested == KeyboardMode::OnDemand
-            && self.focus_grab_surface_id.as_deref() == Some(surface_id)
+            && self
+                .input_seats
+                .values()
+                .any(|seat| seat.focus_grab_surface_id.as_deref() == Some(surface_id))
         {
             KeyboardMode::Exclusive
         } else {
@@ -152,77 +251,108 @@ impl State {
     }
 
     pub(super) fn reapply_surface_config(&mut self, surface_id: &str) {
-        let effective_keyboard_mode = match self.surfaces.get(surface_id) {
-            Some(entry) => self.effective_keyboard_mode_for(surface_id, entry.cfg.keyboard_mode),
-            None => return,
-        };
+        let grabbed = self
+            .input_seats
+            .values()
+            .any(|seat| seat.focus_grab_surface_id.as_deref() == Some(surface_id));
         let Some(entry) = self.surfaces.get_mut(surface_id) else {
             return;
+        };
+        let requested = entry.cfg.keyboard_mode;
+        let effective_keyboard_mode = if requested == KeyboardMode::OnDemand && grabbed {
+            KeyboardMode::Exclusive
+        } else {
+            requested
         };
         if entry.applied_keyboard_mode == effective_keyboard_mode {
             return;
         }
-
-        // Keyboard interactivity is a layer-shell concept; popups never request
-        // OnDemand focus, so there is nothing to reapply for the popup role.
         let Some(layer_surface) = entry.role.as_layer() else {
             return;
         };
         let effective_cfg = entry.cfg.with_keyboard_mode(effective_keyboard_mode);
-        tracing::debug!(
-            "[focus] layer_shell: reapplying keyboard mode for surface_id={surface_id} mode={:?}",
-            effective_keyboard_mode
-        );
         apply_config(layer_surface, &effective_cfg);
         layer_surface.commit();
         entry.applied_keyboard_mode = effective_keyboard_mode;
         entry.config_fingerprint = surface_config_fingerprint(&entry.cfg, effective_keyboard_mode);
     }
 
-    pub(super) fn request_surface_focus(&mut self, surface_id: &str, event: &PointerEvent) {
-        if self.request_surface_focus_grab(surface_id) {
+    pub(super) fn request_surface_focus(
+        &mut self,
+        seat_id: &SeatId,
+        surface_id: &str,
+        event: &PointerEvent,
+    ) {
+        if self.request_surface_focus_grab(seat_id, surface_id) {
             return;
         }
-        self.request_surface_activation(surface_id, event);
+        self.request_surface_activation(seat_id, surface_id, event);
     }
 
-    fn request_surface_focus_grab(&mut self, surface_id: &str) -> bool {
+    fn request_surface_focus_grab(&mut self, seat_id: &SeatId, surface_id: &str) -> bool {
         let Some(manager) = self.focus_grab_manager.as_ref() else {
             return false;
         };
-        if self.keyboard_focus.as_deref() == Some(surface_id) {
-            if self.focus_grab_surface_id.as_deref() == Some(surface_id) {
+        let (keyboard_focus, current_grab) = self
+            .input_seats
+            .get(seat_id)
+            .map(|seat| {
+                (
+                    seat.keyboard_focus.clone(),
+                    seat.focus_grab_surface_id.clone(),
+                )
+            })
+            .unwrap_or_default();
+        if keyboard_focus.as_deref() == Some(surface_id) {
+            if current_grab.as_deref() == Some(surface_id) {
                 tracing::debug!(
                     "[focus] layer_shell: focus already on grabbed surface_id={surface_id}; releasing stale focus grab"
                 );
-                self.release_surface_focus_grab(surface_id);
+                self.release_surface_focus_grab_for_seat(seat_id, surface_id, true);
             }
             return true;
         }
-        let Some(entry) = self.surfaces.get(surface_id) else {
+        let Some(surface) = self
+            .surfaces
+            .get(surface_id)
+            .map(|entry| (entry.cfg.keyboard_mode, entry.wl_surface().clone()))
+        else {
             return false;
         };
-        if entry.cfg.keyboard_mode != KeyboardMode::OnDemand {
+        if surface.0 != KeyboardMode::OnDemand {
             return false;
         }
 
-        let grab = self
-            .focus_grab
-            .get_or_insert_with(|| manager.create_grab(&self.qh, ()));
-        let previous_surface_id = self.focus_grab_surface_id.clone();
-        if let Some(previous_surface_id) = self.focus_grab_surface_id.as_deref()
-            && previous_surface_id != surface_id
-            && let Some(previous_entry) = self.surfaces.get(previous_surface_id)
-        {
-            grab.remove_surface(previous_entry.wl_surface());
-        }
+        let mut changed = false;
+        let previous_surface_id = {
+            let Some(seat) = self.input_seats.get_mut(seat_id) else {
+                return false;
+            };
+            let grab = seat
+                .focus_grab
+                .get_or_insert_with(|| manager.create_grab(&self.qh, ()));
+            self.focus_grab_seats.insert(grab.id(), seat_id.clone());
+            let previous_surface_id = seat.focus_grab_surface_id.clone();
+            if let Some(previous_surface_id) = previous_surface_id.as_deref()
+                && previous_surface_id != surface_id
+                && let Some(previous_entry) = self.surfaces.get(previous_surface_id)
+            {
+                grab.remove_surface(previous_entry.wl_surface());
+            }
 
-        if self.focus_grab_surface_id.as_deref() != Some(surface_id) {
-            tracing::debug!("[focus] layer_shell: starting focus grab for surface_id={surface_id}");
-            grab.add_surface(entry.wl_surface());
-            grab.commit();
-            self.focus_grab_surface_id = Some(Arc::from(surface_id));
-            self.focus_grab_requested_at = Some(Instant::now());
+            if seat.focus_grab_surface_id.as_deref() != Some(surface_id) {
+                tracing::debug!(
+                    "[focus] layer_shell: starting focus grab for seat={seat_id} surface_id={surface_id}"
+                );
+                grab.add_surface(&surface.1);
+                grab.commit();
+                seat.focus_grab_surface_id = Some(Arc::from(surface_id));
+                seat.focus_grab_requested_at = Some(Instant::now());
+                changed = true;
+            }
+            previous_surface_id
+        };
+        if changed {
             if let Some(previous_surface_id) = previous_surface_id.as_deref()
                 && previous_surface_id != surface_id
             {
@@ -235,49 +365,45 @@ impl State {
     }
 
     pub(super) fn release_expired_surface_focus_grab(&mut self) -> bool {
-        let Some(surface_id) = self.focus_grab_surface_id.clone() else {
-            return false;
-        };
-        let Some(requested_at) = self.focus_grab_requested_at else {
-            tracing::warn!(
-                "[focus] layer_shell: focus grab active for surface_id={surface_id} without request timestamp; releasing"
-            );
-            self.release_surface_focus_grab(&surface_id);
-            return true;
-        };
-        if let Some(keyboard_focus) = self.keyboard_focus.as_deref() {
-            if keyboard_focus != surface_id.as_ref() {
-                tracing::debug!(
-                    "[focus] layer_shell: focus moved off grabbed surface from={keyboard_focus} to={surface_id}; releasing focus grab"
-                );
-                self.release_surface_focus_grab(&surface_id);
-                return true;
+        let seat_ids = self.input_seat_order.clone();
+        let mut changed = false;
+        for seat_id in seat_ids {
+            let Some((surface_id, requested_at, keyboard_focus)) =
+                self.input_seats.get(&seat_id).and_then(|seat| {
+                    Some((
+                        seat.focus_grab_surface_id.clone()?,
+                        seat.focus_grab_requested_at,
+                        seat.keyboard_focus.clone(),
+                    ))
+                })
+            else {
+                continue;
+            };
+            let expired = requested_at
+                .map(|at| at.elapsed() >= SURFACE_FOCUS_GRAB_TIMEOUT)
+                .unwrap_or(true);
+            if keyboard_focus
+                .as_deref()
+                .is_some_and(|focused| focused != surface_id.as_ref())
+                || expired
+            {
+                self.release_surface_focus_grab_for_seat(&seat_id, &surface_id, true);
+                changed = true;
             }
-            if requested_at.elapsed() < SURFACE_FOCUS_GRAB_TIMEOUT {
-                return false;
-            }
-            tracing::warn!(
-                "[focus] layer_shell: focus stayed on grabbed surface_id={surface_id} for too long; releasing focus grab"
-            );
-            self.release_surface_focus_grab(&surface_id);
-            return true;
         }
-        if requested_at.elapsed() < SURFACE_FOCUS_GRAB_TIMEOUT {
-            return false;
-        }
-
-        tracing::warn!(
-            "[focus] layer_shell: focus grab timed out for surface_id={surface_id}; releasing"
-        );
-        self.release_surface_focus_grab(&surface_id);
-        true
+        changed
     }
 
-    fn request_surface_activation(&self, surface_id: &str, event: &PointerEvent) {
+    fn request_surface_activation(&self, seat_id: &SeatId, surface_id: &str, event: &PointerEvent) {
         let Some(activation) = self.activation_state.as_ref() else {
             return;
         };
-        if self.keyboard_focus.as_deref() == Some(surface_id) {
+        if self
+            .input_seats
+            .get(seat_id)
+            .and_then(|seat| seat.keyboard_focus.as_deref())
+            == Some(surface_id)
+        {
             return;
         }
         let Some(entry) = self.surfaces.get(surface_id) else {
@@ -286,7 +412,7 @@ impl State {
         if entry.cfg.keyboard_mode != KeyboardMode::OnDemand {
             return;
         }
-        let Some(seat) = self.activation_seat.clone() else {
+        let Some(seat) = self.input_seats.get(seat_id).map(|seat| seat.seat.clone()) else {
             tracing::debug!("[focus] layer_shell: skipping activation request without seat");
             return;
         };
@@ -308,47 +434,64 @@ impl State {
     }
 
     pub(super) fn release_surface_focus_grab(&mut self, surface_id: &str) {
-        self.release_surface_focus_grab_inner(surface_id, true);
+        let seat_ids = self.input_seat_order.clone();
+        for seat_id in seat_ids {
+            self.release_surface_focus_grab_for_seat(&seat_id, surface_id, true);
+        }
     }
 
     pub(super) fn release_surface_focus_grab_for_teardown(&mut self, surface_id: &str) {
-        self.release_surface_focus_grab_inner(surface_id, false);
+        let seat_ids = self.input_seat_order.clone();
+        for seat_id in seat_ids {
+            self.release_surface_focus_grab_for_seat(&seat_id, surface_id, false);
+        }
     }
 
-    pub(super) fn release_focus_grab_for_seat_teardown(&mut self) {
-        if let Some(surface_id) = self.focus_grab_surface_id.clone() {
-            self.release_surface_focus_grab_for_teardown(&surface_id);
-        } else if let Some(grab) = self.focus_grab.take() {
+    pub(super) fn release_focus_grab_for_seat_teardown(&mut self, seat_id: &SeatId) {
+        let surface_id = self
+            .input_seats
+            .get(seat_id)
+            .and_then(|seat| seat.focus_grab_surface_id.clone());
+        if let Some(surface_id) = surface_id {
+            self.release_surface_focus_grab_for_seat(seat_id, &surface_id, false);
+        } else if let Some(seat) = self.input_seats.get_mut(seat_id)
+            && let Some(grab) = seat.focus_grab.take()
+        {
+            self.focus_grab_seats.remove(&grab.id());
             grab.destroy();
         }
-        self.focus_grab_surface_id = None;
-        self.focus_grab_requested_at = None;
     }
 
-    fn release_surface_focus_grab_inner(&mut self, surface_id: &str, reapply_config: bool) {
-        if self.focus_grab_surface_id.as_deref() != Some(surface_id) {
-            return;
-        }
-        let Some(grab) = self.focus_grab.take() else {
-            self.focus_grab_surface_id = None;
-            self.focus_grab_requested_at = None;
-            if reapply_config {
-                self.reapply_surface_config(surface_id);
-            }
+    pub(super) fn release_surface_focus_grab_for_seat(
+        &mut self,
+        seat_id: &SeatId,
+        surface_id: &str,
+        reapply_config: bool,
+    ) {
+        let Some(seat) = self.input_seats.get_mut(seat_id) else {
             return;
         };
+        if seat.focus_grab_surface_id.as_deref() != Some(surface_id) {
+            return;
+        }
+        let grab = seat.focus_grab.take();
         if let Some(entry) = self.surfaces.get(surface_id) {
             tracing::debug!(
                 "[focus] layer_shell: releasing focus grab for surface_id={surface_id}"
             );
-            grab.remove_surface(entry.wl_surface());
+            if let Some(grab) = grab.as_ref() {
+                grab.remove_surface(entry.wl_surface());
+            }
         }
         // Destroy is the protocol's hard release path: it removes an active
         // grab even if a compositor does not process an empty whitelist the way
         // we expect. The next focus request creates a fresh grab object.
-        grab.destroy();
-        self.focus_grab_surface_id = None;
-        self.focus_grab_requested_at = None;
+        if let Some(grab) = grab {
+            self.focus_grab_seats.remove(&grab.id());
+            grab.destroy();
+        }
+        seat.focus_grab_surface_id = None;
+        seat.focus_grab_requested_at = None;
         if reapply_config {
             self.reapply_surface_config(surface_id);
         }
@@ -386,32 +529,47 @@ impl State {
     /// object. Capability removal is independent from surface teardown: the
     /// surfaces remain valid, but no follow-up event may be routed from the
     /// capability that just disappeared.
-    pub(super) fn cancel_pointer_input(&mut self) {
-        cancel_pointer_input_state(
-            &mut self.pointer_focus,
-            &mut self.gesture_surface,
-            &mut self.gesture_kind,
+    pub(super) fn cancel_pointer_input_for_seat(&mut self, seat_id: &SeatId) {
+        let Some(seat) = self.input_seats.get_mut(seat_id) else {
+            return;
+        };
+        cancel_pointer_input_state_for_seat(
+            Some(seat_id),
+            &mut seat.pointer_focus,
+            &mut seat.gesture_surface,
+            &mut seat.gesture_kind,
             &mut self.events,
         );
     }
 
-    pub(super) fn cancel_keyboard_input(&mut self) {
-        cancel_keyboard_input_state(
-            &mut self.keyboard_focus,
-            &mut self.keyboard_mods,
-            &mut self.keyboard_repeat,
+    pub(super) fn cancel_keyboard_input_for_seat(&mut self, seat_id: &SeatId) {
+        let Some(seat) = self.input_seats.get_mut(seat_id) else {
+            return;
+        };
+        cancel_keyboard_input_state_for_seat(
+            Some(seat_id),
+            &mut seat.keyboard_focus,
+            &mut seat.keyboard_mods,
+            &mut seat.keyboard_repeat,
             &mut self.events,
         );
     }
 
-    pub(super) fn cancel_touch_input(&mut self) {
-        cancel_touch_input_state(&mut self.touch_surfaces, &mut self.events);
+    pub(super) fn cancel_touch_input_for_seat(&mut self, seat_id: &SeatId) {
+        let Some(seat) = self.input_seats.get_mut(seat_id) else {
+            return;
+        };
+        cancel_touch_input_state_for_seat(
+            Some(seat_id),
+            &mut seat.touch_surfaces,
+            &mut self.events,
+        );
     }
 
-    pub(super) fn cancel_all_input(&mut self) {
-        self.cancel_pointer_input();
-        self.cancel_keyboard_input();
-        self.cancel_touch_input();
+    pub(super) fn cancel_all_input_for_seat(&mut self, seat_id: &SeatId) {
+        self.cancel_pointer_input_for_seat(seat_id);
+        self.cancel_keyboard_input_for_seat(seat_id);
+        self.cancel_touch_input_for_seat(seat_id);
     }
 
     fn teardown_surface_with_focus(&mut self, surface_id: &str, reapply_focus: bool) -> bool {
@@ -436,17 +594,24 @@ impl State {
     /// arrive after teardown, so clearing the ownership maps and queued stale
     /// events is part of removing the surface, not an optional shell policy.
     fn cancel_surface_input(&mut self, surface_id: &str) {
-        cancel_surface_input_state(
-            surface_id,
-            &mut self.pointer_focus,
-            &mut self.keyboard_focus,
-            &mut self.keyboard_mods,
-            &mut self.keyboard_repeat,
-            &mut self.touch_surfaces,
-            &mut self.gesture_surface,
-            &mut self.gesture_kind,
-            &mut self.events,
-        );
+        let seat_ids = self.input_seat_order.clone();
+        for seat_id in seat_ids {
+            let Some(seat) = self.input_seats.get_mut(&seat_id) else {
+                continue;
+            };
+            cancel_surface_input_state_for_seat(
+                Some(&seat_id),
+                surface_id,
+                &mut seat.pointer_focus,
+                &mut seat.keyboard_focus,
+                &mut seat.keyboard_mods,
+                &mut seat.keyboard_repeat,
+                &mut seat.touch_surfaces,
+                &mut seat.gesture_surface,
+                &mut seat.gesture_kind,
+                &mut self.events,
+            );
+        }
     }
 
     /// Tear down a parent and all popup descendants. The returned ids are in
@@ -520,57 +685,24 @@ impl State {
         }
         self.connection_lost = Some(reason.clone());
 
-        let pointer_focus = self.pointer_focus.take();
-        let touch_surfaces = self
-            .touch_surfaces
-            .drain()
-            .map(|(_, surface_id)| surface_id)
-            .collect::<HashSet<_>>();
-        let mut touch_surfaces = touch_surfaces.into_iter().collect::<Vec<_>>();
-        touch_surfaces.sort();
-        self.keyboard_focus = None;
-        self.keyboard_repeat = None;
-        self.keyboard_mods = Modifiers::default();
-        let gesture_surface = self.gesture_surface.take();
-        let gesture_kind = self.gesture_kind.take();
-        self.focus_grab.take();
-        self.focus_grab_surface_id = None;
-        self.focus_grab_requested_at = None;
+        let seat_ids = self.input_seat_order.clone();
         self.activation_seat = None;
-        self.pointer.take();
-        self.touch.take();
-        self.keyboard.take();
-        self.gesture_swipe.take();
-        self.gesture_pinch.take();
-        self.gesture_hold.take();
 
         // Discard queued input addressed to objects that no longer exist, but
         // preserve local cancellation signals for active ownership.
         self.events.clear();
-        if let Some(surface_id) = pointer_focus {
-            self.events
-                .push(DevWindowEvent::PointerLeave { surface_id });
+        for seat_id in &seat_ids {
+            self.cancel_all_input_for_seat(seat_id);
         }
-        for surface_id in touch_surfaces {
-            self.events.push(DevWindowEvent::TouchCancel { surface_id });
-        }
-        if let Some(surface_id) = gesture_surface {
-            match gesture_kind {
-                Some(GestureKind::Swipe) => self.events.push(DevWindowEvent::GestureSwipeEnd {
-                    surface_id,
-                    cancelled: true,
-                }),
-                Some(GestureKind::Pinch) => self.events.push(DevWindowEvent::GesturePinchEnd {
-                    surface_id,
-                    cancelled: true,
-                }),
-                Some(GestureKind::Hold) => self.events.push(DevWindowEvent::GestureHoldEnd {
-                    surface_id,
-                    cancelled: true,
-                }),
-                None => {}
-            }
-        }
+        self.input_seats.clear();
+        self.input_seat_order.clear();
+        self.pointer_seats.clear();
+        self.keyboard_seats.clear();
+        self.touch_seats.clear();
+        self.swipe_seats.clear();
+        self.pinch_seats.clear();
+        self.hold_seats.clear();
+        self.focus_grab_seats.clear();
         self.close_requests.clear();
 
         let mut surface_ids = self.surfaces.keys().cloned().collect::<Vec<_>>();
@@ -605,7 +737,8 @@ impl State {
     }
 }
 
-fn cancel_surface_input_state(
+fn cancel_surface_input_state_for_seat(
+    seat_id: Option<&SeatId>,
     surface_id: &str,
     pointer_focus: &mut Option<Arc<str>>,
     keyboard_focus: &mut Option<Arc<str>>,
@@ -614,12 +747,14 @@ fn cancel_surface_input_state(
     touch_surfaces: &mut HashMap<i32, Arc<str>>,
     gesture_surface: &mut Option<Arc<str>>,
     gesture_kind: &mut Option<GestureKind>,
-    events: &mut Vec<DevWindowEvent>,
+    events: &mut Vec<QueuedInputEvent>,
 ) {
     // Events already queued for this identity were observed before teardown
     // but cannot be routed safely after it. Retain only the cancellation
     // events emitted below.
-    events.retain(|event| crate::event_surface_id(event) != surface_id);
+    events.retain(|queued| {
+        !(queued_for_seat(queued, seat_id) && crate::event_surface_id(&queued.event) == surface_id)
+    });
 
     if pointer_focus
         .as_deref()
@@ -628,7 +763,7 @@ fn cancel_surface_input_state(
         let surface_id = pointer_focus
             .take()
             .expect("pointer focus was present after the identity check");
-        events.push(DevWindowEvent::PointerLeave { surface_id });
+        push_queued_event(seat_id, events, DevWindowEvent::PointerLeave { surface_id });
     }
 
     let keyboard_focus_owned = keyboard_focus
@@ -652,7 +787,7 @@ fn cancel_surface_input_state(
         let gesture_surface = gesture_surface
             .take()
             .expect("gesture surface was present after the identity check");
-        push_cancelled_gesture(Some(gesture_surface), gesture_kind.take(), events);
+        push_cancelled_gesture(seat_id, Some(gesture_surface), gesture_kind.take(), events);
     }
 
     let touch_owned = touch_surfaces
@@ -660,73 +795,209 @@ fn cancel_surface_input_state(
         .any(|owned_surface| owned_surface.as_ref() == surface_id);
     touch_surfaces.retain(|_, owned_surface| owned_surface.as_ref() != surface_id);
     if touch_owned {
-        events.push(DevWindowEvent::TouchCancel {
-            surface_id: Arc::from(surface_id),
-        });
+        push_queued_event(
+            seat_id,
+            events,
+            DevWindowEvent::TouchCancel {
+                surface_id: Arc::from(surface_id),
+            },
+        );
     }
 }
 
+fn cancel_pointer_input_state_for_seat(
+    seat_id: Option<&SeatId>,
+    pointer_focus: &mut Option<Arc<str>>,
+    gesture_surface: &mut Option<Arc<str>>,
+    gesture_kind: &mut Option<GestureKind>,
+    events: &mut Vec<QueuedInputEvent>,
+) {
+    events.retain(|queued| !(queued_for_seat(queued, seat_id) && is_pointer_event(&queued.event)));
+    if let Some(surface_id) = pointer_focus.take() {
+        push_queued_event(seat_id, events, DevWindowEvent::PointerLeave { surface_id });
+    }
+    push_cancelled_gesture(seat_id, gesture_surface.take(), gesture_kind.take(), events);
+}
+
+fn cancel_keyboard_input_state_for_seat(
+    seat_id: Option<&SeatId>,
+    keyboard_focus: &mut Option<Arc<str>>,
+    keyboard_mods: &mut Modifiers,
+    keyboard_repeat: &mut Option<KeyboardRepeatState>,
+    events: &mut Vec<QueuedInputEvent>,
+) {
+    events.retain(|queued| !(queued_for_seat(queued, seat_id) && is_keyboard_event(&queued.event)));
+    keyboard_focus.take();
+    *keyboard_mods = Modifiers::default();
+    keyboard_repeat.take();
+}
+
+fn cancel_touch_input_state_for_seat(
+    seat_id: Option<&SeatId>,
+    touch_surfaces: &mut HashMap<i32, Arc<str>>,
+    events: &mut Vec<QueuedInputEvent>,
+) {
+    events.retain(|queued| !(queued_for_seat(queued, seat_id) && is_touch_event(&queued.event)));
+    let mut surfaces: Vec<Arc<str>> = touch_surfaces.drain().map(|(_, id)| id).collect();
+    surfaces.sort();
+    surfaces.dedup();
+    for surface_id in surfaces {
+        push_queued_event(seat_id, events, DevWindowEvent::TouchCancel { surface_id });
+    }
+}
+
+// The focused unit tests below exercise the cancellation primitives without a
+// live Wayland object. Keep that small API seat-neutral while production paths
+// use the seat-tagged queue above.
+#[cfg(test)]
+fn cancel_surface_input_state(
+    surface_id: &str,
+    pointer_focus: &mut Option<Arc<str>>,
+    keyboard_focus: &mut Option<Arc<str>>,
+    keyboard_mods: &mut Modifiers,
+    keyboard_repeat: &mut Option<KeyboardRepeatState>,
+    touch_surfaces: &mut HashMap<i32, Arc<str>>,
+    gesture_surface: &mut Option<Arc<str>>,
+    gesture_kind: &mut Option<GestureKind>,
+    events: &mut Vec<DevWindowEvent>,
+) {
+    let mut queued = events
+        .drain(..)
+        .map(|event| QueuedInputEvent {
+            seat_id: None,
+            event,
+        })
+        .collect();
+    cancel_surface_input_state_for_seat(
+        None,
+        surface_id,
+        pointer_focus,
+        keyboard_focus,
+        keyboard_mods,
+        keyboard_repeat,
+        touch_surfaces,
+        gesture_surface,
+        gesture_kind,
+        &mut queued,
+    );
+    events.extend(queued.into_iter().map(|queued| queued.event));
+}
+
+#[cfg(test)]
 fn cancel_pointer_input_state(
     pointer_focus: &mut Option<Arc<str>>,
     gesture_surface: &mut Option<Arc<str>>,
     gesture_kind: &mut Option<GestureKind>,
     events: &mut Vec<DevWindowEvent>,
 ) {
-    events.retain(|event| !is_pointer_event(event));
-    if let Some(surface_id) = pointer_focus.take() {
-        events.push(DevWindowEvent::PointerLeave { surface_id });
-    }
-    push_cancelled_gesture(gesture_surface.take(), gesture_kind.take(), events);
+    let mut queued = events
+        .drain(..)
+        .map(|event| QueuedInputEvent {
+            seat_id: None,
+            event,
+        })
+        .collect();
+    cancel_pointer_input_state_for_seat(
+        None,
+        pointer_focus,
+        gesture_surface,
+        gesture_kind,
+        &mut queued,
+    );
+    events.extend(queued.into_iter().map(|queued| queued.event));
 }
 
+#[cfg(test)]
 fn cancel_keyboard_input_state(
     keyboard_focus: &mut Option<Arc<str>>,
     keyboard_mods: &mut Modifiers,
     keyboard_repeat: &mut Option<KeyboardRepeatState>,
     events: &mut Vec<DevWindowEvent>,
 ) {
-    events.retain(|event| !is_keyboard_event(event));
-    keyboard_focus.take();
-    *keyboard_mods = Modifiers::default();
-    keyboard_repeat.take();
+    let mut queued = events
+        .drain(..)
+        .map(|event| QueuedInputEvent {
+            seat_id: None,
+            event,
+        })
+        .collect();
+    cancel_keyboard_input_state_for_seat(
+        None,
+        keyboard_focus,
+        keyboard_mods,
+        keyboard_repeat,
+        &mut queued,
+    );
+    events.extend(queued.into_iter().map(|queued| queued.event));
 }
 
+#[cfg(test)]
 fn cancel_touch_input_state(
     touch_surfaces: &mut HashMap<i32, Arc<str>>,
     events: &mut Vec<DevWindowEvent>,
 ) {
-    events.retain(|event| !is_touch_event(event));
-    let mut surfaces: Vec<Arc<str>> = touch_surfaces.drain().map(|(_, id)| id).collect();
-    surfaces.sort();
-    surfaces.dedup();
-    for surface_id in surfaces {
-        events.push(DevWindowEvent::TouchCancel { surface_id });
-    }
+    let mut queued = events
+        .drain(..)
+        .map(|event| QueuedInputEvent {
+            seat_id: None,
+            event,
+        })
+        .collect();
+    cancel_touch_input_state_for_seat(None, touch_surfaces, &mut queued);
+    events.extend(queued.into_iter().map(|queued| queued.event));
 }
 
 fn push_cancelled_gesture(
+    seat_id: Option<&SeatId>,
     gesture_surface: Option<Arc<str>>,
     gesture_kind: Option<GestureKind>,
-    events: &mut Vec<DevWindowEvent>,
+    events: &mut Vec<QueuedInputEvent>,
 ) {
     let Some(surface_id) = gesture_surface else {
         return;
     };
     match gesture_kind {
-        Some(GestureKind::Swipe) => events.push(DevWindowEvent::GestureSwipeEnd {
-            surface_id,
-            cancelled: true,
-        }),
-        Some(GestureKind::Pinch) => events.push(DevWindowEvent::GesturePinchEnd {
-            surface_id,
-            cancelled: true,
-        }),
-        Some(GestureKind::Hold) => events.push(DevWindowEvent::GestureHoldEnd {
-            surface_id,
-            cancelled: true,
-        }),
+        Some(GestureKind::Swipe) => push_queued_event(
+            seat_id,
+            events,
+            DevWindowEvent::GestureSwipeEnd {
+                surface_id,
+                cancelled: true,
+            },
+        ),
+        Some(GestureKind::Pinch) => push_queued_event(
+            seat_id,
+            events,
+            DevWindowEvent::GesturePinchEnd {
+                surface_id,
+                cancelled: true,
+            },
+        ),
+        Some(GestureKind::Hold) => push_queued_event(
+            seat_id,
+            events,
+            DevWindowEvent::GestureHoldEnd {
+                surface_id,
+                cancelled: true,
+            },
+        ),
         None => {}
     }
+}
+
+fn queued_for_seat(queued: &QueuedInputEvent, seat_id: Option<&SeatId>) -> bool {
+    seat_id.is_none_or(|seat_id| queued.seat_id.as_ref() == Some(seat_id))
+}
+
+fn push_queued_event(
+    seat_id: Option<&SeatId>,
+    events: &mut Vec<QueuedInputEvent>,
+    event: DevWindowEvent,
+) {
+    events.push(QueuedInputEvent {
+        seat_id: seat_id.cloned(),
+        event,
+    });
 }
 
 fn is_pointer_event(event: &DevWindowEvent) -> bool {
@@ -1366,6 +1637,76 @@ mod input_teardown_tests {
 #[cfg(test)]
 mod input_capability_tests {
     use super::*;
+
+    #[test]
+    fn seat_scoped_surface_cancellation_preserves_another_seat_queue() {
+        let seat_id = ObjectId::null();
+        let mut pointer_focus = Some(Arc::from("panel") as Arc<str>);
+        let mut keyboard_focus = None;
+        let mut keyboard_mods = Modifiers::default();
+        let mut keyboard_repeat = None;
+        let mut touch_surfaces = HashMap::new();
+        let mut gesture_surface = Some(Arc::from("panel") as Arc<str>);
+        let mut gesture_kind = Some(GestureKind::Swipe);
+        let mut events = vec![
+            QueuedInputEvent {
+                seat_id: Some(seat_id.clone()),
+                event: DevWindowEvent::PointerMove {
+                    surface_id: Arc::from("panel"),
+                    x: 1.0,
+                    y: 2.0,
+                },
+            },
+            QueuedInputEvent {
+                // A second live seat may target the same surface. Its queued
+                // event must not be discarded by the first seat's teardown.
+                seat_id: None,
+                event: DevWindowEvent::PointerMove {
+                    surface_id: Arc::from("panel"),
+                    x: 3.0,
+                    y: 4.0,
+                },
+            },
+        ];
+
+        cancel_surface_input_state_for_seat(
+            Some(&seat_id),
+            "panel",
+            &mut pointer_focus,
+            &mut keyboard_focus,
+            &mut keyboard_mods,
+            &mut keyboard_repeat,
+            &mut touch_surfaces,
+            &mut gesture_surface,
+            &mut gesture_kind,
+            &mut events,
+        );
+
+        assert!(pointer_focus.is_none());
+        assert!(gesture_surface.is_none());
+        assert!(gesture_kind.is_none());
+        assert!(events.iter().any(|queued| {
+            queued.seat_id.is_none()
+                && matches!(
+                    &queued.event,
+                    DevWindowEvent::PointerMove { x, y, .. } if (*x, *y) == (3.0, 4.0)
+                )
+        }));
+        assert!(events.iter().any(|queued| {
+            queued.seat_id.as_ref() == Some(&seat_id)
+                && matches!(&queued.event, DevWindowEvent::PointerLeave { .. })
+        }));
+        assert!(events.iter().any(|queued| {
+            queued.seat_id.as_ref() == Some(&seat_id)
+                && matches!(
+                    &queued.event,
+                    DevWindowEvent::GestureSwipeEnd {
+                        cancelled: true,
+                        ..
+                    }
+                )
+        }));
+    }
 
     #[test]
     fn pointer_capability_cancellation_emits_leave_and_gesture_end() {

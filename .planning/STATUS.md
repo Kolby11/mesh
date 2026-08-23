@@ -23,13 +23,12 @@ role, and updates shell config caches only after acceptance.
 Compositor-closed layers and dismissed popups now emit typed lifecycle events;
 their auxiliary protocol objects and identity mappings go through one
 idempotent teardown helper, and the shell invalidates/recreates closed targets.
-That shared teardown now cancels the current single-seat pointer focus,
-keyboard focus/repeat, touch ids, and active gesture before removing a surface,
-while preserving ownership belonging to other surfaces and emitting local
-cancellation events.
-Seat capability and seat removal now perform the corresponding pointer/gesture,
-keyboard/repeat, touch, and focus-grab cancellation before dropping their
-Wayland objects.
+Input protocol handles and ownership now live in per-seat state: pointer,
+keyboard, touch, gesture, and focus-grab callbacks resolve their originating
+seat, repeat processing runs independently, and queued events retain internal
+seat ownership until the backend boundary. Surface teardown, seat capability
+removal, and full seat removal cancel only the affected seat's ownership while
+preserving other seats targeting the same surface.
 Normalized Wayland Escape (`Esc`) is also classified as non-repeating, closing
 the key-name mismatch between event normalization and repeat suppression.
 
@@ -46,7 +45,6 @@ repository-settings fixture, which rejects its `revision` key as unknown.
 
 ## Next
 
-Move input ownership into per-seat state and complete multi-seat event routing,
-then add object/configure/frame generations and the remaining semantic
-presentation diff. Resource preparation and text shaping remain separate
-follow-up work.
+Add object/configure/frame generations and the remaining semantic presentation
+diff. Pointer-button identity, IME/text-input-v3, connection recreation, and
+resource preparation/text shaping remain separate follow-up work.
