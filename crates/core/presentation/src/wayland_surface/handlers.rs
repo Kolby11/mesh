@@ -1178,6 +1178,7 @@ mod tests {
         assert_eq!(normalize_keysym_name("space"), "Space");
         assert_eq!(normalize_keysym_name("ISO_Left_Tab"), "Tab");
         assert_eq!(normalize_keysym_name("BackSpace"), "Backspace");
+        assert_eq!(normalize_keysym_name("Escape"), "Esc");
         assert_eq!(normalize_keysym_name("Left"), "ArrowLeft");
         assert_eq!(normalize_keysym_name("Right"), "ArrowRight");
         assert_eq!(normalize_keysym_name("Up"), "ArrowUp");

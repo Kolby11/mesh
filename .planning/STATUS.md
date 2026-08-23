@@ -30,6 +30,8 @@ cancellation events.
 Seat capability and seat removal now perform the corresponding pointer/gesture,
 keyboard/repeat, touch, and focus-grab cancellation before dropping their
 Wayland objects.
+Normalized Wayland Escape (`Esc`) is also classified as non-repeating, closing
+the key-name mismatch between event normalization and repeat suppression.
 
 Icon bitmap/SVG and font-glyph preparation still share a bounded render resource
 broker, with revision-aware cache handoff and linked-file invalidation. Typed

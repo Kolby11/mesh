@@ -804,6 +804,7 @@ fn is_non_repeating_key(key: &str) -> bool {
         || key.eq_ignore_ascii_case("numlock")
         || key.eq_ignore_ascii_case("scrolllock")
         || key.eq_ignore_ascii_case("escape")
+        || key.eq_ignore_ascii_case("esc")
 }
 
 fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
@@ -865,6 +866,7 @@ mod performance_tests {
         assert!(is_non_repeating_key("CTRL"));
         assert!(is_non_repeating_key("CapsLock"));
         assert!(is_non_repeating_key("Escape"));
+        assert!(is_non_repeating_key("Esc"));
         assert!(!is_non_repeating_key("a"));
         assert!(!is_non_repeating_key("Enter"));
     }
@@ -880,6 +882,10 @@ mod performance_tests {
 
         assert!(
             keyboard_repeat_state_for(repeat_info, "panel", "Shift_L", mods.clone(), None, now)
+                .is_none()
+        );
+        assert!(
+            keyboard_repeat_state_for(repeat_info, "panel", "Esc", mods.clone(), None, now)
                 .is_none()
         );
 
