@@ -309,6 +309,7 @@ fn keyboard_navigation_pointer_focus_visible_tracks_input_modality() {
             240,
             160,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 8.0,
                 y: 8.0,
                 pressed: true,
@@ -324,6 +325,7 @@ fn keyboard_navigation_pointer_focus_visible_tracks_input_modality() {
             240,
             160,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 8.0,
                 y: 40.0,
                 pressed: true,
@@ -494,6 +496,7 @@ fn keyboard_navigation_skips_disabled_hidden_and_tabindex_negative_targets() {
             240,
             160,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 150.0,
                 y: 8.0,
                 pressed: true,

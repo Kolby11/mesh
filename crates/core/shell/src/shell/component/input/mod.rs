@@ -73,7 +73,19 @@ impl FrontendSurfaceComponent {
         input: ComponentInput,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         match input {
-            ComponentInput::PointerButton { x, y, pressed } => {
+            ComponentInput::PointerButton {
+                x,
+                y,
+                button,
+                pressed,
+            } => {
+                // MESH's activation contract is primary-button-only. Keep
+                // other button codes in the input ABI so future pointer
+                // handlers can consume them without making right/middle
+                // clicks activate buttons today.
+                if button != mesh_core_presentation::PRIMARY_POINTER_BUTTON {
+                    return Ok(Vec::new());
+                }
                 if !pressed && self.active_scrollbar_drag.take().is_some() {
                     self.invalidate_paint();
                     return Ok(Vec::new());
@@ -250,11 +262,12 @@ impl FrontendSurfaceComponent {
                             .clone()
                             .filter(|target| target.key == node_key)
                         {
-                            let click_event = self.build_click_event_for_pressed_target(
+                            let click_event = self.build_click_event_for_pressed_target_button(
                                 tree,
                                 &pressed_target,
                                 x,
                                 y,
+                                button,
                             );
                             if pressed_target.activation_item {
                                 requests.extend(self.dispatch_pressed_activation_handlers(
@@ -271,13 +284,14 @@ impl FrontendSurfaceComponent {
                                 .pointer_down_bounds
                                 .or_else(|| find_node_bounds_by_key(tree, &node_key, 0.0, 0.0))
                                 .unwrap_or((0.0, 0.0, 0.0, 0.0));
-                            let click_event = self.build_click_event_for(
+                            let click_event = self.build_click_event_for_button(
                                 tree,
                                 &node_key,
                                 Some(target),
                                 bounds,
                                 x,
                                 y,
+                                button,
                             );
                             if node_is_source(
                                 target,

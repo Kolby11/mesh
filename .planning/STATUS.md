@@ -71,6 +71,12 @@ serial. The presentation backend resolves the requested seat directly and
 emits a warning when a requested grab has no live matching seat/serial, instead
 of silently selecting the global activation-seat hint.
 
+Wayland pointer presses and releases now retain their Linux button code through
+presentation, shell routing, and component input. Primary-button activation and
+click-grab authorization remain explicit; secondary and other buttons cannot
+silently activate MESH controls, and generated click events expose the button
+code.
+
 Popup targets now invalidate their cached creation size when presentation
 reports `SurfaceMissing`, including state-only commits, and force a full retry
 when the missing result came from surface-state submission. Child popup
@@ -100,9 +106,11 @@ dead-code/private-interface warnings remain. The focused real-surface
 navigation raster fixture still has the known 1280px layout overflow. The
 broad workspace lib test run remains blocked by the pre-existing
 repository-settings fixture, which rejects its `revision` key as unknown.
+The complete elements library suite also retains eight existing theme/style
+expectation failures unrelated to pointer input.
 
 ## Next
 
-Complete the remaining semantic presentation state diff. Carry full
-pointer-button identity, IME/text-input-v3, connection recreation, and resource
-preparation/text shaping as separate follow-up work.
+Complete the remaining semantic presentation state diff, IME/text-input-v3,
+connection recreation, and resource preparation/text shaping as separate
+follow-up work.

@@ -244,9 +244,15 @@ pub(super) fn translate_child_surface_input(
             x: x + origin_x,
             y: y + origin_y,
         },
-        ComponentInput::PointerButton { x, y, pressed } => ComponentInput::PointerButton {
+        ComponentInput::PointerButton {
+            x,
+            y,
+            button,
+            pressed,
+        } => ComponentInput::PointerButton {
             x: x + origin_x,
             y: y + origin_y,
+            button,
             pressed,
         },
         ComponentInput::Scroll { x, y, dx, dy } => ComponentInput::Scroll {

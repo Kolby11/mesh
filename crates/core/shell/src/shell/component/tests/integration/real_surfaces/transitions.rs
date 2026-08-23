@@ -247,6 +247,7 @@ fn shipped_theme_selector_buttons_accept_first_entering_frame_clicks() {
             112,
             92,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: click_x,
                 y: click_y,
                 pressed: true,
@@ -259,6 +260,7 @@ fn shipped_theme_selector_buttons_accept_first_entering_frame_clicks() {
             112,
             92,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: click_x,
                 y: click_y,
                 pressed: false,

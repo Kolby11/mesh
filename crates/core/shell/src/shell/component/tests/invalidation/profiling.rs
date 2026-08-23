@@ -202,6 +202,7 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
             320,
             220,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: drag_x,
                 y: drag_y,
                 pressed: true,

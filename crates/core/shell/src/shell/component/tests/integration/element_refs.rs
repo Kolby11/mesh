@@ -391,6 +391,7 @@ fn scrollbar_thumb_can_be_dragged_with_the_pointer() {
             120,
             120,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x,
                 y: press_y,
                 pressed: true,
@@ -426,6 +427,7 @@ fn scrollbar_thumb_can_be_dragged_with_the_pointer() {
             120,
             120,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x,
                 y: initial_hit.track_start + initial_hit.track_extent,
                 pressed: false,

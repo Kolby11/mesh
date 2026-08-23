@@ -15,15 +15,19 @@ pub use wayland_surface::{
 
 /// The Wayland seat and button-press serial that authorize an `xdg_popup` grab.
 ///
-/// The identity is deliberately separate from [`WindowEvent::PointerButton`].
-/// Developer-window and test backends do not have a protocol seat or serial,
-/// while a Wayland popup must use the exact seat that delivered the triggering
-/// press rather than a process-global "active" seat.
+/// The protocol identity is deliberately separate from the button code carried
+/// by [`WindowEvent::PointerButton`]. Developer-window and test backends do not
+/// have a protocol seat or serial, while a Wayland popup must use the exact
+/// seat that delivered the triggering press rather than a process-global
+/// "active" seat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PointerButtonIdentity {
     pub seat_id: u32,
     pub serial: u32,
 }
+
+/// Linux input-event code for the primary pointer button (`BTN_LEFT`).
+pub const PRIMARY_POINTER_BUTTON: u32 = 0x110;
 
 use dev_window::DevWindowBackend;
 use wayland_surface::WaylandSurfaceBackend;
@@ -1626,6 +1630,7 @@ mod tests {
                 surface_id: "panel".into(),
                 x: 3.0,
                 y: 4.0,
+                button: PRIMARY_POINTER_BUTTON,
                 pressed: true,
             },
         ]);

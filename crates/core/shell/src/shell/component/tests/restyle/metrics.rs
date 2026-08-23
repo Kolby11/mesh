@@ -74,6 +74,7 @@ end
             200,
             60,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 60.0,
                 y: 5.0,
                 pressed: true,
@@ -86,6 +87,7 @@ end
             200,
             60,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 60.0,
                 y: 5.0,
                 pressed: false,

@@ -71,6 +71,7 @@ end
             240,
             160,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 8.0,
                 y: 8.0,
                 pressed: true,
@@ -409,6 +410,7 @@ end
             240,
             160,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 0.0,
                 y: 10.0,
                 pressed: true,
@@ -532,6 +534,7 @@ end
             240,
             160,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 80.0,
                 y: 10.0,
                 pressed: true,
@@ -650,6 +653,7 @@ slider {
             240,
             40,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 24.0,
                 y: 20.0,
                 pressed: true,
@@ -900,6 +904,7 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
             width,
             height,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: button_center_x,
                 y: button_center_y,
                 pressed: true,

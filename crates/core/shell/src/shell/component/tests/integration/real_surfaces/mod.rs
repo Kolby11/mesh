@@ -254,7 +254,12 @@ fn pick_bubble_option(enter_handler: &str, option_index: usize) -> (Option<usize
                 cw,
                 ch,
                 content_offset,
-                ComponentInput::PointerButton { x, y, pressed },
+                ComponentInput::PointerButton {
+                    x,
+                    y,
+                    button: 0x110,
+                    pressed,
+                },
             )
             .unwrap();
     }

@@ -565,43 +565,43 @@ impl PointerHandler for State {
                     self.queue_event(&seat_id, DevWindowEvent::PointerMove { surface_id, x, y });
                 }
                 PointerEventKind::Press { button, serial, .. } => {
-                    if button == 0x110 {
+                    if button == crate::PRIMARY_POINTER_BUTTON {
                         self.request_surface_focus(&seat_id, &surface_id, event);
-                        let (x, y) = (event.position.0 as f32, event.position.1 as f32);
-                        tracing::debug!(
-                            "[hover] layer_shell: pointer press surface_id={surface_id} x={x:.1} y={y:.1}"
-                        );
-                        self.queue_event(
-                            &seat_id,
-                            DevWindowEvent::PointerButtonWithIdentity {
-                                surface_id,
-                                x,
-                                y,
-                                pressed: true,
-                                identity: crate::PointerButtonIdentity {
-                                    seat_id: seat_id.protocol_id(),
-                                    serial,
-                                },
-                            },
-                        );
                     }
+                    let (x, y) = (event.position.0 as f32, event.position.1 as f32);
+                    tracing::debug!(
+                        "[hover] layer_shell: pointer press surface_id={surface_id} button={button} x={x:.1} y={y:.1}"
+                    );
+                    self.queue_event(
+                        &seat_id,
+                        DevWindowEvent::PointerButtonWithIdentity {
+                            surface_id,
+                            x,
+                            y,
+                            button,
+                            pressed: true,
+                            identity: crate::PointerButtonIdentity {
+                                seat_id: seat_id.protocol_id(),
+                                serial,
+                            },
+                        },
+                    );
                 }
                 PointerEventKind::Release { button, .. } => {
-                    if button == 0x110 {
-                        let (x, y) = (event.position.0 as f32, event.position.1 as f32);
-                        tracing::debug!(
-                            "[hover] layer_shell: pointer release surface_id={surface_id} x={x:.1} y={y:.1}"
-                        );
-                        self.queue_event(
-                            &seat_id,
-                            DevWindowEvent::PointerButton {
-                                surface_id,
-                                x,
-                                y,
-                                pressed: false,
-                            },
-                        );
-                    }
+                    let (x, y) = (event.position.0 as f32, event.position.1 as f32);
+                    tracing::debug!(
+                        "[hover] layer_shell: pointer release surface_id={surface_id} button={button} x={x:.1} y={y:.1}"
+                    );
+                    self.queue_event(
+                        &seat_id,
+                        DevWindowEvent::PointerButton {
+                            surface_id,
+                            x,
+                            y,
+                            button,
+                            pressed: false,
+                        },
+                    );
                 }
                 PointerEventKind::Axis {
                     horizontal,

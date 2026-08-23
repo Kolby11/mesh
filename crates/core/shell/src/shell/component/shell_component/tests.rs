@@ -349,6 +349,7 @@ fn clipped_absolute_descendant_stays_in_parent_surface() {
 fn child_surface_input_is_translated_from_popup_local_coordinates() {
     let input = translate_child_surface_input(
         ComponentInput::PointerButton {
+            button: 0x110,
             x: 8.0,
             y: 12.0,
             pressed: true,
@@ -358,7 +359,7 @@ fn child_surface_input_is_translated_from_popup_local_coordinates() {
     );
 
     match input {
-        ComponentInput::PointerButton { x, y, pressed } => {
+        ComponentInput::PointerButton { x, y, pressed, .. } => {
             assert_eq!((x, y, pressed), (28.0, 54.0, true));
         }
         other => panic!("expected pointer button input, got {other:?}"),

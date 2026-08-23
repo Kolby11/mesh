@@ -161,6 +161,7 @@ slider {
             240,
             40,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 200.0,
                 y: 20.0,
                 pressed: true,
@@ -232,6 +233,7 @@ fn audio_popover_keeps_drag_value_visible_until_backend_catches_up() {
             width,
             height,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: drag_x,
                 y: drag_y,
                 pressed: true,
@@ -319,6 +321,7 @@ fn audio_popover_first_slider_grab_dispatches_change() {
             width,
             height,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: drag_x,
                 y: drag_y,
                 pressed: true,
@@ -389,6 +392,7 @@ fn audio_popover_drag_keeps_fractional_slider_value_visible() {
             width,
             height,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: drag_x,
                 y: drag_y,
                 pressed: true,
@@ -456,6 +460,7 @@ fn audio_popover_backend_update_moves_slider_after_preserved_value_clears() {
             width,
             height,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: drag_x,
                 y: drag_y,
                 pressed: true,
@@ -468,6 +473,7 @@ fn audio_popover_backend_update_moves_slider_after_preserved_value_clears() {
             width,
             height,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: drag_x,
                 y: drag_y,
                 pressed: false,
@@ -578,6 +584,7 @@ fn audio_popover_slider_keyboard_still_steps_after_mouse_drag() {
             width,
             height,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: drag_x,
                 y: drag_y,
                 pressed: true,
@@ -590,6 +597,7 @@ fn audio_popover_slider_keyboard_still_steps_after_mouse_drag() {
             width,
             height,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: drag_x,
                 y: drag_y,
                 pressed: false,
@@ -670,6 +678,7 @@ end
             240,
             160,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 4.0,
                 y: 4.0,
                 pressed: true,
@@ -716,6 +725,7 @@ end
             240,
             160,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 8.0,
                 y: 8.0,
                 pressed: true,
@@ -765,6 +775,7 @@ end
             240,
             160,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 10.0,
                 y: 10.0,
                 pressed: true,
@@ -785,6 +796,7 @@ end
             240,
             160,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 60.0,
                 y: 10.0,
                 pressed: false,
@@ -828,6 +840,7 @@ end
             240,
             160,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 40.0,
                 y: 10.0,
                 pressed: true,
@@ -840,6 +853,7 @@ end
             240,
             160,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 40.0,
                 y: 10.0,
                 pressed: false,
@@ -872,6 +886,7 @@ fn pointer_release_without_requests_still_clears_active_state() {
             240,
             160,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 8.0,
                 y: 8.0,
                 pressed: true,
@@ -888,6 +903,7 @@ fn pointer_release_without_requests_still_clears_active_state() {
             240,
             160,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 8.0,
                 y: 8.0,
                 pressed: false,
@@ -1204,6 +1220,7 @@ end
                 240,
                 160,
                 ComponentInput::PointerButton {
+                    button: 0x110,
                     x: 8.0,
                     y: 8.0,
                     pressed: true,
@@ -1216,6 +1233,7 @@ end
                 240,
                 160,
                 ComponentInput::PointerButton {
+                    button: 0x110,
                     x: 8.0,
                     y: 8.0,
                     pressed: false,

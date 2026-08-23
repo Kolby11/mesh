@@ -173,6 +173,8 @@ pub enum ComponentInput {
     PointerButton {
         x: f32,
         y: f32,
+        /// Linux input-event code, for example `BTN_LEFT` (`0x110`).
+        button: u32,
         pressed: bool,
     },
     Scroll {

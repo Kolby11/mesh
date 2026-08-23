@@ -98,10 +98,12 @@ impl Shell {
 
             let target_surface_id = route_surface_id;
             if let RoutedWindowEvent::PointerButtonWithIdentity {
+                button,
                 identity,
                 pressed: true,
                 ..
             } = &event
+                && *button == mesh_core_presentation::PRIMARY_POINTER_BUTTON
             {
                 self.remember_popup_grab(target_surface_id, *identity);
             }
@@ -224,6 +226,7 @@ impl Shell {
                         x,
                         y,
                         pressed: true,
+                        ..
                     } => Some((*x, *y, true)),
                     RoutedWindowEvent::PointerButtonWithIdentity {
                         x,
@@ -284,36 +287,57 @@ impl Shell {
                 RoutedWindowEvent::PointerButtonWithIdentity {
                     x,
                     y,
+                    button,
                     pressed: true,
                     ..
-                } => {
+                } if button == mesh_core_presentation::PRIMARY_POINTER_BUTTON => {
                     self.claim_keyboard_focus_for_surface(target_surface_id);
                     ComponentInput::PointerButton {
                         x,
                         y,
+                        button,
                         pressed: true,
                     }
                 }
                 RoutedWindowEvent::PointerButton {
                     x,
                     y,
+                    button,
                     pressed: true,
-                } => {
+                } if button == mesh_core_presentation::PRIMARY_POINTER_BUTTON => {
                     self.claim_keyboard_focus_for_surface(target_surface_id);
                     ComponentInput::PointerButton {
                         x,
                         y,
+                        button,
                         pressed: true,
                     }
                 }
                 RoutedWindowEvent::PointerMove { x, y } => ComponentInput::PointerMove { x, y },
                 RoutedWindowEvent::PointerLeave => ComponentInput::PointerLeave,
-                RoutedWindowEvent::PointerButtonWithIdentity { x, y, pressed, .. } => {
-                    ComponentInput::PointerButton { x, y, pressed }
-                }
-                RoutedWindowEvent::PointerButton { x, y, pressed } => {
-                    ComponentInput::PointerButton { x, y, pressed }
-                }
+                RoutedWindowEvent::PointerButtonWithIdentity {
+                    x,
+                    y,
+                    button,
+                    pressed,
+                    ..
+                } => ComponentInput::PointerButton {
+                    x,
+                    y,
+                    button,
+                    pressed,
+                },
+                RoutedWindowEvent::PointerButton {
+                    x,
+                    y,
+                    button,
+                    pressed,
+                } => ComponentInput::PointerButton {
+                    x,
+                    y,
+                    button,
+                    pressed,
+                },
                 RoutedWindowEvent::Scroll { x, y, dx, dy } => {
                     ComponentInput::Scroll { x, y, dx, dy }
                 }
@@ -572,11 +596,13 @@ enum RoutedWindowEvent {
     PointerButton {
         x: f32,
         y: f32,
+        button: u32,
         pressed: bool,
     },
     PointerButtonWithIdentity {
         x: f32,
         y: f32,
+        button: u32,
         pressed: bool,
         identity: mesh_core_presentation::PointerButtonIdentity,
     },
@@ -665,15 +691,22 @@ fn split_window_event(event: WindowEvent) -> (std::sync::Arc<str>, RoutedWindowE
             surface_id,
             x,
             y,
+            button,
             pressed,
         } => (
             surface_id,
-            RoutedWindowEvent::PointerButton { x, y, pressed },
+            RoutedWindowEvent::PointerButton {
+                x,
+                y,
+                button,
+                pressed,
+            },
         ),
         WindowEvent::PointerButtonWithIdentity {
             surface_id,
             x,
             y,
+            button,
             pressed,
             identity,
         } => (
@@ -681,6 +714,7 @@ fn split_window_event(event: WindowEvent) -> (std::sync::Arc<str>, RoutedWindowE
             RoutedWindowEvent::PointerButtonWithIdentity {
                 x,
                 y,
+                button,
                 pressed,
                 identity,
             },
@@ -816,6 +850,7 @@ mod tests {
             surface_id: "panel".into(),
             x: 12.0,
             y: 24.0,
+            button: mesh_core_presentation::PRIMARY_POINTER_BUTTON,
             pressed: true,
         });
         assert_eq!(surface_id.as_ref(), "panel");
@@ -824,6 +859,7 @@ mod tests {
             RoutedWindowEvent::PointerButton {
                 x: 12.0,
                 y: 24.0,
+                button: mesh_core_presentation::PRIMARY_POINTER_BUTTON,
                 pressed: true
             }
         ));
@@ -836,6 +872,7 @@ mod tests {
             surface_id: "panel".into(),
             x: 12.0,
             y: 24.0,
+            button: mesh_core_presentation::PRIMARY_POINTER_BUTTON,
             pressed: true,
             identity,
         });
@@ -845,9 +882,28 @@ mod tests {
             RoutedWindowEvent::PointerButtonWithIdentity {
                 x: 12.0,
                 y: 24.0,
+                button: mesh_core_presentation::PRIMARY_POINTER_BUTTON,
                 pressed: true,
                 identity: actual,
             } if actual == identity
+        ));
+
+        let (surface_id, event) = split_window_event(WindowEvent::PointerButton {
+            surface_id: "panel".into(),
+            x: 4.0,
+            y: 5.0,
+            button: 0x111,
+            pressed: false,
+        });
+        assert_eq!(surface_id.as_ref(), "panel");
+        assert!(matches!(
+            event,
+            RoutedWindowEvent::PointerButton {
+                x: 4.0,
+                y: 5.0,
+                button: 0x111,
+                pressed: false,
+            }
         ));
 
         let (surface_id, event) = split_window_event(WindowEvent::Key {

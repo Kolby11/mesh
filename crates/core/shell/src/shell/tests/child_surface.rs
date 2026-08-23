@@ -818,6 +818,7 @@ fn child_surface_input_routes_to_local_child_handler_and_profiles() {
             surface_id: child_id.clone().into(),
             x: 10.0,
             y: 12.0,
+            button: mesh_core_presentation::PRIMARY_POINTER_BUTTON,
             pressed: true,
         },
     );
@@ -839,6 +840,7 @@ fn child_surface_input_routes_to_local_child_handler_and_profiles() {
     assert!(matches!(
         inputs[1].1,
         ComponentInput::PointerButton {
+            button: 0x110,
             x: 10.0,
             y: 12.0,
             pressed: true

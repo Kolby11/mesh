@@ -645,6 +645,26 @@ impl FrontendSurfaceComponent {
         })
     }
 
+    pub(in crate::shell::component) fn build_click_event_for_button(
+        &self,
+        tree: &WidgetNode,
+        node_key: &str,
+        target: Option<&WidgetNode>,
+        bounds: (f32, f32, f32, f32),
+        x: f32,
+        y: f32,
+        button: u32,
+    ) -> serde_json::Value {
+        let mut event = self.build_click_event_for(tree, node_key, target, bounds, x, y);
+        if let Some(pointer) = event
+            .get_mut("pointer")
+            .and_then(|value| value.as_object_mut())
+        {
+            pointer.insert("button".into(), serde_json::json!(button));
+        }
+        event
+    }
+
     pub(in crate::shell::component) fn pressed_target_snapshot(
         &self,
         key: &str,
@@ -698,6 +718,24 @@ impl FrontendSurfaceComponent {
             },
             "current_target": target.current_target
         })
+    }
+
+    pub(in crate::shell::component) fn build_click_event_for_pressed_target_button(
+        &self,
+        tree: &WidgetNode,
+        target: &PressedTargetSnapshot,
+        x: f32,
+        y: f32,
+        button: u32,
+    ) -> serde_json::Value {
+        let mut event = self.build_click_event_for_pressed_target(tree, target, x, y);
+        if let Some(pointer) = event
+            .get_mut("pointer")
+            .and_then(|value| value.as_object_mut())
+        {
+            pointer.insert("button".into(), serde_json::json!(button));
+        }
+        event
     }
 
     pub(super) fn build_focus_event(

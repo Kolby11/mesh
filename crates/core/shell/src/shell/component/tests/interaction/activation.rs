@@ -2,6 +2,80 @@ use super::*;
 use mesh_core_frontend_host::ShellComponent;
 
 #[test]
+fn pointer_button_identity_reaches_click_event_without_secondary_activation() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+clicks = 0
+observed_button = 0
+function onClick(event)
+    clicks = clicks + 1
+    observed_button = event.pointer.button
+end
+</script>
+"#,
+    );
+    component.last_tree = Some(root_with(vec![event_node(
+        "button",
+        "root/0",
+        10.0,
+        10.0,
+        80.0,
+        28.0,
+        &[("click", "onClick")],
+    )]));
+    let theme = default_theme();
+
+    for pressed in [true, false] {
+        component
+            .handle_input(
+                &theme,
+                160,
+                80,
+                ComponentInput::PointerButton {
+                    x: 24.0,
+                    y: 18.0,
+                    button: 0x111,
+                    pressed,
+                },
+            )
+            .unwrap();
+    }
+    assert_eq!(
+        runtime_value(&component, "clicks"),
+        Some(serde_json::json!(0))
+    );
+
+    for pressed in [true, false] {
+        component
+            .handle_input(
+                &theme,
+                160,
+                80,
+                ComponentInput::PointerButton {
+                    x: 24.0,
+                    y: 18.0,
+                    button: mesh_core_presentation::PRIMARY_POINTER_BUTTON,
+                    pressed,
+                },
+            )
+            .unwrap();
+    }
+
+    assert_eq!(
+        runtime_value(&component, "clicks"),
+        Some(serde_json::json!(1))
+    );
+    assert_eq!(
+        runtime_value(&component, "observed_button"),
+        Some(serde_json::json!(
+            mesh_core_presentation::PRIMARY_POINTER_BUTTON
+        ))
+    );
+}
+
+#[test]
 fn keyboard_activation_focused_input_backspace_edits_value() {
     let mut component = test_frontend_component(
         r#"

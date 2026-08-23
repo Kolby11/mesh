@@ -685,6 +685,7 @@ fn navigation_language_option_cancels_hover_close_and_accepts_mouse_click() {
             ch,
             content_offset,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: option_x,
                 y: option_y,
                 pressed: true,
@@ -699,6 +700,7 @@ fn navigation_language_option_cancels_hover_close_and_accepts_mouse_click() {
             ch,
             content_offset,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: option_x,
                 y: option_y,
                 pressed: false,
@@ -997,6 +999,7 @@ fn navigation_bar_pointer_click_opens_settings_and_updates_focus_diagnostic() {
             320,
             80,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x,
                 y,
                 pressed: true,
@@ -1037,6 +1040,7 @@ fn navigation_bar_pointer_click_opens_settings_and_updates_focus_diagnostic() {
             320,
             80,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x,
                 y,
                 pressed: false,
@@ -1352,6 +1356,7 @@ fn navigation_bar_pointer_activation_toggles_volume_mute() {
             width,
             height,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x,
                 y,
                 pressed: true,
@@ -1364,6 +1369,7 @@ fn navigation_bar_pointer_activation_toggles_volume_mute() {
             width,
             height,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x,
                 y,
                 pressed: false,
@@ -1616,6 +1622,7 @@ fn navigation_bar_volume_trigger_keeps_click_capture_during_press_animation() {
             width,
             height,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x,
                 y,
                 pressed: true,
@@ -1636,6 +1643,7 @@ fn navigation_bar_volume_trigger_keeps_click_capture_during_press_animation() {
             width,
             height,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x,
                 y,
                 pressed: false,

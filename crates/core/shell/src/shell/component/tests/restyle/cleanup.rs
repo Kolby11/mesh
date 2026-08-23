@@ -200,6 +200,7 @@ fn selection_boundaries_ignore_selectable_text_inside_controls() {
             240,
             160,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 8.0,
                 y: 8.0,
                 pressed: true,
@@ -233,6 +234,7 @@ fn selection_boundaries_clamp_drag_to_same_text_node() {
             240,
             160,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 8.0,
                 y: 8.0,
                 pressed: true,

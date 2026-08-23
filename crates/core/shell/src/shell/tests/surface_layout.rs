@@ -524,6 +524,7 @@ fn wayland_parent_click_does_not_cache_padded_size_for_spanning_surface() {
             surface_id: "@test/input-size".into(),
             x: 1840.0,
             y: 28.0,
+            button: mesh_core_presentation::PRIMARY_POINTER_BUTTON,
             pressed: true,
         },
     );

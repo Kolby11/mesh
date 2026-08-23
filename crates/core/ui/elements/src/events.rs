@@ -8,11 +8,13 @@ pub enum UiEvent {
         node_id: NodeId,
         x: f32,
         y: f32,
+        button: u32,
     },
     PointerUp {
         node_id: NodeId,
         x: f32,
         y: f32,
+        button: u32,
     },
     PointerMove {
         node_id: NodeId,
@@ -154,7 +156,12 @@ impl InputState {
                 }
             }
 
-            RawInputEvent::PointerButton { x, y, pressed, .. } => {
+            RawInputEvent::PointerButton {
+                x,
+                y,
+                button,
+                pressed,
+            } => {
                 if *pressed {
                     // Ensure hover state is current (pointer may not have moved first).
                     let target = EventDispatcher::hit_test(root, *x, *y);
@@ -181,6 +188,7 @@ impl InputState {
                             node_id,
                             x: *x,
                             y: *y,
+                            button: *button,
                         });
                     }
                 } else {
@@ -194,6 +202,7 @@ impl InputState {
                             node_id,
                             x: *x,
                             y: *y,
+                            button: *button,
                         });
                     }
                 }
@@ -320,19 +329,26 @@ impl EventDispatcher {
     /// Convert a raw input event into targeted UI events.
     pub fn dispatch(root: &WidgetNode, raw: &RawInputEvent) -> Vec<UiEvent> {
         match raw {
-            RawInputEvent::PointerButton { x, y, pressed, .. } => {
+            RawInputEvent::PointerButton {
+                x,
+                y,
+                button,
+                pressed,
+            } => {
                 if let Some(node_id) = Self::hit_test(root, *x, *y) {
                     if *pressed {
                         vec![UiEvent::PointerDown {
                             node_id,
                             x: *x,
                             y: *y,
+                            button: *button,
                         }]
                     } else {
                         vec![UiEvent::PointerUp {
                             node_id,
                             x: *x,
                             y: *y,
+                            button: *button,
                         }]
                     }
                 } else {
@@ -461,5 +477,28 @@ mod tests {
         assert_eq!(EventDispatcher::hit_test(&root, 150.0, 75.0), Some(root.id));
         // Outside everything.
         assert_eq!(EventDispatcher::hit_test(&root, 300.0, 300.0), None);
+    }
+
+    #[test]
+    fn dispatch_preserves_pointer_button_identity() {
+        let mut root = WidgetNode::new("root");
+        root.computed_style.width = Dimension::Px(200.0);
+        root.computed_style.height = Dimension::Px(100.0);
+        root.children = vec![WidgetNode::new("button")].into();
+        LayoutEngine::compute(&mut root, 200.0, 100.0);
+
+        let events = EventDispatcher::dispatch(
+            &root,
+            &RawInputEvent::PointerButton {
+                x: 10.0,
+                y: 10.0,
+                button: 0x111,
+                pressed: true,
+            },
+        );
+        assert!(matches!(
+            events.as_slice(),
+            [UiEvent::PointerDown { button: 0x111, .. }]
+        ));
     }
 }

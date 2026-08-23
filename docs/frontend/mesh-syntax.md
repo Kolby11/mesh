@@ -665,11 +665,16 @@ event table with:
 ```lua
 event.pointer.x
 event.pointer.y
+event.pointer.button
 event.current_target.bounds.left
 event.current_target.bounds.bottom
 event.current_target.position.margin_left
 event.current_target.position.margin_top
 ```
+
+Pointer coordinates are logical surface pixels. `event.pointer.button` is the
+Linux input-event code (`0x110` is the primary/left button); MESH activation
+remains primary-button-only.
 
 Inline `<popover>` nodes should normally be authored inside the trigger's
 component and anchored declaratively:

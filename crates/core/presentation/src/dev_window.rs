@@ -18,6 +18,7 @@ pub enum DevWindowEvent {
         surface_id: Arc<str>,
         x: f32,
         y: f32,
+        button: u32,
         pressed: bool,
     },
     /// A Wayland pointer press carrying the seat/serial identity required for
@@ -27,6 +28,7 @@ pub enum DevWindowEvent {
         surface_id: Arc<str>,
         x: f32,
         y: f32,
+        button: u32,
         pressed: bool,
         identity: crate::PointerButtonIdentity,
     },
@@ -233,6 +235,7 @@ impl DevWindowBackend {
                     surface_id: surface_id.clone(),
                     x,
                     y,
+                    button: crate::PRIMARY_POINTER_BUTTON,
                     pressed: current_left_down,
                 });
                 surface.last_left_down = current_left_down;

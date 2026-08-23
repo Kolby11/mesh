@@ -139,7 +139,12 @@ fn shipped_language_trigger_flag_follows_the_picked_locale() {
                     cw,
                     ch,
                     content_offset,
-                    ComponentInput::PointerButton { x, y, pressed },
+                    ComponentInput::PointerButton {
+                        x,
+                        y,
+                        button: 0x110,
+                        pressed,
+                    },
                 )
                 .unwrap(),
         );

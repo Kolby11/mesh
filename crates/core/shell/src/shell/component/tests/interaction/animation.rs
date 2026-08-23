@@ -40,6 +40,7 @@ end
             240,
             160,
             ComponentInput::PointerButton {
+                button: 0x110,
                 x: 50.0,
                 y: 10.0,
                 pressed: true,
