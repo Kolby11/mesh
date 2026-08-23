@@ -109,9 +109,9 @@ pub fn resolve_css_props(
         let value =
             props_state
                 .and_then(|obj| obj.get(&def.name))
-                .and_then(|value| {
-                    mesh_core_component::json_to_prop_value_ref(value).and_then(|value| {
-                        match mesh_core_component::prop_value_to_css(def, &value) {
+                .and_then(
+                    |value| match mesh_core_component::json_to_prop_value_ref(value) {
+                        Ok(value) => match mesh_core_component::prop_value_to_css(def, &value) {
                             Ok(css) => Some(css),
                             Err(err) => {
                                 tracing::warn!(
@@ -120,9 +120,16 @@ pub fn resolve_css_props(
                                 );
                                 None
                             }
+                        },
+                        Err(err) => {
+                            tracing::warn!(
+                                "invalid runtime value for prop `{}` ignored: {err}",
+                                def.name
+                            );
+                            None
                         }
-                    })
-                })
+                    },
+                )
                 .or_else(|| {
                     def.default.as_ref().and_then(|value| {
                         match mesh_core_component::prop_value_to_css(def, value) {

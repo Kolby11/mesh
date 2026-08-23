@@ -201,6 +201,23 @@ impl PropValue {
     }
 }
 
+/// JSON values that cannot cross the scalar prop boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum JsonPropValueError {
+    #[error("null is not a scalar prop value")]
+    Null,
+    #[error(
+        "array values are not supported as props until an explicit structured prop type exists"
+    )]
+    Array,
+    #[error(
+        "object values are not supported as props until an explicit structured prop type exists"
+    )]
+    Object,
+    #[error("number cannot be represented as a finite prop number")]
+    InvalidNumber,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PropValidationError {
     pub message: String,
@@ -349,28 +366,32 @@ fn localized_label_to_json(label: &LocalizedLabel) -> serde_json::Value {
     }
 }
 
-pub fn json_to_prop_value(value: serde_json::Value) -> Option<PropValue> {
+pub fn json_to_prop_value(value: serde_json::Value) -> Result<PropValue, JsonPropValueError> {
     match value {
-        serde_json::Value::String(s) => Some(PropValue::String(s)),
-        serde_json::Value::Number(n) => n.as_f64().map(PropValue::Number),
-        serde_json::Value::Bool(b) => Some(PropValue::Bool(b)),
-        serde_json::Value::Null => None,
-        other => Some(PropValue::String(other.to_string())),
+        serde_json::Value::String(s) => Ok(PropValue::String(s)),
+        serde_json::Value::Number(n) => n
+            .as_f64()
+            .map(PropValue::Number)
+            .ok_or(JsonPropValueError::InvalidNumber),
+        serde_json::Value::Bool(b) => Ok(PropValue::Bool(b)),
+        serde_json::Value::Null => Err(JsonPropValueError::Null),
+        serde_json::Value::Array(_) => Err(JsonPropValueError::Array),
+        serde_json::Value::Object(_) => Err(JsonPropValueError::Object),
     }
 }
 
 /// Convert a JSON value to the scalar prop domain without taking ownership.
-///
-/// Host/runtime callers frequently need to validate or project a value while
-/// retaining the original JSON. Borrowing avoids a deep clone for arrays and
-/// objects before their compatibility string conversion.
-pub fn json_to_prop_value_ref(value: &serde_json::Value) -> Option<PropValue> {
+pub fn json_to_prop_value_ref(value: &serde_json::Value) -> Result<PropValue, JsonPropValueError> {
     match value {
-        serde_json::Value::String(value) => Some(PropValue::String(value.clone())),
-        serde_json::Value::Number(value) => value.as_f64().map(PropValue::Number),
-        serde_json::Value::Bool(value) => Some(PropValue::Bool(*value)),
-        serde_json::Value::Null => None,
-        other => Some(PropValue::String(other.to_string())),
+        serde_json::Value::String(value) => Ok(PropValue::String(value.clone())),
+        serde_json::Value::Number(value) => value
+            .as_f64()
+            .map(PropValue::Number)
+            .ok_or(JsonPropValueError::InvalidNumber),
+        serde_json::Value::Bool(value) => Ok(PropValue::Bool(*value)),
+        serde_json::Value::Null => Err(JsonPropValueError::Null),
+        serde_json::Value::Array(_) => Err(JsonPropValueError::Array),
+        serde_json::Value::Object(_) => Err(JsonPropValueError::Object),
     }
 }
 
@@ -598,7 +619,7 @@ mod prop_value_conversion_tests {
     use super::*;
 
     #[test]
-    fn borrowed_json_prop_conversion_matches_owned_conversion() {
+    fn json_prop_conversion_accepts_only_scalars() {
         let values = [
             serde_json::json!("text"),
             serde_json::json!(42.5),
@@ -614,52 +635,18 @@ mod prop_value_conversion_tests {
                 json_to_prop_value(value.clone())
             );
         }
-    }
 
-    // cargo test -p mesh-core-component --release -- borrowed_json_prop_conversion_avoids_nested_clone --ignored --nocapture
-    #[test]
-    #[ignore = "release-only borrowed prop conversion microbenchmark"]
-    fn borrowed_json_prop_conversion_avoids_nested_clone() {
-        use std::time::Instant;
-
-        let value = serde_json::json!({
-            "items": (0..64)
-                .map(|index| serde_json::json!({
-                    "id": index,
-                    "label": "x".repeat(128),
-                    "enabled": index % 2 == 0
-                }))
-                .collect::<Vec<_>>()
-        });
-        let iterations = 20_000usize;
-
-        let owned_started = Instant::now();
-        let mut owned_total = 0usize;
-        for _ in 0..iterations {
-            let converted = json_to_prop_value(std::hint::black_box(value.clone())).unwrap();
-            owned_total += match converted {
-                PropValue::String(value) => value.len(),
-                _ => 0,
-            };
-        }
-        let owned_time = owned_started.elapsed();
-
-        let borrowed_started = Instant::now();
-        let mut borrowed_total = 0usize;
-        for _ in 0..iterations {
-            let converted = json_to_prop_value_ref(std::hint::black_box(&value)).unwrap();
-            borrowed_total += match converted {
-                PropValue::String(value) => value.len(),
-                _ => 0,
-            };
-        }
-        let borrowed_time = borrowed_started.elapsed();
-
-        eprintln!(
-            "nested JSON prop conversion: owned {owned_time:?}; borrowed {borrowed_time:?}; ratio {:.1}x; bytes={owned_total}/{borrowed_total}",
-            owned_time.as_secs_f64() / borrowed_time.as_secs_f64()
+        assert_eq!(
+            json_to_prop_value_ref(&serde_json::json!(["a", "b"])),
+            Err(JsonPropValueError::Array)
         );
-        assert_eq!(owned_total, borrowed_total);
-        assert!(borrowed_time < owned_time);
+        assert_eq!(
+            json_to_prop_value(serde_json::json!({"nested": [1, 2, 3]})),
+            Err(JsonPropValueError::Object)
+        );
+        assert_eq!(
+            json_to_prop_value_ref(&serde_json::Value::Null),
+            Err(JsonPropValueError::Null)
+        );
     }
 }

@@ -1,5 +1,5 @@
 use mesh_core_component::{
-    PropDef, PropValue, PropsBlock, prop_value_to_json, validate_prop_value,
+    PropDef, PropsBlock, json_to_prop_value_ref, prop_value_to_json, validate_prop_value,
 };
 use mesh_core_config::validate::{
     FieldKind, FieldSpec, SettingsDiagnostic, unknown_key_diagnostic_from, validate_object,
@@ -788,16 +788,13 @@ fn validate_prop_map(
             diagnostics.push(unknown_key_diagnostic_from(namespace, prefix, name, &known));
             continue;
         };
-        let prop_value = match value {
-            serde_json::Value::String(value) => Some(PropValue::String(value.clone())),
-            serde_json::Value::Number(value) => value.as_f64().map(PropValue::Number),
-            serde_json::Value::Bool(value) => Some(PropValue::Bool(*value)),
-            serde_json::Value::Null
-            | serde_json::Value::Array(_)
-            | serde_json::Value::Object(_) => None,
-        };
         let path = format!("{prefix}.{name}");
-        match prop_value.and_then(|value| validate_prop_value(def, &value).ok().map(|_| value)) {
+        let valid = json_to_prop_value_ref(value).ok().and_then(|prop_value| {
+            validate_prop_value(def, &prop_value)
+                .ok()
+                .map(|_| prop_value)
+        });
+        match valid {
             Some(_) => {
                 accepted.insert(name.clone(), value.clone());
             }
@@ -813,13 +810,8 @@ fn validate_prop_map(
 }
 
 fn prop_value_error(def: &PropDef, value: &serde_json::Value) -> String {
-    let converted = match value {
-        serde_json::Value::String(value) => Some(PropValue::String(value.clone())),
-        serde_json::Value::Number(value) => value.as_f64().map(PropValue::Number),
-        serde_json::Value::Bool(value) => Some(PropValue::Bool(*value)),
-        _ => None,
-    };
-    converted
+    json_to_prop_value_ref(value)
+        .ok()
         .and_then(|value| validate_prop_value(def, &value).err())
         .map(|error| error.message)
         .unwrap_or_else(|| {

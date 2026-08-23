@@ -1706,9 +1706,9 @@ fn validate_json_prop(
     def: &mesh_core_component::PropDef,
     value: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let prop_value = mesh_core_component::json_to_prop_value_ref(&value).ok_or_else(|| {
+    let prop_value = mesh_core_component::json_to_prop_value_ref(&value).map_err(|error| {
         format!(
-            "prop `{}` expects a {}, found null",
+            "prop `{}` expects a {}, {error}",
             def.name,
             def.ty.lua_type()
         )

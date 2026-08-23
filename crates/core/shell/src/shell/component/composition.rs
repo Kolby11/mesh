@@ -511,26 +511,13 @@ fn embedded_root_is_popover(node: &WidgetNode) -> bool {
 
 fn runtime_props_json(props: &AttributeMap) -> HashMap<String, serde_json::Value> {
     let mut props_json = HashMap::with_capacity(props.len());
-    for (key, value) in props {
-        props_json.insert(key.as_str().to_string(), decode_prop_value(value));
+    for (key, value) in props.iter_values() {
+        let value = value.to_json_value();
+        if mesh_core_component::json_to_prop_value_ref(&value).is_ok() {
+            props_json.insert(key.as_str().to_string(), value);
+        }
     }
     props_json
-}
-
-/// A bound table/array prop (e.g. `items="{items}"`) reaches this boundary
-/// already JSON-stringified — the attribute resolver in `mesh-core-frontend`
-/// stringifies every resolved value on the way here (`json_value_to_string`),
-/// so the type information is otherwise lost. Recover it: a value that looks
-/// like a JSON array/object is parsed back into structured JSON so it lands
-/// in the child's Luau `_ENV` as a real table, not a stringified blob.
-/// Anything else (the overwhelming majority of props: plain text, numbers,
-/// booleans) is passed through unchanged.
-fn decode_prop_value(value: &str) -> serde_json::Value {
-    match value.trim_start().as_bytes().first() {
-        Some(b'[') | Some(b'{') => serde_json::from_str(value)
-            .unwrap_or_else(|_| serde_json::Value::String(value.to_string())),
-        _ => serde_json::Value::String(value.to_string()),
-    }
 }
 
 fn apply_prop_handler_calls(
@@ -940,36 +927,27 @@ mod tests {
     }
 
     #[test]
-    fn runtime_props_json_recovers_array_and_object_props_as_structured_json() {
-        // A bound table prop (e.g. `items="{items}"`) arrives here already
-        // JSON-stringified by the attribute resolver upstream. It must come
-        // back out as a real array/object, not a string blob the child's
-        // `{#for item in items}` can't iterate.
-        let props = AttributeMap::from([
-            (
-                "items".into(),
-                r#"[{"id":"en","text":"EN"},{"id":"sk","text":"SK"}]"#.into(),
-            ),
-            ("config".into(), r#"{"enabled":true}"#.into()),
-            ("label".into(), "Volume".into()),
-            // Looks table-ish at a glance but isn't valid JSON: must fall
-            // back to a plain string rather than being dropped or panicking.
-            ("weird".into(), "[not json".into()),
-        ]);
+    fn runtime_props_json_rejects_structured_props() {
+        // Structured bindings retain their JSON type at this boundary, so the
+        // scalar prop conversion can reject them instead of accepting their
+        // stringified representation as a `string` prop.
+        let mut props = AttributeMap::new();
+        props.insert_value(
+            "items".into(),
+            serde_json::json!([
+                {"id": "en", "text": "EN"},
+                {"id": "sk", "text": "SK"},
+            ]),
+        );
+        props.insert_value("config".into(), serde_json::json!({"enabled": true}));
+        props.insert("label".into(), "Volume".into());
+        // Text that only looks table-ish remains a scalar string.
+        props.insert("weird".into(), "[not json".into());
 
         let props_json = runtime_props_json(&props);
 
-        assert_eq!(
-            props_json.get("items"),
-            Some(&serde_json::json!([
-                {"id": "en", "text": "EN"},
-                {"id": "sk", "text": "SK"},
-            ]))
-        );
-        assert_eq!(
-            props_json.get("config"),
-            Some(&serde_json::json!({"enabled": true}))
-        );
+        assert!(!props_json.contains_key("items"));
+        assert!(!props_json.contains_key("config"));
         assert_eq!(
             props_json.get("label"),
             Some(&serde_json::Value::String("Volume".into()))

@@ -74,6 +74,14 @@ impl ResolvedAttributeValueRef<'_> {
         }
     }
 
+    /// Return the resolved value while preserving its JSON scalar/structured type.
+    pub fn to_json_value(self) -> serde_json::Value {
+        match self.value {
+            StoredAttributeValue::String(value) => serde_json::Value::String(value.clone()),
+            StoredAttributeValue::Typed(value) => value.value.clone(),
+        }
+    }
+
     #[cfg(test)]
     fn is_string(self) -> bool {
         match self.value {

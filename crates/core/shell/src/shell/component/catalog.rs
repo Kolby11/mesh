@@ -107,22 +107,13 @@ fn validate_placement_props(
                 ),
             });
         }
-        let value = match value {
-            serde_json::Value::String(value) => {
-                mesh_core_component::PropValue::String(value.clone())
+        let value = mesh_core_component::json_to_prop_value_ref(value).map_err(|_| {
+            ShellRunError::FrontendComposition {
+                message: format!(
+                    "invalid_node_props: contribution '{reference}' prop '{name}' must be scalar"
+                ),
             }
-            serde_json::Value::Number(value) => {
-                mesh_core_component::PropValue::Number(value.as_f64().unwrap_or(f64::NAN))
-            }
-            serde_json::Value::Bool(value) => mesh_core_component::PropValue::Bool(*value),
-            _ => {
-                return Err(ShellRunError::FrontendComposition {
-                    message: format!(
-                        "invalid_node_props: contribution '{reference}' prop '{name}' must be scalar"
-                    ),
-                });
-            }
-        };
+        })?;
         mesh_core_component::validate_prop_value(definition, &value).map_err(|error| {
             ShellRunError::FrontendComposition {
                 message: format!("invalid_node_props: {error}"),

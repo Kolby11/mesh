@@ -216,6 +216,6 @@ live compositor/lifecycle matrix remain separate follow-up work.
 
 ## Next
 
-The next component-language item makes JSON-to-prop conversion scalar-only until
-an explicit structured prop type exists;
+The next component-language item normalizes and validates `PropDef` constraints,
+units, options, tokens, and CSS-domain values once;
 the remaining presentation/resource follow-ups stay separate from this work.

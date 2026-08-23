@@ -61,7 +61,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/07-component-language/improvements.md)
 
-- [ ] Make JSON-to-prop conversion scalar-only until an explicit structured prop type exists.
 - [ ] Normalize and validate `PropDef` constraints, units, options, tokens, and CSS-domain values once.
 - [ ] Replace line-oriented script/import/symbol scans with one Luau lexer/parser and source metadata.
 - [ ] Carry reliable source spans through component AST nodes, compiler errors, CLI diagnostics, and LSP output.

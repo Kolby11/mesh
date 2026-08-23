@@ -449,10 +449,10 @@ impl Shell {
             .unwrap_or_else(|| "props.global".to_string());
 
         if let Some(value) = value.as_ref() {
-            let parsed = mesh_core_component::json_to_prop_value_ref(value).ok_or_else(|| {
+            let parsed = mesh_core_component::json_to_prop_value_ref(value).map_err(|error| {
                 ShellRunError::FrontendComposition {
                     message: format!(
-                        "setting {module_id}.{settings_path}.{prop} must be a string, number, or boolean"
+                        "setting {module_id}.{settings_path}.{prop} must be a string, number, or boolean: {error}"
                     ),
                 }
             })?;
