@@ -244,7 +244,9 @@ pub(super) fn attributes_fingerprint(node: &WidgetNode) -> u64 {
     node.accessibility.label.hash(&mut hasher);
     node.accessibility.description.hash(&mut hasher);
     node.accessibility.focusable.hash(&mut hasher);
-    node.accessibility.focused.hash(&mut hasher);
+    // Accessibility snapshots derive focus from the live interaction state;
+    // the accessibility field is only a shell compatibility projection.
+    node.state.focused.hash(&mut hasher);
     node.accessibility.hidden.hash(&mut hasher);
     node.accessibility.visible.hash(&mut hasher);
     node.accessibility.keyboard_shortcut.hash(&mut hasher);

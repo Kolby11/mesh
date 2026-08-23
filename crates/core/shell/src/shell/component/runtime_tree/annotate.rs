@@ -297,6 +297,8 @@ pub(super) fn annotate_runtime_tree_inner(
         node.attributes
             .insert("_mesh_focused".into(), "true".into());
     }
+    // Compatibility projection for callers inspecting the live node. Semantic
+    // snapshots derive focus from `node.state`, so this is not authoritative.
     node.accessibility.focused = node.state.focused;
 
     if is_input {

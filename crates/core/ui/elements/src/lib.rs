@@ -24,7 +24,7 @@ pub mod tree;
 
 pub use accessibility::{
     AccessibilityInfo, AccessibilityRelationships, AccessibilityRole, AccessibilityState,
-    AccessibilityTree, AccessibilityTreeNode, normalize_accessibility,
+    AccessibilityTree, AccessibilityTreeNode, live_accessibility_focus, normalize_accessibility,
 };
 pub use attributes::{AttrKey, AttributeMap};
 pub use composition::{ComponentCompositionProps, HandlerTarget};

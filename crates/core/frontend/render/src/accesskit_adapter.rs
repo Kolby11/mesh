@@ -234,7 +234,8 @@ mod tests {
         let mut slider = node("slider", 2);
         slider.accessibility.role = AccessibilityRole::Slider;
         slider.accessibility.focusable = true;
-        slider.accessibility.focused = true;
+        // The compatibility projection may lag; the live state owns focus.
+        slider.accessibility.focused = false;
         slider.state.focused = true;
         slider.accessibility.state.value = Some("42".to_string());
         slider.accessibility.state.value_min = Some(0.0);

@@ -65,7 +65,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/08-ui-element-core/improvements.md)
 
-- [ ] Derive accessibility focus from canonical live focus state during snapshot generation.
 - [ ] Include all shaping inputs and resource/measurer revisions in text measurement contexts and cache keys.
 - [ ] Make popover placement tokens and trigger/surface relationships typed, validated, and observable across promotion.
 - [ ] Introduce an immutable frame snapshot with phase stamps, semantic diffs, stable identities, and property-based invariant tests.

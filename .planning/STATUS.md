@@ -225,5 +225,6 @@ color, font family, font size, font weight, and line height. Matching authored
 declarations, including transparent and default-valued declarations, survive
 full and targeted restyles without being mistaken for unset values; compiler
 and indexed/uncached paths use the same mask contract. The next open backlog
-item is deriving accessibility focus from canonical live focus state; the
-remaining presentation/resource follow-ups stay separate.
+item is including all shaping inputs and resource/measurer revisions in text
+measurement contexts and cache keys; the remaining presentation/resource
+follow-ups stay separate.

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use mesh_core_elements::style::{
     BackgroundPaint, Color, ComputedStyle, Display, Edges, Transform2D,
 };
-use mesh_core_elements::{AccessibilityRole, NodeId, WidgetNode};
+use mesh_core_elements::{AccessibilityRole, NodeId, WidgetNode, live_accessibility_focus};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RenderObjectDirtySummary {
@@ -603,7 +603,7 @@ fn accessibility_slot(
             previous.and_then(|slot| slot.1.as_ref()),
         ),
         node.accessibility.focusable,
-        node.accessibility.focused,
+        live_accessibility_focus(node),
     )
 }
 
@@ -812,6 +812,38 @@ mod tests {
                 .iter()
                 .map(|child| child.id)
                 .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn render_object_focus_snapshot_uses_live_state() {
+        let mut node = retained_visual_node();
+        node.accessibility.focusable = true;
+        node.accessibility.focused = true;
+        node.state.focused = false;
+
+        let mut tree = RenderObjectTree::default();
+        tree.update(&node);
+        assert!(
+            !tree
+                .objects
+                .get(&node.id)
+                .expect("initial render object")
+                .fingerprint
+                .accessibility
+                .3
+        );
+
+        node.state.focused = true;
+        let dirty = tree.update(&node);
+        assert_eq!(dirty.accessibility, 1);
+        assert!(
+            tree.objects
+                .get(&node.id)
+                .expect("focused render object")
+                .fingerprint
+                .accessibility
+                .3
         );
     }
 

@@ -104,6 +104,18 @@ impl Default for AccessibilityInfo {
     }
 }
 
+/// Return the focus state to expose in a semantic snapshot.
+///
+/// `ElementState::focused` is the live interaction state and therefore the
+/// canonical source for accessibility focus. `AccessibilityInfo::focused` is
+/// retained as a compatibility projection for callers that inspect the live
+/// node, but it must not be used to build a snapshot because it can lag behind
+/// input dispatch.
+#[inline]
+pub fn live_accessibility_focus(node: &WidgetNode) -> bool {
+    node.state.focused
+}
+
 /// Dynamic state for accessibility.
 #[derive(Debug, Clone, Default)]
 pub struct AccessibilityState {
@@ -404,7 +416,7 @@ fn normalized_info(node: &WidgetNode, hidden: bool, child_text: &str) -> Accessi
         })
         .or(info.state.value_max);
 
-    info.focused = node.state.focused;
+    info.focused = live_accessibility_focus(node);
     info.hidden = hidden;
     info.visible = !hidden;
     info
@@ -688,6 +700,43 @@ mod tests {
                 .nodes
                 .iter()
                 .all(|node| node.info.label.as_deref() != Some("Do not announce"))
+        );
+    }
+
+    #[test]
+    fn snapshot_focus_uses_live_state_over_stale_accessibility_projection() {
+        let mut root = WidgetNode::new("box");
+        let mut button = WidgetNode::new("button");
+        button.accessibility.role = AccessibilityRole::Button;
+        button.accessibility.focusable = true;
+
+        // The projection may be stale between input dispatch and shell
+        // annotation. Snapshot generation must still report the live state.
+        button.accessibility.focused = true;
+        button.state.focused = false;
+        let button_id = button.id;
+        root.children.push(button);
+
+        let snapshot = AccessibilityTree::from_widget_tree(&root);
+        assert_eq!(
+            snapshot
+                .nodes
+                .iter()
+                .find(|node| node.id == button_id)
+                .map(|node| node.info.focused),
+            Some(false)
+        );
+
+        root.children[0].state.focused = true;
+        root.children[0].accessibility.focused = false;
+        let snapshot = AccessibilityTree::from_widget_tree(&root);
+        assert_eq!(
+            snapshot
+                .nodes
+                .iter()
+                .find(|node| node.id == button_id)
+                .map(|node| node.info.focused),
+            Some(true)
         );
     }
 
