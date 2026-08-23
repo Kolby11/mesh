@@ -242,6 +242,7 @@ pub(in crate::wayland_surface) struct SurfaceEntry {
     shm_buffer_bytes: usize,
     shm_pool_config: Option<ShmPoolConfig>,
     next_shm_buffer: usize,
+    buffer_backpressured: bool,
     pub(in crate::wayland_surface) frame_pending_since: Option<Instant>,
     generations: SurfaceGenerations,
     pub(in crate::wayland_surface) scale: f32,
@@ -295,6 +296,7 @@ impl SurfaceEntry {
             shm_buffer_bytes: 0,
             shm_pool_config: None,
             next_shm_buffer: 0,
+            buffer_backpressured: false,
             frame_pending_since: None,
             generations: SurfaceGenerations::new(object_generation),
             scale: 1.0,
@@ -613,6 +615,7 @@ impl SurfaceEntry {
     pub(super) fn hide(&mut self) {
         self.generations.clear_pending_frame();
         self.frame_pending_since = None;
+        self.buffer_backpressured = false;
         let wl_surface = self.role.wl_surface();
         wl_surface.attach(None, 0, 0);
         wl_surface.commit();
@@ -637,6 +640,7 @@ impl SurfaceEntry {
             self.shm_buffers.clear();
             self.shm_buffer_bytes = 0;
             self.next_shm_buffer = 0;
+            self.buffer_backpressured = false;
             self.shm_pool_config = Some(pool_config);
         }
 
@@ -686,6 +690,7 @@ impl SurfaceEntry {
                     }
                 }
                 self.next_shm_buffer = (index + 1) % self.shm_buffers.len();
+                self.buffer_backpressured = false;
                 // When a buffer is reused while older frame callbacks are still
                 // outstanding, `pending_damage` can be larger than the current
                 // frame's damage. We must report the region we actually copied
@@ -701,6 +706,7 @@ impl SurfaceEntry {
             // surfaces whose frame callbacks and releases may be throttled).
             // Let the present boundary return NotReady so the shell retains
             // this frame's damage and retries after dispatching more events.
+            self.buffer_backpressured = true;
             return Ok(None);
         }
 
@@ -732,6 +738,7 @@ impl SurfaceEntry {
         });
         self.shm_buffer_bytes += pool_config.bytes;
         self.next_shm_buffer = (index + 1) % self.shm_buffers.len();
+        self.buffer_backpressured = false;
         Ok(Some((index, smallvec![full])))
     }
 
@@ -846,6 +853,25 @@ impl SurfaceEntry {
             && self
                 .frame_pending_since
                 .is_some_and(|since| since.elapsed() < MAX_FRAME_CALLBACK_WAIT)
+    }
+
+    /// Refresh the explicit buffer-release gate after Wayland dispatch. The
+    /// slot pool learns that a compositor-owned buffer is reusable through its
+    /// `wl_buffer.release` event; polling the pool here avoids a timer-based
+    /// retry loop while still allowing the next shell pass to proceed promptly.
+    pub(in crate::wayland_surface) fn refresh_buffer_backpressure(&mut self, pool: &mut SlotPool) {
+        if self.buffer_backpressured
+            && self
+                .shm_buffers
+                .iter()
+                .any(|slot| pool.canvas(&slot.buffer).is_some())
+        {
+            self.buffer_backpressured = false;
+        }
+    }
+
+    pub(in crate::wayland_surface) fn waiting_for_buffer_release(&self) -> bool {
+        self.buffer_backpressured
     }
 }
 

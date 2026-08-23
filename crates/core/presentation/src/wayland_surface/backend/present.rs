@@ -328,6 +328,13 @@ impl WaylandSurfaceBackend {
             .is_some_and(SurfaceEntry::waiting_for_frame_callback)
     }
 
+    pub fn surface_waiting_for_buffer_release(&self, surface_id: &str) -> bool {
+        self.state
+            .surfaces
+            .get(surface_id)
+            .is_some_and(SurfaceEntry::waiting_for_buffer_release)
+    }
+
     pub fn surface_generation(&self, surface_id: &str) -> Option<SurfaceGeneration> {
         self.state
             .surfaces

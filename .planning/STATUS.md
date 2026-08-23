@@ -4,6 +4,13 @@
 
 ## Now
 
+Presentation now keeps frame-callback pacing separate from SHM buffer-release
+backpressure. When all reusable buffers are compositor-owned, the live backend
+retains an explicit release gate, refreshes it from dispatched
+`wl_buffer.release` events, and the shell waits for that event instead of
+retrying on the frame-callback timeout. The deterministic backend and shell
+tests exercise the two gates independently.
+
 Presentation now resolves dynamic layer-shell zero dimensions against the
 surface's actual output before buffer attach and surface-state preparation.
 The resolved logical extent is shared by paint-facing queries, input regions,
@@ -167,6 +174,7 @@ live compositor/lifecycle matrix remain separate follow-up work.
 
 ## Next
 
-Complete the remaining semantic presentation state diff and text-input-v3 live
-compositor lifecycle matrix; connection recreation and resource
-preparation/text shaping remain separate follow-up work.
+Complete the remaining semantic presentation state diff and the live
+compositor/lifecycle matrix for presentation and text-input-v3; connection
+recreation and resource preparation/text shaping remain separate follow-up
+work.

@@ -196,6 +196,9 @@ impl Shell {
                     && !self
                         .presentation_engine
                         .surface_waiting_for_frame_callback(surface_id)
+                    && !self
+                        .presentation_engine
+                        .surface_waiting_for_buffer_release(surface_id)
                     && self
                         .presentation_engine
                         .surface_ready_to_present(surface_id)

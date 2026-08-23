@@ -175,6 +175,9 @@ impl Shell {
             if self
                 .presentation_engine
                 .surface_waiting_for_frame_callback(&child_surface_id)
+                || self
+                    .presentation_engine
+                    .surface_waiting_for_buffer_release(&child_surface_id)
             {
                 continue;
             }

@@ -625,6 +625,67 @@ fn unconfigured_surface_keeps_pending_frame_until_configure_retry() {
 }
 
 #[test]
+fn buffer_backpressure_keeps_pending_frame_until_release() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(MeasuredLayerGeometryComponent::new(
+        "@test/buffer-retry",
+        (80, 40),
+        (80, 40),
+    )));
+    let mut emitted = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: "@test/buffer-retry".into(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    shell.render_components().unwrap();
+
+    let pending = mesh_core_render::DamageRect {
+        x: 3,
+        y: 4,
+        width: 10,
+        height: 8,
+    };
+    shell.components[0].parent.pending_present_damage = vec![pending];
+    let presents_before = shell.presentation_engine.testing_presented_surfaces().len();
+    shell
+        .presentation_engine
+        .testing_set_surface_buffer_backpressured("@test/buffer-retry", true);
+
+    shell.render_components().unwrap();
+
+    assert_eq!(
+        shell.components[0].parent.pending_present_damage,
+        [pending],
+        "a buffer-starved surface must retain its already-painted frame"
+    );
+    assert_eq!(
+        shell.presentation_engine.testing_presented_surfaces().len(),
+        presents_before,
+        "buffer backpressure must not acknowledge a frame"
+    );
+    assert!(
+        !shell.components_have_ready_render_work(),
+        "buffer backpressure must wait for a release instead of spinning"
+    );
+
+    shell
+        .presentation_engine
+        .testing_set_surface_buffer_backpressured("@test/buffer-retry", false);
+    assert!(shell.components_have_ready_render_work());
+    shell.render_components().unwrap();
+
+    assert!(shell.components[0].parent.pending_present_damage.is_empty());
+    assert_eq!(
+        shell.presentation_engine.testing_presented_surfaces().len(),
+        presents_before + 1,
+        "the released buffer must make the retained frame eligible again"
+    );
+}
+
+#[test]
 fn blur_settings_clamp_into_painter_quality() {
     let defaults = blur_quality_from_settings(&mesh_core_config::BlurSettings::default());
     assert_eq!(defaults.passes, 1);

@@ -104,9 +104,12 @@ impl Shell {
                 continue;
             }
             if visible
-                && self
+                && (self
                     .presentation_engine
                     .surface_waiting_for_frame_callback(&surface_id)
+                    || self
+                        .presentation_engine
+                        .surface_waiting_for_buffer_release(&surface_id))
             {
                 components_want_render_after_frame = true;
                 continue;

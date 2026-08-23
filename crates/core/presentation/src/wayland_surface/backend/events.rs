@@ -50,6 +50,7 @@ impl WaylandSurfaceBackend {
             Ok(_) => {}
             Err(error) => return Err(self.map_dispatch_error("dispatch", error)),
         }
+        self.state.refresh_buffer_backpressure();
         self.release_expired_surface_focus_grab()?;
         Ok(())
     }
@@ -65,6 +66,7 @@ impl WaylandSurfaceBackend {
                 Ok(_) => {}
                 Err(error) => return Err(self.map_dispatch_error("dispatch", error)),
             }
+            self.state.refresh_buffer_backpressure();
 
             let Some(read_guard) = self.event_queue.prepare_read() else {
                 continue;
@@ -124,6 +126,7 @@ impl WaylandSurfaceBackend {
             Ok(_) => {}
             Err(error) => return Err(self.map_dispatch_error("dispatch", error)),
         }
+        self.state.refresh_buffer_backpressure();
         self.release_expired_surface_focus_grab()?;
         Ok(())
     }
@@ -149,6 +152,7 @@ impl WaylandSurfaceBackend {
             Ok(_) => {}
             Err(error) => return Err(self.map_dispatch_error("dispatch", error)),
         }
+        self.state.refresh_buffer_backpressure();
 
         // A `None` guard means events arrived between the dispatch above and
         // here; don't block, let the caller process them.
@@ -223,6 +227,7 @@ impl WaylandSurfaceBackend {
             Ok(_) => {}
             Err(error) => return Err(self.map_dispatch_error("dispatch", error)),
         }
+        self.state.refresh_buffer_backpressure();
         self.release_expired_surface_focus_grab()?;
 
         Ok(WaitResult {

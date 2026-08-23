@@ -307,6 +307,8 @@ struct TestingBackend {
     window_states: HashMap<String, WindowStates>,
     unconfigured_surfaces: HashSet<String>,
     missing_surfaces: HashSet<String>,
+    frame_pending_surfaces: HashSet<String>,
+    buffer_backpressured_surfaces: HashSet<String>,
     text_input_state: Option<(String, TextInputState)>,
     text_input_surface: Option<String>,
     text_input_pending: TestingPendingTextInput,
@@ -358,6 +360,11 @@ fn drop_testing_events_for_surface(backend: &mut TestingBackend, surface_id: &st
         .retain(|event| event_surface_id(event) != surface_id);
 }
 
+fn clear_testing_presentation_waits(backend: &mut TestingBackend, surface_id: &str) {
+    backend.frame_pending_surfaces.remove(surface_id);
+    backend.buffer_backpressured_surfaces.remove(surface_id);
+}
+
 /// Keep the deterministic backend's retained text-input publication aligned
 /// with the compositor identity it represents. The real Wayland backend drops
 /// this snapshot while tearing down a surface, so a later shell sync cannot
@@ -376,6 +383,7 @@ fn clear_testing_text_input_transaction_for_surface(
 }
 
 fn clear_testing_text_input_for_surface(backend: &mut TestingBackend, surface_id: &str) {
+    clear_testing_presentation_waits(backend, surface_id);
     clear_testing_text_input_transaction_for_surface(backend, surface_id);
     if backend
         .text_input_state
@@ -446,10 +454,43 @@ impl PresentationEngine {
         }
     }
 
+    /// Stand in for an outstanding `wl_surface.frame` callback in presentation
+    /// scheduler tests. This is intentionally separate from buffer ownership:
+    /// a released buffer may still be waiting for a frame callback, and vice
+    /// versa.
+    #[doc(hidden)]
+    pub fn testing_set_surface_frame_pending(&mut self, surface_id: &str, pending: bool) {
+        if let Backend::Testing(backend) = &mut self.backend {
+            if pending {
+                backend
+                    .frame_pending_surfaces
+                    .insert(surface_id.to_string());
+            } else {
+                backend.frame_pending_surfaces.remove(surface_id);
+            }
+        }
+    }
+
+    /// Stand in for all SHM slots being owned by the compositor. Clearing this
+    /// flag represents a dispatched `wl_buffer.release` event.
+    #[doc(hidden)]
+    pub fn testing_set_surface_buffer_backpressured(&mut self, surface_id: &str, blocked: bool) {
+        if let Backend::Testing(backend) = &mut self.backend {
+            if blocked {
+                backend
+                    .buffer_backpressured_surfaces
+                    .insert(surface_id.to_string());
+            } else {
+                backend.buffer_backpressured_surfaces.remove(surface_id);
+            }
+        }
+    }
+
     #[doc(hidden)]
     pub fn testing_set_surface_missing(&mut self, surface_id: &str, missing: bool) {
         if let Backend::Testing(backend) = &mut self.backend {
             if missing {
+                clear_testing_presentation_waits(backend, surface_id);
                 backend.missing_surfaces.insert(surface_id.to_string());
             } else {
                 backend.missing_surfaces.remove(surface_id);
@@ -576,6 +617,8 @@ impl PresentationEngine {
             backend.text_input_surface = None;
             backend.text_input_pending = TestingPendingTextInput::default();
             backend.text_input_state = None;
+            backend.frame_pending_surfaces.clear();
+            backend.buffer_backpressured_surfaces.clear();
             let mut surface_ids = backend
                 .surface_configs
                 .keys()
@@ -731,7 +774,9 @@ impl PresentationEngine {
                 if let Some(message) = backend.configure_error.take() {
                     return Err(PresentationError::SurfaceCreate(message));
                 }
-                backend.missing_surfaces.remove(surface_id);
+                if backend.missing_surfaces.remove(surface_id) {
+                    clear_testing_presentation_waits(backend, surface_id);
+                }
                 backend.destroyed_surface_ids.remove(surface_id);
                 backend
                     .surface_config_history
@@ -852,7 +897,9 @@ impl PresentationEngine {
                 if let Some(message) = backend.popup_configure_error.take() {
                     return Err(PresentationError::SurfaceCreate(message));
                 }
-                backend.missing_surfaces.remove(surface_id);
+                if backend.missing_surfaces.remove(surface_id) {
+                    clear_testing_presentation_waits(backend, surface_id);
+                }
                 backend.destroyed_popup_ids.remove(surface_id);
                 backend.popup_configs.insert(surface_id.to_string(), config);
                 Ok(())
@@ -1011,6 +1058,12 @@ impl PresentationEngine {
                     return Ok(PresentStatus::SurfaceMissing);
                 }
                 if visible && backend.unconfigured_surfaces.contains(surface_id) {
+                    return Ok(PresentStatus::NotReady);
+                }
+                if visible
+                    && (backend.frame_pending_surfaces.contains(surface_id)
+                        || backend.buffer_backpressured_surfaces.contains(surface_id))
+                {
                     return Ok(PresentStatus::NotReady);
                 }
                 if visible {
@@ -1184,7 +1237,17 @@ impl PresentationEngine {
                 bridge.surface_waiting_for_frame_callback(surface_id)
             }
             Backend::DevWindow(_) => false,
-            Backend::Testing(_) => false,
+            Backend::Testing(backend) => backend.frame_pending_surfaces.contains(surface_id),
+        }
+    }
+
+    pub fn surface_waiting_for_buffer_release(&self, surface_id: &str) -> bool {
+        match &self.backend {
+            Backend::WaylandSurface(bridge) => {
+                bridge.surface_waiting_for_buffer_release(surface_id)
+            }
+            Backend::DevWindow(_) => false,
+            Backend::Testing(backend) => backend.buffer_backpressured_surfaces.contains(surface_id),
         }
     }
 
@@ -1960,6 +2023,51 @@ mod tests {
             PresentStatus::Presented
         );
         assert_eq!(engine.testing_presented_surfaces(), ["panel"]);
+    }
+
+    #[test]
+    fn testing_backend_separates_frame_pacing_from_buffer_backpressure() {
+        let mut engine = PresentationEngine::testing_with_popup_support(false);
+        engine
+            .configure("panel", SurfaceConfig::default())
+            .expect("testing surface configuration succeeds");
+        let buffer = PixelBuffer::new(32, 16);
+        let damage = [DamageRect {
+            x: 0,
+            y: 0,
+            width: 32,
+            height: 16,
+        }];
+
+        engine.testing_set_surface_frame_pending("panel", true);
+        assert!(engine.surface_waiting_for_frame_callback("panel"));
+        assert!(!engine.surface_waiting_for_buffer_release("panel"));
+        assert_eq!(
+            engine
+                .present_with_damage("panel", "Panel", true, &buffer, &damage)
+                .unwrap(),
+            PresentStatus::NotReady
+        );
+
+        engine.testing_set_surface_frame_pending("panel", false);
+        engine.testing_set_surface_buffer_backpressured("panel", true);
+        assert!(!engine.surface_waiting_for_frame_callback("panel"));
+        assert!(engine.surface_waiting_for_buffer_release("panel"));
+        assert_eq!(
+            engine
+                .present_with_damage("panel", "Panel", true, &buffer, &damage)
+                .unwrap(),
+            PresentStatus::NotReady
+        );
+
+        engine.testing_set_surface_buffer_backpressured("panel", false);
+        assert!(!engine.surface_waiting_for_buffer_release("panel"));
+        assert_eq!(
+            engine
+                .present_with_damage("panel", "Panel", true, &buffer, &damage)
+                .unwrap(),
+            PresentStatus::Presented
+        );
     }
 
     #[test]

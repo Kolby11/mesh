@@ -206,7 +206,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 - [ ] Route close, dismiss, parent destruction, role replacement, and connection loss through one idempotent teardown supervisor.
 - [ ] Gate popup reposition by negotiated protocol version and validate popup role, parent, identity, and reparenting.
 - [ ] Commit opaque, blur, and other surface-state changes even when pixel damage is empty.
-- [ ] Separate frame-callback waiting from buffer-release backpressure and prevent hot retry loops.
 - [ ] Make input ownership per seat and cancel pointer, touch, gesture, focus, and repeat transactions during teardown.
 - [ ] Validate buffer length/stride/scale, propagate attach/region errors, expose connection loss, and reap clipboard children.
 - [ ] Replace the recorder backend with a deterministic protocol-state lifecycle simulator plus a focused live compositor matrix.

@@ -709,6 +709,18 @@ impl State {
         Some(entry)
     }
 
+    /// Update SHM backpressure after dispatching compositor events. Buffer
+    /// release is the wakeup for a blocked surface; it must not depend on the
+    /// frame-callback timeout used for pacing.
+    pub(super) fn refresh_buffer_backpressure(&mut self) {
+        let Some(pool) = self.pool.as_mut() else {
+            return;
+        };
+        for entry in self.surfaces.values_mut() {
+            entry.refresh_buffer_backpressure(pool);
+        }
+    }
+
     /// Remove one live surface and release all presentation-owned auxiliary
     /// protocol objects. Callers use this for explicit destruction and for
     /// compositor-originated close/dismiss callbacks, so teardown remains
