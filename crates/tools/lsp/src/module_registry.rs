@@ -358,6 +358,7 @@ fn discover_resources(workspace_root: &Path) -> ResourceExplanationSnapshot {
             status: "selected".into(),
             assets: Vec::new(),
             mappings,
+            script_coverage: Vec::new(),
         });
     }
 
@@ -406,6 +407,15 @@ fn discover_resources(workspace_root: &Path) -> ResourceExplanationSnapshot {
             })
             .collect::<Vec<_>>();
         mappings.sort_by(|left, right| left.semantic_name.cmp(&right.semantic_name));
+        let mut script_coverage = section.covers.keys().cloned().collect::<Vec<_>>();
+        script_coverage.extend(
+            section
+                .faces
+                .iter()
+                .flat_map(|face| face.coverage.iter().cloned()),
+        );
+        script_coverage.sort();
+        script_coverage.dedup();
         snapshot.fonts.available.push(section.id.clone());
         snapshot.fonts.chain.push(ResourcePackExplanation {
             module_id: module_id.clone(),
@@ -414,6 +424,7 @@ fn discover_resources(workspace_root: &Path) -> ResourceExplanationSnapshot {
             status: "selected".into(),
             assets,
             mappings,
+            script_coverage,
         });
     }
 

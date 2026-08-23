@@ -184,6 +184,44 @@ fn cmd_resources(args: &[String]) {
             serde_json::to_string_pretty(&snapshot.fonts)
                 .expect("font resource explanation serialization")
         ),
+        Some("coverage") => {
+            let mut request =
+                mesh_core_resources::ResourceCoverageRequest::from_snapshot(&snapshot);
+            let mut index = 1;
+            while index < args.len() {
+                let required = match args[index].as_str() {
+                    "--font-script" => true,
+                    "--optional-font-script" => false,
+                    other => exit_error(format!(
+                        "unknown resources coverage option: {other}\nusage: mesh-shell resources coverage [--font-script <module>:<role>:<script>] [--optional-font-script <module>:<role>:<script>]"
+                    )),
+                };
+                let value = args.get(index + 1).unwrap_or_else(|| {
+                    exit_error(format!("{} requires <module>:<role>:<script>", args[index]))
+                });
+                let mut parts = value.splitn(3, ':');
+                let (Some(module_id), Some(role), Some(script)) =
+                    (parts.next(), parts.next(), parts.next())
+                else {
+                    exit_error(format!(
+                        "invalid font script need '{value}'; expected <module>:<role>:<script>"
+                    ));
+                };
+                if module_id.is_empty() || role.is_empty() || script.is_empty() {
+                    exit_error(format!(
+                        "invalid font script need '{value}'; module, role, and script must be non-empty"
+                    ));
+                }
+                request.add_font_script(module_id, role, script, required);
+                index += 2;
+            }
+            let advice = snapshot.advise_coverage(&request);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&advice)
+                    .expect("resource coverage advice serialization")
+            );
+        }
         Some("doctor") => {
             if snapshot.diagnostics.is_empty() {
                 println!("resource snapshot: no problems found");
@@ -206,7 +244,7 @@ fn cmd_resources(args: &[String]) {
             }
         }
         Some(other) => exit_error(format!(
-            "unknown resources subcommand: {other}\nsubcommands: show, icons, fonts, doctor"
+            "unknown resources subcommand: {other}\nsubcommands: show, icons, fonts, coverage, doctor"
         )),
     }
 }
@@ -2022,6 +2060,9 @@ fn cmd_help() {
     println!("  resources Inspect the effective host/module resource snapshot");
     println!("            show                 print the complete snapshot (default)");
     println!("            icons|fonts          print one resource chain");
+    println!("            coverage             preview semantic and font-script gaps");
+    println!("              --font-script <module>:<role>:<script>");
+    println!("              --optional-font-script <module>:<role>:<script>");
     println!("            doctor               print structured resource diagnostics");
     println!("  locale    Inspect graph-backed catalogs");
     println!("            list                 list available locales");

@@ -57,8 +57,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/06-host-resources-and-icon-packs/improvements.md)
 
-- [ ] Add a resource coverage advisor for semantic vocabulary and font-script gaps without silently reordering user chains.
-
 ### 7. Component language
 
 [Audit](../.planning/log/sections/07-component-language/improvements.md)

@@ -3,7 +3,14 @@
 //! This crate describes what the desktop has installed. MESH resource-pack
 //! modules remain semantic mapping and composition units layered above it.
 
+mod coverage;
 mod font;
+
+pub use coverage::{
+    ResourceChainSuggestion, ResourceCoverageAdvice, ResourceCoverageAdvisor, ResourceCoverageKind,
+    ResourceCoverageRequest, ResourceFontScriptGap, ResourceFontScriptNeed, ResourceSemanticGap,
+    ResourceSemanticNeed,
+};
 
 pub use font::{
     FontFaceBinding, FontFrontendBindings, FontPackBindings, FontRegistry, FontRegistryError,
@@ -724,6 +731,11 @@ pub struct ResourcePackExplanation {
     pub status: String,
     pub assets: Vec<ResourceAssetExplanation>,
     pub mappings: Vec<ResourceMappingExplanation>,
+    /// Font script coverage declared by this pack's `covers` and bundled
+    /// faces. Icon packs leave this empty; semantic icon coverage is carried
+    /// by `mappings`.
+    #[serde(default)]
+    pub script_coverage: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

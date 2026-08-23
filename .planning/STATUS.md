@@ -202,6 +202,7 @@ live compositor/lifecycle matrix remain separate follow-up work.
 ## Next
 
 Complete the remaining semantic presentation state diff and the live
-compositor/lifecycle matrix for presentation and text-input-v3; the resource
-coverage advisor, connection recreation, and text shaping remain separate
-follow-up work.
+compositor/lifecycle matrix for presentation and text-input-v3; connection
+recreation and text shaping remain separate follow-up work. The resource
+coverage advisor is now preview-only and leaves chain application to the normal
+profile/settings prepare-and-commit path.

@@ -162,6 +162,7 @@ fn resource_explanation_snapshot(
                 status: "selected".into(),
                 assets,
                 mappings,
+                script_coverage: Vec::new(),
             })
         })
         .collect();
@@ -199,6 +200,14 @@ fn resource_explanation_snapshot(
                 )
                 .collect::<Vec<_>>();
             mappings.sort_by(|left, right| left.semantic_name.cmp(&right.semantic_name));
+            let mut script_coverage = pack.covers.keys().cloned().collect::<Vec<_>>();
+            script_coverage.extend(
+                pack.faces
+                    .iter()
+                    .flat_map(|face| face.coverage.iter().cloned()),
+            );
+            script_coverage.sort();
+            script_coverage.dedup();
             let mut assets = pack
                 .faces
                 .iter()
@@ -218,6 +227,7 @@ fn resource_explanation_snapshot(
                 status: "selected".into(),
                 assets,
                 mappings,
+                script_coverage,
             })
         })
         .collect();
