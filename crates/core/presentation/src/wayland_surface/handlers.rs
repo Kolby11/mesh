@@ -1,6 +1,6 @@
 use super::backend::WaylandRole;
-use super::state::PendingTextInput;
 use super::state::{FrameCallbackData, GestureKind};
+use super::state::{PendingTextInput, clear_text_input_for_surface};
 use super::*;
 use std::{borrow::Cow, sync::Arc};
 
@@ -1125,10 +1125,13 @@ impl Dispatch<ZwpTextInputV3, (), State> for State {
                 if let Some(input) = state.input_seats.get_mut(&seat_id)
                     && input.text_input_surface.as_deref() == Some(surface_id.as_ref())
                 {
-                    input.text_input_surface = None;
-                    input.text_input_pending = PendingTextInput::default();
-                    input.text_input_enabled = false;
-                    input.text_input_state_applied = None;
+                    clear_text_input_for_surface(
+                        surface_id.as_ref(),
+                        &mut input.text_input_surface,
+                        &mut input.text_input_pending,
+                        &mut input.text_input_enabled,
+                        &mut input.text_input_state_applied,
+                    );
                 }
             }
             zwp_text_input_v3::Event::PreeditString {

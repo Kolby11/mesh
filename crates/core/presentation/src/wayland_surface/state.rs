@@ -42,6 +42,26 @@ pub(super) struct PendingTextInput {
     pub(super) after_bytes: usize,
 }
 
+/// Remove text-input-v3 ownership for a surface before its compositor
+/// identity disappears. A `done` callback may arrive after surface teardown,
+/// so retaining either the entered surface or its pending transaction would
+/// allow stale text to be routed to a later surface with the same id.
+pub(super) fn clear_text_input_for_surface(
+    surface_id: &str,
+    text_input_surface: &mut Option<Arc<str>>,
+    text_input_pending: &mut PendingTextInput,
+    text_input_enabled: &mut bool,
+    text_input_state_applied: &mut Option<TextInputState>,
+) {
+    if text_input_surface.as_deref() != Some(surface_id) {
+        return;
+    }
+    *text_input_surface = None;
+    *text_input_pending = PendingTextInput::default();
+    *text_input_enabled = false;
+    *text_input_state_applied = None;
+}
+
 impl PendingTextInput {
     pub(super) fn is_empty(&self) -> bool {
         self.preedit.is_none()
@@ -759,6 +779,13 @@ impl State {
             let Some(seat) = self.input_seats.get_mut(&seat_id) else {
                 continue;
             };
+            clear_text_input_for_surface(
+                surface_id,
+                &mut seat.text_input_surface,
+                &mut seat.text_input_pending,
+                &mut seat.text_input_enabled,
+                &mut seat.text_input_state_applied,
+            );
             cancel_surface_input_state_for_seat(
                 Some(&seat_id),
                 surface_id,
@@ -2055,6 +2082,58 @@ mod input_capability_tests {
 #[cfg(test)]
 mod text_input_tests {
     use super::*;
+
+    #[test]
+    fn surface_teardown_clears_text_input_ownership_and_pending_edit() {
+        let mut text_input_surface = Some(Arc::from("panel") as Arc<str>);
+        let mut pending = PendingTextInput {
+            preedit: Some(Some(Arc::from("候"))),
+            preedit_cursor_begin: 0,
+            preedit_cursor_end: 3,
+            commit: Some(Arc::from("候")),
+            before_bytes: 3,
+            after_bytes: 1,
+        };
+        let mut enabled = true;
+        let mut applied = Some(TextInputState::new("A🙂B", 5, 5));
+
+        clear_text_input_for_surface(
+            "panel",
+            &mut text_input_surface,
+            &mut pending,
+            &mut enabled,
+            &mut applied,
+        );
+
+        assert!(text_input_surface.is_none());
+        assert!(pending.is_empty());
+        assert!(!enabled);
+        assert!(applied.is_none());
+    }
+
+    #[test]
+    fn surface_teardown_preserves_another_surface_text_input_transaction() {
+        let mut text_input_surface = Some(Arc::from("other") as Arc<str>);
+        let mut pending = PendingTextInput {
+            preedit: Some(Some(Arc::from("候"))),
+            ..PendingTextInput::default()
+        };
+        let mut enabled = true;
+        let mut applied = Some(TextInputState::new("other", 0, 0));
+
+        clear_text_input_for_surface(
+            "panel",
+            &mut text_input_surface,
+            &mut pending,
+            &mut enabled,
+            &mut applied,
+        );
+
+        assert_eq!(text_input_surface.as_deref(), Some("other"));
+        assert!(!pending.is_empty());
+        assert!(enabled);
+        assert!(applied.is_some());
+    }
 
     #[test]
     fn pending_text_input_events_commit_as_one_atomic_edit() {

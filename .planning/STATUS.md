@@ -96,7 +96,11 @@ boundary. Components retain preedit separately from committed input state and
 project it inline at the UTF-8 cursor for rendering without firing a change
 handler. The retained display list carries validated UTF-8 preedit ranges and
 the painter draws the composition underline and caret at the compositor's
-preedit cursor without decorating masked password input.
+preedit cursor without decorating masked password input. Surface teardown now
+clears the entered text-input surface, pending `done` transaction, and applied
+surrounding state before the compositor identity disappears; the deterministic
+testing backend drops queued input for destroyed surfaces while preserving
+other seats/surfaces.
 
 Popup targets now invalidate their cached creation size when presentation
 reports `SurfaceMissing`, including state-only commits, and force a full retry

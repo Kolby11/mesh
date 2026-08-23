@@ -277,6 +277,12 @@ struct TestingBackend {
     missing_surfaces: HashSet<String>,
 }
 
+fn drop_testing_events_for_surface(backend: &mut TestingBackend, surface_id: &str) {
+    backend
+        .events
+        .retain(|event| event_surface_id(event) != surface_id);
+}
+
 impl PresentationEngine {
     pub fn select() -> Self {
         let forced = std::env::var("MESH_BACKEND").ok();
@@ -422,6 +428,7 @@ impl PresentationEngine {
         if let Backend::Testing(backend) = &mut self.backend {
             let surface_id = surface_id.into();
             if backend.popup_configs.remove(&surface_id).is_some() {
+                drop_testing_events_for_surface(backend, &surface_id);
                 backend.pending_surface_states.remove(&surface_id);
                 backend.missing_surfaces.insert(surface_id.clone());
                 backend.destroyed_popup_ids.insert(surface_id.clone());
@@ -437,6 +444,7 @@ impl PresentationEngine {
         if let Backend::Testing(backend) = &mut self.backend {
             let surface_id = surface_id.into();
             if backend.surface_configs.remove(&surface_id).is_some() {
+                drop_testing_events_for_surface(backend, &surface_id);
                 backend.pending_surface_states.remove(&surface_id);
                 backend.missing_surfaces.insert(surface_id.clone());
                 backend.destroyed_surface_ids.insert(surface_id.clone());
@@ -459,6 +467,7 @@ impl PresentationEngine {
             }
             let reason = reason.into();
             backend.connection_lost = Some(reason.clone());
+            backend.events.clear();
             let mut surface_ids = backend
                 .surface_configs
                 .keys()
@@ -637,6 +646,7 @@ impl PresentationEngine {
             Backend::WaylandSurface(bridge) => bridge.destroy_popup(surface_id),
             Backend::DevWindow(_) => {}
             Backend::Testing(backend) => {
+                drop_testing_events_for_surface(backend, surface_id);
                 backend.popup_configs.remove(surface_id);
                 backend.pending_surface_states.remove(surface_id);
                 if backend.destroyed_popup_ids.insert(surface_id.to_string()) {
@@ -653,6 +663,7 @@ impl PresentationEngine {
             Backend::DevWindow(bridge) => bridge.destroy_surface(surface_id),
             Backend::Testing(backend) => {
                 backend.missing_surfaces.remove(surface_id);
+                drop_testing_events_for_surface(backend, surface_id);
                 let child_ids = backend
                     .popup_configs
                     .iter()
@@ -661,6 +672,7 @@ impl PresentationEngine {
                     })
                     .collect::<Vec<_>>();
                 for child_id in child_ids {
+                    drop_testing_events_for_surface(backend, &child_id);
                     backend.popup_configs.remove(&child_id);
                     backend.pending_surface_states.remove(&child_id);
                     if backend.destroyed_popup_ids.insert(child_id.clone()) {
@@ -691,6 +703,7 @@ impl PresentationEngine {
                     })
                     .collect::<Vec<_>>();
                 for id in ids {
+                    drop_testing_events_for_surface(backend, &id);
                     backend.popup_configs.remove(&id);
                     if backend.destroyed_popup_ids.insert(id.clone()) {
                         backend.destroyed_popups.push(id);
@@ -1403,6 +1416,48 @@ pub fn event_surface_id(event: &WindowEvent) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn testing_surface_teardown_drops_queued_input_for_destroyed_surface() {
+        let mut engine = PresentationEngine::testing_with_popup_support(false);
+        engine
+            .configure("panel", SurfaceConfig::default())
+            .expect("surface config should be accepted");
+        engine
+            .configure("other", SurfaceConfig::default())
+            .expect("second surface config should be accepted");
+        engine.testing_push_event(WindowEvent::TextInputEdit {
+            surface_id: "panel".into(),
+            preedit_present: true,
+            preedit: Some("候".into()),
+            preedit_cursor_begin: 0,
+            preedit_cursor_end: 3,
+            commit: None,
+            before_bytes: 0,
+            after_bytes: 0,
+        });
+        engine.testing_push_event(WindowEvent::TextInput {
+            surface_id: "other".into(),
+            text: "kept".into(),
+        });
+
+        engine.testing_push_surface_closed("panel");
+
+        let events = engine
+            .poll_events()
+            .expect("testing backend remains connected");
+        assert!(matches!(
+            events.as_slice(),
+            [WindowEvent::TextInput { surface_id, text }]
+                if surface_id.as_ref() == "other" && text.as_ref() == "kept"
+        ));
+        assert_eq!(
+            engine.take_surface_lifecycle_events(),
+            [SurfaceLifecycleEvent::Closed {
+                surface_id: "panel".to_string()
+            }]
+        );
+    }
 
     #[test]
     fn state_only_commit_reports_pending_region_work_once() {
