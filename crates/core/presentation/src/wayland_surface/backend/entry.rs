@@ -12,6 +12,8 @@ pub(super) struct SurfaceGenerations {
     object: u64,
     configure: u64,
     frame: u64,
+    allocated_buffer_generation: u64,
+    committed_buffer_generation: u64,
     pending_frame: Option<u64>,
 }
 
@@ -21,6 +23,8 @@ impl SurfaceGenerations {
             object,
             configure: 0,
             frame: 0,
+            allocated_buffer_generation: 0,
+            committed_buffer_generation: 0,
             pending_frame: None,
         }
     }
@@ -33,10 +37,33 @@ impl SurfaceGenerations {
         true
     }
 
+    pub(super) fn allocate_buffer(&mut self) -> Result<u64, PresentationError> {
+        let generation = self
+            .allocated_buffer_generation
+            .checked_add(1)
+            .ok_or_else(|| PresentationError::BufferAlloc("buffer generation exhausted".into()))?;
+        self.allocated_buffer_generation = generation;
+        Ok(generation)
+    }
+
+    pub(super) fn commit_buffer(&mut self, generation: u64) {
+        debug_assert!(
+            generation != 0 && generation <= self.allocated_buffer_generation,
+            "committed buffer generation must refer to an allocated slot"
+        );
+        self.committed_buffer_generation = generation;
+    }
+
     pub(super) fn begin_frame(
         &mut self,
         surface_id: &str,
+        buffer_generation: u64,
     ) -> Result<FrameCallbackData, PresentationError> {
+        if buffer_generation == 0 || buffer_generation > self.allocated_buffer_generation {
+            return Err(PresentationError::BufferAttach(
+                "frame references an unknown buffer generation".into(),
+            ));
+        }
         let frame = self
             .frame
             .checked_add(1)
@@ -47,6 +74,7 @@ impl SurfaceGenerations {
             surface_id: Arc::from(surface_id),
             object_generation: self.object,
             frame_generation: self.frame,
+            buffer_generation,
         })
     }
 
@@ -73,6 +101,7 @@ impl SurfaceGenerations {
             object: self.object,
             configure: self.configure,
             frame: self.frame,
+            buffer: self.committed_buffer_generation,
         }
     }
 }
@@ -552,8 +581,13 @@ impl SurfaceEntry {
                     pool_config.width, pool_config.height, pool_config.bytes
                 )));
             }
-            self.shm_buffers
-                .push(create_surface_shm_buffer(pool, pool_config, full)?);
+            let generation = self.generations.allocate_buffer()?;
+            self.shm_buffers.push(create_surface_shm_buffer(
+                pool,
+                pool_config,
+                full,
+                generation,
+            )?);
             self.shm_buffer_bytes += pool_config.bytes;
         }
 
@@ -612,6 +646,7 @@ impl SurfaceEntry {
         }
 
         let index = self.shm_buffers.len();
+        let generation = self.generations.allocate_buffer()?;
         let (wl_buffer, canvas) = pool
             .create_buffer(
                 pool_config.width as i32,
@@ -623,6 +658,7 @@ impl SurfaceEntry {
         copy_bgra_to_canvas(src, canvas, width, height, pool_config.width)
             .map_err(|error| PresentationError::BufferCopy(error.to_string()))?;
         self.shm_buffers.push(SurfaceShmBuffer {
+            generation,
             buffer: wl_buffer,
             pending_damage: SmallVec::new(),
         });
@@ -644,6 +680,7 @@ impl SurfaceEntry {
         copy_damage: &[DamageRect],
         scale: f32,
     ) -> Result<(), PresentationError> {
+        let buffer_generation = self.shm_buffers[index].generation;
         let buffer = &self.shm_buffers[index].buffer;
         let wl_surface = self.role.wl_surface();
 
@@ -713,9 +750,12 @@ impl SurfaceEntry {
             viewport.set_destination(logical_width as i32, logical_height as i32);
         }
 
-        let callback = self.generations.begin_frame(surface_id)?;
+        let callback = self
+            .generations
+            .begin_frame(surface_id, buffer_generation)?;
         wl_surface.frame(qh, callback);
         wl_surface.commit();
+        self.generations.commit_buffer(buffer_generation);
         self.frame_pending_since = Some(Instant::now());
         self.width = logical_width;
         self.height = logical_height;

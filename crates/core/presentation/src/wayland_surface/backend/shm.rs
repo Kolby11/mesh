@@ -99,6 +99,10 @@ pub(super) fn viewport_source_dimensions(
 
 #[derive(Debug)]
 pub(super) struct SurfaceShmBuffer {
+    /// Stable identity for this slot within the current compositor object.
+    /// The generation is not reused when the pool changes size, so diagnostics
+    /// can distinguish a newly allocated slot from a recycled one.
+    pub(super) generation: u64,
     pub(super) buffer: Buffer,
     pub(super) pending_damage: SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]>,
 }
@@ -107,6 +111,7 @@ pub(super) fn create_surface_shm_buffer(
     pool: &mut SlotPool,
     config: ShmPoolConfig,
     initial_damage: DamageRect,
+    generation: u64,
 ) -> Result<SurfaceShmBuffer, PresentationError> {
     let (buffer, _) = pool
         .create_buffer(
@@ -117,6 +122,7 @@ pub(super) fn create_surface_shm_buffer(
         )
         .map_err(|e| PresentationError::BufferAlloc(format!("create_buffer: {e}")))?;
     Ok(SurfaceShmBuffer {
+        generation,
         buffer,
         // Newly allocated SHM memory contains no usable frame. Seed the
         // visible (cropped) extent as dirty even when this frame itself is

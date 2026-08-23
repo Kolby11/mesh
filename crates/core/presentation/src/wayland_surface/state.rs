@@ -38,6 +38,7 @@ pub(super) struct FrameCallbackData {
     pub(super) surface_id: Arc<str>,
     pub(super) object_generation: u64,
     pub(super) frame_generation: u64,
+    pub(super) buffer_generation: u64,
 }
 
 pub(super) struct SeatInputState {
@@ -186,6 +187,7 @@ impl State {
                 surface_id = callback.surface_id.as_ref(),
                 object_generation = callback.object_generation,
                 frame_generation = callback.frame_generation,
+                buffer_generation = callback.buffer_generation,
                 "layer_shell: accepted frame callback"
             );
         } else {
@@ -193,6 +195,7 @@ impl State {
                 surface_id = callback.surface_id.as_ref(),
                 object_generation = callback.object_generation,
                 frame_generation = callback.frame_generation,
+                buffer_generation = callback.buffer_generation,
                 "layer_shell: ignored stale frame callback"
             );
         }

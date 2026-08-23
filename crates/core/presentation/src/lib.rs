@@ -81,14 +81,18 @@ pub enum SurfaceStateStatus {
 
 /// Monotonic identities for the compositor object and the protocol state it
 /// has accepted. A replacement role gets a new object generation, configure
-/// callbacks advance the configure generation, and each requested frame gets
-/// a new frame generation. Presentation callbacks must match the object and
-/// frame generations that are still current before they can release pacing.
+/// callbacks advance the configure generation, allocated SHM slots get a
+/// buffer generation, and each requested frame gets a new frame generation.
+/// Presentation callbacks must match the object and frame generations that are
+/// still current before they can release pacing. The buffer generation is the
+/// identity of the slot whose contents were most recently committed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SurfaceGeneration {
     pub object: u64,
     pub configure: u64,
     pub frame: u64,
+    /// Zero until the first buffer commit on this compositor object.
+    pub buffer: u64,
 }
 
 /// A compositor-owned surface lifecycle transition that the shell must
