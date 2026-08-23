@@ -433,6 +433,7 @@ pub struct Shell {
     effective_capabilities: Arc<HashMap<String, EffectiveCapabilities>>,
     installed_module_graph: Option<InstalledModuleGraph>,
     resource_snapshot: Arc<discovery::ResourceSnapshot>,
+    resource_explanation: Arc<mesh_core_resources::ResourceExplanationSnapshot>,
     pub font_registry: mesh_core_resources::FontRegistry,
     font_renderer_revision: u64,
     resource_preparation: mesh_core_resources::ResourcePreparationCoordinator,

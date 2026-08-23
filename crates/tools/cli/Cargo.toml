@@ -28,6 +28,7 @@ mesh-core-debug = { workspace = true }
 mesh-core-capability = { workspace = true }
 mesh-core-locale = { workspace = true }
 mesh-core-service = { workspace = true }
+mesh-core-resources = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

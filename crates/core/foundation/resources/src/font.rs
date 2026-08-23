@@ -146,6 +146,33 @@ impl FontRegistry {
         self.revision
     }
 
+    /// Return the validated pack bindings in deterministic pack-id order for
+    /// diagnostics and tooling. The live registry keeps ownership of its
+    /// handles; callers receive a clone of the immutable prepared bindings.
+    pub fn pack_bindings(&self) -> Vec<FontPackBindings> {
+        self.packs.values().cloned().collect()
+    }
+
+    /// Return the complete effective shell font chain, including a shell-wide
+    /// prefix and the profile baseline after normalization.
+    pub fn effective_pack_chain(&self) -> Vec<String> {
+        self.chain.clone()
+    }
+
+    /// Return each frontend's normalized effective chain in deterministic
+    /// module-id order. This is the same chain used by `resolve_for_module`.
+    pub fn frontend_effective_pack_chains(&self) -> Vec<(String, Vec<String>)> {
+        self.frontends
+            .iter()
+            .map(|(module_id, frontend)| {
+                (
+                    module_id.clone(),
+                    frontend.effective_chain(&self.shell_chain, &self.base_chain),
+                )
+            })
+            .collect()
+    }
+
     /// Return the prepared database used by the text renderer. It contains
     /// the host database captured during resource preparation plus every
     /// bundled face in the active candidate. Cloning the database is cheap

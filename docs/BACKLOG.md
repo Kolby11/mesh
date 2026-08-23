@@ -57,7 +57,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/06-host-resources-and-icon-packs/improvements.md)
 
-- [ ] Generate runtime, CLI, LSP, doctor, and debug resource explanations from one effective snapshot.
 - [ ] Add a resource coverage advisor for semantic vocabulary and font-script gaps without silently reordering user chains.
 
 ### 7. Component language

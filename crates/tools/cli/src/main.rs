@@ -42,6 +42,7 @@ fn main() {
         Some("lock") => cmd_lock(&args[2..]),
         Some("status") => cmd_status(),
         Some("locale") => cmd_locale(&args[2..]),
+        Some("resources") => cmd_resources(&args[2..]),
         Some("version") => cmd_version(),
         Some("help") | Some("--help") | Some("-h") => cmd_help(),
         Some(other) => {
@@ -88,7 +89,6 @@ fn cmd_list() {
         eprintln!("failed to resolve modules: {err}");
         std::process::exit(1);
     }
-
     let mut count = 0;
     for (id, _state) in shell.modules() {
         let module = shell.module(id).unwrap();
@@ -156,6 +156,59 @@ fn cmd_status() {
     println!("MESH v{}", env!("CARGO_PKG_VERSION"));
     println!("theme: {}", shell.theme.active().name);
     println!("locale: {}", shell.locale.current());
+}
+
+fn resource_snapshot_for_cli() -> mesh_core_resources::ResourceExplanationSnapshot {
+    let mut shell = Shell::new();
+    shell.discover_modules();
+    if let Err(error) = shell.resolve_modules() {
+        exit_error(format!("failed to resolve resources: {error}"));
+    }
+    shell.resource_explanation_snapshot()
+}
+
+fn cmd_resources(args: &[String]) {
+    let snapshot = resource_snapshot_for_cli();
+    match args.first().map(String::as_str) {
+        Some("show") | None => println!(
+            "{}",
+            serde_json::to_string_pretty(&snapshot).expect("resource snapshot serialization")
+        ),
+        Some("icons") => println!(
+            "{}",
+            serde_json::to_string_pretty(&snapshot.icons)
+                .expect("icon resource explanation serialization")
+        ),
+        Some("fonts") => println!(
+            "{}",
+            serde_json::to_string_pretty(&snapshot.fonts)
+                .expect("font resource explanation serialization")
+        ),
+        Some("doctor") => {
+            if snapshot.diagnostics.is_empty() {
+                println!("resource snapshot: no problems found");
+                return;
+            }
+            for diagnostic in &snapshot.diagnostics {
+                let owner = diagnostic
+                    .module_id
+                    .as_deref()
+                    .or(diagnostic.pack_id.as_deref())
+                    .unwrap_or("resources");
+                println!("{} {}: {}", diagnostic.severity, owner, diagnostic.message);
+            }
+            if snapshot
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.severity == "error")
+            {
+                std::process::exit(1);
+            }
+        }
+        Some(other) => exit_error(format!(
+            "unknown resources subcommand: {other}\nsubcommands: show, icons, fonts, doctor"
+        )),
+    }
 }
 
 fn locale_read_model() -> (
@@ -1713,6 +1766,7 @@ fn cmd_config_doctor() {
         eprintln!("failed to resolve modules: {err}");
         std::process::exit(1);
     }
+    let resource_diagnostics = shell.resource_explanation_snapshot().diagnostics;
 
     for namespace in store.namespace_names() {
         let module_id = namespace.split('#').next().unwrap_or(namespace);
@@ -1765,7 +1819,8 @@ fn cmd_config_doctor() {
     let authoring_diagnostics = authoring_graph.authoring_diagnostics();
 
     println!("settings: {}", store.path().display());
-    if diagnostics.is_empty() && authoring_diagnostics.is_empty() {
+    if diagnostics.is_empty() && authoring_diagnostics.is_empty() && resource_diagnostics.is_empty()
+    {
         println!("no problems found");
         return;
     }
@@ -1797,13 +1852,36 @@ fn cmd_config_doctor() {
         println!("        → fix the module source or manifest declaration");
     }
 
+    for diagnostic in &resource_diagnostics {
+        println!();
+        let owner = diagnostic
+            .module_id
+            .as_deref()
+            .or(diagnostic.pack_id.as_deref())
+            .unwrap_or("resources");
+        println!("{} {}: {}", diagnostic.severity, owner, diagnostic.message);
+        println!("        → inspect 'mesh-shell resources show'");
+    }
+
     println!();
     println!(
         "{}, {}",
         count("error", errors),
-        count("warning", warnings + authoring_diagnostics.len())
+        count(
+            "warning",
+            warnings
+                + authoring_diagnostics.len()
+                + resource_diagnostics
+                    .iter()
+                    .filter(|diagnostic| diagnostic.severity != "error")
+                    .count(),
+        )
     );
-    if errors > 0 {
+    if errors > 0
+        || resource_diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == "error")
+    {
         println!("invalid values are ignored; the declared defaults apply until they are fixed");
         std::process::exit(1);
     }
@@ -1941,6 +2019,10 @@ fn cmd_help() {
     );
     println!("            flags: --available-only, --profile <id>, --allow-elevated, --allow-high");
     println!("  status    Show shell status");
+    println!("  resources Inspect the effective host/module resource snapshot");
+    println!("            show                 print the complete snapshot (default)");
+    println!("            icons|fonts          print one resource chain");
+    println!("            doctor               print structured resource diagnostics");
     println!("  locale    Inspect graph-backed catalogs");
     println!("            list                 list available locales");
     println!("            active               show locale and fallback chain");

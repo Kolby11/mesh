@@ -122,6 +122,7 @@ impl Shell {
         DebugSnapshot {
             modules,
             module_graph: self.module_graph_entries(),
+            resources: self.resource_explanation_snapshot(),
             module_instances,
             interfaces,
             backend_runtimes,

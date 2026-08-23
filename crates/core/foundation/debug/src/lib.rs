@@ -13,6 +13,7 @@ pub const DEBUG_TELEMETRY_SCHEMA_VERSION: u32 = 1;
 pub struct DebugSnapshot {
     pub modules: Vec<ModuleEntry>,
     pub module_graph: Vec<ModuleGraphEntry>,
+    pub resources: mesh_core_resources::ResourceExplanationSnapshot,
     pub module_instances: Vec<ModuleObjectEntry>,
     pub interfaces: Vec<InterfaceEntry>,
     pub backend_runtimes: Vec<BackendRuntimeEntry>,

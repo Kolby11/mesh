@@ -10,6 +10,7 @@ pub use font::{
     FontResolution, FontResolutionSource,
 };
 
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
@@ -259,7 +260,7 @@ impl ResourcePreparationLease {
 /// changes that are not visible through a single file's metadata (for
 /// example, a newly installed icon in a theme directory); this fingerprint
 /// avoids retaining stale bytes when an existing file is replaced.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ResourceFingerprint {
     pub len: u64,
     pub modified_nanos: u128,
@@ -665,6 +666,178 @@ pub struct SystemFontFamily {
     pub name: String,
     pub face_count: usize,
     pub monospace: bool,
+}
+
+/// The diagnostic view of the effective resource candidate.
+///
+/// This is deliberately owned by the foundational resources crate rather than
+/// by the shell, CLI, or LSP. Each of those consumers can therefore display
+/// the same ordered chains, owner records, asset fingerprints, and structured
+/// diagnostics without inventing a second resource authority.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceExplanationSnapshot {
+    pub revision: u64,
+    pub host_revision: u64,
+    pub host: ResourceHostExplanation,
+    pub icons: ResourceChainExplanation,
+    pub fonts: ResourceChainExplanation,
+    pub frontends: Vec<ResourceFrontendExplanation>,
+    pub diagnostics: Vec<ResourceExplanationDiagnostic>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceHostExplanation {
+    pub data_dirs: Vec<String>,
+    pub icon_dirs: Vec<String>,
+    pub font_dirs: Vec<String>,
+    pub icon_themes: Vec<ResourceHostIconTheme>,
+    pub font_families: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceHostIconTheme {
+    pub id: String,
+    pub name: String,
+    pub inherits: Vec<String>,
+    pub hidden: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceChainExplanation {
+    /// The active ordered chain. `chain_position` is stable and starts at 0.
+    pub chain: Vec<ResourcePackExplanation>,
+    /// Accepted identifiers for this resource kind in the current snapshot.
+    /// This includes active module packs and, for icons, visible host themes.
+    pub available: Vec<String>,
+    /// Contribution assets that were prepared for the active graph but are not
+    /// owned by a pack mapping.
+    pub contributions: Vec<ResourceAssetExplanation>,
+    /// Runtime semantic-name resolutions made against this same snapshot.
+    pub resolutions: Vec<ResourceResolutionExplanation>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourcePackExplanation {
+    pub module_id: String,
+    pub pack_id: String,
+    pub chain_position: usize,
+    pub status: String,
+    pub assets: Vec<ResourceAssetExplanation>,
+    pub mappings: Vec<ResourceMappingExplanation>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceAssetExplanation {
+    pub id: String,
+    pub path: String,
+    pub fingerprint: Option<ResourceFingerprint>,
+    pub prepared: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceMappingExplanation {
+    pub semantic_name: String,
+    pub target: String,
+    pub multicolor: bool,
+    pub owner_module: String,
+    pub fallback_stage: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceResolutionExplanation {
+    pub module_id: String,
+    pub semantic_name: String,
+    pub required: bool,
+    pub status: String,
+    pub owner_module: Option<String>,
+    pub pack_id: Option<String>,
+    pub candidate: Option<String>,
+    pub fallback_stage: Option<String>,
+    pub tried: Vec<String>,
+    pub asset: Option<ResourceAssetExplanation>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceFrontendExplanation {
+    pub module_id: String,
+    pub icon_chain: Vec<String>,
+    pub font_chain: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceExplanationDiagnostic {
+    pub severity: String,
+    pub code: String,
+    pub module_id: Option<String>,
+    pub pack_id: Option<String>,
+    pub message: String,
+}
+
+impl ResourceExplanationSnapshot {
+    /// Start a tooling snapshot from the same host catalog used by resource
+    /// preparation. Callers then add the graph-owned chains and diagnostics.
+    pub fn from_catalog(catalog: &SystemResourceCatalog) -> Self {
+        let host = ResourceHostExplanation {
+            data_dirs: catalog
+                .data_dirs
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect(),
+            icon_dirs: catalog
+                .icon_dirs
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect(),
+            font_dirs: catalog
+                .font_dirs
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect(),
+            icon_themes: catalog
+                .icon_themes
+                .iter()
+                .map(|theme| ResourceHostIconTheme {
+                    id: theme.id.clone(),
+                    name: theme.name.clone(),
+                    inherits: theme.inherits.clone(),
+                    hidden: theme.hidden,
+                })
+                .collect(),
+            font_families: catalog
+                .font_families
+                .iter()
+                .map(|family| family.name.clone())
+                .collect(),
+        };
+        let available_icons = host
+            .icon_themes
+            .iter()
+            .filter(|theme| !theme.hidden)
+            .map(|theme| theme.id.clone())
+            .collect();
+        Self {
+            revision: catalog.revision,
+            host_revision: catalog.revision,
+            host,
+            icons: ResourceChainExplanation {
+                available: available_icons,
+                ..ResourceChainExplanation::default()
+            },
+            fonts: ResourceChainExplanation::default(),
+            frontends: Vec::new(),
+            diagnostics: Vec::new(),
+        }
+    }
+
+    /// Return the identifiers accepted by the runtime for a shell icon-pack
+    /// setting. The order is the effective host/module discovery order.
+    pub fn icon_pack_ids(&self) -> &[String] {
+        &self.icons.available
+    }
+
+    pub fn font_pack_ids(&self) -> &[String] {
+        &self.fonts.available
+    }
 }
 
 static SYSTEM_RESOURCES: OnceLock<RwLock<Arc<SystemResourceCatalog>>> = OnceLock::new();

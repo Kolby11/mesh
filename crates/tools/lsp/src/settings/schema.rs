@@ -11,7 +11,6 @@
 
 use mesh_core_config::validate::{FieldKind, FieldSpec};
 use mesh_core_config::{SHELL_NAMESPACE, SHELL_SETTINGS_FIELDS};
-use mesh_core_module::manifest::ModuleType;
 use mesh_core_surface_config::MODULE_NAMESPACE_FIELDS;
 
 use crate::json::schema::{
@@ -31,7 +30,7 @@ impl Discovered {
         Self {
             themes: registry.themes.clone(),
             locales: registry.locales.clone(),
-            icon_packs: registry.module_ids_of_type(ModuleType::IconPack),
+            icon_packs: registry.resource_snapshot.icon_pack_ids().to_vec(),
         }
     }
 }

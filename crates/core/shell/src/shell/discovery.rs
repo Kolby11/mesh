@@ -55,9 +55,310 @@ pub(in crate::shell) struct PreparedResourceSnapshot {
     pub(in crate::shell) generation: u64,
     pub(in crate::shell) resource_lease: Option<mesh_core_resources::ResourcePreparationLease>,
     pub snapshot: ResourceSnapshot,
+    pub explanation: mesh_core_resources::ResourceExplanationSnapshot,
     pub icon_packs: Vec<mesh_core_icon::IconPackBindings>,
     pub font_registry: mesh_core_resources::FontRegistry,
     pub frontends: Vec<(String, mesh_core_icon::FrontendIconBindings)>,
+}
+
+fn resource_asset_explanation(
+    id: impl Into<String>,
+    path: &std::path::Path,
+    prepared: bool,
+) -> mesh_core_resources::ResourceAssetExplanation {
+    resource_asset_explanation_with_fingerprint(
+        id,
+        path,
+        mesh_core_resources::resource_fingerprint(path),
+        prepared,
+    )
+}
+
+fn resource_asset_explanation_with_fingerprint(
+    id: impl Into<String>,
+    path: &std::path::Path,
+    fingerprint: Option<mesh_core_resources::ResourceFingerprint>,
+    prepared: bool,
+) -> mesh_core_resources::ResourceAssetExplanation {
+    mesh_core_resources::ResourceAssetExplanation {
+        id: id.into(),
+        path: path.display().to_string(),
+        fingerprint,
+        prepared,
+    }
+}
+
+fn resource_explanation_snapshot(
+    revision: u64,
+    host_catalog: &mesh_core_resources::SystemResourceCatalog,
+    icon_chain: &[String],
+    font_registry: &mesh_core_resources::FontRegistry,
+    icon_packs: &[mesh_core_icon::IconPackBindings],
+    frontends: &[(String, mesh_core_icon::FrontendIconBindings)],
+    icon_requirements: &[(String, String, bool)],
+    icon_assets: &[ResourceAsset],
+    font_assets: &[ResourceAsset],
+    shell_default_icon_pack: Option<&str>,
+) -> mesh_core_resources::ResourceExplanationSnapshot {
+    let mut explanation =
+        mesh_core_resources::ResourceExplanationSnapshot::from_catalog(host_catalog);
+    explanation.revision = revision;
+
+    explanation
+        .icons
+        .available
+        .extend(icon_chain.iter().cloned());
+    explanation.icons.available.sort();
+    explanation.icons.available.dedup();
+    explanation.icons.contributions = icon_assets
+        .iter()
+        .map(|asset| resource_asset_explanation(&asset.id, &asset.handle.candidate_path(), true))
+        .collect();
+    explanation.icons.chain = icon_chain
+        .iter()
+        .enumerate()
+        .filter_map(|(chain_position, module_id)| {
+            let pack = icon_packs
+                .iter()
+                .find(|pack| &pack.module_id == module_id)?;
+            let mut mappings = pack
+                .mappings
+                .iter()
+                .map(
+                    |(semantic_name, mapping)| mesh_core_resources::ResourceMappingExplanation {
+                        semantic_name: semantic_name.clone(),
+                        target: mapping.target.clone(),
+                        multicolor: mapping.multicolor,
+                        owner_module: pack.module_id.clone(),
+                        fallback_stage: "pack-chain".into(),
+                    },
+                )
+                .collect::<Vec<_>>();
+            mappings.sort_by(|left, right| left.semantic_name.cmp(&right.semantic_name));
+
+            let mut assets = Vec::new();
+            for (alias, font) in &pack.font_aliases {
+                if let Some(path) = font.resolved_font_path.as_ref() {
+                    assets.push(resource_asset_explanation_with_fingerprint(
+                        format!("font:{alias}"),
+                        path,
+                        font.font_fingerprint,
+                        font.prepared_font.is_some(),
+                    ));
+                }
+                if let Some(path) = font.glyph_map_path.as_ref() {
+                    assets.push(resource_asset_explanation(
+                        format!("glyph-map:{alias}"),
+                        path,
+                        font.prepared_glyphs.is_some(),
+                    ));
+                }
+            }
+            assets.sort_by(|left, right| left.id.cmp(&right.id));
+            Some(mesh_core_resources::ResourcePackExplanation {
+                module_id: pack.module_id.clone(),
+                pack_id: pack.pack_id.clone(),
+                chain_position,
+                status: "selected".into(),
+                assets,
+                mappings,
+            })
+        })
+        .collect();
+
+    let font_pack_bindings = font_registry.pack_bindings();
+    let effective_font_chain = font_registry.effective_pack_chain();
+    explanation.fonts.available = font_pack_bindings
+        .iter()
+        .flat_map(|pack| [pack.module_id.clone(), pack.pack_id.clone()])
+        .collect();
+    explanation.fonts.available.sort();
+    explanation.fonts.available.dedup();
+    explanation.fonts.contributions = font_assets
+        .iter()
+        .map(|asset| resource_asset_explanation(&asset.id, &asset.handle.candidate_path(), true))
+        .collect();
+    explanation.fonts.chain = effective_font_chain
+        .iter()
+        .enumerate()
+        .filter_map(|(chain_position, pack_id)| {
+            let pack = font_pack_bindings
+                .iter()
+                .find(|pack| &pack.pack_id == pack_id)?;
+            let mut mappings = pack
+                .mappings
+                .iter()
+                .map(
+                    |(semantic_name, family)| mesh_core_resources::ResourceMappingExplanation {
+                        semantic_name: semantic_name.clone(),
+                        target: family.clone(),
+                        multicolor: false,
+                        owner_module: pack.module_id.clone(),
+                        fallback_stage: "font-chain".into(),
+                    },
+                )
+                .collect::<Vec<_>>();
+            mappings.sort_by(|left, right| left.semantic_name.cmp(&right.semantic_name));
+            let mut assets = pack
+                .faces
+                .iter()
+                .map(|face| {
+                    resource_asset_explanation(
+                        format!("face:{}", face.family),
+                        &face.asset.candidate_path(),
+                        true,
+                    )
+                })
+                .collect::<Vec<_>>();
+            assets.sort_by(|left, right| left.id.cmp(&right.id));
+            Some(mesh_core_resources::ResourcePackExplanation {
+                module_id: pack.module_id.clone(),
+                pack_id: pack.pack_id.clone(),
+                chain_position,
+                status: "selected".into(),
+                assets,
+                mappings,
+            })
+        })
+        .collect();
+
+    let icon_frontend_chains = frontends
+        .iter()
+        .map(|(module_id, bindings)| {
+            (
+                module_id.clone(),
+                bindings.effective_chain(shell_default_icon_pack),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let font_frontend_chains = font_registry
+        .frontend_effective_pack_chains()
+        .into_iter()
+        .collect::<BTreeMap<_, _>>();
+    let mut frontend_ids = icon_frontend_chains
+        .keys()
+        .chain(font_frontend_chains.keys())
+        .cloned()
+        .collect::<Vec<_>>();
+    frontend_ids.sort();
+    frontend_ids.dedup();
+    explanation.frontends = frontend_ids
+        .into_iter()
+        .map(
+            |module_id| mesh_core_resources::ResourceFrontendExplanation {
+                icon_chain: icon_frontend_chains
+                    .get(&module_id)
+                    .cloned()
+                    .unwrap_or_default(),
+                font_chain: font_frontend_chains
+                    .get(&module_id)
+                    .cloned()
+                    .unwrap_or_default(),
+                module_id,
+            },
+        )
+        .collect();
+
+    if let Ok(config) = mesh_core_icon::IconConfig::builtin_xdg()
+        && let Ok(mut registry) = mesh_core_icon::IconRegistry::from_config(config)
+    {
+        for pack in icon_packs {
+            registry.set_icon_pack(pack.clone());
+        }
+        for (module_id, bindings) in frontends {
+            registry.set_frontend_bindings(module_id.clone(), bindings.clone());
+        }
+        registry.set_shell_default_pack(shell_default_icon_pack.map(str::to_owned));
+        for (module_id, semantic_name, required) in icon_requirements {
+            let resolution = registry.resolve_for_module(module_id, semantic_name, 24);
+            let resolution_explanation = match resolution {
+                mesh_core_icon::IconResolution::Found {
+                    provenance, target, ..
+                } => {
+                    let asset = match target {
+                        mesh_core_icon::ResolvedTarget::File(path) => {
+                            Some(resource_asset_explanation("resolved-icon", &path, true))
+                        }
+                        mesh_core_icon::ResolvedTarget::Glyph {
+                            font_path,
+                            font_fingerprint,
+                            ..
+                        } => Some(resource_asset_explanation_with_fingerprint(
+                            "resolved-glyph",
+                            &font_path,
+                            font_fingerprint,
+                            true,
+                        )),
+                    };
+                    mesh_core_resources::ResourceResolutionExplanation {
+                        module_id: module_id.clone(),
+                        semantic_name: semantic_name.clone(),
+                        required: *required,
+                        status: "found".into(),
+                        owner_module: provenance.owner_module,
+                        pack_id: provenance.pack_id,
+                        candidate: Some(provenance.candidate),
+                        fallback_stage: Some(provenance.fallback_stage),
+                        tried: Vec::new(),
+                        asset,
+                    }
+                }
+                mesh_core_icon::IconResolution::Missing { tried, .. } => {
+                    mesh_core_resources::ResourceResolutionExplanation {
+                        module_id: module_id.clone(),
+                        semantic_name: semantic_name.clone(),
+                        required: *required,
+                        status: "missing".into(),
+                        owner_module: None,
+                        pack_id: None,
+                        candidate: None,
+                        fallback_stage: None,
+                        tried,
+                        asset: None,
+                    }
+                }
+            };
+            if resolution_explanation.status == "missing" {
+                explanation.diagnostics.push(
+                    mesh_core_resources::ResourceExplanationDiagnostic {
+                        severity: if *required { "error" } else { "warning" }.into(),
+                        code: if *required {
+                            "missing_required_icon"
+                        } else {
+                            "missing_optional_icon"
+                        }
+                        .into(),
+                        module_id: Some(module_id.clone()),
+                        pack_id: None,
+                        message: format!(
+                            "{} icon '{semantic_name}' did not resolve in the effective resource snapshot",
+                            if *required { "required" } else { "optional" }
+                        ),
+                    },
+                );
+            }
+            explanation.icons.resolutions.push(resolution_explanation);
+        }
+    }
+
+    for (pack_id, family) in font_registry.missing_requirements() {
+        let module_id = font_pack_bindings
+            .iter()
+            .find(|pack| pack.pack_id == pack_id)
+            .map(|pack| pack.module_id.clone());
+        explanation
+            .diagnostics
+            .push(mesh_core_resources::ResourceExplanationDiagnostic {
+                severity: "warning".into(),
+                code: "missing_host_font".into(),
+                module_id,
+                pack_id: Some(pack_id.clone()),
+                message: format!(
+                    "font pack '{pack_id}' requires host family '{family}'; resolver will use system fallback"
+                ),
+            });
+    }
+    explanation
 }
 
 /// A worker-owned resource candidate that can be polled by a non-blocking
@@ -234,6 +535,7 @@ impl Shell {
         let icon_chain = graph.icon_pack_chain().to_vec();
         let font_chain = graph.font_pack_chain().to_vec();
         let shell_font_chain = settings_store.shell().fonts.packs.clone();
+        let shell_default_icon_pack = settings_store.shell().icons.default_pack.clone();
         let icon_ids = icon_chain
             .iter()
             .cloned()
@@ -244,6 +546,17 @@ impl Shell {
             .collect::<std::collections::HashSet<_>>();
         let icon_contributions = graph.contributed_icons().to_vec();
         let font_contributions = graph.contributed_fonts().to_vec();
+        let icon_requirements = graph
+            .icon_requirements()
+            .iter()
+            .map(|requirement| {
+                (
+                    requirement.module_id.clone(),
+                    requirement.name.clone(),
+                    requirement.required,
+                )
+            })
+            .collect::<Vec<_>>();
 
         let mut pack_inputs = Vec::new();
         for module_id in &icon_chain {
@@ -530,6 +843,19 @@ impl Shell {
                     });
                 }
 
+                let explanation = resource_explanation_snapshot(
+                    revision,
+                    &host_catalog,
+                    &icon_chain,
+                    &font_registry,
+                    &icon_packs,
+                    &frontends,
+                    &icon_requirements,
+                    &icon_assets,
+                    &font_assets,
+                    shell_default_icon_pack.as_deref(),
+                );
+
                 Ok(PreparedResourceSnapshot {
                     generation: 0,
                     resource_lease: None,
@@ -540,6 +866,7 @@ impl Shell {
                         icon_assets,
                         font_assets,
                     },
+                    explanation,
                     icon_packs,
                     font_registry,
                     frontends,
@@ -583,6 +910,7 @@ impl Shell {
         })?;
         self.font_registry = prepared.font_registry.clone();
         self.resource_snapshot = Arc::new(prepared.snapshot.clone());
+        self.resource_explanation = Arc::new(prepared.explanation.clone());
         let font_registry = &self.font_registry;
         self.theme.update_active(|theme| {
             apply_font_registry_tokens(theme, font_registry);
@@ -597,6 +925,15 @@ impl Shell {
             self.resource_preparation.retire(prepared.generation);
         }
         Ok(())
+    }
+
+    /// Return the exact effective resource explanation last committed by the
+    /// worker-built snapshot. Runtime diagnostics and external tooling should
+    /// consume this model rather than rediscovering packs independently.
+    pub fn resource_explanation_snapshot(
+        &self,
+    ) -> mesh_core_resources::ResourceExplanationSnapshot {
+        (*self.resource_explanation).clone()
     }
 }
 
@@ -1294,6 +1631,9 @@ impl Shell {
             effective_capabilities: Arc::new(HashMap::new()),
             installed_module_graph: None,
             resource_snapshot: Arc::new(ResourceSnapshot::default()),
+            resource_explanation: Arc::new(
+                mesh_core_resources::ResourceExplanationSnapshot::default(),
+            ),
             font_registry: mesh_core_resources::FontRegistry::default(),
             font_renderer_revision: 0,
             resource_preparation: mesh_core_resources::ResourcePreparationCoordinator::default(),

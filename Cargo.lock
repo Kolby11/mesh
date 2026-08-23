@@ -1731,6 +1731,7 @@ dependencies = [
 name = "mesh-core-debug"
 version = "0.1.0"
 dependencies = [
+ "mesh-core-resources",
  "serde",
  "serde_json",
 ]
@@ -1898,6 +1899,7 @@ version = "0.1.0"
 dependencies = [
  "fontdb 0.23.0",
  "libc",
+ "serde",
  "tempfile",
  "thiserror 2.0.18",
 ]
@@ -2022,6 +2024,7 @@ dependencies = [
  "mesh-core-frontend",
  "mesh-core-locale",
  "mesh-core-module",
+ "mesh-core-resources",
  "mesh-core-service",
  "mesh-core-shell",
  "mesh-core-surface-config",
@@ -2042,6 +2045,7 @@ dependencies = [
  "mesh-core-config",
  "mesh-core-elements",
  "mesh-core-module",
+ "mesh-core-resources",
  "mesh-core-service",
  "mesh-core-surface-config",
  "mesh-core-theme",

@@ -183,7 +183,12 @@ Resource discovery, selected icon/font-pack parsing, and asset preparation now
 run on cancellable workers. Immutable glyph maps and font bytes cross the
 resource boundary as prepared handles; semantic icon lookup and icon/glyph
 raster work use revision-aware bounded broker queues with deterministic missing
-placeholders. Text shaping remains synchronous and outside that broker.
+placeholders. The committed resource candidate now also carries a serializable
+effective explanation with host/module provenance, pack chains, asset handles,
+fallback attempts, and structured diagnostics. Runtime debug output, CLI
+resource views and config doctor, and LSP resource completion consume that same
+model; LSP deliberately reports discovered metadata without claiming prepared
+render assets. Text shaping remains synchronous and outside that broker.
 
 Focused presentation, Wayland routing, shell text-transaction, and preedit
 rendering tests plus `cargo check --workspace`, formatting, and `git diff
@@ -197,5 +202,6 @@ live compositor/lifecycle matrix remain separate follow-up work.
 ## Next
 
 Complete the remaining semantic presentation state diff and the live
-compositor/lifecycle matrix for presentation and text-input-v3; connection
-recreation and text shaping remain separate follow-up work.
+compositor/lifecycle matrix for presentation and text-input-v3; the resource
+coverage advisor, connection recreation, and text shaping remain separate
+follow-up work.

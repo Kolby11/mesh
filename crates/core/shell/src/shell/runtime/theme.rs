@@ -308,12 +308,19 @@ impl Shell {
         theme_id: &str,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let theme_id = theme_id.trim();
-        let available = mesh_core_resources::system_resource_catalog()
+        let available_host_theme = mesh_core_resources::system_resource_catalog()
             .icon_themes
             .iter()
             .any(|theme| theme.id == theme_id && !theme.hidden);
+        let available_resource_pack = self
+            .resource_explanation_snapshot()
+            .icons
+            .available
+            .iter()
+            .any(|candidate| candidate == theme_id);
+        let available = available_host_theme || available_resource_pack;
         if !available {
-            tracing::warn!("cannot select unavailable system icon theme '{theme_id}'");
+            tracing::warn!("cannot select unavailable icon resource '{theme_id}'");
             return Ok(VecDeque::new());
         }
         self.settings.icons.default_pack = Some(theme_id.to_owned());

@@ -1,5 +1,9 @@
 use mesh_core_config::{default_config_path, load_config, resolve_discovery_paths};
 use mesh_core_module::manifest::{Manifest, ModuleType, load_canonical_manifest};
+use mesh_core_resources::{
+    ResourceAssetExplanation, ResourceExplanationSnapshot, ResourceMappingExplanation,
+    ResourcePackExplanation,
+};
 use mesh_core_service::{InterfaceContract, canonical_interface_name, parse_interface_contract};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -37,6 +41,11 @@ pub struct ModuleRegistry {
     /// Locale codes some module ships a catalog for, plus the default locales
     /// modules declare. Sorted, deduplicated.
     pub locales: Vec<String>,
+    /// The same serializable effective-resource explanation consumed by shell
+    /// diagnostics and the CLI. LSP does not prepare render assets, so its
+    /// records are marked as metadata-only until the runtime snapshot is
+    /// available; identifiers and ordered graph ownership stay identical.
+    pub resource_snapshot: ResourceExplanationSnapshot,
 }
 
 impl ModuleRegistry {
@@ -51,6 +60,7 @@ impl ModuleRegistry {
             exported_tags: HashMap::new(),
             themes: Vec::new(),
             locales: Vec::new(),
+            resource_snapshot: ResourceExplanationSnapshot::default(),
         }
     }
 
@@ -65,6 +75,7 @@ impl ModuleRegistry {
 
         registry.themes = discover_themes(workspace_root, &registry);
         registry.locales = discover_locales(workspace_root);
+        registry.resource_snapshot = discover_resources(workspace_root);
 
         registry
     }
@@ -272,6 +283,177 @@ impl ModuleRegistry {
             Some(description) => format!("`{kind}` module — {description}"),
             None => format!("`{kind}` module"),
         })
+    }
+}
+
+fn discover_resources(workspace_root: &Path) -> ResourceExplanationSnapshot {
+    let catalog = mesh_core_resources::refresh_system_resource_catalog();
+    let mut snapshot = ResourceExplanationSnapshot::from_catalog(&catalog);
+    let root_graph = std::env::var_os("MESH_MODULE_GRAPH_PATH")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| workspace_root.join("config/module.json"));
+    let Ok(graph) = mesh_core_module::package::load_installed_module_graph(&root_graph) else {
+        return snapshot;
+    };
+
+    snapshot.revision = mesh_core_resources::resource_revision();
+    let icon_chain = graph.icon_pack_chain().to_vec();
+    let font_chain = graph.font_pack_chain().to_vec();
+    snapshot.icons.available.extend(icon_chain.iter().cloned());
+    snapshot.icons.available.sort();
+    snapshot.icons.available.dedup();
+    snapshot.fonts.available.extend(font_chain.iter().cloned());
+
+    for (chain_position, module_id) in icon_chain.iter().enumerate() {
+        let Some(module) = graph.module(module_id) else {
+            snapshot.diagnostics.push(resource_diagnostic(
+                "error",
+                "missing_pack_module",
+                Some(module_id.clone()),
+                None,
+                format!("effective icon chain references missing module '{module_id}'"),
+            ));
+            continue;
+        };
+        let Some(section) = module.manifest.mesh.icon_pack.as_ref() else {
+            snapshot.diagnostics.push(resource_diagnostic(
+                "error",
+                "missing_icon_pack_section",
+                Some(module_id.clone()),
+                None,
+                format!("effective icon chain module '{module_id}' has no icon-pack section"),
+            ));
+            continue;
+        };
+        let mut mappings = section
+            .mappings
+            .iter()
+            .map(|(name, mapping)| ResourceMappingExplanation {
+                semantic_name: name.clone(),
+                target: mapping.target.clone(),
+                multicolor: mapping.multicolor,
+                owner_module: module_id.clone(),
+                fallback_stage: "pack-chain".into(),
+            })
+            .collect::<Vec<_>>();
+        for vocabulary in section.vocabularies.values() {
+            mappings.extend(
+                vocabulary
+                    .iter()
+                    .map(|(name, mapping)| ResourceMappingExplanation {
+                        semantic_name: name.clone(),
+                        target: mapping.target.clone(),
+                        multicolor: mapping.multicolor,
+                        owner_module: module_id.clone(),
+                        fallback_stage: "pack-vocabulary".into(),
+                    }),
+            );
+        }
+        mappings.sort_by(|left, right| left.semantic_name.cmp(&right.semantic_name));
+        snapshot.icons.chain.push(ResourcePackExplanation {
+            module_id: module_id.clone(),
+            pack_id: section.id.clone(),
+            chain_position,
+            status: "selected".into(),
+            assets: Vec::new(),
+            mappings,
+        });
+    }
+
+    for (chain_position, module_id) in font_chain.iter().enumerate() {
+        let Some(module) = graph.module(module_id) else {
+            snapshot.diagnostics.push(resource_diagnostic(
+                "error",
+                "missing_pack_module",
+                Some(module_id.clone()),
+                None,
+                format!("effective font chain references missing module '{module_id}'"),
+            ));
+            continue;
+        };
+        let Some(section) = module.manifest.mesh.font_pack.as_ref() else {
+            snapshot.diagnostics.push(resource_diagnostic(
+                "error",
+                "missing_font_pack_section",
+                Some(module_id.clone()),
+                None,
+                format!("effective font chain module '{module_id}' has no font-pack section"),
+            ));
+            continue;
+        };
+        let root = module.manifest_path.parent().unwrap_or(workspace_root);
+        let mut assets = section
+            .faces
+            .iter()
+            .map(|face| ResourceAssetExplanation {
+                id: format!("face:{}", face.family),
+                path: root.join(&face.file).display().to_string(),
+                fingerprint: None,
+                prepared: false,
+            })
+            .collect::<Vec<_>>();
+        assets.sort_by(|left, right| left.id.cmp(&right.id));
+        let mut mappings = section
+            .mappings
+            .iter()
+            .map(|(name, family)| ResourceMappingExplanation {
+                semantic_name: name.clone(),
+                target: family.clone(),
+                multicolor: false,
+                owner_module: module_id.clone(),
+                fallback_stage: "font-chain".into(),
+            })
+            .collect::<Vec<_>>();
+        mappings.sort_by(|left, right| left.semantic_name.cmp(&right.semantic_name));
+        snapshot.fonts.available.push(section.id.clone());
+        snapshot.fonts.chain.push(ResourcePackExplanation {
+            module_id: module_id.clone(),
+            pack_id: section.id.clone(),
+            chain_position,
+            status: "selected".into(),
+            assets,
+            mappings,
+        });
+    }
+
+    for module in graph.enabled_modules() {
+        if !matches!(
+            module.kind,
+            mesh_core_module::package::ModuleKind::Frontend
+                | mesh_core_module::package::ModuleKind::Component
+        ) {
+            continue;
+        }
+        snapshot
+            .frontends
+            .push(mesh_core_resources::ResourceFrontendExplanation {
+                module_id: module.id.clone(),
+                icon_chain: module.manifest.mesh.uses.resources.icons.clone(),
+                font_chain: module.manifest.mesh.uses.resources.fonts.clone(),
+            });
+    }
+    snapshot
+        .frontends
+        .sort_by(|left, right| left.module_id.cmp(&right.module_id));
+    snapshot.fonts.available.sort();
+    snapshot.fonts.available.dedup();
+    snapshot
+}
+
+fn resource_diagnostic(
+    severity: &str,
+    code: &str,
+    module_id: Option<String>,
+    pack_id: Option<String>,
+    message: String,
+) -> mesh_core_resources::ResourceExplanationDiagnostic {
+    mesh_core_resources::ResourceExplanationDiagnostic {
+        severity: severity.into(),
+        code: code.into(),
+        module_id,
+        pack_id,
+        message,
     }
 }
 
