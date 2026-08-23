@@ -4,6 +4,11 @@
 
 ## Now
 
+Display paint now carries parsed `font-style` into the text renderer. Cosmic
+text shaping, layout caching, ellipsis truncation, selection geometry, and
+editable-input rendering use the same normal/italic style, and the style is
+also part of text batch compatibility.
+
 The deterministic presentation backend now clears its retained text-input
 surrounding-text snapshot whenever the owning surface, popup, parent tree, or
 connection is torn down, while preserving state published for other surfaces.

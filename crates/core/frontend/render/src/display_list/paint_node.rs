@@ -36,6 +36,7 @@ pub(super) fn build_paint_node_with_previous(
             font_family: node.computed_style.font_family.clone(),
             font_size: node.computed_style.font_size,
             font_weight: node.computed_style.font_weight,
+            font_style: node.computed_style.font_style,
             line_height: node.computed_style.line_height,
             text_align: node.computed_style.text_align,
             text_overflow: node.computed_style.text_overflow,

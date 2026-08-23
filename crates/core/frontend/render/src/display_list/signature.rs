@@ -366,6 +366,7 @@ pub(super) fn hash_text_batch_material(node: &WidgetNode, hasher: &mut DisplaySi
     node.computed_style.font_family.hash(hasher);
     node.computed_style.font_size.to_bits().hash(hasher);
     node.computed_style.font_weight.hash(hasher);
+    std::mem::discriminant(&node.computed_style.font_style).hash(hasher);
     node.computed_style.line_height.to_bits().hash(hasher);
     std::mem::discriminant(&node.computed_style.text_align).hash(hasher);
 }

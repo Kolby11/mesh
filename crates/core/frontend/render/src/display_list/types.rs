@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use mesh_core_elements::style::{
-    BackgroundPaint, BlendMode, Color, Edges, Overflow, TextAlign, TextDirection, TextOverflow,
+    BackgroundPaint, BlendMode, Color, Edges, FontStyle, Overflow, TextAlign, TextDirection,
+    TextOverflow,
 };
 use mesh_core_elements::{BoxShadow, VisualFilter};
 use mesh_core_elements::{LayoutRect, NodeId};
@@ -273,6 +274,7 @@ pub struct DisplayPaintStyle {
     pub font_family: Arc<str>,
     pub font_size: f32,
     pub font_weight: u16,
+    pub font_style: FontStyle,
     pub line_height: f32,
     pub text_align: TextAlign,
     pub text_overflow: TextOverflow,

@@ -3,7 +3,7 @@ use super::super::*;
 use super::common::*;
 use crate::RenderObjectDirtySummary;
 use mesh_core_elements::WidgetNode;
-use mesh_core_elements::style::{BackgroundPaint, Color, StyleLinearGradient};
+use mesh_core_elements::style::{BackgroundPaint, Color, FontStyle, StyleLinearGradient};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -107,6 +107,16 @@ fn batch_signature_tracks_generic_content_material() {
         batch_signature(&slider, DisplayPrimitiveSlot::Generic),
         original
     );
+}
+
+#[test]
+fn batch_signature_separates_text_font_styles() {
+    let mut text = node(1, "text", 0.0, 0.0, 20.0, 20.0);
+    text.computed_style.background_color.a = 0;
+    let normal = batch_signature(&text, DisplayPrimitiveSlot::Text);
+
+    text.computed_style.font_style = FontStyle::Italic;
+    assert_ne!(batch_signature(&text, DisplayPrimitiveSlot::Text), normal);
 }
 
 #[test]

@@ -8,7 +8,7 @@ use cosmic_text::{
 };
 use mesh_core_elements::Color;
 use mesh_core_elements::lru::ByteLruCache;
-use mesh_core_elements::style::TextAlign;
+use mesh_core_elements::style::{FontStyle, TextAlign};
 use mesh_core_resources::resource_revision;
 use skia_safe::{
     AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images,
@@ -96,6 +96,7 @@ struct TextLayoutEntry {
     font_family: String,
     font_size: u32,
     font_weight: u16,
+    font_style: FontStyle,
     line_height: u32,
     max_width: Option<u32>,
     align: TextAlign,
@@ -129,6 +130,7 @@ struct TextLayoutParams<'a> {
     font_family: &'a str,
     font_size: u32,
     font_weight: u16,
+    font_style: FontStyle,
     line_height: u32,
     max_width: Option<u32>,
     align: TextAlign,
@@ -142,6 +144,7 @@ impl<'a> TextLayoutParams<'a> {
         font_family: &'a str,
         font_size: f32,
         font_weight: u16,
+        font_style: FontStyle,
         line_height: f32,
         max_width: Option<f32>,
         align: TextAlign,
@@ -155,6 +158,7 @@ impl<'a> TextLayoutParams<'a> {
             font_family,
             font_size,
             font_weight,
+            font_style,
             line_height,
             max_width,
             align,
@@ -165,6 +169,7 @@ impl<'a> TextLayoutParams<'a> {
             font_family,
             font_size,
             font_weight,
+            font_style,
             line_height,
             max_width,
             align,
@@ -181,6 +186,7 @@ impl TextLayoutEntry {
             && self.font_family == params.font_family
             && self.font_size == params.font_size
             && self.font_weight == params.font_weight
+            && self.font_style == params.font_style
             && self.line_height == params.line_height
             && self.max_width == params.max_width
             && self.align == params.align
@@ -259,6 +265,7 @@ fn text_layout_cache_key(
     font_family: &str,
     font_size: u32,
     font_weight: u16,
+    font_style: FontStyle,
     line_height: u32,
     max_width: Option<u32>,
     align: TextAlign,
@@ -269,6 +276,7 @@ fn text_layout_cache_key(
     font_family.hash(&mut state);
     font_size.hash(&mut state);
     font_weight.hash(&mut state);
+    font_style.hash(&mut state);
     line_height.hash(&mut state);
     max_width.hash(&mut state);
     match align {
@@ -380,17 +388,52 @@ impl TextRenderer {
         clip: (u32, u32, u32, u32),
         max_width: Option<f32>,
     ) {
+        self.render_clipped_with_font_style(
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            FontStyle::Normal,
+            line_height,
+            align,
+            color,
+            buffer,
+            x,
+            y,
+            clip,
+            max_width,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_clipped_with_font_style(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        font_style: FontStyle,
+        line_height: f32,
+        align: TextAlign,
+        color: Color,
+        buffer: &mut PixelBuffer,
+        x: u32,
+        y: u32,
+        clip: (u32, u32, u32, u32),
+        max_width: Option<f32>,
+    ) {
         // Legacy callers pass a raw buffer. Wrap it in a one-shot canvas
         // session and route through the Skia glyph path. Hot-path callers
         // (display-list paint) should use `render_clipped_on_canvas`
         // directly so the surface wrap is shared with surrounding draws.
         let mut session = PixelCanvasSession::new(buffer);
         let _ = session.with_canvas(|canvas| {
-            self.render_clipped_on_canvas(
+            self.render_clipped_on_canvas_with_font_style(
                 text,
                 font_family,
                 font_size,
                 font_weight,
+                font_style,
                 line_height,
                 align,
                 color,
@@ -419,6 +462,40 @@ impl TextRenderer {
         clip: (u32, u32, u32, u32),
         max_width: Option<f32>,
     ) {
+        self.render_clipped_on_canvas_with_font_style(
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            FontStyle::Normal,
+            line_height,
+            align,
+            color,
+            canvas,
+            x,
+            y,
+            clip,
+            max_width,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_clipped_on_canvas_with_font_style(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        font_style: FontStyle,
+        line_height: f32,
+        align: TextAlign,
+        color: Color,
+        canvas: &Canvas,
+        x: u32,
+        y: u32,
+        clip: (u32, u32, u32, u32),
+        max_width: Option<f32>,
+    ) {
         let mut engine = self.engine.borrow_mut();
         engine.ensure_resource_revision();
         let (_, metrics, width, text_align) = text_config(
@@ -426,6 +503,7 @@ impl TextRenderer {
             font_family,
             font_size,
             font_weight,
+            font_style,
             line_height,
             max_width,
             align,
@@ -435,6 +513,7 @@ impl TextRenderer {
             font_family,
             font_size,
             font_weight,
+            font_style,
             line_height,
             max_width,
             align,
@@ -482,6 +561,27 @@ impl TextRenderer {
         line_height: f32,
         max_width: Option<f32>,
     ) -> (f32, f32) {
+        self.measure_styled_with_font_style(
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            FontStyle::Normal,
+            line_height,
+            max_width,
+        )
+    }
+
+    pub fn measure_styled_with_font_style(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        font_style: FontStyle,
+        line_height: f32,
+        max_width: Option<f32>,
+    ) -> (f32, f32) {
         let mut engine = self.engine.borrow_mut();
         engine.ensure_resource_revision();
         let (_, metrics, width, _) = text_config(
@@ -489,6 +589,7 @@ impl TextRenderer {
             font_family,
             font_size,
             font_weight,
+            font_style,
             line_height,
             max_width,
             TextAlign::Left,
@@ -498,6 +599,7 @@ impl TextRenderer {
             font_family,
             font_size,
             font_weight,
+            font_style,
             line_height,
             max_width,
             TextAlign::Left,
@@ -531,6 +633,27 @@ impl TextRenderer {
         line_height: f32,
         max_width: f32,
     ) -> Option<String> {
+        self.truncate_with_ellipsis_shaped_with_font_style(
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            FontStyle::Normal,
+            line_height,
+            max_width,
+        )
+    }
+
+    pub fn truncate_with_ellipsis_shaped_with_font_style(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        font_style: FontStyle,
+        line_height: f32,
+        max_width: f32,
+    ) -> Option<String> {
         if text.is_empty() || text.contains('\n') {
             return None;
         }
@@ -544,6 +667,7 @@ impl TextRenderer {
             font_family,
             font_size,
             font_weight,
+            font_style,
             line_height,
             None,
             TextAlign::Left,
@@ -554,6 +678,7 @@ impl TextRenderer {
             font_family,
             font_size,
             font_weight,
+            font_style,
             line_height,
             None,
             TextAlign::Left,
@@ -574,6 +699,7 @@ impl TextRenderer {
             font_family,
             font_size,
             font_weight,
+            font_style,
             line_height,
             None,
             TextAlign::Left,
@@ -619,6 +745,34 @@ impl TextRenderer {
         anchor: (f32, f32),
         focus: (f32, f32),
     ) -> Option<TextSelectionGeometry> {
+        self.selection_geometry_with_font_style(
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            FontStyle::Normal,
+            line_height,
+            align,
+            max_width,
+            anchor,
+            focus,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn selection_geometry_with_font_style(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        font_style: FontStyle,
+        line_height: f32,
+        align: TextAlign,
+        max_width: Option<f32>,
+        anchor: (f32, f32),
+        focus: (f32, f32),
+    ) -> Option<TextSelectionGeometry> {
         let mut engine = self.engine.borrow_mut();
         engine.ensure_resource_revision();
         let (_, metrics, width, text_align) = text_config(
@@ -626,6 +780,7 @@ impl TextRenderer {
             font_family,
             font_size,
             font_weight,
+            font_style,
             line_height,
             max_width,
             align,
@@ -635,6 +790,7 @@ impl TextRenderer {
             font_family,
             font_size,
             font_weight,
+            font_style,
             line_height,
             max_width,
             align,
@@ -886,6 +1042,7 @@ impl TextEngine {
             &self.font_aliases,
             params.font_family,
             params.font_weight,
+            params.font_style,
         );
         let mut cosmic = Buffer::new(&mut self.font_system, metrics);
         {
@@ -915,6 +1072,7 @@ impl TextEngine {
             font_family: params.font_family.to_string(),
             font_size: params.font_size,
             font_weight: params.font_weight,
+            font_style: params.font_style,
             line_height: params.line_height,
             max_width: params.max_width,
             align: params.align,
@@ -1033,6 +1191,29 @@ impl SharedTextMeasurer {
         })
     }
 
+    pub fn measure_styled_with_font_style(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        font_style: FontStyle,
+        line_height: f32,
+        max_width: Option<f32>,
+    ) -> (f32, f32) {
+        RENDERER.with(|renderer| {
+            renderer.borrow().measure_styled_with_font_style(
+                text,
+                font_family,
+                font_size,
+                font_weight,
+                font_style,
+                line_height,
+                max_width,
+            )
+        })
+    }
+
     pub fn truncate_with_ellipsis_shaped(
         &self,
         text: &str,
@@ -1051,6 +1232,31 @@ impl SharedTextMeasurer {
                 line_height,
                 max_width,
             )
+        })
+    }
+
+    pub fn truncate_with_ellipsis_shaped_with_font_style(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        font_style: FontStyle,
+        line_height: f32,
+        max_width: f32,
+    ) -> Option<String> {
+        RENDERER.with(|renderer| {
+            renderer
+                .borrow()
+                .truncate_with_ellipsis_shaped_with_font_style(
+                    text,
+                    font_family,
+                    font_size,
+                    font_weight,
+                    font_style,
+                    line_height,
+                    max_width,
+                )
         })
     }
 
@@ -1076,6 +1282,42 @@ impl SharedTextMeasurer {
                 font_family,
                 font_size,
                 font_weight,
+                line_height,
+                align,
+                color,
+                buffer,
+                x,
+                y,
+                clip,
+                max_width,
+            );
+        });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_clipped_with_font_style(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        font_style: FontStyle,
+        line_height: f32,
+        align: TextAlign,
+        color: Color,
+        buffer: &mut PixelBuffer,
+        x: u32,
+        y: u32,
+        clip: (u32, u32, u32, u32),
+        max_width: Option<f32>,
+    ) {
+        RENDERER.with(|renderer| {
+            renderer.borrow().render_clipped_with_font_style(
+                text,
+                font_family,
+                font_size,
+                font_weight,
+                font_style,
                 line_height,
                 align,
                 color,
@@ -1123,6 +1365,42 @@ impl SharedTextMeasurer {
     }
 
     #[allow(clippy::too_many_arguments)]
+    pub fn render_clipped_on_canvas_with_font_style(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        font_style: FontStyle,
+        line_height: f32,
+        align: TextAlign,
+        color: Color,
+        canvas: &Canvas,
+        x: u32,
+        y: u32,
+        clip: (u32, u32, u32, u32),
+        max_width: Option<f32>,
+    ) {
+        RENDERER.with(|renderer| {
+            renderer.borrow().render_clipped_on_canvas_with_font_style(
+                text,
+                font_family,
+                font_size,
+                font_weight,
+                font_style,
+                line_height,
+                align,
+                color,
+                canvas,
+                x,
+                y,
+                clip,
+                max_width,
+            );
+        });
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub fn selection_geometry(
         &self,
         text: &str,
@@ -1149,6 +1427,36 @@ impl SharedTextMeasurer {
             )
         })
     }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn selection_geometry_with_font_style(
+        &self,
+        text: &str,
+        font_family: &str,
+        font_size: f32,
+        font_weight: u16,
+        font_style: FontStyle,
+        line_height: f32,
+        align: TextAlign,
+        max_width: Option<f32>,
+        anchor: (f32, f32),
+        focus: (f32, f32),
+    ) -> Option<TextSelectionGeometry> {
+        RENDERER.with(|renderer| {
+            renderer.borrow().selection_geometry_with_font_style(
+                text,
+                font_family,
+                font_size,
+                font_weight,
+                font_style,
+                line_height,
+                align,
+                max_width,
+                anchor,
+                focus,
+            )
+        })
+    }
 }
 
 fn text_config<'a>(
@@ -1156,6 +1464,7 @@ fn text_config<'a>(
     font_family: &'a str,
     font_size: f32,
     font_weight: u16,
+    font_style: FontStyle,
     line_height: f32,
     max_width: Option<f32>,
     align: TextAlign,
@@ -1163,7 +1472,7 @@ fn text_config<'a>(
     let family = primary_family(font_system, font_family);
     let attrs = Attrs::new()
         .family(family)
-        .style(CosmicStyle::Normal)
+        .style(cosmic_font_style(font_style))
         .weight(Weight(font_weight.max(100)));
     let metrics = Metrics::new(
         font_size.max(1.0),
@@ -1183,13 +1492,21 @@ fn text_attrs(
     aliases: &HashMap<String, String>,
     font_family: &str,
     font_weight: u16,
+    font_style: FontStyle,
 ) -> AttrsOwned {
     let family = primary_family_owned(font_system, aliases, font_family);
     let attrs = Attrs::new()
         .family(family.as_family())
-        .style(CosmicStyle::Normal)
+        .style(cosmic_font_style(font_style))
         .weight(Weight(font_weight.max(100)));
     AttrsOwned::new(&attrs)
+}
+
+fn cosmic_font_style(font_style: FontStyle) -> CosmicStyle {
+    match font_style {
+        FontStyle::Normal => CosmicStyle::Normal,
+        FontStyle::Italic => CosmicStyle::Italic,
+    }
 }
 
 fn primary_family_owned(
@@ -1402,6 +1719,36 @@ mod tests {
     }
 
     #[test]
+    fn text_cache_misses_when_font_style_changes() {
+        let renderer = TextRenderer::new();
+        renderer.reset_cache_metrics();
+
+        renderer.measure_styled_with_font_style(
+            "styled text",
+            "Inter",
+            14.0,
+            400,
+            FontStyle::Normal,
+            1.2,
+            Some(120.0),
+        );
+        renderer.measure_styled_with_font_style(
+            "styled text",
+            "Inter",
+            14.0,
+            400,
+            FontStyle::Italic,
+            1.2,
+            Some(120.0),
+        );
+        let metrics = renderer.cache_metrics();
+
+        assert_eq!(metrics.layout_misses, 2);
+        assert_eq!(metrics.layout_hits, 0);
+        assert_eq!(metrics.shaped_entries, 2);
+    }
+
+    #[test]
     fn text_layout_cache_reports_bounded_resident_bytes() {
         let renderer = TextRenderer::new();
         renderer.reset_cache_metrics();
@@ -1436,6 +1783,7 @@ mod tests {
             "Inter",
             14.0f32.to_bits(),
             400,
+            FontStyle::Normal,
             1.2f32.to_bits(),
             Some(120.0f32.to_bits()),
             TextAlign::Left,
@@ -1446,12 +1794,40 @@ mod tests {
             "Inter",
             14.0f32.to_bits(),
             400,
+            FontStyle::Normal,
             1.2f32.to_bits(),
             Some(120.0f32.to_bits()),
             TextAlign::Left,
             8,
         );
         assert_ne!(base, changed);
+    }
+
+    #[test]
+    fn text_layout_cache_key_includes_font_style() {
+        let normal = text_layout_cache_key(
+            "styled text",
+            "Inter",
+            14.0f32.to_bits(),
+            400,
+            FontStyle::Normal,
+            1.2f32.to_bits(),
+            Some(120.0f32.to_bits()),
+            TextAlign::Left,
+            7,
+        );
+        let italic = text_layout_cache_key(
+            "styled text",
+            "Inter",
+            14.0f32.to_bits(),
+            400,
+            FontStyle::Italic,
+            1.2f32.to_bits(),
+            Some(120.0f32.to_bits()),
+            TextAlign::Left,
+            7,
+        );
+        assert_ne!(normal, italic);
     }
 
     #[test]
