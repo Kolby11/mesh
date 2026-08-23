@@ -513,22 +513,27 @@ fn shared_value_change_handlers_are_normalized() {
         Attribute {
             name: "oninput".into(),
             value: AttributeValue::EventHandler("onInput".into()),
+            span: None,
         },
         Attribute {
             name: "onchange".into(),
             value: AttributeValue::EventHandler("onChange".into()),
+            span: None,
         },
         Attribute {
             name: "onselect".into(),
             value: AttributeValue::EventHandler("onSelect".into()),
+            span: None,
         },
         Attribute {
             name: "onactivate".into(),
             value: AttributeValue::EventHandler("onActivate".into()),
+            span: None,
         },
         Attribute {
             name: "onopenchange".into(),
             value: AttributeValue::EventHandler("onOpenChange".into()),
+            span: None,
         },
     ];
 

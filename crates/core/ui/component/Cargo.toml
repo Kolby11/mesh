@@ -13,3 +13,4 @@ tracing = { workspace = true }
 mesh-core-theme = { workspace = true }
 quick-xml = "0.39"
 lightningcss = { version = "1.0.0-alpha.71", default-features = false }
+full_moon = { workspace = true }

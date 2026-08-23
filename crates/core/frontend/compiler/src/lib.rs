@@ -703,18 +703,22 @@ mod tests {
             Attribute {
                 name: "onclick".into(),
                 value: AttributeValue::EventHandler("openPanel".into()),
+                span: None,
             },
             Attribute {
                 name: "onchange".into(),
                 value: AttributeValue::EventHandler("updateValue".into()),
+                span: None,
             },
             Attribute {
                 name: "onrelease".into(),
                 value: AttributeValue::EventHandler("finishDrag".into()),
+                span: None,
             },
             Attribute {
                 name: "onfocus".into(),
                 value: AttributeValue::EventHandler("focusControl".into()),
+                span: None,
             },
         ];
 
@@ -747,6 +751,7 @@ mod tests {
         let attrs = vec![Attribute {
             name: "onclick".into(),
             value: AttributeValue::EventHandler("onActivate".into()),
+            span: None,
         }];
         let store = MapStore(
             [(
@@ -774,6 +779,7 @@ mod tests {
         let attrs = vec![Attribute {
             name: "onfocus".into(),
             value: AttributeValue::Binding("onFocusProxy".into()),
+            span: None,
         }];
         let store = MapStore(
             [(

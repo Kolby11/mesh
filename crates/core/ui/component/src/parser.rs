@@ -1,13 +1,13 @@
 /// Parser for `.mesh` single-file components.
 ///
 /// Parses the source into validated top-level blocks (`<template>`, `<script>`, `<style>`,
+mod brace;
 mod markup;
 mod props;
 mod script;
 mod styles;
 
 use crate::{BlockAttribute, ComponentBlock, ComponentFile, ComponentImportTarget, SourceSpan};
-use markup::parse_markup;
 use props::parse_props;
 use script::{extract_imports, parse_script};
 use std::collections::{HashMap, HashSet};
@@ -82,8 +82,9 @@ pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
         .iter()
         .find(|block| block.name == "template")
         .map(|block| {
-            parse_markup(
+            markup::parse_markup_at(
                 &source[block.content.start..block.content.end],
+                block.content.start,
                 &imported_components,
             )
         })
@@ -897,6 +898,113 @@ button {
             }
             _ => panic!("expected element"),
         }
+    }
+
+    #[test]
+    fn rejects_malformed_interpolation_with_source_location() {
+        for (body, expected) in [
+            ("{name", "unterminated interpolation"),
+            ("{}", "empty interpolation"),
+            ("{name + }", "malformed Luau interpolation"),
+        ] {
+            let source = format!("<template>\n  <text>{body}</text>\n</template>");
+            let error = parse_component(&source).expect_err("malformed interpolation accepted");
+            let message = error.to_string();
+            assert!(message.contains(expected), "{message}");
+            assert!(message.contains("line 2"), "{message}");
+            assert!(message.contains("column "), "{message}");
+        }
+    }
+
+    #[test]
+    fn interpolation_spans_cover_braces_and_expression_body() {
+        let source = "<template>\n  <text>{t(\"}\")}</text>\n</template>";
+        let file = parse_component(source).expect("quoted brace expression parses");
+        let TemplateNode::Element(text) = &file.template.unwrap().root[0] else {
+            panic!("expected text element");
+        };
+        let [TemplateNode::Expr(expression)] = text.children.as_slice() else {
+            panic!("expected one interpolation");
+        };
+        let start = source.find('{').expect("opening brace");
+        let end = source.find("}</text>").expect("closing brace") + 1;
+        assert_eq!(expression.span, SourceSpan::new(start, end));
+        assert_eq!(
+            &source[expression.expression_span.start..expression.expression_span.end],
+            r#"t("}")"#
+        );
+    }
+
+    #[test]
+    fn control_flow_is_lexed_and_spanned_before_markup_lowering() {
+        let source = r#"<template>
+{#if show}
+  {#for item in items key={item.id}}<text>{item.name}</text>{/for}
+{:else if fallback}
+  <text>fallback</text>
+{:else}
+  <text>hidden</text>
+{/if}
+</template>"#;
+        let file = parse_component(source).expect("control-flow parses");
+        let TemplateNode::If(if_node) = &file.template.unwrap().root[0] else {
+            panic!("expected if node");
+        };
+        let if_start = source.find("{#if").expect("if opening");
+        let if_end = source.find("{/if}").expect("if closing") + "{/if}".len();
+        assert_eq!(if_node.span, SourceSpan::new(if_start, if_end));
+        assert_eq!(
+            &source[if_node.condition_span.start..if_node.condition_span.end],
+            "show"
+        );
+        let TemplateNode::For(for_node) = &if_node.then_children[0] else {
+            panic!("expected for node");
+        };
+        let for_start = source.find("{#for").expect("for opening");
+        let for_end = source.find("{/for}").expect("for closing") + "{/for}".len();
+        assert_eq!(for_node.span, SourceSpan::new(for_start, for_end));
+        assert_eq!(
+            &source[for_node.iterable_span.start..for_node.iterable_span.end],
+            "items"
+        );
+        let key_span = for_node.key_span.expect("key span");
+        assert_eq!(&source[key_span.start..key_span.end], "item.id");
+    }
+
+    #[test]
+    fn rejects_mismatched_control_flow_braces() {
+        for body in ["{/if}", "{#if show}{/for}", "{#if show}{:else}{:else}{/if}"] {
+            let source = format!("<template>{body}</template>");
+            let error = parse_component(&source).expect_err("malformed control flow accepted");
+            assert!(
+                error.to_string().contains("directive")
+                    || error.to_string().contains("unexpected")
+                    || error.to_string().contains("closes"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn attribute_interpolations_retain_their_brace_span() {
+        let source =
+            r#"<template><button title={tooltip} onclick="{activate}">Open</button></template>"#;
+        let file = parse_component(source).expect("attribute interpolations parse");
+        let TemplateNode::Element(button) = &file.template.unwrap().root[0] else {
+            panic!("expected button");
+        };
+        let title = &button.attributes[0];
+        let title_start = source.find("{tooltip}").expect("title expression");
+        assert_eq!(
+            title.span,
+            Some(SourceSpan::new(title_start, title_start + 9))
+        );
+        let onclick = &button.attributes[1];
+        let onclick_start = source.find("{activate}").expect("handler expression");
+        assert_eq!(
+            onclick.span,
+            Some(SourceSpan::new(onclick_start, onclick_start + 10))
+        );
     }
 
     #[test]

@@ -1705,6 +1705,7 @@ dependencies = [
 name = "mesh-core-component"
 version = "0.1.0"
 dependencies = [
+ "full_moon",
  "lightningcss",
  "mesh-core-theme",
  "quick-xml",

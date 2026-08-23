@@ -11,6 +11,7 @@ fn event_handler_call_attrs_store_typed_args_not_json_handler_string() {
             handler: "selectItem".into(),
             args: vec!["item_id".into(), "\"fallback\"".into()],
         },
+        span: None,
     }];
     let store = MapStore(
         [
@@ -49,6 +50,7 @@ fn two_way_value_binding_still_resolves_attribute_value() {
     let attrs = vec![Attribute {
         name: "value".into(),
         value: AttributeValue::TwoWayBinding("current_value".into()),
+        span: None,
     }];
 
     let (_, _, resolved, _, _) = parse_attributes(&attrs, None);
@@ -66,6 +68,7 @@ fn bound_attributes_retain_runtime_types_through_accessibility_lowering() {
     .map(|(name, binding)| Attribute {
         name: name.into(),
         value: AttributeValue::Binding(binding.into()),
+        span: None,
     });
     let store = MapStore(std::collections::HashMap::new());
 

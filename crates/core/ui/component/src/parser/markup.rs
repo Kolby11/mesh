@@ -4,180 +4,10 @@ use quick_xml::events::Event;
 use std::collections::HashMap;
 
 use super::ParseError;
-use crate::ComponentImportTarget;
+use super::brace::{self, BraceKind, BraceLex};
+use crate::{ComponentImportTarget, SourceSpan};
 
-/// Convert `{#for}`, `{#if}`, `{:else if}`, `{:else}`, `{/for}`, `{/if}` directives
-/// into custom XML tags so quick_xml can build a proper element tree.
-///
-/// `{#for item in list}` → `<mesh-for item="item" iterable="list">`
-/// `{/for}`              → `</mesh-for>`
-/// `{#if cond}`          → `<mesh-if><mesh-ifthen condition="ESCAPED">`
-/// `{:else if cond}`     → `</mesh-ifthen><mesh-ifthen condition="ESCAPED">`
-/// `{:else}`             → `</mesh-ifthen><mesh-else>`
-/// `{/if}`               → close current branch + `</mesh-if>`
-fn preprocess_control_flow(source: &str) -> String {
-    let mut out = String::with_capacity(source.len() + 128);
-    let mut remaining = source;
-    // Stack entries: "for" | "if-outer" | "ifthen" | "else"
-    let mut cf_stack: Vec<&'static str> = Vec::new();
-
-    while !remaining.is_empty() {
-        let Some(brace_pos) = remaining.find('{') else {
-            out.push_str(remaining);
-            break;
-        };
-
-        out.push_str(&remaining[..brace_pos]);
-        remaining = &remaining[brace_pos..];
-
-        // {#for item in iterable}
-        if let Some(rest) = remaining.strip_prefix("{#for ") {
-            if let Some(end) = find_cf_end(rest) {
-                let inner = rest[..end].trim();
-                if let Some(sep) = inner.find(" in ") {
-                    let item = inner[..sep].trim();
-                    let (iterable, key) = split_for_key(inner[sep + 4..].trim());
-                    out.push_str(&format!(
-                        "<mesh-for item=\"{}\" iterable=\"{}\"{}>",
-                        xml_attr_escape(item),
-                        xml_attr_escape(iterable),
-                        key.map(|key| format!(" key=\"{}\"", xml_attr_escape(key)))
-                            .unwrap_or_default(),
-                    ));
-                    cf_stack.push("for");
-                    remaining = &rest[end + 1..];
-                    continue;
-                }
-            }
-        }
-        // {/for}
-        else if remaining.starts_with("{/for}") {
-            out.push_str("</mesh-for>");
-            if cf_stack.last() == Some(&"for") {
-                cf_stack.pop();
-            }
-            remaining = &remaining[6..];
-            continue;
-        }
-        // {#if condition}
-        else if let Some(rest) = remaining.strip_prefix("{#if ") {
-            if let Some(end) = find_cf_end(rest) {
-                let cond = rest[..end].trim();
-                out.push_str(&format!(
-                    "<mesh-if><mesh-ifthen condition=\"{}\">",
-                    xml_attr_escape(cond)
-                ));
-                cf_stack.push("if-outer");
-                cf_stack.push("ifthen");
-                remaining = &rest[end + 1..];
-                continue;
-            }
-        }
-        // {:else if condition}  — must be checked before {:else}
-        else if let Some(rest) = remaining.strip_prefix("{:else if ") {
-            if let Some(end) = find_cf_end(rest) {
-                let cond = rest[..end].trim();
-                match cf_stack.last() {
-                    Some(&"ifthen") => {
-                        out.push_str("</mesh-ifthen>");
-                        cf_stack.pop();
-                    }
-                    Some(&"else") => {
-                        out.push_str("</mesh-else>");
-                        cf_stack.pop();
-                    }
-                    _ => {}
-                }
-                out.push_str(&format!(
-                    "<mesh-ifthen condition=\"{}\">",
-                    xml_attr_escape(cond)
-                ));
-                cf_stack.push("ifthen");
-                remaining = &rest[end + 1..];
-                continue;
-            }
-        }
-        // {:else}
-        else if remaining.starts_with("{:else}") {
-            match cf_stack.last() {
-                Some(&"ifthen") => {
-                    out.push_str("</mesh-ifthen>");
-                    cf_stack.pop();
-                }
-                Some(&"else") => {
-                    out.push_str("</mesh-else>");
-                    cf_stack.pop();
-                }
-                _ => {}
-            }
-            out.push_str("<mesh-else>");
-            cf_stack.push("else");
-            remaining = &remaining[7..];
-            continue;
-        }
-        // {/if}
-        else if remaining.starts_with("{/if}") {
-            match cf_stack.last() {
-                Some(&"ifthen") => {
-                    out.push_str("</mesh-ifthen>");
-                    cf_stack.pop();
-                }
-                Some(&"else") => {
-                    out.push_str("</mesh-else>");
-                    cf_stack.pop();
-                }
-                _ => {}
-            }
-            if cf_stack.last() == Some(&"if-outer") {
-                out.push_str("</mesh-if>");
-                cf_stack.pop();
-            }
-            remaining = &remaining[5..];
-            continue;
-        }
-
-        // Not a control-flow token — keep `{` and advance.
-        out.push('{');
-        remaining = &remaining[1..];
-    }
-
-    out
-}
-
-fn split_for_key(value: &str) -> (&str, Option<&str>) {
-    let Some(key_start) = value.find(" key=") else {
-        return (value.trim(), None);
-    };
-    let iterable = value[..key_start].trim();
-    let key = value[key_start + " key=".len()..].trim();
-    let key = key
-        .strip_prefix('{')
-        .and_then(|key| key.strip_suffix('}'))
-        .unwrap_or(key);
-    (iterable, (!key.is_empty()).then_some(key))
-}
-
-/// Find the index of the `}` that closes the outer `{`, depth-aware.
-/// `s` is the text AFTER the opening `{`.
-fn find_cf_end(s: &str) -> Option<usize> {
-    let mut depth = 1usize;
-    for (i, ch) in s.char_indices() {
-        match ch {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(i);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-/// Escape special XML attribute characters so conditions survive the round-trip
-/// through quick_xml (it will unescape them back when reading the attribute).
+/// Escape special XML attribute characters in synthetic lowering attributes.
 fn xml_attr_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
@@ -192,98 +22,178 @@ fn xml_attr_escape(s: &str) -> String {
     out
 }
 
-/// Convert unquoted brace attribute values to quoted form so quick_xml can parse them.
-///
-/// `onclick={handler}` → `onclick="{handler}"`
-/// `value={expr}` follows the same preprocessing path before XML parsing.
-fn preprocess_template(source: &str) -> String {
-    let mut out = String::with_capacity(source.len() + 32);
-    let bytes = source.as_bytes();
-    let len = bytes.len();
-    let mut i = 0;
-    let mut in_tag = false;
-    let mut in_quoted = false;
-    let mut quote_char = b'"';
-
-    while i < len {
-        let b = bytes[i];
-
-        if !in_tag {
-            if b == b'<' {
-                in_tag = true;
-            }
-            push_source_char(source, &mut out, &mut i);
-        } else if in_quoted {
-            if b == quote_char {
-                in_quoted = false;
-            }
-            push_source_char(source, &mut out, &mut i);
-        } else if b == b'"' || b == b'\'' {
-            in_quoted = true;
-            quote_char = b;
-            out.push(b as char);
-            i += 1;
-        } else if b == b'>' {
-            in_tag = false;
-            out.push(b as char);
-            i += 1;
-        } else if b == b'=' && i + 1 < len && bytes[i + 1] == b'{' {
-            // Unquoted brace value: wrap it.
-            out.push('=');
-            out.push('"');
-            i += 1; // skip '=', now pointing at '{'
-            let expression_start = i;
-            let mut depth: i32 = 0;
-            let mut expression_quote: Option<u8> = None;
-            let mut escaped = false;
-            while i < len {
-                let c = bytes[i];
-                if let Some(quote) = expression_quote {
-                    if escaped {
-                        escaped = false;
-                    } else if c == b'\\' {
-                        escaped = true;
-                    } else if c == quote {
-                        expression_quote = None;
-                    }
-                } else if c == b'"' || c == b'\'' {
-                    expression_quote = Some(c);
-                } else if c == b'{' {
-                    depth += 1;
-                } else if c == b'}' {
-                    depth -= 1;
-                    if depth == 0 {
-                        i += 1;
-                        break;
-                    }
-                }
-                i += 1;
-            }
-            out.push_str(&xml_attr_escape(&source[expression_start..i]));
-            out.push('"');
-        } else {
-            push_source_char(source, &mut out, &mut i);
-        }
+fn preprocess_template(source: &str, braces: &BraceLex) -> Result<String, ParseError> {
+    #[derive(Clone, Copy)]
+    enum Branch {
+        Then,
+        Else,
+    }
+    enum Flow {
+        If(Branch),
+        For,
     }
 
-    out
+    let mut output = String::with_capacity(source.len() + 128);
+    let mut source_cursor = 0usize;
+    let mut markup = MarkupState::default();
+    let mut flow = Vec::<Flow>::new();
+
+    for (id, token) in braces.tokens.iter().enumerate() {
+        let unchanged = &source[source_cursor..token.span.start];
+        output.push_str(unchanged);
+        markup.advance(unchanged);
+
+        match &token.kind {
+            BraceKind::Expression { .. } if markup.in_tag => {
+                if markup.quote.is_none()
+                    && source[..token.span.start]
+                        .chars()
+                        .rev()
+                        .find(|ch| !ch.is_whitespace())
+                        .is_none_or(|ch| ch != '=')
+                {
+                    return Err(ParseError::InvalidTemplate {
+                        message: "attribute interpolation must follow `=`".into(),
+                    });
+                }
+                let marker = BraceLex::marker(id);
+                if markup.quote.is_some() {
+                    output.push_str(&marker);
+                } else {
+                    output.push('"');
+                    output.push_str(&marker);
+                    output.push('"');
+                }
+            }
+            BraceKind::Expression { .. } => {
+                output.push_str(&format!("<mesh-expr data-mesh-id=\"{id}\" />"));
+            }
+            BraceKind::IfOpen { condition } => {
+                if markup.in_tag {
+                    return Err(ParseError::InvalidTemplate {
+                        message: "control-flow directives cannot appear inside a tag".into(),
+                    });
+                }
+                let close_end = token.matching_end.expect("validated control-flow match");
+                let condition = xml_attr_escape(&source[condition.start..condition.end]);
+                output.push_str(&format!(
+                    "<mesh-if data-mesh-id=\"{id}\" data-mesh-end=\"{close_end}\"><mesh-ifthen data-mesh-condition-id=\"{id}\" condition=\"{condition}\">"
+                ));
+                flow.push(Flow::If(Branch::Then));
+            }
+            BraceKind::ForOpen {
+                item,
+                iterable,
+                key,
+            } => {
+                if markup.in_tag {
+                    return Err(ParseError::InvalidTemplate {
+                        message: "control-flow directives cannot appear inside a tag".into(),
+                    });
+                }
+                let close_end = token.matching_end.expect("validated control-flow match");
+                let key = key
+                    .map(|key| format!(" key=\"{}\"", xml_attr_escape(&source[key.start..key.end])))
+                    .unwrap_or_default();
+                output.push_str(&format!(
+                    "<mesh-for data-mesh-id=\"{id}\" data-mesh-end=\"{close_end}\" item=\"{}\" iterable=\"{}\"{}>",
+                    xml_attr_escape(item),
+                    xml_attr_escape(&source[iterable.start..iterable.end]),
+                    key,
+                ));
+                flow.push(Flow::For);
+            }
+            BraceKind::ElseIf { condition } => {
+                let Some(Flow::If(branch)) = flow.last_mut() else {
+                    unreachable!("brace parser validates else-if nesting")
+                };
+                output.push_str(match branch {
+                    Branch::Then => "</mesh-ifthen>",
+                    Branch::Else => "</mesh-else>",
+                });
+                let condition = xml_attr_escape(&source[condition.start..condition.end]);
+                output.push_str(&format!(
+                    "<mesh-ifthen data-mesh-condition-id=\"{id}\" condition=\"{condition}\">"
+                ));
+                *branch = Branch::Then;
+            }
+            BraceKind::Else => {
+                let Some(Flow::If(branch)) = flow.last_mut() else {
+                    unreachable!("brace parser validates else nesting")
+                };
+                output.push_str(match branch {
+                    Branch::Then => "</mesh-ifthen>",
+                    Branch::Else => "</mesh-else>",
+                });
+                output.push_str("<mesh-else>");
+                *branch = Branch::Else;
+            }
+            BraceKind::IfClose => {
+                let Some(Flow::If(branch)) = flow.pop() else {
+                    unreachable!("brace parser validates if closing")
+                };
+                output.push_str(match branch {
+                    Branch::Then => "</mesh-ifthen></mesh-if>",
+                    Branch::Else => "</mesh-else></mesh-if>",
+                });
+            }
+            BraceKind::ForClose => {
+                let Some(Flow::For) = flow.pop() else {
+                    unreachable!("brace parser validates for closing")
+                };
+                output.push_str("</mesh-for>");
+            }
+        }
+        source_cursor = token.span.end;
+    }
+
+    output.push_str(&source[source_cursor..]);
+    if !flow.is_empty() {
+        unreachable!("brace parser validates all control-flow closures")
+    }
+    Ok(output)
 }
 
-fn push_source_char(source: &str, out: &mut String, offset: &mut usize) {
-    let ch = source[*offset..]
-        .chars()
-        .next()
-        .expect("offset remains within the source");
-    out.push(ch);
-    *offset += ch.len_utf8();
+#[derive(Default)]
+struct MarkupState {
+    in_tag: bool,
+    quote: Option<char>,
 }
 
+impl MarkupState {
+    fn advance(&mut self, source: &str) {
+        for ch in source.chars() {
+            if let Some(quote) = self.quote {
+                if ch == quote {
+                    self.quote = None;
+                }
+                continue;
+            }
+            match ch {
+                '<' if !self.in_tag => self.in_tag = true,
+                '>' if self.in_tag => self.in_tag = false,
+                '\'' | '"' if self.in_tag => self.quote = Some(ch),
+                _ => {}
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 pub(super) fn parse_markup(
     source: &str,
     imported_components: &HashMap<String, ComponentImportTarget>,
 ) -> Result<TemplateBlock, ParseError> {
-    let cf_processed = preprocess_control_flow(source.trim());
-    let preprocessed = preprocess_template(&cf_processed);
+    parse_markup_at(source, 0, imported_components)
+}
+
+pub(super) fn parse_markup_at(
+    source: &str,
+    source_base: usize,
+    imported_components: &HashMap<String, ComponentImportTarget>,
+) -> Result<TemplateBlock, ParseError> {
+    let braces = brace::lex(source)?;
+    let preprocessed = preprocess_template(source, &braces)?;
     let wrapped = format!("<mesh-root>{}</mesh-root>", preprocessed);
     let mut reader = Reader::from_str(&wrapped);
     reader.config_mut().trim_text(false);
@@ -298,7 +208,7 @@ pub(super) fn parse_markup(
                 if tag == "mesh-root" {
                     continue;
                 }
-                let attrs = parse_xml_attributes(&reader, &event)?;
+                let attrs = parse_xml_attributes(source, &reader, &event, &braces, source_base)?;
                 stack.push(OpenNode {
                     tag,
                     attributes: attrs,
@@ -310,8 +220,16 @@ pub(super) fn parse_markup(
                 if tag == "mesh-root" {
                     continue;
                 }
-                let attrs = parse_xml_attributes(&reader, &event)?;
-                let node = build_template_node(tag, attrs, Vec::new(), imported_components)?;
+                let attrs = parse_xml_attributes(source, &reader, &event, &braces, source_base)?;
+                let node = build_template_node(
+                    tag,
+                    attrs,
+                    Vec::new(),
+                    imported_components,
+                    source,
+                    &braces,
+                    source_base,
+                )?;
                 push_template_node(&mut stack, &mut root, node);
             }
             Ok(Event::Text(event)) => {
@@ -321,8 +239,14 @@ pub(super) fn parse_markup(
                         message: err.to_string(),
                     })?
                     .into_owned();
-                for node in parse_inline_nodes(&text) {
-                    push_template_node(&mut stack, &mut root, node);
+                if !text.trim().is_empty() {
+                    push_template_node(
+                        &mut stack,
+                        &mut root,
+                        TemplateNode::Text(TextNode {
+                            content: text.trim().to_string(),
+                        }),
+                    );
                 }
             }
             Ok(Event::CData(event)) => {
@@ -332,8 +256,14 @@ pub(super) fn parse_markup(
                         message: err.to_string(),
                     })?
                     .into_owned();
-                for node in parse_inline_nodes(&text) {
-                    push_template_node(&mut stack, &mut root, node);
+                if !text.trim().is_empty() {
+                    push_template_node(
+                        &mut stack,
+                        &mut root,
+                        TemplateNode::Text(TextNode {
+                            content: text.trim().to_string(),
+                        }),
+                    );
                 }
             }
             Ok(Event::End(event)) => {
@@ -356,6 +286,9 @@ pub(super) fn parse_markup(
                     open.attributes,
                     open.children,
                     imported_components,
+                    source,
+                    &braces,
+                    source_base,
                 )?;
                 push_template_node(&mut stack, &mut root, node);
             }
@@ -466,8 +399,11 @@ fn mark_loop_component_refs(nodes: &mut [TemplateNode], inside_loop: bool) {
 }
 
 fn parse_xml_attributes(
+    source: &str,
     reader: &Reader<&[u8]>,
     event: &quick_xml::events::BytesStart<'_>,
+    braces: &BraceLex,
+    source_base: usize,
 ) -> Result<Vec<Attribute>, ParseError> {
     let mut attrs = Vec::new();
 
@@ -483,15 +419,34 @@ fn parse_xml_attributes(
             })?
             .into_owned();
 
+        let expression = BraceLex::marker_id(&value).and_then(|id| {
+            let token = braces.token(id)?;
+            let BraceKind::Expression { expression } = &token.kind else {
+                return None;
+            };
+            Some((
+                source[expression.start..expression.end].to_string(),
+                crate::SourceSpan::new(
+                    source_base + token.span.start,
+                    source_base + token.span.end,
+                ),
+            ))
+        });
+        let expression_span = expression.as_ref().map(|(_, span)| *span);
+        let binding = expression.as_ref().map(|(value, _)| value.as_str());
+
         let (attr_name, attr_value) = if name == "bind:this" {
-            let binding = extract_brace_expr(&value).unwrap_or(value);
+            let binding = binding.unwrap_or(value.as_str()).to_string();
             (name, AttributeValue::InstanceBinding(binding))
         } else if let Some(var) = name.strip_prefix("bind:") {
             // bind:value="variable" — two-way binding.
-            (var.to_string(), AttributeValue::TwoWayBinding(value))
+            (
+                var.to_string(),
+                AttributeValue::TwoWayBinding(binding.unwrap_or(value.as_str()).to_string()),
+            )
         } else if is_event_attr(&name) {
             // onclick={handler}, onclick="handler", or onclick="{handler}" — strip braces if present.
-            let handler = extract_brace_expr(&value).unwrap_or(value);
+            let handler = binding.unwrap_or(value.as_str()).to_string();
             if let Some((fn_name, fn_args)) = parse_handler_call(&handler) {
                 (
                     name,
@@ -503,9 +458,9 @@ fn parse_xml_attributes(
             } else {
                 (name, AttributeValue::EventHandler(handler))
             }
-        } else if let Some(expr) = extract_brace_expr(&value) {
+        } else if let Some((expr, _)) = expression.as_ref() {
             // title={expr} or title="{expr}" — dynamic binding, expression inside braces.
-            (name, AttributeValue::Binding(expr))
+            (name, AttributeValue::Binding(expr.clone()))
         } else {
             (name, AttributeValue::Static(value))
         };
@@ -513,6 +468,7 @@ fn parse_xml_attributes(
         attrs.push(Attribute {
             name: attr_name,
             value: attr_value,
+            span: expression_span,
         });
     }
 
@@ -593,114 +549,72 @@ fn split_call_args(s: &str) -> Vec<&str> {
     args
 }
 
-/// If `value` is exactly `{expr}`, returns the inner expression; otherwise `None`.
-fn extract_brace_expr(value: &str) -> Option<String> {
-    if value.starts_with('{') && value.ends_with('}') && value.len() >= 2 {
-        Some(value[1..value.len() - 1].trim().to_string())
-    } else {
-        None
-    }
-}
-
-fn parse_inline_nodes(text: &str) -> Vec<TemplateNode> {
-    let mut nodes = Vec::new();
-    let mut remaining = text;
-
-    while !remaining.is_empty() {
-        // Find the next `{expr}` expression.
-        let Some(start) = remaining.find('{') else {
-            break;
-        };
-
-        let prefix = &remaining[..start];
-        if !prefix.trim().is_empty() {
-            nodes.push(TemplateNode::Text(TextNode {
-                content: prefix.trim().to_string(),
-            }));
-        }
-
-        // `{expr}` — find the matching `}` respecting nested parens so `{t(a.b)}` works.
-        let expr_body = &remaining[start + 1..];
-        if let Some(end) = find_closing_brace(expr_body) {
-            let expr = expr_body[..end].trim();
-            if !expr.is_empty() {
-                nodes.push(TemplateNode::Expr(ExprNode {
-                    expression: expr.to_string(),
-                }));
-            }
-            remaining = &expr_body[end + 1..];
-        } else {
-            // Unclosed `{` — emit as literal and stop.
-            nodes.push(TemplateNode::Text(TextNode {
-                content: remaining[start..].to_string(),
-            }));
-            remaining = "";
-        }
-    }
-
-    if !remaining.trim().is_empty() {
-        nodes.push(TemplateNode::Text(TextNode {
-            content: remaining.trim().to_string(),
-        }));
-    }
-
-    nodes
-}
-
-/// Find the index of the `}` that closes the expression, respecting nested
-/// parentheses and string literals so `t(a.b)` and `t("key")` are handled.
-fn find_closing_brace(s: &str) -> Option<usize> {
-    let mut depth = 0usize;
-    let mut in_string = false;
-    let mut string_char = '\0';
-    let chars = s.char_indices();
-
-    for (i, ch) in chars {
-        if in_string {
-            if ch == string_char {
-                in_string = false;
-            }
-            continue;
-        }
-        match ch {
-            '"' | '\'' => {
-                in_string = true;
-                string_char = ch;
-            }
-            '(' | '[' => depth += 1,
-            ')' | ']' => {
-                if depth == 0 {
-                    return None; // unbalanced
-                }
-                depth -= 1;
-            }
-            '}' if depth == 0 => return Some(i),
-            _ => {}
-        }
-    }
-
-    None
-}
-
 fn build_template_node(
     tag: String,
     attributes: Vec<Attribute>,
     children: Vec<TemplateNode>,
     imported_components: &HashMap<String, ComponentImportTarget>,
+    source: &str,
+    braces: &BraceLex,
+    source_base: usize,
 ) -> Result<TemplateNode, ParseError> {
-    // Control-flow nodes produced by preprocess_control_flow.
+    if tag == "mesh-expr" {
+        let id = find_static_attr(&attributes, "data-mesh-id")
+            .and_then(|value| value.parse::<usize>().ok())
+            .ok_or_else(|| ParseError::InvalidTemplate {
+                message: "synthetic interpolation is missing its token id".into(),
+            })?;
+        let token = braces
+            .token(id)
+            .ok_or_else(|| ParseError::InvalidTemplate {
+                message: "synthetic interpolation has an unknown token id".into(),
+            })?;
+        let BraceKind::Expression { expression } = &token.kind else {
+            return Err(ParseError::InvalidTemplate {
+                message: "synthetic interpolation points to a control-flow token".into(),
+            });
+        };
+        return Ok(TemplateNode::Expr(ExprNode {
+            expression: source[expression.start..expression.end].to_string(),
+            span: add_base(token.span, source_base),
+            expression_span: add_base(*expression, source_base),
+        }));
+    }
+
+    // Control-flow nodes produced by the brace lexer.
     if tag == "mesh-for" {
         let item_name = find_static_attr(&attributes, "item").unwrap_or_default();
-        let iterable = find_static_attr(&attributes, "iterable").unwrap_or_default();
+        let iterable_text = find_static_attr(&attributes, "iterable").unwrap_or_default();
+        let id = synthetic_token_id(&attributes, "data-mesh-id")?;
+        let token = braces
+            .token(id)
+            .ok_or_else(|| ParseError::InvalidTemplate {
+                message: "synthetic for-loop has an unknown token id".into(),
+            })?;
+        let BraceKind::ForOpen { iterable, key, .. } = &token.kind else {
+            return Err(ParseError::InvalidTemplate {
+                message: "synthetic for-loop points to a non-for token".into(),
+            });
+        };
+        let close_end = synthetic_end(&attributes, "data-mesh-end")?;
         return Ok(TemplateNode::For(ForNode {
             item_name,
-            iterable,
+            iterable: iterable_text,
+            span: SourceSpan::new(source_base + token.span.start, source_base + close_end),
+            iterable_span: add_base(*iterable, source_base),
             key: find_static_attr(&attributes, "key"),
+            key_span: key.map(|key| add_base(key, source_base)),
             children,
         }));
     }
     if tag == "mesh-if" {
-        return Ok(build_if_node(children));
+        return Ok(build_if_node(
+            attributes,
+            children,
+            source,
+            braces,
+            source_base,
+        ));
     }
     // mesh-ifthen / mesh-else remain as Element so build_if_node can extract them.
     if tag == "mesh-ifthen" || tag == "mesh-else" {
@@ -963,15 +877,43 @@ fn lowercase_primitive_name(tag: &str) -> &'static str {
 ///
 /// Multiple `mesh-ifthen` branches are folded into a chain of nested `IfNode`s
 /// so that `{:else if}` is handled correctly.
-fn build_if_node(children: Vec<TemplateNode>) -> TemplateNode {
-    let mut branches: Vec<(String, Vec<TemplateNode>)> = Vec::new();
+fn build_if_node(
+    attributes: Vec<Attribute>,
+    children: Vec<TemplateNode>,
+    _source: &str,
+    braces: &BraceLex,
+    source_base: usize,
+) -> TemplateNode {
+    let outer_id = synthetic_token_id(&attributes, "data-mesh-id").unwrap_or_default();
+    let outer = braces.token(outer_id);
+    let outer_span = outer
+        .and_then(|token| {
+            token
+                .matching_end
+                .map(|end| SourceSpan::new(token.span.start, end))
+        })
+        .map(|span| add_base(span, source_base))
+        .unwrap_or_else(|| SourceSpan::new(source_base, source_base));
+
+    let mut branches: Vec<(String, SourceSpan, Vec<TemplateNode>)> = Vec::new();
     let mut else_children: Vec<TemplateNode> = Vec::new();
 
     for child in children {
         match child {
             TemplateNode::Element(el) if el.tag == "mesh-ifthen" => {
                 let cond = find_static_attr(&el.attributes, "condition").unwrap_or_default();
-                branches.push((cond, el.children));
+                let condition_id =
+                    synthetic_token_id(&el.attributes, "data-mesh-condition-id").ok();
+                let condition_span = condition_id
+                    .and_then(|id| braces.token(id))
+                    .and_then(|token| match &token.kind {
+                        BraceKind::IfOpen { condition } | BraceKind::ElseIf { condition } => {
+                            Some(add_base(*condition, source_base))
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| SourceSpan::new(source_base, source_base));
+                branches.push((cond, condition_span, el.children));
             }
             TemplateNode::Element(el) if el.tag == "mesh-else" => {
                 else_children = el.children;
@@ -991,9 +933,11 @@ fn build_if_node(children: Vec<TemplateNode>) -> TemplateNode {
 
     // Fold branches from last to first into a nested IfNode chain.
     let mut current_else = else_children;
-    for (cond, then_children) in branches.into_iter().rev() {
+    for (cond, condition_span, then_children) in branches.into_iter().rev() {
         let node = TemplateNode::If(IfNode {
             condition: cond,
+            span: outer_span,
+            condition_span,
             then_children,
             else_children: current_else,
         });
@@ -1001,6 +945,22 @@ fn build_if_node(children: Vec<TemplateNode>) -> TemplateNode {
     }
 
     current_else.remove(0)
+}
+
+fn synthetic_token_id(attrs: &[Attribute], name: &str) -> Result<usize, ParseError> {
+    find_static_attr(attrs, name)
+        .and_then(|value| value.parse::<usize>().ok())
+        .ok_or_else(|| ParseError::InvalidTemplate {
+            message: format!("synthetic node is missing `{name}`"),
+        })
+}
+
+fn synthetic_end(attrs: &[Attribute], name: &str) -> Result<usize, ParseError> {
+    synthetic_token_id(attrs, name)
+}
+
+fn add_base(span: SourceSpan, base: usize) -> SourceSpan {
+    SourceSpan::new(base + span.start, base + span.end)
 }
 
 fn find_static_attr(attrs: &[Attribute], name: &str) -> Option<String> {

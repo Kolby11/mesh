@@ -205,6 +205,9 @@ pub struct ElementNode {
 pub struct Attribute {
     pub name: String,
     pub value: AttributeValue,
+    /// Source span of the dynamic brace expression, when this attribute is
+    /// backed by one. Static attributes have no span yet.
+    pub span: Option<crate::SourceSpan>,
 }
 
 /// How an attribute value is bound.
@@ -234,12 +237,20 @@ pub struct TextNode {
 #[derive(Debug, Clone)]
 pub struct ExprNode {
     pub expression: String,
+    /// The complete interpolation, including its braces.
+    pub span: crate::SourceSpan,
+    /// The expression body without surrounding braces or whitespace.
+    pub expression_span: crate::SourceSpan,
 }
 
 /// Conditional block.
 #[derive(Debug, Clone)]
 pub struct IfNode {
     pub condition: String,
+    /// The complete control-flow block, from `{#if` through `{/if}`.
+    pub span: crate::SourceSpan,
+    /// The condition body without surrounding directive syntax.
+    pub condition_span: crate::SourceSpan,
     pub then_children: Vec<TemplateNode>,
     pub else_children: Vec<TemplateNode>,
 }
@@ -249,8 +260,14 @@ pub struct IfNode {
 pub struct ForNode {
     pub item_name: String,
     pub iterable: String,
+    /// The complete control-flow block, from `{#for` through `{/for}`.
+    pub span: crate::SourceSpan,
+    /// The iterable expression body in the opening directive.
+    pub iterable_span: crate::SourceSpan,
     /// Optional expression that gives each iteration a stable identity.
     pub key: Option<String>,
+    /// The optional key expression body in the opening directive.
+    pub key_span: Option<crate::SourceSpan>,
     pub children: Vec<TemplateNode>,
 }
 

@@ -7,8 +7,11 @@
 The component parser now validates a strict top-level `.mesh` block sequence,
 retains ordered byte-span metadata and attributes, requires `<template>`,
 rejects duplicates/unknown content/unsupported script languages, and reports
-inline `<i18n>` as an explicit migration error. Focused component and frontend
-tests plus workspace checking pass. The broad elements and LSP suites retain
+inline `<i18n>` as an explicit migration error. Its brace-aware template lexer
+and parser validates Luau expressions and control-flow nesting, rejects empty,
+unterminated, malformed, and mismatched braces, and preserves absolute spans
+for expressions, attributes, conditions, loops, and control-flow blocks.
+Focused component and frontend tests plus workspace checking pass. The broad elements and LSP suites retain
 their existing theme-color and locale-completion failures respectively.
 
 The deterministic presentation backend now models compositor preferred-scale
@@ -208,6 +211,6 @@ live compositor/lifecycle matrix remain separate follow-up work.
 
 ## Next
 
-The next component-language item is real brace-aware interpolation/control-flow
-parsing; the remaining presentation/resource follow-ups stay separate from
-this completed parser increment.
+The next component-language item is semantic validation linking `<props>`,
+`prop()` references, child props, visibility, types, and CSS domains; the
+remaining presentation/resource follow-ups stay separate from this parser work.
