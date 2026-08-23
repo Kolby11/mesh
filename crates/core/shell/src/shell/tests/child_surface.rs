@@ -188,6 +188,52 @@ fn child_popup_recreates_after_presentation_reports_missing_surface() {
 }
 
 #[test]
+fn child_popup_recreates_after_parent_role_replacement() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(Arc::clone(&state))));
+
+    render_components_until_child_popup(&mut shell);
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+    let presents_before = shell
+        .presentation_engine
+        .testing_presented_surfaces()
+        .iter()
+        .filter(|surface| *surface == &child_id)
+        .count();
+
+    // Replacing the parent compositor role destroys its popup descendants in
+    // the presentation backend. The retained child request must still cause
+    // a fresh popup object and a full retained-subtree present.
+    shell
+        .surfaces
+        .get_mut("@test/popover-host")
+        .expect("popover host surface should be registered")
+        .role = mesh_core_wayland::SurfaceRole::Window;
+    shell.render_components().unwrap();
+
+    assert!(
+        shell
+            .presentation_engine
+            .testing_popup_config(&child_id)
+            .is_some(),
+        "parent role replacement must not leave the child popup absent"
+    );
+    assert!(
+        shell
+            .presentation_engine
+            .testing_presented_surfaces()
+            .iter()
+            .filter(|surface| *surface == &child_id)
+            .count()
+            > presents_before,
+        "the recreated popup must receive a retained-subtree present"
+    );
+}
+
+#[test]
 fn promoting_an_embedded_child_replaces_its_popup_with_a_toplevel() {
     let mut shell = Shell::new();
     shell.presentation_engine =

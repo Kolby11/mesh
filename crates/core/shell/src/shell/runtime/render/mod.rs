@@ -204,6 +204,7 @@ impl Shell {
             // reserve for parent layer surfaces (popups stay content-sized).
             let mut paint_width = width;
             let mut paint_height = height;
+            let mut parent_reconfigured = false;
             loop {
                 let surface = self
                     .surfaces
@@ -392,6 +393,12 @@ impl Shell {
                     // pins the surface at its first-ever (often wrong) size
                     // forever.
                     self.components[index].parent.known_surface_size = None;
+                    // Reconfiguring a parent may replace its compositor role,
+                    // which also destroys every popup/window child owned by
+                    // that role. Drop child-side compositor caches together
+                    // with the parent cache so the next reconcile recreates
+                    // the child object and repaints its retained content.
+                    parent_reconfigured = true;
                 }
 
                 let inner_requested_width = surface.width;
@@ -672,6 +679,10 @@ impl Shell {
                 rerender_attempts += 1;
             }
 
+            if parent_reconfigured {
+                self.invalidate_child_surface_targets_after_parent_configure(index);
+            }
+
             // Component(VM)-level profiling + invalidation are recorded once,
             // regardless of how many surface targets the component drives.
             let observation_summary = self.components[index]
@@ -823,6 +834,18 @@ impl Shell {
     pub(in crate::shell) fn destroy_all_child_surfaces(&mut self, index: usize) {
         while !self.components[index].children.is_empty() {
             self.destroy_child_surface_at(index, 0);
+        }
+    }
+
+    fn invalidate_child_surface_targets_after_parent_configure(&mut self, index: usize) {
+        for child in &mut self.components[index].children {
+            child.target.last_surface_config = None;
+            child.target.known_surface_size = None;
+            child.target.last_region_state = None;
+            if child.kind != ChildSurfaceKind::Window {
+                child.target.last_popup_size = None;
+            }
+            child.target.force_full_present = true;
         }
     }
 

@@ -78,6 +78,11 @@ reconciliation treats that invalidated gate as configure-needed even when the
 placement is unchanged, while retained child paint state cannot suppress the
 retry present.
 
+Successful parent reconfiguration now invalidates child compositor caches as
+well. If a parent role replacement destroys its popup or window descendants,
+the next reconciliation recreates those child objects and forces a retained
+content present instead of trusting the old child target cache.
+
 Icon bitmap/SVG and font-glyph preparation still share a bounded render resource
 broker, with revision-aware cache handoff and linked-file invalidation. Typed
 icon/glyph caches and shell polling remain separate at the handoff boundary.
@@ -93,7 +98,7 @@ repository-settings fixture, which rejects its `revision` key as unknown.
 
 ## Next
 
-Complete safe popup recreation for rejected reposition or replaced parents and
-the remaining semantic presentation state diff. Carry full pointer-button
+Complete safe popup recovery for rejected reposition and the remaining
+semantic presentation state diff. Carry full pointer-button
 identity, IME/text-input-v3, connection recreation, and resource
 preparation/text shaping as separate follow-up work.
