@@ -941,6 +941,7 @@ impl FrontendCatalog {
     pub(super) fn imported_component_module_id(
         &self,
         host: &mesh_core_module::Manifest,
+        owner_source_path: Option<&std::path::Path>,
         alias: &str,
     ) -> Result<String, String> {
         let Some(entry) = self.modules.get(&host.package.id) else {
@@ -948,19 +949,18 @@ impl FrontendCatalog {
         };
         let module_id = entry
             .compiled
-            .module_component_imports
-            .get(alias)
+            .component_module_for(owner_source_path, alias)
             .or_else(|| {
                 self.contribution_entries_for(&host.package.id)
-                    .find_map(|compiled| compiled.module_component_imports.get(alias))
+                    .find_map(|compiled| compiled.component_module_for(owner_source_path, alias))
             });
         let Some(module_id) = module_id else {
             return Err(format!(
                 "no explicit component import for alias '{alias}'; add a script import such as local {alias} = require(\"@scope/module\")"
             ));
         };
-        self.validate_component_module_import(host, module_id)?;
-        Ok(module_id.clone())
+        self.validate_component_module_import(host, &module_id)?;
+        Ok(module_id)
     }
 }
 
@@ -1204,8 +1204,8 @@ fn compiled_interface_imports(
     compiled: &CompiledFrontendModule,
 ) -> std::collections::HashSet<String> {
     compiled
-        .local_components
-        .values()
+        .all_local_components()
+        .into_iter()
         .chain(std::iter::once(&compiled.component))
         .flat_map(|component| {
             component

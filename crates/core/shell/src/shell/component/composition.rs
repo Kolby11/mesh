@@ -100,6 +100,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         &self,
         host: &mesh_core_module::Manifest,
         host_instance_key: &str,
+        owner_source_path: Option<&std::path::Path>,
         alias: &str,
         source_ordinal: usize,
         duplicate_ordinal: Option<usize>,
@@ -121,18 +122,29 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             .modules
             .get(&host.package.id)
             .map(|entry| &entry.compiled);
-        // A contribution root carries its own local components, so resolve the
-        // alias against whichever of this module's compiled roots declares it.
-        let local_compiled = primary_compiled
-            .filter(|compiled| compiled.local_components.contains_key(alias))
-            .or_else(|| {
-                self.frontend_catalog
-                    .contribution_entries_for(&host.package.id)
-                    .find(|compiled| compiled.local_components.contains_key(alias))
-            })
-            .or(primary_compiled);
+        // A contribution root carries its own local components. Resolve the
+        // owner first, then resolve the alias inside that owner's namespace;
+        // another recursive owner using the same alias must not participate.
+        let local_compiled = if let Some(owner) = owner_source_path {
+            primary_compiled
+                .filter(|compiled| compiled.owns_component_path(owner))
+                .or_else(|| {
+                    self.frontend_catalog
+                        .contribution_entries_for(&host.package.id)
+                        .find(|compiled| compiled.owns_component_path(owner))
+                })
+        } else {
+            primary_compiled
+                .filter(|compiled| compiled.local_components.contains_key(alias))
+                .or_else(|| {
+                    self.frontend_catalog
+                        .contribution_entries_for(&host.package.id)
+                        .find(|compiled| compiled.local_components.contains_key(alias))
+                })
+                .or(primary_compiled)
+        };
         if let Some(compiled) = local_compiled
-            && let Some(component) = compiled.local_components.get(alias)
+            && let Some(resolved) = compiled.local_component_for(owner_source_path, alias)
         {
             let instance_key = self.instance_keys.borrow_mut().intern_embedded_occurrence(
                 host_instance_key,
@@ -159,7 +171,8 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             let mut node = self.render_local_component(
                 &compiled.manifest,
                 alias,
-                component,
+                &resolved.component,
+                &resolved.source_path,
                 &instance_key,
                 &props_json,
                 container_width,
@@ -171,8 +184,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                     .map(|style| style.rules.as_slice())
                     .unwrap_or(&[]),
             );
-            let source_path = local_component_source_path(compiled, alias);
-            annotate_source_file(&mut node, &source_path);
+            annotate_source_file(&mut node, &resolved.source_path.display().to_string());
             apply_prop_handler_calls(&mut node, &props.values, prop_handler_calls);
             if let Some(binding) = bind_this.and_then(|value| simple_state_binding(&value)) {
                 self.bind_child_instance(host_instance_key, &binding, &instance_key);
@@ -193,13 +205,14 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             return Some(node);
         }
 
-        let module_id = match self
-            .frontend_catalog
-            .imported_component_module_id(host, alias)
-        {
-            Ok(id) => id,
-            Err(message) => return Some(self.build_error_widget(message)),
-        };
+        let module_id =
+            match self
+                .frontend_catalog
+                .imported_component_module_id(host, owner_source_path, alias)
+            {
+                Ok(id) => id,
+                Err(message) => return Some(self.build_error_widget(message)),
+            };
 
         // Surface modules are portals: their visibility is tracked via pending_surface_states
         // and translated to ShowSurface/HideSurface requests in tick(). They render nothing inline.
@@ -483,35 +496,6 @@ pub(super) fn annotate_source_file(node: &mut WidgetNode, source_path: &str) {
     for child in &mut node.children {
         annotate_source_file(child, source_path);
     }
-}
-
-fn local_component_source_path(
-    compiled: &mesh_core_frontend::CompiledFrontendModule,
-    alias: &str,
-) -> String {
-    let normalized_alias = alias
-        .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect::<String>();
-    compiled
-        .watched_paths
-        .iter()
-        .find(|path| {
-            path.file_stem()
-                .and_then(|stem| stem.to_str())
-                .map(|stem| {
-                    stem.chars()
-                        .filter(|ch| ch.is_ascii_alphanumeric())
-                        .flat_map(char::to_lowercase)
-                        .collect::<String>()
-                        == normalized_alias
-                })
-                .unwrap_or(false)
-        })
-        .unwrap_or(&compiled.source_path)
-        .display()
-        .to_string()
 }
 
 /// Returns true when an embedded component's rendered tree has a `<popover>` as its

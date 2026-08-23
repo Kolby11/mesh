@@ -39,6 +39,7 @@ fn component_handler_calls_preserve_authored_prop_identity() {
             &self,
             _host: &Manifest,
             _host_instance_key: &str,
+            _owner_source_path: Option<&std::path::Path>,
             _alias: &str,
             _source_ordinal: usize,
             _duplicate_ordinal: Option<usize>,

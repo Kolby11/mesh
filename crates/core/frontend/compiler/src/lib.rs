@@ -21,11 +21,13 @@ use std::path::PathBuf;
 
 pub use accessibility::root_accessibility_role;
 pub use compile::{
-    CompileFrontendError, compile_frontend_entrypoint, compile_frontend_module, is_frontend_module,
+    CompileFrontendError, ImportCyclePath, compile_frontend_entrypoint, compile_frontend_module,
+    is_frontend_module,
 };
 pub use render::{
     PreparedComponentStyleRules, build_embedded_widget_tree_from_component,
     build_embedded_widget_tree_from_component_with_prepared_styles,
+    build_embedded_widget_tree_from_component_with_prepared_styles_and_owner,
     build_widget_tree_from_component, props_settings_schema, resolve_css_props,
 };
 pub use tags::UiTag;
@@ -98,6 +100,7 @@ pub trait FrontendCompositionResolver {
         &self,
         host: &Manifest,
         host_instance_key: &str,
+        owner_source_path: Option<&std::path::Path>,
         alias: &str,
         source_ordinal: usize,
         duplicate_ordinal: Option<usize>,
@@ -201,13 +204,145 @@ pub struct CompiledFrontendModule {
     pub manifest: Manifest,
     pub source_path: PathBuf,
     pub component: ComponentFile,
-    /// `src/components/*.mesh`, keyed by filename stem.
+    /// Compatibility alias index for direct imports, plus private
+    /// owner-scoped records keyed by canonical owner/alias/target identities.
     pub local_components: std::collections::HashMap<String, mesh_core_component::ComponentFile>,
-    /// Explicit component module imports keyed by template alias.
+    /// Explicit component module imports. Direct imports use their alias;
+    /// recursive imports use a canonical owner-scoped key.
     pub module_component_imports: std::collections::HashMap<String, String>,
     /// Every `.mesh` file that contributed, entrypoint and imports alike. The
     /// hot-reload watcher mtimes each, so editing any one triggers a recompile.
     pub watched_paths: Vec<PathBuf>,
+}
+
+/// The resolved local component selected by an owner-scoped import binding.
+///
+/// `local_components` remains a compatibility index for callers that construct
+/// compiled fixtures by hand. Compiler-produced modules resolve through the
+/// canonical, owner-scoped records encoded in that index instead.
+#[derive(Debug, Clone)]
+pub struct ResolvedLocalComponent {
+    pub source_path: PathBuf,
+    pub component: ComponentFile,
+}
+
+const SCOPED_LOCAL_COMPONENT_PREFIX: &str = "\0mesh-local\0";
+const SCOPED_MODULE_IMPORT_PREFIX: &str = "\0mesh-module\0";
+
+pub(crate) fn scoped_local_component_key(
+    owner: &std::path::Path,
+    alias: &str,
+    target: &std::path::Path,
+) -> String {
+    format!(
+        "{SCOPED_LOCAL_COMPONENT_PREFIX}{}\0{}\0{}",
+        owner.display(),
+        alias,
+        target.display()
+    )
+}
+
+pub(crate) fn scoped_module_import_key(owner: &std::path::Path, alias: &str) -> String {
+    format!(
+        "{SCOPED_MODULE_IMPORT_PREFIX}{}\0{}",
+        owner.display(),
+        alias
+    )
+}
+
+impl CompiledFrontendModule {
+    /// Resolve a local import in the namespace of the component that authored
+    /// it. The fallback is intentionally retained for older hand-built test
+    /// fixtures that only populate `local_components`.
+    pub fn local_component_for(
+        &self,
+        owner_source_path: Option<&std::path::Path>,
+        alias: &str,
+    ) -> Option<ResolvedLocalComponent> {
+        if let Some(owner) = owner_source_path {
+            let owner_prefix = format!(
+                "{SCOPED_LOCAL_COMPONENT_PREFIX}{}\0{alias}\0",
+                owner.display()
+            );
+            if let Some((key, component)) = self
+                .local_components
+                .iter()
+                .find(|(key, _)| key.starts_with(&owner_prefix))
+            {
+                let target = key.split('\0').nth(4).map(PathBuf::from)?;
+                return Some(ResolvedLocalComponent {
+                    source_path: target,
+                    component: component.clone(),
+                });
+            }
+        }
+
+        if owner_source_path.is_some_and(|owner| owner != self.source_path) {
+            return None;
+        }
+        self.local_components
+            .get(alias)
+            .map(|component| ResolvedLocalComponent {
+                source_path: self
+                    .watched_paths
+                    .iter()
+                    .find(|path| path.file_stem().and_then(|stem| stem.to_str()) == Some(alias))
+                    .cloned()
+                    .unwrap_or_else(|| self.source_path.clone()),
+                component: component.clone(),
+            })
+    }
+
+    /// Return a module import from its owner's namespace, without allowing a
+    /// same alias in another recursive owner to shadow it.
+    pub fn component_module_for(
+        &self,
+        owner_source_path: Option<&std::path::Path>,
+        alias: &str,
+    ) -> Option<String> {
+        if let Some(owner) = owner_source_path {
+            let key = scoped_module_import_key(owner, alias);
+            if let Some(module_id) = self.module_component_imports.get(&key) {
+                return Some(module_id.clone());
+            }
+        }
+        if owner_source_path.is_some_and(|owner| owner != self.source_path) {
+            return None;
+        }
+        self.module_component_imports.get(alias).cloned()
+    }
+
+    /// Whether this compiled root owns the component source path. This lets a
+    /// contribution root and a primary root use the same local alias safely.
+    pub fn owns_component_path(&self, source_path: &std::path::Path) -> bool {
+        let source_path = source_path.display().to_string();
+        self.source_path.display().to_string() == source_path
+            || self.local_components.keys().any(|key| {
+                key.strip_prefix(SCOPED_LOCAL_COMPONENT_PREFIX)
+                    .and_then(|value| value.split('\0').next())
+                    .is_some_and(|owner| owner == source_path)
+            })
+    }
+
+    /// Iterate the recursive local-component records, falling back to the
+    /// compatibility alias index for manually assembled fixtures.
+    pub fn all_local_components(&self) -> Vec<&ComponentFile> {
+        let mut scoped = self
+            .local_components
+            .iter()
+            .filter(|(key, _)| key.starts_with(SCOPED_LOCAL_COMPONENT_PREFIX))
+            .collect::<Vec<_>>();
+        scoped.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        let scoped = scoped
+            .into_iter()
+            .map(|(_, component)| component)
+            .collect::<Vec<_>>();
+        if scoped.is_empty() {
+            self.local_components.values().collect()
+        } else {
+            scoped
+        }
+    }
 }
 
 impl CompiledFrontendModule {
@@ -312,6 +447,7 @@ impl CompiledFrontendModule {
         measurer: Option<&dyn mesh_core_elements::TextMeasurer>,
         selective: Option<(&WidgetNode, &HashSet<NodeId>)>,
     ) -> WidgetNode {
+        let _source_path_guard = render::ComponentSourcePathGuard::enter(Some(&self.source_path));
         let mut root = WidgetNode::new("surface");
         root.attributes
             .insert("id".into(), self.manifest.package.id.clone());

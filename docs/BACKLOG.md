@@ -61,7 +61,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/07-component-language/improvements.md)
 
-- [ ] Resolve recursive imports by owner scope and canonical target, with collision and cycle diagnostics.
 - [ ] Replace lossy block extraction with a span-preserving top-level parser that validates required, unique, attributed blocks and `<i18n>` policy.
 - [ ] Parse interpolations and control-flow braces with a real lexer/parser that rejects malformed expressions and preserves spans.
 - [ ] Add semantic validation linking `<props>`, `prop()` references, child props, visibility, types, and CSS domains.

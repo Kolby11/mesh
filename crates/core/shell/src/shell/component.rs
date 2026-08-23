@@ -1419,8 +1419,8 @@ impl FrontendSurfaceComponent {
 fn compiled_module_has_animatable_style_rules(compiled: &CompiledFrontendModule) -> bool {
     component_has_animatable_style_rules(&compiled.component)
         || compiled
-            .local_components
-            .values()
+            .all_local_components()
+            .into_iter()
             .any(component_has_animatable_style_rules)
 }
 
@@ -1519,7 +1519,7 @@ fn tracked_service_fields_changed(
 fn element_metric_usage(compiled: &CompiledFrontendModule) -> ElementMetricUsage {
     let mut usage =
         component_element_metric_usage(&compiled.component.script, &compiled.component.template);
-    for component in compiled.local_components.values() {
+    for component in compiled.all_local_components() {
         let component_usage =
             component_element_metric_usage(&component.script, &component.template);
         usage.elements |= component_usage.elements;

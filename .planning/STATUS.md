@@ -4,6 +4,12 @@
 
 ## Now
 
+The frontend compiler now resolves recursive component imports by canonical
+owner scope, reports same-owner alias collisions and canonical cycle chains,
+and carries that resolution into shell composition, style collection, and
+runtime module-import lookup. Focused frontend tests and workspace checks pass;
+the broad shell library retains its existing fixture/runtime failures.
+
 The deterministic presentation backend now models compositor preferred-scale
 updates for live surfaces: valid 0.5x..4x changes are observable through the
 same scale/full-redraw seam as Wayland, while missing and destroyed surfaces

@@ -160,9 +160,11 @@ pub(super) fn build_component_ref(
         }
     }
     if let Some(composition) = composition {
+        let owner_source_path = super::current_component_source_path();
         if let Some(node) = composition.render_import(
             manifest,
             host_instance_key,
+            owner_source_path.as_deref(),
             &component.name,
             component.source_ordinal,
             component.duplicate_ordinal,

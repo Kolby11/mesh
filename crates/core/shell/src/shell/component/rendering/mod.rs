@@ -60,12 +60,8 @@ impl FrontendSurfaceComponent {
                 rules.extend(style.rules.iter().cloned());
             }
 
-            let mut aliases: Vec<_> = self.compiled.local_components.keys().cloned().collect();
-            aliases.sort();
-            for alias in aliases {
-                if let Some(component) = self.compiled.local_components.get(&alias)
-                    && let Some(style) = component.style.as_ref()
-                {
+            for component in self.compiled.all_local_components() {
+                if let Some(style) = component.style.as_ref() {
                     rules.extend(style.rules.iter().cloned());
                 }
             }
@@ -93,12 +89,8 @@ impl FrontendSurfaceComponent {
                 if let Some(style) = compiled.component.style.as_ref() {
                     rules.extend(style.rules.iter().cloned());
                 }
-                let mut aliases: Vec<_> = compiled.local_components.keys().cloned().collect();
-                aliases.sort();
-                for alias in aliases {
-                    if let Some(component) = compiled.local_components.get(&alias)
-                        && let Some(style) = component.style.as_ref()
-                    {
+                for component in compiled.all_local_components() {
+                    if let Some(style) = component.style.as_ref() {
                         rules.extend(style.rules.iter().cloned());
                     }
                 }
@@ -119,12 +111,8 @@ impl FrontendSurfaceComponent {
                 if let Some(style) = entry.compiled.component.style.as_ref() {
                     rules.extend(style.rules.iter().cloned());
                 }
-                let mut aliases: Vec<_> = entry.compiled.local_components.keys().cloned().collect();
-                aliases.sort();
-                for alias in aliases {
-                    if let Some(component) = entry.compiled.local_components.get(&alias)
-                        && let Some(style) = component.style.as_ref()
-                    {
+                for component in entry.compiled.all_local_components() {
+                    if let Some(style) = component.style.as_ref() {
                         rules.extend(style.rules.iter().cloned());
                     }
                 }

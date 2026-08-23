@@ -638,6 +638,7 @@ impl FrontendSurfaceComponent {
         host: &mesh_core_module::Manifest,
         alias: &str,
         component: &mesh_core_component::ComponentFile,
+        source_path: &std::path::Path,
         instance_key: &str,
         props: &HashMap<String, serde_json::Value>,
         container_width: f32,
@@ -666,7 +667,9 @@ impl FrontendSurfaceComponent {
             let cached = self.prepared_component_styles.borrow();
             cached
                 .get(&host.package.id)
-                .and_then(|components| components.get(alias))
+                .and_then(|components| {
+                    components.get(&format!("{}::{alias}", source_path.display()))
+                })
                 .cloned()
         }
         .unwrap_or_else(|| {
@@ -677,11 +680,14 @@ impl FrontendSurfaceComponent {
                 .borrow_mut()
                 .entry(host.package.id.clone())
                 .or_default()
-                .insert(alias.to_string(), Arc::clone(&prepared));
+                .insert(
+                    format!("{}::{alias}", source_path.display()),
+                    Arc::clone(&prepared),
+                );
             prepared
         });
         let node =
-            mesh_core_frontend::build_embedded_widget_tree_from_component_with_prepared_styles(
+            mesh_core_frontend::build_embedded_widget_tree_from_component_with_prepared_styles_and_owner(
                 component,
                 host,
                 &theme,
@@ -691,6 +697,7 @@ impl FrontendSurfaceComponent {
                 instance_key,
                 Some(&bound),
                 &prepared_styles,
+                source_path,
             );
         node
     }

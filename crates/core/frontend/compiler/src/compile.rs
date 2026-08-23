@@ -34,8 +34,18 @@ pub enum CompileFrontendError {
     #[error("invalid component source path {path}: {message}")]
     InvalidSourcePath { path: PathBuf, message: String },
 
-    #[error("component import alias '{alias}' is declared with multiple targets")]
-    ConflictingImportAlias { alias: String },
+    #[error(
+        "component import alias '{alias}' in {owner} is declared with multiple targets ({existing} and {incoming})"
+    )]
+    ConflictingImportAlias {
+        alias: String,
+        owner: PathBuf,
+        existing: String,
+        incoming: String,
+    },
+
+    #[error("component import cycle detected: {cycle}")]
+    ImportCycle { cycle: ImportCyclePath },
 
     #[error("standalone component validation failed for {path}: {message}")]
     StandaloneComponentViolation { path: PathBuf, message: String },
@@ -94,6 +104,9 @@ pub fn compile_frontend_entrypoint(
     let mut local_components: HashMap<String, ComponentFile> = HashMap::new();
     let mut module_component_imports = HashMap::new();
     let mut seen_local_paths = HashSet::new();
+    let mut parsed_components = HashMap::from([(source_path.clone(), component.clone())]);
+    let mut import_bindings = HashMap::new();
+    let mut ancestry = vec![source_path.clone()];
     collect_imports(
         &component,
         &source_path,
@@ -101,6 +114,9 @@ pub fn compile_frontend_entrypoint(
         &mut local_components,
         &mut module_component_imports,
         &mut seen_local_paths,
+        &mut parsed_components,
+        &mut import_bindings,
+        &mut ancestry,
     )?;
     validate_standalone_imports(&component, &source_path, module_dir, &local_components)?;
     validate_customizable_slots(manifest, &component, &source_path)?;
@@ -130,6 +146,21 @@ pub fn compile_frontend_entrypoint(
         module_component_imports,
         watched_paths,
     })
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportCyclePath(Vec<PathBuf>);
+
+impl std::fmt::Display for ImportCyclePath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (index, path) in self.0.iter().enumerate() {
+            if index > 0 {
+                f.write_str(" -> ")?;
+            }
+            write!(f, "{}", path.display())?;
+        }
+        Ok(())
+    }
 }
 
 fn validate_customizable_slots(
@@ -214,19 +245,42 @@ fn collect_imports(
     local_components: &mut HashMap<String, ComponentFile>,
     module_component_imports: &mut HashMap<String, String>,
     seen_local_paths: &mut HashSet<PathBuf>,
+    parsed_components: &mut HashMap<PathBuf, ComponentFile>,
+    import_bindings: &mut HashMap<(PathBuf, String), String>,
+    ancestry: &mut Vec<PathBuf>,
 ) -> Result<(), CompileFrontendError> {
     for import in &component.imports {
         match &import.target {
             ComponentImportTarget::ComponentLocal(source) => {
                 let target_path = resolve_local_component_file(source, component_path, module_dir)?;
-                let parsed = parse_component_file(&target_path)?;
-                insert_local_component(
-                    &import.alias,
-                    target_path.clone(),
-                    parsed.clone(),
-                    local_components,
-                )?;
+                let incoming = format!("local target {}", target_path.display());
+                insert_import_binding(component_path, &import.alias, incoming, import_bindings)?;
+                let parsed = if let Some(parsed) = parsed_components.get(&target_path) {
+                    parsed.clone()
+                } else {
+                    let parsed = parse_component_file(&target_path)?;
+                    parsed_components.insert(target_path.clone(), parsed.clone());
+                    parsed
+                };
+                let scoped_key =
+                    crate::scoped_local_component_key(component_path, &import.alias, &target_path);
+                local_components.insert(scoped_key, parsed.clone());
+                if ancestry.len() == 1 {
+                    local_components.insert(import.alias.clone(), parsed.clone());
+                }
+                if ancestry.iter().any(|path| path == &target_path) {
+                    let start = ancestry
+                        .iter()
+                        .position(|path| path == &target_path)
+                        .unwrap_or(0);
+                    let mut cycle = ancestry[start..].to_vec();
+                    cycle.push(target_path);
+                    return Err(CompileFrontendError::ImportCycle {
+                        cycle: ImportCyclePath(cycle),
+                    });
+                }
                 if seen_local_paths.insert(target_path.clone()) {
+                    ancestry.push(target_path.clone());
                     collect_imports(
                         &parsed,
                         &target_path,
@@ -234,45 +288,84 @@ fn collect_imports(
                         local_components,
                         module_component_imports,
                         seen_local_paths,
+                        parsed_components,
+                        import_bindings,
+                        ancestry,
                     )?;
+                    ancestry.pop();
                 }
             }
             ComponentImportTarget::ComponentModule(module_id) => {
-                insert_module_component_import(&import.alias, module_id, module_component_imports)?;
+                insert_import_binding(
+                    component_path,
+                    &import.alias,
+                    format!("module target {module_id}"),
+                    import_bindings,
+                )?;
+                insert_module_component_import(
+                    component_path,
+                    &import.alias,
+                    module_id,
+                    ancestry.len() == 1,
+                    module_component_imports,
+                )?;
             }
-            ComponentImportTarget::InterfaceApi { .. } => {}
+            ComponentImportTarget::InterfaceApi { interface, version } => {
+                insert_import_binding(
+                    component_path,
+                    &import.alias,
+                    format!(
+                        "interface target {}{}",
+                        interface,
+                        version
+                            .as_deref()
+                            .map(|version| format!("@{version}"))
+                            .unwrap_or_default()
+                    ),
+                    import_bindings,
+                )?;
+            }
         }
     }
     Ok(())
 }
 
-fn insert_local_component(
+fn insert_import_binding(
+    owner: &Path,
     alias: &str,
-    path: PathBuf,
-    component: ComponentFile,
-    local_components: &mut HashMap<String, ComponentFile>,
+    incoming: String,
+    import_bindings: &mut HashMap<(PathBuf, String), String>,
 ) -> Result<(), CompileFrontendError> {
-    local_components.insert(alias.to_string(), component);
-    tracing::debug!(
-        "registered local component import {alias} from {}",
-        path.display()
-    );
+    let key = (owner.to_path_buf(), alias.to_string());
+    if let Some(existing) = import_bindings.get(&key)
+        && existing != &incoming
+    {
+        return Err(CompileFrontendError::ConflictingImportAlias {
+            alias: alias.to_string(),
+            owner: owner.to_path_buf(),
+            existing: existing.clone(),
+            incoming,
+        });
+    }
+    import_bindings.insert(key, incoming);
     Ok(())
 }
 
 fn insert_module_component_import(
+    owner: &Path,
     alias: &str,
     module_id: &str,
+    is_root: bool,
     module_component_imports: &mut HashMap<String, String>,
 ) -> Result<(), CompileFrontendError> {
-    if let Some(existing) = module_component_imports.get(alias) {
-        if existing != module_id {
-            return Err(CompileFrontendError::ConflictingImportAlias {
-                alias: alias.to_string(),
-            });
-        }
+    if is_root {
+        module_component_imports.insert(alias.to_string(), module_id.to_string());
+    } else {
+        module_component_imports.insert(
+            crate::scoped_module_import_key(owner, alias),
+            module_id.to_string(),
+        );
     }
-    module_component_imports.insert(alias.to_string(), module_id.to_string());
     Ok(())
 }
 
@@ -483,7 +576,14 @@ fn validate_template_nodes(
 
                 if let Some(source) = local_imports.get(component_ref.name.as_str()) {
                     let child_path = resolve_local_component_path(source, path, module_dir)?;
-                    let Some(child_component) = local_components.get(&component_ref.name) else {
+                    let child_component = local_components
+                        .get(&crate::scoped_local_component_key(
+                            path,
+                            &component_ref.name,
+                            &child_path,
+                        ))
+                        .or_else(|| local_components.get(&component_ref.name));
+                    let Some(child_component) = child_component else {
                         continue;
                     };
                     let explicit_props = component_ref
@@ -974,5 +1074,161 @@ end
             &HashMap::new(),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn recursive_imports_are_resolved_by_canonical_owner_and_alias() {
+        let directory = tempfile::tempdir().unwrap();
+        let root_path = directory.path().join("main.mesh");
+        let branch_a = directory.path().join("branch-a.mesh");
+        let branch_b = directory.path().join("branch-b.mesh");
+        let item_a = directory.path().join("item-a.mesh");
+        let item_b = directory.path().join("item-b.mesh");
+        std::fs::write(
+            &root_path,
+            r#"
+<template><BranchA /><BranchB /></template>
+<script lang="luau">
+import BranchA from "./branch-a.mesh"
+import BranchB from "./branch-b.mesh"
+</script>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &branch_a,
+            r#"
+<template><Item /></template>
+<script lang="luau">import Item from "./item-a.mesh"</script>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &branch_b,
+            r#"
+<template><Item /></template>
+<script lang="luau">import Item from "./item-b.mesh"</script>
+"#,
+        )
+        .unwrap();
+        std::fs::write(&item_a, "<template><text>A</text></template>").unwrap();
+        std::fs::write(&item_b, "<template><text>B</text></template>").unwrap();
+
+        let root = parse_component_file(&root_path).unwrap();
+        let mut local_components = HashMap::new();
+        let mut module_component_imports = HashMap::new();
+        let mut seen_local_paths = HashSet::new();
+        let mut parsed_components = HashMap::from([(root_path.clone(), root.clone())]);
+        let mut import_bindings = HashMap::new();
+        let mut ancestry = vec![root_path.clone()];
+        collect_imports(
+            &root,
+            &root_path,
+            directory.path(),
+            &mut local_components,
+            &mut module_component_imports,
+            &mut seen_local_paths,
+            &mut parsed_components,
+            &mut import_bindings,
+            &mut ancestry,
+        )
+        .unwrap();
+
+        let root_path = root_path.canonicalize().unwrap();
+        let branch_a = branch_a.canonicalize().unwrap();
+        let branch_b = branch_b.canonicalize().unwrap();
+        let item_a = item_a.canonicalize().unwrap();
+        let item_b = item_b.canonicalize().unwrap();
+        assert!(
+            local_components.contains_key(&crate::scoped_local_component_key(
+                &branch_a, "Item", &item_a,
+            ))
+        );
+        assert!(
+            local_components.contains_key(&crate::scoped_local_component_key(
+                &branch_b, "Item", &item_b,
+            ))
+        );
+        assert_eq!(seen_local_paths.len(), 4);
+
+        validate_standalone_imports(&root, &root_path, directory.path(), &local_components)
+            .unwrap();
+    }
+
+    #[test]
+    fn recursive_import_cycle_reports_canonical_path_chain() {
+        let directory = tempfile::tempdir().unwrap();
+        let root_path = directory.path().join("main.mesh");
+        let first_path = directory.path().join("first.mesh");
+        let second_path = directory.path().join("second.mesh");
+        std::fs::write(
+            &root_path,
+            "<template><First /></template><script lang=\"luau\">import First from \"./first.mesh\"</script>",
+        )
+        .unwrap();
+        std::fs::write(
+            &first_path,
+            "<template><Second /></template><script lang=\"luau\">import Second from \"./second.mesh\"</script>",
+        )
+        .unwrap();
+        std::fs::write(
+            &second_path,
+            "<template><First /></template><script lang=\"luau\">import First from \"./first.mesh\"</script>",
+        )
+        .unwrap();
+
+        let root = parse_component_file(&root_path).unwrap();
+        let mut local_components = HashMap::new();
+        let mut module_component_imports = HashMap::new();
+        let mut seen_local_paths = HashSet::new();
+        let mut parsed_components = HashMap::from([(root_path.clone(), root.clone())]);
+        let mut import_bindings = HashMap::new();
+        let mut ancestry = vec![root_path.clone()];
+        let error = collect_imports(
+            &root,
+            &root_path,
+            directory.path(),
+            &mut local_components,
+            &mut module_component_imports,
+            &mut seen_local_paths,
+            &mut parsed_components,
+            &mut import_bindings,
+            &mut ancestry,
+        )
+        .unwrap_err();
+
+        let first = first_path.canonicalize().unwrap();
+        let second = second_path.canonicalize().unwrap();
+        assert!(matches!(error, CompileFrontendError::ImportCycle { .. }));
+        let message = error.to_string();
+        assert!(message.contains(&first.display().to_string()));
+        assert!(message.contains(&second.display().to_string()));
+    }
+
+    #[test]
+    fn import_alias_collision_reports_owner_and_targets() {
+        let owner = PathBuf::from("/module/src/owner.mesh");
+        let mut bindings = HashMap::new();
+        insert_import_binding(
+            &owner,
+            "Item",
+            "local target /module/src/one.mesh".into(),
+            &mut bindings,
+        )
+        .unwrap();
+        let error = insert_import_binding(
+            &owner,
+            "Item",
+            "module target @mesh/item".into(),
+            &mut bindings,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            CompileFrontendError::ConflictingImportAlias { ref alias, .. } if alias == "Item"
+        ));
+        assert!(error.to_string().contains("owner.mesh"));
+        assert!(error.to_string().contains("@mesh/item"));
     }
 }

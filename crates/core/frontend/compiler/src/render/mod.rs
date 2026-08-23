@@ -14,6 +14,7 @@ use mesh_core_theme::Theme;
 use serde_json;
 
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 mod elements;
 mod expr_eval;
@@ -25,6 +26,34 @@ pub(crate) use elements::template_has_dynamic_structure;
 pub(crate) use expr_eval::collect_component_tags;
 pub(crate) use style_context::BuildStyleContext;
 pub use style_context::{PreparedComponentStyleRules, props_settings_schema, resolve_css_props};
+
+thread_local! {
+    static CURRENT_COMPONENT_SOURCE_PATH: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+pub(crate) fn current_component_source_path() -> Option<PathBuf> {
+    CURRENT_COMPONENT_SOURCE_PATH.with(|path| path.borrow().clone())
+}
+
+pub(crate) struct ComponentSourcePathGuard(Option<PathBuf>);
+
+impl ComponentSourcePathGuard {
+    pub(crate) fn enter(path: Option<&Path>) -> Self {
+        Self(
+            CURRENT_COMPONENT_SOURCE_PATH
+                .with(|current| current.replace(path.map(Path::to_path_buf))),
+        )
+    }
+}
+
+impl Drop for ComponentSourcePathGuard {
+    fn drop(&mut self) {
+        CURRENT_COMPONENT_SOURCE_PATH.with(|current| {
+            current.replace(self.0.take());
+        });
+    }
+}
 
 use elements::*;
 use expr_eval::*;
@@ -59,6 +88,7 @@ pub fn build_widget_tree_from_component(
         host_rules,
         None,
         false,
+        None,
     )
 }
 
@@ -89,6 +119,7 @@ pub fn build_embedded_widget_tree_from_component(
         host_rules,
         None,
         true,
+        None,
     )
 }
 
@@ -118,6 +149,38 @@ pub fn build_embedded_widget_tree_from_component_with_prepared_styles(
         &[],
         Some(prepared_styles),
         true,
+        None,
+    )
+}
+
+/// Build a local component while retaining its canonical source identity for
+/// recursive owner-scoped import resolution.
+#[allow(clippy::too_many_arguments)]
+pub fn build_embedded_widget_tree_from_component_with_prepared_styles_and_owner(
+    component: &mesh_core_component::ComponentFile,
+    host_manifest: &Manifest,
+    theme: &Theme,
+    container_width: f32,
+    container_height: f32,
+    composition: Option<&dyn FrontendCompositionResolver>,
+    instance_key: &str,
+    state: Option<&dyn VariableStore>,
+    prepared_styles: &PreparedComponentStyleRules,
+    owner_source_path: &Path,
+) -> WidgetNode {
+    build_widget_tree_from_component_inner(
+        component,
+        host_manifest,
+        theme,
+        container_width,
+        container_height,
+        composition,
+        instance_key,
+        state,
+        &[],
+        Some(prepared_styles),
+        true,
+        Some(owner_source_path),
     )
 }
 
@@ -134,7 +197,9 @@ fn build_widget_tree_from_component_inner(
     host_rules: &[mesh_core_component::style::StyleRule],
     prepared_styles: Option<&PreparedComponentStyleRules>,
     namespace_handlers: bool,
+    owner_source_path: Option<&Path>,
 ) -> WidgetNode {
+    let _source_path_guard = ComponentSourcePathGuard::enter(owner_source_path);
     let resolver =
         StyleResolver::new(theme).with_props(resolve_css_props(component.props.as_ref(), state));
     let component_rules = component
