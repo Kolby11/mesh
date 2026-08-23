@@ -107,7 +107,6 @@ pub(in crate::wayland_surface) struct SurfaceEntry {
     pub(in crate::wayland_surface) width: u32,
     pub(in crate::wayland_surface) height: u32,
     pub(in crate::wayland_surface) configured: bool,
-    pub(in crate::wayland_surface) config_fingerprint: u64,
     /// Set until title/app_id have been pushed to the toplevel once. The first
     /// `apply_config` after creation sees a config equal to the one the entry
     /// was constructed with, so identity would otherwise never be sent.
@@ -155,7 +154,6 @@ impl SurfaceEntry {
             role,
             width: cfg.width.max(1),
             height: cfg.height.max(1),
-            config_fingerprint: surface_config_fingerprint(&cfg, applied_keyboard_mode),
             padding: cfg.padding,
             cfg,
             applied_keyboard_mode,
@@ -214,8 +212,15 @@ impl SurfaceEntry {
         cfg: &SurfaceConfig,
         keyboard_mode: KeyboardMode,
     ) -> bool {
-        !self.configured
-            || self.config_fingerprint != surface_config_fingerprint(cfg, keyboard_mode)
+        !self.configured || self.config_change(cfg, keyboard_mode) != SurfaceConfigChange::Unchanged
+    }
+
+    pub(super) fn config_change(
+        &self,
+        cfg: &SurfaceConfig,
+        keyboard_mode: KeyboardMode,
+    ) -> SurfaceConfigChange {
+        surface_config_change(&self.cfg, self.applied_keyboard_mode, cfg, keyboard_mode)
     }
 
     pub(super) fn apply_config(&mut self, cfg: SurfaceConfig, keyboard_mode: KeyboardMode) {
@@ -239,11 +244,11 @@ impl SurfaceEntry {
             return;
         };
         let requires_fresh_configure =
-            surface_change_requires_fresh_configure(&self.cfg, &cfg, self.configured);
+            surface_config_change(&self.cfg, self.applied_keyboard_mode, &cfg, keyboard_mode)
+                .requires_fresh_configure();
         let effective_cfg = cfg.with_keyboard_mode(keyboard_mode);
         apply_config(layer_surface, &effective_cfg);
         layer_surface.commit();
-        self.config_fingerprint = surface_config_fingerprint(&cfg, keyboard_mode);
         self.cfg = cfg;
         self.applied_keyboard_mode = keyboard_mode;
         // Geometry/layout reconfiguration can require a fresh layer-shell
@@ -297,7 +302,6 @@ impl SurfaceEntry {
             role.applied_size_hints = Some(hints);
         }
 
-        self.config_fingerprint = surface_config_fingerprint(&cfg, keyboard_mode);
         self.cfg = cfg;
         self.applied_keyboard_mode = keyboard_mode;
         window.commit();

@@ -126,16 +126,16 @@ impl WaylandSurfaceBackend {
             .state
             .effective_keyboard_mode_for(surface_id, cfg.keyboard_mode);
 
-        let role_changed = self
-            .state
-            .surfaces
-            .get(surface_id)
-            .is_some_and(|entry| entry.role.is_window() != (cfg.role == SurfaceRole::Window));
-        if role_changed {
+        let must_recreate = self.state.surfaces.get(surface_id).is_some_and(|entry| {
+            entry
+                .config_change(&cfg, effective_keyboard_mode)
+                .requires_recreation()
+        });
+        if must_recreate {
             tracing::info!(
                 surface_id,
                 role = ?cfg.role,
-                "surface role changed; recreating the compositor surface"
+                "surface creation identity changed; recreating the compositor surface"
             );
             // Create the replacement while the last-known-good role is still
             // installed. A missing protocol global or compositor allocation

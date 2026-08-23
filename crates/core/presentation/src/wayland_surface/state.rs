@@ -1,4 +1,4 @@
-use super::backend::{SurfaceEntry, WaylandRole, apply_config, surface_config_fingerprint};
+use super::backend::{SurfaceEntry, WaylandRole, apply_config};
 use super::*;
 use std::sync::Arc;
 
@@ -274,7 +274,6 @@ impl State {
         apply_config(layer_surface, &effective_cfg);
         layer_surface.commit();
         entry.applied_keyboard_mode = effective_keyboard_mode;
-        entry.config_fingerprint = surface_config_fingerprint(&entry.cfg, effective_keyboard_mode);
     }
 
     pub(super) fn request_surface_focus(

@@ -1,6 +1,5 @@
 use super::*;
 use mesh_core_render::DamageRect;
-use std::hash::{Hash, Hasher};
 
 /// Configuration passed from the shell before each present.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,116 +154,81 @@ impl SurfaceConfig {
     }
 }
 
-struct SurfaceConfigHasher(u64);
+/// The protocol work implied by a change from one accepted surface intent to
+/// another. Keeping this classification typed prevents a newly added config
+/// field from silently disappearing from a hash and lets the caller choose the
+/// safe transition instead of treating every change as the same reconfigure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SurfaceConfigChange {
+    /// No compositor-facing or retained surface state changed.
+    Unchanged,
+    /// Apply the new live state to the existing role. This includes title,
+    /// app-id, size hints, keyboard interactivity, and input-region padding.
+    Live,
+    /// Re-commit layer-shell geometry and wait for a fresh configure before
+    /// attaching another buffer.
+    Configure,
+    /// The role object's creation-time identity or protocol negotiation
+    /// changed; prepare a replacement object before destroying the old one.
+    Recreate,
+}
 
-impl Default for SurfaceConfigHasher {
-    fn default() -> Self {
-        Self(0xcbf2_9ce4_8422_2325)
+impl SurfaceConfigChange {
+    pub(super) fn requires_recreation(self) -> bool {
+        matches!(self, Self::Recreate)
+    }
+
+    pub(super) fn requires_fresh_configure(self) -> bool {
+        matches!(self, Self::Configure | Self::Recreate)
     }
 }
 
-impl Hasher for SurfaceConfigHasher {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-
-    fn write(&mut self, bytes: &[u8]) {
-        for byte in bytes {
-            self.write_u8(*byte);
-        }
-    }
-
-    fn write_u8(&mut self, i: u8) {
-        self.0 ^= u64::from(i);
-        self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-
-    fn write_u32(&mut self, i: u32) {
-        self.0 ^= u64::from(i);
-        self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-
-    fn write_i32(&mut self, i: i32) {
-        self.write_u32(i as u32);
-    }
-}
-
-pub(in crate::wayland_surface) fn surface_config_fingerprint(
-    cfg: &SurfaceConfig,
-    keyboard_mode: KeyboardMode,
-) -> u64 {
-    let mut hasher = SurfaceConfigHasher::default();
-    surface_role_slot(cfg.role).hash(&mut hasher);
-    cfg.window.title.hash(&mut hasher);
-    cfg.window.app_id.hash(&mut hasher);
-    cfg.window.resizable.hash(&mut hasher);
-    surface_edge_slot(cfg.edge).hash(&mut hasher);
-    surface_layer_slot(cfg.layer).hash(&mut hasher);
-    cfg.exclusive_zone.hash(&mut hasher);
-    keyboard_mode_slot(keyboard_mode).hash(&mut hasher);
-    cfg.width.hash(&mut hasher);
-    cfg.height.hash(&mut hasher);
-    // The reserve carries no protocol request, but it decides the input region,
-    // so a config that changes only the reserve must still reach `apply_config`
-    // (`surface_change_requires_fresh_configure` keeps it from invalidating the
-    // compositor's acked size).
-    cfg.padding.hash(&mut hasher);
-    cfg.margin_top.hash(&mut hasher);
-    cfg.margin_right.hash(&mut hasher);
-    cfg.margin_bottom.hash(&mut hasher);
-    cfg.margin_left.hash(&mut hasher);
-    hasher.finish()
-}
-
-pub(super) fn surface_role_slot(role: SurfaceRole) -> u8 {
-    match role {
-        SurfaceRole::Layer => 0,
-        SurfaceRole::Window => 1,
-    }
-}
-
-pub(super) fn surface_edge_slot(edge: Option<Edge>) -> u8 {
-    match edge {
-        Some(Edge::Top) => 1,
-        Some(Edge::Bottom) => 2,
-        Some(Edge::Left) => 3,
-        Some(Edge::Right) => 4,
-        None => 0,
-    }
-}
-
-pub(super) fn surface_layer_slot(layer: MeshLayer) -> u8 {
-    match layer {
-        MeshLayer::Background => 1,
-        MeshLayer::Bottom => 2,
-        MeshLayer::Top => 3,
-        MeshLayer::Overlay => 4,
-    }
-}
-
-pub(super) fn keyboard_mode_slot(mode: KeyboardMode) -> u8 {
-    match mode {
-        KeyboardMode::None => 0,
-        KeyboardMode::Exclusive => 1,
-        KeyboardMode::OnDemand => 2,
-    }
-}
-
-pub(super) fn surface_change_requires_fresh_configure(
+/// Classify a new shell surface intent against the intent currently applied to
+/// the live compositor object.
+pub(super) fn surface_config_change(
     previous: &SurfaceConfig,
+    previous_keyboard_mode: KeyboardMode,
     next: &SurfaceConfig,
-    configured: bool,
-) -> bool {
-    !configured
-        || previous.edge != next.edge
-        || previous.layer != next.layer
-        || previous.exclusive_zone != next.exclusive_zone
-        || previous.width != next.width
-        || previous.height != next.height
-        || previous.margin_top != next.margin_top
-        || previous.margin_right != next.margin_right
-        || previous.margin_bottom != next.margin_bottom
-        || previous.margin_left != next.margin_left
+    next_keyboard_mode: KeyboardMode,
+) -> SurfaceConfigChange {
+    if previous.role != next.role {
+        return SurfaceConfigChange::Recreate;
+    }
+
+    // A layer namespace is supplied only while creating the role, and blur is
+    // encoded into that namespace. Decorations are negotiated while creating an
+    // xdg toplevel. Neither can be repaired by a later live request.
+    let creation_identity_changed = match previous.role {
+        SurfaceRole::Layer => previous.namespace != next.namespace || previous.blur != next.blur,
+        SurfaceRole::Window => previous.window.decorations != next.window.decorations,
+    };
+    if creation_identity_changed {
+        return SurfaceConfigChange::Recreate;
+    }
+
+    let geometry_changed = match previous.role {
+        SurfaceRole::Layer => {
+            previous.edge != next.edge
+                || previous.layer != next.layer
+                || previous.exclusive_zone != next.exclusive_zone
+                || previous.width != next.width
+                || previous.height != next.height
+                || previous.margin_top != next.margin_top
+                || previous.margin_right != next.margin_right
+                || previous.margin_bottom != next.margin_bottom
+                || previous.margin_left != next.margin_left
+        }
+        SurfaceRole::Window => false,
+    };
+    if geometry_changed {
+        return SurfaceConfigChange::Configure;
+    }
+
+    if previous != next || previous_keyboard_mode != next_keyboard_mode {
+        SurfaceConfigChange::Live
+    } else {
+        SurfaceConfigChange::Unchanged
+    }
 }
 
 /// Clamp a layer-surface config's size/margins to a known output's logical

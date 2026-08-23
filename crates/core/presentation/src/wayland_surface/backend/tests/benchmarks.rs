@@ -1,7 +1,6 @@
 use super::*;
 use mesh_core_render::DamageRect;
 use smallvec::SmallVec;
-use std::hash::{Hash, Hasher};
 
 #[test]
 #[ignore = "release-only present damage allocation benchmark"]
@@ -142,88 +141,6 @@ fn smallvec_clipped_damage_beats_heap_vec_scratch() {
     assert!(inline < heap_vec);
 }
 
-#[test]
-#[ignore = "release-only surface config fingerprint microbenchmark"]
-fn primitive_surface_config_hashing_beats_byte_writes() {
-    use std::hint::black_box;
-    use std::time::Instant;
-
-    struct OldHasher(u64);
-    impl Default for OldHasher {
-        fn default() -> Self {
-            Self(0xcbf2_9ce4_8422_2325)
-        }
-    }
-    impl Hasher for OldHasher {
-        fn finish(&self) -> u64 {
-            self.0
-        }
-
-        fn write(&mut self, bytes: &[u8]) {
-            for byte in bytes {
-                self.0 ^= u64::from(*byte);
-                self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
-            }
-        }
-    }
-
-    fn old_surface_config_fingerprint(cfg: &SurfaceConfig, keyboard_mode: KeyboardMode) -> u64 {
-        let mut hasher = OldHasher::default();
-        surface_edge_slot(cfg.edge).hash(&mut hasher);
-        surface_layer_slot(cfg.layer).hash(&mut hasher);
-        cfg.exclusive_zone.hash(&mut hasher);
-        keyboard_mode_slot(keyboard_mode).hash(&mut hasher);
-        cfg.width.hash(&mut hasher);
-        cfg.height.hash(&mut hasher);
-        cfg.margin_top.hash(&mut hasher);
-        cfg.margin_right.hash(&mut hasher);
-        cfg.margin_bottom.hash(&mut hasher);
-        cfg.margin_left.hash(&mut hasher);
-        hasher.finish()
-    }
-
-    let cfg = SurfaceConfig {
-        role: SurfaceRole::Layer,
-        window: WindowOptions::default(),
-        edge: Some(Edge::Top),
-        layer: MeshLayer::Overlay,
-        size_policy: LayerSurfaceSizePolicy::Fixed,
-        width: 1_920,
-        height: 48,
-        padding: SurfacePadding::default(),
-        exclusive_zone: 48,
-        keyboard_mode: KeyboardMode::OnDemand,
-        namespace: "benchmark".into(),
-        margin_top: 2,
-        margin_right: 4,
-        margin_bottom: 6,
-        margin_left: 8,
-        blur: false,
-    };
-    let iterations = 2_000_000;
-
-    let started = Instant::now();
-    let mut old_hash = 0;
-    for _ in 0..iterations {
-        old_hash ^=
-            old_surface_config_fingerprint(black_box(&cfg), black_box(KeyboardMode::OnDemand));
-    }
-    let old = started.elapsed();
-
-    let started = Instant::now();
-    let mut new_hash = 0;
-    for _ in 0..iterations {
-        new_hash ^= surface_config_fingerprint(black_box(&cfg), black_box(KeyboardMode::OnDemand));
-    }
-    let new = started.elapsed();
-
-    black_box((old_hash, new_hash));
-    eprintln!(
-        "surface config fingerprint over {iterations} configs: byte writes {old:?}, primitive writes {new:?}, ratio {:.1}x",
-        old.as_secs_f64() / new.as_secs_f64()
-    );
-    assert!(new < old);
-}
 #[test]
 #[ignore = "release-only disjoint SHM copy benchmark"]
 fn disjoint_damage_copy_beats_bounding_union_copy() {

@@ -64,65 +64,100 @@ fn window_config_is_not_clamped_to_an_output() {
 }
 
 #[test]
-fn window_identity_and_role_participate_in_the_config_fingerprint() {
+fn window_identity_and_role_have_typed_change_kinds() {
     let cfg = window_cfg();
-    let baseline = surface_config_fingerprint(&cfg, KeyboardMode::None);
 
     let mut retitled = cfg.clone();
     retitled.window.title = "Settings — Audio".into();
-    assert_ne!(
-        baseline,
-        surface_config_fingerprint(&retitled, KeyboardMode::None),
-        "a title change must reach the toplevel instead of being deduplicated away"
+    assert_eq!(
+        surface_config_change(&cfg, KeyboardMode::None, &retitled, KeyboardMode::None),
+        SurfaceConfigChange::Live,
+        "a title change must reach the toplevel without requiring a fresh configure"
     );
 
     let mut resizable = cfg.clone();
     resizable.window.resizable = true;
-    assert_ne!(
-        baseline,
-        surface_config_fingerprint(&resizable, KeyboardMode::None)
+    assert_eq!(
+        surface_config_change(&cfg, KeyboardMode::None, &resizable, KeyboardMode::None),
+        SurfaceConfigChange::Live
     );
 
     let mut as_layer = cfg.clone();
     as_layer.role = SurfaceRole::Layer;
-    assert_ne!(
-        baseline,
-        surface_config_fingerprint(&as_layer, KeyboardMode::None),
-        "a role change must be visible to the reconfigure gate"
+    assert_eq!(
+        surface_config_change(&cfg, KeyboardMode::None, &as_layer, KeyboardMode::None),
+        SurfaceConfigChange::Recreate,
+        "a role change must replace the compositor object"
+    );
+
+    let mut server_decorations = cfg.clone();
+    server_decorations.window.decorations = WindowDecorations::Server;
+    assert_eq!(
+        surface_config_change(
+            &cfg,
+            KeyboardMode::None,
+            &server_decorations,
+            KeyboardMode::None,
+        ),
+        SurfaceConfigChange::Recreate,
+        "decoration negotiation is a creation-time window property"
     );
 }
 
 #[test]
-fn keyboard_mode_only_reconfigure_keeps_surface_configured() {
+fn keyboard_mode_only_change_is_live() {
     let previous = base_cfg();
     let mut next = previous.clone();
     next.keyboard_mode = KeyboardMode::Exclusive;
 
-    assert!(
-        !surface_change_requires_fresh_configure(&previous, &next, true),
+    assert_eq!(
+        surface_config_change(&previous, previous.keyboard_mode, &next, next.keyboard_mode,),
+        SurfaceConfigChange::Live,
         "keyboard interactivity-only changes must not force a fresh configure for an already-visible surface"
     );
 }
 
 #[test]
-fn geometry_reconfigure_still_requires_fresh_configure() {
+fn layer_geometry_change_requires_fresh_configure() {
     let previous = base_cfg();
     let mut next = previous.clone();
     next.width = 320;
 
-    assert!(surface_change_requires_fresh_configure(
-        &previous, &next, true
-    ));
+    assert_eq!(
+        surface_config_change(&previous, previous.keyboard_mode, &next, next.keyboard_mode,),
+        SurfaceConfigChange::Configure
+    );
 }
 
 #[test]
-fn unconfigured_surface_still_requires_initial_configure() {
+fn unchanged_config_has_no_semantic_diff() {
     let previous = base_cfg();
     let next = previous.clone();
 
-    assert!(surface_change_requires_fresh_configure(
-        &previous, &next, false
-    ));
+    assert_eq!(
+        surface_config_change(&previous, previous.keyboard_mode, &next, next.keyboard_mode,),
+        SurfaceConfigChange::Unchanged
+    );
+    assert!(!SurfaceConfigChange::Unchanged.requires_fresh_configure());
+}
+
+#[test]
+fn layer_namespace_and_blur_require_surface_recreation() {
+    let cfg = base_cfg();
+
+    let mut renamed = cfg.clone();
+    renamed.namespace = "@mesh/other-popover".into();
+    assert_eq!(
+        surface_config_change(&cfg, cfg.keyboard_mode, &renamed, renamed.keyboard_mode),
+        SurfaceConfigChange::Recreate
+    );
+
+    let mut blurred = cfg.clone();
+    blurred.blur = true;
+    assert_eq!(
+        surface_config_change(&cfg, cfg.keyboard_mode, &blurred, blurred.keyboard_mode),
+        SurfaceConfigChange::Recreate
+    );
 }
 
 #[test]
@@ -361,14 +396,19 @@ fn padding_larger_than_the_surface_does_not_collapse_the_region() {
 
 /// The reserve carries no protocol request of its own, so `apply_config` is
 /// the only thing that copies it onto the live surface — and it only runs
-/// when the fingerprint says the config changed.
+/// when the typed diff says the config changed.
 #[test]
 fn changing_only_the_padding_still_counts_as_a_config_change() {
     let cfg = base_cfg();
     let mut padded = cfg.clone();
     padded.padding = SurfacePadding::trailing(0, 200);
-    assert_ne!(
-        surface_config_fingerprint(&cfg, KeyboardMode::OnDemand),
-        surface_config_fingerprint(&padded, KeyboardMode::OnDemand),
+    assert_eq!(
+        surface_config_change(
+            &cfg,
+            KeyboardMode::OnDemand,
+            &padded,
+            KeyboardMode::OnDemand,
+        ),
+        SurfaceConfigChange::Live,
     );
 }

@@ -31,6 +31,11 @@ removal, and full seat removal cancel only the affected seat's ownership while
 preserving other seats targeting the same surface.
 Normalized Wayland Escape (`Esc`) is also classified as non-repeating, closing
 the key-name mismatch between event normalization and repeat suppression.
+Surface configuration now uses a typed semantic diff instead of a partial
+fingerprint: live changes, layer geometry that needs a fresh configure, and
+creation-time identity changes that require replacement are distinct. Layer
+namespace/blur and window decoration changes now take the safe replacement
+path rather than being silently applied to the wrong live role.
 
 Icon bitmap/SVG and font-glyph preparation still share a bounded render resource
 broker, with revision-aware cache handoff and linked-file invalidation. Typed
@@ -46,5 +51,6 @@ repository-settings fixture, which rejects its `revision` key as unknown.
 ## Next
 
 Add object/configure/frame generations and the remaining semantic presentation
-diff. Pointer-button identity, IME/text-input-v3, connection recreation, and
-resource preparation/text shaping remain separate follow-up work.
+state diff, including region-only commits. Pointer-button identity,
+IME/text-input-v3, connection recreation, and resource preparation/text shaping
+remain separate follow-up work.
