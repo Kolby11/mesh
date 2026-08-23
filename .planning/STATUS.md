@@ -16,7 +16,9 @@ multi-output membership and compositor conformance remain open.
 The deterministic popup lifecycle simulator now enforces the live identity
 contract: unsupported promotion, regular-surface id collisions, missing or
 nested parents, and reparenting are rejected before retained popup state is
-mutated. Live compositor conformance and connection recreation remain open.
+mutated. Parent-close simulation now dismisses popup descendants before
+publishing the parent's `Closed` event. Live compositor conformance and
+connection recreation remain open.
 
 Presentation now keeps frame-callback pacing separate from SHM buffer-release
 backpressure. When all reusable buffers are compositor-owned, the live backend

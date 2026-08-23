@@ -752,6 +752,27 @@ impl PresentationEngine {
         if let Backend::Testing(backend) = &mut self.backend {
             let surface_id = surface_id.into();
             if backend.surface_configs.remove(&surface_id).is_some() {
+                let mut child_ids = backend
+                    .popup_configs
+                    .iter()
+                    .filter_map(|(id, config)| {
+                        (config.parent_surface_id == surface_id).then_some(id.clone())
+                    })
+                    .collect::<Vec<_>>();
+                child_ids.sort();
+                for child_id in child_ids {
+                    drop_testing_events_for_surface(backend, &child_id);
+                    clear_testing_text_input_for_surface(backend, &child_id);
+                    backend.popup_configs.remove(&child_id);
+                    backend.pending_surface_states.remove(&child_id);
+                    backend.missing_surfaces.insert(child_id.clone());
+                    backend.destroyed_popup_ids.insert(child_id.clone());
+                    backend
+                        .lifecycle_events
+                        .push(SurfaceLifecycleEvent::Dismissed {
+                            surface_id: child_id,
+                        });
+                }
                 drop_testing_events_for_surface(backend, &surface_id);
                 clear_testing_text_input_for_surface(backend, &surface_id);
                 backend.pending_surface_states.remove(&surface_id);
@@ -2119,6 +2140,64 @@ mod tests {
             PresentationError::SurfaceCreate(message)
                 if message.contains("parent cannot itself be a popup")
         ));
+    }
+
+    #[test]
+    fn testing_parent_close_dismisses_popup_descendants_before_close() {
+        let mut engine = PresentationEngine::testing_with_popup_support(true);
+        engine
+            .configure("panel", SurfaceConfig::default())
+            .expect("parent surface should be accepted");
+        for popup_id in ["popup-b", "popup-a"] {
+            engine
+                .configure_popup(
+                    popup_id,
+                    PopupConfig {
+                        parent_surface_id: "panel".to_string(),
+                        placement: PopupPlacement::default(),
+                        padding: SurfacePadding::default(),
+                        grab: false,
+                        grab_identity: None,
+                    },
+                )
+                .expect("popup config should be accepted");
+        }
+        engine
+            .set_text_input_state(Some("popup-a"), Some(TextInputState::new("stale", 5, 5)))
+            .expect("popup text-input state should be accepted");
+        engine.testing_push_event(WindowEvent::TextInput {
+            surface_id: "popup-a".into(),
+            text: "stale".into(),
+        });
+
+        engine.testing_push_surface_closed("panel");
+        engine.testing_push_surface_closed("panel");
+
+        assert!(engine.testing_surface_configs().is_empty());
+        assert!(engine.testing_popup_config("popup-a").is_none());
+        assert!(engine.testing_popup_config("popup-b").is_none());
+        assert!(engine.testing_text_input_state().is_none());
+        assert!(
+            engine
+                .poll_events()
+                .expect("testing backend remains connected")
+                .is_empty()
+        );
+        assert_eq!(
+            engine.take_surface_lifecycle_events(),
+            [
+                SurfaceLifecycleEvent::Dismissed {
+                    surface_id: "popup-a".to_string(),
+                },
+                SurfaceLifecycleEvent::Dismissed {
+                    surface_id: "popup-b".to_string(),
+                },
+                SurfaceLifecycleEvent::Closed {
+                    surface_id: "panel".to_string(),
+                },
+            ]
+        );
+        assert!(engine.take_surface_lifecycle_events().is_empty());
     }
 
     #[test]
