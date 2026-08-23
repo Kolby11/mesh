@@ -47,6 +47,17 @@ pub fn poll_icon_raster_jobs() -> bool {
     icon::poll_icon_raster_jobs()
 }
 
+/// Drain completed semantic icon-resolution jobs and report whether a target
+/// became available for the next paint.
+pub fn poll_icon_resolution_jobs() -> bool {
+    icon::poll_icon_resolution_jobs()
+}
+
+/// Report whether semantic icon lookup is still in flight.
+pub fn icon_resolution_jobs_pending() -> bool {
+    icon::icon_resolution_jobs_pending()
+}
+
 /// Report whether a file-icon raster job is still in flight. The shell uses
 /// this to keep its scheduler polling without blocking the paint thread.
 pub fn icon_raster_jobs_pending() -> bool {

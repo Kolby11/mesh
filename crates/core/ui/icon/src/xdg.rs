@@ -335,8 +335,11 @@ fn resolve_font_glyph(
     }
     let codepoint = lookup_codepoint(&glyph_map_path, asset_name)?;
     let supported_axes = detect_supported_axes(&font_path);
+    let font_fingerprint = resource_fingerprint(&font_path);
     Some(ResolvedTarget::Glyph {
         font_path,
+        font_bytes: None,
+        font_fingerprint,
         codepoint,
         supported_axes,
     })

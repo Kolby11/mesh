@@ -173,7 +173,9 @@ pub(crate) fn prepare_icon_pack_bindings_with_cancellation(
             None => (None, None),
         };
 
-        let resolved_font_path = if let Some(path) = req.file.as_deref() {
+        let (resolved_font_path, prepared_font, font_fingerprint) = if let Some(path) =
+            req.file.as_deref()
+        {
             let (font_path, bytes) = read_module_resource_with_cancellation(
                 module_id,
                 module_dir,
@@ -188,7 +190,12 @@ pub(crate) fn prepare_icon_pack_bindings_with_cancellation(
                     module_id, req.alias, path
                 )
             })?;
-            Some(font_path)
+            let font_fingerprint = mesh_core_resources::resource_fingerprint(&font_path);
+            (
+                Some(font_path),
+                Some(std::sync::Arc::from(bytes)),
+                font_fingerprint,
+            )
         } else {
             let path = mesh_core_resources::system_resource_catalog()
                 .font_path_for_family(&req.family)
@@ -215,7 +222,12 @@ pub(crate) fn prepare_icon_pack_bindings_with_cancellation(
                     path.display()
                 )
             })?;
-            Some(path)
+            let font_fingerprint = mesh_core_resources::resource_fingerprint(&path);
+            (
+                Some(path),
+                Some(std::sync::Arc::from(bytes)),
+                font_fingerprint,
+            )
         };
 
         font_aliases.insert(
@@ -224,6 +236,8 @@ pub(crate) fn prepare_icon_pack_bindings_with_cancellation(
                 family: req.family.clone(),
                 glyph_map_path,
                 resolved_font_path,
+                prepared_font,
+                font_fingerprint,
                 prepared_glyphs,
             },
         );

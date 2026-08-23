@@ -1,4 +1,5 @@
 use crate::registry::SupportedAxes;
+use mesh_core_resources::ResourceFingerprint;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -53,6 +54,14 @@ pub struct FontAsset {
     pub family: String,
     pub glyph_map_path: Option<PathBuf>,
     pub resolved_font_path: Option<PathBuf>,
+    /// Font bytes captured during resource preparation. Active module packs
+    /// publish this immutable handoff so render-time glyph resolution never
+    /// reopens a module file that may have been replaced after validation.
+    pub prepared_font: Option<Arc<[u8]>>,
+    /// The fingerprint observed while the prepared bytes were read. It is
+    /// part of renderer cache identity even though the bytes themselves are
+    /// retained through the render-worker handoff.
+    pub font_fingerprint: Option<ResourceFingerprint>,
     /// Parsed during resource preparation so resolution never has to read or
     /// parse a module-owned glyph map on the render path.
     pub prepared_glyphs: Option<Arc<HashMap<String, u32>>>,

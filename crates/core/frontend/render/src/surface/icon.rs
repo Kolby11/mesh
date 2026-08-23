@@ -12,7 +12,9 @@ use mesh_core_elements::lru::ByteLruCache;
 #[cfg(test)]
 use mesh_core_elements::lru::LruCache;
 use mesh_core_elements::style::Color;
-use mesh_core_icon::{IconResolution, MISSING_ICON_SVG, ResolvedTarget, resolve_icon_result};
+#[cfg(test)]
+use mesh_core_icon::resolve_icon_result;
+use mesh_core_icon::{IconResolution, MISSING_ICON_SVG, ResolvedTarget};
 use mesh_core_resources::{
     ResourceByteReservation, ResourceFingerprint, resource_fingerprint, resource_revision,
 };
@@ -32,11 +34,13 @@ static IMAGE_CACHE: OnceLock<Mutex<ByteLruCache<Arc<Path>, CachedImage>>> = Once
 static RASTER_CACHE: OnceLock<Mutex<ByteLruCache<RasterCacheKey, RasterVariant>>> = OnceLock::new();
 static SOURCE_IDENTITY_CACHE: OnceLock<Mutex<ByteLruCache<Arc<Path>, CachedSourceIdentity>>> =
     OnceLock::new();
+#[cfg(test)]
 static SVG_CACHEABILITY_CACHE: OnceLock<Mutex<ByteLruCache<Arc<Path>, CachedSvgCacheability>>> =
     OnceLock::new();
 const RASTER_CACHE_CAPACITY: usize = 256;
 const IMAGE_CACHE_CAPACITY: usize = 256;
 const SOURCE_IDENTITY_CACHE_CAPACITY: usize = 1024;
+#[cfg(test)]
 const SVG_CACHEABILITY_CACHE_CAPACITY: usize = 1024;
 const RASTER_CACHE_MAX_BYTES: usize = 16 * 1024 * 1024;
 const IMAGE_CACHE_MAX_BYTES: usize = 32 * 1024 * 1024;
@@ -97,6 +101,7 @@ struct CachedSourceIdentity {
     identity: Arc<Path>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone)]
 struct CachedSvgCacheability {
     resource_revision: u64,
@@ -158,6 +163,35 @@ struct IconRasterQueue {
 static ICON_RASTER_QUEUE: OnceLock<Mutex<IconRasterQueue>> = OnceLock::new();
 static ICON_RASTER_RESULTS_READY: AtomicBool = AtomicBool::new(false);
 
+#[cfg(not(test))]
+const ICON_RESOLUTION_WORK_BYTES: usize = 4 * 1024;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct IconResolutionKey {
+    resource_revision: u64,
+    module_id: String,
+    semantic_name: String,
+    size: u32,
+}
+
+struct IconResolutionJobResult {
+    key: IconResolutionKey,
+    resolution: Option<IconResolution>,
+    cancelled: bool,
+    _budget: ResourceByteReservation,
+}
+
+struct IconResolutionQueue {
+    #[cfg(not(test))]
+    result_sender: Sender<IconResolutionJobResult>,
+    receiver: Receiver<IconResolutionJobResult>,
+    pending: HashSet<IconResolutionKey>,
+    ready: HashMap<IconResolutionKey, (IconResolution, ResourceByteReservation)>,
+}
+
+static ICON_RESOLUTION_QUEUE: OnceLock<Mutex<IconResolutionQueue>> = OnceLock::new();
+static ICON_RESOLUTION_RESULTS_READY: AtomicBool = AtomicBool::new(false);
+
 fn icon_raster_queue() -> &'static Mutex<IconRasterQueue> {
     ICON_RASTER_QUEUE.get_or_init(|| {
         let (result_sender, result_receiver) = mpsc::channel::<RasterJobResult>();
@@ -168,6 +202,159 @@ fn icon_raster_queue() -> &'static Mutex<IconRasterQueue> {
             ready: HashMap::new(),
         })
     })
+}
+
+#[cfg(not(test))]
+fn icon_resolution_queue() -> &'static Mutex<IconResolutionQueue> {
+    ICON_RESOLUTION_QUEUE.get_or_init(|| {
+        #[cfg(not(test))]
+        let (result_sender, result_receiver) = mpsc::channel::<IconResolutionJobResult>();
+        #[cfg(test)]
+        let (_, result_receiver) = mpsc::channel::<IconResolutionJobResult>();
+        Mutex::new(IconResolutionQueue {
+            #[cfg(not(test))]
+            result_sender,
+            receiver: result_receiver,
+            pending: HashSet::new(),
+            ready: HashMap::new(),
+        })
+    })
+}
+
+#[cfg(not(test))]
+fn missing_icon_resolution(name: &str) -> IconResolution {
+    IconResolution::Missing {
+        semantic_name: name.to_string(),
+        tried: Vec::new(),
+    }
+}
+
+fn drain_icon_resolution_jobs() -> bool {
+    let results = {
+        let Some(queue) = ICON_RESOLUTION_QUEUE.get() else {
+            return false;
+        };
+        let Ok(mut queue) = queue.lock() else {
+            return false;
+        };
+        let current_generation = resource_revision();
+        queue
+            .ready
+            .retain(|key, _| key.resource_revision == current_generation);
+        let mut results = Vec::new();
+        while let Ok(result) = queue.receiver.try_recv() {
+            queue.pending.remove(&result.key);
+            results.push(result);
+        }
+        results
+    };
+
+    let mut completed = false;
+    if let Some(queue) = ICON_RESOLUTION_QUEUE.get()
+        && let Ok(mut queue) = queue.lock()
+    {
+        for result in results {
+            if result.cancelled || !resource_generation_is_current(result.key.resource_revision) {
+                continue;
+            }
+            if let Some(resolution) = result.resolution {
+                queue.ready.insert(result.key, (resolution, result._budget));
+                completed = true;
+            }
+        }
+    }
+    if completed {
+        ICON_RESOLUTION_RESULTS_READY.store(true, Ordering::Release);
+    }
+    completed
+}
+
+#[cfg(not(test))]
+fn take_ready_icon_resolution(key: &IconResolutionKey) -> Option<IconResolution> {
+    let queue = ICON_RESOLUTION_QUEUE.get()?;
+    queue
+        .lock()
+        .ok()?
+        .ready
+        .remove(key)
+        .map(|(resolution, _budget)| resolution)
+}
+
+pub fn poll_icon_resolution_jobs() -> bool {
+    drain_icon_resolution_jobs() || ICON_RESOLUTION_RESULTS_READY.swap(false, Ordering::AcqRel)
+}
+
+pub fn icon_resolution_jobs_pending() -> bool {
+    let pending = ICON_RESOLUTION_QUEUE
+        .get()
+        .and_then(|queue| queue.lock().ok())
+        .is_some_and(|queue| !queue.pending.is_empty());
+    pending || ICON_RESOLUTION_RESULTS_READY.load(Ordering::Acquire)
+}
+
+#[cfg(not(test))]
+fn resolve_icon_for_render(module_id: &str, name: &str, size: u32) -> IconResolution {
+    drain_icon_resolution_jobs();
+    let key = IconResolutionKey {
+        resource_revision: resource_revision(),
+        module_id: module_id.to_string(),
+        semantic_name: name.to_string(),
+        size,
+    };
+    if let Some(resolution) = take_ready_icon_resolution(&key) {
+        return resolution;
+    }
+
+    let Ok(mut queue) = icon_resolution_queue().lock() else {
+        return missing_icon_resolution(name);
+    };
+    if !queue.pending.insert(key.clone()) {
+        return missing_icon_resolution(name);
+    }
+    let result_sender = queue.result_sender.clone();
+    let result_key = key.clone();
+    let cancellation_key = key.clone();
+    let cancellation_sender = result_sender.clone();
+    let job_module_id = module_id.to_string();
+    let job_name = name.to_string();
+    let Some(broker) = ResourceBroker::global() else {
+        queue.pending.remove(&key);
+        return missing_icon_resolution(name);
+    };
+    let scheduled = broker.submit(
+        ICON_RESOLUTION_WORK_BYTES,
+        move |context: ResourceBrokerContext| {
+            let resolution = if context.is_current() {
+                Some(mesh_core_icon::resolve_icon_for_module(
+                    &job_module_id,
+                    &job_name,
+                    size,
+                ))
+            } else {
+                None
+            };
+            let cancelled = !context.is_current() || resolution.is_none();
+            let reservation = context.into_reservation();
+            let _ = result_sender.send(IconResolutionJobResult {
+                key: result_key,
+                resolution,
+                cancelled,
+                _budget: reservation,
+            });
+        },
+        move |reservation| {
+            let _ = cancellation_sender.send(IconResolutionJobResult {
+                key: cancellation_key,
+                resolution: None,
+                cancelled: true,
+                _budget: reservation,
+            });
+        },
+    );
+    if !matches!(scheduled, Some(true)) {
+        queue.pending.remove(&key);
+    }
+    missing_icon_resolution(name)
 }
 
 fn icon_raster_bytes(width: u32, height: u32) -> Option<usize> {
@@ -405,6 +592,7 @@ fn source_identity_cache() -> &'static Mutex<ByteLruCache<Arc<Path>, CachedSourc
     })
 }
 
+#[cfg(test)]
 fn svg_cacheability_cache() -> &'static Mutex<ByteLruCache<Arc<Path>, CachedSvgCacheability>> {
     SVG_CACHEABILITY_CACHE.get_or_init(|| {
         Mutex::new(ByteLruCache::new(
@@ -497,6 +685,7 @@ fn source_identity(path: &Path, freshness: Option<FileFreshness>) -> Arc<Path> {
     identity
 }
 
+#[cfg(test)]
 fn raster_file_key(
     path: &Path,
     width: u32,
@@ -530,6 +719,7 @@ fn raster_file_key_with_freshness(
     }
 }
 
+#[cfg(test)]
 fn svg_file_cacheability(path: &Path) -> Option<(bool, FileFreshness)> {
     let resource_revision = resource_revision();
     let freshness = file_freshness(path)?;
@@ -921,6 +1111,7 @@ fn raster_bitmap_variant(
     Some(variant_from_bgra(width, height, pixels))
 }
 
+#[cfg(test)]
 fn raster_svg_variant(
     path: &Path,
     width: u32,
@@ -1067,6 +1258,7 @@ fn resolve_file_variant(
     }
 }
 
+#[cfg(test)]
 fn resolve_file_variant_sync(
     path: &Path,
     dest_w: i32,
@@ -1151,7 +1343,7 @@ fn resolve_file_variant_async(
 
     match schedule_icon_raster_job(key, path, kind, width, height, tint, multicolor) {
         Some(true) | Some(false) => {}
-        None => return resolve_file_variant_sync(path, dest_w, dest_h, tint, multicolor),
+        None => return None,
     }
     None
 }
@@ -1287,9 +1479,13 @@ pub fn draw_named_icon_in_session(
     dest_h: i32,
     tint: Color,
 ) {
+    #[cfg(test)]
+    let resolution = resolve_icon_result(name, size);
+    #[cfg(not(test))]
+    let resolution = resolve_icon_for_render("", name, size);
     draw_icon_resolution_with_axes_in_session(
         session,
-        resolve_icon_result(name, size),
+        resolution,
         dest_x,
         dest_y,
         dest_w,
@@ -1311,15 +1507,12 @@ pub fn draw_named_icon_for_module_in_session(
     tint: Color,
     axes: GlyphAxes,
 ) {
+    #[cfg(test)]
+    let resolution = mesh_core_icon::resolve_icon_for_module(module_id, name, size);
+    #[cfg(not(test))]
+    let resolution = resolve_icon_for_render(module_id, name, size);
     draw_icon_resolution_with_axes_in_session(
-        session,
-        mesh_core_icon::resolve_icon_for_module(module_id, name, size),
-        dest_x,
-        dest_y,
-        dest_w,
-        dest_h,
-        tint,
-        axes,
+        session, resolution, dest_x, dest_y, dest_w, dest_h, tint, axes,
     );
 }
 
@@ -1349,6 +1542,8 @@ fn draw_icon_resolution_with_axes_in_session(
             target:
                 ResolvedTarget::Glyph {
                     font_path,
+                    font_bytes,
+                    font_fingerprint,
                     codepoint,
                     supported_axes,
                 },
@@ -1359,6 +1554,8 @@ fn draw_icon_resolution_with_axes_in_session(
                     draw_font_glyph_on_canvas(
                         canvas,
                         &font_path,
+                        font_bytes.as_ref(),
+                        font_fingerprint,
                         codepoint,
                         supported_axes,
                         axes,
@@ -1437,6 +1634,8 @@ pub fn draw_icon_resolution_with_axes(
             target:
                 ResolvedTarget::Glyph {
                     font_path,
+                    font_bytes: _,
+                    font_fingerprint: _,
                     codepoint,
                     supported_axes,
                 },

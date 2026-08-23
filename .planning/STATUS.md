@@ -179,10 +179,11 @@ reposition, now destroys the stale popup role and requests a paint retry. The
 next normal child reconciliation recreates the popup with the requested
 placement while preserving its normal entrance transition.
 
-Icon bitmap/SVG and font-glyph preparation still share a bounded render resource
-broker, with revision-aware cache handoff and linked-file invalidation. Typed
-icon/glyph caches and shell polling remain separate at the handoff boundary.
-Text shaping remains synchronous and outside that broker.
+Resource discovery, selected icon/font-pack parsing, and asset preparation now
+run on cancellable workers. Immutable glyph maps and font bytes cross the
+resource boundary as prepared handles; semantic icon lookup and icon/glyph
+raster work use revision-aware bounded broker queues with deterministic missing
+placeholders. Text shaping remains synchronous and outside that broker.
 
 Focused presentation, Wayland routing, shell text-transaction, and preedit
 rendering tests plus `cargo check --workspace`, formatting, and `git diff
@@ -197,5 +198,4 @@ live compositor/lifecycle matrix remain separate follow-up work.
 
 Complete the remaining semantic presentation state diff and the live
 compositor/lifecycle matrix for presentation and text-input-v3; connection
-recreation and resource preparation/text shaping remain separate follow-up
-work.
+recreation and text shaping remain separate follow-up work.

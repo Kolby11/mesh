@@ -43,6 +43,8 @@ pub enum ResolvedTarget {
     File(PathBuf),
     Glyph {
         font_path: PathBuf,
+        font_bytes: Option<std::sync::Arc<[u8]>>,
+        font_fingerprint: Option<mesh_core_resources::ResourceFingerprint>,
         codepoint: u32,
         supported_axes: SupportedAxes,
     },
@@ -605,7 +607,7 @@ impl IconRegistry {
         axes: SupportedAxes,
     ) -> Option<ResolvedTarget> {
         let font_path = font_asset.resolved_font_path.clone()?;
-        if !font_path.is_file() {
+        if font_asset.prepared_font.is_none() && !font_path.is_file() {
             return None;
         }
         let codepoint = if let Some(glyphs) = &font_asset.prepared_glyphs {
@@ -616,6 +618,8 @@ impl IconRegistry {
         }?;
         Some(ResolvedTarget::Glyph {
             font_path,
+            font_bytes: font_asset.prepared_font.clone(),
+            font_fingerprint: font_asset.font_fingerprint,
             codepoint,
             supported_axes: axes,
         })
@@ -700,6 +704,8 @@ nothing = ["system:nothing"]
                     family: "Material Symbols Rounded".into(),
                     glyph_map_path: Some(glyph_map_path),
                     resolved_font_path: Some(font_path.clone()),
+                    prepared_font: None,
+                    font_fingerprint: None,
                     prepared_glyphs: None,
                 },
             )]),
@@ -715,6 +721,7 @@ nothing = ["system:nothing"]
                         font_path: resolved_path,
                         codepoint,
                         supported_axes,
+                        ..
                     },
                 ..
             } => {
@@ -1021,6 +1028,8 @@ nothing = ["system:nothing"]
             family: "Material Symbols Rounded".into(),
             glyph_map_path: Some(glyph_map_path),
             resolved_font_path: Some(font_path.clone()),
+            prepared_font: None,
+            font_fingerprint: None,
             prepared_glyphs: None,
         };
         let mut registry = registry();
@@ -1074,6 +1083,62 @@ nothing = ["system:nothing"]
         assert_eq!(provenance.owner_module.as_deref(), Some("@mesh/pack-a"));
         assert_eq!(provenance.pack_id.as_deref(), Some("pack-a"));
         assert_eq!(provenance.fallback_stage, "exact");
+    }
+
+    #[test]
+    fn prepared_font_alias_does_not_reopen_a_replaced_source_file() {
+        let temp = tempdir().unwrap();
+        let font_path = temp.path().join("prepared.ttf");
+        fs::write(&font_path, b"old font bytes").unwrap();
+        let mut registry = registry();
+        registry
+            .replace_bindings(
+                vec![IconPackBindings {
+                    pack_id: "prepared".into(),
+                    module_id: "@mesh/prepared-icons".into(),
+                    mappings: HashMap::from([("settings".into(), "font/settings".into())]),
+                    axes: SupportedAxes::default(),
+                    font_aliases: HashMap::from([(
+                        "font".into(),
+                        FontAsset {
+                            family: "Prepared Icons".into(),
+                            glyph_map_path: None,
+                            resolved_font_path: Some(font_path.clone()),
+                            prepared_font: Some(std::sync::Arc::from(&b"prepared font bytes"[..])),
+                            font_fingerprint: None,
+                            prepared_glyphs: Some(std::sync::Arc::new(HashMap::from([(
+                                "settings".into(),
+                                0xe000,
+                            )]))),
+                        },
+                    )]),
+                }],
+                vec![(
+                    "frontend".into(),
+                    FrontendIconBindings {
+                        declared_pack_chain: vec!["@mesh/prepared-icons".into()],
+                        ..Default::default()
+                    },
+                )],
+                None,
+            )
+            .unwrap();
+        fs::remove_file(&font_path).unwrap();
+
+        let IconResolution::Found {
+            target:
+                ResolvedTarget::Glyph {
+                    font_bytes: Some(bytes),
+                    codepoint,
+                    ..
+                },
+            ..
+        } = registry.resolve_for_module("frontend", "settings", 24)
+        else {
+            panic!("expected prepared font bytes to survive source replacement");
+        };
+        assert_eq!(bytes.as_ref(), b"prepared font bytes");
+        assert_eq!(codepoint, 0xe000);
     }
 
     #[test]

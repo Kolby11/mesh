@@ -152,6 +152,7 @@ pub fn glyph_raster_jobs_pending() -> bool {
 fn schedule_glyph_raster_job(
     key: GlyphCacheKey,
     font_path: &Path,
+    font_bytes: Option<Arc<[u8]>>,
     codepoint: u32,
     px: u32,
     axes: GlyphAxes,
@@ -171,6 +172,7 @@ fn schedule_glyph_raster_job(
     let cancellation_key = key.clone();
     let cancellation_sender = result_sender.clone();
     let job_font_path = font_path.to_path_buf();
+    let job_font_bytes = font_bytes;
     let Some(broker) = ResourceBroker::global() else {
         queue.pending.remove(&key);
         return None;
@@ -180,7 +182,14 @@ fn schedule_glyph_raster_job(
         move |context: ResourceBrokerContext| {
             let started = std::time::Instant::now();
             let glyph = if context.is_current() {
-                rasterize(&job_font_path, codepoint, px, axes, supported)
+                rasterize(
+                    &job_font_path,
+                    job_font_bytes,
+                    codepoint,
+                    px,
+                    axes,
+                    supported,
+                )
             } else {
                 None
             };
@@ -293,13 +302,14 @@ fn font_bytes(path: &Path) -> Option<Arc<[u8]>> {
 
 fn rasterize(
     font_path: &Path,
+    prepared_bytes: Option<Arc<[u8]>>,
     codepoint: u32,
     px: u32,
     axes: GlyphAxes,
     supported: SupportedAxes,
 ) -> Option<CachedGlyph> {
     glyph_work_bytes(px)?;
-    let bytes = font_bytes(font_path)?;
+    let bytes = prepared_bytes.or_else(|| font_bytes(font_path))?;
     let font = FontRef::from_index(bytes.as_ref(), 0)?;
     let glyph_id = font.charmap().map(char::from_u32(codepoint)?);
     if glyph_id == 0 {
@@ -396,8 +406,9 @@ fn quantize(value: Option<f32>) -> i32 {
     }
 }
 
-fn glyph_cache_key(
+fn glyph_cache_key_with_fingerprint(
     font_path: &Path,
+    font_fingerprint: Option<ResourceFingerprint>,
     codepoint: u32,
     px: u32,
     supported_axes: SupportedAxes,
@@ -407,7 +418,7 @@ fn glyph_cache_key(
     GlyphCacheKey {
         font_path: hash_path(font_path),
         resource_revision: resource_revision(),
-        font_fingerprint: resource_fingerprint(font_path),
+        font_fingerprint,
         codepoint,
         px,
         color: encode_color(tint),
@@ -434,6 +445,26 @@ fn glyph_cache_key(
     }
 }
 
+#[cfg(test)]
+fn glyph_cache_key(
+    font_path: &Path,
+    codepoint: u32,
+    px: u32,
+    supported_axes: SupportedAxes,
+    axes: GlyphAxes,
+    tint: Color,
+) -> GlyphCacheKey {
+    glyph_cache_key_with_fingerprint(
+        font_path,
+        resource_fingerprint(font_path),
+        codepoint,
+        px,
+        supported_axes,
+        axes,
+        tint,
+    )
+}
+
 /// Render a glyph from a font pack into the buffer at the given destination
 /// rectangle, recoloring the alpha mask to `tint`. Returns `false` when the
 /// glyph couldn't be rasterized (font missing, unmapped codepoint, color
@@ -458,7 +489,7 @@ pub fn draw_font_glyph(
         Some(value) => value,
         None => {
             let raster_started = std::time::Instant::now();
-            let value = rasterize(font_path, codepoint, px, axes, supported_axes);
+            let value = rasterize(font_path, None, codepoint, px, axes, supported_axes);
             profiling::record_icon_image_raster(raster_started.elapsed());
             cache_store(key, value.clone());
             value
@@ -505,6 +536,8 @@ pub fn draw_font_glyph(
 pub fn draw_font_glyph_on_canvas(
     canvas: &Canvas,
     font_path: &Path,
+    prepared_bytes: Option<&Arc<[u8]>>,
+    font_fingerprint: Option<ResourceFingerprint>,
     codepoint: u32,
     supported_axes: SupportedAxes,
     axes: GlyphAxes,
@@ -516,7 +549,16 @@ pub fn draw_font_glyph_on_canvas(
 ) -> bool {
     drain_glyph_raster_jobs();
     let px = dest_w.max(dest_h).max(1) as u32;
-    let key = glyph_cache_key(font_path, codepoint, px, supported_axes, axes, tint);
+    let fingerprint = font_fingerprint;
+    let key = glyph_cache_key_with_fingerprint(
+        font_path,
+        fingerprint,
+        codepoint,
+        px,
+        supported_axes,
+        axes,
+        tint,
+    );
 
     let glyph = match cache_lookup(key) {
         Some(value) => value,
@@ -524,23 +566,31 @@ pub fn draw_font_glyph_on_canvas(
             #[cfg(test)]
             {
                 let raster_started = std::time::Instant::now();
-                let value = rasterize(font_path, codepoint, px, axes, supported_axes);
+                let value = rasterize(
+                    font_path,
+                    prepared_bytes.cloned(),
+                    codepoint,
+                    px,
+                    axes,
+                    supported_axes,
+                );
                 profiling::record_icon_image_raster(raster_started.elapsed());
                 cache_store(key, value.clone());
                 value
             }
             #[cfg(not(test))]
             {
-                match schedule_glyph_raster_job(key, font_path, codepoint, px, axes, supported_axes)
-                {
+                match schedule_glyph_raster_job(
+                    key,
+                    font_path,
+                    prepared_bytes.cloned(),
+                    codepoint,
+                    px,
+                    axes,
+                    supported_axes,
+                ) {
                     Some(_) => None,
-                    None => {
-                        let raster_started = std::time::Instant::now();
-                        let value = rasterize(font_path, codepoint, px, axes, supported_axes);
-                        profiling::record_icon_image_raster(raster_started.elapsed());
-                        cache_store(key, value.clone());
-                        value
-                    }
+                    None => None,
                 }
             }
         }
@@ -690,6 +740,7 @@ mod tests {
 
         let glyph = rasterize(
             &font_path,
+            None,
             0xe8b8,
             24,
             GlyphAxes {
@@ -708,6 +759,29 @@ mod tests {
         .expect("settings glyph should rasterize");
 
         assert!(glyph.width > 0 && glyph.height > 0);
+        assert!(glyph.pixels.iter().any(|alpha| *alpha > 0));
+    }
+
+    #[test]
+    fn prepared_font_bytes_rasterize_after_the_source_file_is_removed() {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../../../modules/icon-packs/material-symbols/assets/MaterialSymbolsRounded.ttf",
+        );
+        let bytes: Arc<[u8]> = std::fs::read(&source).unwrap().into();
+        let temp = tempfile::tempdir().unwrap();
+        let replaced = temp.path().join("icons.ttf");
+        std::fs::write(&replaced, &bytes).unwrap();
+        std::fs::remove_file(&replaced).unwrap();
+
+        let glyph = rasterize(
+            &replaced,
+            Some(bytes),
+            0xe8b8,
+            24,
+            GlyphAxes::default(),
+            SupportedAxes::default(),
+        )
+        .expect("prepared bytes should be sufficient for glyph rasterization");
         assert!(glyph.pixels.iter().any(|alpha| *alpha > 0));
     }
 
@@ -739,7 +813,7 @@ mod tests {
         let key = glyph_cache_key(&font_path, 0xe8b8, 24, supported, axes, tint);
 
         assert_eq!(
-            schedule_glyph_raster_job(key, &font_path, 0xe8b8, 24, axes, supported,),
+            schedule_glyph_raster_job(key, &font_path, None, 0xe8b8, 24, axes, supported,),
             Some(true)
         );
 
