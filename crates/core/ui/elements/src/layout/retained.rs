@@ -55,6 +55,9 @@ pub(super) fn compute_fresh_retained_layout(
                     available_height,
                 );
                 state.last_available = (available_width, available_height);
+                state.text_measure_revisions = measurer
+                    .map(|measurer| measurer.revisions())
+                    .unwrap_or_default();
                 state.valid = true;
             }
         }
@@ -158,6 +161,9 @@ pub(super) fn compute_structural_retained_layout(
                     available_height,
                 );
                 state.last_available = (available_width, available_height);
+                state.text_measure_revisions = measurer
+                    .map(|measurer| measurer.revisions())
+                    .unwrap_or_default();
                 state.valid = true;
             }
         }
@@ -304,8 +310,23 @@ pub(super) fn update_text_context(
                 && existing.font_family == node.computed_style.font_family
                 && existing.font_size == node.computed_style.font_size
                 && existing.font_weight == node.computed_style.font_weight
+                && existing.font_style == node.computed_style.font_style
+                && existing.letter_spacing == node.computed_style.letter_spacing
                 && existing.line_height == node.computed_style.line_height
-                && existing.nowrap == (node.computed_style.white_space == crate::WhiteSpace::Nowrap)
+                && existing.text_direction == node.computed_style.text_direction
+                && existing.white_space == node.computed_style.white_space
+                && existing.language.as_ref()
+                    == node
+                        .attributes
+                        .get("lang")
+                        .map(String::as_str)
+                        .unwrap_or_default()
+                && existing.shaping_features.as_ref()
+                    == node
+                        .attributes
+                        .get("font-features")
+                        .map(String::as_str)
+                        .unwrap_or_default()
         });
         if !unchanged {
             text_nodes.insert(
@@ -315,8 +336,21 @@ pub(super) fn update_text_context(
                     font_family: node.computed_style.font_family.clone(),
                     font_size: node.computed_style.font_size,
                     font_weight: node.computed_style.font_weight,
+                    font_style: node.computed_style.font_style,
+                    letter_spacing: node.computed_style.letter_spacing,
                     line_height: node.computed_style.line_height,
-                    nowrap: node.computed_style.white_space == crate::WhiteSpace::Nowrap,
+                    text_direction: node.computed_style.text_direction,
+                    white_space: node.computed_style.white_space,
+                    language: node
+                        .attributes
+                        .get("lang")
+                        .map(|value| Arc::from(value.as_str()))
+                        .unwrap_or_default(),
+                    shaping_features: node
+                        .attributes
+                        .get("font-features")
+                        .map(|value| Arc::from(value.as_str()))
+                        .unwrap_or_default(),
                 },
             );
         }

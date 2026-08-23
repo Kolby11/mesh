@@ -6,8 +6,13 @@ pub(super) struct TextMeasureData {
     pub(super) font_family: Arc<str>,
     pub(super) font_size: f32,
     pub(super) font_weight: u16,
+    pub(super) font_style: crate::FontStyle,
+    pub(super) letter_spacing: f32,
     pub(super) line_height: f32,
-    pub(super) nowrap: bool,
+    pub(super) text_direction: crate::TextDirection,
+    pub(super) white_space: crate::WhiteSpace,
+    pub(super) language: Arc<str>,
+    pub(super) shaping_features: Arc<str>,
 }
 
 impl TextMeasureData {
@@ -21,8 +26,43 @@ impl TextMeasureData {
             font_family: node.computed_style.font_family.clone(),
             font_size: node.computed_style.font_size,
             font_weight: node.computed_style.font_weight,
+            font_style: node.computed_style.font_style,
+            letter_spacing: node.computed_style.letter_spacing,
             line_height: node.computed_style.line_height,
-            nowrap: node.computed_style.white_space == crate::WhiteSpace::Nowrap,
+            text_direction: node.computed_style.text_direction,
+            white_space: node.computed_style.white_space,
+            language: node
+                .attributes
+                .get("lang")
+                .map(|value| Arc::<str>::from(value.as_str()))
+                .unwrap_or_default(),
+            shaping_features: node
+                .attributes
+                .get("font-features")
+                .map(|value| Arc::<str>::from(value.as_str()))
+                .unwrap_or_default(),
+        }
+    }
+
+    pub(super) fn context<'a>(
+        &'a self,
+        max_width: Option<f32>,
+        revisions: TextMeasureRevisions,
+    ) -> TextMeasureContext<'a> {
+        TextMeasureContext {
+            text: &self.content,
+            font_family: &self.font_family,
+            font_size: self.font_size,
+            font_weight: self.font_weight,
+            font_style: self.font_style,
+            letter_spacing: self.letter_spacing,
+            line_height: self.line_height,
+            text_direction: self.text_direction,
+            white_space: self.white_space,
+            language: &self.language,
+            shaping_features: &self.shaping_features,
+            max_width,
+            revisions,
         }
     }
 }
@@ -286,26 +326,21 @@ pub(super) fn measure_taffy_node(
         };
     };
 
-    let max_width = if text.nowrap {
+    let max_width = if text.white_space == crate::WhiteSpace::Nowrap {
         known_dimensions.width
     } else {
         known_dimensions
             .width
             .or_else(|| available_space_to_option(available_space.width))
     };
-    let measure_key = TextMeasureKey::new(text, max_width);
+    let revisions = measurer.revisions();
+    let context = text.context(max_width, revisions);
+    let measure_key = TextMeasureKey::new(&context);
     let (measured_width, measured_height) =
         if let Some(measured) = intrinsic_cache.get_text_measurement(&measure_key) {
             measured
         } else {
-            let measured = measurer.measure_text(
-                &text.content,
-                &text.font_family,
-                text.font_size,
-                text.font_weight,
-                text.line_height,
-                max_width,
-            );
+            let measured = measurer.measure_text(&context);
             intrinsic_cache.insert_text_measurement(measure_key, measured);
             measured
         };

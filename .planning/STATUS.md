@@ -220,11 +220,11 @@ live compositor/lifecycle matrix remain separate follow-up work.
 
 ## Next
 
-Retained style resolution now carries shared explicit and inherited masks for
-color, font family, font size, font weight, and line height. Matching authored
-declarations, including transparent and default-valued declarations, survive
-full and targeted restyles without being mistaken for unset values; compiler
-and indexed/uncached paths use the same mask contract. The next open backlog
-item is including all shaping inputs and resource/measurer revisions in text
-measurement contexts and cache keys; the remaining presentation/resource
-follow-ups stay separate.
+Text measurement now passes a complete shaping and wrapping context through
+core layout and the renderer, including font style, tracking, direction,
+whitespace, language/features, and resource/measurer revisions. Intrinsic and
+retained caches key every input, and retained layout remeasures when a
+measurer/resource revision changes without an ordinary dirty flag. The next
+open UI-element item is typed, validated, observable popover placement and
+trigger/surface relationships; the remaining presentation/resource follow-ups
+stay separate.

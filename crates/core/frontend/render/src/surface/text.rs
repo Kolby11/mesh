@@ -8,7 +8,8 @@ use cosmic_text::{
 };
 use mesh_core_elements::Color;
 use mesh_core_elements::lru::ByteLruCache;
-use mesh_core_elements::style::{FontStyle, TextAlign};
+use mesh_core_elements::style::{FontStyle, TextAlign, TextDirection, WhiteSpace};
+use mesh_core_elements::{TextMeasureContext, TextMeasureRevisions};
 use mesh_core_resources::resource_revision;
 use skia_safe::{
     AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images,
@@ -69,6 +70,7 @@ struct TextEngine {
     swash_cache: SwashCache,
     layout_cache: ByteLruCache<u64, TextLayoutEntry>,
     resource_revision: u64,
+    measurer_revision: u64,
     metrics: TextCacheMetrics,
 }
 
@@ -92,12 +94,18 @@ pub struct TextCacheMetrics {
 
 struct TextLayoutEntry {
     resource_revision: u64,
+    measurer_revision: u64,
     text: String,
     font_family: String,
     font_size: u32,
     font_weight: u16,
     font_style: FontStyle,
+    letter_spacing: u32,
     line_height: u32,
+    text_direction: TextDirection,
+    white_space: WhiteSpace,
+    language: String,
+    shaping_features: String,
     max_width: Option<u32>,
     align: TextAlign,
     buffer: Buffer,
@@ -131,11 +139,17 @@ struct TextLayoutParams<'a> {
     font_size: u32,
     font_weight: u16,
     font_style: FontStyle,
+    letter_spacing: u32,
     line_height: u32,
+    text_direction: TextDirection,
+    white_space: WhiteSpace,
+    language: &'a str,
+    shaping_features: &'a str,
     max_width: Option<u32>,
     align: TextAlign,
     cache_key: u64,
     resource_revision: u64,
+    measurer_revision: u64,
 }
 
 impl<'a> TextLayoutParams<'a> {
@@ -148,33 +162,64 @@ impl<'a> TextLayoutParams<'a> {
         line_height: f32,
         max_width: Option<f32>,
         align: TextAlign,
+        measurer_revision: u64,
     ) -> Self {
-        let font_size = font_size.to_bits();
-        let line_height = line_height.to_bits();
-        let max_width = max_width.map(f32::to_bits);
-        let resource_revision = resource_revision();
-        let cache_key = text_layout_cache_key(
+        let mut context = TextMeasureContext::new(
             text,
             font_family,
             font_size,
             font_weight,
-            font_style,
             line_height,
+            max_width,
+        );
+        context.font_style = font_style;
+        Self::from_context(&context, align, resource_revision(), measurer_revision)
+    }
+
+    fn from_context(
+        context: &TextMeasureContext<'a>,
+        align: TextAlign,
+        resource_revision: u64,
+        measurer_revision: u64,
+    ) -> Self {
+        let font_size = context.font_size.to_bits();
+        let line_height = context.line_height.to_bits();
+        let letter_spacing = context.letter_spacing.to_bits();
+        let max_width = context.max_width.map(f32::to_bits);
+        let cache_key = text_layout_cache_key(
+            context.text,
+            context.font_family,
+            font_size,
+            context.font_weight,
+            context.font_style,
+            letter_spacing,
+            line_height,
+            context.text_direction,
+            context.white_space,
+            context.language,
+            context.shaping_features,
             max_width,
             align,
             resource_revision,
+            measurer_revision,
         );
         Self {
-            text,
-            font_family,
+            text: context.text,
+            font_family: context.font_family,
             font_size,
-            font_weight,
-            font_style,
+            font_weight: context.font_weight,
+            font_style: context.font_style,
+            letter_spacing,
             line_height,
+            text_direction: context.text_direction,
+            white_space: context.white_space,
+            language: context.language,
+            shaping_features: context.shaping_features,
             max_width,
             align,
             cache_key,
             resource_revision,
+            measurer_revision,
         }
     }
 }
@@ -187,9 +232,15 @@ impl TextLayoutEntry {
             && self.font_size == params.font_size
             && self.font_weight == params.font_weight
             && self.font_style == params.font_style
+            && self.letter_spacing == params.letter_spacing
             && self.line_height == params.line_height
+            && self.text_direction == params.text_direction
+            && self.white_space == params.white_space
+            && self.language == params.language
+            && self.shaping_features == params.shaping_features
             && self.max_width == params.max_width
             && self.align == params.align
+            && self.measurer_revision == params.measurer_revision
     }
 
     fn estimated_bytes(&self) -> Option<usize> {
@@ -266,10 +317,16 @@ fn text_layout_cache_key(
     font_size: u32,
     font_weight: u16,
     font_style: FontStyle,
+    letter_spacing: u32,
     line_height: u32,
+    text_direction: TextDirection,
+    white_space: WhiteSpace,
+    language: &str,
+    shaping_features: &str,
     max_width: Option<u32>,
     align: TextAlign,
     resource_revision: u64,
+    measurer_revision: u64,
 ) -> u64 {
     let mut state = TextLayoutHasher::default();
     text.hash(&mut state);
@@ -277,7 +334,12 @@ fn text_layout_cache_key(
     font_size.hash(&mut state);
     font_weight.hash(&mut state);
     font_style.hash(&mut state);
+    letter_spacing.hash(&mut state);
     line_height.hash(&mut state);
+    text_direction.hash(&mut state);
+    white_space.hash(&mut state);
+    language.hash(&mut state);
+    shaping_features.hash(&mut state);
     max_width.hash(&mut state);
     match align {
         TextAlign::Left => 0u8,
@@ -286,6 +348,7 @@ fn text_layout_cache_key(
     }
     .hash(&mut state);
     resource_revision.hash(&mut state);
+    measurer_revision.hash(&mut state);
     state.finish()
 }
 
@@ -321,6 +384,7 @@ impl TextRenderer {
                     TEXT_LAYOUT_CACHE_MAX_BYTES,
                 ),
                 resource_revision: resource_revision(),
+                measurer_revision: 0,
                 metrics: TextCacheMetrics {
                     layout_cache_max_bytes: TEXT_LAYOUT_CACHE_MAX_BYTES as u64,
                     glyph_cache_active: true,
@@ -505,6 +569,7 @@ impl TextRenderer {
             font_weight,
             font_style,
             line_height,
+            0.0,
             max_width,
             align,
         );
@@ -517,6 +582,7 @@ impl TextRenderer {
             line_height,
             max_width,
             align,
+            engine.measurer_revision,
         );
         let cosmic = engine.take_layout(&params, metrics, width, text_align);
 
@@ -582,27 +648,37 @@ impl TextRenderer {
         line_height: f32,
         max_width: Option<f32>,
     ) -> (f32, f32) {
-        let mut engine = self.engine.borrow_mut();
-        engine.ensure_resource_revision();
-        let (_, metrics, width, _) = text_config(
-            &engine.font_system,
-            font_family,
-            font_size,
-            font_weight,
-            font_style,
-            line_height,
-            max_width,
-            TextAlign::Left,
-        );
-        let params = TextLayoutParams::new(
+        let mut context = TextMeasureContext::new(
             text,
             font_family,
             font_size,
             font_weight,
-            font_style,
             line_height,
             max_width,
+        );
+        context.font_style = font_style;
+        self.measure_text_context(&context)
+    }
+
+    pub fn measure_text_context(&self, context: &TextMeasureContext<'_>) -> (f32, f32) {
+        let mut engine = self.engine.borrow_mut();
+        engine.ensure_resource_revision();
+        let (_, metrics, width, _) = text_config(
+            &engine.font_system,
+            context.font_family,
+            context.font_size,
+            context.font_weight,
+            context.font_style,
+            context.line_height,
+            context.letter_spacing,
+            context.max_width,
             TextAlign::Left,
+        );
+        let params = TextLayoutParams::from_context(
+            context,
+            TextAlign::Left,
+            engine.resource_revision,
+            engine.measurer_revision,
         );
         let mut cosmic = engine.take_layout(&params, metrics, width, Align::Left);
 
@@ -669,6 +745,7 @@ impl TextRenderer {
             font_weight,
             font_style,
             line_height,
+            0.0,
             None,
             TextAlign::Left,
         );
@@ -682,6 +759,7 @@ impl TextRenderer {
             line_height,
             None,
             TextAlign::Left,
+            engine.measurer_revision,
         );
         let mut ellipsis_layout = engine.take_layout(&ellipsis_params, metrics, width, align);
         let ellipsis_width = {
@@ -703,6 +781,7 @@ impl TextRenderer {
             line_height,
             None,
             TextAlign::Left,
+            engine.measurer_revision,
         );
         let mut cosmic = engine.take_layout(&params, metrics, width, align);
         let split = {
@@ -782,6 +861,7 @@ impl TextRenderer {
             font_weight,
             font_style,
             line_height,
+            0.0,
             max_width,
             align,
         );
@@ -794,6 +874,7 @@ impl TextRenderer {
             line_height,
             max_width,
             align,
+            engine.measurer_revision,
         );
         let mut cosmic = engine.take_layout(&params, metrics, width, text_align);
 
@@ -982,6 +1063,7 @@ fn glyph_atlas_storage_bytes(width: u32, height: u32, bytes_per_pixel: usize) ->
 impl TextEngine {
     fn set_font_database(&mut self, database: fontdb::Database) {
         self.font_database = Some(database.clone());
+        self.measurer_revision = self.measurer_revision.saturating_add(1);
         self.font_system = FontSystem::new_with_locale_and_db(self.locale.clone(), database);
         self.swash_cache = SwashCache::new();
         self.layout_cache.clear();
@@ -995,6 +1077,7 @@ impl TextEngine {
             return;
         }
         self.font_aliases = aliases;
+        self.measurer_revision = self.measurer_revision.saturating_add(1);
         self.layout_cache.clear();
         GLYPH_ATLAS.with(|atlas| atlas.borrow_mut().clear());
         self.metrics.layout_invalidations = self.metrics.layout_invalidations.saturating_add(1);
@@ -1007,6 +1090,7 @@ impl TextEngine {
         }
 
         self.resource_revision = revision;
+        self.measurer_revision = self.measurer_revision.saturating_add(1);
         self.font_system = self
             .font_database
             .as_ref()
@@ -1019,6 +1103,14 @@ impl TextEngine {
         GLYPH_ATLAS.with(|atlas| atlas.borrow_mut().clear());
         NAMED_FONT_AVAILABILITY.with(|cache| cache.borrow_mut().clear());
         self.metrics.layout_invalidations = self.metrics.layout_invalidations.saturating_add(1);
+    }
+
+    fn revisions(&mut self) -> TextMeasureRevisions {
+        self.ensure_resource_revision();
+        TextMeasureRevisions {
+            resource_revision: self.resource_revision,
+            measurer_revision: self.measurer_revision,
+        }
     }
 
     fn take_layout(
@@ -1041,13 +1133,18 @@ impl TextEngine {
             &self.font_system,
             &self.font_aliases,
             params.font_family,
+            f32::from_bits(params.font_size),
             params.font_weight,
             params.font_style,
+            f32::from_bits(params.letter_spacing),
         );
         let mut cosmic = Buffer::new(&mut self.font_system, metrics);
         {
             let mut cosmic_borrow = cosmic.borrow_with(&mut self.font_system);
-            cosmic_borrow.set_wrap(wrap_for(params.max_width.map(f32::from_bits)));
+            cosmic_borrow.set_wrap(wrap_for(
+                params.max_width.map(f32::from_bits),
+                params.white_space,
+            ));
             cosmic_borrow.set_size(width, None);
             cosmic_borrow.set_text(
                 params.text,
@@ -1068,12 +1165,18 @@ impl TextEngine {
     fn store_layout(&mut self, params: &TextLayoutParams<'_>, cosmic: Buffer) {
         let entry = TextLayoutEntry {
             resource_revision: params.resource_revision,
+            measurer_revision: params.measurer_revision,
             text: params.text.to_string(),
             font_family: params.font_family.to_string(),
             font_size: params.font_size,
             font_weight: params.font_weight,
             font_style: params.font_style,
+            letter_spacing: params.letter_spacing,
             line_height: params.line_height,
+            text_direction: params.text_direction,
+            white_space: params.white_space,
+            language: params.language.to_owned(),
+            shaping_features: params.shaping_features.to_owned(),
             max_width: params.max_width,
             align: params.align,
             buffer: cosmic,
@@ -1110,50 +1213,31 @@ impl Default for TextRenderer {
 }
 
 impl mesh_core_elements::TextMeasurer for TextRenderer {
-    fn measure_text(
-        &self,
-        text: &str,
-        font_family: &str,
-        font_size: f32,
-        font_weight: u16,
-        line_height: f32,
-        max_width: Option<f32>,
-    ) -> (f32, f32) {
-        self.measure_styled(
-            text,
-            font_family,
-            font_size,
-            font_weight,
-            line_height,
-            max_width,
-        )
+    fn measure_text(&self, context: &TextMeasureContext<'_>) -> (f32, f32) {
+        self.measure_text_context(context)
+    }
+
+    fn revisions(&self) -> TextMeasureRevisions {
+        let mut engine = self.engine.borrow_mut();
+        engine.revisions()
     }
 }
 
 impl mesh_core_elements::TextMeasurer for SharedTextMeasurer {
-    fn measure_text(
-        &self,
-        text: &str,
-        font_family: &str,
-        font_size: f32,
-        font_weight: u16,
-        line_height: f32,
-        max_width: Option<f32>,
-    ) -> (f32, f32) {
-        RENDERER.with(|renderer| {
-            renderer.borrow().measure_styled(
-                text,
-                font_family,
-                font_size,
-                font_weight,
-                line_height,
-                max_width,
-            )
-        })
+    fn measure_text(&self, context: &TextMeasureContext<'_>) -> (f32, f32) {
+        RENDERER.with(|renderer| renderer.borrow().measure_text_context(context))
+    }
+
+    fn revisions(&self) -> TextMeasureRevisions {
+        RENDERER.with(|renderer| renderer.borrow().revisions())
     }
 }
 
 impl SharedTextMeasurer {
+    pub fn measure_text_context(&self, context: &TextMeasureContext<'_>) -> (f32, f32) {
+        RENDERER.with(|renderer| renderer.borrow().measure_text_context(context))
+    }
+
     pub fn set_font_database(&self, database: fontdb::Database) {
         RENDERER.with(|renderer| renderer.borrow().set_font_database(database));
     }
@@ -1466,6 +1550,7 @@ fn text_config<'a>(
     font_weight: u16,
     font_style: FontStyle,
     line_height: f32,
+    letter_spacing: f32,
     max_width: Option<f32>,
     align: TextAlign,
 ) -> (Attrs<'a>, Metrics, Option<f32>, Align) {
@@ -1473,7 +1558,8 @@ fn text_config<'a>(
     let attrs = Attrs::new()
         .family(family)
         .style(cosmic_font_style(font_style))
-        .weight(Weight(font_weight.max(100)));
+        .weight(Weight(font_weight.max(100)))
+        .letter_spacing(letter_spacing_em(letter_spacing, font_size));
     let metrics = Metrics::new(
         font_size.max(1.0),
         (font_size * line_height.max(1.0)).max(1.0),
@@ -1491,15 +1577,26 @@ fn text_attrs(
     font_system: &FontSystem,
     aliases: &HashMap<String, String>,
     font_family: &str,
+    font_size: f32,
     font_weight: u16,
     font_style: FontStyle,
+    letter_spacing: f32,
 ) -> AttrsOwned {
     let family = primary_family_owned(font_system, aliases, font_family);
     let attrs = Attrs::new()
         .family(family.as_family())
         .style(cosmic_font_style(font_style))
-        .weight(Weight(font_weight.max(100)));
+        .weight(Weight(font_weight.max(100)))
+        .letter_spacing(letter_spacing_em(letter_spacing, font_size));
     AttrsOwned::new(&attrs)
+}
+
+fn letter_spacing_em(letter_spacing: f32, font_size: f32) -> f32 {
+    if letter_spacing.is_finite() && font_size.is_finite() && font_size.abs() > f32::EPSILON {
+        letter_spacing / font_size
+    } else {
+        0.0
+    }
 }
 
 fn cosmic_font_style(font_style: FontStyle) -> CosmicStyle {
@@ -1611,8 +1708,8 @@ mod font_family_tests {
     }
 }
 
-fn wrap_for(max_width: Option<f32>) -> Wrap {
-    if max_width.is_some() {
+fn wrap_for(max_width: Option<f32>, white_space: WhiteSpace) -> Wrap {
+    if max_width.is_some() && white_space != WhiteSpace::Nowrap {
         Wrap::Word
     } else {
         Wrap::None
@@ -1784,10 +1881,16 @@ mod tests {
             14.0f32.to_bits(),
             400,
             FontStyle::Normal,
+            0.0f32.to_bits(),
             1.2f32.to_bits(),
+            TextDirection::Ltr,
+            WhiteSpace::Normal,
+            "",
+            "",
             Some(120.0f32.to_bits()),
             TextAlign::Left,
             7,
+            0,
         );
         let changed = text_layout_cache_key(
             "revisioned text",
@@ -1795,10 +1898,16 @@ mod tests {
             14.0f32.to_bits(),
             400,
             FontStyle::Normal,
+            0.0f32.to_bits(),
             1.2f32.to_bits(),
+            TextDirection::Ltr,
+            WhiteSpace::Normal,
+            "",
+            "",
             Some(120.0f32.to_bits()),
             TextAlign::Left,
             8,
+            0,
         );
         assert_ne!(base, changed);
     }
@@ -1811,10 +1920,16 @@ mod tests {
             14.0f32.to_bits(),
             400,
             FontStyle::Normal,
+            0.0f32.to_bits(),
             1.2f32.to_bits(),
+            TextDirection::Ltr,
+            WhiteSpace::Normal,
+            "",
+            "",
             Some(120.0f32.to_bits()),
             TextAlign::Left,
             7,
+            0,
         );
         let italic = text_layout_cache_key(
             "styled text",
@@ -1822,12 +1937,59 @@ mod tests {
             14.0f32.to_bits(),
             400,
             FontStyle::Italic,
+            0.0f32.to_bits(),
             1.2f32.to_bits(),
+            TextDirection::Ltr,
+            WhiteSpace::Normal,
+            "",
+            "",
             Some(120.0f32.to_bits()),
             TextAlign::Left,
             7,
+            0,
         );
         assert_ne!(normal, italic);
+    }
+
+    #[test]
+    fn text_layout_cache_key_includes_complete_measure_context() {
+        let mut context =
+            TextMeasureContext::new("context text", "Inter", 14.0, 400, 1.2, Some(120.0));
+        let base = TextLayoutParams::from_context(&context, TextAlign::Left, 7, 3).cache_key;
+
+        context.letter_spacing = 0.5;
+        assert_ne!(
+            base,
+            TextLayoutParams::from_context(&context, TextAlign::Left, 7, 3).cache_key
+        );
+        context.letter_spacing = 0.0;
+        context.text_direction = TextDirection::Rtl;
+        assert_ne!(
+            base,
+            TextLayoutParams::from_context(&context, TextAlign::Left, 7, 3).cache_key
+        );
+        context.text_direction = TextDirection::Ltr;
+        context.white_space = WhiteSpace::Nowrap;
+        assert_ne!(
+            base,
+            TextLayoutParams::from_context(&context, TextAlign::Left, 7, 3).cache_key
+        );
+        context.white_space = WhiteSpace::Normal;
+        context.language = "ar";
+        assert_ne!(
+            base,
+            TextLayoutParams::from_context(&context, TextAlign::Left, 7, 3).cache_key
+        );
+        context.language = "";
+        context.shaping_features = "liga=0";
+        assert_ne!(
+            base,
+            TextLayoutParams::from_context(&context, TextAlign::Left, 7, 3).cache_key
+        );
+        assert_ne!(
+            base,
+            TextLayoutParams::from_context(&context, TextAlign::Left, 7, 4).cache_key
+        );
     }
 
     #[test]

@@ -42,7 +42,8 @@ pub use events::{
     EventDispatcher, InputDispatchResult, InputState, Modifiers, RawInputEvent, UiEvent,
 };
 pub use layout::{
-    IntrinsicLayoutCache, LayoutEngine, LayoutRect, PerSurfaceLayoutState, TextMeasurer,
+    IntrinsicLayoutCache, LayoutEngine, LayoutRect, PerSurfaceLayoutState, TextMeasureContext,
+    TextMeasureRevisions, TextMeasurer,
 };
 pub use popover::{
     PopoverAnchor, PopoverConstraintAdjustment, PopoverGrab, PopoverGravity, PopoverPlacement,

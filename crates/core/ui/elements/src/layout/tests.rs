@@ -1,7 +1,9 @@
 use super::lowering::*;
 use super::retained::*;
 use super::*;
-use crate::style::{AlignSelf, Color, Display, Edges, FlexDirection, Position};
+use crate::style::{
+    AlignSelf, Color, Display, Edges, FlexDirection, FontStyle, Position, TextDirection, WhiteSpace,
+};
 use std::cell::Cell;
 
 fn make_node(tag: &str, width: Dimension, height: Dimension) -> WidgetNode {
@@ -110,18 +112,107 @@ struct CountingMeasurer {
 }
 
 impl TextMeasurer for CountingMeasurer {
-    fn measure_text(
-        &self,
-        text: &str,
-        _font_family: &str,
-        _font_size: f32,
-        _font_weight: u16,
-        _line_height: f32,
-        _max_width: Option<f32>,
-    ) -> (f32, f32) {
+    fn measure_text(&self, context: &TextMeasureContext<'_>) -> (f32, f32) {
         self.calls.set(self.calls.get() + 1);
-        (text.len() as f32 * 8.0, 16.0)
+        (context.text.len() as f32 * 8.0, 16.0)
     }
+}
+
+struct RevisionedMeasurer {
+    revisions: Cell<TextMeasureRevisions>,
+    calls: Cell<usize>,
+}
+
+impl TextMeasurer for RevisionedMeasurer {
+    fn measure_text(&self, context: &TextMeasureContext<'_>) -> (f32, f32) {
+        self.calls.set(self.calls.get() + 1);
+        (
+            context.text.len() as f32 * 8.0 + context.revisions.measurer_revision as f32,
+            16.0,
+        )
+    }
+
+    fn revisions(&self) -> TextMeasureRevisions {
+        self.revisions.get()
+    }
+}
+
+#[test]
+fn text_measure_key_includes_all_shaping_inputs_and_revisions() {
+    let mut context = TextMeasureContext::new("shaped", "Inter", 14.0, 400, 1.4, Some(120.0));
+    let base = TextMeasureKey::new(&context);
+
+    context.font_style = FontStyle::Italic;
+    assert_ne!(base, TextMeasureKey::new(&context));
+    context.font_style = FontStyle::Normal;
+    context.letter_spacing = 0.5;
+    assert_ne!(base, TextMeasureKey::new(&context));
+    context.letter_spacing = 0.0;
+    context.text_direction = TextDirection::Rtl;
+    assert_ne!(base, TextMeasureKey::new(&context));
+    context.text_direction = TextDirection::Ltr;
+    context.white_space = WhiteSpace::Nowrap;
+    assert_ne!(base, TextMeasureKey::new(&context));
+    context.white_space = WhiteSpace::Normal;
+    context.language = "ar";
+    assert_ne!(base, TextMeasureKey::new(&context));
+    context.language = "";
+    context.shaping_features = "liga=0";
+    assert_ne!(base, TextMeasureKey::new(&context));
+    context.shaping_features = "";
+    context.revisions = TextMeasureRevisions {
+        resource_revision: 2,
+        measurer_revision: 1,
+    };
+    assert_ne!(base, TextMeasureKey::new(&context));
+}
+
+#[test]
+fn retained_layout_remeasures_when_measurer_revision_changes() {
+    let mut root = make_node("row", Dimension::Content, Dimension::Auto);
+    let mut text = make_node("text", Dimension::Auto, Dimension::Auto);
+    text.attributes.insert("content".into(), "hello".into());
+    root.children.push(text);
+
+    let measurer = RevisionedMeasurer {
+        revisions: Cell::new(TextMeasureRevisions {
+            resource_revision: 1,
+            measurer_revision: 1,
+        }),
+        calls: Cell::new(0),
+    };
+    let mut state = PerSurfaceLayoutState::default();
+    let mut cache = IntrinsicLayoutCache::default();
+    LayoutEngine::compute_incremental(
+        &mut root,
+        &mut state,
+        300.0,
+        40.0,
+        false,
+        false,
+        &mut cache,
+        Some(&measurer),
+    );
+    let first_width = root.children[0].layout.width;
+    let first_calls = measurer.calls.get();
+
+    measurer.revisions.set(TextMeasureRevisions {
+        resource_revision: 2,
+        measurer_revision: 2,
+    });
+    LayoutEngine::compute_incremental(
+        &mut root,
+        &mut state,
+        300.0,
+        40.0,
+        false,
+        false,
+        &mut cache,
+        Some(&measurer),
+    );
+
+    assert!(measurer.calls.get() > first_calls);
+    assert!(root.children[0].layout.width > first_width);
 }
 
 #[test]

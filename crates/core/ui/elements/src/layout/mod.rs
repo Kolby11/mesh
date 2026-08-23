@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use crate::lru::LruCache;
 use crate::style::{
-    AlignContent, AlignItems, AlignSelf, Dimension, Display, Edges, FlexDirection, JustifyContent,
-    Overflow, Position, TextDirection,
+    AlignContent, AlignItems, AlignSelf, Dimension, Display, Edges, FlexDirection, FontStyle,
+    JustifyContent, Overflow, Position, TextDirection, WhiteSpace,
 };
 use crate::tree::{NodeId, WidgetNode};
 use taffy::TaffyTree;
@@ -25,18 +25,80 @@ use lowering::*;
 use retained::*;
 
 /// nodes without taking a direct dependency on the renderer.
-pub trait TextMeasurer {
-    /// Return `(width, height)` in logical pixels for the given text and style.
-    /// `max_width: None` means unconstrained (natural single-line width).
-    fn measure_text(
-        &self,
-        text: &str,
-        font_family: &str,
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct TextMeasureRevisions {
+    /// Revision of the resource/catalog snapshot used for shaping.
+    pub resource_revision: u64,
+    /// Revision of the measurer's own configuration and runtime state.
+    pub measurer_revision: u64,
+}
+
+/// Complete shaping and wrapping input for one intrinsic text measurement.
+///
+/// This is deliberately independent of a renderer implementation. A renderer
+/// may use additional internal state, but it must report changes to that state
+/// through [`TextMeasureRevisions`] so layout caches cannot reuse an old
+/// result.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextMeasureContext<'a> {
+    pub text: &'a str,
+    pub font_family: &'a str,
+    pub font_size: f32,
+    pub font_weight: u16,
+    pub font_style: FontStyle,
+    pub letter_spacing: f32,
+    pub line_height: f32,
+    pub text_direction: TextDirection,
+    pub white_space: WhiteSpace,
+    /// Optional language tag used by the shaping backend. An empty value
+    /// means that the backend's current locale applies.
+    pub language: &'a str,
+    /// Backend-specific shaping feature settings. The value is opaque to the
+    /// layout crate but remains part of the cache identity.
+    pub shaping_features: &'a str,
+    /// `None` means unconstrained natural width. `Some` is the width used for
+    /// wrapping, unless `white_space` is [`WhiteSpace::Nowrap`].
+    pub max_width: Option<f32>,
+    pub revisions: TextMeasureRevisions,
+}
+
+impl<'a> TextMeasureContext<'a> {
+    pub fn new(
+        text: &'a str,
+        font_family: &'a str,
         font_size: f32,
         font_weight: u16,
         line_height: f32,
         max_width: Option<f32>,
-    ) -> (f32, f32);
+    ) -> Self {
+        Self {
+            text,
+            font_family,
+            font_size,
+            font_weight,
+            font_style: FontStyle::Normal,
+            letter_spacing: 0.0,
+            line_height,
+            text_direction: TextDirection::Ltr,
+            white_space: WhiteSpace::Normal,
+            language: "",
+            shaping_features: "",
+            max_width,
+            revisions: TextMeasureRevisions::default(),
+        }
+    }
+}
+
+pub trait TextMeasurer {
+    /// Return `(width, height)` in logical pixels for the complete shaping
+    /// and wrapping context.
+    fn measure_text(&self, context: &TextMeasureContext<'_>) -> (f32, f32);
+
+    /// Return the resource and measurer revisions that affect this result.
+    /// Implementations with no mutable shaping state can keep the default.
+    fn revisions(&self) -> TextMeasureRevisions {
+        TextMeasureRevisions::default()
+    }
 }
 
 /// Computed layout rectangle for a node.
@@ -118,19 +180,35 @@ struct TextMeasureKey {
     font_family: Arc<str>,
     font_size: u32,
     font_weight: u16,
+    font_style: FontStyle,
+    letter_spacing: u32,
     line_height: u32,
+    text_direction: TextDirection,
+    white_space: WhiteSpace,
+    language: Arc<str>,
+    shaping_features: Arc<str>,
     max_width: Option<u32>,
+    resource_revision: u64,
+    measurer_revision: u64,
 }
 
 impl TextMeasureKey {
-    fn new(text: &TextMeasureData, max_width: Option<f32>) -> Self {
+    fn new(context: &TextMeasureContext<'_>) -> Self {
         Self {
-            content: text.content.clone(),
-            font_family: text.font_family.clone(),
-            font_size: text.font_size.to_bits(),
-            font_weight: text.font_weight,
-            line_height: text.line_height.to_bits(),
-            max_width: max_width.map(f32::to_bits),
+            content: Arc::from(context.text),
+            font_family: Arc::from(context.font_family),
+            font_size: context.font_size.to_bits(),
+            font_weight: context.font_weight,
+            font_style: context.font_style,
+            letter_spacing: context.letter_spacing.to_bits(),
+            line_height: context.line_height.to_bits(),
+            text_direction: context.text_direction,
+            white_space: context.white_space,
+            language: Arc::from(context.language),
+            shaping_features: Arc::from(context.shaping_features),
+            max_width: context.max_width.map(f32::to_bits),
+            resource_revision: context.revisions.resource_revision,
+            measurer_revision: context.revisions.measurer_revision,
         }
     }
 }
@@ -160,6 +238,10 @@ pub struct PerSurfaceLayoutState {
     /// alongside the retained Taffy nodes avoids rebuilding text content and
     /// style contexts on every layout-dirty frame.
     text_nodes: HashMap<NodeId, TextMeasureData>,
+    /// Revisions used by the last successful layout pass. A revision change
+    /// invalidates intrinsic text geometry even when no node dirty flag was
+    /// emitted by the caller.
+    text_measure_revisions: TextMeasureRevisions,
     /// `(width, height)` used in the last `compute_layout` call.
     pub last_available: (f32, f32),
     /// `false` after theme/locale/source-reload resets; forces a
@@ -183,6 +265,7 @@ impl PerSurfaceLayoutState {
             node_map: HashMap::new(),
             stable_node_ids: HashSet::new(),
             text_nodes: HashMap::new(),
+            text_measure_revisions: TextMeasureRevisions::default(),
             last_available: (0.0, 0.0),
             valid: false,
             #[cfg(test)]
@@ -413,6 +496,9 @@ impl LayoutEngine {
         intrinsic_cache: &mut IntrinsicLayoutCache,
         measurer: Option<&dyn TextMeasurer>,
     ) {
+        let text_measure_revisions = measurer
+            .map(|measurer| measurer.revisions())
+            .unwrap_or_default();
         if !state.valid {
             compute_fresh_retained_layout(
                 root,
@@ -451,17 +537,24 @@ impl LayoutEngine {
         };
 
         let available_changed = state.last_available != (available_width, available_height);
+        let measurement_changed = state.text_measure_revisions != text_measure_revisions;
         // Paint-only frames cannot change geometry. Leave the retained Taffy
         // tree untouched and defer style/context synchronization until a
         // layout-dirty frame, when it is needed immediately before layout.
         // This avoids rebuilding two maps, converting every ComputedStyle,
         // and calling set_style for every node on animation/repaint frames.
-        if !available_changed && !dirty_layout {
+        if !available_changed && !dirty_layout && !measurement_changed {
             return;
         }
 
         let mut report = TaffyLayoutReport::default();
-        let synchronization = if let Some(dirty_node_snapshots) = dirty_node_snapshots {
+        let synchronization = if measurement_changed {
+            // A resource/measurer change can affect any text node, including
+            // nodes omitted from a sparse dirty snapshot. Synchronize the
+            // complete retained tree and mark it dirty so Taffy cannot reuse
+            // its prior intrinsic result.
+            update_retained_node_styles(root, state, true, None, &mut report)
+        } else if let Some(dirty_node_snapshots) = dirty_node_snapshots {
             update_retained_node_snapshots(state, dirty_layout, dirty_node_snapshots, &mut report)
         } else {
             update_retained_node_styles(root, state, dirty_layout, dirty_node_ids, &mut report)
@@ -489,7 +582,7 @@ impl LayoutEngine {
             return;
         }
 
-        if available_changed || dirty_layout {
+        if available_changed || dirty_layout || measurement_changed {
             let available_space = taffy_available_space(available_width, available_height);
             let (tree, text_nodes) = (&mut state.tree, &state.text_nodes);
             if let Err(error) = tree.compute_layout_with_measure(
@@ -521,6 +614,7 @@ impl LayoutEngine {
                     available_height,
                 );
                 state.last_available = (available_width, available_height);
+                state.text_measure_revisions = text_measure_revisions;
             }
         }
 
