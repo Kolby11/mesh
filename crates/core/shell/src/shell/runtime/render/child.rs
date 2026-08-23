@@ -313,9 +313,12 @@ impl Shell {
                 // later size/reposition passes.
                 let mut accepted_popup_config = popup_config.clone();
                 accepted_popup_config.grab_identity = None;
-                let popup_config_changed = {
+                let (popup_config_changed, popup_needs_configure) = {
                     let child = &self.components[index].children[child_index];
-                    child.target.popup_config.as_ref() != Some(&accepted_popup_config)
+                    let config_changed =
+                        child.target.popup_config.as_ref() != Some(&accepted_popup_config);
+                    let size_changed = child.target.last_popup_size != Some(padded_size);
+                    (config_changed, config_changed || size_changed)
                 };
                 {
                     let child = &mut self.components[index].children[child_index];
@@ -324,7 +327,7 @@ impl Shell {
                         child.target.last_popup_size = Some(padded_size);
                     }
                 }
-                if popup_config_changed
+                if popup_needs_configure
                     && let Err(error) = self
                         .presentation_engine
                         .configure_popup(&child_surface_id, popup_config)
@@ -481,16 +484,21 @@ impl Shell {
         let paint_generation = self.components[index]
             .component
             .child_surface_paint_generation(&node_key);
-        if child_surface_paint_cache_matches(
-            paint_generation,
-            self.components[index].children[child_index].last_paint_generation,
-            exiting,
-            self.components[index].children[child_index].last_paint_exiting,
-            scale.to_bits(),
-            self.components[index].children[child_index].last_paint_scale_bits,
-            content_offset,
-            self.components[index].children[child_index].last_paint_content_offset,
-        ) {
+        let child_target = &self.components[index].children[child_index].target;
+        let has_pending_present =
+            !child_target.pending_present_damage.is_empty() || child_target.force_full_present;
+        if !has_pending_present
+            && child_surface_paint_cache_matches(
+                paint_generation,
+                self.components[index].children[child_index].last_paint_generation,
+                exiting,
+                self.components[index].children[child_index].last_paint_exiting,
+                scale.to_bits(),
+                self.components[index].children[child_index].last_paint_scale_bits,
+                content_offset,
+                self.components[index].children[child_index].last_paint_content_offset,
+            )
+        {
             return Ok(false);
         }
         let painted = {

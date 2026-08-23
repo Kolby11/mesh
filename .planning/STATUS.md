@@ -71,6 +71,13 @@ serial. The presentation backend resolves the requested seat directly and
 emits a warning when a requested grab has no live matching seat/serial, instead
 of silently selecting the global activation-seat hint.
 
+Popup targets now invalidate their cached creation size when presentation
+reports `SurfaceMissing`, including state-only commits, and force a full retry
+when the missing result came from surface-state submission. Child popup
+reconciliation treats that invalidated gate as configure-needed even when the
+placement is unchanged, while retained child paint state cannot suppress the
+retry present.
+
 Icon bitmap/SVG and font-glyph preparation still share a bounded render resource
 broker, with revision-aware cache handoff and linked-file invalidation. Typed
 icon/glyph caches and shell polling remain separate at the handoff boundary.
@@ -86,7 +93,7 @@ repository-settings fixture, which rejects its `revision` key as unknown.
 
 ## Next
 
-Complete the remaining semantic presentation state diff and safe popup
-recreation for unsupported or replaced parents. Carry full pointer-button
+Complete safe popup recreation for rejected reposition or replaced parents and
+the remaining semantic presentation state diff. Carry full pointer-button
 identity, IME/text-input-v3, connection recreation, and resource
 preparation/text shaping as separate follow-up work.

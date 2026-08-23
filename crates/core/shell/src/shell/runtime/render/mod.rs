@@ -1079,6 +1079,13 @@ impl Shell {
                     target.last_surface_config = None;
                     target.known_surface_size = None;
                     target.last_region_state = None;
+                    // `last_popup_size` is the creation/reposition gate for
+                    // xdg_popup targets. A missing popup object cannot be
+                    // repaired by replaying pixels alone; force the next
+                    // render to issue configure_popup and create a fresh role.
+                    if target.popup_config.is_some() {
+                        target.last_popup_size = None;
+                    }
                     self.components[index].component.request_paint();
                 }
                 Err(error) => {
@@ -1105,6 +1112,10 @@ impl Shell {
                     target.last_surface_config = None;
                     target.known_surface_size = None;
                     target.last_region_state = None;
+                    if target.popup_config.is_some() {
+                        target.last_popup_size = None;
+                        target.force_full_present = true;
+                    }
                     self.components[index].component.request_paint();
                 }
                 Err(error) => {

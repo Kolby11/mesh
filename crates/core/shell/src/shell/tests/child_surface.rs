@@ -147,6 +147,47 @@ fn child_surface_reconcile_creates_popup_and_paints_subtree() {
 }
 
 #[test]
+fn child_popup_recreates_after_presentation_reports_missing_surface() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(Arc::clone(&state))));
+
+    render_components_until_child_popup(&mut shell);
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+
+    // Simulate a compositor-side popup disappearance without a separate
+    // lifecycle event. The next present must invalidate the cached size so a
+    // following reconcile can issue a fresh configure_popup call.
+    shell
+        .presentation_engine
+        .testing_set_surface_missing(&child_id, true);
+    state.lock().unwrap().paint_generation = Some(2);
+    shell.render_components().unwrap();
+    assert_eq!(
+        shell.components[0].children[0].target.last_popup_size, None,
+        "a missing popup must not leave the creation gate warm"
+    );
+
+    shell.render_components().unwrap();
+    assert_eq!(
+        shell.components[0].children[0].target.last_popup_size,
+        Some((72, 32))
+    );
+    assert!(
+        shell
+            .presentation_engine
+            .testing_presented_surfaces()
+            .iter()
+            .filter(|surface| *surface == &child_id)
+            .count()
+            >= 2,
+        "the popup should be presented again after recreation"
+    );
+}
+
+#[test]
 fn promoting_an_embedded_child_replaces_its_popup_with_a_toplevel() {
     let mut shell = Shell::new();
     shell.presentation_engine =
