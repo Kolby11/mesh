@@ -1,4 +1,5 @@
 use super::backend::WaylandRole;
+use super::state::GestureKind;
 use super::*;
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -912,6 +913,7 @@ impl Dispatch<ZwpPointerGestureSwipeV1, GlobalData> for State {
                     return;
                 };
                 state.gesture_surface = Some(surface_id.clone());
+                state.gesture_kind = Some(GestureKind::Swipe);
                 state.events.push(DevWindowEvent::GestureSwipeBegin {
                     surface_id,
                     fingers,
@@ -931,6 +933,7 @@ impl Dispatch<ZwpPointerGestureSwipeV1, GlobalData> for State {
                 let Some(surface_id) = state.gesture_surface.take() else {
                     return;
                 };
+                state.gesture_kind = None;
                 state.events.push(DevWindowEvent::GestureSwipeEnd {
                     surface_id,
                     cancelled: cancelled != 0,
@@ -958,6 +961,7 @@ impl Dispatch<ZwpPointerGesturePinchV1, GlobalData> for State {
                     return;
                 };
                 state.gesture_surface = Some(surface_id.clone());
+                state.gesture_kind = Some(GestureKind::Pinch);
                 state.events.push(DevWindowEvent::GesturePinchBegin {
                     surface_id,
                     fingers,
@@ -985,6 +989,7 @@ impl Dispatch<ZwpPointerGesturePinchV1, GlobalData> for State {
                 let Some(surface_id) = state.gesture_surface.take() else {
                     return;
                 };
+                state.gesture_kind = None;
                 state.events.push(DevWindowEvent::GesturePinchEnd {
                     surface_id,
                     cancelled: cancelled != 0,
@@ -1012,6 +1017,7 @@ impl Dispatch<ZwpPointerGestureHoldV1, GlobalData> for State {
                     return;
                 };
                 state.gesture_surface = Some(surface_id.clone());
+                state.gesture_kind = Some(GestureKind::Hold);
                 state.events.push(DevWindowEvent::GestureHoldBegin {
                     surface_id,
                     fingers,
@@ -1021,6 +1027,7 @@ impl Dispatch<ZwpPointerGestureHoldV1, GlobalData> for State {
                 let Some(surface_id) = state.gesture_surface.take() else {
                     return;
                 };
+                state.gesture_kind = None;
                 state.events.push(DevWindowEvent::GestureHoldEnd {
                     surface_id,
                     cancelled: cancelled != 0,

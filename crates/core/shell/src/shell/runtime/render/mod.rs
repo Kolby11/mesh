@@ -763,7 +763,7 @@ impl Shell {
         Ok(())
     }
 
-    fn drain_surface_lifecycle_events(&mut self) -> Result<(), ShellRunError> {
+    pub(in crate::shell) fn drain_surface_lifecycle_events(&mut self) -> Result<(), ShellRunError> {
         for event in self.presentation_engine.take_surface_lifecycle_events() {
             match event {
                 SurfaceLifecycleEvent::Dismissed { surface_id } => {
@@ -787,7 +787,8 @@ impl Shell {
                         _ => {}
                     }
                 }
-                SurfaceLifecycleEvent::Closed { surface_id } => {
+                SurfaceLifecycleEvent::Closed { surface_id }
+                | SurfaceLifecycleEvent::Lost { surface_id, .. } => {
                     let Some((index, target)) = self.component_target_for_surface(&surface_id)
                     else {
                         continue;

@@ -71,6 +71,7 @@ impl WaylandSurfaceBackend {
             touch: None,
             touch_surfaces: HashMap::new(),
             gesture_surface: None,
+            gesture_kind: None,
             keyboard: None,
             pointer_focus: None,
             keyboard_focus: None,
@@ -81,6 +82,7 @@ impl WaylandSurfaceBackend {
             xdg_shell,
             lifecycle_events: Vec::new(),
             close_requests: Vec::new(),
+            connection_lost: None,
         };
 
         Ok(Self {
@@ -122,6 +124,9 @@ impl WaylandSurfaceBackend {
         surface_id: &str,
         cfg: SurfaceConfig,
     ) -> Result<(), PresentationError> {
+        if let Some(error) = self.state.connection_lost_error() {
+            return Err(error);
+        }
         let cfg = self.clamp_surface_config(surface_id, cfg);
         let qh = self.state.qh.clone();
         let effective_keyboard_mode = self
@@ -328,6 +333,9 @@ impl WaylandSurfaceBackend {
         surface_id: &str,
         config: PopupConfig,
     ) -> Result<(), PresentationError> {
+        if let Some(error) = self.state.connection_lost_error() {
+            return Err(error);
+        }
         // An existing popup is repositioned in place rather than recreated, so
         // anchor moves (exclusive-zone/output changes) don't tear it down. The
         // shadow/overshoot reserve travels with the placement size, so adopt it

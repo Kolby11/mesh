@@ -1,9 +1,9 @@
 use super::*;
 
 impl WaylandSurfaceBackend {
-    pub fn pump(&mut self) {
-        let _ = self.dispatch_available();
-        let _ = self.release_expired_surface_focus_grab();
+    pub fn pump(&mut self) -> Result<(), PresentationError> {
+        self.dispatch_available()?;
+        self.release_expired_surface_focus_grab()
     }
 
     /// Flush all requests staged by this shell frame, then dispatch already
@@ -14,9 +14,9 @@ impl WaylandSurfaceBackend {
         self.dispatch_pending()
     }
 
-    pub fn poll_events(&mut self) -> Vec<DevWindowEvent> {
-        let _ = self.dispatch_available();
-        let _ = self.release_expired_surface_focus_grab();
+    pub fn poll_events(&mut self) -> Result<Vec<DevWindowEvent>, PresentationError> {
+        self.dispatch_available()?;
+        self.release_expired_surface_focus_grab()?;
         self.state.push_due_keyboard_repeats();
         let events = std::mem::take(&mut self.state.events);
         if !events.is_empty() {
@@ -25,38 +25,43 @@ impl WaylandSurfaceBackend {
                 events.len()
             );
         }
-        events
+        Ok(events)
     }
 
     fn release_expired_surface_focus_grab(&mut self) -> Result<(), PresentationError> {
         if self.state.release_expired_surface_focus_grab() {
-            self.event_queue
-                .flush()
-                .map_err(|e| PresentationError::SurfaceCreate(format!("flush: {e}")))?;
+            match self.event_queue.flush() {
+                Ok(()) => {}
+                Err(error) => return Err(self.map_wayland_error("flush", error)),
+            }
         }
         Ok(())
     }
 
     fn dispatch_pending(&mut self) -> Result<(), PresentationError> {
-        self.event_queue
-            .flush()
-            .map_err(|e| PresentationError::SurfaceCreate(format!("flush: {e}")))?;
-        self.event_queue
-            .dispatch_pending(&mut self.state)
-            .map_err(|e| PresentationError::SurfaceCreate(format!("dispatch: {e}")))?;
+        match self.event_queue.flush() {
+            Ok(()) => {}
+            Err(error) => return Err(self.map_wayland_error("flush", error)),
+        }
+        match self.event_queue.dispatch_pending(&mut self.state) {
+            Ok(_) => {}
+            Err(error) => return Err(self.map_dispatch_error("dispatch", error)),
+        }
         self.release_expired_surface_focus_grab()?;
         Ok(())
     }
 
     pub(super) fn dispatch_available(&mut self) -> Result<(), PresentationError> {
-        self.event_queue
-            .flush()
-            .map_err(|e| PresentationError::SurfaceCreate(format!("flush: {e}")))?;
+        match self.event_queue.flush() {
+            Ok(()) => {}
+            Err(error) => return Err(self.map_wayland_error("flush", error)),
+        }
 
         for _ in 0..32 {
-            self.event_queue
-                .dispatch_pending(&mut self.state)
-                .map_err(|e| PresentationError::SurfaceCreate(format!("dispatch: {e}")))?;
+            match self.event_queue.dispatch_pending(&mut self.state) {
+                Ok(_) => {}
+                Err(error) => return Err(self.map_dispatch_error("dispatch", error)),
+            }
 
             let Some(read_guard) = self.event_queue.prepare_read() else {
                 continue;
@@ -92,12 +97,12 @@ impl WaylandSurfaceBackend {
                         Ok(read_count) => {
                             tracing::trace!("read {read_count} Wayland event(s)");
                             if read_count == 0 {
-                                break;
+                                return Err(self.connection_lost("read: Wayland connection closed"));
                             }
                         }
                         Err(WaylandError::Io(err)) if err.kind() == ErrorKind::WouldBlock => break,
                         Err(err) => {
-                            return Err(PresentationError::SurfaceCreate(format!("read: {err}")));
+                            return Err(self.map_wayland_error("read", err));
                         }
                     }
                 }
@@ -107,14 +112,15 @@ impl WaylandSurfaceBackend {
                 }
                 Err(err) => {
                     drop(read_guard);
-                    return Err(PresentationError::SurfaceCreate(format!("poll: {err}")));
+                    return Err(self.connection_lost(format!("poll: {err}")));
                 }
             }
         }
 
-        self.event_queue
-            .dispatch_pending(&mut self.state)
-            .map_err(|e| PresentationError::SurfaceCreate(format!("dispatch: {e}")))?;
+        match self.event_queue.dispatch_pending(&mut self.state) {
+            Ok(_) => {}
+            Err(error) => return Err(self.map_dispatch_error("dispatch", error)),
+        }
         self.release_expired_surface_focus_grab()?;
         Ok(())
     }
@@ -132,12 +138,14 @@ impl WaylandSurfaceBackend {
         use crate::{WaitReason, WaitResult};
         use rustix::io::read as eventfd_read;
 
-        self.event_queue
-            .flush()
-            .map_err(|e| PresentationError::SurfaceCreate(format!("flush: {e}")))?;
-        self.event_queue
-            .dispatch_pending(&mut self.state)
-            .map_err(|e| PresentationError::SurfaceCreate(format!("dispatch: {e}")))?;
+        match self.event_queue.flush() {
+            Ok(()) => {}
+            Err(error) => return Err(self.map_wayland_error("flush", error)),
+        }
+        match self.event_queue.dispatch_pending(&mut self.state) {
+            Ok(_) => {}
+            Err(error) => return Err(self.map_dispatch_error("dispatch", error)),
+        }
 
         // A `None` guard means events arrived between the dispatch above and
         // here; don't block, let the caller process them.
@@ -173,7 +181,7 @@ impl WaylandSurfaceBackend {
             ),
             Err(err) => {
                 drop(read_guard);
-                return Err(PresentationError::SurfaceCreate(format!("poll: {err}")));
+                return Err(self.connection_lost(format!("poll: {err}")));
             }
         };
 
@@ -186,14 +194,17 @@ impl WaylandSurfaceBackend {
         let mut wake_reason = WaitReason::DeadlineExpired;
         if wayland_ready {
             match read_guard.read() {
-                Ok(0) | Ok(_) => {
+                Ok(0) => {
+                    return Err(self.connection_lost("read: Wayland connection closed"));
+                }
+                Ok(_) => {
                     wake_reason = WaitReason::WaylandEvent;
                 }
                 Err(WaylandError::Io(err)) if err.kind() == ErrorKind::WouldBlock => {
                     wake_reason = WaitReason::WaylandEvent;
                 }
                 Err(err) => {
-                    return Err(PresentationError::SurfaceCreate(format!("read: {err}")));
+                    return Err(self.map_wayland_error("read", err));
                 }
             }
         } else {
@@ -205,13 +216,37 @@ impl WaylandSurfaceBackend {
             wake_reason = WaitReason::IpcEvent;
         }
 
-        self.event_queue
-            .dispatch_pending(&mut self.state)
-            .map_err(|e| PresentationError::SurfaceCreate(format!("dispatch: {e}")))?;
+        match self.event_queue.dispatch_pending(&mut self.state) {
+            Ok(_) => {}
+            Err(error) => return Err(self.map_dispatch_error("dispatch", error)),
+        }
         self.release_expired_surface_focus_grab()?;
 
         Ok(WaitResult {
             reason: wake_reason,
         })
+    }
+
+    fn connection_lost(&mut self, reason: impl Into<String>) -> PresentationError {
+        let reason = reason.into();
+        self.state.mark_connection_lost(reason.clone());
+        PresentationError::ConnectionLost(reason)
+    }
+
+    fn map_wayland_error(&mut self, context: &str, error: WaylandError) -> PresentationError {
+        let message = format!("{context}: {error}");
+        match error {
+            WaylandError::Io(error) if error.kind() != ErrorKind::WouldBlock => {
+                self.connection_lost(message)
+            }
+            _ => PresentationError::SurfaceCreate(message),
+        }
+    }
+
+    fn map_dispatch_error(&mut self, context: &str, error: DispatchError) -> PresentationError {
+        match error {
+            DispatchError::Backend(error) => self.map_wayland_error(context, error),
+            error => PresentationError::SurfaceCreate(format!("{context}: {error}")),
+        }
     }
 }

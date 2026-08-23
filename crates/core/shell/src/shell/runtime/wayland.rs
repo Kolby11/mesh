@@ -4,7 +4,18 @@ const MAX_WAYLAND_EVENTS_PER_FRAME: usize = 32;
 
 impl Shell {
     pub(in crate::shell) fn dispatch_wayland(&mut self) -> Result<(), ShellRunError> {
-        let events = coalesce_input_events(self.presentation_engine.poll_events());
+        let events = match self.presentation_engine.poll_events() {
+            Ok(events) => coalesce_input_events(events),
+            Err(error) => {
+                // Connection loss tears down compositor identities before the
+                // typed error reaches the shell. Consume those lifecycle
+                // events now so retained targets cannot keep stale accepted
+                // configuration while the caller decides whether to exit or
+                // restart the presentation backend.
+                self.drain_surface_lifecycle_events()?;
+                return Err(ShellRunError::Presentation(error));
+            }
+        };
         if !events.is_empty() {
             self.presented_last_frame = true;
         }

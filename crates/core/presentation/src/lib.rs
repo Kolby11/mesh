@@ -75,6 +75,10 @@ pub enum SurfaceLifecycleEvent {
     /// The compositor dismissed an xdg popup, usually because of outside-click
     /// handling or destruction of its parent surface.
     Dismissed { surface_id: String },
+    /// The Wayland connection was lost while this surface was live. The
+    /// compositor object is gone and the shell must invalidate its accepted
+    /// configuration before attempting recovery.
+    Lost { surface_id: String, reason: String },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -96,6 +100,9 @@ pub enum PresentationError {
 
     #[error("buffer attach failed: {0}")]
     BufferAttach(String),
+
+    #[error("Wayland connection lost: {0}")]
+    ConnectionLost(String),
 }
 
 pub struct PresentationEngine {
@@ -123,6 +130,7 @@ struct TestingBackend {
     destroyed_popup_ids: HashSet<String>,
     destroyed_surface_ids: HashSet<String>,
     lifecycle_events: Vec<SurfaceLifecycleEvent>,
+    connection_lost: Option<String>,
     close_requests: Vec<String>,
     events: Vec<WindowEvent>,
     presented: Vec<String>,
@@ -286,6 +294,38 @@ impl PresentationEngine {
         }
     }
 
+    /// Simulate the Wayland connection disappearing. This follows the same
+    /// one-shot lifecycle contract as the real backend: every live surface is
+    /// removed before its `Lost` event is exposed, and later injections do not
+    /// duplicate events.
+    #[doc(hidden)]
+    pub fn testing_push_connection_lost(&mut self, reason: impl Into<String>) {
+        if let Backend::Testing(backend) = &mut self.backend {
+            if backend.connection_lost.is_some() {
+                return;
+            }
+            let reason = reason.into();
+            backend.connection_lost = Some(reason.clone());
+            let mut surface_ids = backend
+                .surface_configs
+                .keys()
+                .chain(backend.popup_configs.keys())
+                .cloned()
+                .collect::<Vec<_>>();
+            surface_ids.sort();
+            surface_ids.dedup();
+            for surface_id in surface_ids {
+                backend.surface_configs.remove(&surface_id);
+                backend.popup_configs.remove(&surface_id);
+                backend.missing_surfaces.insert(surface_id.clone());
+                backend.lifecycle_events.push(SurfaceLifecycleEvent::Lost {
+                    surface_id,
+                    reason: reason.clone(),
+                });
+            }
+        }
+    }
+
     #[doc(hidden)]
     pub fn testing_push_event(&mut self, event: WindowEvent) {
         if let Backend::Testing(backend) = &mut self.backend {
@@ -302,6 +342,9 @@ impl PresentationEngine {
             Backend::WaylandSurface(bridge) => bridge.configure(surface_id, cfg),
             Backend::DevWindow(_) => Ok(()),
             Backend::Testing(backend) => {
+                if let Some(reason) = &backend.connection_lost {
+                    return Err(PresentationError::ConnectionLost(reason.clone()));
+                }
                 if let Some(message) = backend.configure_error.take() {
                     return Err(PresentationError::SurfaceCreate(message));
                 }
@@ -420,6 +463,9 @@ impl PresentationEngine {
             Backend::WaylandSurface(bridge) => bridge.configure_popup(surface_id, config),
             Backend::DevWindow(_) => Ok(()),
             Backend::Testing(backend) => {
+                if let Some(reason) = &backend.connection_lost {
+                    return Err(PresentationError::ConnectionLost(reason.clone()));
+                }
                 backend.missing_surfaces.remove(surface_id);
                 backend.destroyed_popup_ids.remove(surface_id);
                 backend.popup_configs.insert(surface_id.to_string(), config);
@@ -560,6 +606,9 @@ impl PresentationEngine {
             }
             Backend::DevWindow(bridge) => bridge.present(surface_id, title, visible, buffer),
             Backend::Testing(backend) => {
+                if let Some(reason) = &backend.connection_lost {
+                    return Err(PresentationError::ConnectionLost(reason.clone()));
+                }
                 if visible && backend.missing_surfaces.contains(surface_id) {
                     return Ok(PresentStatus::SurfaceMissing);
                 }
@@ -588,6 +637,9 @@ impl PresentationEngine {
                 Ok(())
             }
             Backend::Testing(backend) => {
+                if let Some(reason) = &backend.connection_lost {
+                    return Err(PresentationError::ConnectionLost(reason.clone()));
+                }
                 backend.completed_frames += 1;
                 Ok(())
             }
@@ -710,19 +762,29 @@ impl PresentationEngine {
         }
     }
 
-    pub fn pump(&mut self) {
+    pub fn pump(&mut self) -> Result<(), PresentationError> {
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => bridge.pump(),
-            Backend::DevWindow(bridge) => bridge.pump(),
-            Backend::Testing(_) => {}
+            Backend::DevWindow(bridge) => {
+                bridge.pump();
+                Ok(())
+            }
+            Backend::Testing(backend) => {
+                backend.connection_lost.as_ref().map_or(Ok(()), |reason| {
+                    Err(PresentationError::ConnectionLost(reason.clone()))
+                })
+            }
         }
     }
 
-    pub fn poll_events(&mut self) -> Vec<WindowEvent> {
+    pub fn poll_events(&mut self) -> Result<Vec<WindowEvent>, PresentationError> {
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => bridge.poll_events(),
-            Backend::DevWindow(bridge) => bridge.poll_events(),
-            Backend::Testing(backend) => std::mem::take(&mut backend.events),
+            Backend::DevWindow(bridge) => Ok(bridge.poll_events()),
+            Backend::Testing(backend) => backend.connection_lost.as_ref().map_or_else(
+                || Ok(std::mem::take(&mut backend.events)),
+                |reason| Err(PresentationError::ConnectionLost(reason.clone())),
+            ),
         }
     }
 
@@ -1219,6 +1281,42 @@ mod tests {
         engine.destroy_surface("panel");
         engine.destroy_surface("panel");
         assert_eq!(engine.testing_destroyed_surfaces(), ["panel"]);
+    }
+
+    #[test]
+    fn connection_loss_tears_down_all_surfaces_once_and_stays_typed() {
+        let mut engine = PresentationEngine::testing_with_popup_support(false);
+        engine
+            .configure("settings", SurfaceConfig::default())
+            .unwrap();
+        engine.configure("panel", SurfaceConfig::default()).unwrap();
+
+        engine.testing_push_connection_lost("compositor exited");
+        assert!(engine.testing_surface_configs().is_empty());
+        assert_eq!(
+            engine.take_surface_lifecycle_events(),
+            [
+                SurfaceLifecycleEvent::Lost {
+                    surface_id: "panel".to_string(),
+                    reason: "compositor exited".to_string(),
+                },
+                SurfaceLifecycleEvent::Lost {
+                    surface_id: "settings".to_string(),
+                    reason: "compositor exited".to_string(),
+                },
+            ]
+        );
+
+        engine.testing_push_connection_lost("a second failure");
+        assert!(engine.take_surface_lifecycle_events().is_empty());
+        assert!(matches!(
+            engine.configure("panel", SurfaceConfig::default()),
+            Err(PresentationError::ConnectionLost(reason)) if reason == "compositor exited"
+        ));
+        assert!(matches!(
+            engine.poll_events(),
+            Err(PresentationError::ConnectionLost(reason)) if reason == "compositor exited"
+        ));
     }
 
     #[test]

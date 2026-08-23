@@ -1,9 +1,17 @@
 use super::backend::{SurfaceEntry, WaylandRole, apply_config, surface_config_fingerprint};
 use super::*;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 const MAX_REPEAT_EVENTS_PER_POLL: usize = 64;
 const SURFACE_FOCUS_GRAB_TIMEOUT: Duration = Duration::from_millis(750);
+
+#[derive(Clone, Copy)]
+pub(super) enum GestureKind {
+    Swipe,
+    Pinch,
+    Hold,
+}
 
 pub(super) struct KeyboardRepeatState {
     pub(super) surface_id: Arc<str>,
@@ -74,6 +82,7 @@ pub(super) struct State {
     /// through. Compositors recognize at most one gesture at a time, so a
     /// single field is sufficient.
     pub(super) gesture_surface: Option<Arc<str>>,
+    pub(super) gesture_kind: Option<GestureKind>,
     pub(super) keyboard: Option<wl_keyboard::WlKeyboard>,
     pub(super) pointer_focus: Option<Arc<str>>,
     pub(super) keyboard_focus: Option<Arc<str>>,
@@ -93,6 +102,10 @@ pub(super) struct State {
     /// means; unlike `dismissed_popups` the surface is *not* removed here,
     /// because xdg-shell's close is a request the client may decline.
     pub(super) close_requests: Vec<String>,
+    /// Once set, the Wayland connection cannot recover in this backend. The
+    /// first connection failure tears down every retained object and publishes
+    /// one `Lost` event per surface; later failures are idempotent.
+    pub(super) connection_lost: Option<String>,
 }
 
 impl State {
@@ -425,6 +438,88 @@ impl State {
             }
         }
         dismissed
+    }
+
+    pub(super) fn connection_lost_error(&self) -> Option<PresentationError> {
+        self.connection_lost
+            .as_ref()
+            .map(|reason| PresentationError::ConnectionLost(reason.clone()))
+    }
+
+    /// Tear down all client-owned protocol and input state after the Wayland
+    /// connection has failed. No protocol request is attempted here: the
+    /// socket is already unusable, so dropping the proxies and clearing the
+    /// identity indexes is the only safe cleanup operation.
+    pub(super) fn mark_connection_lost(&mut self, reason: String) {
+        if self.connection_lost.is_some() {
+            return;
+        }
+        self.connection_lost = Some(reason.clone());
+
+        let pointer_focus = self.pointer_focus.take();
+        let touch_surfaces = self
+            .touch_surfaces
+            .drain()
+            .map(|(_, surface_id)| surface_id)
+            .collect::<HashSet<_>>();
+        let mut touch_surfaces = touch_surfaces.into_iter().collect::<Vec<_>>();
+        touch_surfaces.sort();
+        self.keyboard_focus = None;
+        self.keyboard_repeat = None;
+        self.keyboard_mods = Modifiers::default();
+        let gesture_surface = self.gesture_surface.take();
+        let gesture_kind = self.gesture_kind.take();
+        self.focus_grab.take();
+        self.focus_grab_surface_id = None;
+        self.focus_grab_requested_at = None;
+        self.activation_seat = None;
+        self.pointer.take();
+        self.touch.take();
+        self.keyboard.take();
+        self.gesture_swipe.take();
+        self.gesture_pinch.take();
+        self.gesture_hold.take();
+
+        // Discard queued input addressed to objects that no longer exist, but
+        // preserve local cancellation signals for active ownership.
+        self.events.clear();
+        if let Some(surface_id) = pointer_focus {
+            self.events
+                .push(DevWindowEvent::PointerLeave { surface_id });
+        }
+        for surface_id in touch_surfaces {
+            self.events.push(DevWindowEvent::TouchCancel { surface_id });
+        }
+        if let Some(surface_id) = gesture_surface {
+            match gesture_kind {
+                Some(GestureKind::Swipe) => self.events.push(DevWindowEvent::GestureSwipeEnd {
+                    surface_id,
+                    cancelled: true,
+                }),
+                Some(GestureKind::Pinch) => self.events.push(DevWindowEvent::GesturePinchEnd {
+                    surface_id,
+                    cancelled: true,
+                }),
+                Some(GestureKind::Hold) => self.events.push(DevWindowEvent::GestureHoldEnd {
+                    surface_id,
+                    cancelled: true,
+                }),
+                None => {}
+            }
+        }
+        self.close_requests.clear();
+
+        let mut surface_ids = self.surfaces.keys().cloned().collect::<Vec<_>>();
+        surface_ids.sort();
+        self.surfaces.clear();
+        self.surface_ids_by_wl_id.clear();
+        self.pool.take();
+        for surface_id in surface_ids {
+            self.lifecycle_events.push(SurfaceLifecycleEvent::Lost {
+                surface_id,
+                reason: reason.clone(),
+            });
+        }
     }
 
     pub(super) fn surface_id_for_wl_surface(

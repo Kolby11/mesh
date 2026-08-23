@@ -372,6 +372,45 @@ fn compositor_closed_surface_invalidates_state_and_recreates_on_next_frame() {
     );
 }
 
+#[test]
+fn connection_loss_invalidates_surface_state_before_reporting_typed_failure() {
+    const SURFACE: &str = "@test/connection-lost";
+
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(SurfaceConfigLifecycleComponent::new(
+        SURFACE,
+        (920, 700),
+    )));
+    let mut emitted = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: SURFACE.into(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    shell.render_components().unwrap();
+
+    shell
+        .presentation_engine
+        .testing_push_connection_lost("compositor exited");
+    let error = shell
+        .dispatch_wayland()
+        .expect_err("connection loss must reach the shell as a typed failure");
+    assert!(matches!(
+        error,
+        crate::ShellRunError::Presentation(
+            mesh_core_presentation::PresentationError::ConnectionLost(reason)
+        ) if reason == "compositor exited"
+    ));
+    let runtime = shell
+        .components
+        .iter()
+        .find(|runtime| runtime.surface_id == SURFACE)
+        .expect("connection loss must not unmount the component");
+    assert!(runtime.parent.last_surface_config.is_none());
+}
+
 /// The invariant: a layer-surface configure never carries a size the protocol
 /// layer would have to invent.
 ///

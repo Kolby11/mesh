@@ -4,7 +4,15 @@
 
 ## Now
 
-Wayland presentation now validates BGRA source/canvas lengths before copying,
+Wayland presentation now classifies compositor I/O/EOF failures as typed
+`ConnectionLost` errors. The first loss clears retained compositor surface
+identities, protocol-owned input handles, focus/repeat/touch/gesture ownership,
+and pending stale input before publishing deterministic per-surface `Lost`
+lifecycle events. The shell drains those events before returning the typed
+failure, invalidating accepted configuration while keeping components mounted;
+the testing backend injects the same one-shot lifecycle.
+
+Wayland presentation also validates BGRA source/canvas lengths before copying,
 returns typed copy and SHM attach failures, and restores the selected buffer's
 copied pending damage when a copy or attach transaction fails. Visible presents
 for missing compositor surfaces return `SurfaceMissing`; the shell retains the
@@ -29,7 +37,7 @@ repository-settings fixture, which rejects its `revision` key as unknown.
 
 ## Next
 
-Extend lifecycle loss handling to connection loss and per-seat input ownership,
-then add object/configure/frame generations and the remaining semantic
-presentation diff. Resource preparation and text shaping remain separate
-follow-up work.
+Complete per-seat input ownership and cancellation for ordinary surface/seat
+teardown, then add object/configure/frame generations and the remaining
+semantic presentation diff. Resource preparation and text shaping remain
+separate follow-up work.

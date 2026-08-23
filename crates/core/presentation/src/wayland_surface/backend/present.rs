@@ -11,6 +11,9 @@ impl WaylandSurfaceBackend {
         buffer: &PixelBuffer,
         damage_rects: &[DamageRect],
     ) -> Result<PresentStatus, PresentationError> {
+        if let Some(error) = self.state.connection_lost_error() {
+            return Err(error);
+        }
         if !visible {
             self.state.release_surface_focus_grab(surface_id);
             // A hidden window is *destroyed*, not detached. Detaching a buffer
