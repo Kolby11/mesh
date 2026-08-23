@@ -8,6 +8,7 @@ use mesh_core_elements::accessibility::AccessibilityInfo;
 use mesh_core_elements::{
     AttrKey, AttributeMap, ComponentCompositionProps, ComputedStyle, EventHandlerCall,
     HandlerTarget, StyleContext, VariableStore, WidgetNode, element_contract_for_tag,
+    element_default_attributes_for_tag, element_input_type_for_tag,
 };
 use mesh_core_module::Manifest;
 use serde_json;
@@ -41,39 +42,14 @@ pub(super) fn is_inline_template_node(node: &TemplateNode) -> bool {
 }
 
 pub(super) fn default_input_type(source_tag: &SourceTag) -> Option<&'static str> {
-    match source_tag {
-        SourceTag::TextArea => Some("textarea"),
-        SourceTag::Search => Some("search"),
-        SourceTag::Password => Some("password"),
-        SourceTag::NumberInput => Some("number"),
-        SourceTag::Stepper => Some("number"),
-        SourceTag::TextInput => Some("text"),
-        SourceTag::PasswordInput => Some("password"),
-        SourceTag::SearchInput => Some("search"),
-        SourceTag::EmailInput => Some("email"),
-        SourceTag::UrlInput => Some("url"),
-        _ => None,
-    }
+    element_input_type_for_tag(source_tag.as_str())
 }
 
 pub(super) fn apply_source_tag_defaults(source_tag: &SourceTag, attributes: &mut AttributeMap) {
-    match source_tag {
-        SourceTag::TextArea => {
-            attributes
-                .entry("multiline".into())
-                .or_insert_with(|| "true".into());
-        }
-        SourceTag::Password | SourceTag::PasswordInput => {
-            attributes
-                .entry("masked".into())
-                .or_insert_with(|| "true".into());
-        }
-        SourceTag::Stepper => {
-            attributes
-                .entry("step".into())
-                .or_insert_with(|| "1".into());
-        }
-        _ => {}
+    for &(name, value) in element_default_attributes_for_tag(source_tag.as_str()) {
+        attributes
+            .entry(name.into())
+            .or_insert_with(|| value.into());
     }
 }
 

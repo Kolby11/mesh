@@ -723,6 +723,7 @@ fn intern(name: &str) -> Arc<str> {
 /// switch, so the table grows without costing lookups.
 fn well_known(name: &str) -> Option<&'static str> {
     Some(match name {
+        "active" => "active",
         "align" => "align",
         "alt" => "alt",
         "anchor" => "anchor",

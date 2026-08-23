@@ -7,6 +7,11 @@ use crate::{AccessibilityRole, ElementState, WidgetNode};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+/// The parser's source-tag enum is the canonical element-kind vocabulary.
+/// Keeping this public alias avoids a second enum that can drift from the
+/// component AST's source tags.
+pub use mesh_core_component::template::SourceTag as ElementKind;
+
 mod contracts;
 mod snapshot;
 mod validate;
@@ -18,142 +23,6 @@ pub use snapshot::{
 pub use validate::{validate_element_attribute, validate_element_event};
 
 use contracts::*;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ElementKind {
-    Box,
-    Row,
-    Column,
-    Grid,
-    Stack,
-    Scroll,
-    ScrollView,
-    ScrollArea,
-    Spacer,
-    Divider,
-    Separator,
-    Section,
-    Header,
-    Footer,
-    Group,
-    FormRow,
-    Text,
-    Label,
-    Icon,
-    Image,
-    Badge,
-    Progress,
-    Meter,
-    Tooltip,
-    Avatar,
-    Shortcut,
-    Button,
-    IconButton,
-    ToggleButton,
-    CommandButton,
-    LinkButton,
-    Input,
-    TextArea,
-    Search,
-    Password,
-    NumberInput,
-    Stepper,
-    Slider,
-    Select,
-    Option,
-    Switch,
-    Checkbox,
-    Radio,
-    RadioGroup,
-    SegmentedControl,
-    Menu,
-    MenuItem,
-    CommandItem,
-    PreferenceRow,
-    Panel,
-    Popover,
-    Dialog,
-    Sheet,
-    Tabs,
-    Tab,
-    Accordion,
-    Details,
-    List,
-    ListItem,
-    Table,
-    Cell,
-    Tree,
-    EmptyState,
-    Slot,
-    Surface,
-    Widget,
-    Unknown,
-}
-
-impl ElementKind {
-    pub const fn type_name(self) -> &'static str {
-        match self {
-            Self::Icon => "IconElement",
-            Self::Image => "ImageElement",
-            Self::Text | Self::Badge | Self::Shortcut => "TextElement",
-            Self::Label => "LabelElement",
-            Self::Progress => "ProgressElement",
-            Self::Meter => "MeterElement",
-            Self::Tooltip => "TooltipElement",
-            Self::Avatar => "AvatarElement",
-            Self::Button | Self::CommandButton | Self::LinkButton => "ButtonElement",
-            Self::IconButton => "IconButtonElement",
-            Self::ToggleButton => "ToggleButtonElement",
-            Self::Input
-            | Self::TextArea
-            | Self::Search
-            | Self::Password
-            | Self::NumberInput
-            | Self::Stepper => "InputElement",
-            Self::Slider => "SliderElement",
-            Self::Select => "SelectElement",
-            Self::Option => "OptionElement",
-            Self::Switch => "SwitchElement",
-            Self::Checkbox | Self::Radio => "CheckboxElement",
-            Self::RadioGroup => "RadioGroupElement",
-            Self::SegmentedControl => "SegmentedControlElement",
-            Self::Menu => "MenuElement",
-            Self::MenuItem | Self::CommandItem => "MenuItemElement",
-            Self::PreferenceRow => "PreferenceRowElement",
-            Self::Row => "RowElement",
-            Self::Column => "ColumnElement",
-            Self::Grid => "GridElement",
-            Self::Stack => "StackElement",
-            Self::Scroll | Self::ScrollView | Self::ScrollArea => "ScrollElement",
-            Self::Spacer => "SpacerElement",
-            Self::Separator | Self::Divider => "SeparatorElement",
-            Self::Section => "SectionElement",
-            Self::Header => "HeaderElement",
-            Self::Footer => "FooterElement",
-            Self::Group => "GroupElement",
-            Self::FormRow => "FormRowElement",
-            Self::Panel => "PanelElement",
-            Self::Popover => "PopoverElement",
-            Self::Dialog => "DialogElement",
-            Self::Sheet => "SheetElement",
-            Self::Tabs => "TabsElement",
-            Self::Tab => "TabElement",
-            Self::Accordion => "AccordionElement",
-            Self::Details => "DetailsElement",
-            Self::List => "ListElement",
-            Self::ListItem => "ListItemElement",
-            Self::Table => "TableElement",
-            Self::Cell => "CellElement",
-            Self::Tree => "TreeElement",
-            Self::EmptyState => "EmptyStateElement",
-            Self::Slot => "SlotElement",
-            Self::Surface => "SurfaceElement",
-            Self::Widget => "WidgetElement",
-            Self::Box | Self::Unknown => "MeshElement",
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -216,7 +85,13 @@ pub struct ElementAccessibilityDef {
 #[derive(Debug, Clone)]
 pub struct ElementContractDef {
     pub kind: ElementKind,
+    /// The authored/source tag. This is never replaced by the lowered runtime
+    /// primitive and is the key used by diagnostics and accessibility.
+    pub source_tag: &'static str,
+    /// Compatibility alias for the authored tag.
     pub tag: &'static str,
+    /// The primitive tag consumed by layout, paint, and runtime dispatch.
+    pub runtime_tag: &'static str,
     pub family: ElementFamily,
     pub type_name: &'static str,
     pub attributes: &'static [ElementAttributeDef],
@@ -224,10 +99,13 @@ pub struct ElementContractDef {
     pub events: &'static [ElementEventDef],
     pub accessibility: ElementAccessibilityDef,
     pub style_hooks: &'static [&'static str],
+    pub input_type: Option<&'static str>,
+    pub default_attributes: &'static [(&'static str, &'static str)],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ElementDiagnosticKind {
+    UnknownElementTag,
     UnsupportedAttribute,
     UnsupportedEvent,
     InvalidAttributeValue,
@@ -262,7 +140,12 @@ pub struct ElementFieldDef {
 #[derive(Debug, Clone, Copy)]
 pub struct ElementTypeDef {
     pub kind: ElementKind,
+    /// The authored/source tag represented by this type.
+    pub source_tag: &'static str,
+    /// Compatibility alias for the authored tag.
     pub tag: &'static str,
+    /// The runtime primitive tag used when the source tag is lowered.
+    pub runtime_tag: &'static str,
     pub type_name: &'static str,
     pub fields: &'static [ElementFieldDef],
 }
@@ -270,8 +153,8 @@ pub struct ElementTypeDef {
 pub fn element_type_for_tag(tag: &str) -> &'static ElementTypeDef {
     ELEMENT_TYPE_DEFS
         .iter()
-        .find(|def| def.tag == tag)
-        .unwrap_or(&ELEMENT_TYPE_DEFS[0])
+        .find(|def| def.source_tag == tag || def.runtime_tag == tag)
+        .unwrap_or(&UNKNOWN_ELEMENT_TYPE)
 }
 
 pub fn element_contract_for_tag(tag: &str) -> Option<&'static ElementContractDef> {
@@ -279,7 +162,22 @@ pub fn element_contract_for_tag(tag: &str) -> Option<&'static ElementContractDef
 }
 
 pub fn element_contract_tags() -> impl Iterator<Item = &'static str> {
-    ELEMENT_CONTRACT_DEFS.iter().map(|def| def.tag)
+    ELEMENT_CONTRACT_DEFS.iter().map(|def| def.source_tag)
+}
+
+/// Resolve the lowered runtime primitive for an authored source tag.
+pub fn element_runtime_tag_for_tag(tag: &str) -> Option<&'static str> {
+    element_contract_for_tag(tag).map(|definition| definition.runtime_tag)
+}
+
+pub fn element_input_type_for_tag(tag: &str) -> Option<&'static str> {
+    element_contract_for_tag(tag).and_then(|definition| definition.input_type)
+}
+
+pub fn element_default_attributes_for_tag(tag: &str) -> &'static [(&'static str, &'static str)] {
+    element_contract_for_tag(tag)
+        .map(|definition| definition.default_attributes)
+        .unwrap_or(&[])
 }
 
 pub fn common_state_flags() -> &'static [ElementStateFlag] {

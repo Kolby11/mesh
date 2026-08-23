@@ -33,8 +33,10 @@ pub use element::{
     ElementAttributeType, ElementContractDef, ElementDiagnostic, ElementDiagnosticKind,
     ElementEventDef, ElementFamily, ElementFieldDef, ElementFieldType, ElementKind, ElementRect,
     ElementSnapshot, ElementStateFlag, ElementStateSnapshot, ElementTypeDef, common_state_flags,
-    element_contract_for_tag, element_contract_tags, element_snapshot, element_snapshot_json,
-    element_type_for_tag, validate_element_attribute, validate_element_event,
+    element_contract_for_tag, element_contract_tags, element_default_attributes_for_tag,
+    element_input_type_for_tag, element_runtime_tag_for_tag, element_snapshot,
+    element_snapshot_json, element_type_for_tag, validate_element_attribute,
+    validate_element_event,
 };
 pub use events::{
     EventDispatcher, InputDispatchResult, InputState, Modifiers, RawInputEvent, UiEvent,

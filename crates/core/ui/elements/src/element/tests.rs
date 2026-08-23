@@ -45,6 +45,111 @@ fn element_contract_dispatch_matches_scanning_lookup() {
     }
 }
 
+#[test]
+fn canonical_schema_keeps_contracts_types_and_runtime_tags_in_lockstep() {
+    assert_eq!(ELEMENT_CONTRACT_DEFS.len(), ELEMENT_TYPE_DEFS.len());
+
+    for contract in ELEMENT_CONTRACT_DEFS {
+        let type_def = ELEMENT_TYPE_DEFS
+            .iter()
+            .find(|candidate| candidate.source_tag == contract.source_tag)
+            .expect("every contract has a generated type");
+        assert_eq!(contract.source_tag, contract.tag);
+        assert_eq!(type_def.source_tag, type_def.tag);
+        assert_eq!(type_def.kind, contract.kind);
+        assert_eq!(type_def.runtime_tag, contract.runtime_tag);
+        assert_eq!(type_def.type_name, contract.type_name);
+        assert_eq!(
+            element_runtime_tag_for_tag(contract.tag),
+            Some(contract.runtime_tag)
+        );
+    }
+
+    for (tag, runtime_tag) in [
+        ("label", "text"),
+        ("scroll", "scroll"),
+        ("scroll-view", "scroll"),
+        ("scroll-area", "scroll"),
+        ("slider", "slider"),
+        ("image", "image"),
+        ("grid", "box"),
+    ] {
+        assert_eq!(element_runtime_tag_for_tag(tag), Some(runtime_tag));
+    }
+}
+
+#[test]
+fn unknown_element_lookups_are_diagnostic_and_do_not_become_box() {
+    let attribute = validate_element_attribute("not-an-element", "value", "x")
+        .expect("unknown element attribute diagnostic");
+    assert_eq!(attribute.kind, ElementDiagnosticKind::UnknownElementTag);
+
+    let event = validate_element_event("not-an-element", "click")
+        .expect("unknown element event diagnostic");
+    assert_eq!(event.kind, ElementDiagnosticKind::UnknownElementTag);
+
+    assert_eq!(element_runtime_tag_for_tag("not-an-element"), None);
+    assert_eq!(
+        element_type_for_tag("not-an-element").type_name,
+        "MeshElement"
+    );
+}
+
+#[test]
+fn canonical_schema_owns_source_specific_input_defaults() {
+    let textarea = element_contract_for_tag("textarea").expect("textarea contract");
+    assert_eq!(textarea.runtime_tag, "input");
+    assert_eq!(textarea.input_type, Some("textarea"));
+    assert_eq!(textarea.default_attributes, &[("multiline", "true")]);
+
+    let password = element_contract_for_tag("password-input").expect("password contract");
+    assert_eq!(password.input_type, Some("password"));
+    assert_eq!(password.default_attributes, &[("masked", "true")]);
+}
+
+#[test]
+fn canonical_schema_uses_family_specific_attribute_profiles() {
+    let text = element_contract_for_tag("text").expect("text contract");
+    assert!(
+        text.attributes
+            .iter()
+            .any(|attribute| attribute.name == "label")
+    );
+    assert!(
+        !text
+            .attributes
+            .iter()
+            .any(|attribute| attribute.name == "disabled")
+    );
+
+    let grid = element_contract_for_tag("grid").expect("grid contract");
+    assert!(
+        grid.attributes
+            .iter()
+            .any(|attribute| attribute.name == "columns")
+    );
+    assert!(
+        !grid
+            .attributes
+            .iter()
+            .any(|attribute| attribute.name == "placeholder")
+    );
+
+    let input = element_contract_for_tag("input").expect("input contract");
+    assert!(
+        input
+            .attributes
+            .iter()
+            .any(|attribute| attribute.name == "placeholder")
+    );
+    assert!(
+        !input
+            .attributes
+            .iter()
+            .any(|attribute| attribute.name == "columns")
+    );
+}
+
 // cargo test -p mesh-core-elements --release -- element_contract_dispatch_beats_definition_scan --ignored --nocapture
 #[test]
 #[ignore = "release-only element contract lookup microbenchmark"]

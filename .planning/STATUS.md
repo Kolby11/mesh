@@ -220,7 +220,11 @@ live compositor/lifecycle matrix remain separate follow-up work.
 
 ## Next
 
-The next open backlog item is in the UI element core audit: generate element
-types, source/runtime tags, contracts, events, attributes, style hooks, and
-accessibility defaults from one schema; the remaining presentation/resource
-follow-ups stay separate.
+The UI element core now generates source/runtime tags, element kinds and
+runtime types, family-specific attributes, event/style profiles,
+source-specific input defaults, and accessibility defaults from one canonical
+schema. Unknown element lookup is diagnostic, and compiler lowering consumes
+the same source/runtime mapping. The next open backlog item is CSS
+custom-property cycle detection with structured diagnostics and specified
+invalid-value fallback; the remaining presentation/resource follow-ups stay
+separate.

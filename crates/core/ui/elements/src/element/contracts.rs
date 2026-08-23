@@ -254,174 +254,6 @@ pub(super) static LABEL_FIELDS: &[ElementFieldDef] = &[field(
     "Associated input id",
 )];
 
-pub(super) static COMMON_ATTRIBUTES: &[ElementAttributeDef] = &[
-    attr("id", ElementAttributeType::String, "Template id attribute"),
-    attr("class", ElementAttributeType::String, "Style class list"),
-    attr("style", ElementAttributeType::String, "Inline style rules"),
-    attr(
-        "ref",
-        ElementAttributeType::String,
-        "Template ref attribute",
-    ),
-    attr(
-        "data-mesh-element",
-        ElementAttributeType::String,
-        "Original source element tag before runtime lowering",
-    ),
-    attr("label", ElementAttributeType::String, "Accessible label"),
-    attr(
-        "aria-label",
-        ElementAttributeType::String,
-        "Accessible label",
-    ),
-    attr("role", ElementAttributeType::String, "Accessibility role"),
-    attr(
-        "aria-role",
-        ElementAttributeType::String,
-        "Accessibility role override",
-    ),
-    attr("title", ElementAttributeType::String, "Accessible title"),
-    attr("disabled", ElementAttributeType::Boolean, "Disabled state"),
-    attr("busy", ElementAttributeType::Boolean, "Busy state"),
-    attr(
-        "default",
-        ElementAttributeType::Boolean,
-        "Default action state",
-    ),
-    attr(
-        "destructive",
-        ElementAttributeType::Boolean,
-        "Destructive action state",
-    ),
-    attr("readonly", ElementAttributeType::Boolean, "Read-only state"),
-    attr("required", ElementAttributeType::Boolean, "Required state"),
-    attr("value", ElementAttributeType::String, "Current value"),
-    attr("min", ElementAttributeType::Number, "Minimum value"),
-    attr("max", ElementAttributeType::Number, "Maximum value"),
-    attr("checked", ElementAttributeType::Boolean, "Checked state"),
-    attr("selected", ElementAttributeType::Boolean, "Selected state"),
-    attr("expanded", ElementAttributeType::Boolean, "Expanded state"),
-    attr("open", ElementAttributeType::Boolean, "Open state"),
-    attr("pressed", ElementAttributeType::Boolean, "Pressed state"),
-    attr("invalid", ElementAttributeType::Boolean, "Invalid state"),
-    attr("hidden", ElementAttributeType::Boolean, "Hidden state"),
-    attr(
-        "keybind",
-        ElementAttributeType::String,
-        "Associated keybind id or display shortcut",
-    ),
-    attr(
-        "command",
-        ElementAttributeType::String,
-        "Command intent metadata",
-    ),
-    attr("href", ElementAttributeType::String, "Link intent metadata"),
-    attr("type", ElementAttributeType::String, "Input type metadata"),
-    attr(
-        "placeholder",
-        ElementAttributeType::String,
-        "Input placeholder text",
-    ),
-    attr(
-        "multiline",
-        ElementAttributeType::Boolean,
-        "Input accepts multiple lines",
-    ),
-    attr(
-        "masked",
-        ElementAttributeType::Boolean,
-        "Input masks displayed text",
-    ),
-    attr("step", ElementAttributeType::Number, "Numeric step size"),
-    attr("align", ElementAttributeType::String, "Layout alignment"),
-    attr(
-        "justify",
-        ElementAttributeType::String,
-        "Main-axis layout justification",
-    ),
-    attr("spacing", ElementAttributeType::Number, "Layout spacing"),
-    attr("gap", ElementAttributeType::Number, "Layout gap"),
-    attr("width", ElementAttributeType::String, "Requested width"),
-    attr("height", ElementAttributeType::String, "Requested height"),
-    attr("min-width", ElementAttributeType::String, "Minimum width"),
-    attr("max-width", ElementAttributeType::String, "Maximum width"),
-    attr("min-height", ElementAttributeType::String, "Minimum height"),
-    attr("max-height", ElementAttributeType::String, "Maximum height"),
-    attr(
-        "overflow",
-        ElementAttributeType::String,
-        "Overflow behavior",
-    ),
-    attr(
-        "overflow-x",
-        ElementAttributeType::String,
-        "Horizontal overflow behavior",
-    ),
-    attr(
-        "overflow-y",
-        ElementAttributeType::String,
-        "Vertical overflow behavior",
-    ),
-    attr(
-        "scroll-x",
-        ElementAttributeType::Number,
-        "Initial horizontal scroll offset",
-    ),
-    attr(
-        "scroll-y",
-        ElementAttributeType::Number,
-        "Initial vertical scroll offset",
-    ),
-    attr(
-        "columns",
-        ElementAttributeType::String,
-        "Conservative grid column track list",
-    ),
-    attr(
-        "rows",
-        ElementAttributeType::String,
-        "Conservative grid row track list",
-    ),
-    attr(
-        "column",
-        ElementAttributeType::Number,
-        "Grid column placement",
-    ),
-    attr("row", ElementAttributeType::Number, "Grid row placement"),
-    attr(
-        "column-span",
-        ElementAttributeType::Number,
-        "Grid column span",
-    ),
-    attr("row-span", ElementAttributeType::Number, "Grid row span"),
-    attr("layer", ElementAttributeType::Number, "Stacking layer"),
-    attr("for", ElementAttributeType::String, "Associated element id"),
-    attr("src", ElementAttributeType::String, "Image or icon source"),
-    attr(
-        "name",
-        ElementAttributeType::String,
-        "Icon or shortcut name",
-    ),
-    attr(
-        "alt",
-        ElementAttributeType::String,
-        "Accessible alternate text",
-    ),
-    attr("size", ElementAttributeType::Number, "Display size hint"),
-    attr("key", ElementAttributeType::String, "Shortcut key label"),
-    attr("tooltip", ElementAttributeType::String, "Tooltip text"),
-    attr(
-        "tooltip-for",
-        ElementAttributeType::String,
-        "Tooltip owner element id",
-    ),
-    attr(
-        "indeterminate",
-        ElementAttributeType::Boolean,
-        "Progress has no determinate value",
-    ),
-];
-
 pub(super) static COMMON_STATES: &[ElementStateFlag] = &[
     ElementStateFlag::Disabled,
     ElementStateFlag::ReadOnly,
@@ -434,309 +266,6 @@ pub(super) static COMMON_STATES: &[ElementStateFlag] = &[
     ElementStateFlag::Invalid,
     ElementStateFlag::Active,
     ElementStateFlag::Value,
-];
-
-pub(super) static COMMON_EVENTS: &[ElementEventDef] = &[
-    event("click", "element", "Activation from pointer or keyboard"),
-    event("input", "value", "Immediate value input"),
-    event("change", "value", "Committed value change"),
-    event("select", "value", "Selection change"),
-    event("activate", "element", "Command or item activation"),
-    event("openchange", "open", "Open state change"),
-];
-
-pub(super) static COMMON_STYLE_HOOKS: &[&str] = &[
-    "disabled",
-    "busy",
-    "default",
-    "destructive",
-    "readonly",
-    "required",
-    "focus",
-    "focus-visible",
-    "selected",
-    "checked",
-    "expanded",
-    "pressed",
-    "invalid",
-    "active",
-    "value",
-    "layout",
-    "display",
-    "structure",
-    "progress",
-    "tooltip",
-];
-
-macro_rules! contract {
-    ($kind:ident, $tag:literal, $family:ident, $role:expr, $focusable:expr) => {
-        ElementContractDef {
-            kind: ElementKind::$kind,
-            tag: $tag,
-            family: ElementFamily::$family,
-            type_name: ElementKind::$kind.type_name(),
-            attributes: COMMON_ATTRIBUTES,
-            states: COMMON_STATES,
-            events: COMMON_EVENTS,
-            accessibility: ElementAccessibilityDef {
-                role: $role,
-                focusable: $focusable,
-                label_required: $focusable,
-            },
-            style_hooks: COMMON_STYLE_HOOKS,
-        }
-    };
-}
-
-pub static ELEMENT_CONTRACT_DEFS: &[ElementContractDef] = &[
-    contract!(Box, "box", Layout, AccessibilityRole::Region, false),
-    contract!(Row, "row", Layout, AccessibilityRole::Region, false),
-    contract!(Column, "column", Layout, AccessibilityRole::Region, false),
-    contract!(Grid, "grid", Layout, AccessibilityRole::Region, false),
-    contract!(Stack, "stack", Layout, AccessibilityRole::Region, false),
-    contract!(Spacer, "spacer", Layout, AccessibilityRole::Region, false),
-    contract!(
-        Divider,
-        "divider",
-        Layout,
-        AccessibilityRole::Separator,
-        false
-    ),
-    contract!(
-        Separator,
-        "separator",
-        Layout,
-        AccessibilityRole::Separator,
-        false
-    ),
-    contract!(
-        ScrollArea,
-        "scroll-area",
-        Layout,
-        AccessibilityRole::Region,
-        false
-    ),
-    contract!(Section, "section", Layout, AccessibilityRole::Region, false),
-    contract!(Header, "header", Layout, AccessibilityRole::Region, false),
-    contract!(Footer, "footer", Layout, AccessibilityRole::Region, false),
-    contract!(Group, "group", Layout, AccessibilityRole::Region, false),
-    contract!(
-        FormRow,
-        "form-row",
-        Layout,
-        AccessibilityRole::Region,
-        false
-    ),
-    contract!(Text, "text", Display, AccessibilityRole::Label, false),
-    contract!(Icon, "icon", Display, AccessibilityRole::Image, false),
-    contract!(Image, "image", Display, AccessibilityRole::Image, false),
-    contract!(Badge, "badge", Display, AccessibilityRole::Status, false),
-    contract!(
-        Progress,
-        "progress",
-        Display,
-        AccessibilityRole::ProgressBar,
-        false
-    ),
-    contract!(
-        Meter,
-        "meter",
-        Display,
-        AccessibilityRole::ProgressBar,
-        false
-    ),
-    contract!(Tooltip, "tooltip", Display, AccessibilityRole::Alert, false),
-    contract!(Avatar, "avatar", Display, AccessibilityRole::Image, false),
-    contract!(
-        Shortcut,
-        "shortcut",
-        Display,
-        AccessibilityRole::Label,
-        false
-    ),
-    contract!(Button, "button", Action, AccessibilityRole::Button, true),
-    contract!(
-        IconButton,
-        "icon-button",
-        Action,
-        AccessibilityRole::Button,
-        true
-    ),
-    contract!(
-        ToggleButton,
-        "toggle-button",
-        Action,
-        AccessibilityRole::Button,
-        true
-    ),
-    contract!(
-        CommandButton,
-        "command-button",
-        Action,
-        AccessibilityRole::Button,
-        true
-    ),
-    contract!(
-        LinkButton,
-        "link-button",
-        Action,
-        AccessibilityRole::Button,
-        true
-    ),
-    contract!(
-        Input,
-        "input",
-        TextInput,
-        AccessibilityRole::TextInput,
-        true
-    ),
-    contract!(
-        TextArea,
-        "textarea",
-        TextInput,
-        AccessibilityRole::TextInput,
-        true
-    ),
-    contract!(
-        Search,
-        "search",
-        TextInput,
-        AccessibilityRole::TextInput,
-        true
-    ),
-    contract!(
-        Password,
-        "password",
-        TextInput,
-        AccessibilityRole::TextInput,
-        true
-    ),
-    contract!(
-        NumberInput,
-        "number-input",
-        TextInput,
-        AccessibilityRole::TextInput,
-        true
-    ),
-    contract!(
-        Stepper,
-        "stepper",
-        TextInput,
-        AccessibilityRole::TextInput,
-        true
-    ),
-    contract!(Select, "select", ChoiceMenu, AccessibilityRole::Menu, true),
-    contract!(
-        Option,
-        "option",
-        ChoiceMenu,
-        AccessibilityRole::MenuItem,
-        false
-    ),
-    contract!(
-        Checkbox,
-        "checkbox",
-        ChoiceMenu,
-        AccessibilityRole::Checkbox,
-        true
-    ),
-    contract!(
-        Switch,
-        "switch",
-        ChoiceMenu,
-        AccessibilityRole::Switch,
-        true
-    ),
-    contract!(
-        Radio,
-        "radio",
-        ChoiceMenu,
-        AccessibilityRole::Checkbox,
-        true
-    ),
-    contract!(
-        RadioGroup,
-        "radio-group",
-        ChoiceMenu,
-        AccessibilityRole::Region,
-        false
-    ),
-    contract!(
-        SegmentedControl,
-        "segmented-control",
-        ChoiceMenu,
-        AccessibilityRole::Toolbar,
-        true
-    ),
-    contract!(Menu, "menu", ChoiceMenu, AccessibilityRole::Menu, true),
-    contract!(
-        MenuItem,
-        "menu-item",
-        ChoiceMenu,
-        AccessibilityRole::MenuItem,
-        true
-    ),
-    contract!(
-        CommandItem,
-        "command-item",
-        ChoiceMenu,
-        AccessibilityRole::MenuItem,
-        true
-    ),
-    contract!(
-        PreferenceRow,
-        "preference-row",
-        ChoiceMenu,
-        AccessibilityRole::Region,
-        true
-    ),
-    contract!(Panel, "panel", Container, AccessibilityRole::Region, false),
-    contract!(
-        Popover,
-        "popover",
-        Container,
-        AccessibilityRole::Dialog,
-        true
-    ),
-    contract!(Dialog, "dialog", Container, AccessibilityRole::Dialog, true),
-    contract!(Sheet, "sheet", Container, AccessibilityRole::Dialog, true),
-    contract!(Tabs, "tabs", Container, AccessibilityRole::Toolbar, true),
-    contract!(Tab, "tab", Container, AccessibilityRole::Tab, true),
-    contract!(
-        Accordion,
-        "accordion",
-        Container,
-        AccessibilityRole::Region,
-        true
-    ),
-    contract!(
-        Details,
-        "details",
-        Container,
-        AccessibilityRole::Region,
-        true
-    ),
-    contract!(List, "list", Collection, AccessibilityRole::List, true),
-    contract!(
-        ListItem,
-        "list-item",
-        Collection,
-        AccessibilityRole::ListItem,
-        true
-    ),
-    contract!(Table, "table", Collection, AccessibilityRole::Region, true),
-    contract!(Cell, "cell", Collection, AccessibilityRole::Region, false),
-    contract!(Tree, "tree", Collection, AccessibilityRole::Region, true),
-    contract!(
-        EmptyState,
-        "empty-state",
-        Collection,
-        AccessibilityRole::Status,
-        false
-    ),
-    contract!(Slot, "slot", Shell, AccessibilityRole::Region, false),
-    contract!(Surface, "surface", Shell, AccessibilityRole::Region, false),
-    contract!(Widget, "widget", Shell, AccessibilityRole::Region, false),
 ];
 
 pub(super) const fn str_eq(left: &str, right: &str) -> bool {
@@ -756,30 +285,315 @@ pub(super) const fn str_eq(left: &str, right: &str) -> bool {
 
 /// Slot of `tag` in [`ELEMENT_CONTRACT_DEFS`], evaluated at compile time.
 ///
-/// Panicking here is deliberate: every caller passes a literal from
-/// `contract_slots!`, so a tag that no longer exists in the definition list
+/// Panicking here is deliberate: every caller passes a literal from the
+/// canonical schema, so a tag that no longer exists in the definition list
 /// fails the build instead of silently resolving to the wrong contract.
 pub(super) const fn contract_slot_of(tag: &str) -> usize {
     let mut index = 0;
     while index < ELEMENT_CONTRACT_DEFS.len() {
-        if str_eq(ELEMENT_CONTRACT_DEFS[index].tag, tag) {
+        if str_eq(ELEMENT_CONTRACT_DEFS[index].source_tag, tag) {
             return index;
         }
         index += 1;
     }
-    panic!("contract_slots! lists a tag that is not in ELEMENT_CONTRACT_DEFS");
+    panic!("element schema lists a tag that is not in ELEMENT_CONTRACT_DEFS");
 }
 
-/// Build the tag → slot dispatch used by [`element_contract_for_tag`].
-///
-/// A `match` over string literals lowers to a length switch plus direct
-/// comparisons, so a lookup costs one dispatch instead of scanning all 62
-/// definitions. Slots are resolved by `contract_slot_of` in an inline `const`
-/// block, which keeps this list honest against `ELEMENT_CONTRACT_DEFS` at
-/// compile time; `element_contract_dispatch_covers_every_definition` covers
-/// the other direction (a definition with no arm here).
-macro_rules! contract_slots {
-    ($($tag:literal),* $(,)?) => {
+static NO_EVENTS: &[ElementEventDef] = &[];
+static ACTION_EVENTS: &[ElementEventDef] = &[
+    event("click", "element", "Activation from pointer or keyboard"),
+    event("change", "value", "Committed value change"),
+    event("activate", "element", "Command or item activation"),
+];
+static INPUT_EVENTS: &[ElementEventDef] = &[
+    event("input", "value", "Immediate value input"),
+    event("change", "value", "Committed value change"),
+];
+static CHOICE_EVENTS: &[ElementEventDef] = &[
+    event("change", "value", "Committed value change"),
+    event("select", "value", "Selection change"),
+    event("activate", "element", "Command or item activation"),
+];
+static ACTIVATE_EVENTS: &[ElementEventDef] =
+    &[event("activate", "element", "Command or item activation")];
+static OPEN_EVENTS: &[ElementEventDef] = &[event("openchange", "open", "Open state change")];
+static SCROLL_EVENTS: &[ElementEventDef] = &[event("scroll", "offset", "Scroll position change")];
+
+static LAYOUT_STYLE_HOOKS: &[&str] = &["layout"];
+static STRUCTURE_STYLE_HOOKS: &[&str] = &["layout", "structure"];
+static DISPLAY_STYLE_HOOKS: &[&str] = &["display"];
+static PROGRESS_STYLE_HOOKS: &[&str] = &["display", "progress"];
+static CONTROL_STYLE_HOOKS: &[&str] = &[
+    "display",
+    "disabled",
+    "busy",
+    "default",
+    "destructive",
+    "readonly",
+    "required",
+    "focus",
+    "focus-visible",
+    "selected",
+    "checked",
+    "expanded",
+    "pressed",
+    "invalid",
+    "active",
+    "value",
+];
+static SHELL_STYLE_HOOKS: &[&str] = &["layout", "display", "structure", "expanded", "active"];
+
+static EMPTY_FIELDS: &[ElementFieldDef] = &[];
+static NO_DEFAULT_ATTRIBUTES: &[(&str, &str)] = &[];
+static TEXTAREA_DEFAULT_ATTRIBUTES: &[(&str, &str)] = &[("multiline", "true")];
+static PASSWORD_DEFAULT_ATTRIBUTES: &[(&str, &str)] = &[("masked", "true")];
+static STEPPER_DEFAULT_ATTRIBUTES: &[(&str, &str)] = &[("step", "1")];
+
+macro_rules! attribute_profile {
+    (@core $(, $extra:expr)*) => {
+        &[
+            attr("id", ElementAttributeType::String, "Template id attribute"),
+            attr("class", ElementAttributeType::String, "Style class list"),
+            attr("style", ElementAttributeType::String, "Inline style rules"),
+            attr("ref", ElementAttributeType::String, "Template ref attribute"),
+            attr("data-mesh-element", ElementAttributeType::String, "Original source element tag before runtime lowering"),
+            attr("label", ElementAttributeType::String, "Accessible label"),
+            attr("aria-label", ElementAttributeType::String, "Accessible label"),
+            attr("role", ElementAttributeType::String, "Accessibility role"),
+            attr("aria-role", ElementAttributeType::String, "Accessibility role override"),
+            attr("title", ElementAttributeType::String, "Accessible title"),
+            $($extra),*
+        ]
+    };
+}
+
+macro_rules! schema_attributes {
+    (Layout) => {
+        attribute_profile!(@core,
+            attr("align", ElementAttributeType::String, "Layout alignment"),
+            attr("justify", ElementAttributeType::String, "Main-axis layout justification"),
+            attr("spacing", ElementAttributeType::Number, "Layout spacing"),
+            attr("gap", ElementAttributeType::Number, "Layout gap"),
+            attr("width", ElementAttributeType::String, "Requested width"),
+            attr("height", ElementAttributeType::String, "Requested height"),
+            attr("min-width", ElementAttributeType::String, "Minimum width"),
+            attr("max-width", ElementAttributeType::String, "Maximum width"),
+            attr("min-height", ElementAttributeType::String, "Minimum height"),
+            attr("max-height", ElementAttributeType::String, "Maximum height"),
+            attr("overflow", ElementAttributeType::String, "Overflow behavior"),
+            attr("overflow-x", ElementAttributeType::String, "Horizontal overflow behavior"),
+            attr("overflow-y", ElementAttributeType::String, "Vertical overflow behavior"),
+            attr("scroll-x", ElementAttributeType::Number, "Initial horizontal scroll offset"),
+            attr("scroll-y", ElementAttributeType::Number, "Initial vertical scroll offset"),
+            attr("columns", ElementAttributeType::String, "Conservative grid column track list"),
+            attr("rows", ElementAttributeType::String, "Conservative grid row track list"),
+            attr("column", ElementAttributeType::Number, "Grid column placement"),
+            attr("row", ElementAttributeType::Number, "Grid row placement"),
+            attr("column-span", ElementAttributeType::Number, "Grid column span"),
+            attr("row-span", ElementAttributeType::Number, "Grid row span"),
+            attr("layer", ElementAttributeType::Number, "Stacking layer"),
+            attr("for", ElementAttributeType::String, "Associated element id")
+        )
+    };
+    (Display) => {
+        attribute_profile!(@core,
+            attr("value", ElementAttributeType::String, "Current value"),
+            attr("min", ElementAttributeType::Number, "Minimum value"),
+            attr("max", ElementAttributeType::Number, "Maximum value"),
+            attr("src", ElementAttributeType::String, "Image or icon source"),
+            attr("name", ElementAttributeType::String, "Icon or shortcut name"),
+            attr("alt", ElementAttributeType::String, "Accessible alternate text"),
+            attr("size", ElementAttributeType::Number, "Display size hint"),
+            attr("key", ElementAttributeType::String, "Shortcut key label"),
+            attr("tooltip", ElementAttributeType::String, "Tooltip text"),
+            attr("tooltip-for", ElementAttributeType::String, "Tooltip owner element id"),
+            attr("indeterminate", ElementAttributeType::Boolean, "Progress has no determinate value")
+        )
+    };
+    (Action) => {
+        attribute_profile!(@core,
+            attr("disabled", ElementAttributeType::Boolean, "Disabled state"),
+            attr("busy", ElementAttributeType::Boolean, "Busy state"),
+            attr("default", ElementAttributeType::Boolean, "Default action state"),
+            attr("destructive", ElementAttributeType::Boolean, "Destructive action state"),
+            attr("pressed", ElementAttributeType::Boolean, "Pressed state"),
+            attr("invalid", ElementAttributeType::Boolean, "Invalid state"),
+            attr("keybind", ElementAttributeType::String, "Associated keybind id or display shortcut"),
+            attr("command", ElementAttributeType::String, "Command intent metadata"),
+            attr("href", ElementAttributeType::String, "Link intent metadata"),
+            attr("value", ElementAttributeType::String, "Current value")
+        )
+    };
+    (TextInput) => {
+        attribute_profile!(@core,
+            attr("disabled", ElementAttributeType::Boolean, "Disabled state"),
+            attr("readonly", ElementAttributeType::Boolean, "Read-only state"),
+            attr("required", ElementAttributeType::Boolean, "Required state"),
+            attr("invalid", ElementAttributeType::Boolean, "Invalid state"),
+            attr("value", ElementAttributeType::String, "Current value"),
+            attr("min", ElementAttributeType::Number, "Minimum value"),
+            attr("max", ElementAttributeType::Number, "Maximum value"),
+            attr("type", ElementAttributeType::String, "Input type metadata"),
+            attr("placeholder", ElementAttributeType::String, "Input placeholder text"),
+            attr("multiline", ElementAttributeType::Boolean, "Input accepts multiple lines"),
+            attr("masked", ElementAttributeType::Boolean, "Input masks displayed text"),
+            attr("step", ElementAttributeType::Number, "Numeric step size")
+        )
+    };
+    (ChoiceMenu) => {
+        attribute_profile!(@core,
+            attr("disabled", ElementAttributeType::Boolean, "Disabled state"),
+            attr("required", ElementAttributeType::Boolean, "Required state"),
+            attr("invalid", ElementAttributeType::Boolean, "Invalid state"),
+            attr("checked", ElementAttributeType::Boolean, "Checked state"),
+            attr("selected", ElementAttributeType::Boolean, "Selected state"),
+            attr("expanded", ElementAttributeType::Boolean, "Expanded state"),
+            attr("value", ElementAttributeType::String, "Current value")
+        )
+    };
+    (Container) => {
+        attribute_profile!(@core,
+            attr("disabled", ElementAttributeType::Boolean, "Disabled state"),
+            attr("hidden", ElementAttributeType::Boolean, "Hidden state"),
+            attr("selected", ElementAttributeType::Boolean, "Selected state"),
+            attr("expanded", ElementAttributeType::Boolean, "Expanded state"),
+            attr("open", ElementAttributeType::Boolean, "Open state"),
+            attr("active", ElementAttributeType::Boolean, "Active state")
+        )
+    };
+    (Collection) => {
+        attribute_profile!(@core,
+            attr("disabled", ElementAttributeType::Boolean, "Disabled state"),
+            attr("hidden", ElementAttributeType::Boolean, "Hidden state"),
+            attr("selected", ElementAttributeType::Boolean, "Selected state"),
+            attr("expanded", ElementAttributeType::Boolean, "Expanded state"),
+            attr("open", ElementAttributeType::Boolean, "Open state"),
+            attr("active", ElementAttributeType::Boolean, "Active state")
+        )
+    };
+    (Shell) => {
+        attribute_profile!(@core,
+            attr("hidden", ElementAttributeType::Boolean, "Hidden state"),
+            attr("expanded", ElementAttributeType::Boolean, "Expanded state"),
+            attr("open", ElementAttributeType::Boolean, "Open state")
+        )
+    };
+}
+
+/// The canonical element schema. The registry/type/lowering/accessibility
+/// records below are all generated from this one list.
+macro_rules! element_schema {
+    ($callback:ident) => {
+        $callback! {
+            (Box, "box", "box", "MeshElement", Layout, AccessibilityRole::Region, false, false, EMPTY_FIELDS, NO_EVENTS, LAYOUT_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Row, "row", "row", "RowElement", Layout, AccessibilityRole::Region, false, false, EMPTY_FIELDS, NO_EVENTS, LAYOUT_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Column, "column", "column", "ColumnElement", Layout, AccessibilityRole::Region, false, false, EMPTY_FIELDS, NO_EVENTS, LAYOUT_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Grid, "grid", "box", "GridElement", Layout, AccessibilityRole::Region, false, false, EMPTY_FIELDS, NO_EVENTS, LAYOUT_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Stack, "stack", "box", "StackElement", Layout, AccessibilityRole::Region, false, false, EMPTY_FIELDS, NO_EVENTS, LAYOUT_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Scroll, "scroll", "scroll", "ScrollElement", Layout, AccessibilityRole::Region, false, false, EMPTY_FIELDS, SCROLL_EVENTS, LAYOUT_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (ScrollView, "scroll-view", "scroll", "ScrollElement", Layout, AccessibilityRole::Region, false, false, EMPTY_FIELDS, SCROLL_EVENTS, LAYOUT_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (ScrollArea, "scroll-area", "scroll", "ScrollElement", Layout, AccessibilityRole::Region, false, false, EMPTY_FIELDS, SCROLL_EVENTS, LAYOUT_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Spacer, "spacer", "box", "SpacerElement", Layout, AccessibilityRole::Region, false, false, EMPTY_FIELDS, NO_EVENTS, LAYOUT_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Divider, "divider", "box", "SeparatorElement", Layout, AccessibilityRole::Separator, false, false, EMPTY_FIELDS, NO_EVENTS, LAYOUT_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Separator, "separator", "box", "SeparatorElement", Layout, AccessibilityRole::Separator, false, false, EMPTY_FIELDS, NO_EVENTS, LAYOUT_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Section, "section", "box", "SectionElement", Layout, AccessibilityRole::Region, false, false, EMPTY_FIELDS, NO_EVENTS, STRUCTURE_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Header, "header", "box", "HeaderElement", Layout, AccessibilityRole::Region, false, false, EMPTY_FIELDS, NO_EVENTS, STRUCTURE_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Footer, "footer", "box", "FooterElement", Layout, AccessibilityRole::Region, false, false, EMPTY_FIELDS, NO_EVENTS, STRUCTURE_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Group, "group", "box", "GroupElement", Layout, AccessibilityRole::Region, false, false, EMPTY_FIELDS, NO_EVENTS, STRUCTURE_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (FormRow, "form-row", "box", "FormRowElement", Layout, AccessibilityRole::Region, false, false, EMPTY_FIELDS, NO_EVENTS, STRUCTURE_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Text, "text", "text", "TextElement", Display, AccessibilityRole::Label, false, false, TEXT_FIELDS, NO_EVENTS, DISPLAY_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Label, "label", "text", "LabelElement", Display, AccessibilityRole::Label, false, false, LABEL_FIELDS, NO_EVENTS, DISPLAY_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Icon, "icon", "icon", "IconElement", Display, AccessibilityRole::Image, false, false, ICON_FIELDS, NO_EVENTS, DISPLAY_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Image, "image", "image", "ImageElement", Display, AccessibilityRole::Image, false, false, IMAGE_FIELDS, NO_EVENTS, DISPLAY_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Badge, "badge", "text", "TextElement", Display, AccessibilityRole::Status, false, false, TEXT_FIELDS, NO_EVENTS, DISPLAY_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Progress, "progress", "text", "ProgressElement", Display, AccessibilityRole::ProgressBar, false, false, EMPTY_FIELDS, NO_EVENTS, PROGRESS_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Meter, "meter", "text", "MeterElement", Display, AccessibilityRole::ProgressBar, false, false, EMPTY_FIELDS, NO_EVENTS, PROGRESS_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Tooltip, "tooltip", "text", "TooltipElement", Display, AccessibilityRole::Alert, false, false, EMPTY_FIELDS, NO_EVENTS, DISPLAY_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Avatar, "avatar", "icon", "AvatarElement", Display, AccessibilityRole::Image, false, false, ICON_FIELDS, NO_EVENTS, DISPLAY_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Shortcut, "shortcut", "text", "TextElement", Display, AccessibilityRole::Label, false, false, TEXT_FIELDS, NO_EVENTS, DISPLAY_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Button, "button", "button", "ButtonElement", Action, AccessibilityRole::Button, true, true, BUTTON_FIELDS, ACTION_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (IconButton, "icon-button", "button", "IconButtonElement", Action, AccessibilityRole::Button, true, true, BUTTON_FIELDS, ACTION_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (ToggleButton, "toggle-button", "button", "ButtonElement", Action, AccessibilityRole::Button, true, true, BUTTON_FIELDS, ACTION_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (CommandButton, "command-button", "button", "ButtonElement", Action, AccessibilityRole::Button, true, true, BUTTON_FIELDS, ACTION_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (LinkButton, "link-button", "button", "ButtonElement", Action, AccessibilityRole::Button, true, true, BUTTON_FIELDS, ACTION_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Input, "input", "input", "InputElement", TextInput, AccessibilityRole::TextInput, true, true, INPUT_FIELDS, INPUT_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (TextArea, "textarea", "input", "InputElement", TextInput, AccessibilityRole::TextInput, true, true, INPUT_FIELDS, INPUT_EVENTS, CONTROL_STYLE_HOOKS, Some("textarea"), TEXTAREA_DEFAULT_ATTRIBUTES),
+            (Search, "search", "input", "InputElement", TextInput, AccessibilityRole::TextInput, true, true, INPUT_FIELDS, INPUT_EVENTS, CONTROL_STYLE_HOOKS, Some("search"), NO_DEFAULT_ATTRIBUTES),
+            (Password, "password", "input", "InputElement", TextInput, AccessibilityRole::TextInput, true, true, INPUT_FIELDS, INPUT_EVENTS, CONTROL_STYLE_HOOKS, Some("password"), PASSWORD_DEFAULT_ATTRIBUTES),
+            (NumberInput, "number-input", "input", "InputElement", TextInput, AccessibilityRole::TextInput, true, true, INPUT_FIELDS, INPUT_EVENTS, CONTROL_STYLE_HOOKS, Some("number"), NO_DEFAULT_ATTRIBUTES),
+            (Stepper, "stepper", "input", "InputElement", TextInput, AccessibilityRole::TextInput, true, true, INPUT_FIELDS, INPUT_EVENTS, CONTROL_STYLE_HOOKS, Some("number"), STEPPER_DEFAULT_ATTRIBUTES),
+            (TextInput, "text-input", "input", "InputElement", TextInput, AccessibilityRole::TextInput, true, true, INPUT_FIELDS, INPUT_EVENTS, CONTROL_STYLE_HOOKS, Some("text"), NO_DEFAULT_ATTRIBUTES),
+            (PasswordInput, "password-input", "input", "InputElement", TextInput, AccessibilityRole::TextInput, true, true, INPUT_FIELDS, INPUT_EVENTS, CONTROL_STYLE_HOOKS, Some("password"), PASSWORD_DEFAULT_ATTRIBUTES),
+            (SearchInput, "search-input", "input", "InputElement", TextInput, AccessibilityRole::TextInput, true, true, INPUT_FIELDS, INPUT_EVENTS, CONTROL_STYLE_HOOKS, Some("search"), NO_DEFAULT_ATTRIBUTES),
+            (EmailInput, "email-input", "input", "InputElement", TextInput, AccessibilityRole::TextInput, true, true, INPUT_FIELDS, INPUT_EVENTS, CONTROL_STYLE_HOOKS, Some("email"), NO_DEFAULT_ATTRIBUTES),
+            (UrlInput, "url-input", "input", "InputElement", TextInput, AccessibilityRole::TextInput, true, true, INPUT_FIELDS, INPUT_EVENTS, CONTROL_STYLE_HOOKS, Some("url"), NO_DEFAULT_ATTRIBUTES),
+            (Slider, "slider", "slider", "SliderElement", TextInput, AccessibilityRole::Slider, true, true, SLIDER_FIELDS, INPUT_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Select, "select", "input", "SelectElement", ChoiceMenu, AccessibilityRole::Menu, true, true, EMPTY_FIELDS, CHOICE_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Option, "option", "input", "OptionElement", ChoiceMenu, AccessibilityRole::MenuItem, false, false, EMPTY_FIELDS, CHOICE_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Switch, "switch", "input", "SwitchElement", ChoiceMenu, AccessibilityRole::Switch, true, true, CHECKABLE_FIELDS, CHOICE_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Checkbox, "checkbox", "input", "CheckboxElement", ChoiceMenu, AccessibilityRole::Checkbox, true, true, CHECKABLE_FIELDS, CHOICE_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Radio, "radio", "input", "CheckboxElement", ChoiceMenu, AccessibilityRole::Checkbox, true, true, CHECKABLE_FIELDS, CHOICE_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (RadioGroup, "radio-group", "input", "RadioGroupElement", ChoiceMenu, AccessibilityRole::Region, false, false, EMPTY_FIELDS, CHOICE_EVENTS, STRUCTURE_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (SegmentedControl, "segmented-control", "input", "SegmentedControlElement", ChoiceMenu, AccessibilityRole::Toolbar, true, true, EMPTY_FIELDS, CHOICE_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Menu, "menu", "row", "MenuElement", ChoiceMenu, AccessibilityRole::Menu, true, true, EMPTY_FIELDS, ACTIVATE_EVENTS, STRUCTURE_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (MenuItem, "menu-item", "row", "MenuItemElement", ChoiceMenu, AccessibilityRole::MenuItem, true, true, EMPTY_FIELDS, ACTIVATE_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (CommandItem, "command-item", "row", "MenuItemElement", ChoiceMenu, AccessibilityRole::MenuItem, true, true, EMPTY_FIELDS, ACTIVATE_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (PreferenceRow, "preference-row", "row", "PreferenceRowElement", ChoiceMenu, AccessibilityRole::Region, true, false, EMPTY_FIELDS, ACTIVATE_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Panel, "panel", "box", "PanelElement", Container, AccessibilityRole::Region, false, false, EMPTY_FIELDS, NO_EVENTS, SHELL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Popover, "popover", "box", "PopoverElement", Container, AccessibilityRole::Dialog, true, true, EMPTY_FIELDS, OPEN_EVENTS, SHELL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Dialog, "dialog", "box", "DialogElement", Container, AccessibilityRole::Dialog, true, true, EMPTY_FIELDS, OPEN_EVENTS, SHELL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Sheet, "sheet", "box", "SheetElement", Container, AccessibilityRole::Dialog, true, true, EMPTY_FIELDS, OPEN_EVENTS, SHELL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Tabs, "tabs", "box", "TabsElement", Container, AccessibilityRole::Toolbar, true, true, EMPTY_FIELDS, OPEN_EVENTS, SHELL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Tab, "tab", "box", "TabElement", Container, AccessibilityRole::Tab, true, true, EMPTY_FIELDS, ACTIVATE_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Accordion, "accordion", "box", "AccordionElement", Container, AccessibilityRole::Region, true, true, EMPTY_FIELDS, OPEN_EVENTS, SHELL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Details, "details", "box", "DetailsElement", Container, AccessibilityRole::Region, true, true, EMPTY_FIELDS, OPEN_EVENTS, SHELL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (List, "list", "column", "ListElement", Collection, AccessibilityRole::List, true, true, EMPTY_FIELDS, NO_EVENTS, STRUCTURE_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (ListItem, "list-item", "row", "ListItemElement", Collection, AccessibilityRole::ListItem, true, true, EMPTY_FIELDS, ACTIVATE_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Table, "table", "column", "TableElement", Collection, AccessibilityRole::Region, true, true, EMPTY_FIELDS, NO_EVENTS, STRUCTURE_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Cell, "cell", "row", "CellElement", Collection, AccessibilityRole::Region, false, false, EMPTY_FIELDS, NO_EVENTS, STRUCTURE_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Tree, "tree", "column", "TreeElement", Collection, AccessibilityRole::Region, true, true, EMPTY_FIELDS, NO_EVENTS, STRUCTURE_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (EmptyState, "empty-state", "row", "EmptyStateElement", Collection, AccessibilityRole::Status, false, false, EMPTY_FIELDS, NO_EVENTS, DISPLAY_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Slot, "slot", "box", "SlotElement", Shell, AccessibilityRole::Region, false, false, EMPTY_FIELDS, NO_EVENTS, SHELL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Surface, "surface", "box", "SurfaceElement", Shell, AccessibilityRole::Region, false, false, EMPTY_FIELDS, NO_EVENTS, SHELL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Widget, "widget", "box", "WidgetElement", Shell, AccessibilityRole::Region, false, false, EMPTY_FIELDS, NO_EVENTS, SHELL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+        }
+    };
+}
+
+macro_rules! generate_element_registries {
+    ($(($kind:ident, $tag:literal, $runtime_tag:literal, $type_name:literal, $family:ident, $role:expr, $focusable:expr, $label_required:expr, $fields:ident, $events:ident, $style_hooks:ident, $input_type:expr, $default_attributes:ident)),* $(,)?) => {
+        pub static ELEMENT_CONTRACT_DEFS: &[ElementContractDef] = &[
+            $(ElementContractDef {
+                kind: ElementKind::$kind,
+                source_tag: $tag,
+                tag: $tag,
+                runtime_tag: $runtime_tag,
+                family: ElementFamily::$family,
+                type_name: $type_name,
+                attributes: schema_attributes!($family),
+                states: COMMON_STATES,
+                events: $events,
+                accessibility: ElementAccessibilityDef {
+                    role: $role,
+                    focusable: $focusable,
+                    label_required: $label_required,
+                },
+                style_hooks: $style_hooks,
+                input_type: $input_type,
+                default_attributes: $default_attributes,
+            }),*
+        ];
+
+        pub static ELEMENT_TYPE_DEFS: &[ElementTypeDef] = &[
+            $(element_type_with_runtime(
+                ElementKind::$kind,
+                $tag,
+                $runtime_tag,
+                $type_name,
+                $fields,
+            )),*
+        ];
+
         pub(super) fn contract_slot_for_tag(tag: &str) -> Option<usize> {
             match tag {
                 $($tag => Some(const { contract_slot_of($tag) }),)*
@@ -789,121 +603,16 @@ macro_rules! contract_slots {
     };
 }
 
-contract_slots!(
-    "box",
-    "row",
-    "column",
-    "grid",
-    "stack",
-    "spacer",
-    "divider",
-    "separator",
-    "scroll-area",
-    "section",
-    "header",
-    "footer",
-    "group",
-    "form-row",
-    "text",
-    "icon",
-    "image",
-    "badge",
-    "progress",
-    "meter",
-    "tooltip",
-    "avatar",
-    "shortcut",
-    "button",
-    "icon-button",
-    "toggle-button",
-    "command-button",
-    "link-button",
-    "input",
-    "textarea",
-    "search",
-    "password",
-    "number-input",
-    "stepper",
-    "select",
-    "option",
-    "checkbox",
-    "switch",
-    "radio",
-    "radio-group",
-    "segmented-control",
-    "menu",
-    "menu-item",
-    "command-item",
-    "preference-row",
-    "panel",
-    "popover",
-    "dialog",
-    "sheet",
-    "tabs",
-    "tab",
-    "accordion",
-    "details",
-    "list",
-    "list-item",
-    "table",
-    "cell",
-    "tree",
-    "empty-state",
-    "slot",
-    "surface",
-    "widget",
-);
+element_schema!(generate_element_registries);
 
-pub static ELEMENT_TYPE_DEFS: &[ElementTypeDef] = &[
-    element_type(ElementKind::Box, "box", "MeshElement", &[]),
-    element_type(ElementKind::Row, "row", "RowElement", &[]),
-    element_type(ElementKind::Column, "column", "ColumnElement", &[]),
-    element_type(ElementKind::Stack, "stack", "StackElement", &[]),
-    element_type(ElementKind::Scroll, "scroll", "ScrollElement", &[]),
-    element_type(ElementKind::ScrollView, "scroll-view", "ScrollElement", &[]),
-    element_type(ElementKind::Spacer, "spacer", "SpacerElement", &[]),
-    element_type(ElementKind::Separator, "separator", "SeparatorElement", &[]),
-    element_type(ElementKind::Text, "text", "TextElement", TEXT_FIELDS),
-    element_type(ElementKind::Label, "label", "LabelElement", LABEL_FIELDS),
-    element_type(ElementKind::Icon, "icon", "IconElement", ICON_FIELDS),
-    element_type(ElementKind::Image, "image", "ImageElement", IMAGE_FIELDS),
-    element_type(
-        ElementKind::Button,
-        "button",
-        "ButtonElement",
-        BUTTON_FIELDS,
-    ),
-    element_type(
-        ElementKind::IconButton,
-        "icon-button",
-        "IconButtonElement",
-        ICON_FIELDS,
-    ),
-    element_type(ElementKind::Input, "input", "InputElement", INPUT_FIELDS),
-    element_type(
-        ElementKind::Slider,
-        "slider",
-        "SliderElement",
-        SLIDER_FIELDS,
-    ),
-    element_type(
-        ElementKind::Switch,
-        "switch",
-        "SwitchElement",
-        CHECKABLE_FIELDS,
-    ),
-    element_type(
-        ElementKind::Checkbox,
-        "checkbox",
-        "CheckboxElement",
-        CHECKABLE_FIELDS,
-    ),
-    element_type(ElementKind::List, "list", "ListElement", &[]),
-    element_type(ElementKind::ListItem, "list-item", "ListItemElement", &[]),
-    element_type(ElementKind::Slot, "slot", "SlotElement", &[]),
-    element_type(ElementKind::Surface, "surface", "SurfaceElement", &[]),
-    element_type(ElementKind::Widget, "widget", "WidgetElement", &[]),
-];
+pub(super) static UNKNOWN_ELEMENT_TYPE: ElementTypeDef = ElementTypeDef {
+    kind: ElementKind::Unknown,
+    source_tag: "unknown",
+    tag: "unknown",
+    runtime_tag: "unknown",
+    type_name: "MeshElement",
+    fields: EMPTY_FIELDS,
+};
 
 pub(super) const fn field(
     name: &'static str,
@@ -943,15 +652,18 @@ pub(super) const fn event(
     }
 }
 
-pub(super) const fn element_type(
+pub(super) const fn element_type_with_runtime(
     kind: ElementKind,
     tag: &'static str,
+    runtime_tag: &'static str,
     type_name: &'static str,
     fields: &'static [ElementFieldDef],
 ) -> ElementTypeDef {
     ElementTypeDef {
         kind,
+        source_tag: tag,
         tag,
+        runtime_tag,
         type_name,
         fields,
     }

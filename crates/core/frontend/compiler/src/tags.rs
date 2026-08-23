@@ -1,4 +1,5 @@
 use mesh_core_component::template::SourceTag;
+use mesh_core_elements::element_runtime_tag_for_tag;
 
 /// Runtime primitive tag set.
 ///
@@ -22,6 +23,7 @@ pub enum UiTag {
     Separator,
     Spacer,
     Toggle,
+    Unknown,
 }
 
 impl UiTag {
@@ -37,12 +39,29 @@ impl UiTag {
             UiTag::Slider => "slider",
             UiTag::Scroll => "scroll",
             UiTag::Icon => "icon",
-            UiTag::Image => "icon",
+            UiTag::Image => "image",
             UiTag::List => "column",
             UiTag::ListItem => "row",
             UiTag::Separator => "box",
             UiTag::Spacer => "box",
             UiTag::Toggle => "input",
+            UiTag::Unknown => "unknown",
+        }
+    }
+
+    fn from_runtime_tag(tag: &str) -> Self {
+        match tag {
+            "row" => Self::Row,
+            "column" => Self::Column,
+            "box" => Self::Box,
+            "text" => Self::Text,
+            "button" => Self::Button,
+            "input" => Self::Input,
+            "slider" => Self::Slider,
+            "scroll" => Self::Scroll,
+            "icon" => Self::Icon,
+            "image" => Self::Image,
+            _ => Self::Unknown,
         }
     }
 }
@@ -52,72 +71,9 @@ impl UiTag {
 /// This is the explicit lowering step that replaces the old ad-hoc
 /// `normalize_tag()` string function.
 pub(crate) fn lower_source_tag(source_tag: &SourceTag) -> UiTag {
-    match source_tag {
-        SourceTag::Panel => UiTag::Box,
-        SourceTag::Row => UiTag::Row,
-        SourceTag::Column => UiTag::Column,
-        SourceTag::Grid => UiTag::Box,
-        SourceTag::Stack => UiTag::Box,
-        SourceTag::ScrollView | SourceTag::ScrollArea => UiTag::Scroll,
-        SourceTag::Spacer => UiTag::Spacer,
-        SourceTag::Divider | SourceTag::Separator => UiTag::Separator,
-        SourceTag::Section
-        | SourceTag::Header
-        | SourceTag::Footer
-        | SourceTag::Group
-        | SourceTag::FormRow => UiTag::Box,
-        SourceTag::Text
-        | SourceTag::Label
-        | SourceTag::Badge
-        | SourceTag::Shortcut
-        | SourceTag::Progress
-        | SourceTag::Meter
-        | SourceTag::Tooltip => UiTag::Text,
-        SourceTag::Icon | SourceTag::Avatar => UiTag::Icon,
-        SourceTag::Image => UiTag::Image,
-        SourceTag::Button
-        | SourceTag::IconButton
-        | SourceTag::ToggleButton
-        | SourceTag::CommandButton
-        | SourceTag::LinkButton => UiTag::Button,
-        SourceTag::Input
-        | SourceTag::TextArea
-        | SourceTag::Search
-        | SourceTag::Password
-        | SourceTag::NumberInput
-        | SourceTag::Stepper
-        | SourceTag::TextInput
-        | SourceTag::PasswordInput
-        | SourceTag::SearchInput
-        | SourceTag::EmailInput
-        | SourceTag::UrlInput => UiTag::Input,
-        SourceTag::Slider => UiTag::Slider,
-        SourceTag::Select
-        | SourceTag::Option
-        | SourceTag::Switch
-        | SourceTag::Checkbox
-        | SourceTag::Radio
-        | SourceTag::RadioGroup
-        | SourceTag::SegmentedControl => UiTag::Toggle,
-        SourceTag::Menu
-        | SourceTag::MenuItem
-        | SourceTag::CommandItem
-        | SourceTag::PreferenceRow => UiTag::Row,
-        SourceTag::Popover
-        | SourceTag::Dialog
-        | SourceTag::Sheet
-        | SourceTag::Tabs
-        | SourceTag::Tab
-        | SourceTag::Accordion
-        | SourceTag::Details => UiTag::Box,
-        SourceTag::List | SourceTag::Table | SourceTag::Tree => UiTag::List,
-        SourceTag::ListItem | SourceTag::Cell | SourceTag::EmptyState => UiTag::ListItem,
-        SourceTag::Slot => UiTag::Box,
-        SourceTag::Surface | SourceTag::Widget => UiTag::Box,
-        SourceTag::Box => UiTag::Box,
-        SourceTag::Scroll => UiTag::Scroll,
-        SourceTag::Unknown => UiTag::Box,
-    }
+    element_runtime_tag_for_tag(source_tag.as_str())
+        .map(UiTag::from_runtime_tag)
+        .unwrap_or(UiTag::Unknown)
 }
 
 #[cfg(test)]
@@ -146,6 +102,13 @@ mod tests {
         assert_eq!(lower_source_tag(&SourceTag::Input).as_str(), "input");
         assert_eq!(lower_source_tag(&SourceTag::Switch).as_str(), "input");
         assert_eq!(lower_source_tag(&SourceTag::Checkbox).as_str(), "input");
+        assert_eq!(lower_source_tag(&SourceTag::Image).as_str(), "image");
+    }
+
+    #[test]
+    fn unknown_source_tags_are_not_silently_lowered_to_box() {
+        assert_eq!(lower_source_tag(&SourceTag::Unknown), UiTag::Unknown);
+        assert_eq!(lower_source_tag(&SourceTag::Unknown).as_str(), "unknown");
     }
 
     #[test]

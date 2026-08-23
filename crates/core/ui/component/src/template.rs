@@ -2,7 +2,9 @@
 
 /// The tag's semantic intent as authored. Distinct from `UiTag` in
 /// `mesh-core-render`, which is the lowered runtime primitive set.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum SourceTag {
     // Layout family
     Panel,
@@ -86,6 +88,154 @@ pub enum SourceTag {
 }
 
 impl SourceTag {
+    /// Return the canonical lowercase source spelling used by element
+    /// contracts and compiler diagnostics.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Panel => "panel",
+            Self::Row => "row",
+            Self::Column => "column",
+            Self::Grid => "grid",
+            Self::Stack => "stack",
+            Self::ScrollView => "scroll-view",
+            Self::ScrollArea => "scroll-area",
+            Self::Spacer => "spacer",
+            Self::Divider => "divider",
+            Self::Separator => "separator",
+            Self::Section => "section",
+            Self::Header => "header",
+            Self::Footer => "footer",
+            Self::Group => "group",
+            Self::FormRow => "form-row",
+            Self::Text => "text",
+            Self::Label => "label",
+            Self::Icon => "icon",
+            Self::Image => "image",
+            Self::Badge => "badge",
+            Self::Progress => "progress",
+            Self::Meter => "meter",
+            Self::Tooltip => "tooltip",
+            Self::Avatar => "avatar",
+            Self::Shortcut => "shortcut",
+            Self::Button => "button",
+            Self::IconButton => "icon-button",
+            Self::ToggleButton => "toggle-button",
+            Self::CommandButton => "command-button",
+            Self::LinkButton => "link-button",
+            Self::Input => "input",
+            Self::TextArea => "textarea",
+            Self::Search => "search",
+            Self::Password => "password",
+            Self::NumberInput => "number-input",
+            Self::Stepper => "stepper",
+            Self::TextInput => "text-input",
+            Self::PasswordInput => "password-input",
+            Self::SearchInput => "search-input",
+            Self::EmailInput => "email-input",
+            Self::UrlInput => "url-input",
+            Self::Slider => "slider",
+            Self::Select => "select",
+            Self::Option => "option",
+            Self::Switch => "switch",
+            Self::Checkbox => "checkbox",
+            Self::Radio => "radio",
+            Self::RadioGroup => "radio-group",
+            Self::SegmentedControl => "segmented-control",
+            Self::Menu => "menu",
+            Self::MenuItem => "menu-item",
+            Self::CommandItem => "command-item",
+            Self::PreferenceRow => "preference-row",
+            Self::Popover => "popover",
+            Self::Dialog => "dialog",
+            Self::Sheet => "sheet",
+            Self::Tabs => "tabs",
+            Self::Tab => "tab",
+            Self::Accordion => "accordion",
+            Self::Details => "details",
+            Self::List => "list",
+            Self::ListItem => "list-item",
+            Self::Table => "table",
+            Self::Cell => "cell",
+            Self::Tree => "tree",
+            Self::EmptyState => "empty-state",
+            Self::Slot => "slot",
+            Self::Surface => "surface",
+            Self::Widget => "widget",
+            Self::Box => "box",
+            Self::Scroll => "scroll",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    /// Compatibility name for callers that used the former element-kind
+    /// enum. Generated element contracts remain the runtime source of truth.
+    pub const fn type_name(&self) -> &'static str {
+        match self {
+            Self::Box | Self::Unknown => "MeshElement",
+            Self::Row => "RowElement",
+            Self::Column => "ColumnElement",
+            Self::Grid => "GridElement",
+            Self::Stack => "StackElement",
+            Self::Scroll | Self::ScrollView | Self::ScrollArea => "ScrollElement",
+            Self::Spacer => "SpacerElement",
+            Self::Divider | Self::Separator => "SeparatorElement",
+            Self::Section => "SectionElement",
+            Self::Header => "HeaderElement",
+            Self::Footer => "FooterElement",
+            Self::Group => "GroupElement",
+            Self::FormRow => "FormRowElement",
+            Self::Text | Self::Badge | Self::Shortcut => "TextElement",
+            Self::Label => "LabelElement",
+            Self::Icon => "IconElement",
+            Self::Image => "ImageElement",
+            Self::Progress => "ProgressElement",
+            Self::Meter => "MeterElement",
+            Self::Tooltip => "TooltipElement",
+            Self::Avatar => "AvatarElement",
+            Self::Button | Self::CommandButton | Self::LinkButton => "ButtonElement",
+            Self::IconButton => "IconButtonElement",
+            Self::ToggleButton => "ToggleButtonElement",
+            Self::Input
+            | Self::TextArea
+            | Self::Search
+            | Self::Password
+            | Self::NumberInput
+            | Self::Stepper
+            | Self::TextInput
+            | Self::PasswordInput
+            | Self::SearchInput
+            | Self::EmailInput
+            | Self::UrlInput => "InputElement",
+            Self::Slider => "SliderElement",
+            Self::Select => "SelectElement",
+            Self::Option => "OptionElement",
+            Self::Switch => "SwitchElement",
+            Self::Checkbox | Self::Radio => "CheckboxElement",
+            Self::RadioGroup => "RadioGroupElement",
+            Self::SegmentedControl => "SegmentedControlElement",
+            Self::Menu => "MenuElement",
+            Self::MenuItem | Self::CommandItem => "MenuItemElement",
+            Self::PreferenceRow => "PreferenceRowElement",
+            Self::Panel => "PanelElement",
+            Self::Popover => "PopoverElement",
+            Self::Dialog => "DialogElement",
+            Self::Sheet => "SheetElement",
+            Self::Tabs => "TabsElement",
+            Self::Tab => "TabElement",
+            Self::Accordion => "AccordionElement",
+            Self::Details => "DetailsElement",
+            Self::List => "ListElement",
+            Self::ListItem => "ListItemElement",
+            Self::Table => "TableElement",
+            Self::Cell => "CellElement",
+            Self::Tree => "TreeElement",
+            Self::EmptyState => "EmptyStateElement",
+            Self::Slot => "SlotElement",
+            Self::Surface => "SurfaceElement",
+            Self::Widget => "WidgetElement",
+        }
+    }
+
     pub fn from_tag_name(tag: &str) -> Self {
         match tag {
             // Primitives stay lowercase so PascalCase is unambiguously a

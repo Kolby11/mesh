@@ -1,7 +1,15 @@
 use super::*;
 
 pub fn validate_element_attribute(tag: &str, name: &str, value: &str) -> Option<ElementDiagnostic> {
-    let contract = element_contract_for_tag(tag)?;
+    let Some(contract) = element_contract_for_tag(tag) else {
+        return Some(ElementDiagnostic {
+            tag: tag.to_string(),
+            name: name.to_string(),
+            kind: ElementDiagnosticKind::UnknownElementTag,
+            message: format!("unknown element tag <{tag}>"),
+            action: "Use a canonical lowercase MESH element tag or a component tag.".into(),
+        });
+    };
     if let Some(diagnostic) = validate_known_attribute_value(tag, name, value) {
         return Some(diagnostic);
     }
@@ -223,7 +231,15 @@ pub(super) fn invalid_attr(
 }
 
 pub fn validate_element_event(tag: &str, event_name: &str) -> Option<ElementDiagnostic> {
-    let contract = element_contract_for_tag(tag)?;
+    let Some(contract) = element_contract_for_tag(tag) else {
+        return Some(ElementDiagnostic {
+            tag: tag.to_string(),
+            name: event_name.to_string(),
+            kind: ElementDiagnosticKind::UnknownElementTag,
+            message: format!("unknown element tag <{tag}>"),
+            action: "Use a canonical lowercase MESH element tag or a component tag.".into(),
+        });
+    };
     if contract.events.iter().any(|event| event.name == event_name) {
         return None;
     }
