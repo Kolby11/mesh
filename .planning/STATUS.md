@@ -9,6 +9,13 @@ surrounding-text snapshot whenever the owning surface, popup, parent tree, or
 connection is torn down, while preserving state published for other surfaces.
 Its lifecycle simulation now matches the real Wayland teardown boundary.
 
+The deterministic backend now also simulates one-seat text-input-v3 lifecycle:
+enter accepts only live surfaces, preedit/commit/deletion payloads remain
+pending until `done`, and one atomic `TextInputEdit` is published at that
+boundary. Leave and object teardown cancel pending protocol state, while
+published surrounding-text state remains valid through leave and clears with
+the owning object.
+
 Wayland keyboard commits now preserve the compositor's complete Unicode text
 payload through presentation, shell routing, keyboard repeat, and the
 component input boundary. Focused inputs apply one accepted multi-scalar

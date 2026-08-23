@@ -3,6 +3,7 @@ mod wayland_surface;
 
 use std::collections::{HashMap, HashSet};
 use std::os::unix::io::BorrowedFd;
+use std::sync::Arc;
 
 use mesh_core_render::{DamageRect, PixelBuffer};
 use mesh_core_wayland::WindowStates;
@@ -307,6 +308,48 @@ struct TestingBackend {
     unconfigured_surfaces: HashSet<String>,
     missing_surfaces: HashSet<String>,
     text_input_state: Option<(String, TextInputState)>,
+    text_input_surface: Option<String>,
+    text_input_pending: TestingPendingTextInput,
+}
+
+#[derive(Default)]
+struct TestingPendingTextInput {
+    /// `Some(None)` represents the protocol's nullable empty preedit, while
+    /// `None` means no preedit event was received in this done group.
+    preedit: Option<Option<String>>,
+    preedit_cursor_begin: i32,
+    preedit_cursor_end: i32,
+    commit: Option<String>,
+    before_bytes: usize,
+    after_bytes: usize,
+}
+
+impl TestingPendingTextInput {
+    fn is_empty(&self) -> bool {
+        self.preedit.is_none()
+            && self.commit.is_none()
+            && self.before_bytes == 0
+            && self.after_bytes == 0
+    }
+
+    fn take_edit(&mut self, surface_id: String) -> Option<WindowEvent> {
+        if self.is_empty() {
+            return None;
+        }
+        let event = WindowEvent::TextInputEdit {
+            surface_id: Arc::from(surface_id),
+            preedit_present: self.preedit.is_some(),
+            preedit: self.preedit.take().flatten().map(Arc::from),
+            preedit_cursor_begin: self.preedit_cursor_begin,
+            preedit_cursor_end: self.preedit_cursor_end,
+            commit: self.commit.take().map(Arc::from),
+            before_bytes: std::mem::take(&mut self.before_bytes),
+            after_bytes: std::mem::take(&mut self.after_bytes),
+        };
+        self.preedit_cursor_begin = 0;
+        self.preedit_cursor_end = 0;
+        Some(event)
+    }
 }
 
 fn drop_testing_events_for_surface(backend: &mut TestingBackend, surface_id: &str) {
@@ -319,7 +362,21 @@ fn drop_testing_events_for_surface(backend: &mut TestingBackend, surface_id: &st
 /// with the compositor identity it represents. The real Wayland backend drops
 /// this snapshot while tearing down a surface, so a later shell sync cannot
 /// accidentally replay surrounding text for a destroyed object.
+fn clear_testing_text_input_transaction_for_surface(
+    backend: &mut TestingBackend,
+    surface_id: &str,
+) -> bool {
+    if backend.text_input_surface.as_deref() == Some(surface_id) {
+        backend.text_input_surface = None;
+        backend.text_input_pending = TestingPendingTextInput::default();
+        true
+    } else {
+        false
+    }
+}
+
 fn clear_testing_text_input_for_surface(backend: &mut TestingBackend, surface_id: &str) {
+    clear_testing_text_input_transaction_for_surface(backend, surface_id);
     if backend
         .text_input_state
         .as_ref()
@@ -516,6 +573,8 @@ impl PresentationEngine {
             let reason = reason.into();
             backend.connection_lost = Some(reason.clone());
             backend.events.clear();
+            backend.text_input_surface = None;
+            backend.text_input_pending = TestingPendingTextInput::default();
             backend.text_input_state = None;
             let mut surface_ids = backend
                 .surface_configs
@@ -543,6 +602,110 @@ impl PresentationEngine {
         if let Backend::Testing(backend) = &mut self.backend {
             backend.events.push(event);
         }
+    }
+
+    /// Simulate `zwp_text_input_v3.enter` for a live testing surface.
+    ///
+    /// The deterministic backend has one protocol seat. Enter replaces the
+    /// previous focus and starts a fresh done-group, matching the real
+    /// per-seat text-input object without exposing protocol handles to tests.
+    #[doc(hidden)]
+    pub fn testing_text_input_enter(&mut self, surface_id: impl Into<String>) -> bool {
+        let Backend::Testing(backend) = &mut self.backend else {
+            return false;
+        };
+        let surface_id = surface_id.into();
+        if backend.connection_lost.is_some()
+            || (!backend.surface_configs.contains_key(&surface_id)
+                && !backend.popup_configs.contains_key(&surface_id))
+        {
+            return false;
+        }
+        backend.text_input_surface = Some(surface_id);
+        backend.text_input_pending = TestingPendingTextInput::default();
+        true
+    }
+
+    /// Simulate `zwp_text_input_v3.leave` and cancel the unfinished done-group.
+    #[doc(hidden)]
+    pub fn testing_text_input_leave(&mut self, surface_id: &str) -> bool {
+        let Backend::Testing(backend) = &mut self.backend else {
+            return false;
+        };
+        if backend.text_input_surface.as_deref() != Some(surface_id) {
+            return false;
+        }
+        clear_testing_text_input_transaction_for_surface(backend, surface_id)
+    }
+
+    /// Buffer one `zwp_text_input_v3.preedit_string` event until `done`.
+    #[doc(hidden)]
+    pub fn testing_text_input_preedit(
+        &mut self,
+        surface_id: &str,
+        text: Option<String>,
+        cursor_begin: i32,
+        cursor_end: i32,
+    ) -> bool {
+        let Backend::Testing(backend) = &mut self.backend else {
+            return false;
+        };
+        if backend.text_input_surface.as_deref() != Some(surface_id) {
+            return false;
+        }
+        backend.text_input_pending.preedit = Some(text);
+        backend.text_input_pending.preedit_cursor_begin = cursor_begin;
+        backend.text_input_pending.preedit_cursor_end = cursor_end;
+        true
+    }
+
+    /// Buffer one `zwp_text_input_v3.commit_string` event until `done`.
+    #[doc(hidden)]
+    pub fn testing_text_input_commit(&mut self, surface_id: &str, text: impl Into<String>) -> bool {
+        let Backend::Testing(backend) = &mut self.backend else {
+            return false;
+        };
+        if backend.text_input_surface.as_deref() != Some(surface_id) {
+            return false;
+        }
+        backend.text_input_pending.commit = Some(text.into());
+        true
+    }
+
+    /// Buffer one `zwp_text_input_v3.delete_surrounding_text` event until
+    /// `done`.
+    #[doc(hidden)]
+    pub fn testing_text_input_delete(
+        &mut self,
+        surface_id: &str,
+        before_bytes: usize,
+        after_bytes: usize,
+    ) -> bool {
+        let Backend::Testing(backend) = &mut self.backend else {
+            return false;
+        };
+        if backend.text_input_surface.as_deref() != Some(surface_id) {
+            return false;
+        }
+        backend.text_input_pending.before_bytes = before_bytes;
+        backend.text_input_pending.after_bytes = after_bytes;
+        true
+    }
+
+    /// Simulate `zwp_text_input_v3.done`, publishing at most one atomic edit.
+    #[doc(hidden)]
+    pub fn testing_text_input_done(&mut self) -> bool {
+        let Backend::Testing(backend) = &mut self.backend else {
+            return false;
+        };
+        let Some(surface_id) = backend.text_input_surface.clone() else {
+            return false;
+        };
+        let Some(event) = backend.text_input_pending.take_edit(surface_id) else {
+            return false;
+        };
+        backend.events.push(event);
+        true
     }
 
     #[doc(hidden)]
@@ -1511,6 +1674,79 @@ mod tests {
             .set_text_input_state(None, None)
             .expect("clearing text-input state should be accepted");
         assert!(engine.testing_text_input_state().is_none());
+    }
+
+    #[test]
+    fn testing_text_input_simulator_preserves_done_boundary_and_ownership() {
+        let mut engine = PresentationEngine::testing_with_popup_support(false);
+        engine
+            .configure("launcher", SurfaceConfig::default())
+            .expect("surface config should be accepted");
+        let published_state = TextInputState::new("launcher", 0, 0);
+        engine
+            .set_text_input_state(Some("launcher"), Some(published_state.clone()))
+            .expect("surrounding state should be accepted");
+
+        assert!(!engine.testing_text_input_enter("missing"));
+        assert!(engine.testing_text_input_enter("launcher"));
+        assert!(engine.testing_text_input_preedit("launcher", Some("候".to_string()), 0, 3,));
+        assert!(engine.testing_text_input_delete("launcher", 3, 1));
+        assert!(engine.testing_text_input_commit("launcher", "候"));
+        assert!(
+            engine
+                .poll_events()
+                .expect("testing backend remains connected")
+                .is_empty()
+        );
+
+        assert!(engine.testing_text_input_done());
+        let events = engine
+            .poll_events()
+            .expect("testing backend remains connected");
+        assert!(matches!(
+            events.as_slice(),
+            [WindowEvent::TextInputEdit {
+                surface_id,
+                preedit_present: true,
+                preedit: Some(preedit),
+                preedit_cursor_begin: 0,
+                preedit_cursor_end: 3,
+                commit: Some(commit),
+                before_bytes: 3,
+                after_bytes: 1,
+            }] if surface_id.as_ref() == "launcher"
+                && preedit.as_ref() == "候"
+                && commit.as_ref() == "候"
+        ));
+        assert!(!engine.testing_text_input_done());
+        assert!(!engine.testing_text_input_commit("other", "stale"));
+
+        assert!(engine.testing_text_input_preedit("launcher", Some("stale".to_string()), 0, 6,));
+        assert!(engine.testing_text_input_leave("launcher"));
+        assert!(!engine.testing_text_input_done());
+        assert_eq!(
+            engine.testing_text_input_state(),
+            Some(("launcher".to_string(), published_state))
+        );
+        assert!(
+            engine
+                .poll_events()
+                .expect("testing backend remains connected")
+                .is_empty()
+        );
+
+        assert!(engine.testing_text_input_enter("launcher"));
+        assert!(
+            engine.testing_text_input_preedit("launcher", Some("cancelled".to_string()), 0, 9,)
+        );
+        engine.testing_push_surface_closed("launcher");
+        assert!(!engine.testing_text_input_done());
+        assert!(
+            engine
+                .poll_events()
+                .expect("testing backend remains connected")
+                .is_empty()
+        );
     }
 
     #[test]
