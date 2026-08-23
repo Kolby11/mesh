@@ -101,7 +101,7 @@ fn output_generation_advances_for_each_membership_revision() {
 
 #[test]
 fn negotiated_capabilities_clamp_versions_and_gate_popup_reposition() {
-    let capabilities = NegotiatedCapabilities::from_versions(1, 9, 2, 4, 3, 2, 2, 2, 8);
+    let capabilities = NegotiatedCapabilities::from_versions(1, 9, 2, 4, 3, 2, 2, 2, 8, 9);
 
     assert_eq!(capabilities.generation, 1);
     assert_eq!(capabilities.layer_shell_version, 4);
@@ -110,7 +110,7 @@ fn negotiated_capabilities_clamp_versions_and_gate_popup_reposition() {
     assert!(!capabilities.supports_xdg_popup_reposition());
     assert!(!capabilities.supports_xdg_popup_reactive_positioner());
 
-    let capabilities = NegotiatedCapabilities::from_versions(2, 4, 3, 1, 1, 1, 1, 1, 3);
+    let capabilities = NegotiatedCapabilities::from_versions(2, 4, 3, 1, 1, 1, 1, 1, 3, 1);
     assert_eq!(capabilities.generation, 2);
     assert!(capabilities.supports_xdg_popup_reposition());
     assert!(capabilities.supports_xdg_popup_reactive_positioner());

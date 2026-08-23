@@ -81,6 +81,10 @@ use wayland_protocols::wp::pointer_gestures::zv1::client::{
     zwp_pointer_gesture_swipe_v1, zwp_pointer_gesture_swipe_v1::ZwpPointerGestureSwipeV1,
     zwp_pointer_gestures_v1, zwp_pointer_gestures_v1::ZwpPointerGesturesV1,
 };
+use wayland_protocols::wp::text_input::zv3::client::{
+    zwp_text_input_manager_v3, zwp_text_input_manager_v3::ZwpTextInputManagerV3, zwp_text_input_v3,
+    zwp_text_input_v3::ZwpTextInputV3,
+};
 use wayland_protocols::wp::viewporter::client::{
     wp_viewport::WpViewport, wp_viewporter, wp_viewporter::WpViewporter,
 };

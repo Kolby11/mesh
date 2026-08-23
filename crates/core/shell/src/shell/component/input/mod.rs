@@ -9,6 +9,8 @@ use focus::selectable_text_target_key;
 use widgets::pointer_event_target_with_focus;
 pub(in crate::shell::component) use widgets::{LONG_PRESS_DELAY, PressedTargetSnapshot};
 
+const MAX_TEXT_INPUT_SURROUNDING_BYTES: usize = 4000;
+
 #[cfg(test)]
 pub(crate) use keyboard::KeybindResolutionSource;
 pub(in crate::shell::component) use keyboard::ResolvedSurfaceShortcut;
@@ -36,6 +38,47 @@ fn hover_path_suffixes<'a>(
 }
 
 impl FrontendSurfaceComponent {
+    pub(in crate::shell::component) fn text_input_state(
+        &self,
+    ) -> Option<mesh_core_frontend_host::TextInputState> {
+        let focused_key = self.focused_key.as_deref()?;
+        let tree = self.last_tree.as_ref()?;
+        if !is_input_key(tree, focused_key) {
+            return None;
+        }
+        let node = find_node_by_key(tree, focused_key)?;
+        let surrounding_text = self.input_values.get(&node.id).cloned().unwrap_or_default();
+        let cursor = self
+            .input_cursors
+            .get(&node.id)
+            .copied()
+            .filter(|cursor| {
+                *cursor <= surrounding_text.len() && surrounding_text.is_char_boundary(*cursor)
+            })
+            .unwrap_or(surrounding_text.len());
+        let (surrounding_text, cursor) = if surrounding_text.len()
+            > MAX_TEXT_INPUT_SURROUNDING_BYTES
+        {
+            let mut start = cursor.saturating_sub(MAX_TEXT_INPUT_SURROUNDING_BYTES / 2);
+            while start > 0 && !surrounding_text.is_char_boundary(start) {
+                start -= 1;
+            }
+            let mut end = (start + MAX_TEXT_INPUT_SURROUNDING_BYTES).min(surrounding_text.len());
+            while end > start && !surrounding_text.is_char_boundary(end) {
+                end -= 1;
+            }
+            let cursor = cursor.saturating_sub(start);
+            (surrounding_text[start..end].to_string(), cursor)
+        } else {
+            (surrounding_text, cursor)
+        };
+        Some(mesh_core_frontend_host::TextInputState {
+            surrounding_text,
+            cursor,
+            anchor: cursor,
+        })
+    }
+
     /// Insert text at the focused input's UTF-8 cursor and return its new
     /// value. Cursor positions stay byte-based because that is the unit used
     /// by text-input-v3, but every mutation is kept on scalar boundaries.
@@ -811,6 +854,52 @@ impl FrontendSurfaceComponent {
                             .unwrap_or_default();
                         let current =
                             self.delete_input_text(input_node.id, before_bytes, after_bytes);
+                        if current != previous {
+                            self.clear_selection();
+                            self.invalidate_text_state();
+                            return self.dispatch_text_input_value_handlers(
+                                tree,
+                                &focused_key,
+                                &current,
+                            );
+                        }
+                    }
+                }
+            }
+            ComponentInput::TextInputEdit {
+                preedit_present: _,
+                preedit: _,
+                preedit_cursor_begin: _,
+                preedit_cursor_end: _,
+                commit,
+                before_bytes,
+                after_bytes,
+            } => {
+                if let Some(focused_key) = self.focused_key.clone() {
+                    let input_node = find_node_by_key(tree, &focused_key);
+                    if is_input_key(tree, &focused_key)
+                        && let Some(input_node) = input_node
+                    {
+                        let previous = self
+                            .input_values
+                            .get(&input_node.id)
+                            .cloned()
+                            .unwrap_or_default();
+                        self.delete_input_text(input_node.id, before_bytes, after_bytes);
+                        if let Some(commit) = commit {
+                            let accepted: String = commit
+                                .chars()
+                                .filter(|ch| input_accepts_char(input_node, *ch))
+                                .collect();
+                            if !accepted.is_empty() {
+                                self.insert_input_text(input_node.id, &accepted);
+                            }
+                        }
+                        let current = self
+                            .input_values
+                            .get(&input_node.id)
+                            .cloned()
+                            .unwrap_or_default();
                         if current != previous {
                             self.clear_selection();
                             self.invalidate_text_state();

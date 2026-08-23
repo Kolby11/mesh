@@ -1,4 +1,5 @@
 use super::backend::WaylandRole;
+use super::state::PendingTextInput;
 use super::state::{FrameCallbackData, GestureKind};
 use super::*;
 use std::{borrow::Cow, sync::Arc};
@@ -318,7 +319,8 @@ impl SeatHandler for State {
         }
         self.input_seat_order.push(seat_id.clone());
         self.input_seats
-            .insert(seat_id, super::state::SeatInputState::new(seat));
+            .insert(seat_id, super::state::SeatInputState::new(seat.clone()));
+        self.ensure_text_input_for_seat(&seat);
     }
 
     fn new_capability(
@@ -336,6 +338,7 @@ impl SeatHandler for State {
                 super::state::SeatInputState::new(seat.clone()),
             );
         }
+        self.ensure_text_input_for_seat(&seat);
         self.activation_seat = Some(seat_id.clone());
         if capability == SeatCapability::Pointer
             && self
@@ -454,6 +457,14 @@ impl SeatHandler for State {
         let seat_id = seat.id();
         self.cancel_all_input_for_seat(&seat_id);
         self.release_focus_grab_for_seat_teardown(&seat_id);
+        let text_input = self
+            .input_seats
+            .get_mut(&seat_id)
+            .and_then(|input| input.text_input.take());
+        if let Some(text_input) = text_input {
+            self.text_input_seats.remove(&text_input.id());
+            text_input.destroy();
+        }
         if let Some(input) = self.input_seats.get_mut(&seat_id) {
             if let Some(gesture) = input.gesture_swipe.take() {
                 self.swipe_seats.remove(&gesture.id());
@@ -1079,6 +1090,103 @@ impl PopupHandler for State {
                     });
             }
         }
+    }
+}
+
+impl Dispatch<ZwpTextInputV3, (), State> for State {
+    fn event(
+        state: &mut State,
+        text_input: &ZwpTextInputV3,
+        event: zwp_text_input_v3::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        let Some(seat_id) = state.text_input_seats.get(&text_input.id()).cloned() else {
+            return;
+        };
+
+        match event {
+            zwp_text_input_v3::Event::Enter { surface } => {
+                let Some(surface_id) = state.surface_id_for_wl_surface(&surface) else {
+                    tracing::warn!("layer_shell: text-input-v3 entered an unknown surface");
+                    return;
+                };
+                if let Some(input) = state.input_seats.get_mut(&seat_id) {
+                    input.text_input_surface = Some(surface_id);
+                    input.text_input_pending = PendingTextInput::default();
+                }
+                state.apply_text_input_state(&seat_id);
+            }
+            zwp_text_input_v3::Event::Leave { surface } => {
+                let Some(surface_id) = state.surface_id_for_wl_surface(&surface) else {
+                    return;
+                };
+                if let Some(input) = state.input_seats.get_mut(&seat_id)
+                    && input.text_input_surface.as_deref() == Some(surface_id.as_ref())
+                {
+                    input.text_input_surface = None;
+                    input.text_input_pending = PendingTextInput::default();
+                    input.text_input_enabled = false;
+                    input.text_input_state_applied = None;
+                }
+            }
+            zwp_text_input_v3::Event::PreeditString {
+                text,
+                cursor_begin,
+                cursor_end,
+            } => {
+                if let Some(input) = state.input_seats.get_mut(&seat_id)
+                    && input.text_input_surface.is_some()
+                {
+                    input.text_input_pending.preedit =
+                        Some(text.map(|text| Arc::from(text.as_str())));
+                    input.text_input_pending.preedit_cursor_begin = cursor_begin;
+                    input.text_input_pending.preedit_cursor_end = cursor_end;
+                }
+            }
+            zwp_text_input_v3::Event::CommitString { text } => {
+                if let Some(input) = state.input_seats.get_mut(&seat_id)
+                    && input.text_input_surface.is_some()
+                {
+                    input.text_input_pending.commit = text.map(|text| Arc::from(text.as_str()));
+                }
+            }
+            zwp_text_input_v3::Event::DeleteSurroundingText {
+                before_length,
+                after_length,
+            } => {
+                if let Some(input) = state.input_seats.get_mut(&seat_id)
+                    && input.text_input_surface.is_some()
+                {
+                    input.text_input_pending.before_bytes = before_length as usize;
+                    input.text_input_pending.after_bytes = after_length as usize;
+                }
+            }
+            zwp_text_input_v3::Event::Done { .. } => {
+                let edit = state.input_seats.get_mut(&seat_id).and_then(|input| {
+                    let surface_id = input.text_input_surface.clone()?;
+                    input.text_input_pending.take_edit(surface_id)
+                });
+                if let Some(edit) = edit {
+                    state.queue_event(&seat_id, edit);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<ZwpTextInputManagerV3, GlobalData> for State {
+    fn event(
+        _: &mut State,
+        _: &ZwpTextInputManagerV3,
+        _: zwp_text_input_manager_v3::Event,
+        _: &GlobalData,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        unreachable!("zwp_text_input_manager_v3 has no events");
     }
 }
 

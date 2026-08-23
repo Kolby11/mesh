@@ -1,6 +1,7 @@
 use super::backend::{SurfaceEntry, WaylandRole, apply_config};
 use super::*;
 use crate::NegotiatedCapabilities;
+use crate::TextInputState;
 use std::sync::Arc;
 
 const MAX_REPEAT_EVENTS_PER_POLL: usize = 64;
@@ -27,6 +28,43 @@ pub(super) type SeatId = ObjectId;
 pub(super) struct QueuedInputEvent {
     pub(super) seat_id: Option<SeatId>,
     pub(super) event: DevWindowEvent,
+}
+
+#[derive(Debug, Default)]
+pub(super) struct PendingTextInput {
+    /// `Some(None)` represents the protocol's nullable empty preedit, while
+    /// `None` means no preedit event was received in this done group.
+    pub(super) preedit: Option<Option<Arc<str>>>,
+    pub(super) preedit_cursor_begin: i32,
+    pub(super) preedit_cursor_end: i32,
+    pub(super) commit: Option<Arc<str>>,
+    pub(super) before_bytes: usize,
+    pub(super) after_bytes: usize,
+}
+
+impl PendingTextInput {
+    pub(super) fn is_empty(&self) -> bool {
+        self.preedit.is_none()
+            && self.commit.is_none()
+            && self.before_bytes == 0
+            && self.after_bytes == 0
+    }
+
+    pub(super) fn take_edit(&mut self, surface_id: Arc<str>) -> Option<DevWindowEvent> {
+        if self.is_empty() {
+            return None;
+        }
+        Some(DevWindowEvent::TextInputEdit {
+            surface_id,
+            preedit_present: self.preedit.is_some(),
+            preedit: self.preedit.take().flatten(),
+            preedit_cursor_begin: self.preedit_cursor_begin,
+            preedit_cursor_end: self.preedit_cursor_end,
+            commit: self.commit.take(),
+            before_bytes: std::mem::take(&mut self.before_bytes),
+            after_bytes: std::mem::take(&mut self.after_bytes),
+        })
+    }
 }
 
 /// User data attached to one `wl_surface.frame` request. The callback object
@@ -58,6 +96,11 @@ pub(super) struct SeatInputState {
     pub(super) keyboard_mods: Modifiers,
     pub(super) keyboard_repeat_info: RepeatInfo,
     pub(super) keyboard_repeat: Option<KeyboardRepeatState>,
+    pub(super) text_input: Option<ZwpTextInputV3>,
+    pub(super) text_input_surface: Option<Arc<str>>,
+    pub(super) text_input_enabled: bool,
+    pub(super) text_input_state_applied: Option<TextInputState>,
+    pub(super) text_input_pending: PendingTextInput,
     pub(super) focus_grab: Option<HyprlandFocusGrabV1>,
     pub(super) focus_grab_surface_id: Option<Arc<str>>,
     pub(super) focus_grab_requested_at: Option<Instant>,
@@ -81,6 +124,11 @@ impl SeatInputState {
             keyboard_mods: Modifiers::default(),
             keyboard_repeat_info: RepeatInfo::Disable,
             keyboard_repeat: None,
+            text_input: None,
+            text_input_surface: None,
+            text_input_enabled: false,
+            text_input_state_applied: None,
+            text_input_pending: PendingTextInput::default(),
             focus_grab: None,
             focus_grab_surface_id: None,
             focus_grab_requested_at: None,
@@ -139,6 +187,13 @@ pub(super) struct State {
     /// never fire, matching the graceful-degradation pattern used for the
     /// other optional globals (`blur_manager`, `focus_grab_manager`, etc).
     pub(super) pointer_gestures: Option<ZwpPointerGesturesV1>,
+    /// Optional text-input-v3 manager. One text-input object is created for
+    /// every seat so compositor focus and IME transactions remain seat-local.
+    pub(super) text_input_manager: Option<ZwpTextInputManagerV3>,
+    pub(super) text_input_seats: HashMap<ObjectId, SeatId>,
+    /// The shell's latest surrounding-text publication. It is replayed when
+    /// a compositor sends a text-input enter after the focused input changes.
+    pub(super) text_input_state: Option<(Arc<str>, TextInputState)>,
     /// All input ownership and protocol handles are partitioned by the
     /// originating `wl_seat`. The order vector makes repeat/cancellation
     /// processing deterministic while the queued event carries its owner so a
@@ -172,6 +227,62 @@ pub(super) struct State {
 }
 
 impl State {
+    pub(super) fn ensure_text_input_for_seat(&mut self, seat: &wl_seat::WlSeat) {
+        let seat_id = seat.id();
+        let Some(manager) = self.text_input_manager.as_ref() else {
+            return;
+        };
+        if self
+            .input_seats
+            .get(&seat_id)
+            .is_some_and(|input| input.text_input.is_some())
+        {
+            return;
+        }
+        let text_input = manager.get_text_input(seat, &self.qh, ());
+        self.text_input_seats
+            .insert(text_input.id(), seat_id.clone());
+        if let Some(input) = self.input_seats.get_mut(&seat_id) {
+            input.text_input = Some(text_input);
+        }
+        tracing::debug!(seat_id = ?seat_id, "layer_shell: text-input-v3 object acquired");
+    }
+
+    pub(super) fn apply_text_input_state(&mut self, seat_id: &SeatId) {
+        let desired = self.text_input_state.clone();
+        let Some(input) = self.input_seats.get_mut(seat_id) else {
+            return;
+        };
+        let Some(text_input) = input.text_input.as_ref() else {
+            return;
+        };
+
+        let active = desired.as_ref().and_then(|(surface_id, state)| {
+            (input.text_input_surface.as_deref() == Some(surface_id.as_ref())).then_some(state)
+        });
+        if let Some(state) = active {
+            if input.text_input_enabled && input.text_input_state_applied.as_ref() == Some(state) {
+                return;
+            }
+            if !input.text_input_enabled {
+                text_input.enable();
+            }
+            text_input.set_surrounding_text(
+                state.surrounding_text.clone(),
+                state.cursor as i32,
+                state.anchor as i32,
+            );
+            text_input.commit();
+            input.text_input_enabled = true;
+            input.text_input_state_applied = Some(state.clone());
+        } else if input.text_input_enabled {
+            text_input.disable();
+            text_input.commit();
+            input.text_input_enabled = false;
+            input.text_input_state_applied = None;
+        }
+    }
+
     pub(super) fn reserve_object_generation(&mut self) -> Result<u64, PresentationError> {
         let generation = self.next_object_generation;
         self.next_object_generation = generation.checked_add(1).ok_or_else(|| {
@@ -751,6 +862,7 @@ impl State {
         self.swipe_seats.clear();
         self.pinch_seats.clear();
         self.hold_seats.clear();
+        self.text_input_seats.clear();
         self.focus_grab_seats.clear();
         self.close_requests.clear();
 
@@ -759,6 +871,8 @@ impl State {
         self.surfaces.clear();
         self.surface_ids_by_wl_id.clear();
         self.pool.take();
+        self.text_input_manager = None;
+        self.text_input_state = None;
         for surface_id in surface_ids {
             self.lifecycle_events.push(SurfaceLifecycleEvent::Lost {
                 surface_id,
@@ -1935,6 +2049,67 @@ mod input_capability_tests {
             })
             .collect();
         assert_eq!(cancelled_surfaces, ["other", "panel"]);
+    }
+}
+
+#[cfg(test)]
+mod text_input_tests {
+    use super::*;
+
+    #[test]
+    fn pending_text_input_events_commit_as_one_atomic_edit() {
+        let mut pending = PendingTextInput {
+            preedit: Some(Some(Arc::from("候"))),
+            preedit_cursor_begin: 0,
+            preedit_cursor_end: 3,
+            commit: Some(Arc::from("候")),
+            before_bytes: 4,
+            after_bytes: 1,
+        };
+
+        let event = pending
+            .take_edit(Arc::from("launcher"))
+            .expect("pending edit");
+        assert!(matches!(
+            event,
+            DevWindowEvent::TextInputEdit {
+                surface_id,
+                preedit_present: true,
+                preedit: Some(preedit),
+                preedit_cursor_begin: 0,
+                preedit_cursor_end: 3,
+                commit: Some(commit),
+                before_bytes: 4,
+                after_bytes: 1,
+            } if surface_id.as_ref() == "launcher"
+                && preedit.as_ref() == "候"
+                && commit.as_ref() == "候"
+        ));
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn nullable_empty_preedit_is_preserved_as_an_update() {
+        let mut pending = PendingTextInput {
+            preedit: Some(None),
+            ..PendingTextInput::default()
+        };
+
+        let event = pending
+            .take_edit(Arc::from("launcher"))
+            .expect("preedit clear edit");
+        assert!(matches!(
+            event,
+            DevWindowEvent::TextInputEdit {
+                preedit_present: true,
+                preedit: None,
+                commit: None,
+                before_bytes: 0,
+                after_bytes: 0,
+                ..
+            }
+        ));
+        assert!(pending.is_empty());
     }
 }
 

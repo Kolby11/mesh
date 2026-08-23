@@ -1,5 +1,7 @@
 use super::*;
 use crate::NegotiatedCapabilities;
+use crate::TextInputState;
+use std::sync::Arc;
 
 impl WaylandSurfaceBackend {
     pub fn new() -> Result<Self, PresentationError> {
@@ -40,6 +42,8 @@ impl WaylandSurfaceBackend {
         // Optional: compositors without it just never emit gesture events.
         let pointer_gestures: Option<ZwpPointerGesturesV1> =
             globals.bind(&qh, 1..=3, GlobalData).ok();
+        let text_input_manager: Option<ZwpTextInputManagerV3> =
+            globals.bind(&qh, 1..=1, GlobalData).ok();
         let seat_state = SeatState::new(&globals, &qh);
 
         let pool = SlotPool::new(256 * 256 * 4, &shm).ok();
@@ -57,6 +61,9 @@ impl WaylandSurfaceBackend {
             fractional_scale_manager,
             blur_manager,
             pointer_gestures,
+            text_input_manager,
+            text_input_seats: HashMap::new(),
+            text_input_state: None,
             seat_state,
             activation_seat: None,
             qh,
@@ -105,6 +112,51 @@ impl WaylandSurfaceBackend {
                 tracing::debug!("layer_shell: failed to update cursor icon: {error}");
             }
         }
+    }
+
+    /// Publish the shell's current editable-text state to every seat's
+    /// text-input-v3 object. The object only accepts requests after its enter
+    /// event, so the state is retained and replayed by that event handler.
+    pub fn set_text_input_state(
+        &mut self,
+        surface_id: Option<&str>,
+        state: Option<TextInputState>,
+    ) -> Result<(), PresentationError> {
+        if let Some(snapshot) = state.as_ref() {
+            let text_len = snapshot.surrounding_text.len();
+            if text_len > 4000 {
+                return Err(PresentationError::TextInputInvalid(
+                    "surrounding text exceeds the 4000-byte Wayland message limit".into(),
+                ));
+            }
+            for (name, offset) in [("cursor", snapshot.cursor), ("anchor", snapshot.anchor)] {
+                if offset > text_len || !snapshot.surrounding_text.is_char_boundary(offset) {
+                    return Err(PresentationError::TextInputInvalid(format!(
+                        "text-input {name} offset {offset} is not a UTF-8 boundary in {text_len} bytes"
+                    )));
+                }
+            }
+        }
+
+        self.state.text_input_state = match (surface_id.filter(|id| !id.is_empty()), state) {
+            (Some(surface_id), Some(state)) => Some((Arc::from(surface_id), state)),
+            (None, None) => None,
+            (Some(_), None) => {
+                return Err(PresentationError::TextInputInvalid(
+                    "a focused surface requires a text-input state".into(),
+                ));
+            }
+            (None, Some(_)) => {
+                return Err(PresentationError::TextInputInvalid(
+                    "text-input state requires a focused surface".into(),
+                ));
+            }
+        };
+        let seat_ids = self.state.input_seat_order.clone();
+        for seat_id in seat_ids {
+            self.state.apply_text_input_state(&seat_id);
+        }
+        Ok(())
     }
 
     /// Apply a surface's desired config. Creates the compositor object — a
@@ -737,5 +789,6 @@ fn negotiated_capabilities(
         version("xdg_activation_v1"),
         version("hyprland_focus_grab_manager_v1"),
         version("zwp_pointer_gestures_v1"),
+        version("zwp_text_input_manager_v3"),
     )
 }

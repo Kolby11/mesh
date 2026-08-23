@@ -29,6 +29,25 @@ pub struct PointerButtonIdentity {
 /// Linux input-event code for the primary pointer button (`BTN_LEFT`).
 pub const PRIMARY_POINTER_BUTTON: u32 = 0x110;
 
+/// The surrounding text state published for the currently focused editable
+/// element. Offsets use UTF-8 bytes, matching `zwp_text_input_v3`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextInputState {
+    pub surrounding_text: String,
+    pub cursor: usize,
+    pub anchor: usize,
+}
+
+impl TextInputState {
+    pub fn new(surrounding_text: impl Into<String>, cursor: usize, anchor: usize) -> Self {
+        Self {
+            surrounding_text: surrounding_text.into(),
+            cursor,
+            anchor,
+        }
+    }
+}
+
 use dev_window::DevWindowBackend;
 use wayland_surface::WaylandSurfaceBackend;
 
@@ -131,6 +150,7 @@ pub struct NegotiatedCapabilities {
     pub activation_version: u32,
     pub focus_grab_version: u32,
     pub pointer_gestures_version: u32,
+    pub text_input_version: u32,
 }
 
 impl NegotiatedCapabilities {
@@ -147,6 +167,7 @@ impl NegotiatedCapabilities {
         activation_version: u32,
         focus_grab_version: u32,
         pointer_gestures_version: u32,
+        text_input_version: u32,
     ) -> Self {
         Self {
             generation,
@@ -158,6 +179,7 @@ impl NegotiatedCapabilities {
             activation_version: activation_version.min(1),
             focus_grab_version: focus_grab_version.min(1),
             pointer_gestures_version: pointer_gestures_version.min(3),
+            text_input_version: text_input_version.min(1),
         }
     }
 
@@ -208,6 +230,9 @@ pub enum PresentationError {
 
     #[error("buffer attach failed: {0}")]
     BufferAttach(String),
+
+    #[error("invalid text-input state: {0}")]
+    TextInputInvalid(String),
 
     #[error("Wayland connection lost: {0}")]
     ConnectionLost(String),
@@ -998,6 +1023,20 @@ impl PresentationEngine {
         }
     }
 
+    /// Publish the focused component's text-input-v3 surrounding-text
+    /// snapshot. Non-Wayland backends accept the state so shell behavior stays
+    /// backend-neutral, while only the Wayland backend sends protocol requests.
+    pub fn set_text_input_state(
+        &mut self,
+        surface_id: Option<&str>,
+        state: Option<TextInputState>,
+    ) -> Result<(), PresentationError> {
+        match &mut self.backend {
+            Backend::WaylandSurface(bridge) => bridge.set_text_input_state(surface_id, state),
+            Backend::DevWindow(_) | Backend::Testing(_) => Ok(()),
+        }
+    }
+
     /// Returns true when the backend supports fd-based blocking dispatch (WaylandSurface).
     /// Returns false for DevWindow, which uses internal polling.
     pub fn supports_blocking_dispatch(&self) -> bool {
@@ -1345,6 +1384,7 @@ pub fn event_surface_id(event: &WindowEvent) -> &str {
         | WindowEvent::Char { surface_id, .. }
         | WindowEvent::TextInput { surface_id, .. }
         | WindowEvent::TextDelete { surface_id, .. }
+        | WindowEvent::TextInputEdit { surface_id, .. }
         | WindowEvent::GestureSwipeBegin { surface_id, .. }
         | WindowEvent::GestureSwipeUpdate { surface_id, .. }
         | WindowEvent::GestureSwipeEnd { surface_id, .. }

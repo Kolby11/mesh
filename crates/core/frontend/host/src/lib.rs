@@ -24,6 +24,16 @@ pub struct ServiceObservationSummary {
     pub interface_events: Vec<ServiceInterfaceEventSubscription>,
 }
 
+/// UTF-8 byte-indexed text state projected by a focused component to the
+/// presentation backend. The host keeps this protocol-neutral so components
+/// do not depend on a particular compositor protocol.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextInputState {
+    pub surrounding_text: String,
+    pub cursor: usize,
+    pub anchor: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ServiceInterfaceEventSubscription {
     pub service: String,
@@ -245,6 +255,17 @@ pub enum ComponentInput {
     /// runtime clamps them to Unicode scalar boundaries before mutating the
     /// value, so malformed or stale protocol payloads cannot split UTF-8.
     TextDelete {
+        before_bytes: usize,
+        after_bytes: usize,
+    },
+    /// One atomic text-input-v3 transaction. Preedit is optional because a
+    /// compositor may send only a commit or deletion in a done group.
+    TextInputEdit {
+        preedit_present: bool,
+        preedit: Option<String>,
+        preedit_cursor_begin: i32,
+        preedit_cursor_end: i32,
+        commit: Option<String>,
         before_bytes: usize,
         after_bytes: usize,
     },
@@ -623,6 +644,11 @@ pub trait ShellComponent: Send {
         input: ComponentInput,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         self.handle_input(theme, width, height, input)
+    }
+    /// Return the focused editable field's UTF-8 byte-indexed surrounding
+    /// text, or `None` when this component has no focused input.
+    fn text_input_state(&self) -> Option<TextInputState> {
+        None
     }
     /// Whether the current pointer hover target should use an interactive cursor.
     fn hovered_target_is_interactive(&self) -> bool {

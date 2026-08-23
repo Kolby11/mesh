@@ -33,6 +33,7 @@ impl Shell {
         }
         self.drain_surface_lifecycle_events()?;
         self.drain_window_close_requests()?;
+        self.sync_text_input_state()?;
 
         let font_revision = self.font_registry.revision();
         if self.font_renderer_revision != font_revision {

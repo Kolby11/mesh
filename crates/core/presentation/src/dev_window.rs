@@ -71,6 +71,19 @@ pub enum DevWindowEvent {
         before_bytes: usize,
         after_bytes: usize,
     },
+    /// One atomic `zwp_text_input_v3.done` transaction. The compositor can
+    /// send preedit, deletion, and commit records in any combination before
+    /// the done boundary; presentation preserves that boundary for the shell.
+    TextInputEdit {
+        surface_id: Arc<str>,
+        preedit_present: bool,
+        preedit: Option<Arc<str>>,
+        preedit_cursor_begin: i32,
+        preedit_cursor_end: i32,
+        commit: Option<Arc<str>>,
+        before_bytes: usize,
+        after_bytes: usize,
+    },
     /// `zwp_pointer_gesture_swipe_v1` begin — a 3+ finger trackpad swipe started.
     GestureSwipeBegin {
         surface_id: Arc<str>,

@@ -1375,6 +1375,10 @@ impl ShellComponent for FrontendSurfaceComponent {
             .is_some()
     }
 
+    fn text_input_state(&self) -> Option<mesh_core_frontend_host::TextInputState> {
+        FrontendSurfaceComponent::text_input_state(self)
+    }
+
     fn last_widget_tree(&self) -> Option<&WidgetNode> {
         self.last_tree.as_ref()
     }

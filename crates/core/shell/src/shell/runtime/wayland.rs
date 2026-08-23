@@ -3,6 +3,41 @@ use super::super::*;
 const MAX_WAYLAND_EVENTS_PER_FRAME: usize = 32;
 
 impl Shell {
+    pub(in crate::shell) fn sync_text_input_state(&mut self) -> Result<(), ShellRunError> {
+        let Some(surface_id) = self.keyboard_focus_surface.clone() else {
+            self.presentation_engine
+                .set_text_input_state(None, None)
+                .map_err(ShellRunError::Presentation)?;
+            return Ok(());
+        };
+        let Some(index) = self.component_index_for_surface(&surface_id) else {
+            self.presentation_engine
+                .set_text_input_state(None, None)
+                .map_err(ShellRunError::Presentation)?;
+            return Ok(());
+        };
+        let state = self.components[index]
+            .component
+            .text_input_state()
+            .map(|state| {
+                mesh_core_presentation::TextInputState::new(
+                    state.surrounding_text,
+                    state.cursor,
+                    state.anchor,
+                )
+            });
+        match state {
+            Some(state) => self
+                .presentation_engine
+                .set_text_input_state(Some(&surface_id), Some(state))
+                .map_err(ShellRunError::Presentation),
+            None => self
+                .presentation_engine
+                .set_text_input_state(None, None)
+                .map_err(ShellRunError::Presentation),
+        }
+    }
+
     fn begin_wayland_input_generation(&mut self) {
         self.popup_grab_generation = self.popup_grab_generation.wrapping_add(1);
         self.pending_popup_grabs.clear();
@@ -401,6 +436,23 @@ impl Shell {
                     before_bytes,
                     after_bytes,
                 },
+                RoutedWindowEvent::TextInputEdit {
+                    preedit_present,
+                    preedit,
+                    preedit_cursor_begin,
+                    preedit_cursor_end,
+                    commit,
+                    before_bytes,
+                    after_bytes,
+                } => ComponentInput::TextInputEdit {
+                    preedit_present,
+                    preedit,
+                    preedit_cursor_begin,
+                    preedit_cursor_end,
+                    commit,
+                    before_bytes,
+                    after_bytes,
+                },
             };
             tracing::trace!(
                 "[hover] dispatch_wayland: routing event to surface_id={}",
@@ -446,6 +498,8 @@ impl Shell {
                 Ok(emitted)
             }
             .map_err(ShellRunError::Component)?;
+
+            self.sync_text_input_state()?;
 
             if let Some(started) = input_started {
                 let component_id = self.components[index].component.id().to_string();
@@ -685,6 +739,15 @@ enum RoutedWindowEvent {
         before_bytes: usize,
         after_bytes: usize,
     },
+    TextInputEdit {
+        preedit_present: bool,
+        preedit: Option<String>,
+        preedit_cursor_begin: i32,
+        preedit_cursor_end: i32,
+        commit: Option<String>,
+        before_bytes: usize,
+        after_bytes: usize,
+    },
 }
 
 impl RoutedWindowEvent {
@@ -696,6 +759,7 @@ impl RoutedWindowEvent {
                 | Self::Char { .. }
                 | Self::TextInput { .. }
                 | Self::TextDelete { .. }
+                | Self::TextInputEdit { .. }
         )
     }
 }
@@ -779,6 +843,27 @@ fn split_window_event(event: WindowEvent) -> (std::sync::Arc<str>, RoutedWindowE
                 after_bytes,
             },
         ),
+        WindowEvent::TextInputEdit {
+            surface_id,
+            preedit_present,
+            preedit,
+            preedit_cursor_begin,
+            preedit_cursor_end,
+            commit,
+            before_bytes,
+            after_bytes,
+        } => (
+            surface_id,
+            RoutedWindowEvent::TextInputEdit {
+                preedit_present,
+                preedit: preedit.map(|text| text.to_string()),
+                preedit_cursor_begin,
+                preedit_cursor_end,
+                commit: commit.map(|text| text.to_string()),
+                before_bytes,
+                after_bytes,
+            },
+        ),
         WindowEvent::GestureSwipeBegin {
             surface_id,
             fingers,
@@ -850,6 +935,7 @@ fn profiling_trigger_for_event(event: &WindowEvent) -> &'static str {
         WindowEvent::Char { .. } => "char",
         WindowEvent::TextInput { .. } => "text_input",
         WindowEvent::TextDelete { .. } => "text_delete",
+        WindowEvent::TextInputEdit { .. } => "text_input_edit",
         WindowEvent::GestureSwipeBegin { .. } => "gesture_swipe_begin",
         WindowEvent::GestureSwipeUpdate { .. } => "gesture_swipe_update",
         WindowEvent::GestureSwipeEnd { .. } => "gesture_swipe_end",
@@ -989,6 +1075,31 @@ mod tests {
                 before_bytes: 5,
                 after_bytes: 4,
             }
+        ));
+
+        let (surface_id, event) = split_window_event(WindowEvent::TextInputEdit {
+            surface_id: "launcher".into(),
+            preedit_present: true,
+            preedit: Some("候".into()),
+            preedit_cursor_begin: 0,
+            preedit_cursor_end: 3,
+            commit: Some("候".into()),
+            before_bytes: 4,
+            after_bytes: 1,
+        });
+        assert_eq!(surface_id.as_ref(), "launcher");
+        assert!(event.is_keyboard());
+        assert!(matches!(
+            event,
+            RoutedWindowEvent::TextInputEdit {
+                preedit_present: true,
+                ref preedit,
+                preedit_cursor_begin: 0,
+                preedit_cursor_end: 3,
+                ref commit,
+                before_bytes: 4,
+                after_bytes: 1,
+            } if preedit.as_deref() == Some("候") && commit.as_deref() == Some("候")
         ));
     }
 

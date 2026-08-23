@@ -756,6 +756,94 @@ end
 }
 
 #[test]
+fn text_input_v3_transaction_applies_delete_and_commit_once() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+text_seen = ""
+change_count = 0
+function onTextChange(value)
+    text_seen = value
+    change_count = change_count + 1
+end
+</script>
+"#,
+    );
+    component.last_tree = Some(root_with(vec![event_node(
+        "input",
+        "root/0",
+        0.0,
+        0.0,
+        100.0,
+        24.0,
+        &[("change", "onTextChange")],
+    )]));
+    component.focused_key = Some("root/0".into());
+    let input_id = find_node_by_key(component.last_tree.as_ref().unwrap(), "root/0")
+        .unwrap()
+        .id;
+    component.input_values.insert(input_id, "A🙂B".into());
+    component.input_cursors.insert(input_id, "A🙂".len());
+
+    component
+        .handle_input(
+            &default_theme(),
+            240,
+            160,
+            ComponentInput::TextInputEdit {
+                preedit_present: true,
+                preedit: Some("候".into()),
+                preedit_cursor_begin: 0,
+                preedit_cursor_end: "候".len() as i32,
+                commit: Some("é🙂".into()),
+                before_bytes: "🙂".len(),
+                after_bytes: "B".len(),
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        component.input_values.get(&input_id).map(String::as_str),
+        Some("Aé🙂")
+    );
+    assert_eq!(component.input_cursors.get(&input_id), Some(&"Aé🙂".len()));
+    assert_eq!(
+        runtime_value(&component, "text_seen"),
+        Some(serde_json::json!("Aé🙂"))
+    );
+    assert_eq!(
+        runtime_value(&component, "change_count"),
+        Some(serde_json::json!(1))
+    );
+}
+
+#[test]
+fn text_input_state_uses_utf8_byte_cursor() {
+    let mut component = test_frontend_component(r#"<template><box /></template>"#);
+    component.last_tree = Some(root_with(vec![event_node(
+        "input",
+        "root/0",
+        0.0,
+        0.0,
+        100.0,
+        24.0,
+        &[],
+    )]));
+    component.focused_key = Some("root/0".into());
+    let input_id = find_node_by_key(component.last_tree.as_ref().unwrap(), "root/0")
+        .unwrap()
+        .id;
+    component.input_values.insert(input_id, "A🙂B".into());
+    component.input_cursors.insert(input_id, "A🙂".len());
+
+    let state = component.text_input_state().expect("focused input state");
+    assert_eq!(state.surrounding_text, "A🙂B");
+    assert_eq!(state.cursor, "A🙂".len());
+    assert_eq!(state.anchor, "A🙂".len());
+}
+
+#[test]
 fn switch_change_handler_receives_boolean_on_click() {
     let mut component = test_frontend_component(
         r#"

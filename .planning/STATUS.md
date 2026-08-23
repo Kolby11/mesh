@@ -86,6 +86,15 @@ click-grab authorization remain explicit; secondary and other buttons cannot
 silently activate MESH controls, and generated click events expose the button
 code.
 
+Wayland presentation now binds one `zwp_text_input_v3` object per seat when the
+compositor advertises the protocol. Enter/leave lifecycle is tracked per
+surface, preedit/commit/deletion events are buffered through each compositor
+`done` boundary, and the shell publishes a validated, UTF-8 byte-indexed
+surrounding-text snapshot for the focused input. The resulting transaction
+reaches the component boundary atomically, preserving one commit/delete change
+boundary; preedit is carried in the typed transaction but is not yet rendered
+as an input composition decoration.
+
 Popup targets now invalidate their cached creation size when presentation
 reports `SurfaceMissing`, including state-only commits, and force a full retry
 when the missing result came from surface-state submission. Child popup
@@ -108,15 +117,13 @@ broker, with revision-aware cache handoff and linked-file invalidation. Typed
 icon/glyph caches and shell polling remain separate at the handoff boundary.
 Text shaping remains synchronous and outside that broker.
 
-Focused presentation, Wayland routing, and child-surface tests plus
-`cargo check --workspace` pass. The focused popover group still has one
-pre-existing legacy dismissed-popover visibility failure. Existing shell
-dead-code/private-interface warnings remain. The focused real-surface
-navigation raster fixture still has the known 1280px layout overflow. The
-broad workspace lib test run remains blocked by the pre-existing
-repository-settings fixture, which rejects its `revision` key as unknown.
-The complete elements library suite also retains eight existing theme/style
-expectation failures unrelated to pointer input.
+Focused presentation, Wayland routing, and shell text-transaction tests plus
+`cargo check --workspace`, formatting, and `git diff --check` pass. The full
+presentation library passes (90 active, 11 ignored). The broad shell library
+run compiles and reaches 665 passed tests, but retains 48 existing fixture and
+runtime failures and 130 ignored tests; none are text-input failures. Existing
+shell dead-code/private-interface warnings remain. Connection recreation, a
+live compositor matrix, and preedit rendering remain separate follow-up work.
 
 ## Next
 
