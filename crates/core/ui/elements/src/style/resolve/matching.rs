@@ -35,7 +35,7 @@ pub(super) fn classify_theme_style_value(value: &str) -> StyleValue {
     }
 }
 
-pub(super) fn selector_matches_attrs(selector: &Selector, attrs: &StyleNodeAttrs) -> bool {
+pub fn selector_matches_attrs(selector: &Selector, attrs: &StyleNodeAttrs) -> bool {
     match selector {
         Selector::Universal => true,
         Selector::Tag(t) => t == attrs.tag,

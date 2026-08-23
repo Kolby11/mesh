@@ -410,6 +410,48 @@ fn dynamic_class_participates_in_initial_style_resolution() {
 }
 
 #[test]
+fn inherited_style_matching_uses_the_node_pseudo_state() {
+    let component = mesh_core_component::parse_component(
+        r#"
+<template>
+  <box>
+    <button />
+    <button disabled="true" />
+  </box>
+</template>
+<style>
+box { color: #123456; }
+button:hover { color: #abcdef; }
+button:disabled { color: #fedcba; }
+</style>
+"#,
+    )
+    .unwrap();
+    let tree = build_widget_tree_from_component(
+        &component,
+        &test_manifest(),
+        &mesh_core_theme::default_theme(),
+        200.0,
+        80.0,
+        None,
+        "root",
+        None,
+        &[],
+    );
+
+    let authored_box = tree.children.first().expect("template box");
+    assert_eq!(authored_box.children.len(), 2);
+    assert_eq!(
+        authored_box.children[0].computed_style.color,
+        mesh_core_elements::Color::from_hex("#123456").unwrap()
+    );
+    assert_eq!(
+        authored_box.children[1].computed_style.color,
+        mesh_core_elements::Color::from_hex("#fedcba").unwrap()
+    );
+}
+
+#[test]
 fn dynamic_inline_style_overrides_stylesheet_layout() {
     let component = mesh_core_component::parse_component(
         r#"

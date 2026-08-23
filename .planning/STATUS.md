@@ -220,6 +220,6 @@ live compositor/lifecycle matrix remain separate follow-up work.
 
 ## Next
 
-The next open backlog item is in the UI element core audit: make compiler
-inheritance matching consume the actual element state; the remaining
-presentation/resource follow-ups stay separate.
+The next open backlog item is in the UI element core audit: make retained
+layout transactional, preserve last-known-good geometry, and retry after
+failure; the remaining presentation/resource follow-ups stay separate.

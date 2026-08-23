@@ -8,7 +8,7 @@ use crate::{FrontendCompositionResolver, LayeredStore};
 use mesh_core_component::template::{AttributeValue, ElementNode, ForNode, TemplateNode};
 use mesh_core_elements::{
     ComputedStyle, NodeId, StyleContext, StyleResolver, VariableStore, WidgetNode,
-    normalize_accessibility,
+    authored_element_state, normalize_accessibility,
 };
 use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
@@ -867,11 +867,13 @@ fn build_element_node(
     let style_id = id
         .as_deref()
         .or_else(|| attributes.get("id").map(String::as_str));
+    let element_state = authored_element_state(&attributes);
     let inherited_mask = inherited_style_mask(
         build_style.rules,
         tag,
         style_classes,
         style_id,
+        element_state,
         container_context,
     );
 
@@ -885,7 +887,7 @@ fn build_element_node(
             style_id,
             attributes.get("style").map(String::as_str),
             container_context,
-            Default::default(),
+            element_state,
             Some(&manifest.package.id),
             parent_style,
         );

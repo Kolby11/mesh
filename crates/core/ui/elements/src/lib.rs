@@ -44,8 +44,8 @@ pub use popover::{
     PopoverAnchor, PopoverConstraintAdjustment, PopoverGrab, PopoverGravity, PopoverPlacement,
 };
 pub use pseudo_state::{
-    PSEUDO_STATE_TABLE, PseudoState, PseudoStateKind, PseudoStateSpec, pseudo_state_mask,
-    pseudo_state_specs,
+    PSEUDO_STATE_TABLE, PseudoState, PseudoStateKind, PseudoStateSpec, authored_element_state,
+    pseudo_state_mask, pseudo_state_specs,
 };
 pub use style::{
     AlignContent, AlignItems, AlignSelf, BlendMode, BoxShadow, Color, ComputedStyle, Corners,

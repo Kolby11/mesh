@@ -1,10 +1,10 @@
 use mesh_core_component::style::{Selector, StyleRule};
-use mesh_core_elements::style::FlexDirection;
-use mesh_core_elements::{ComputedStyle, Dimension, StyleContext};
+use mesh_core_elements::style::{FlexDirection, StyleNodeAttrs, selector_matches_attrs};
+use mesh_core_elements::{ComputedStyle, Dimension, ElementState, StyleContext};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct InheritedStyleMask {
     color: bool,
     font_family: bool,
@@ -196,6 +196,7 @@ pub(crate) fn inherited_style_mask(
     tag: &str,
     classes: &[String],
     id: Option<&str>,
+    state: ElementState,
     context: StyleContext,
 ) -> InheritedStyleMask {
     INHERITED_STYLE_RULE_INDEX.with(|cache| {
@@ -204,6 +205,7 @@ pub(crate) fn inherited_style_mask(
             cache.rebuild(rules);
         }
 
+        let attrs = StyleNodeAttrs::new(tag, classes, id, state);
         let mut mask = InheritedStyleMask::default();
         cache
             .non_container
@@ -213,7 +215,7 @@ pub(crate) fn inherited_style_mask(
                         continue;
                     }
                     let rule = &rules[candidate.index];
-                    if selector_matches(&rule.selector, tag, classes, id) {
+                    if selector_matches_attrs(&rule.selector, &attrs) {
                         mask |= candidate.mask;
                     }
                 }
@@ -227,7 +229,7 @@ pub(crate) fn inherited_style_mask(
                             continue;
                         }
                         let rule = &rules[candidate.index];
-                        if selector_matches(&rule.selector, tag, classes, id)
+                        if selector_matches_attrs(&rule.selector, &attrs)
                             && rule.container_query.is_none_or(|query| {
                                 query.matches(context.container_width, context.container_height)
                             })
@@ -265,6 +267,7 @@ pub(crate) fn inherited_style_mask_scan(
     tag: &str,
     classes: &[String],
     id: Option<&str>,
+    state: ElementState,
     context: StyleContext,
 ) -> InheritedStyleMask {
     FLAT_INHERITED_STYLE_RULE_INDEX.with(|cache| {
@@ -288,16 +291,17 @@ pub(crate) fn inherited_style_mask_scan(
             }
         }
 
+        let attrs = StyleNodeAttrs::new(tag, classes, id, state);
         let mut mask = InheritedStyleMask::default();
         for candidate in &cache.non_container {
             let rule = &rules[candidate.index];
-            if selector_matches(&rule.selector, tag, classes, id) {
+            if selector_matches_attrs(&rule.selector, &attrs) {
                 mask |= candidate.mask;
             }
         }
         for candidate in &cache.container {
             let rule = &rules[candidate.index];
-            if selector_matches(&rule.selector, tag, classes, id)
+            if selector_matches_attrs(&rule.selector, &attrs)
                 && rule.container_query.is_none_or(|query| {
                     query.matches(context.container_width, context.container_height)
                 })
@@ -322,19 +326,6 @@ fn inherited_declaration_mask(rule: &StyleRule) -> InheritedStyleMask {
         }
     }
     mask
-}
-
-fn selector_matches(selector: &Selector, tag: &str, classes: &[String], id: Option<&str>) -> bool {
-    match selector {
-        Selector::Universal => true,
-        Selector::Tag(tag_name) => tag_name == tag,
-        Selector::Class(class_name) => classes.iter().any(|class| class == class_name),
-        Selector::Id(id_name) => id == Some(id_name.as_str()),
-        Selector::State(tag_name, _state) => tag_name == "*" || tag_name == tag,
-        Selector::Compound(parts) => parts
-            .iter()
-            .all(|part| selector_matches(part, tag, classes, id)),
-    }
 }
 
 impl std::ops::BitOrAssign for InheritedStyleMask {
@@ -521,6 +512,7 @@ mod inherited_mask_tests {
     #[test]
     fn bucketed_inherited_mask_matches_full_scan() {
         let rules = representative_rules();
+        let state = ElementState::default();
         for context in [
             StyleContext {
                 container_width: 320.0,
@@ -532,9 +524,10 @@ mod inherited_mask_tests {
             },
         ] {
             for (tag, classes, id) in cases() {
-                let bucketed = inherited_style_mask(&rules, tag, &classes, id.as_deref(), context);
+                let bucketed =
+                    inherited_style_mask(&rules, tag, &classes, id.as_deref(), state, context);
                 let scanned =
-                    inherited_style_mask_scan(&rules, tag, &classes, id.as_deref(), context);
+                    inherited_style_mask_scan(&rules, tag, &classes, id.as_deref(), state, context);
                 assert!(
                     bucketed == scanned,
                     "mask mismatch for <{tag}> classes={classes:?} id={id:?}"
@@ -548,10 +541,45 @@ mod inherited_mask_tests {
         let first = vec![rule(Selector::Tag("row".to_string()), "color")];
         let second = vec![rule(Selector::Tag("row".to_string()), "font-size")];
         let context = StyleContext::default();
-        let first_mask = inherited_style_mask(&first, "row", &[], None, context);
+        let state = ElementState::default();
+        let first_mask = inherited_style_mask(&first, "row", &[], None, state, context);
         assert!(first_mask.color && !first_mask.font_size);
-        let second_mask = inherited_style_mask(&second, "row", &[], None, context);
+        let second_mask = inherited_style_mask(&second, "row", &[], None, state, context);
         assert!(second_mask.font_size && !second_mask.color);
+    }
+
+    #[test]
+    fn inherited_mask_requires_the_actual_pseudo_state() {
+        let rules = vec![
+            rule(
+                Selector::State("button".to_string(), "hover".to_string()),
+                "color",
+            ),
+            rule(
+                Selector::Compound(vec![
+                    Selector::Tag("button".to_string()),
+                    Selector::State("button".to_string(), "disabled".to_string()),
+                ]),
+                "font-size",
+            ),
+        ];
+        let context = StyleContext::default();
+        let inactive = ElementState::default();
+        let active = ElementState {
+            hovered: true,
+            disabled: true,
+            ..ElementState::default()
+        };
+
+        let inactive_mask = inherited_style_mask(&rules, "button", &[], None, inactive, context);
+        assert!(!inactive_mask.color && !inactive_mask.font_size);
+
+        let active_mask = inherited_style_mask(&rules, "button", &[], None, active, context);
+        assert!(active_mask.color && active_mask.font_size);
+        assert_eq!(
+            active_mask,
+            inherited_style_mask_scan(&rules, "button", &[], None, active, context)
+        );
     }
 
     // cargo test -p mesh-core-frontend --release -- inherited_mask_buckets_beat_full_candidate_scan --ignored --nocapture
@@ -567,10 +595,11 @@ mod inherited_mask_tests {
         };
         let nodes = cases();
         let passes = 200_000usize;
+        let state = ElementState::default();
 
         // Warm both thread-local indexes so neither pays its build cost.
-        let _ = inherited_style_mask_scan(&rules, "row", &[], None, context);
-        let _ = inherited_style_mask(&rules, "row", &[], None, context);
+        let _ = inherited_style_mask_scan(&rules, "row", &[], None, state, context);
+        let _ = inherited_style_mask(&rules, "row", &[], None, state, context);
 
         let scan_started = Instant::now();
         let mut scan_checksum = 0usize;
@@ -581,6 +610,7 @@ mod inherited_mask_tests {
                     tag,
                     classes,
                     id.as_deref(),
+                    state,
                     context,
                 );
                 scan_checksum += mask.color as usize + mask.font_size as usize;
@@ -597,6 +627,7 @@ mod inherited_mask_tests {
                     tag,
                     classes,
                     id.as_deref(),
+                    state,
                     context,
                 );
                 bucket_checksum += mask.color as usize + mask.font_size as usize;

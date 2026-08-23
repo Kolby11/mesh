@@ -247,9 +247,7 @@ pub(super) fn annotate_runtime_tree_inner(
     node.set_mesh_key(key.clone());
 
     let authored = node.authored_payload();
-    let authored_attributes = authored.attributes.clone();
-    let authored_checked =
-        mesh_core_elements::PseudoState::Checked.authored_value(&authored.attributes);
+    let authored_state = mesh_core_elements::authored_element_state(&authored.attributes);
     let is_input = authored.tag == "input";
     let is_slider = authored.tag == "slider";
     let is_switch_or_checkbox = matches!(authored.tag.as_str(), "switch" | "checkbox");
@@ -270,7 +268,9 @@ pub(super) fn annotate_runtime_tree_inner(
         .checked_values
         .get(&node_id)
         .copied()
-        .or(authored_checked)
+        .or(Some(
+            mesh_core_elements::PseudoState::Checked.value(authored_state),
+        ))
         .unwrap_or(false);
 
     node.state = ElementState {
@@ -282,13 +282,8 @@ pub(super) fn annotate_runtime_tree_inner(
         hovered: context.hovered_ids.contains(&node_id),
         active: context.active_id == Some(node_id),
         window: context.window,
-        ..ElementState::default()
+        ..authored_state
     };
-    for spec in mesh_core_elements::pseudo_state_specs() {
-        if let Some(value) = spec.state.authored_value(&authored_attributes) {
-            spec.state.set_value(&mut node.state, value);
-        }
-    }
     // Runtime widget state is authoritative over the authored fallback.
     mesh_core_elements::PseudoState::Checked.set_value(&mut node.state, checked);
     if node.state.hovered {

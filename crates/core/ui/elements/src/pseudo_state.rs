@@ -272,6 +272,18 @@ impl PseudoState {
     }
 }
 
+/// Resolve the state that markup attributes author before live interaction
+/// state is applied by the shell.
+pub fn authored_element_state(attributes: &AttributeMap) -> ElementState {
+    let mut state = ElementState::default();
+    for spec in PSEUDO_STATE_TABLE {
+        if let Some(value) = spec.state.authored_value(attributes) {
+            spec.state.set_value(&mut state, value);
+        }
+    }
+    state
+}
+
 pub fn pseudo_state_specs() -> &'static [PseudoStateSpec] {
     PSEUDO_STATE_TABLE
 }
