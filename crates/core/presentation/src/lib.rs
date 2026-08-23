@@ -1062,6 +1062,44 @@ impl PresentationEngine {
                 if let Some(message) = backend.popup_configure_error.take() {
                     return Err(PresentationError::SurfaceCreate(message));
                 }
+                let existing_popup_parent = backend
+                    .popup_configs
+                    .get(surface_id)
+                    .map(|existing| existing.parent_surface_id.clone());
+                if backend.surface_configs.contains_key(surface_id) {
+                    return Err(PresentationError::SurfaceCreate(format!(
+                        "surface '{surface_id}' is already a non-popup surface"
+                    )));
+                }
+                if let Some(existing_parent) = existing_popup_parent.as_deref() {
+                    if existing_parent != config.parent_surface_id {
+                        return Err(PresentationError::SurfaceCreate(format!(
+                            "popup '{surface_id}' cannot be reparented from '{existing_parent}' to '{}'",
+                            config.parent_surface_id
+                        )));
+                    }
+                } else if !backend.popup_supported {
+                    return Err(PresentationError::ProtocolUnsupported(
+                        "xdg_wm_base unavailable; cannot promote popover".into(),
+                    ));
+                }
+                if backend
+                    .popup_configs
+                    .contains_key(&config.parent_surface_id)
+                {
+                    return Err(PresentationError::SurfaceCreate(
+                        "popup parent cannot itself be a popup".into(),
+                    ));
+                }
+                if !backend
+                    .surface_configs
+                    .contains_key(&config.parent_surface_id)
+                {
+                    return Err(PresentationError::SurfaceCreate(format!(
+                        "popup parent surface '{}' not found",
+                        config.parent_surface_id
+                    )));
+                }
                 if backend.missing_surfaces.remove(surface_id) {
                     clear_testing_surface_runtime_state(backend, surface_id);
                 }
@@ -1998,6 +2036,89 @@ mod tests {
                 if message.contains("cursor") && message.contains("UTF-8 boundary")
         ));
         assert!(engine.testing_text_input_state().is_none());
+    }
+
+    #[test]
+    fn testing_popup_validation_matches_live_identity_contract() {
+        let mut unsupported = PresentationEngine::testing_with_popup_support(false);
+        unsupported
+            .configure("panel", SurfaceConfig::default())
+            .expect("parent surface should be accepted");
+        let error = unsupported
+            .configure_popup(
+                "popup",
+                PopupConfig {
+                    parent_surface_id: "panel".to_string(),
+                    placement: PopupPlacement::default(),
+                    padding: SurfacePadding::default(),
+                    grab: false,
+                    grab_identity: None,
+                },
+            )
+            .expect_err("unsupported popup promotion should be rejected");
+        assert!(matches!(
+            error,
+            PresentationError::ProtocolUnsupported(message)
+                if message.contains("xdg_wm_base")
+        ));
+        assert!(unsupported.testing_popup_config("popup").is_none());
+
+        let mut engine = PresentationEngine::testing_with_popup_support(true);
+        engine
+            .configure("panel", SurfaceConfig::default())
+            .expect("parent surface should be accepted");
+        let popup_config = |parent_surface_id: &str| PopupConfig {
+            parent_surface_id: parent_surface_id.to_string(),
+            placement: PopupPlacement::default(),
+            padding: SurfacePadding::default(),
+            grab: false,
+            grab_identity: None,
+        };
+
+        let error = engine
+            .configure_popup("panel", popup_config("panel"))
+            .expect_err("popup id must not replace a regular surface");
+        assert!(matches!(
+            error,
+            PresentationError::SurfaceCreate(message)
+                if message.contains("already a non-popup surface")
+        ));
+
+        let error = engine
+            .configure_popup("missing-popup", popup_config("missing"))
+            .expect_err("popup parent identity must be validated");
+        assert!(matches!(
+            error,
+            PresentationError::SurfaceCreate(message) if message.contains("not found")
+        ));
+
+        engine
+            .configure_popup("popup", popup_config("panel"))
+            .expect("valid popup config should be accepted");
+        let original = engine
+            .testing_popup_config("popup")
+            .cloned()
+            .expect("accepted popup config should be retained");
+        let mut reparented = original.clone();
+        reparented.parent_surface_id = "other".to_string();
+        let error = engine
+            .configure_popup("popup", reparented)
+            .expect_err("an existing popup must not be reparented");
+        assert!(matches!(
+            error,
+            PresentationError::SurfaceCreate(message)
+                if message.contains("cannot be reparented")
+        ));
+        assert_eq!(engine.testing_popup_config("popup"), Some(&original));
+
+        let error = engine
+            .configure_popup("nested", popup_config("popup"))
+            .expect_err("nested popup parents are not supported");
+        assert!(matches!(
+            error,
+            PresentationError::SurfaceCreate(message)
+                if message.contains("parent cannot itself be a popup")
+        ));
     }
 
     #[test]
