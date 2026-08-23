@@ -7,6 +7,7 @@ fn padding_inline_and_block_tokens_resolve_to_computed_edges() {
     use mesh_core_component::parser::parse_component;
 
     let source = r#"
+<template><box /></template>
 <style>
 .panel {
 padding-inline: var(--spacing-lg);
@@ -41,6 +42,7 @@ fn padding_shorthand_and_overrides_resolve_correctly() {
     use mesh_core_component::parser::parse_component;
 
     let source = r#"
+<template><box /></template>
 <style>
 .card {
 padding: 16px;

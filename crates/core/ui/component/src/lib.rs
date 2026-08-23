@@ -6,7 +6,7 @@ pub mod style;
 ///
 /// ```text
 /// <template>  — XHTML-like markup
-/// <script>    — Luau logic
+/// <script lang="luau"> — Luau logic
 /// <style>     — CSS-like styling with theme token references
 /// ```
 ///
@@ -43,11 +43,57 @@ pub enum ComponentImportTarget {
 /// A parsed `.mesh` single-file component.
 #[derive(Debug, Clone)]
 pub struct ComponentFile {
+    /// The validated top-level block sequence, in source order.
+    ///
+    /// The parsed block ASTs below intentionally remain specialized, but this
+    /// metadata keeps their source ownership and ordering available to
+    /// compiler/tooling consumers without re-scanning the source text.
+    pub blocks: Vec<ComponentBlock>,
     pub imports: Vec<ComponentImport>,
     pub props: Option<PropsBlock>,
     pub template: Option<TemplateBlock>,
     pub script: Option<ScriptBlock>,
     pub style: Option<StyleBlock>,
+}
+
+/// A half-open byte range into the original `.mesh` source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceSpan {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl SourceSpan {
+    pub const fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
+
+    pub const fn len(self) -> usize {
+        self.end.saturating_sub(self.start)
+    }
+}
+
+/// A validated attribute on a top-level component block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockAttribute {
+    pub name: String,
+    pub value: String,
+    /// The range of the complete attribute, including its name and value.
+    pub span: SourceSpan,
+    /// The range of the value without its surrounding quotes.
+    pub value_span: SourceSpan,
+}
+
+/// Source metadata for one top-level `.mesh` block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentBlock {
+    pub name: String,
+    pub attributes: Vec<BlockAttribute>,
+    /// The complete block, from the opening `<` through the closing `>`.
+    pub span: SourceSpan,
+    pub open_tag: SourceSpan,
+    pub content: SourceSpan,
+    pub close_tag: SourceSpan,
 }
 
 /// A parsed `<props>` block: the component's typed, defaulted configuration.

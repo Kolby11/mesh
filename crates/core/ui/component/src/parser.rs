@@ -1,16 +1,16 @@
 /// Parser for `.mesh` single-file components.
 ///
-/// Splits the source into top-level blocks (`<template>`, `<script>`, `<style>`,
+/// Parses the source into validated top-level blocks (`<template>`, `<script>`, `<style>`,
 mod markup;
 mod props;
 mod script;
 mod styles;
 
-use crate::{ComponentFile, ComponentImportTarget};
+use crate::{BlockAttribute, ComponentBlock, ComponentFile, ComponentImportTarget, SourceSpan};
 use markup::parse_markup;
 use props::parse_props;
 use script::{extract_imports, parse_script};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use styles::parse_style;
 
 #[derive(Debug, thiserror::Error)]
@@ -20,6 +20,28 @@ pub enum ParseError {
 
     #[error("unexpected closing tag </{tag}> at line {line}")]
     UnexpectedClose { tag: String, line: usize },
+
+    #[error("missing required block <{name}>")]
+    MissingRequiredBlock { name: String },
+
+    #[error("duplicate block <{name}> at line {line}")]
+    DuplicateBlock { name: String, line: usize },
+
+    #[error("invalid attributes on <{name}> at line {line}: {message}")]
+    InvalidBlockAttributes {
+        name: String,
+        line: usize,
+        message: String,
+    },
+
+    #[error("unsupported script language `{language}` at line {line}; expected `luau`")]
+    UnsupportedScriptLanguage { language: String, line: usize },
+
+    #[error("unexpected top-level content at line {line}: {message}")]
+    UnexpectedTopLevelContent { line: usize, message: String },
+
+    #[error("malformed top-level block at line {line}: {message}")]
+    MalformedTopLevelBlock { line: usize, message: String },
 
     #[error("invalid template syntax: {message}")]
     InvalidTemplate { message: String },
@@ -41,10 +63,12 @@ pub enum ParseError {
 }
 
 pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
-    let blocks = extract_blocks(source)?;
+    let blocks = parse_top_level_blocks(source)?;
 
-    let (imports, script_source) = if let Some(s) = blocks.get("script") {
-        let (imports, stripped) = extract_imports(s)?;
+    let (imports, script_source) = if let Some(block) =
+        blocks.iter().find(|block| block.name == "script")
+    {
+        let (imports, stripped) = extract_imports(&source[block.content.start..block.content.end])?;
         (imports, Some(stripped))
     } else {
         (Vec::new(), None)
@@ -55,17 +79,32 @@ pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
         .collect();
 
     let template = blocks
-        .get("template")
-        .map(|s| parse_markup(s, &imported_components))
+        .iter()
+        .find(|block| block.name == "template")
+        .map(|block| {
+            parse_markup(
+                &source[block.content.start..block.content.end],
+                &imported_components,
+            )
+        })
         .transpose()?;
 
     let script = script_source.map(|s| parse_script(&s));
 
-    let style = blocks.get("style").map(|s| parse_style(s)).transpose()?;
+    let style = blocks
+        .iter()
+        .find(|block| block.name == "style")
+        .map(|block| parse_style(&source[block.content.start..block.content.end]))
+        .transpose()?;
 
-    let props = blocks.get("props").map(|s| parse_props(s)).transpose()?;
+    let props = blocks
+        .iter()
+        .find(|block| block.name == "props")
+        .map(|block| parse_props(&source[block.content.start..block.content.end]))
+        .transpose()?;
 
     Ok(ComponentFile {
+        blocks,
         imports,
         props,
         template,
@@ -79,66 +118,547 @@ pub fn parse_inline_style(source: &str) -> Result<Vec<crate::style::Declaration>
     styles::parse_inline_style(source)
 }
 
-fn extract_blocks(source: &str) -> Result<HashMap<String, String>, ParseError> {
-    let mut blocks = HashMap::new();
-    let known_tags = ["props", "template", "script", "style", "i18n"];
+const TOP_LEVEL_BLOCKS: &[&str] = &["props", "template", "script", "style", "i18n"];
 
-    let mut remaining = source;
-    let mut line_offset = 1;
+/// Parse the complete top-level grammar while retaining ranges into `source`.
+///
+/// The block bodies are deliberately not copied or searched with a global
+/// substring operation. The scanner advances from one validated block to the
+/// next, so unknown content, duplicate blocks, attributes, ordering, and
+/// source ranges cannot be silently discarded.
+fn parse_top_level_blocks(source: &str) -> Result<Vec<ComponentBlock>, ParseError> {
+    let mut blocks = Vec::new();
+    let mut seen = HashSet::new();
+    let mut offset = 0;
 
-    while !remaining.is_empty() {
-        let Some(open_start) = remaining.find('<') else {
+    while offset < source.len() {
+        offset = skip_ascii_whitespace(source, offset);
+        if offset == source.len() {
             break;
-        };
-
-        let before = &remaining[..open_start];
-        line_offset += before.chars().filter(|&c| c == '\n').count();
-
-        let after_open = &remaining[open_start + 1..];
-        let Some(open_end) = after_open.find('>') else {
-            break;
-        };
-
-        let tag_content = &after_open[..open_end];
-        let tag_name = tag_content.split_whitespace().next().unwrap_or("");
-
-        if tag_name.starts_with('/') || tag_name.is_empty() {
-            remaining = &after_open[open_end + 1..];
-            continue;
         }
 
-        if !known_tags.contains(&tag_name) {
-            remaining = &after_open[open_end + 1..];
-            continue;
+        if source.as_bytes()[offset] != b'<' {
+            return Err(ParseError::UnexpectedTopLevelContent {
+                line: line_at(source, offset),
+                message: "expected a component block".into(),
+            });
         }
 
-        if tag_name == "i18n" {
+        if source[offset..].starts_with("</") {
+            let name = scan_tag_name(source, offset + 2).unwrap_or_default();
+            return Err(ParseError::UnexpectedClose {
+                tag: name,
+                line: line_at(source, offset),
+            });
+        }
+
+        let opening = parse_opening_tag(source, offset)?;
+        if !TOP_LEVEL_BLOCKS.contains(&opening.name.as_str()) {
+            return Err(ParseError::UnknownBlock {
+                name: opening.name,
+                line: line_at(source, offset),
+            });
+        }
+
+        if !seen.insert(opening.name.clone()) {
+            return Err(ParseError::DuplicateBlock {
+                name: opening.name,
+                line: line_at(source, offset),
+            });
+        }
+
+        validate_block_attributes(source, offset, &opening)?;
+
+        let content_start = opening.end;
+        let (content_end, close_end) = find_block_close(source, content_start, &opening.name);
+        let Some((content_end, close_end)) = content_end.zip(close_end) else {
+            return Err(ParseError::UnclosedBlock {
+                tag: opening.name,
+                line: line_at(source, offset),
+            });
+        };
+
+        if opening.name == "i18n" {
             return Err(ParseError::InvalidI18n {
                 message: "inline catalogs are not supported; declare files in mesh.provides.i18n"
                     .into(),
-                line: line_offset,
+                line: line_at(source, offset),
             });
         }
 
-        let close_tag = format!("</{tag_name}>");
-        let body_start = open_start + 1 + open_end + 1;
-        let body_source = &remaining[body_start..];
+        blocks.push(ComponentBlock {
+            name: opening.name,
+            attributes: opening.attributes,
+            span: SourceSpan::new(offset, close_end),
+            open_tag: SourceSpan::new(offset, opening.end),
+            content: SourceSpan::new(content_start, content_end),
+            close_tag: SourceSpan::new(content_end, close_end),
+        });
+        offset = close_end;
+    }
 
-        let Some(close_pos) = body_source.find(close_tag.as_str()) else {
-            return Err(ParseError::UnclosedBlock {
-                tag: tag_name.to_string(),
-                line: line_offset,
-            });
-        };
-
-        blocks.insert(tag_name.to_string(), body_source[..close_pos].to_string());
-
-        let skip = body_start + close_pos + close_tag.len();
-        line_offset += remaining[..skip].chars().filter(|&c| c == '\n').count();
-        remaining = &remaining[skip..];
+    if !seen.contains("template") {
+        return Err(ParseError::MissingRequiredBlock {
+            name: "template".into(),
+        });
     }
 
     Ok(blocks)
+}
+
+struct OpeningTag {
+    name: String,
+    attributes: Vec<BlockAttribute>,
+    end: usize,
+}
+
+fn parse_opening_tag(source: &str, start: usize) -> Result<OpeningTag, ParseError> {
+    let Some(end) = find_tag_end(source, start + 1) else {
+        return Err(ParseError::MalformedTopLevelBlock {
+            line: line_at(source, start),
+            message: "opening tag has no closing `>`".into(),
+        });
+    };
+
+    let name_start = start + 1;
+    let Some(name_end) = scan_tag_name_end(source, name_start) else {
+        return Err(ParseError::MalformedTopLevelBlock {
+            line: line_at(source, start),
+            message: "opening tag has no valid name".into(),
+        });
+    };
+    let name = source[name_start..name_end].to_string();
+    let mut cursor = name_end;
+    let mut attributes = Vec::new();
+    let mut attribute_names = HashSet::new();
+
+    while cursor < end - 1 {
+        cursor = skip_ascii_whitespace(source, cursor);
+        if cursor >= end - 1 {
+            break;
+        }
+        if source.as_bytes()[cursor] == b'/' {
+            return Err(ParseError::InvalidBlockAttributes {
+                name,
+                line: line_at(source, start),
+                message: "top-level blocks must use an explicit closing tag".into(),
+            });
+        }
+
+        let attribute_start = cursor;
+        let Some(attribute_end) = scan_attribute_name_end(source, cursor) else {
+            return Err(ParseError::MalformedTopLevelBlock {
+                line: line_at(source, start),
+                message: "invalid attribute name".into(),
+            });
+        };
+        let attribute_name = source[attribute_start..attribute_end].to_string();
+        cursor = skip_ascii_whitespace(source, attribute_end);
+        if source.as_bytes().get(cursor) != Some(&b'=') {
+            return Err(ParseError::InvalidBlockAttributes {
+                name,
+                line: line_at(source, start),
+                message: format!("attribute `{attribute_name}` must have a quoted value"),
+            });
+        }
+        cursor = skip_ascii_whitespace(source, cursor + 1);
+        let Some(&quote) = source.as_bytes().get(cursor) else {
+            return Err(ParseError::MalformedTopLevelBlock {
+                line: line_at(source, start),
+                message: "attribute value is missing".into(),
+            });
+        };
+        if quote != b'"' && quote != b'\'' {
+            return Err(ParseError::InvalidBlockAttributes {
+                name,
+                line: line_at(source, start),
+                message: format!("attribute `{attribute_name}` must use single or double quotes"),
+            });
+        }
+        let value_start = cursor + 1;
+        let Some(relative_end) = source[value_start..].find(quote as char) else {
+            return Err(ParseError::MalformedTopLevelBlock {
+                line: line_at(source, start),
+                message: format!("attribute `{attribute_name}` is unclosed"),
+            });
+        };
+        let value_end = value_start + relative_end;
+        cursor = value_end + 1;
+        if !attribute_names.insert(attribute_name.clone()) {
+            return Err(ParseError::InvalidBlockAttributes {
+                name,
+                line: line_at(source, start),
+                message: format!("duplicate attribute `{attribute_name}`"),
+            });
+        }
+        attributes.push(BlockAttribute {
+            name: attribute_name,
+            value: source[value_start..value_end].to_string(),
+            span: SourceSpan::new(attribute_start, cursor),
+            value_span: SourceSpan::new(value_start, value_end),
+        });
+    }
+
+    Ok(OpeningTag {
+        name,
+        attributes,
+        end: end + 1,
+    })
+}
+
+fn validate_block_attributes(
+    source: &str,
+    start: usize,
+    opening: &OpeningTag,
+) -> Result<(), ParseError> {
+    let line = line_at(source, start);
+    match opening.name.as_str() {
+        "script" => {
+            // Luau is the established default for an unadorned script block.
+            // When `lang` is present, it is still validated explicitly so an
+            // unsupported runtime language cannot be silently accepted.
+            if opening.attributes.is_empty() {
+                return Ok(());
+            }
+            let Some(attribute) = opening.attributes.first() else {
+                return Err(ParseError::InvalidBlockAttributes {
+                    name: opening.name.clone(),
+                    line,
+                    message: "expected lang=\"luau\"".into(),
+                });
+            };
+            if opening.attributes.len() != 1 || attribute.name != "lang" {
+                return Err(ParseError::InvalidBlockAttributes {
+                    name: opening.name.clone(),
+                    line,
+                    message: "only lang=\"luau\" is supported".into(),
+                });
+            }
+            if attribute.value != "luau" {
+                return Err(ParseError::UnsupportedScriptLanguage {
+                    language: attribute.value.clone(),
+                    line,
+                });
+            }
+        }
+        "template" | "props" | "style" => {
+            if !opening.attributes.is_empty() {
+                return Err(ParseError::InvalidBlockAttributes {
+                    name: opening.name.clone(),
+                    line,
+                    message: "this block does not accept attributes".into(),
+                });
+            }
+        }
+        "i18n" => {}
+        _ => {}
+    }
+    Ok(())
+}
+
+fn find_block_close(source: &str, start: usize, name: &str) -> (Option<usize>, Option<usize>) {
+    let mut cursor = start;
+    let mut nested = 0usize;
+    let mut quote = None;
+    let mut line_comment = false;
+    let mut block_comment = false;
+    let mut long_delimiter = None;
+
+    while cursor < source.len() {
+        if let Some(delimiter) = long_delimiter {
+            if let Some(end) = find_long_bracket_end(source, cursor, delimiter) {
+                cursor = end;
+                long_delimiter = None;
+                continue;
+            }
+            return (None, None);
+        }
+        if line_comment {
+            if source.as_bytes()[cursor] == b'\n' {
+                line_comment = false;
+            }
+            cursor = advance_char(source, cursor);
+            continue;
+        }
+        if block_comment {
+            if source[cursor..].starts_with("*/") {
+                block_comment = false;
+                cursor += 2;
+            } else {
+                cursor = advance_char(source, cursor);
+            }
+            continue;
+        }
+        if let Some(active_quote) = quote {
+            let byte = source.as_bytes()[cursor];
+            if byte == b'\\' {
+                cursor = skip_escaped_char(source, cursor);
+            } else {
+                if byte == active_quote {
+                    quote = None;
+                }
+                cursor = advance_char(source, cursor);
+            }
+            continue;
+        }
+
+        if source[cursor..].starts_with("<!--") {
+            if let Some(end) = source[cursor + 4..].find("-->") {
+                cursor += 4 + end + 3;
+                continue;
+            }
+            return (None, None);
+        }
+        if source[cursor..].starts_with("/*") {
+            block_comment = true;
+            cursor += 2;
+            continue;
+        }
+        if name == "script" && source[cursor..].starts_with("--") {
+            if source[cursor..].starts_with("--[") {
+                if let Some(delimiter) = long_bracket_delimiter(source, cursor + 2) {
+                    long_delimiter = Some(delimiter);
+                    cursor += 2 + delimiter.open_len;
+                    continue;
+                }
+            }
+            line_comment = true;
+            cursor += 2;
+            continue;
+        }
+        if name == "script"
+            && source.as_bytes()[cursor] == b'['
+            && let Some(delimiter) = long_bracket_delimiter(source, cursor)
+        {
+            long_delimiter = Some(delimiter);
+            cursor += delimiter.open_len;
+            continue;
+        }
+
+        // In template text, quote characters are ordinary text. Only treat
+        // them as protected delimiters while skipping an actual markup tag.
+        // This keeps apostrophes in rendered text from changing the block
+        // boundary while still protecting `</template>` in an attribute.
+        if name == "template" {
+            if source.as_bytes()[cursor] == b'<' {
+                if source[cursor..].starts_with("</") {
+                    if let Some((tag_name, tag_end)) = parse_close_tag(source, cursor)
+                        && tag_name == name
+                    {
+                        if nested == 0 {
+                            return (Some(cursor), Some(tag_end));
+                        }
+                        nested -= 1;
+                        cursor = tag_end;
+                    } else {
+                        cursor = advance_char(source, cursor);
+                    }
+                } else if let Some((tag_name, tag_end, self_closing)) =
+                    parse_inner_open_tag(source, cursor)
+                {
+                    if tag_name == name && !self_closing {
+                        nested += 1;
+                    }
+                    cursor = tag_end;
+                } else {
+                    cursor = advance_char(source, cursor);
+                }
+            } else {
+                cursor = advance_char(source, cursor);
+            }
+            continue;
+        }
+
+        match source.as_bytes()[cursor] {
+            b'"' | b'\'' => {
+                quote = Some(source.as_bytes()[cursor]);
+                cursor = advance_char(source, cursor);
+            }
+            b'<' if source[cursor..].starts_with("</") => {
+                if let Some((tag_name, tag_end)) = parse_close_tag(source, cursor)
+                    && tag_name == name
+                {
+                    if nested == 0 {
+                        return (Some(cursor), Some(tag_end));
+                    }
+                    nested -= 1;
+                    cursor = tag_end;
+                } else {
+                    cursor = advance_char(source, cursor);
+                }
+            }
+            b'<' => {
+                if let Some((tag_name, tag_end, self_closing)) =
+                    parse_inner_open_tag(source, cursor)
+                    && tag_name == name
+                    && !self_closing
+                {
+                    nested += 1;
+                    cursor = tag_end;
+                } else {
+                    cursor = advance_char(source, cursor);
+                }
+            }
+            _ => cursor = advance_char(source, cursor),
+        }
+    }
+    (None, None)
+}
+
+#[derive(Clone, Copy)]
+struct LongBracketDelimiter {
+    open_len: usize,
+    close_len: usize,
+}
+
+fn long_bracket_delimiter(source: &str, start: usize) -> Option<LongBracketDelimiter> {
+    let bytes = source.as_bytes();
+    if bytes.get(start) != Some(&b'[') {
+        return None;
+    }
+    let mut cursor = start + 1;
+    while bytes.get(cursor) == Some(&b'=') {
+        cursor += 1;
+    }
+    if bytes.get(cursor) != Some(&b'[') {
+        return None;
+    }
+    let equals = cursor - start - 1;
+    Some(LongBracketDelimiter {
+        open_len: cursor + 1 - start,
+        close_len: equals + 2,
+    })
+}
+
+fn find_long_bracket_end(
+    source: &str,
+    start: usize,
+    delimiter: LongBracketDelimiter,
+) -> Option<usize> {
+    let close = format!("]{}]", "=".repeat(delimiter.close_len.saturating_sub(2)));
+    source[start..]
+        .find(&close)
+        .map(|offset| start + offset + close.len())
+}
+
+fn parse_close_tag(source: &str, start: usize) -> Option<(String, usize)> {
+    let name_start = start + 2;
+    let name_end = scan_tag_name_end(source, name_start)?;
+    let name = source[name_start..name_end].to_string();
+    let end = find_tag_end(source, name_end)?;
+    if !source[name_end..end].trim().is_empty() {
+        return None;
+    }
+    Some((name, end + 1))
+}
+
+fn parse_inner_open_tag(source: &str, start: usize) -> Option<(String, usize, bool)> {
+    let name_start = start + 1;
+    let name_end = scan_tag_name_end(source, name_start)?;
+    let end = find_tag_end(source, name_end)?;
+    let tail = source[name_end..end].trim();
+    Some((
+        source[name_start..name_end].to_string(),
+        end + 1,
+        tail.ends_with('/'),
+    ))
+}
+
+fn find_tag_end(source: &str, start: usize) -> Option<usize> {
+    let mut cursor = start;
+    let mut quote = None;
+    while cursor < source.len() {
+        let byte = source.as_bytes()[cursor];
+        if let Some(active_quote) = quote {
+            if byte == b'\\' {
+                cursor = (cursor + 2).min(source.len());
+                continue;
+            }
+            if byte == active_quote {
+                quote = None;
+            }
+        } else if byte == b'"' || byte == b'\'' {
+            quote = Some(byte);
+        } else if byte == b'>' {
+            return Some(cursor);
+        }
+        cursor += 1;
+    }
+    None
+}
+
+fn scan_tag_name(source: &str, start: usize) -> Option<String> {
+    let end = scan_tag_name_end(source, start)?;
+    Some(source[start..end].to_string())
+}
+
+fn scan_tag_name_end(source: &str, start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let first = *bytes.get(start)?;
+    if !(first.is_ascii_alphabetic() || first == b'_') {
+        return None;
+    }
+    let mut end = start + 1;
+    while let Some(byte) = bytes.get(end) {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b':') {
+            end += 1;
+        } else {
+            break;
+        }
+    }
+    Some(end)
+}
+
+fn scan_attribute_name_end(source: &str, start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let first = *bytes.get(start)?;
+    if !(first.is_ascii_alphabetic() || first == b'_' || first == b':') {
+        return None;
+    }
+    let mut end = start + 1;
+    while let Some(byte) = bytes.get(end) {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b':' | b'.') {
+            end += 1;
+        } else {
+            break;
+        }
+    }
+    Some(end)
+}
+
+fn skip_ascii_whitespace(source: &str, mut offset: usize) -> usize {
+    while let Some(byte) = source.as_bytes().get(offset) {
+        if !byte.is_ascii_whitespace() {
+            break;
+        }
+        offset += 1;
+    }
+    offset
+}
+
+fn advance_char(source: &str, offset: usize) -> usize {
+    source[offset..]
+        .chars()
+        .next()
+        .map(|ch| offset + ch.len_utf8())
+        .unwrap_or(offset)
+}
+
+fn skip_escaped_char(source: &str, offset: usize) -> usize {
+    let after_escape = advance_char(source, offset);
+    if after_escape < source.len() {
+        advance_char(source, after_escape)
+    } else {
+        after_escape
+    }
+}
+
+fn line_at(source: &str, offset: usize) -> usize {
+    source[..offset.min(source.len())]
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count()
+        + 1
 }
 
 #[cfg(test)]
@@ -162,6 +682,100 @@ mod tests {
         assert!(file.script.is_none());
         assert!(file.style.is_none());
         assert!(file.props.is_none());
+    }
+
+    #[test]
+    fn preserves_top_level_block_order_and_source_spans() {
+        let source = "  \n<template>\n  <box />\n</template>\n\n<script lang='luau'>\nvalue = 1\n</script>\n<style>\nbox { opacity: 1; }\n</style>\n";
+        let file = parse_component(source).unwrap();
+
+        let names: Vec<_> = file
+            .blocks
+            .iter()
+            .map(|block| block.name.as_str())
+            .collect();
+        assert_eq!(names, ["template", "script", "style"]);
+
+        let script = &file.blocks[1];
+        assert_eq!(script.attributes[0].name, "lang");
+        assert_eq!(script.attributes[0].value, "luau");
+        assert_eq!(
+            &source[script.attributes[0].value_span.start..script.attributes[0].value_span.end],
+            "luau"
+        );
+        assert_eq!(
+            &source[script.span.start..script.span.end],
+            "<script lang='luau'>\nvalue = 1\n</script>"
+        );
+        assert_eq!(
+            &source[script.content.start..script.content.end],
+            "\nvalue = 1\n"
+        );
+        assert_eq!(
+            &source[script.open_tag.start..script.open_tag.end],
+            "<script lang='luau'>"
+        );
+        assert_eq!(
+            &source[script.close_tag.start..script.close_tag.end],
+            "</script>"
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_top_level_block_grammar() {
+        let cases = [
+            (
+                "<template><box /></template><unknown></unknown>",
+                "unknown block <unknown>",
+            ),
+            (
+                "<template><box /></template><template></template>",
+                "duplicate block <template>",
+            ),
+            (
+                "<style>box { opacity: 1; }</style>",
+                "missing required block <template>",
+            ),
+            (
+                "<template data='x'><box /></template>",
+                "invalid attributes on <template>",
+            ),
+            (
+                "<template><box /></template><script lang='lua'></script>",
+                "unsupported script language `lua`",
+            ),
+        ];
+
+        for (source, expected) in cases {
+            let error = parse_component(source).expect_err("invalid top-level grammar");
+            assert!(error.to_string().contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn block_closing_tags_inside_block_literals_are_not_boundaries() {
+        let source = r#"
+<template><text title="</template>">It's fine</text></template>
+<script lang="luau">local marker = "</script>"</script>
+<style>.literal::after { content: "</style>"; }</style>
+"#;
+        let file = parse_component(source).unwrap();
+
+        assert_eq!(file.blocks.len(), 3);
+        assert!(file.script.unwrap().source.contains("</script>"));
+        assert_eq!(file.style.unwrap().rules.len(), 1);
+    }
+
+    #[test]
+    fn rejects_stray_top_level_content_and_inline_i18n() {
+        let error = parse_component("text\n<template><box /></template>").unwrap_err();
+        assert!(error.to_string().contains("unexpected top-level content"));
+
+        let error =
+            parse_component("<template><box /></template>\n<i18n>{\"hello\": \"Hello\"}</i18n>")
+                .unwrap_err();
+        assert!(matches!(error, ParseError::InvalidI18n { .. }));
+        assert!(error.to_string().contains("mesh.provides.i18n"));
     }
 
     #[test]
@@ -201,7 +815,7 @@ mod tests {
         assert!(matches!(error, ParseError::InvalidI18n { .. }));
         let message = error.to_string();
         assert!(
-            message.contains("line 5"),
+            message.contains("line 4"),
             "unexpected source location: {message}"
         );
         assert!(message.contains("mesh.provides.i18n"));
@@ -288,6 +902,7 @@ button {
     #[test]
     fn classifies_standalone_prop_reference() {
         let source = r#"
+<template><box /></template>
 <style>
 .mixer {
     width: prop(track_width);
@@ -311,6 +926,7 @@ button {
     #[test]
     fn rejects_prop_reference_in_keyframes() {
         let source = r#"
+<template><box /></template>
 <style>
 @keyframes grow {
     0% { width: prop(track_width); }
@@ -325,6 +941,7 @@ button {
     #[test]
     fn parse_style_tokens_and_literals() {
         let source = r#"
+<template><box /></template>
 <style>
 box {
     gap: 8px;
@@ -346,6 +963,7 @@ box {
     #[test]
     fn parse_grouped_selectors_into_multiple_rules() {
         let source = r#"
+<template><box /></template>
 <style>
 .panel, #main {
     color: #fff;
@@ -362,6 +980,7 @@ box {
     #[test]
     fn parse_container_query_rules() {
         let source = r#"
+<template><box /></template>
 <style>
 @container (max-width: 640px) {
     .sidebar {
@@ -388,6 +1007,7 @@ box {
     #[test]
     fn unsupported_media_rule_reports_at_rule_name() {
         let source = r#"
+<template><box /></template>
 <style>
 @media (min-width: 640px) {
     .panel {
@@ -437,6 +1057,7 @@ box {
     #[test]
     fn parse_percentage_keyframes() {
         let source = r#"
+<template><box /></template>
 <style>
 @keyframes pulse {
     0% { opacity: 0; }
@@ -458,6 +1079,7 @@ box {
     #[test]
     fn reject_from_keyframe_alias() {
         let source = r#"
+<template><box /></template>
 <style>
 @keyframes pulse {
     from { opacity: 0; }
@@ -475,6 +1097,7 @@ box {
     #[test]
     fn reject_to_keyframe_alias() {
         let source = r#"
+<template><box /></template>
 <style>
 @keyframes pulse {
     0% { opacity: 0; }
@@ -492,6 +1115,7 @@ box {
     #[test]
     fn parse_filter_and_shadow_keyframes() {
         let source = r#"
+<template><box /></template>
 <style>
 @keyframes pulse {
     0% { filter: blur(4px); }
@@ -519,6 +1143,7 @@ box {
     #[test]
     fn reject_unsupported_keyframe_property() {
         let source = r#"
+<template><box /></template>
 <style>
 @keyframes pulse {
     0% { grid-template-columns: 1fr 1fr; }
@@ -536,6 +1161,7 @@ box {
     #[test]
     fn reject_non_runnable_keyframes() {
         let source = r#"
+<template><box /></template>
 <style>
 @keyframes pulse {
     0% { }
@@ -640,6 +1266,7 @@ end
     #[test]
     fn local_declarations_preserved_verbatim() {
         let source = r#"
+<template><box /></template>
 <script lang="luau">
 local handler = function() end
 local audio = require("mesh.audio")
@@ -889,6 +1516,7 @@ import Audio from "mesh.audio"
     #[test]
     fn rejects_duplicate_import_aliases() {
         let source = r#"
+<template><box /></template>
 <script lang="luau">
 import Thing from "./components/one.mesh"
 import Thing from "./components/two.mesh"
@@ -904,6 +1532,7 @@ import Thing from "./components/two.mesh"
     #[test]
     fn rejects_duplicate_alias_between_import_and_require() {
         let source = r#"
+<template><box /></template>
 <script lang="luau">
 import Thing from "./components/one.mesh"
 local Thing = require("./components/two.mesh")
@@ -964,6 +1593,7 @@ local Thing = require("./components/two.mesh")
         // Verify which property names lightningcss emits for the padding variants
         // we use in .mesh components so apply_declaration handles them all.
         let source = r#"
+<template><box /></template>
 <style>
 .box {
     padding: 8px;

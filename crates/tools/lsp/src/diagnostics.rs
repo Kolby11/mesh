@@ -34,6 +34,40 @@ fn diagnostics_from_error(err: &ParseError, source: &str) -> Vec<Diagnostic> {
             DiagnosticSeverity::ERROR,
         )],
 
+        ParseError::MissingRequiredBlock { name } => vec![top_level_diag(
+            format!("Missing required block <{name}>"),
+            DiagnosticSeverity::ERROR,
+        )],
+
+        ParseError::DuplicateBlock { name, line } => vec![source_line_diag(
+            *line,
+            format!("Duplicate block <{name}>"),
+            DiagnosticSeverity::ERROR,
+        )],
+
+        ParseError::InvalidBlockAttributes {
+            name,
+            line,
+            message,
+        } => vec![source_line_diag(
+            *line,
+            format!("Block <{name}> attributes: {message}"),
+            DiagnosticSeverity::ERROR,
+        )],
+
+        ParseError::UnsupportedScriptLanguage { language, line } => vec![source_line_diag(
+            *line,
+            format!("Unsupported script language `{language}`; expected `luau`"),
+            DiagnosticSeverity::ERROR,
+        )],
+
+        ParseError::UnexpectedTopLevelContent { line, message }
+        | ParseError::MalformedTopLevelBlock { line, message } => vec![source_line_diag(
+            *line,
+            message.clone(),
+            DiagnosticSeverity::ERROR,
+        )],
+
         ParseError::InvalidTemplate { message } => vec![make_diag(
             source,
             "template",
@@ -95,6 +129,27 @@ fn diagnostics_from_error(err: &ParseError, source: &str) -> Vec<Diagnostic> {
             format!("Unknown block <{name}>"),
             DiagnosticSeverity::WARNING,
         )],
+    }
+}
+
+fn top_level_diag(message: String, severity: DiagnosticSeverity) -> Diagnostic {
+    source_line_diag(1, message, severity)
+}
+
+fn source_line_diag(line: usize, message: String, severity: DiagnosticSeverity) -> Diagnostic {
+    let line = line.saturating_sub(1) as u32;
+    Diagnostic {
+        range: Range {
+            start: Position { line, character: 0 },
+            end: Position {
+                line,
+                character: u32::MAX,
+            },
+        },
+        severity: Some(severity),
+        message,
+        source: Some("mesh-tools-lsp".to_string()),
+        ..Default::default()
     }
 }
 

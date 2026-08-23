@@ -361,6 +361,7 @@ fn shell_card_css_subset_resolves_for_layout() {
     use mesh_core_component::parser::parse_component;
 
     let source = r#"
+<template><box /></template>
 <style>
 .shell-card {
 --pad: var(--spacing-md);

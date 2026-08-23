@@ -6,7 +6,12 @@ use mesh_core_component::{
 };
 
 pub(super) fn parse_fixture_style(source: &str) -> Vec<StyleRule> {
-    parse_component(source)
+    let source = if source.contains("<template>") {
+        source.to_owned()
+    } else {
+        format!("<template><box /></template>\n{source}")
+    };
+    parse_component(&source)
         .expect("fixture parses")
         .style
         .expect("fixture has style")

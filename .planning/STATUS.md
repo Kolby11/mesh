@@ -4,11 +4,12 @@
 
 ## Now
 
-The frontend compiler now resolves recursive component imports by canonical
-owner scope, reports same-owner alias collisions and canonical cycle chains,
-and carries that resolution into shell composition, style collection, and
-runtime module-import lookup. Focused frontend tests and workspace checks pass;
-the broad shell library retains its existing fixture/runtime failures.
+The component parser now validates a strict top-level `.mesh` block sequence,
+retains ordered byte-span metadata and attributes, requires `<template>`,
+rejects duplicates/unknown content/unsupported script languages, and reports
+inline `<i18n>` as an explicit migration error. Focused component and frontend
+tests plus workspace checking pass. The broad elements and LSP suites retain
+their existing theme-color and locale-completion failures respectively.
 
 The deterministic presentation backend now models compositor preferred-scale
 updates for live surfaces: valid 0.5x..4x changes are observable through the
@@ -207,8 +208,6 @@ live compositor/lifecycle matrix remain separate follow-up work.
 
 ## Next
 
-Complete the remaining semantic presentation state diff and the live
-compositor/lifecycle matrix for presentation and text-input-v3; connection
-recreation and text shaping remain separate follow-up work. The resource
-coverage advisor is now preview-only and leaves chain application to the normal
-profile/settings prepare-and-commit path.
+The next component-language item is real brace-aware interpolation/control-flow
+parsing; the remaining presentation/resource follow-ups stay separate from
+this completed parser increment.

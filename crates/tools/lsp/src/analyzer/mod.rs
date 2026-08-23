@@ -287,7 +287,8 @@ item_row.$0
     #[test]
     fn script_completion_on_props_offers_declared_props_and_helpers() {
         let (source, position) = fixture_with_cursor(
-            r#"<props>
+            r#"<template></template>
+<props>
   track_width: { type: "size", default: "20px" }
   anim_ms: { type: "duration", default: 120 }
 </props>
@@ -308,7 +309,8 @@ props.$0
     #[test]
     fn style_completion_inside_prop_call_offers_declared_props() {
         let (source, position) = fixture_with_cursor(
-            r#"<props>
+            r#"<template></template>
+<props>
   track_width: { type: "size", default: "20px" }
 </props>
 <style>
