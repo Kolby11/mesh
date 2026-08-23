@@ -245,6 +245,24 @@ impl FrontendRenderEngine {
         } else {
             style.color
         };
+        let display_text = display_value.as_ref();
+        let preedit = (!input.mask_text)
+            .then_some(input.preedit.as_ref())
+            .flatten()
+            .filter(|preedit| {
+                let valid_boundary =
+                    |offset| offset <= display_text.len() && display_text.is_char_boundary(offset);
+                preedit.start < preedit.end
+                    && preedit.end <= display_text.len()
+                    && valid_boundary(preedit.start)
+                    && valid_boundary(preedit.end)
+                    && preedit.cursor_begin >= preedit.start
+                    && preedit.cursor_begin <= preedit.end
+                    && preedit.cursor_end >= preedit.start
+                    && preedit.cursor_end <= preedit.end
+                    && valid_boundary(preedit.cursor_begin)
+                    && valid_boundary(preedit.cursor_end)
+            });
 
         let tx = (x + (style.padding.left * scale) as i32).max(0) as u32;
         let inner_height =
@@ -280,7 +298,54 @@ impl FrontendRenderEngine {
         });
 
         if input.focused {
-            let caret_x = tx + text_width.round() as u32;
+            if let Some(preedit) = preedit {
+                let (prefix_width, _) = self.text_renderer.measure_styled(
+                    &display_text[..preedit.start],
+                    &style.font_family,
+                    style.font_size * scale,
+                    style.font_weight,
+                    style.line_height,
+                    None,
+                );
+                let (preedit_width, _) = self.text_renderer.measure_styled(
+                    &display_text[preedit.start..preedit.end],
+                    &style.font_family,
+                    style.font_size * scale,
+                    style.font_weight,
+                    style.line_height,
+                    None,
+                );
+                let underline_rect = ClipRect {
+                    x: tx as i32 + prefix_width.round() as i32,
+                    y: ty as i32 + glyph_height.saturating_sub(2),
+                    width: preedit_width.round().max(1.0) as i32,
+                    height: scale.round().max(1.0) as i32,
+                };
+                self.execute_painter_commands_in_session(
+                    session,
+                    &[PainterCommand::DrawRect {
+                        rect: underline_rect,
+                        paint: PainterPaint::fill(style.color),
+                        clip,
+                    }],
+                );
+            }
+
+            let caret_width = preedit
+                .map(|preedit| {
+                    self.text_renderer
+                        .measure_styled(
+                            &display_text[..preedit.cursor_end],
+                            &style.font_family,
+                            style.font_size * scale,
+                            style.font_weight,
+                            style.line_height,
+                            None,
+                        )
+                        .0
+                })
+                .unwrap_or(text_width);
+            let caret_x = tx + caret_width.round() as u32;
             let caret_rect = ClipRect {
                 x: caret_x as i32,
                 y: ty as i32,

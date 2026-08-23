@@ -35,6 +35,65 @@ fn painter_helper_lowering_routes_rect_helper_through_command_backend() {
 }
 
 #[test]
+fn painter_places_preedit_caret_inside_decorated_composition() {
+    let mut input = node(
+        "input",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 180.0,
+            height: 40.0,
+        },
+        Color::TRANSPARENT,
+    );
+    input.computed_style.color = Color::WHITE;
+    input.computed_style.font_size = 14.0;
+    input.computed_style.line_height = 1.4;
+    input.computed_style.padding = Edges::zero();
+    input.attributes.insert("value".into(), "A🙂候選B".into());
+    input
+        .attributes
+        .insert("_mesh_preedit_start".into(), "5".into());
+    input
+        .attributes
+        .insert("_mesh_preedit_end".into(), "11".into());
+    input
+        .attributes
+        .insert("_mesh_preedit_cursor_begin".into(), "5".into());
+    input
+        .attributes
+        .insert("_mesh_preedit_cursor_end".into(), "8".into());
+    input
+        .attributes
+        .insert("_mesh_focused".into(), "true".into());
+
+    let backend = RecordingPaintBackend::default();
+    let recorded = backend.clone();
+    let engine = FrontendRenderEngine::with_paint_backend(Box::new(backend));
+    let mut buffer = PixelBuffer::new(180, 40);
+    engine.render_tree(&input, &mut buffer, 1.0);
+
+    let rects: Vec<_> = recorded
+        .recorded_commands()
+        .into_iter()
+        .filter_map(|command| match command {
+            PainterCommand::DrawRect { rect, .. } => Some(rect),
+            _ => None,
+        })
+        .collect();
+    let underline = rects
+        .iter()
+        .find(|rect| rect.height == 1)
+        .expect("preedit underline command");
+    let caret = rects
+        .iter()
+        .find(|rect| rect.width == 2 && rect.height > 1)
+        .expect("focused input caret command");
+    assert!(caret.x > underline.x);
+    assert!(caret.x < underline.x + underline.width);
+}
+
+#[test]
 fn painter_helper_lowering_routes_effect_helpers_through_command_backend() {
     let backend = RecordingPaintBackend::default();
     let recorded = backend.clone();

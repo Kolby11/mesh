@@ -271,6 +271,7 @@ mod tests {
             placeholder: "".into(),
             mask_text: false,
             focused: false,
+            preedit: None,
         };
         let c = cmd(
             DisplayPaintContent::Input(input),

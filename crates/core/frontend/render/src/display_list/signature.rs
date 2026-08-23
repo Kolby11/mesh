@@ -285,6 +285,10 @@ pub(super) fn hash_paint_content_attributes(
             hash_attribute(node, "placeholder", hasher);
             hash_attribute(node, "type", hasher);
             hash_attribute(node, "_mesh_focused", hasher);
+            hash_attribute(node, "_mesh_preedit_start", hasher);
+            hash_attribute(node, "_mesh_preedit_end", hasher);
+            hash_attribute(node, "_mesh_preedit_cursor_begin", hasher);
+            hash_attribute(node, "_mesh_preedit_cursor_end", hasher);
         }
         "slider" => {
             hash_attribute(node, "min", hasher);

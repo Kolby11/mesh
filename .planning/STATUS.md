@@ -94,7 +94,9 @@ surrounding-text snapshot for the focused input. The resulting transaction
 reaches the component boundary atomically, preserving one commit/delete change
 boundary. Components retain preedit separately from committed input state and
 project it inline at the UTF-8 cursor for rendering without firing a change
-handler; composition decoration/cursor styling is still pending.
+handler. The retained display list carries validated UTF-8 preedit ranges and
+the painter draws the composition underline and caret at the compositor's
+preedit cursor without decorating masked password input.
 
 Popup targets now invalidate their cached creation size when presentation
 reports `SurfaceMissing`, including state-only commits, and force a full retry
@@ -118,18 +120,17 @@ broker, with revision-aware cache handoff and linked-file invalidation. Typed
 icon/glyph caches and shell polling remain separate at the handoff boundary.
 Text shaping remains synchronous and outside that broker.
 
-Focused presentation, Wayland routing, and shell text-transaction tests plus
-`cargo check --workspace`, formatting, and `git diff --check` pass. The full
+Focused presentation, Wayland routing, shell text-transaction, and preedit
+rendering tests plus `cargo check --workspace`, formatting, and `git diff
+--check` pass. The full
 presentation library passes (90 active, 11 ignored). The broad shell library
-run compiles and reaches 668 passed tests, but retains 46 existing fixture and
+run compiles and reaches 667 passed tests, but retains 47 existing fixture and
 runtime failures and 130 ignored tests; none are text-input failures. Existing
-shell dead-code/private-interface warnings remain. Connection recreation, a
-live compositor matrix, and composition decoration/cursor styling remain
-separate follow-up work.
+shell dead-code/private-interface warnings remain. Connection recreation and a
+live compositor/lifecycle matrix remain separate follow-up work.
 
 ## Next
 
-Complete the remaining semantic presentation state diff and text-input-v3
-composition decoration/cursor styling plus live compositor lifecycle matrix;
-connection recreation and resource preparation/text shaping remain separate
-follow-up work.
+Complete the remaining semantic presentation state diff and text-input-v3 live
+compositor lifecycle matrix; connection recreation and resource
+preparation/text shaping remain separate follow-up work.

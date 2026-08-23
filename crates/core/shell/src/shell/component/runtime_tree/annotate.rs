@@ -169,20 +169,50 @@ impl<'a> RuntimeAnnotationContext<'a> {
     }
 }
 
-fn compose_input_value(value: &str, preedit: Option<&TextPreeditState>) -> String {
+#[derive(Debug, Clone, Copy)]
+struct InputPreeditProjection {
+    start: usize,
+    end: usize,
+    cursor_begin: usize,
+    cursor_end: usize,
+}
+
+fn clamp_preedit_cursor(text: &str, cursor: i32) -> usize {
+    let cursor = usize::try_from(cursor).unwrap_or(0).min(text.len());
+    (0..=cursor)
+        .rev()
+        .find(|offset| text.is_char_boundary(*offset))
+        .unwrap_or(0)
+}
+
+fn compose_input_value(
+    value: &str,
+    preedit: Option<&TextPreeditState>,
+) -> (String, Option<InputPreeditProjection>) {
     let Some(preedit) = preedit.filter(|preedit| !preedit.text.is_empty()) else {
-        return value.to_owned();
+        return (value.to_owned(), None);
     };
     let insert_at = preedit.insert_at.min(value.len());
     let insert_at = value
         .is_char_boundary(insert_at)
         .then_some(insert_at)
         .unwrap_or(value.len());
+    let preedit_end = insert_at + preedit.text.len();
     let mut composed = String::with_capacity(value.len() + preedit.text.len());
     composed.push_str(&value[..insert_at]);
     composed.push_str(&preedit.text);
     composed.push_str(&value[insert_at..]);
-    composed
+    let cursor_begin = insert_at + clamp_preedit_cursor(&preedit.text, preedit.cursor_begin);
+    let cursor_end = insert_at + clamp_preedit_cursor(&preedit.text, preedit.cursor_end);
+    (
+        composed,
+        Some(InputPreeditProjection {
+            start: insert_at,
+            end: preedit_end,
+            cursor_begin,
+            cursor_end,
+        }),
+    )
 }
 
 #[cfg(test)]
@@ -288,8 +318,30 @@ pub(super) fn annotate_runtime_tree_inner(
         let preedit = (context.focused_id == Some(node_id))
             .then(|| context.input_preedits.get(&node_id))
             .flatten();
-        let value = compose_input_value(&value, preedit);
+        let (value, preedit_projection) = compose_input_value(&value, preedit);
         node.attributes.insert("value".into(), value);
+        for attribute in [
+            "_mesh_preedit_start",
+            "_mesh_preedit_end",
+            "_mesh_preedit_cursor_begin",
+            "_mesh_preedit_cursor_end",
+        ] {
+            node.attributes.remove(attribute);
+        }
+        if let Some(projection) = preedit_projection {
+            node.attributes
+                .insert("_mesh_preedit_start".into(), projection.start.to_string());
+            node.attributes
+                .insert("_mesh_preedit_end".into(), projection.end.to_string());
+            node.attributes.insert(
+                "_mesh_preedit_cursor_begin".into(),
+                projection.cursor_begin.to_string(),
+            );
+            node.attributes.insert(
+                "_mesh_preedit_cursor_end".into(),
+                projection.cursor_end.to_string(),
+            );
+        }
     } else if is_slider {
         annotate_slider_node(node, node_id, context);
     } else if is_switch_or_checkbox {

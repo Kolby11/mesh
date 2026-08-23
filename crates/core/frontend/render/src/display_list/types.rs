@@ -337,12 +337,21 @@ pub struct DisplayTextSelectionPaint {
     pub text_y: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DisplayInputPreedit {
+    pub start: usize,
+    pub end: usize,
+    pub cursor_begin: usize,
+    pub cursor_end: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct DisplayInputPaint {
     pub value: Arc<str>,
     pub placeholder: Arc<str>,
     pub mask_text: bool,
     pub focused: bool,
+    pub preedit: Option<DisplayInputPreedit>,
 }
 
 impl PartialEq for DisplayInputPaint {
@@ -351,6 +360,7 @@ impl PartialEq for DisplayInputPaint {
             && shared_str_eq(&self.placeholder, &other.placeholder)
             && self.mask_text == other.mask_text
             && self.focused == other.focused
+            && self.preedit == other.preedit
     }
 }
 

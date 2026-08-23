@@ -41,6 +41,37 @@ fn rebuilt_display_node_retains_unchanged_text_allocation() {
 }
 
 #[test]
+fn input_display_payload_preserves_preedit_decoration_range() {
+    let mut input = node(1, "input", 0.0, 0.0, 160.0, 32.0);
+    input.attributes.insert("value".into(), "A🙂候B".into());
+    input
+        .attributes
+        .insert("_mesh_preedit_start".into(), "5".into());
+    input
+        .attributes
+        .insert("_mesh_preedit_end".into(), "8".into());
+    input
+        .attributes
+        .insert("_mesh_preedit_cursor_begin".into(), "5".into());
+    input
+        .attributes
+        .insert("_mesh_preedit_cursor_end".into(), "8".into());
+
+    let DisplayPaintContent::Input(payload) = build_paint_content(&input) else {
+        panic!("input node must produce input paint content");
+    };
+    assert_eq!(
+        payload.preedit,
+        Some(DisplayInputPreedit {
+            start: 5,
+            end: 8,
+            cursor_begin: 5,
+            cursor_end: 8,
+        })
+    );
+}
+
+#[test]
 fn display_payload_equality_falls_back_to_text_content() {
     let first = DisplayIconPaint {
         src: Some(Arc::from("icons/search.svg")),

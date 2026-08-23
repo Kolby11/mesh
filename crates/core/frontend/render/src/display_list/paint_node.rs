@@ -112,15 +112,15 @@ pub(super) fn build_paint_content_with_previous(
             ),
             selection: build_text_selection(node),
         }),
-        "input" => DisplayPaintContent::Input(DisplayInputPaint {
-            value: retained_display_str(
+        "input" => {
+            let value = retained_display_str(
                 node.attributes.get("value").map_or("", String::as_str),
                 match previous {
                     Some(DisplayPaintContent::Input(input)) => Some(&input.value),
                     _ => None,
                 },
-            ),
-            placeholder: retained_display_str(
+            );
+            let placeholder = retained_display_str(
                 node.attributes
                     .get("placeholder")
                     .map_or("", String::as_str),
@@ -128,16 +128,21 @@ pub(super) fn build_paint_content_with_previous(
                     Some(DisplayPaintContent::Input(input)) => Some(&input.placeholder),
                     _ => None,
                 },
-            ),
-            mask_text: node
-                .attributes
-                .get("type")
-                .is_some_and(|value| value == "password"),
-            focused: node
-                .attributes
-                .get("_mesh_focused")
-                .is_some_and(|value| value == "true"),
-        }),
+            );
+            DisplayPaintContent::Input(DisplayInputPaint {
+                preedit: build_input_preedit(node, value.as_ref()),
+                value,
+                placeholder,
+                mask_text: node
+                    .attributes
+                    .get("type")
+                    .is_some_and(|value| value == "password"),
+                focused: node
+                    .attributes
+                    .get("_mesh_focused")
+                    .is_some_and(|value| value == "true"),
+            })
+        }
         "slider" => DisplayPaintContent::Slider(DisplaySliderPaint {
             min: attr_f32_with_default(node, "min", 0.0),
             max: attr_f32_with_default(node, "max", 100.0),
@@ -177,6 +182,28 @@ pub(super) fn build_paint_content_with_previous(
         }),
         _ => DisplayPaintContent::None,
     }
+}
+
+fn build_input_preedit(node: &WidgetNode, value: &str) -> Option<DisplayInputPreedit> {
+    let parse = |attribute| node.attributes.get(attribute)?.parse::<usize>().ok();
+    let preedit = DisplayInputPreedit {
+        start: parse("_mesh_preedit_start")?,
+        end: parse("_mesh_preedit_end")?,
+        cursor_begin: parse("_mesh_preedit_cursor_begin")?,
+        cursor_end: parse("_mesh_preedit_cursor_end")?,
+    };
+    let valid_boundary = |offset| offset <= value.len() && value.is_char_boundary(offset);
+    (preedit.start < preedit.end
+        && preedit.end <= value.len()
+        && valid_boundary(preedit.start)
+        && valid_boundary(preedit.end)
+        && preedit.cursor_begin >= preedit.start
+        && preedit.cursor_begin <= preedit.end
+        && preedit.cursor_end >= preedit.start
+        && preedit.cursor_end <= preedit.end
+        && valid_boundary(preedit.cursor_begin)
+        && valid_boundary(preedit.cursor_end))
+    .then_some(preedit)
 }
 
 pub(super) fn retained_display_str(value: &str, previous: Option<&Arc<str>>) -> Arc<str> {
