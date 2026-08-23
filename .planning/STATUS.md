@@ -216,6 +216,6 @@ live compositor/lifecycle matrix remain separate follow-up work.
 
 ## Next
 
-The next component-language item normalizes and validates `PropDef` constraints,
-units, options, tokens, and CSS-domain values once;
+The next component-language item replaces line-oriented script/import/symbol
+scans with one Luau lexer/parser and source metadata;
 the remaining presentation/resource follow-ups stay separate from this work.

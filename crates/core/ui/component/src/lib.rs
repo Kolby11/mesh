@@ -19,6 +19,20 @@ pub use parser::{ParseError, parse_component, parse_inline_style};
 pub use style::*;
 pub use template::*;
 
+use lightningcss::{
+    properties::size::Size,
+    traits::Parse,
+    values::{
+        angle::Angle,
+        color::CssColor,
+        ident::{CustomIdent, DashedIdent},
+        length::LengthValue,
+        percentage::Percentage,
+        resolution::Resolution,
+        time::Time,
+    },
+};
+
 /// A parsed authoring-time import from a `.mesh` script block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComponentImport {
@@ -230,6 +244,131 @@ impl std::fmt::Display for PropValidationError {
 }
 
 impl std::error::Error for PropValidationError {}
+
+/// Validate the metadata of one normalized prop definition.
+///
+/// The parser calls this once after collecting and normalizing the declaration;
+/// runtime value checks then only need to validate the incoming scalar value.
+pub fn validate_prop_definition(def: &PropDef) -> Result<(), PropValidationError> {
+    if def.ty == PropType::Enum && def.options.is_empty() {
+        return Err(definition_error(
+            def,
+            "enum props require a non-empty `options` list",
+        ));
+    }
+    if def.ty != PropType::Enum && !def.options.is_empty() {
+        return Err(definition_error(
+            def,
+            "`options` is only valid for enum props",
+        ));
+    }
+
+    for (index, option) in def.options.iter().enumerate() {
+        if option.trim().is_empty() {
+            return Err(definition_error(def, "enum options must not be empty"));
+        }
+        if option != option.trim() || CustomIdent::parse_string(option).is_err() {
+            return Err(definition_error(
+                def,
+                &format!("enum option `{option}` is not a valid CSS identifier"),
+            ));
+        }
+        if def.options[..index]
+            .iter()
+            .any(|previous| previous == option)
+        {
+            return Err(definition_error(
+                def,
+                &format!("enum option `{option}` is duplicated"),
+            ));
+        }
+    }
+
+    let has_numeric_constraints = def.min.is_some() || def.max.is_some() || def.step.is_some();
+    if has_numeric_constraints && !supports_numeric_constraints(def.ty) {
+        return Err(definition_error(
+            def,
+            "`min`, `max`, and `step` are only valid for size, number, int, or duration props",
+        ));
+    }
+
+    if let Some(min) = def.min
+        && !min.is_finite()
+    {
+        return Err(definition_error(def, "`min` must be finite"));
+    }
+    if let Some(max) = def.max
+        && !max.is_finite()
+    {
+        return Err(definition_error(def, "`max` must be finite"));
+    }
+    if let (Some(min), Some(max)) = (def.min, def.max)
+        && min > max
+    {
+        return Err(definition_error(
+            def,
+            "`min` must not be greater than `max`",
+        ));
+    }
+    if let Some(step) = def.step {
+        if !step.is_finite() || step <= 0.0 {
+            return Err(definition_error(
+                def,
+                "`step` must be finite and greater than zero",
+            ));
+        }
+        if def.ty == PropType::Int && step.fract() != 0.0 {
+            return Err(definition_error(
+                def,
+                "int prop `step` must be a whole number",
+            ));
+        }
+    }
+
+    if let Some(unit) = &def.unit {
+        if !is_valid_prop_unit(def.ty, unit) {
+            return Err(definition_error(
+                def,
+                &format!("unit `{unit}` is not valid for `{}` props", def.ty.as_str()),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn definition_error(def: &PropDef, message: &str) -> PropValidationError {
+    PropValidationError {
+        message: format!("prop `{}` {message}", def.name),
+    }
+}
+
+fn supports_numeric_constraints(ty: PropType) -> bool {
+    matches!(
+        ty,
+        PropType::Size | PropType::Number | PropType::Int | PropType::Duration
+    )
+}
+
+fn is_valid_prop_unit(ty: PropType, unit: &str) -> bool {
+    let unit = unit.trim();
+    if unit.is_empty() || unit.chars().any(char::is_whitespace) {
+        return false;
+    }
+
+    let candidate = format!("1{unit}");
+    match ty {
+        PropType::Size => Size::parse_string(&candidate).is_ok(),
+        PropType::Number | PropType::Int => {
+            LengthValue::parse_string(&candidate).is_ok()
+                || Percentage::parse_string(&candidate).is_ok()
+                || Angle::parse_string(&candidate).is_ok()
+                || Time::parse_string(&candidate).is_ok()
+                || Resolution::parse_string(&candidate).is_ok()
+        }
+        _ => false,
+    }
+}
 
 pub fn validate_prop_value(def: &PropDef, value: &PropValue) -> Result<(), PropValidationError> {
     match def.ty {
@@ -480,6 +619,11 @@ fn validate_icon_prop(def: &PropDef, value: &PropValue) -> Result<(), PropValida
 }
 
 fn validate_numeric_bounds(def: &PropDef, value: f64) -> Result<(), PropValidationError> {
+    if !value.is_finite() {
+        return Err(PropValidationError {
+            message: format!("prop `{}` value {value} must be finite", def.name),
+        });
+    }
     if let Some(min) = def.min
         && value < min
     {
@@ -518,67 +662,51 @@ fn format_prop_number(n: f64) -> String {
 
 fn is_css_size_value(value: &str) -> bool {
     let trimmed = value.trim();
-    if matches!(
-        trimmed,
-        "auto" | "fit-content" | "min-content" | "max-content"
-    ) {
-        return true;
-    }
-    if trimmed.starts_with("var(") && trimmed.ends_with(')') {
-        return true;
-    }
-    if trimmed.starts_with("calc(") && trimmed.ends_with(')') {
-        return true;
-    }
-    parse_dimension(trimmed).is_some()
-}
-
-fn parse_dimension(value: &str) -> Option<(f64, &str)> {
-    let split_at = value
-        .find(|ch: char| !(ch.is_ascii_digit() || matches!(ch, '.' | '-' | '+')))
-        .unwrap_or(value.len());
-    let (number, unit) = value.split_at(split_at);
-    if number.is_empty() || number.parse::<f64>().is_err() {
-        return None;
-    }
-    if unit.is_empty()
-        || matches!(
-            unit,
-            "px" | "%" | "em" | "rem" | "vh" | "vw" | "vmin" | "vmax" | "ch"
-        )
-    {
-        Some((number.parse().ok()?, unit))
-    } else {
-        None
-    }
+    Size::parse_string(trimmed).is_ok() || is_css_var_reference(trimmed)
 }
 
 fn is_css_color_value(value: &str) -> bool {
     let trimmed = value.trim();
-    trimmed == "transparent"
-        || trimmed == "currentColor"
-        || trimmed.starts_with('#')
-        || trimmed.starts_with("rgb(")
-        || trimmed.starts_with("rgba(")
-        || trimmed.starts_with("hsl(")
-        || trimmed.starts_with("hsla(")
-        || trimmed.starts_with("var(")
+    CssColor::parse_string(trimmed).is_ok() || is_css_var_reference(trimmed)
 }
 
 fn is_token_value(value: &str) -> bool {
     let trimmed = value.trim();
-    trimmed.starts_with("var(--")
-        || trimmed
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    if trimmed.is_empty() {
+        return false;
+    }
+    if is_css_var_reference(trimmed) {
+        return true;
+    }
+    trimmed
+        .split('.')
+        .all(|part| !part.is_empty() && CustomIdent::parse_string(part).is_ok())
+}
+
+fn is_css_var_reference(value: &str) -> bool {
+    let Some(inner) = value
+        .strip_prefix("var(")
+        .and_then(|value| value.strip_suffix(')'))
+    else {
+        return false;
+    };
+    let name = inner.split_once(',').map_or(inner, |(name, _)| name).trim();
+    DashedIdent::parse_string(name).is_ok()
 }
 
 fn parse_duration_ms(value: &str) -> Option<f64> {
     let trimmed = value.trim();
     if let Some(ms) = trimmed.strip_suffix("ms") {
-        return ms.trim().parse::<f64>().ok();
+        return ms
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite());
     }
-    trimmed.parse::<f64>().ok()
+    trimmed
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
 }
 
 fn is_icon_name(value: &str) -> bool {

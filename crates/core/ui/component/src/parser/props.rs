@@ -11,7 +11,10 @@
 //! </props>
 //! ```
 
-use crate::{LocalizedLabel, PropDef, PropType, PropValue, PropsBlock, validate_prop_value};
+use crate::{
+    LocalizedLabel, PropDef, PropType, PropValue, PropsBlock, validate_prop_definition,
+    validate_prop_value,
+};
 
 use super::ParseError;
 
@@ -251,8 +254,19 @@ fn build_prop(name: String, fields: Vec<(String, RawValue)>) -> Result<PropDef, 
     let mut step: Option<f64> = None;
     let mut unit: Option<String> = None;
     let mut expose = true;
+    let mut seen_fields = Vec::new();
+    let mut options_provided = false;
+    let mut min_provided = false;
+    let mut max_provided = false;
+    let mut step_provided = false;
 
     for (key, value) in fields {
+        if seen_fields.iter().any(|field| field == &key) {
+            return Err(invalid(format!(
+                "prop `{name}` has duplicate field `{key}`"
+            )));
+        }
+        seen_fields.push(key.clone());
         match key.as_str() {
             "type" => {
                 let raw = expect_string(&key, &name, &value)?;
@@ -264,10 +278,22 @@ fn build_prop(name: String, fields: Vec<(String, RawValue)>) -> Result<PropDef, 
             "default" => default = Some(to_prop_value(&key, &name, value)?),
             "label" => label = Some(to_label(&key, &name, value)?),
             "description" => description = Some(to_label(&key, &name, value)?),
-            "options" => options = to_string_array(&key, &name, value)?,
-            "min" => min = Some(expect_number(&key, &name, &value)?),
-            "max" => max = Some(expect_number(&key, &name, &value)?),
-            "step" => step = Some(expect_number(&key, &name, &value)?),
+            "options" => {
+                options_provided = true;
+                options = to_string_array(&key, &name, value)?;
+            }
+            "min" => {
+                min_provided = true;
+                min = Some(expect_number(&key, &name, &value)?);
+            }
+            "max" => {
+                max_provided = true;
+                max = Some(expect_number(&key, &name, &value)?);
+            }
+            "step" => {
+                step_provided = true;
+                step = Some(expect_number(&key, &name, &value)?);
+            }
             "unit" => unit = Some(expect_string(&key, &name, &value)?),
             "expose" => expose = expect_bool(&key, &name, &value)?,
             other => {
@@ -280,13 +306,28 @@ fn build_prop(name: String, fields: Vec<(String, RawValue)>) -> Result<PropDef, 
 
     let ty = ty.ok_or_else(|| invalid(format!("prop `{name}` is missing required `type`")))?;
 
+    if options_provided && ty != PropType::Enum {
+        return Err(invalid(format!(
+            "prop `{name}` field `options` is only valid for enum props"
+        )));
+    }
+    if (min_provided || max_provided || step_provided)
+        && !matches!(
+            ty,
+            PropType::Size | PropType::Number | PropType::Int | PropType::Duration
+        )
+    {
+        return Err(invalid(format!(
+            "prop `{name}` fields `min`, `max`, and `step` are only valid for size, number, int, or duration props"
+        )));
+    }
     if ty == PropType::Enum && options.is_empty() {
         return Err(invalid(format!(
             "enum prop `{name}` requires a non-empty `options` list"
         )));
     }
 
-    let def = PropDef {
+    let mut def = PropDef {
         name,
         ty,
         default,
@@ -299,6 +340,12 @@ fn build_prop(name: String, fields: Vec<(String, RawValue)>) -> Result<PropDef, 
         unit,
         expose,
     };
+
+    if let Some(unit) = &mut def.unit {
+        *unit = unit.trim().to_ascii_lowercase();
+    }
+
+    validate_prop_definition(&def).map_err(|err| invalid(err.message))?;
 
     if let Some(default) = &def.default {
         validate_prop_value(&def, default).map_err(|err| {
@@ -562,5 +609,118 @@ mod tests {
             "##,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn rejects_duplicate_fields() {
+        let err = parse_props(r#"x: { type: "size", type: "number" }"#)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("duplicate field `type`"), "{err}");
+    }
+
+    #[test]
+    fn rejects_type_inapplicable_metadata() {
+        for (source, expected) in [
+            (
+                r#"x: { type: "bool", options: [] }"#,
+                "`options` is only valid for enum props",
+            ),
+            (
+                r#"x: { type: "string", min: 0 }"#,
+                "only valid for size, number, int, or duration props",
+            ),
+            (
+                r#"x: { type: "color", unit: "px" }"#,
+                "unit `px` is not valid for `color` props",
+            ),
+        ] {
+            let err = parse_props(source).unwrap_err().to_string();
+            assert!(err.contains(expected), "{err}");
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_constraints() {
+        let err = parse_props(r#"x: { type: "number", min: 10, max: 1 }"#)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("`min` must not be greater than `max`"),
+            "{err}"
+        );
+
+        let err = parse_props(r#"x: { type: "number", step: 0 }"#)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("`step` must be finite and greater than zero"),
+            "{err}"
+        );
+
+        let err = parse_props(r#"x: { type: "int", step: 0.5 }"#)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("int prop `step` must be a whole number"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_enum_options() {
+        let err = parse_props(r#"x: { type: "enum", options: ["compact", "compact"] }"#)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("enum option `compact` is duplicated"), "{err}");
+    }
+
+    #[test]
+    fn validates_css_domain_values_with_the_css_parser() {
+        let err = parse_props(r##"x: { type: "token", default: "" }"##)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("default is invalid"), "{err}");
+
+        let err = parse_props(r#"x: { type: "color", default: "rgb(255, 0)" }"#)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("default is invalid"), "{err}");
+
+        let err = parse_props(r#"x: { type: "size", default: "12watts" }"#)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("default is invalid"), "{err}");
+
+        parse_props(
+            r##"
+            size: { type: "size", default: "1cm" }
+            color: { type: "color", default: "rebeccapurple" }
+            token: { type: "token", default: "module.surface" }
+            "##,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn normalizes_and_validates_units() {
+        let block = parse_props(r#"x: { type: "number", unit: " PX ", default: 2 }"#).unwrap();
+        assert_eq!(block.props[0].unit.as_deref(), Some("px"));
+
+        let err = parse_props(r#"x: { type: "size", unit: "watts" }"#)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("unit `watts` is not valid for `size` props"),
+            "{err}"
+        );
+
+        let err = parse_props(r#"x: { type: "duration", unit: "ms" }"#)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("unit `ms` is not valid for `duration` props"),
+            "{err}"
+        );
     }
 }
