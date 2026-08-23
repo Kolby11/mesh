@@ -9,14 +9,24 @@
 use accesskit::{
     Action, Node, NodeId as AccessKitNodeId, Rect, Role, Toggled, Tree, TreeId, TreeUpdate,
 };
-use mesh_core_elements::{AccessibilityRole, NodeId, WidgetNode};
+use mesh_core_elements::{
+    AccessibilityRole, AccessibilityTree, AccessibilityTreeNode, NodeId, WidgetNode,
+};
 
 pub fn build_accesskit_runtime_update(root: &WidgetNode) -> TreeUpdate {
-    let root_id = accesskit_node_id(root.id);
-    let mut nodes = Vec::with_capacity(node_count(root));
-    let mut focus = None;
-    collect_node(root, &mut nodes, &mut focus);
-    let focus = focus.map(accesskit_node_id).unwrap_or(root_id);
+    let snapshot = AccessibilityTree::publish(root);
+    let root_id = snapshot
+        .nodes
+        .first()
+        .map(|node| accesskit_node_id(node.id))
+        .unwrap_or_else(|| accesskit_node_id(root.id));
+    let focus = snapshot
+        .nodes
+        .iter()
+        .find(|node| node.info.focused)
+        .map(|node| accesskit_node_id(node.id))
+        .unwrap_or(root_id);
+    let nodes = snapshot.nodes.iter().map(accesskit_node).collect();
 
     TreeUpdate {
         nodes,
@@ -26,36 +36,28 @@ pub fn build_accesskit_runtime_update(root: &WidgetNode) -> TreeUpdate {
     }
 }
 
-fn collect_node(
-    node: &WidgetNode,
-    out: &mut Vec<(AccessKitNodeId, Node)>,
-    focus: &mut Option<NodeId>,
-) {
-    let accesskit_id = accesskit_node_id(node.id);
-    let mut accesskit_node = Node::new(role_for(&node.accessibility.role));
-    if node.accessibility.focused && focus.is_none() {
-        *focus = Some(node.id);
-    }
+fn accesskit_node(node: &AccessibilityTreeNode) -> (AccessKitNodeId, Node) {
+    let mut accesskit_node = Node::new(role_for(&node.info.role));
 
-    if let Some(label) = accessible_label(node) {
+    if let Some(label) = node.info.label.clone() {
         accesskit_node.set_label(label);
     }
-    if let Some(description) = node.accessibility.description.clone() {
+    if let Some(description) = node.info.description.clone() {
         accesskit_node.set_description(description);
     }
-    if let Some(value) = node.accessibility.state.value.clone() {
+    if let Some(value) = node.info.state.value.clone() {
         accesskit_node.set_value(value);
     }
-    if node.accessibility.focusable {
+    if node.info.focusable {
         accesskit_node.add_action(Action::Focus);
     }
-    if node.accessibility.state.disabled {
+    if node.info.state.disabled {
         accesskit_node.set_disabled();
     }
-    if node.accessibility.state.selected {
+    if node.info.state.selected {
         accesskit_node.set_selected(true);
     }
-    if let Some(checked) = node.accessibility.state.checked {
+    if let Some(checked) = node.info.state.checked {
         accesskit_node.set_toggled(if checked {
             Toggled::True
         } else {
@@ -63,17 +65,17 @@ fn collect_node(
         });
         accesskit_node.add_action(Action::Click);
     }
-    if let Some(expanded) = node.accessibility.state.expanded {
+    if let Some(expanded) = node.info.state.expanded {
         accesskit_node.set_expanded(expanded);
     }
-    if let Some(min) = node.accessibility.state.value_min {
+    if let Some(min) = node.info.state.value_min {
         accesskit_node.set_min_numeric_value(min as f64);
     }
-    if let Some(max) = node.accessibility.state.value_max {
+    if let Some(max) = node.info.state.value_max {
         accesskit_node.set_max_numeric_value(max as f64);
     }
     if let Some(value) = node
-        .accessibility
+        .info
         .state
         .value
         .as_ref()
@@ -82,54 +84,65 @@ fn collect_node(
         accesskit_node.set_numeric_value(value);
     }
     if matches!(
-        node.accessibility.role,
+        node.info.role,
         AccessibilityRole::Button | AccessibilityRole::Switch | AccessibilityRole::Checkbox
     ) {
         accesskit_node.add_action(Action::Click);
     }
     if matches!(
-        node.accessibility.role,
+        node.info.role,
         AccessibilityRole::Slider | AccessibilityRole::TextInput
     ) {
         accesskit_node.add_action(Action::SetValue);
     }
 
     accesskit_node.set_bounds(Rect {
-        x0: node.layout.x as f64,
-        y0: node.layout.y as f64,
-        x1: (node.layout.x + node.layout.width) as f64,
-        y1: (node.layout.y + node.layout.height) as f64,
+        x0: node.bounds.x as f64,
+        y0: node.bounds.y as f64,
+        x1: (node.bounds.x + node.bounds.width) as f64,
+        y1: (node.bounds.y + node.bounds.height) as f64,
     });
     if !node.children.is_empty() {
-        let mut children = Vec::with_capacity(node.children.len());
-        children.extend(
-            node.children
-                .iter()
-                .map(|child| accesskit_node_id(child.id)),
-        );
+        let children: Vec<AccessKitNodeId> = node
+            .children
+            .iter()
+            .map(|child| accesskit_node_id(*child))
+            .collect();
         accesskit_node.set_children(children);
     }
-
-    out.push((accesskit_id, accesskit_node));
-    for child in &node.children {
-        collect_node(child, out, focus);
+    let related_ids = |ids: &[NodeId]| {
+        ids.iter()
+            .copied()
+            .map(accesskit_node_id)
+            .collect::<Vec<_>>()
+    };
+    if !node.relationships.controls.is_empty() {
+        accesskit_node.set_controls(related_ids(&node.relationships.controls));
     }
+    if !node.relationships.described_by.is_empty() {
+        accesskit_node.set_described_by(related_ids(&node.relationships.described_by));
+    }
+    if !node.relationships.labelled_by.is_empty() {
+        accesskit_node.set_labelled_by(related_ids(&node.relationships.labelled_by));
+    }
+    if !node.relationships.owns.is_empty() {
+        accesskit_node.set_owns(related_ids(&node.relationships.owns));
+    }
+    if !node.relationships.details.is_empty() {
+        accesskit_node.set_details(related_ids(&node.relationships.details));
+    }
+    if let Some(error_message) = node.relationships.error_message.first() {
+        accesskit_node.set_error_message(accesskit_node_id(*error_message));
+    }
+    if let Some(popover_trigger) = node.relationships.popover_trigger {
+        accesskit_node.set_popup_for(accesskit_node_id(popover_trigger));
+    }
+
+    (accesskit_node_id(node.id), accesskit_node)
 }
 
 fn accesskit_node_id(node_id: NodeId) -> AccessKitNodeId {
     AccessKitNodeId(node_id)
-}
-
-fn node_count(node: &WidgetNode) -> usize {
-    1 + node.children.iter().map(node_count).sum::<usize>()
-}
-
-fn accessible_label(node: &WidgetNode) -> Option<String> {
-    node.accessibility
-        .label
-        .clone()
-        .or_else(|| node.attributes.get("aria-label").cloned())
-        .or_else(|| node.attributes.get("content").cloned())
 }
 
 fn role_for(role: &AccessibilityRole) -> Role {
@@ -222,6 +235,7 @@ mod tests {
         slider.accessibility.role = AccessibilityRole::Slider;
         slider.accessibility.focusable = true;
         slider.accessibility.focused = true;
+        slider.state.focused = true;
         slider.accessibility.state.value = Some("42".to_string());
         slider.accessibility.state.value_min = Some(0.0);
         slider.accessibility.state.value_max = Some(100.0);
@@ -241,5 +255,48 @@ mod tests {
         assert_eq!(slider_node.min_numeric_value(), Some(0.0));
         assert_eq!(slider_node.max_numeric_value(), Some(100.0));
         assert!(slider_node.supports_action(Action::SetValue));
+    }
+
+    #[test]
+    fn accesskit_update_publishes_normalized_names_and_visibility() {
+        let mut root = node("box", 20);
+        let mut button = node("button", 21);
+        button.accessibility.role = AccessibilityRole::Button;
+        button.accessibility.focusable = true;
+        button.state.focused = true;
+
+        let mut hidden = node("text", 22);
+        hidden
+            .attributes
+            .insert("content".into(), "Hidden name".into());
+        hidden
+            .attributes
+            .insert("aria-hidden".into(), "true".into());
+        let mut visible = node("text", 23);
+        visible
+            .attributes
+            .insert("content".into(), "Visible name".into());
+        button.children.push(hidden);
+        button.children.push(visible);
+        root.children.push(button);
+
+        let update = build_accesskit_runtime_update(&root);
+
+        assert_eq!(update.focus, AccessKitNodeId(21));
+        assert_eq!(update.nodes.len(), 3);
+        let button_node = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == AccessKitNodeId(21))
+            .map(|(_, node)| node)
+            .expect("button");
+        assert_eq!(button_node.label(), Some("Visible name"));
+        assert_eq!(button_node.children(), &[AccessKitNodeId(23)]);
+        assert!(
+            !update
+                .nodes
+                .iter()
+                .any(|(id, _)| *id == AccessKitNodeId(22))
+        );
     }
 }

@@ -8,6 +8,7 @@ use crate::{FrontendCompositionResolver, LayeredStore};
 use mesh_core_component::template::{AttributeValue, ElementNode, ForNode, TemplateNode};
 use mesh_core_elements::{
     ComputedStyle, NodeId, StyleContext, StyleResolver, VariableStore, WidgetNode,
+    normalize_accessibility,
 };
 use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
@@ -250,10 +251,12 @@ fn build_widget_tree_from_component_inner(
         let mut container = WidgetNode::new("box");
         attach_module_id(&mut container, &host_manifest.package.id);
         container.children = children.into();
+        normalize_accessibility(&mut container);
         container
     } else {
         let mut container = WidgetNode::new("box");
         attach_module_id(&mut container, &host_manifest.package.id);
+        normalize_accessibility(&mut container);
         container
     }
 }
@@ -268,7 +271,7 @@ pub(crate) fn build_widget_node(
     instance_key: &str,
     composition: Option<&dyn FrontendCompositionResolver>,
 ) -> WidgetNode {
-    build_widget_node_inner(
+    let mut node = build_widget_node_inner(
         node,
         manifest,
         build_style,
@@ -278,7 +281,9 @@ pub(crate) fn build_widget_node(
         instance_key,
         composition,
         None,
-    )
+    );
+    normalize_accessibility(&mut node);
+    node
 }
 
 /// Build a template node as zero or more layout children. Control-flow nodes
@@ -432,7 +437,7 @@ pub(crate) fn build_widget_node_selective(
     previous: Option<&WidgetNode>,
     rebuild_node_ids: &HashSet<NodeId>,
 ) -> WidgetNode {
-    build_widget_node_inner(
+    let mut node = build_widget_node_inner(
         node,
         manifest,
         build_style,
@@ -442,7 +447,9 @@ pub(crate) fn build_widget_node_selective(
         instance_key,
         composition,
         previous.map(|previous| (previous, rebuild_node_ids)),
-    )
+    );
+    normalize_accessibility(&mut node);
+    node
 }
 
 #[allow(clippy::too_many_arguments)]

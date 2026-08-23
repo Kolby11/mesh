@@ -65,7 +65,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/08-ui-element-core/improvements.md)
 
-- [ ] Normalize roles, names, descriptions, hidden state, ARIA aliases, focus, relationships, and visibility after child construction and publish the semantic snapshot.
 - [ ] Use visible descendant text in accessible-name precedence and preserve hidden-child and locale behavior.
 - [ ] Generate one typed pseudo-state table for indexing, mutation, matching, invalidation, diagnostics, and tests.
 - [ ] Make compiler inheritance matching consume the actual element state.

@@ -542,6 +542,7 @@ impl CompiledFrontendModule {
         if mode == FrontendRenderMode::Surface {
             LayoutEngine::compute_with_measurer(&mut root, width as f32, height as f32, measurer);
         }
+        mesh_core_elements::normalize_accessibility(&mut root);
         root
     }
 

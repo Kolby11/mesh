@@ -176,6 +176,8 @@ pub(super) fn build_component_ref(
             container_context.container_width,
             container_context.container_height,
         ) {
+            let mut node = node;
+            mesh_core_elements::normalize_accessibility(&mut node);
             return node;
         }
     }
@@ -200,6 +202,7 @@ pub(super) fn build_component_ref(
     );
     node.attributes
         .insert("component".into(), component.name.clone());
+    mesh_core_elements::normalize_accessibility(&mut node);
     node
 }
 

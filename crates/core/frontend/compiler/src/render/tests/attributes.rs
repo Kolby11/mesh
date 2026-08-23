@@ -197,6 +197,7 @@ fn phase88_button_aliases_preserve_source_semantics_without_icon_shortcuts() {
         button.accessibility.role,
         mesh_core_elements::AccessibilityRole::Button
     );
+    assert_eq!(button.accessibility.label.as_deref(), Some("Play"));
     assert!(button.accessibility.state.pressed);
     assert!(button.accessibility.state.busy);
     assert_eq!(

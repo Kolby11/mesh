@@ -242,8 +242,31 @@ pub(super) fn attributes_fingerprint(node: &WidgetNode) -> u64 {
     }
     hash_accessibility_role(&node.accessibility.role, &mut hasher);
     node.accessibility.label.hash(&mut hasher);
+    node.accessibility.description.hash(&mut hasher);
     node.accessibility.focusable.hash(&mut hasher);
     node.accessibility.focused.hash(&mut hasher);
+    node.accessibility.hidden.hash(&mut hasher);
+    node.accessibility.visible.hash(&mut hasher);
+    node.accessibility.keyboard_shortcut.hash(&mut hasher);
+    node.accessibility.state.disabled.hash(&mut hasher);
+    node.accessibility.state.checked.hash(&mut hasher);
+    node.accessibility.state.expanded.hash(&mut hasher);
+    node.accessibility.state.selected.hash(&mut hasher);
+    node.accessibility.state.pressed.hash(&mut hasher);
+    node.accessibility.state.busy.hash(&mut hasher);
+    node.accessibility.state.invalid.hash(&mut hasher);
+    node.accessibility.state.required.hash(&mut hasher);
+    node.accessibility.state.value.hash(&mut hasher);
+    node.accessibility
+        .state
+        .value_min
+        .map(f32::to_bits)
+        .hash(&mut hasher);
+    node.accessibility
+        .state
+        .value_max
+        .map(f32::to_bits)
+        .hash(&mut hasher);
     hasher.finish()
 }
 

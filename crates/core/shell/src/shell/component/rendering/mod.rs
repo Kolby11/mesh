@@ -807,6 +807,10 @@ impl FrontendSurfaceComponent {
                 Some(trigger_kind),
             );
         }
+        // Runtime state and computed visibility are now final. Rebuild the
+        // semantic projection after children, styles, and layout so published
+        // snapshots cannot retain stale focus, names, or hidden descendants.
+        mesh_core_elements::normalize_accessibility(tree);
         self.annotate_selection_tree(tree, theme);
 
         // Store current interaction state for next frame's targeted restyle diff.
