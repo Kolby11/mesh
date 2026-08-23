@@ -184,6 +184,59 @@ fn script_write_to_props_reprojects_into_css() {
     );
 }
 
+const INVALID_PROP_WRITE_SOURCE: &str = r#"
+<props>
+  track_width: { type: "size", default: "20px" }
+</props>
+<template>
+  <slider class="slider"/>
+</template>
+<style>
+.slider { width: prop(track_width); }
+</style>
+<script lang="luau">
+function invalidate(self)
+  props.track_width = "not-a-size"
+end
+</script>
+"#;
+
+#[test]
+fn invalid_script_override_falls_back_to_the_valid_host_layer() {
+    let mut component = test_frontend_component(INVALID_PROP_WRITE_SOURCE);
+    component.settings_json = serde_json::json!({
+        "props": { "global": { "track_width": "28px" } }
+    });
+    component.runtimes.lock().unwrap().clear();
+    component.init_root_runtime().unwrap();
+
+    component
+        .call_namespaced_handler("invalidate", &[])
+        .unwrap();
+    component.invalidate_script_state();
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(200, 80);
+    component
+        .paint(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
+        .unwrap();
+
+    let slider = first_node_by_class(component.last_tree.as_ref().unwrap(), "slider").unwrap();
+    assert_eq!(
+        slider.computed_style.width,
+        mesh_core_elements::Dimension::Px(28.0),
+        "an invalid script value must not displace a valid global prop"
+    );
+    let props = component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get(component.root_instance_key())
+        .and_then(|runtime| runtime.script_ctx.state().get_ref("props").cloned())
+        .expect("runtime props");
+    assert_eq!(props["track_width"], serde_json::json!("28px"));
+}
+
 #[test]
 fn settings_reload_drops_an_invalid_override_to_the_declared_default() {
     let mut component = test_frontend_component(SETTINGS_PROP_SOURCE);

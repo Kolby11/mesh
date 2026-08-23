@@ -233,6 +233,7 @@ impl FrontendSurfaceComponent {
             Self::drain_script_diagnostics(diagnostics, runtime);
             return false;
         }
+        Self::normalize_script_props(diagnostics, runtime);
         Self::drain_script_diagnostics(diagnostics, runtime);
         // A render hook that refreshed state no template expression reads has
         // no effect on the tree, exactly as for an event handler. Clear the
@@ -264,6 +265,113 @@ impl FrontendSurfaceComponent {
                 "interface '{}' unavailable for '{}': {}",
                 diagnostic.interface, diagnostic.module_id, diagnostic.reason
             ));
+        }
+    }
+
+    /// Keep an invalid script assignment from displacing the last valid host
+    /// value. Host layers are resolved before the runtime is created and are
+    /// retained in `host_props`, so a rejected script value falls back to the
+    /// highest valid non-script layer rather than all the way to the declared
+    /// default in the CSS projection.
+    pub(super) fn normalize_script_props(
+        diagnostics: &Option<Diagnostics>,
+        runtime: &mut EmbeddedFrontendRuntime,
+    ) {
+        if runtime.prop_definitions.is_empty() {
+            return;
+        }
+        let Some(current) = runtime.script_ctx.state().get_ref("props").cloned() else {
+            return;
+        };
+        let Some(current) = current.as_object() else {
+            let issue_code = format!(
+                "prop-invalid:{}:{}:table",
+                runtime.module_id, runtime.script_ctx.instance_id
+            );
+            let message =
+                "component props state must be an object; restoring the last valid host values";
+            tracing::warn!(
+                module_id = %runtime.module_id,
+                instance_id = %runtime.script_ctx.instance_id,
+                "{message}"
+            );
+            if let Some(diagnostics) = diagnostics {
+                diagnostics.record_issue(
+                    issue_code,
+                    mesh_core_diagnostics::IssueSeverity::Warning,
+                    message,
+                );
+            }
+            let _ = runtime
+                .script_ctx
+                .set_member_state("props", runtime.host_props.clone());
+            return;
+        };
+        let host = runtime.host_props.as_object();
+        let mut normalized = current.clone();
+        let mut changed = false;
+
+        for def in &runtime.prop_definitions {
+            let issue_code = format!(
+                "prop-invalid:{}:{}:{}",
+                runtime.module_id, runtime.script_ctx.instance_id, def.name
+            );
+            match current.get(&def.name) {
+                Some(value) => match validate_json_prop(def, value.clone()) {
+                    Ok(_) => {
+                        if let Some(diagnostics) = diagnostics {
+                            diagnostics.resolve_issue(&issue_code);
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            module_id = %runtime.module_id,
+                            instance_id = %runtime.script_ctx.instance_id,
+                            prop = %def.name,
+                            error = %error,
+                            "invalid script prop override ignored; restoring the highest valid host value"
+                        );
+                        if let Some(diagnostics) = diagnostics {
+                            diagnostics.record_issue(
+                                issue_code,
+                                mesh_core_diagnostics::IssueSeverity::Warning,
+                                format!(
+                                    "invalid script override for prop `{}`: {error}; using the highest valid host value",
+                                    def.name
+                                ),
+                            );
+                        }
+                        match host.and_then(|host| host.get(&def.name)) {
+                            Some(value) => {
+                                normalized.insert(def.name.clone(), value.clone());
+                            }
+                            None => {
+                                normalized.remove(&def.name);
+                            }
+                        }
+                        changed = true;
+                    }
+                },
+                None => {
+                    if let Some(value) = host.and_then(|host| host.get(&def.name)) {
+                        normalized.insert(def.name.clone(), value.clone());
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        if changed {
+            if let Err(error) = runtime
+                .script_ctx
+                .set_member_state("props", serde_json::Value::Object(normalized))
+            {
+                tracing::warn!(
+                    module_id = %runtime.module_id,
+                    instance_id = %runtime.script_ctx.instance_id,
+                    "failed to restore valid component props after an invalid script override: {error}"
+                );
+            }
         }
     }
 
@@ -514,12 +622,19 @@ impl FrontendSurfaceComponent {
             }
         }
 
-        Ok(EmbeddedFrontendRuntime {
+        let mut runtime = EmbeddedFrontendRuntime {
             module_id: component_id,
             script_ctx,
+            prop_definitions: component
+                .props
+                .as_ref()
+                .map(|block| block.props.clone())
+                .unwrap_or_default(),
             host_props,
             cached_state_clone: None,
-        })
+        };
+        Self::normalize_script_props(&self.diagnostics, &mut runtime);
+        Ok(runtime)
     }
 
     pub(super) fn create_runtime(
@@ -828,6 +943,7 @@ impl FrontendSurfaceComponent {
             self.sync_runtime_generation(&runtime_key, generation);
             return Ok(Vec::new());
         }
+        Self::normalize_script_props(&self.diagnostics, runtime);
         Self::drain_script_diagnostics(&self.diagnostics, runtime);
         let state_dirty = runtime.script_ctx.state().is_dirty();
         let state_affects_template = runtime.script_ctx.dirty_state_affects_template();
@@ -957,6 +1073,7 @@ impl FrontendSurfaceComponent {
                 continue;
             }
             neighbor.script_ctx.resync_state();
+            Self::normalize_script_props(&self.diagnostics, neighbor);
             Self::drain_script_diagnostics(&self.diagnostics, neighbor);
             if neighbor.script_ctx.state().is_dirty() {
                 state_dirty = true;
@@ -1456,11 +1573,9 @@ mod handler_call_tests {
 
 /// Publish each declared prop's precedence-resolved value under `props.<name>`
 /// in script state. The compiler reads these to project `prop(name)` into CSS,
-/// and scripts read them as `props.name`. Precedence applied here: declared
-/// default, overridden by an instance prop passed at the embed site.
-///
-/// User-settings layers (global / per-instance) fold into this same map once the
-/// settings projection lands; the funnel key (`props.<name>`) stays the same.
+/// and scripts read them as `props.name`. Every layer is validated before it
+/// can win; an invalid higher-precedence value is ignored so the next valid
+/// layer remains effective.
 pub(super) fn publish_resolved_props(
     script_ctx: &mut ScriptContext,
     component: &mesh_core_component::ComponentFile,
@@ -1494,29 +1609,58 @@ pub(super) fn resolved_props_json(
         .and_then(|instances| instances.get(instance_key))
         .and_then(serde_json::Value::as_object);
     for def in &block.props {
-        let resolved = def
-            .default
-            .as_ref()
-            .map(prop_default_to_json)
-            .into_iter()
-            .chain(
-                global_settings
-                    .and_then(|settings| settings.get(&def.name))
-                    .cloned(),
-            )
-            .chain(instance_props.get(&def.name).cloned())
-            .chain(
-                instance_settings
-                    .and_then(|settings| settings.get(&def.name))
-                    .cloned(),
-            )
-            .last()
-            .and_then(|value| validate_json_prop(def, value));
+        let mut candidates = Vec::with_capacity(4);
+        if let Some(default) = def.default.as_ref().map(prop_default_to_json) {
+            candidates.push((PropLayer::Default, default));
+        }
+        if let Some(value) = global_settings.and_then(|settings| settings.get(&def.name)) {
+            candidates.push((PropLayer::Global, value.clone()));
+        }
+        if let Some(value) = instance_props.get(&def.name) {
+            candidates.push((PropLayer::Instance, value.clone()));
+        }
+        if let Some(value) = instance_settings.and_then(|settings| settings.get(&def.name)) {
+            candidates.push((PropLayer::PerInstance, value.clone()));
+        }
+
+        let resolved = candidates.into_iter().rev().find_map(|(layer, value)| {
+            match validate_json_prop(def, value) {
+                Ok(value) => Some(value),
+                Err(error) => {
+                    tracing::warn!(
+                        prop = %def.name,
+                        layer = layer.as_str(),
+                        error = %error,
+                        "invalid prop override ignored; trying the next lower-precedence value"
+                    );
+                    None
+                }
+            }
+        });
         if let Some(value) = resolved {
             props.insert(def.name.clone(), value);
         }
     }
     serde_json::Value::Object(props)
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PropLayer {
+    Default,
+    Global,
+    Instance,
+    PerInstance,
+}
+
+impl PropLayer {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Global => "global",
+            Self::Instance => "instance",
+            Self::PerInstance => "per_instance",
+        }
+    }
 }
 
 /// Apply a fresh host-owned prop snapshot without overwriting script values.
@@ -1561,18 +1705,17 @@ fn prop_default_to_json(value: &mesh_core_component::PropValue) -> serde_json::V
 fn validate_json_prop(
     def: &mesh_core_component::PropDef,
     value: serde_json::Value,
-) -> Option<serde_json::Value> {
-    let prop_value = mesh_core_component::json_to_prop_value_ref(&value)?;
-    match mesh_core_component::validate_prop_value(def, &prop_value) {
-        Ok(()) => Some(value),
-        Err(err) => {
-            tracing::warn!(
-                "invalid value for prop `{}` from settings/instance state ignored: {err}",
-                def.name
-            );
-            None
-        }
-    }
+) -> Result<serde_json::Value, String> {
+    let prop_value = mesh_core_component::json_to_prop_value_ref(&value).ok_or_else(|| {
+        format!(
+            "prop `{}` expects a {}, found null",
+            def.name,
+            def.ty.lua_type()
+        )
+    })?;
+    mesh_core_component::validate_prop_value(def, &prop_value)
+        .map(|_| value)
+        .map_err(|error| error.message)
 }
 
 pub(super) fn script_has_service_read(
@@ -1581,6 +1724,73 @@ pub(super) fn script_has_service_read(
     _service_name: &str,
 ) -> bool {
     script_ctx.can_read_service_interface(interface)
+}
+
+#[cfg(test)]
+mod prop_resolution_tests {
+    use super::*;
+
+    fn component_with_props() -> mesh_core_component::ComponentFile {
+        mesh_core_component::parse_component(
+            r#"
+<props>
+  width: { type: "size", default: "20px" }
+</props>
+<template><box /></template>
+"#,
+        )
+        .expect("component with props")
+    }
+
+    #[test]
+    fn invalid_higher_layers_fall_back_to_the_highest_valid_value() {
+        let component = component_with_props();
+
+        let settings = serde_json::json!({
+            "props": {
+                "global": { "width": "28px" },
+                "instances": { "instance": { "width": "not-a-size" } }
+            }
+        });
+        let instance_props =
+            HashMap::from([("width".to_string(), serde_json::json!("also-not-a-size"))]);
+
+        assert_eq!(
+            resolved_props_json(&component, &instance_props, &settings, "instance"),
+            serde_json::json!({ "width": "28px" })
+        );
+    }
+
+    #[test]
+    fn a_valid_instance_layer_beats_an_invalid_global_override() {
+        let component = component_with_props();
+        let settings = serde_json::json!({
+            "props": { "global": { "width": "not-a-size" } }
+        });
+        let instance_props = HashMap::from([("width".to_string(), serde_json::json!("32px"))]);
+
+        assert_eq!(
+            resolved_props_json(&component, &instance_props, &settings, "instance"),
+            serde_json::json!({ "width": "32px" })
+        );
+    }
+
+    #[test]
+    fn invalid_overrides_leave_the_declared_default_as_the_effective_value() {
+        let component = component_with_props();
+        let settings = serde_json::json!({
+            "props": {
+                "global": { "width": "not-a-size" },
+                "instances": { "instance": { "width": null } }
+            }
+        });
+        let instance_props = HashMap::from([("width".to_string(), serde_json::json!(false))]);
+
+        assert_eq!(
+            resolved_props_json(&component, &instance_props, &settings, "instance"),
+            serde_json::json!({ "width": "20px" })
+        );
+    }
 }
 
 impl FrontendSurfaceComponent {

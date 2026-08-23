@@ -1047,6 +1047,9 @@ impl ElementMetricUsage {
 struct EmbeddedFrontendRuntime {
     module_id: String,
     script_ctx: ScriptContext,
+    /// The declarations used to validate script writes to the reactive props
+    /// table. Host layers have already been resolved into `host_props`.
+    prop_definitions: Vec<mesh_core_component::PropDef>,
     /// Last prop snapshot supplied by declaration/settings/instance layers.
     /// Used on settings reload to distinguish host-owned values from a newer
     /// script assignment, which has higher precedence and must survive.

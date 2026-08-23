@@ -216,6 +216,6 @@ live compositor/lifecycle matrix remain separate follow-up work.
 
 ## Next
 
-The next component-language item selects the highest valid value across
-prop/configuration layers while retaining invalid overrides only in diagnostics;
+The next component-language item makes JSON-to-prop conversion scalar-only until
+an explicit structured prop type exists;
 the remaining presentation/resource follow-ups stay separate from this work.
