@@ -14,6 +14,7 @@ pub(super) struct SurfaceGenerations {
     frame: u64,
     allocated_buffer_generation: u64,
     committed_buffer_generation: u64,
+    output_generation: u64,
     pending_frame: Option<u64>,
 }
 
@@ -25,6 +26,7 @@ impl SurfaceGenerations {
             frame: 0,
             allocated_buffer_generation: 0,
             committed_buffer_generation: 0,
+            output_generation: 0,
             pending_frame: None,
         }
     }
@@ -52,6 +54,14 @@ impl SurfaceGenerations {
             "committed buffer generation must refer to an allocated slot"
         );
         self.committed_buffer_generation = generation;
+    }
+
+    pub(super) fn advance_output(&mut self) -> bool {
+        let Some(generation) = self.output_generation.checked_add(1) else {
+            return false;
+        };
+        self.output_generation = generation;
+        true
     }
 
     pub(super) fn begin_frame(
@@ -102,6 +112,7 @@ impl SurfaceGenerations {
             configure: self.configure,
             frame: self.frame,
             buffer: self.committed_buffer_generation,
+            output: self.output_generation,
         }
     }
 }
@@ -303,8 +314,37 @@ impl SurfaceEntry {
         }
     }
 
-    pub(super) fn surface_generation(&self) -> SurfaceGeneration {
+    pub(in crate::wayland_surface) fn surface_generation(&self) -> SurfaceGeneration {
         self.generations.snapshot()
+    }
+
+    /// Adopt a new output membership. The compositor can send enter/leave in
+    /// either order while a surface moves between outputs, so only a real
+    /// association change advances the output generation. A changed output
+    /// requires a full redraw because output-dependent size and scale inputs
+    /// may have changed even when the retained tree did not.
+    pub(in crate::wayland_surface) fn update_output(
+        &mut self,
+        output: Option<wl_output::WlOutput>,
+    ) -> bool {
+        if self.output.as_ref() == output.as_ref() {
+            return false;
+        }
+        self.output = output;
+        self.mark_output_revision_changed()
+    }
+
+    /// Invalidate output-dependent presentation state after the compositor
+    /// revises an output's mode, scale, or logical geometry.
+    pub(in crate::wayland_surface) fn mark_output_revision_changed(&mut self) -> bool {
+        if !self.generations.advance_output() {
+            tracing::error!(
+                object_generation = self.generations.snapshot().object,
+                "layer_shell: output generation exhausted"
+            );
+        }
+        self.needs_full_redraw = true;
+        true
     }
 
     pub(in crate::wayland_surface) fn complete_frame_callback(

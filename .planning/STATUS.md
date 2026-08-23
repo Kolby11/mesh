@@ -42,14 +42,18 @@ surface-state transaction. Pixel-free render passes issue a state-only
 shell region caches are invalidated whenever a configure can replace or remap
 the compositor object.
 
-Live presentation entries now carry monotonic object, configure, frame, and
-buffer generations. Role creation reserves a unique object generation,
+Live presentation entries now carry monotonic object, configure, frame, buffer,
+and output generations. Role creation reserves a unique object generation,
 accepted compositor configures advance the per-object configure generation,
 each SHM slot receives a non-reused buffer identity, and each
-`wl_surface.frame` request carries an exact object/frame/buffer token. Late
-callbacks from timed-out frames or replaced roles are ignored instead of
+`wl_surface.frame` request carries an exact object/frame/buffer token. Output
+enter/leave, output geometry updates, and output destruction advance the output
+generation, invalidate output-dependent presentation state, and force a full
+redraw; stale leave/destroy notifications cannot clear a newer membership.
+Late callbacks from timed-out frames or replaced roles are ignored instead of
 releasing a newer pacing gate; the current generation snapshot is available to
-diagnostics and identifies the most recently committed SHM slot.
+diagnostics and identifies the most recently committed SHM slot and output
+membership revision.
 
 Icon bitmap/SVG and font-glyph preparation still share a bounded render resource
 broker, with revision-aware cache handoff and linked-file invalidation. Typed
@@ -64,7 +68,6 @@ repository-settings fixture, which rejects its `revision` key as unknown.
 
 ## Next
 
-Add output membership and negotiated-capability generations plus the remaining
-semantic presentation state diff. Pointer-button identity, IME/text-input-v3,
-connection recreation, and resource preparation/text shaping remain separate
-follow-up work.
+Add negotiated-capability generations plus the remaining semantic presentation
+state diff. Pointer-button identity, IME/text-input-v3, connection recreation,
+and resource preparation/text shaping remain separate follow-up work.

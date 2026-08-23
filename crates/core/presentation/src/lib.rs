@@ -85,7 +85,9 @@ pub enum SurfaceStateStatus {
 /// buffer generation, and each requested frame gets a new frame generation.
 /// Presentation callbacks must match the object and frame generations that are
 /// still current before they can release pacing. The buffer generation is the
-/// identity of the slot whose contents were most recently committed.
+/// identity of the slot whose contents were most recently committed. The
+/// output generation advances whenever the surface's output association or
+/// the associated output's geometry is revised.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SurfaceGeneration {
     pub object: u64,
@@ -93,6 +95,8 @@ pub struct SurfaceGeneration {
     pub frame: u64,
     /// Zero until the first buffer commit on this compositor object.
     pub buffer: u64,
+    /// Zero until the compositor reports the surface's first output.
+    pub output: u64,
 }
 
 /// A compositor-owned surface lifecycle transition that the shell must

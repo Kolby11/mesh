@@ -103,7 +103,13 @@ impl CompositorHandler for State {
             .find(|(_, entry)| entry.wl_surface() == surface)
         {
             tracing::debug!(surface_id = surface_id.as_str(), "wl_surface::enter fired");
-            entry.output = Some(output.clone());
+            if entry.update_output(Some(output.clone())) {
+                tracing::debug!(
+                    surface_id = surface_id.as_str(),
+                    output_generation = entry.surface_generation().output,
+                    "wl_surface::enter updated output generation"
+                );
+            }
         }
     }
 
@@ -114,13 +120,18 @@ impl CompositorHandler for State {
         surface: &wl_surface::WlSurface,
         output: &wl_output::WlOutput,
     ) {
-        if let Some(entry) = self
+        if let Some((surface_id, entry)) = self
             .surfaces
-            .values_mut()
-            .find(|entry| entry.wl_surface() == surface)
+            .iter_mut()
+            .find(|(_, entry)| entry.wl_surface() == surface)
             && entry.output.as_ref() == Some(output)
+            && entry.update_output(None)
         {
-            entry.output = None;
+            tracing::debug!(
+                surface_id = surface_id.as_str(),
+                output_generation = entry.surface_generation().output,
+                "wl_surface::leave cleared output membership"
+            );
         }
     }
 }
@@ -132,14 +143,38 @@ impl OutputHandler for State {
 
     fn new_output(&mut self, _c: &Connection, _q: &QueueHandle<Self>, _o: wl_output::WlOutput) {}
 
-    fn update_output(&mut self, _c: &Connection, _q: &QueueHandle<Self>, _o: wl_output::WlOutput) {}
+    fn update_output(
+        &mut self,
+        _c: &Connection,
+        _q: &QueueHandle<Self>,
+        output: wl_output::WlOutput,
+    ) {
+        for (surface_id, entry) in &mut self.surfaces {
+            if entry.output.as_ref() == Some(&output) && entry.mark_output_revision_changed() {
+                tracing::debug!(
+                    surface_id = surface_id.as_str(),
+                    output_generation = entry.surface_generation().output,
+                    "wl_output update invalidated surface output revision"
+                );
+            }
+        }
+    }
 
     fn output_destroyed(
         &mut self,
         _c: &Connection,
         _q: &QueueHandle<Self>,
-        _o: wl_output::WlOutput,
+        output: wl_output::WlOutput,
     ) {
+        for (surface_id, entry) in &mut self.surfaces {
+            if entry.output.as_ref() == Some(&output) && entry.update_output(None) {
+                tracing::debug!(
+                    surface_id = surface_id.as_str(),
+                    output_generation = entry.surface_generation().output,
+                    "wl_output destruction cleared surface output membership"
+                );
+            }
+        }
     }
 }
 

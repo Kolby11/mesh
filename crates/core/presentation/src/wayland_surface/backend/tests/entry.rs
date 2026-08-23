@@ -86,3 +86,14 @@ fn frame_rejects_an_unallocated_buffer_generation() {
 
     assert!(matches!(error, PresentationError::BufferAttach(_)));
 }
+
+#[test]
+fn output_generation_advances_for_each_membership_revision() {
+    let mut generations = SurfaceGenerations::new(7);
+
+    assert_eq!(generations.snapshot().output, 0);
+    assert!(generations.advance_output());
+    assert_eq!(generations.snapshot().output, 1);
+    assert!(generations.advance_output());
+    assert_eq!(generations.snapshot().output, 2);
+}
