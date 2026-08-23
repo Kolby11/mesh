@@ -247,18 +247,9 @@ pub(super) fn annotate_runtime_tree_inner(
     node.set_mesh_key(key.clone());
 
     let authored = node.authored_payload();
-    let disabled = authored
-        .attributes
-        .get("disabled")
-        .is_some_and(|value| truthy_attribute(value))
-        || authored
-            .attributes
-            .get("aria-disabled")
-            .is_some_and(|value| truthy_attribute(value));
-    let authored_checked = authored
-        .attributes
-        .get("checked")
-        .map(|value| matches!(value.as_str(), "true" | "1" | "checked"));
+    let authored_attributes = authored.attributes.clone();
+    let authored_checked =
+        mesh_core_elements::PseudoState::Checked.authored_value(&authored.attributes);
     let is_input = authored.tag == "input";
     let is_slider = authored.tag == "slider";
     let is_switch_or_checkbox = matches!(authored.tag.as_str(), "switch" | "checkbox");
@@ -290,11 +281,16 @@ pub(super) fn annotate_runtime_tree_inner(
                 && is_input),
         hovered: context.hovered_ids.contains(&node_id),
         active: context.active_id == Some(node_id),
-        disabled,
-        checked,
         window: context.window,
         ..ElementState::default()
     };
+    for spec in mesh_core_elements::pseudo_state_specs() {
+        if let Some(value) = spec.state.authored_value(&authored_attributes) {
+            spec.state.set_value(&mut node.state, value);
+        }
+    }
+    // Runtime widget state is authoritative over the authored fallback.
+    mesh_core_elements::PseudoState::Checked.set_value(&mut node.state, checked);
     if node.state.hovered {
         tracing::trace!(
             "[hover] annotate: key={key} tag={} set hovered=true",
@@ -362,8 +358,8 @@ pub(super) fn annotate_runtime_tree_inner(
                 if checked { "true" } else { "false" }.into(),
             );
         }
-        node.state.checked = checked;
-        node.state.selected = checked;
+        mesh_core_elements::PseudoState::Checked.set_value(&mut node.state, checked);
+        mesh_core_elements::PseudoState::Selected.set_value(&mut node.state, checked);
         node.accessibility.state.checked = Some(checked);
         node.accessibility.state.selected = checked;
     }
@@ -376,7 +372,7 @@ pub(super) fn annotate_runtime_tree_inner(
             .or(authored_value)
     {
         node.attributes.insert("value".into(), value.clone());
-        node.state.value = true;
+        mesh_core_elements::PseudoState::Value.set_value(&mut node.state, true);
         node.accessibility.state.value = Some(value);
     }
 
@@ -480,8 +476,4 @@ pub(super) fn resolved_slider_value(
 
 pub(super) fn float_eq(left: f32, right: f32) -> bool {
     (left - right).abs() <= f32::EPSILON
-}
-
-pub(super) fn truthy_attribute(value: &str) -> bool {
-    matches!(value, "" | "true" | "1" | "disabled" | "checked")
 }

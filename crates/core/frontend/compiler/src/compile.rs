@@ -55,6 +55,13 @@ pub enum CompileFrontendError {
         message: String,
         span: SourceSpan,
     },
+
+    #[error("unsupported pseudo-state :{state} in component source {path} at bytes {span:?}")]
+    UnsupportedPseudoState {
+        path: PathBuf,
+        state: String,
+        span: SourceSpan,
+    },
 }
 
 impl CompileFrontendError {
@@ -63,9 +70,9 @@ impl CompileFrontendError {
     /// no component source range.
     pub fn source_span(&self) -> Option<SourceSpan> {
         match self {
-            Self::ParseSource { span, .. } | Self::StandaloneComponentViolation { span, .. } => {
-                Some(*span)
-            }
+            Self::ParseSource { span, .. }
+            | Self::StandaloneComponentViolation { span, .. }
+            | Self::UnsupportedPseudoState { span, .. } => Some(*span),
             Self::NotFrontendModule { .. }
             | Self::MissingFrontendEntrypoint { .. }
             | Self::ReadSource { .. }
@@ -261,11 +268,56 @@ fn parse_component_file(path: &Path) -> Result<ComponentFile, CompileFrontendErr
             path: path.to_path_buf(),
             source,
         })?;
-    parse_component(&source).map_err(|source| CompileFrontendError::ParseSource {
-        path: path.to_path_buf(),
-        span: source.span(),
-        source,
-    })
+    let component =
+        parse_component(&source).map_err(|source| CompileFrontendError::ParseSource {
+            path: path.to_path_buf(),
+            span: source.span(),
+            source,
+        })?;
+    validate_component_pseudo_states(path, &component)?;
+    Ok(component)
+}
+
+fn validate_component_pseudo_states(
+    path: &Path,
+    component: &ComponentFile,
+) -> Result<(), CompileFrontendError> {
+    fn visit(
+        selector: &mesh_core_component::style::Selector,
+        path: &Path,
+        span: SourceSpan,
+    ) -> Result<(), CompileFrontendError> {
+        match selector {
+            mesh_core_component::style::Selector::State(_, state) => {
+                if mesh_core_elements::PseudoState::from_name(state).is_none() {
+                    return Err(CompileFrontendError::UnsupportedPseudoState {
+                        path: path.to_path_buf(),
+                        state: state.clone(),
+                        span,
+                    });
+                }
+                Ok(())
+            }
+            mesh_core_component::style::Selector::Compound(parts) => {
+                for part in parts {
+                    visit(part, path, span)?;
+                }
+                Ok(())
+            }
+            mesh_core_component::style::Selector::Universal
+            | mesh_core_component::style::Selector::Tag(_)
+            | mesh_core_component::style::Selector::Class(_)
+            | mesh_core_component::style::Selector::Id(_) => Ok(()),
+        }
+    }
+
+    let Some(style) = &component.style else {
+        return Ok(());
+    };
+    for rule in &style.rules {
+        visit(&rule.selector, path, style.span)?;
+    }
+    Ok(())
 }
 
 fn collect_imports(
@@ -921,6 +973,41 @@ mod tests {
 
     fn component(source: &str) -> ComponentFile {
         parse_component(source).unwrap()
+    }
+
+    #[test]
+    fn known_pseudo_states_are_accepted_by_compiler_validation() {
+        let source = r#"
+<template><box /></template>
+<style>
+box:hover { opacity: 0.9; }
+box:required { opacity: 0.8; }
+box:selected { opacity: 0.7; }
+box:expanded { opacity: 0.6; }
+box:pressed { opacity: 0.5; }
+box:invalid { opacity: 0.4; }
+box:value { opacity: 0.3; }
+</style>
+"#;
+        let component = component(source);
+        validate_component_pseudo_states(Path::new("/tmp/states.mesh"), &component).unwrap();
+    }
+
+    #[test]
+    fn unknown_pseudo_states_have_a_source_owned_compiler_diagnostic() {
+        let source = r#"
+<template><box /></template>
+<style>box:pressedly { opacity: 0.5; }</style>
+"#;
+        let component = component(source);
+        let error = validate_component_pseudo_states(Path::new("/tmp/states.mesh"), &component)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CompileFrontendError::UnsupportedPseudoState { ref state, span, .. }
+                if state == "pressedly" && span == component.style.as_ref().unwrap().span
+        ));
+        assert!(error.source_span().is_some());
     }
 
     #[test]

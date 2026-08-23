@@ -1,5 +1,6 @@
 use super::super::attrs::*;
 use super::super::index::*;
+use super::super::matching::selector_matches_attrs;
 use super::super::state::*;
 use super::super::*;
 use super::common::*;
@@ -95,6 +96,25 @@ fn state_to_rules_handles_compound_selector_with_state() {
     let index = StyleRuleIndex::new(&rules);
 
     assert_eq!(index.rules_for_state_bit(STATE_HOVERED), &[0]);
+}
+
+#[test]
+fn every_typed_pseudo_state_indexes_and_matches_from_the_same_table() {
+    for spec in crate::pseudo_state_specs() {
+        let rules = vec![rule_with_state(spec.name)];
+        let index = StyleRuleIndex::new(&rules);
+        assert_eq!(index.rules_for_state_bit(spec.bit), &[0], "{}", spec.name);
+
+        let mut state = ElementState::default();
+        spec.state.set_value(&mut state, true);
+        let attrs = StyleNodeAttrs::new("box", &[], None, state);
+        let selector = Selector::State("*".into(), spec.name.into());
+        assert!(selector_matches_attrs(&selector, &attrs), "{}", spec.name);
+
+        spec.state.set_value(&mut state, false);
+        let attrs = StyleNodeAttrs::new("box", &[], None, state);
+        assert!(!selector_matches_attrs(&selector, &attrs), "{}", spec.name);
+    }
 }
 
 #[test]

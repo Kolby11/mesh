@@ -94,6 +94,48 @@ fn pseudo_state_annotation_sets_disabled_and_checked_deterministically() {
 }
 
 #[test]
+fn pseudo_state_annotation_projects_authored_states_through_the_typed_table() {
+    let mut tree = root_with(vec![
+        child_with_attrs(
+            "input",
+            &[
+                ("readonly", "true"),
+                ("required", "true"),
+                ("invalid", "true"),
+                ("value", "ready"),
+            ],
+        ),
+        child_with_attrs("tab", &[("selected", "true")]),
+        child_with_attrs("details", &[("expanded", "true")]),
+        child_with_attrs("button", &[("pressed", "true")]),
+    ]);
+
+    annotate_runtime_tree(
+        &mut tree,
+        "root".to_string(),
+        &None,
+        &None,
+        &[],
+        None,
+        None,
+        &HashMap::new(),
+        &mut HashMap::new(),
+        &mut HashMap::new(),
+        &HashMap::new(),
+        &mut HashMap::new(),
+    );
+
+    let input = node_by_mesh_key(&tree, "root/0");
+    assert!(input.state.read_only);
+    assert!(input.state.required);
+    assert!(input.state.invalid);
+    assert!(input.state.value);
+    assert!(node_by_mesh_key(&tree, "root/1").state.selected);
+    assert!(node_by_mesh_key(&tree, "root/2").state.expanded);
+    assert!(node_by_mesh_key(&tree, "root/3").state.pressed);
+}
+
+#[test]
 fn pseudo_state_restyle_applies_runtime_state_after_rebuild() {
     let mut component = test_frontend_component(
         r#"
@@ -228,9 +270,21 @@ fn targeted_restyle_tracks_active_checked_and_focus_visible_changes() {
         .insert(runtime_node_id_for_key("root/0/1"), true);
     component.focused_key = Some("root/0/2".into());
     component.focus_visible_key = Some("root/0/2".into());
-    assert!(component.cached_restyle_state_dependencies.active);
-    assert!(component.cached_restyle_state_dependencies.checked);
-    assert!(component.cached_restyle_state_dependencies.focus_visible);
+    assert!(
+        component
+            .cached_restyle_state_dependencies
+            .contains(mesh_core_elements::PseudoState::Active)
+    );
+    assert!(
+        component
+            .cached_restyle_state_dependencies
+            .contains(mesh_core_elements::PseudoState::Checked)
+    );
+    assert!(
+        component
+            .cached_restyle_state_dependencies
+            .contains(mesh_core_elements::PseudoState::FocusVisible)
+    );
     let changed = component.collect_interaction_changed_node_ids();
     assert!(
         changed

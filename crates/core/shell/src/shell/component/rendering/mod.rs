@@ -137,14 +137,15 @@ impl FrontendSurfaceComponent {
     /// sync with imported modules and hot source reloads.
     pub(super) fn module_styles_have_state_rules(&mut self) -> bool {
         self.module_restyle_rules();
-        self.cached_restyle_state_dependencies.any
+        self.cached_restyle_state_dependencies.mask != 0
     }
 
     /// Whether a pointer hover transition can change any rule in this surface,
     /// including rules contributed by imported component modules.
     pub(super) fn module_styles_have_hover_rules(&mut self) -> bool {
         self.module_restyle_rules();
-        self.cached_restyle_state_dependencies.hover
+        self.cached_restyle_state_dependencies
+            .contains(mesh_core_elements::PseudoState::Hovered)
     }
 
     pub(super) fn requested_layout_size(&self) -> (u32, u32) {
@@ -826,7 +827,10 @@ impl FrontendSurfaceComponent {
                 .map(runtime_node_id_for_key)
         });
         self.previous_active_key = self.pointer_down_id;
-        if self.cached_restyle_state_dependencies.checked {
+        if self.cached_restyle_state_dependencies.contains_any([
+            mesh_core_elements::PseudoState::Checked,
+            mesh_core_elements::PseudoState::Selected,
+        ]) {
             self.previous_checked_values
                 .clone_from(&self.checked_values);
         } else {
@@ -866,7 +870,7 @@ impl FrontendSurfaceComponent {
         // Hover paths are ordered root-to-leaf chains. Only the tails after
         // their common prefix changed hover state; walking those tails avoids
         // the quadratic pair of `Vec::contains` scans on deep trees.
-        if dependencies.hover {
+        if dependencies.contains(mesh_core_elements::PseudoState::Hovered) {
             collect_hover_changed_ids(
                 &self.previous_hovered_path,
                 &self.hovered_path,
@@ -885,11 +889,13 @@ impl FrontendSurfaceComponent {
 
         // Focus keys remain at input and handler boundaries; restyle diffs use
         // the stable identities computed once here.
-        if dependencies.focus && self.previous_focused_key != focused_id {
+        if dependencies.contains(mesh_core_elements::PseudoState::Focused)
+            && self.previous_focused_key != focused_id
+        {
             changed_ids.extend(self.previous_focused_key.into_iter().chain(focused_id));
         }
 
-        if dependencies.focus_visible
+        if dependencies.contains(mesh_core_elements::PseudoState::FocusVisible)
             && (self.previous_focus_visible_key != focus_visible_id
                 || self.previous_focused_key != focused_id)
         {
@@ -904,7 +910,9 @@ impl FrontendSurfaceComponent {
             changed_ids.extend(self.previous_focused_key.into_iter().chain(focused_id));
         }
 
-        if dependencies.active && self.previous_active_key != self.pointer_down_id {
+        if dependencies.contains(mesh_core_elements::PseudoState::Active)
+            && self.previous_active_key != self.pointer_down_id
+        {
             changed_ids.extend(
                 self.previous_active_key
                     .into_iter()
@@ -912,7 +920,10 @@ impl FrontendSurfaceComponent {
             );
         }
 
-        if dependencies.checked {
+        if dependencies.contains_any([
+            mesh_core_elements::PseudoState::Checked,
+            mesh_core_elements::PseudoState::Selected,
+        ]) {
             for (node_id, value) in &self.previous_checked_values {
                 if self.checked_values.get(node_id) != Some(value) {
                     changed_ids.insert(*node_id);

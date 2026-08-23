@@ -1,6 +1,7 @@
 use super::attrs::*;
 use super::cache::*;
 use super::index::*;
+use crate::pseudo_state::PseudoState;
 use crate::style::*;
 use mesh_core_component::style::{Selector, StyleRule, StyleValue};
 
@@ -42,20 +43,8 @@ pub(super) fn selector_matches_attrs(selector: &Selector, attrs: &StyleNodeAttrs
         Selector::Id(i) => attrs.id() == Some(i.as_str()),
         Selector::State(t, pseudo) => {
             let tag_matches = t == "*" || t == attrs.tag;
-            let state_matches = match pseudo.as_str() {
-                "hover" | "hovered" => attrs.state.hovered,
-                "focus" | "focused" => attrs.state.focused,
-                "active" => attrs.state.active,
-                "disabled" => attrs.state.disabled,
-                "checked" => attrs.state.checked,
-                "focus-visible" => attrs.state.focus_visible,
-                "windowed" => attrs.state.window.windowed,
-                "fullscreen" => attrs.state.window.fullscreen,
-                "maximized" => attrs.state.window.maximized,
-                "activated" => attrs.state.window.activated,
-                "tiled" => attrs.state.window.tiled,
-                _ => false,
-            };
+            let state_matches =
+                PseudoState::from_name(pseudo).is_some_and(|state| state.value(attrs.state));
             tag_matches && state_matches
         }
         Selector::Compound(parts) => parts.iter().all(|s| selector_matches_attrs(s, attrs)),

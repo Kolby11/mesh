@@ -85,13 +85,17 @@ pub(super) fn find_node_by_id(node: &WidgetNode, node_id: NodeId) -> Option<&Wid
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct StyleStateDependencies {
-    any: bool,
-    hover: bool,
-    focus: bool,
-    focus_visible: bool,
-    active: bool,
-    disabled: bool,
-    checked: bool,
+    mask: u32,
+}
+
+impl StyleStateDependencies {
+    fn contains(self, state: mesh_core_elements::PseudoState) -> bool {
+        self.mask & state.spec().bit != 0
+    }
+
+    fn contains_any<const N: usize>(self, states: [mesh_core_elements::PseudoState; N]) -> bool {
+        states.into_iter().any(|state| self.contains(state))
+    }
 }
 
 #[derive(Clone)]

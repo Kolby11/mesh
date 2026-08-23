@@ -223,19 +223,8 @@ pub(super) fn collect_selector_state_dependencies(
 
     match selector {
         Selector::State(_, state) => {
-            dependencies.any = true;
-            match state.as_str() {
-                "hover" | "hovered" => dependencies.hover = true,
-                "focus" | "focused" => dependencies.focus = true,
-                "focus-visible" => dependencies.focus_visible = true,
-                "active" => dependencies.active = true,
-                "disabled" => dependencies.disabled = true,
-                "checked" => dependencies.checked = true,
-                // Window states are ambient and change through
-                // `observe_window_states`, which invalidates the whole surface;
-                // they never take the targeted interaction-restyle path, so
-                // only `any` matters here.
-                _ => {}
+            if let Some(state) = mesh_core_elements::PseudoState::from_name(state) {
+                dependencies.mask |= state.spec().bit;
             }
         }
         Selector::Compound(parts) => {

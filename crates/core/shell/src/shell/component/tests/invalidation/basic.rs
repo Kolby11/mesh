@@ -972,6 +972,18 @@ box:focus-visible { opacity: 0.7; }
 box:active { opacity: 0.6; }
 box:disabled { opacity: 0.5; }
 box:checked { opacity: 0.4; }
+box:readonly { opacity: 0.3; }
+box:required { opacity: 0.29; }
+box:selected { opacity: 0.28; }
+box:expanded { opacity: 0.27; }
+box:pressed { opacity: 0.26; }
+box:invalid { opacity: 0.25; }
+box:value { opacity: 0.24; }
+box:windowed { opacity: 0.23; }
+box:fullscreen { opacity: 0.22; }
+box:maximized { opacity: 0.21; }
+box:activated { opacity: 0.20; }
+box:tiled { opacity: 0.19; }
 </style>
 "#,
     );
@@ -980,13 +992,9 @@ box:checked { opacity: 0.4; }
     assert_eq!(
         component.cached_restyle_state_dependencies,
         StyleStateDependencies {
-            any: true,
-            hover: true,
-            focus: true,
-            focus_visible: true,
-            active: true,
-            disabled: true,
-            checked: true,
+            mask: mesh_core_elements::pseudo_state_specs()
+                .iter()
+                .fold(0, |mask, spec| mask | spec.bit),
         }
     );
 }
@@ -1055,7 +1063,8 @@ surface { width: 1000px; height: 80px; }
                 .unwrap();
         }
         if force_state_agnostic_focus {
-            component.cached_restyle_state_dependencies.focus = true;
+            component.cached_restyle_state_dependencies.mask |=
+                mesh_core_elements::PseudoState::Focused.spec().bit;
         }
 
         let started = Instant::now();
