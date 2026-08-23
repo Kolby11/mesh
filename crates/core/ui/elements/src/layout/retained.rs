@@ -45,7 +45,6 @@ pub(super) fn compute_fresh_retained_layout(
                     error = %error,
                     "retained taffy fresh layout computation failed"
                 );
-                zero_layout_subtree(root);
                 state.valid = false;
             } else {
                 write_taffy_layout(
@@ -65,7 +64,6 @@ pub(super) fn compute_fresh_retained_layout(
                 error = %error,
                 "retained taffy tree construction failed"
             );
-            zero_layout_subtree(root);
             state.valid = false;
         }
     }
@@ -115,6 +113,9 @@ pub(super) fn compute_structural_retained_layout(
                         error = %error,
                         "failed to remove stale retained layout subtree"
                     );
+                    state.valid = false;
+                    log_taffy_report(&report);
+                    return;
                 }
             }
             state
@@ -147,7 +148,6 @@ pub(super) fn compute_structural_retained_layout(
                     error = %error,
                     "retained taffy structural layout computation failed"
                 );
-                zero_layout_subtree(root);
                 state.valid = false;
             } else {
                 write_taffy_layout(
@@ -167,7 +167,6 @@ pub(super) fn compute_structural_retained_layout(
                 error = %error,
                 "retained taffy structural reconciliation failed"
             );
-            zero_layout_subtree(root);
             state.valid = false;
         }
     }
@@ -219,7 +218,7 @@ pub(super) fn update_retained_node_styles(
     mark_dirty: bool,
     dirty_node_ids: Option<&HashSet<NodeId>>,
     report: &mut TaffyLayoutReport,
-) {
+) -> Result<(), taffy::TaffyError> {
     if let Some(taffy_id) = retained_taffy_id(node, state) {
         let node_dirty = dirty_node_ids.is_none_or(|ids| ids.contains(&node.id));
         if node_dirty {
@@ -230,6 +229,7 @@ pub(super) fn update_retained_node_styles(
                     error = %error,
                     "failed to update retained taffy style"
                 );
+                return Err(error);
             }
             if mark_dirty && let Err(error) = state.tree.mark_dirty(taffy_id) {
                 tracing::warn!(
@@ -237,22 +237,16 @@ pub(super) fn update_retained_node_styles(
                     error = %error,
                     "failed to mark retained taffy node dirty"
                 );
+                return Err(error);
             }
         }
-        if let Err(error) =
-            update_text_context(node, &mut state.tree, taffy_id, &mut state.text_nodes)
-        {
-            tracing::warn!(
-                target: "mesh::layout",
-                error = %error,
-                "failed to update retained taffy text context"
-            );
-        }
+        update_text_context(node, &mut state.tree, taffy_id, &mut state.text_nodes)?;
     }
 
     for child in &node.children {
-        update_retained_node_styles(child, state, mark_dirty, dirty_node_ids, report);
+        update_retained_node_styles(child, state, mark_dirty, dirty_node_ids, report)?;
     }
+    Ok(())
 }
 
 /// Synchronize only the nodes selected by the retained-tree layout diff.
@@ -266,7 +260,7 @@ pub(super) fn update_retained_node_snapshots(
     mark_dirty: bool,
     dirty_nodes: &[WidgetNode],
     report: &mut TaffyLayoutReport,
-) {
+) -> Result<(), taffy::TaffyError> {
     for node in dirty_nodes {
         let Some(taffy_id) = retained_taffy_id(node, state) else {
             continue;
@@ -278,6 +272,7 @@ pub(super) fn update_retained_node_snapshots(
                 error = %error,
                 "failed to update retained taffy style from dirty snapshot"
             );
+            return Err(error);
         }
         if mark_dirty && let Err(error) = state.tree.mark_dirty(taffy_id) {
             tracing::warn!(
@@ -285,17 +280,11 @@ pub(super) fn update_retained_node_snapshots(
                 error = %error,
                 "failed to mark retained taffy node dirty from dirty snapshot"
             );
+            return Err(error);
         }
-        if let Err(error) =
-            update_text_context(node, &mut state.tree, taffy_id, &mut state.text_nodes)
-        {
-            tracing::warn!(
-                target: "mesh::layout",
-                error = %error,
-                "failed to update retained taffy text context from dirty snapshot"
-            );
-        }
+        update_text_context(node, &mut state.tree, taffy_id, &mut state.text_nodes)?;
     }
+    Ok(())
 }
 
 pub(super) fn update_text_context(

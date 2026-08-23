@@ -925,6 +925,33 @@ fn compute_incremental_visual_repaint_preserves_layout() {
     assert_layout_maps_eq(&keyed_layouts(&root), &before);
 }
 
+#[test]
+fn retained_layout_failure_preserves_geometry_and_retries() {
+    let mut root = retained_fixture();
+    let mut state = PerSurfaceLayoutState::default();
+    let mut cache = IntrinsicLayoutCache::default();
+    LayoutEngine::compute_incremental(
+        &mut root, &mut state, 200.0, 100.0, false, false, &mut cache, None,
+    );
+    let before = keyed_layouts(&root);
+
+    // Inject a failed retained update without changing the available size.
+    state.fail_next_layout = true;
+    LayoutEngine::compute_incremental(
+        &mut root, &mut state, 200.0, 100.0, true, false, &mut cache, None,
+    );
+
+    assert!(!state.valid);
+    assert_layout_maps_eq(&keyed_layouts(&root), &before);
+
+    // The invalid retained state forces a fresh rebuild on the next frame.
+    LayoutEngine::compute_incremental(
+        &mut root, &mut state, 200.0, 100.0, false, false, &mut cache, None,
+    );
+    assert!(state.valid);
+    assert_layout_maps_eq(&keyed_layouts(&root), &before);
+}
+
 // cargo test -p mesh-core-elements --release -- retained_layout_paint_only_fast_path_beats_tree_sync --ignored --nocapture
 #[test]
 #[ignore = "release-only retained layout paint-only microbenchmark"]
@@ -943,7 +970,7 @@ fn retained_layout_paint_only_fast_path_beats_tree_sync() {
     for _ in 0..iterations {
         let mut node_map = HashMap::new();
         let mut report = TaffyLayoutReport::default();
-        update_retained_node_styles(
+        let _ = update_retained_node_styles(
             std::hint::black_box(&root),
             &mut state,
             false,

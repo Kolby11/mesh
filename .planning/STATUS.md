@@ -220,6 +220,7 @@ live compositor/lifecycle matrix remain separate follow-up work.
 
 ## Next
 
-The next open backlog item is in the UI element core audit: make retained
-layout transactional, preserve last-known-good geometry, and retry after
-failure; the remaining presentation/resource follow-ups stay separate.
+The next open backlog item is in the UI element core audit: use one stateful
+input dispatcher with pointer capture, press-origin identity, activation
+semantics, focus eligibility, and invalidation output; the remaining
+presentation/resource follow-ups stay separate.

@@ -165,6 +165,8 @@ pub struct PerSurfaceLayoutState {
     /// `false` after theme/locale/source-reload resets; forces a
     /// full fresh-build on the next pass, which then sets `valid = true`.
     pub valid: bool,
+    #[cfg(test)]
+    fail_next_layout: bool,
 }
 
 // SAFETY: `PerSurfaceLayoutState` is an owned per-surface cache. The shell may
@@ -183,6 +185,8 @@ impl PerSurfaceLayoutState {
             text_nodes: HashMap::new(),
             last_available: (0.0, 0.0),
             valid: false,
+            #[cfg(test)]
+            fail_next_layout: false,
         }
     }
 }
@@ -457,10 +461,32 @@ impl LayoutEngine {
         }
 
         let mut report = TaffyLayoutReport::default();
-        if let Some(dirty_node_snapshots) = dirty_node_snapshots {
-            update_retained_node_snapshots(state, dirty_layout, dirty_node_snapshots, &mut report);
+        let synchronization = if let Some(dirty_node_snapshots) = dirty_node_snapshots {
+            update_retained_node_snapshots(state, dirty_layout, dirty_node_snapshots, &mut report)
         } else {
-            update_retained_node_styles(root, state, dirty_layout, dirty_node_ids, &mut report);
+            update_retained_node_styles(root, state, dirty_layout, dirty_node_ids, &mut report)
+        };
+        if let Err(error) = synchronization {
+            tracing::warn!(
+                target: "mesh::layout",
+                error = %error,
+                "retained layout synchronization failed; preserving last-known-good geometry"
+            );
+            state.valid = false;
+            log_taffy_report(&report);
+            return;
+        }
+
+        #[cfg(test)]
+        if state.fail_next_layout {
+            state.fail_next_layout = false;
+            tracing::warn!(
+                target: "mesh::layout",
+                "injected retained taffy layout failure; preserving last-known-good geometry"
+            );
+            state.valid = false;
+            log_taffy_report(&report);
+            return;
         }
 
         if available_changed || dirty_layout {
@@ -483,9 +509,9 @@ impl LayoutEngine {
                 tracing::warn!(
                     target: "mesh::layout",
                     error = %error,
-                    "retained taffy layout computation failed"
+                    "retained taffy layout computation failed; preserving last-known-good geometry"
                 );
-                zero_layout_subtree(root);
+                state.valid = false;
             } else {
                 write_taffy_layout(
                     root,
