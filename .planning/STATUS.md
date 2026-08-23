@@ -220,6 +220,6 @@ live compositor/lifecycle matrix remain separate follow-up work.
 
 ## Next
 
-The next open backlog item is in the UI element core audit: preserve visible
-descendant text in accessible-name precedence while retaining hidden-child and
-locale behavior; the remaining presentation/resource follow-ups stay separate.
+The next open backlog item is in the UI element core audit: generate one typed
+pseudo-state table for indexing, mutation, matching, invalidation, diagnostics,
+and tests; the remaining presentation/resource follow-ups stay separate.

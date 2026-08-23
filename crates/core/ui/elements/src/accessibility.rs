@@ -238,9 +238,13 @@ fn normalize_node(node: &mut WidgetNode, ancestor_hidden: bool) -> String {
     }
     let child_text = child_text.join(" ");
     let info = normalized_info(node, hidden, &child_text);
-    let visible_text = visible_text(node, &child_text, info.hidden);
+    let name_text = semantic_text(
+        &info,
+        visible_text(node, &child_text, info.hidden),
+        info.hidden,
+    );
     node.accessibility = info;
-    visible_text
+    name_text
 }
 
 fn build_snapshot_node(node: &WidgetNode, ancestor_hidden: bool) -> Option<SnapshotNode> {
@@ -260,7 +264,7 @@ fn build_snapshot_node(node: &WidgetNode, ancestor_hidden: bool) -> Option<Snaps
         .collect::<Vec<_>>()
         .join(" ");
     let info = normalized_info(node, false, &child_text);
-    let visible_text = visible_text(node, &child_text, false);
+    let visible_text = semantic_text(&info, visible_text(node, &child_text, false), false);
     Some(SnapshotNode {
         id: node.id,
         info,
@@ -299,25 +303,53 @@ fn normalized_info(node: &WidgetNode, hidden: bool, child_text: &str) -> Accessi
     }
 
     let visible_text = visible_text(node, child_text, hidden);
-    let explicit_label = attributes
+    let label = attributes
+        .get("label")
+        .filter(|value| !value.trim().is_empty())
+        .cloned();
+    let aria_label = attributes
         .get("aria-label")
-        .or_else(|| attributes.get("label"))
-        .or_else(|| attributes.get("alt"))
+        .filter(|value| !value.trim().is_empty())
+        .cloned();
+    let alt = attributes
+        .get("alt")
         .filter(|value| !value.trim().is_empty())
         .cloned();
     let existing_label = info.label.clone();
-    info.label = explicit_label
-        .or_else(|| non_empty(visible_text))
-        .or(existing_label);
+    let preserved_label = (!hidden && (node.tag == "surface" || node.children.is_empty()))
+        .then_some(existing_label)
+        .flatten();
+    info.label = if hidden {
+        None
+    } else if node.tag == "surface" {
+        preserved_label
+            .or_else(|| non_empty(visible_text))
+            .or(label)
+            .or(aria_label)
+            .or(alt)
+    } else {
+        non_empty(visible_text)
+            .or(label)
+            .or(aria_label)
+            .or(alt)
+            .or(preserved_label)
+    };
 
     let existing_description = info.description.clone();
-    info.description = attributes
-        .get("aria-description")
-        .or_else(|| attributes.get("title"))
-        .or_else(|| attributes.get("tooltip"))
-        .filter(|value| !value.trim().is_empty())
-        .cloned()
-        .or(existing_description);
+    let preserved_description = (!hidden && (node.tag == "surface" || node.children.is_empty()))
+        .then_some(existing_description)
+        .flatten();
+    info.description = if hidden {
+        None
+    } else {
+        attributes
+            .get("aria-description")
+            .or_else(|| attributes.get("title"))
+            .or_else(|| attributes.get("tooltip"))
+            .filter(|value| !value.trim().is_empty())
+            .cloned()
+            .or(preserved_description)
+    };
     info.keyboard_shortcut = attributes
         .get("aria-keyshortcuts")
         .or_else(|| attributes.get("key"))
@@ -394,6 +426,16 @@ fn visible_text(node: &WidgetNode, child_text: &str, hidden: bool) -> String {
         .filter(|text| !text.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn semantic_text(info: &AccessibilityInfo, visible_text: String, hidden: bool) -> String {
+    if hidden {
+        String::new()
+    } else if !visible_text.is_empty() {
+        visible_text
+    } else {
+        info.label.clone().unwrap_or_default()
+    }
 }
 
 fn locally_hidden(node: &WidgetNode) -> bool {
@@ -647,6 +689,46 @@ mod tests {
                 .iter()
                 .all(|node| node.info.label.as_deref() != Some("Do not announce"))
         );
+    }
+
+    #[test]
+    fn accessible_name_precedence_tracks_hidden_children_and_locale_updates() {
+        let mut named = WidgetNode::new("button");
+        attr(&mut named, "label", "Fallback label");
+        attr(&mut named, "aria-label", "Screen-reader label");
+        let mut visible = WidgetNode::new("text");
+        attr(&mut visible, "content", "Visible text");
+        named.children.push(visible);
+        normalize_accessibility(&mut named);
+        assert_eq!(named.accessibility.label.as_deref(), Some("Visible text"));
+
+        let mut localized = WidgetNode::new("button");
+        let mut localized_text = WidgetNode::new("text");
+        attr(&mut localized_text, "content", "English");
+        localized.children.push(localized_text);
+        normalize_accessibility(&mut localized);
+        assert_eq!(localized.accessibility.label.as_deref(), Some("English"));
+
+        attr(&mut localized.children[0], "aria-hidden", "true");
+        normalize_accessibility(&mut localized);
+        assert_eq!(localized.accessibility.label, None);
+        assert!(localized.children[0].accessibility.hidden);
+
+        attr(&mut localized.children[0], "aria-hidden", "false");
+        attr(&mut localized.children[0], "content", "Slovak");
+        normalize_accessibility(&mut localized);
+        assert_eq!(localized.accessibility.label.as_deref(), Some("Slovak"));
+
+        let mut icon_button = WidgetNode::new("button");
+        let mut icon = WidgetNode::new("icon");
+        attr(&mut icon, "alt", "Mute");
+        icon_button.children.push(icon);
+        normalize_accessibility(&mut icon_button);
+        assert_eq!(icon_button.accessibility.label.as_deref(), Some("Mute"));
+
+        attr(&mut icon_button.children[0], "aria-hidden", "true");
+        normalize_accessibility(&mut icon_button);
+        assert_eq!(icon_button.accessibility.label, None);
     }
 
     #[test]
