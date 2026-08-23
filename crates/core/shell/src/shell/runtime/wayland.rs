@@ -3,7 +3,38 @@ use super::super::*;
 const MAX_WAYLAND_EVENTS_PER_FRAME: usize = 32;
 
 impl Shell {
+    fn begin_wayland_input_generation(&mut self) {
+        self.popup_grab_generation = self.popup_grab_generation.wrapping_add(1);
+        self.pending_popup_grabs.clear();
+    }
+
+    fn remember_popup_grab(
+        &mut self,
+        surface_id: &str,
+        identity: mesh_core_presentation::PointerButtonIdentity,
+    ) {
+        self.pending_popup_grabs.insert(
+            surface_id.to_string(),
+            PendingPopupGrab {
+                identity,
+                dispatch_generation: self.popup_grab_generation,
+            },
+        );
+    }
+
+    pub(super) fn take_pending_popup_grab(
+        &mut self,
+        parent_surface_id: &str,
+    ) -> Option<mesh_core_presentation::PointerButtonIdentity> {
+        take_pending_popup_grab_from_map(
+            &mut self.pending_popup_grabs,
+            self.popup_grab_generation,
+            parent_surface_id,
+        )
+    }
+
     pub(in crate::shell) fn dispatch_wayland(&mut self) -> Result<(), ShellRunError> {
+        self.begin_wayland_input_generation();
         let events = match self.presentation_engine.poll_events() {
             Ok(events) => coalesce_input_events(events),
             Err(error) => {
@@ -66,10 +97,19 @@ impl Shell {
             };
 
             let target_surface_id = route_surface_id;
+            if let RoutedWindowEvent::PointerButtonWithIdentity {
+                identity,
+                pressed: true,
+                ..
+            } = &event
+            {
+                self.remember_popup_grab(target_surface_id, *identity);
+            }
             if matches!(
                 event,
                 RoutedWindowEvent::PointerMove { .. }
                     | RoutedWindowEvent::PointerButton { .. }
+                    | RoutedWindowEvent::PointerButtonWithIdentity { .. }
                     | RoutedWindowEvent::Scroll { .. }
                     | RoutedWindowEvent::TwoFingerScroll { .. }
                     | RoutedWindowEvent::GestureSwipeBegin { .. }
@@ -185,6 +225,12 @@ impl Shell {
                         y,
                         pressed: true,
                     } => Some((*x, *y, true)),
+                    RoutedWindowEvent::PointerButtonWithIdentity {
+                        x,
+                        y,
+                        pressed: true,
+                        ..
+                    } => Some((*x, *y, true)),
                     _ => None,
                 }
             {
@@ -235,6 +281,19 @@ impl Shell {
             }
 
             let input = match event {
+                RoutedWindowEvent::PointerButtonWithIdentity {
+                    x,
+                    y,
+                    pressed: true,
+                    ..
+                } => {
+                    self.claim_keyboard_focus_for_surface(target_surface_id);
+                    ComponentInput::PointerButton {
+                        x,
+                        y,
+                        pressed: true,
+                    }
+                }
                 RoutedWindowEvent::PointerButton {
                     x,
                     y,
@@ -249,6 +308,9 @@ impl Shell {
                 }
                 RoutedWindowEvent::PointerMove { x, y } => ComponentInput::PointerMove { x, y },
                 RoutedWindowEvent::PointerLeave => ComponentInput::PointerLeave,
+                RoutedWindowEvent::PointerButtonWithIdentity { x, y, pressed, .. } => {
+                    ComponentInput::PointerButton { x, y, pressed }
+                }
                 RoutedWindowEvent::PointerButton { x, y, pressed } => {
                     ComponentInput::PointerButton { x, y, pressed }
                 }
@@ -512,6 +574,12 @@ enum RoutedWindowEvent {
         y: f32,
         pressed: bool,
     },
+    PointerButtonWithIdentity {
+        x: f32,
+        y: f32,
+        pressed: bool,
+        identity: mesh_core_presentation::PointerButtonIdentity,
+    },
     Scroll {
         x: f32,
         y: f32,
@@ -602,6 +670,21 @@ fn split_window_event(event: WindowEvent) -> (std::sync::Arc<str>, RoutedWindowE
             surface_id,
             RoutedWindowEvent::PointerButton { x, y, pressed },
         ),
+        WindowEvent::PointerButtonWithIdentity {
+            surface_id,
+            x,
+            y,
+            pressed,
+            identity,
+        } => (
+            surface_id,
+            RoutedWindowEvent::PointerButtonWithIdentity {
+                x,
+                y,
+                pressed,
+                identity,
+            },
+        ),
         WindowEvent::Scroll {
             surface_id,
             x,
@@ -690,6 +773,7 @@ fn profiling_trigger_for_event(event: &WindowEvent) -> &'static str {
         WindowEvent::PointerMove { .. } => "pointer_move",
         WindowEvent::PointerLeave { .. } => "pointer_leave",
         WindowEvent::PointerButton { .. } => "pointer_button",
+        WindowEvent::PointerButtonWithIdentity { .. } => "pointer_button",
         WindowEvent::Scroll { .. } => "scroll",
         WindowEvent::TwoFingerScroll { .. } => "two_finger_scroll",
         WindowEvent::Key { .. } => "key",
@@ -707,6 +791,17 @@ fn profiling_trigger_for_event(event: &WindowEvent) -> &'static str {
         WindowEvent::TouchUp { .. } => "touch_up",
         WindowEvent::TouchCancel { .. } => "touch_cancel",
     }
+}
+
+fn take_pending_popup_grab_from_map(
+    pending_grabs: &mut std::collections::HashMap<String, PendingPopupGrab>,
+    dispatch_generation: u64,
+    parent_surface_id: &str,
+) -> Option<mesh_core_presentation::PointerButtonIdentity> {
+    pending_grabs
+        .remove(parent_surface_id)
+        .filter(|pending| pending.dispatch_generation == dispatch_generation)
+        .map(|pending| pending.identity)
 }
 
 #[cfg(test)]
@@ -733,6 +828,28 @@ mod tests {
             }
         ));
 
+        let identity = mesh_core_presentation::PointerButtonIdentity {
+            seat_id: 7,
+            serial: 42,
+        };
+        let (surface_id, event) = split_window_event(WindowEvent::PointerButtonWithIdentity {
+            surface_id: "panel".into(),
+            x: 12.0,
+            y: 24.0,
+            pressed: true,
+            identity,
+        });
+        assert_eq!(surface_id.as_ref(), "panel");
+        assert!(matches!(
+            event,
+            RoutedWindowEvent::PointerButtonWithIdentity {
+                x: 12.0,
+                y: 24.0,
+                pressed: true,
+                identity: actual,
+            } if actual == identity
+        ));
+
         let (surface_id, event) = split_window_event(WindowEvent::Key {
             surface_id: "launcher".into(),
             event: WindowKeyEvent::Pressed(
@@ -753,6 +870,44 @@ mod tests {
                 ref mods
             } if key == "Enter" && mods.ctrl && !mods.shift && mods.alt
         ));
+    }
+
+    #[test]
+    fn popup_grab_identity_is_one_shot_and_generation_bound() {
+        let identity = mesh_core_presentation::PointerButtonIdentity {
+            seat_id: 3,
+            serial: 19,
+        };
+        let mut pending = std::collections::HashMap::from([(
+            "panel".to_string(),
+            PendingPopupGrab {
+                identity,
+                dispatch_generation: 4,
+            },
+        )]);
+
+        assert_eq!(
+            take_pending_popup_grab_from_map(&mut pending, 4, "panel"),
+            Some(identity)
+        );
+        assert_eq!(
+            take_pending_popup_grab_from_map(&mut pending, 4, "panel"),
+            None,
+            "a popup creation consumes its click credential"
+        );
+
+        pending.insert(
+            "panel".to_string(),
+            PendingPopupGrab {
+                identity,
+                dispatch_generation: 4,
+            },
+        );
+        assert_eq!(
+            take_pending_popup_grab_from_map(&mut pending, 5, "panel"),
+            None,
+            "a credential from an older dispatch cannot authorize a later popup"
+        );
     }
 
     #[test]

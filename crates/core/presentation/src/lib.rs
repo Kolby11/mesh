@@ -13,6 +13,18 @@ pub use wayland_surface::{
     PopupPlacement, SurfaceConfig, SurfacePadding,
 };
 
+/// The Wayland seat and button-press serial that authorize an `xdg_popup` grab.
+///
+/// The identity is deliberately separate from [`WindowEvent::PointerButton`].
+/// Developer-window and test backends do not have a protocol seat or serial,
+/// while a Wayland popup must use the exact seat that delivered the triggering
+/// press rather than a process-global "active" seat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PointerButtonIdentity {
+    pub seat_id: u32,
+    pub serial: u32,
+}
+
 use dev_window::DevWindowBackend;
 use wayland_surface::WaylandSurfaceBackend;
 
@@ -1311,6 +1323,7 @@ pub fn event_surface_id(event: &WindowEvent) -> &str {
         WindowEvent::PointerMove { surface_id, .. }
         | WindowEvent::PointerLeave { surface_id }
         | WindowEvent::PointerButton { surface_id, .. }
+        | WindowEvent::PointerButtonWithIdentity { surface_id, .. }
         | WindowEvent::Scroll { surface_id, .. }
         | WindowEvent::TwoFingerScroll { surface_id, .. }
         | WindowEvent::Key { surface_id, .. }
@@ -1485,7 +1498,7 @@ mod tests {
                     placement: PopupPlacement::default(),
                     padding: SurfacePadding::default(),
                     grab: false,
-                    grab_serial: None,
+                    grab_identity: None,
                 },
             )
             .expect("popup config should be accepted by the testing backend");

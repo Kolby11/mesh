@@ -564,7 +564,7 @@ impl PointerHandler for State {
                     );
                     self.queue_event(&seat_id, DevWindowEvent::PointerMove { surface_id, x, y });
                 }
-                PointerEventKind::Press { button, .. } => {
+                PointerEventKind::Press { button, serial, .. } => {
                     if button == 0x110 {
                         self.request_surface_focus(&seat_id, &surface_id, event);
                         let (x, y) = (event.position.0 as f32, event.position.1 as f32);
@@ -573,11 +573,15 @@ impl PointerHandler for State {
                         );
                         self.queue_event(
                             &seat_id,
-                            DevWindowEvent::PointerButton {
+                            DevWindowEvent::PointerButtonWithIdentity {
                                 surface_id,
                                 x,
                                 y,
                                 pressed: true,
+                                identity: crate::PointerButtonIdentity {
+                                    seat_id: seat_id.protocol_id(),
+                                    serial,
+                                },
                             },
                         );
                     }

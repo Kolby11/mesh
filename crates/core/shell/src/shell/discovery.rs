@@ -1323,6 +1323,8 @@ impl Shell {
             active_key_modifiers: KeyModifiers::default(),
             keyboard_focus_surface: None,
             pending_wayland_events: VecDeque::new(),
+            pending_popup_grabs: HashMap::new(),
+            popup_grab_generation: 0,
             transfer_owned_keyboard_modes: HashMap::new(),
             service_handlers: HashMap::new(),
             backend_runtimes: HashMap::new(),

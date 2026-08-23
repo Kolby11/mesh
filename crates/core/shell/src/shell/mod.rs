@@ -74,6 +74,12 @@ pub use types::{
 
 use service::{service_capabilities, service_name_from_interface};
 
+#[derive(Debug, Clone, Copy)]
+struct PendingPopupGrab {
+    identity: mesh_core_presentation::PointerButtonIdentity,
+    dispatch_generation: u64,
+}
+
 /// Translates the user's blur settings into the painter's quality knobs.
 /// Values outside the painter's supported range are clamped rather than
 /// rejected: a settings file asking for eight passes gets the most the painter
@@ -447,6 +453,11 @@ pub struct Shell {
     active_key_modifiers: KeyModifiers,
     keyboard_focus_surface: Option<SurfaceId>,
     pending_wayland_events: VecDeque<WindowEvent>,
+    /// Click credentials captured from the current Wayland dispatch. Entries
+    /// are consumed when a popup is created and never reused for repositioning
+    /// or a later dispatch generation.
+    pending_popup_grabs: HashMap<String, PendingPopupGrab>,
+    popup_grab_generation: u64,
     transfer_owned_keyboard_modes: HashMap<SurfaceId, mesh_core_wayland::KeyboardMode>,
     service_handlers: HashMap<String, mpsc::UnboundedSender<ServiceCommandMsg>>,
     backend_runtimes: HashMap<String, BackendRuntimeSlot>,

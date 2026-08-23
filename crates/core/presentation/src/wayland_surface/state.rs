@@ -1055,6 +1055,7 @@ fn is_pointer_event(event: &DevWindowEvent) -> bool {
         DevWindowEvent::PointerMove { .. }
             | DevWindowEvent::PointerLeave { .. }
             | DevWindowEvent::PointerButton { .. }
+            | DevWindowEvent::PointerButtonWithIdentity { .. }
             | DevWindowEvent::Scroll { .. }
             | DevWindowEvent::TwoFingerScroll { .. }
             | DevWindowEvent::GestureSwipeBegin { .. }

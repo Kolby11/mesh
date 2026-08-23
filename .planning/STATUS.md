@@ -62,20 +62,31 @@ requests return typed diagnostics. Late callbacks from timed-out frames or
 replaced roles are ignored instead of releasing a newer pacing gate; the
 current surface generation snapshot remains available for diagnostics.
 
+Click-grab popups now carry the exact Wayland seat protocol identity and
+button-press serial from input normalization through shell routing and popup
+creation. The shell stores that credential only for the current dispatch
+generation, consumes it once for initial popup creation, and strips it from the
+accepted placement cache so reposition/resize passes cannot replay a stale
+serial. The presentation backend resolves the requested seat directly and
+emits a warning when a requested grab has no live matching seat/serial, instead
+of silently selecting the global activation-seat hint.
+
 Icon bitmap/SVG and font-glyph preparation still share a bounded render resource
 broker, with revision-aware cache handoff and linked-file invalidation. Typed
 icon/glyph caches and shell polling remain separate at the handoff boundary.
 Text shaping remains synchronous and outside that broker.
 
-Focused presentation and shell tests plus `cargo check --workspace` pass.
-Existing shell dead-code/private-interface warnings remain. The focused
-real-surface navigation raster fixture still has the known 1280px layout
-overflow. The broad workspace lib test run remains blocked by the pre-existing
+Focused presentation, Wayland routing, and child-surface tests plus
+`cargo check --workspace` pass. The focused popover group still has one
+pre-existing legacy dismissed-popover visibility failure. Existing shell
+dead-code/private-interface warnings remain. The focused real-surface
+navigation raster fixture still has the known 1280px layout overflow. The
+broad workspace lib test run remains blocked by the pre-existing
 repository-settings fixture, which rejects its `revision` key as unknown.
 
 ## Next
 
 Complete the remaining semantic presentation state diff and safe popup
-recreation for unsupported or replaced parents. Carry click-grab seat/serial
-identity, pointer-button identity, IME/text-input-v3, connection recreation, and
-resource preparation/text shaping as separate follow-up work.
+recreation for unsupported or replaced parents. Carry full pointer-button
+identity, IME/text-input-v3, connection recreation, and resource
+preparation/text shaping as separate follow-up work.

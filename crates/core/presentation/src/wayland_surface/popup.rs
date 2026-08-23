@@ -15,6 +15,8 @@
 
 use wayland_protocols::xdg::shell::client::xdg_positioner;
 
+use crate::PointerButtonIdentity;
+
 /// Edge/corner of the anchor rectangle the popup is positioned against.
 ///
 /// Mirrors `xdg_positioner.anchor`.
@@ -119,12 +121,15 @@ pub struct PopupConfig {
     /// over the transparent ring falling through to whatever is behind it.
     pub padding: super::SurfacePadding,
     /// Take a compositor input grab (click-to-dismiss-outside + keyboard).
-    /// Requires a recent input serial; ignored when no serial is available.
+    /// Requires a recent input serial; when no identity is available the
+    /// backend opens without a grab and emits a downgrade diagnostic.
     pub grab: bool,
-    /// The input event serial used for the grab. An `xdg_popup` grab is only
-    /// valid in response to a recent click, so a pure-hover popover passes
-    /// `grab = false` / `serial = None` and relies on the core hover-bridge.
-    pub grab_serial: Option<u32>,
+    /// The exact seat and input serial that triggered this popup. An
+    /// `xdg_popup` grab is only valid in response to a recent click, so a
+    /// pure-hover popover passes `grab = false` / `None` and relies on the core
+    /// hover-bridge. The shell consumes this identity once when creating the
+    /// popup; it is not retained for later reposition transactions.
+    pub grab_identity: Option<PointerButtonIdentity>,
 }
 
 pub(super) fn map_anchor(anchor: PopupAnchor) -> xdg_positioner::Anchor {

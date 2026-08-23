@@ -440,20 +440,25 @@ impl WaylandSurfaceBackend {
                 layer.get_popup(popup.xdg_popup());
             }
 
-            // A grab is only valid in response to a recent input serial. Hover-open
+            // A grab is only valid in response to a recent input serial from
+            // the exact seat that delivered the triggering press. Hover-open
             // popovers pass `grab = false` and rely on the core hover-bridge.
             if config.grab {
-                let seat = self
-                    .state
-                    .activation_seat
-                    .as_ref()
-                    .and_then(|seat_id| self.state.input_seats.get(seat_id))
-                    .map(|seat| seat.seat.clone());
-                if let (Some(seat), Some(serial)) = (seat.as_ref(), config.grab_serial) {
-                    popup.xdg_popup().grab(seat, serial);
+                let grab = config.grab_identity.and_then(|identity| {
+                    if identity.serial == 0 {
+                        return None;
+                    }
+                    self.state
+                        .input_seats
+                        .iter()
+                        .find(|(seat_id, _)| seat_id.protocol_id() == identity.seat_id)
+                        .map(|(_, seat)| (seat.seat.clone(), identity.serial))
+                });
+                if let Some((seat, serial)) = grab {
+                    popup.xdg_popup().grab(&seat, serial);
                 } else {
-                    tracing::debug!(
-                        "[popover] layer_shell: grab requested for {surface_id} but no seat/serial; opening without grab"
+                    tracing::warn!(
+                        "[popover] layer_shell: grab requested for {surface_id} without a live triggering seat/serial; opening without grab"
                     );
                 }
             }

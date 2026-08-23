@@ -855,7 +855,7 @@ impl Shell {
                             offset: (0, 0),
                         },
                         grab: false,
-                        grab_serial: None,
+                        grab_identity: None,
                     };
                     // Legacy path: this promotes a *separate* popover module's
                     // own parent surface into an xdg_popup. The newer model

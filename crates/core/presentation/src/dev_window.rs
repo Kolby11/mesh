@@ -20,6 +20,16 @@ pub enum DevWindowEvent {
         y: f32,
         pressed: bool,
     },
+    /// A Wayland pointer press carrying the seat/serial identity required for
+    /// an `xdg_popup` grab. Non-Wayland backends continue to emit
+    /// [`Self::PointerButton`] because they have no protocol identity.
+    PointerButtonWithIdentity {
+        surface_id: Arc<str>,
+        x: f32,
+        y: f32,
+        pressed: bool,
+        identity: crate::PointerButtonIdentity,
+    },
     Scroll {
         surface_id: Arc<str>,
         x: f32,

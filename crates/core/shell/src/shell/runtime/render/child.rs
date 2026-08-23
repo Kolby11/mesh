@@ -273,6 +273,17 @@ impl Shell {
                         pad_top,
                         pad_bottom,
                     );
+                let grab = request.placement.grab == PopoverGrab::Click;
+                let grab_identity = if grab
+                    && self.components[index].children[child_index]
+                        .target
+                        .popup_config
+                        .is_none()
+                {
+                    self.take_pending_popup_grab(parent_surface_id)
+                } else {
+                    None
+                };
                 let popup_config = PopupConfig {
                     parent_surface_id: parent_surface_id.to_string(),
                     // The reserve travels with the padded size it produced, so
@@ -293,21 +304,26 @@ impl Shell {
                         constraint: map_popover_constraint(request.placement.constraint_adjustment),
                         offset: (offset_x, offset_y),
                     },
-                    grab: request.placement.grab == PopoverGrab::Click,
-                    grab_serial: None,
+                    grab,
+                    grab_identity,
                 };
+                // The triggering credential is valid only for this creation
+                // transaction. Keep the accepted placement in the child
+                // cache, but never compare or reuse the one-shot identity on
+                // later size/reposition passes.
+                let mut accepted_popup_config = popup_config.clone();
+                accepted_popup_config.grab_identity = None;
                 let popup_config_changed = {
+                    let child = &self.components[index].children[child_index];
+                    child.target.popup_config.as_ref() != Some(&accepted_popup_config)
+                };
+                {
                     let child = &mut self.components[index].children[child_index];
-                    let changed = child.target.popup_config.as_ref() != Some(&popup_config);
-                    if changed {
-                        child.target.popup_config = Some(popup_config.clone());
-                    }
                     child.target.known_surface_size = Some(padded_size);
                     if child.target.last_popup_size != Some(padded_size) {
                         child.target.last_popup_size = Some(padded_size);
                     }
-                    changed
-                };
+                }
                 if popup_config_changed
                     && let Err(error) = self
                         .presentation_engine
@@ -316,6 +332,11 @@ impl Shell {
                     tracing::warn!("configure_popup for child {child_surface_id} failed: {error}");
                     self.destroy_child_surface_at(index, child_index);
                     continue;
+                }
+                if popup_config_changed {
+                    self.components[index].children[child_index]
+                        .target
+                        .popup_config = Some(accepted_popup_config);
                 }
                 padded_size
             };
