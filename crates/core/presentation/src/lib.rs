@@ -309,6 +309,8 @@ struct TestingBackend {
     missing_surfaces: HashSet<String>,
     frame_pending_surfaces: HashSet<String>,
     buffer_backpressured_surfaces: HashSet<String>,
+    surface_scales: HashMap<String, f32>,
+    full_redraw_surfaces: HashSet<String>,
     text_input_state: Option<(String, TextInputState)>,
     text_input_surface: Option<String>,
     text_input_pending: TestingPendingTextInput,
@@ -365,6 +367,12 @@ fn clear_testing_presentation_waits(backend: &mut TestingBackend, surface_id: &s
     backend.buffer_backpressured_surfaces.remove(surface_id);
 }
 
+fn clear_testing_surface_runtime_state(backend: &mut TestingBackend, surface_id: &str) {
+    clear_testing_presentation_waits(backend, surface_id);
+    backend.surface_scales.remove(surface_id);
+    backend.full_redraw_surfaces.remove(surface_id);
+}
+
 /// Keep the deterministic backend's retained text-input publication aligned
 /// with the compositor identity it represents. The real Wayland backend drops
 /// this snapshot while tearing down a surface, so a later shell sync cannot
@@ -383,7 +391,7 @@ fn clear_testing_text_input_transaction_for_surface(
 }
 
 fn clear_testing_text_input_for_surface(backend: &mut TestingBackend, surface_id: &str) {
-    clear_testing_presentation_waits(backend, surface_id);
+    clear_testing_surface_runtime_state(backend, surface_id);
     clear_testing_text_input_transaction_for_surface(backend, surface_id);
     if backend
         .text_input_state
@@ -486,11 +494,40 @@ impl PresentationEngine {
         }
     }
 
+    /// Simulate a compositor preferred-scale update for a live surface. The
+    /// bounds mirror `wp_fractional_scale_v1`'s supported 0.5x..4x range;
+    /// accepted changes invalidate retained pixels exactly as the Wayland
+    /// backend does, so the next shell pass must repaint the full buffer.
+    #[doc(hidden)]
+    pub fn testing_set_surface_scale(&mut self, surface_id: &str, scale: f32) -> bool {
+        let Backend::Testing(backend) = &mut self.backend else {
+            return false;
+        };
+        if !scale.is_finite()
+            || backend.missing_surfaces.contains(surface_id)
+            || !(backend.surface_configs.contains_key(surface_id)
+                || backend.popup_configs.contains_key(surface_id))
+        {
+            return false;
+        }
+        let scale = scale.clamp(0.5, 4.0);
+        let previous = backend
+            .surface_scales
+            .get(surface_id)
+            .copied()
+            .unwrap_or(1.0);
+        if (previous - scale).abs() > f32::EPSILON {
+            backend.surface_scales.insert(surface_id.to_string(), scale);
+            backend.full_redraw_surfaces.insert(surface_id.to_string());
+        }
+        true
+    }
+
     #[doc(hidden)]
     pub fn testing_set_surface_missing(&mut self, surface_id: &str, missing: bool) {
         if let Backend::Testing(backend) = &mut self.backend {
             if missing {
-                clear_testing_presentation_waits(backend, surface_id);
+                clear_testing_surface_runtime_state(backend, surface_id);
                 backend.missing_surfaces.insert(surface_id.to_string());
             } else {
                 backend.missing_surfaces.remove(surface_id);
@@ -619,6 +656,8 @@ impl PresentationEngine {
             backend.text_input_state = None;
             backend.frame_pending_surfaces.clear();
             backend.buffer_backpressured_surfaces.clear();
+            backend.surface_scales.clear();
+            backend.full_redraw_surfaces.clear();
             let mut surface_ids = backend
                 .surface_configs
                 .keys()
@@ -775,7 +814,7 @@ impl PresentationEngine {
                     return Err(PresentationError::SurfaceCreate(message));
                 }
                 if backend.missing_surfaces.remove(surface_id) {
-                    clear_testing_presentation_waits(backend, surface_id);
+                    clear_testing_surface_runtime_state(backend, surface_id);
                 }
                 backend.destroyed_surface_ids.remove(surface_id);
                 backend
@@ -898,7 +937,7 @@ impl PresentationEngine {
                     return Err(PresentationError::SurfaceCreate(message));
                 }
                 if backend.missing_surfaces.remove(surface_id) {
-                    clear_testing_presentation_waits(backend, surface_id);
+                    clear_testing_surface_runtime_state(backend, surface_id);
                 }
                 backend.destroyed_popup_ids.remove(surface_id);
                 backend.popup_configs.insert(surface_id.to_string(), config);
@@ -1274,7 +1313,11 @@ impl PresentationEngine {
         match &self.backend {
             Backend::WaylandSurface(bridge) => bridge.surface_scale(surface_id),
             Backend::DevWindow(_) => 1.0,
-            Backend::Testing(_) => 1.0,
+            Backend::Testing(backend) => backend
+                .surface_scales
+                .get(surface_id)
+                .copied()
+                .unwrap_or(1.0),
         }
     }
 
@@ -1282,13 +1325,17 @@ impl PresentationEngine {
         match &self.backend {
             Backend::WaylandSurface(bridge) => bridge.surface_needs_full_redraw(surface_id),
             Backend::DevWindow(_) => false,
-            Backend::Testing(_) => false,
+            Backend::Testing(backend) => backend.full_redraw_surfaces.contains(surface_id),
         }
     }
 
     pub fn clear_surface_needs_full_redraw(&mut self, surface_id: &str) {
-        if let Backend::WaylandSurface(bridge) = &mut self.backend {
-            bridge.clear_surface_needs_full_redraw(surface_id);
+        match &mut self.backend {
+            Backend::WaylandSurface(bridge) => bridge.clear_surface_needs_full_redraw(surface_id),
+            Backend::DevWindow(_) => {}
+            Backend::Testing(backend) => {
+                backend.full_redraw_surfaces.remove(surface_id);
+            }
         }
     }
 
@@ -2068,6 +2115,39 @@ mod tests {
                 .unwrap(),
             PresentStatus::Presented
         );
+    }
+
+    #[test]
+    fn testing_backend_models_scale_change_as_full_redraw() {
+        let mut engine = PresentationEngine::testing_with_popup_support(false);
+        assert!(!engine.testing_set_surface_scale("panel", 1.5));
+        engine
+            .configure("panel", SurfaceConfig::default())
+            .expect("testing surface configuration succeeds");
+
+        assert_eq!(engine.surface_scale("panel"), 1.0);
+        assert!(!engine.surface_needs_full_redraw("panel"));
+        assert!(engine.testing_set_surface_scale("panel", 1.5));
+        assert_eq!(engine.surface_scale("panel"), 1.5);
+        assert!(engine.surface_needs_full_redraw("panel"));
+
+        // Repeating the same compositor scale does not create another redraw
+        // obligation, and clearing the consumed obligation is observable.
+        assert!(engine.testing_set_surface_scale("panel", 1.5));
+        engine.clear_surface_needs_full_redraw("panel");
+        assert!(!engine.surface_needs_full_redraw("panel"));
+
+        // The simulator follows the real preferred-scale bounds and clears
+        // scale/redraw state when the compositor destroys the surface.
+        assert!(engine.testing_set_surface_scale("panel", 5.0));
+        assert_eq!(engine.surface_scale("panel"), 4.0);
+        engine.testing_set_surface_missing("panel", true);
+        assert!(!engine.testing_set_surface_scale("panel", 2.0));
+        engine.testing_set_surface_missing("panel", false);
+        engine.testing_push_surface_closed("panel");
+        assert_eq!(engine.surface_scale("panel"), 1.0);
+        assert!(!engine.surface_needs_full_redraw("panel"));
+        assert!(!engine.testing_set_surface_scale("panel", f32::NAN));
     }
 
     #[test]

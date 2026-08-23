@@ -4,6 +4,12 @@
 
 ## Now
 
+The deterministic presentation backend now models compositor preferred-scale
+updates for live surfaces: valid 0.5x..4x changes are observable through the
+same scale/full-redraw seam as Wayland, while missing and destroyed surfaces
+reject or clear stale scale state. This covers the simulator's scaling phase;
+multi-output membership and live compositor conformance remain open.
+
 Presentation now keeps frame-callback pacing separate from SHM buffer-release
 backpressure. When all reusable buffers are compositor-owned, the live backend
 retains an explicit release gate, refreshes it from dispatched
