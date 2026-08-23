@@ -349,12 +349,21 @@ impl WaylandSurfaceBackend {
             return Err(error);
         }
         // An existing popup is repositioned in place rather than recreated, so
-        // anchor moves (exclusive-zone/output changes) don't tear it down. The
-        // shadow/overshoot reserve travels with the placement size, so adopt it
-        // on the same path that adopts the new size.
-        if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
-            entry.padding = config.padding;
-            self.reposition_popup(surface_id, &config.placement);
+        // anchor moves (exclusive-zone/output changes) don't tear it down. Do
+        // not treat an arbitrary existing surface id as a popup: doing so can
+        // silently replace a parent or leave a logical popup reparented from
+        // the compositor object that actually owns it.
+        if self.state.surfaces.contains_key(surface_id) {
+            let placement_changed = self.validate_existing_popup(surface_id, &config)?;
+            if placement_changed {
+                self.reposition_popup(surface_id, &config.placement)?;
+            }
+            if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
+                entry.padding = config.padding;
+                if placement_changed && let WaylandRole::Popup(role) = &mut entry.role {
+                    role.placement = config.placement;
+                }
+            }
             return Ok(());
         }
 
@@ -391,6 +400,13 @@ impl WaylandSurfaceBackend {
                 )));
             }
         };
+        let parent_object_generation = self
+            .state
+            .surfaces
+            .get(&config.parent_surface_id)
+            .expect("popup parent was validated above")
+            .surface_generation()
+            .object;
 
         let qh = self.state.qh.clone();
         // `XdgShell` is not `Clone`, so create the popup while holding an
@@ -455,6 +471,10 @@ impl WaylandSurfaceBackend {
             WaylandRole::Popup(PopupRole {
                 popup,
                 parent_id: config.parent_surface_id.clone(),
+                parent_object_generation,
+                placement: config.placement,
+                next_reposition_token: 0,
+                pending_reposition_token: None,
             }),
             cfg,
             KeyboardMode::None,
@@ -481,21 +501,89 @@ impl WaylandSurfaceBackend {
         Ok(())
     }
 
-    fn reposition_popup(&mut self, surface_id: &str, placement: &PopupPlacement) {
-        let Some(xdg_shell) = self.state.xdg_shell.as_ref() else {
-            return;
-        };
-        let Ok(positioner) = build_positioner(xdg_shell, placement) else {
-            return;
-        };
-        if let Some(entry) = self.state.surfaces.get(surface_id)
-            && let WaylandRole::Popup(role) = &entry.role
-        {
-            // `xdg_popup.reposition` requires xdg_wm_base v3+. The token is
-            // echoed back on the resulting reactive configure; 0 is fine since
-            // we don't correlate repositions yet.
-            role.popup.reposition(&positioner, 0);
+    fn validate_existing_popup(
+        &self,
+        surface_id: &str,
+        config: &PopupConfig,
+    ) -> Result<bool, PresentationError> {
+        let (parent_id, parent_object_generation, placement) =
+            match self.state.surfaces.get(surface_id).map(|entry| &entry.role) {
+                Some(WaylandRole::Popup(role)) => (
+                    role.parent_id.as_str(),
+                    role.parent_object_generation,
+                    role.placement,
+                ),
+                Some(_) => {
+                    return Err(PresentationError::SurfaceCreate(format!(
+                        "surface '{surface_id}' is already a non-popup surface"
+                    )));
+                }
+                None => unreachable!("surface existence checked before popup validation"),
+            };
+        if parent_id != config.parent_surface_id {
+            return Err(PresentationError::SurfaceCreate(format!(
+                "popup '{surface_id}' cannot be reparented from '{parent_id}' to '{}'",
+                config.parent_surface_id
+            )));
         }
+        let Some(parent) = self.state.surfaces.get(&config.parent_surface_id) else {
+            return Err(PresentationError::SurfaceCreate(format!(
+                "popup parent surface '{}' no longer exists",
+                config.parent_surface_id
+            )));
+        };
+        if parent.role.is_popup() {
+            return Err(PresentationError::SurfaceCreate(
+                "popup parent cannot itself be a popup".into(),
+            ));
+        }
+        let current_parent_generation = parent.surface_generation().object;
+        if current_parent_generation != parent_object_generation {
+            return Err(PresentationError::SurfaceCreate(format!(
+                "popup parent '{}' was replaced; popup must be recreated",
+                config.parent_surface_id
+            )));
+        }
+        Ok(placement != config.placement)
+    }
+
+    fn reposition_popup(
+        &mut self,
+        surface_id: &str,
+        placement: &PopupPlacement,
+    ) -> Result<(), PresentationError> {
+        if !self
+            .state
+            .negotiated_capabilities
+            .supports_xdg_popup_reposition()
+        {
+            return Err(PresentationError::ProtocolUnsupported(
+                "xdg_popup.reposition requires xdg-shell version 3".into(),
+            ));
+        }
+        let Some(xdg_shell) = self.state.xdg_shell.as_ref() else {
+            return Err(PresentationError::ProtocolUnsupported(
+                "xdg_wm_base unavailable; cannot reposition popup".into(),
+            ));
+        };
+        let positioner = build_positioner(xdg_shell, placement)?;
+        let Some(entry) = self.state.surfaces.get_mut(surface_id) else {
+            return Err(PresentationError::SurfaceCreate(format!(
+                "popup surface '{surface_id}' no longer exists"
+            )));
+        };
+        let WaylandRole::Popup(role) = &mut entry.role else {
+            return Err(PresentationError::SurfaceCreate(format!(
+                "surface '{surface_id}' is not a popup"
+            )));
+        };
+        let token = next_popup_reposition_token(role.next_reposition_token).ok_or_else(|| {
+            PresentationError::SurfaceCreate("popup reposition token exhausted".into())
+        })?;
+        role.next_reposition_token = token;
+        role.pending_reposition_token = Some(token);
+        role.popup.reposition(&positioner, token);
+        Ok(())
     }
 
     /// Tear down a promoted popup. Dropping the [`SurfaceEntry`] drops the SCTK

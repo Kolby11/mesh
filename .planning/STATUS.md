@@ -52,10 +52,14 @@ generation, invalidate output-dependent presentation state, and force a full
 redraw; stale leave/destroy notifications cannot clear a newer membership.
 The Wayland connection also publishes a typed, connection-local negotiated
 capability snapshot with clamped protocol versions and an explicit generation;
-`xdg_popup.reposition` is now represented as a version gate. Late callbacks
-from timed-out frames or replaced roles are ignored instead of releasing a
-newer pacing gate; the current surface generation snapshot remains available to
-diagnostics.
+`xdg_popup.reposition` is now represented as a version gate. Popup updates
+reject non-popup id collisions, reparenting, and parent object replacement,
+gate reposition requests on xdg-shell v3, issue nonzero reposition tokens, and
+correlate returned configure tokens. Initial popup creation remains available
+on older xdg-shell versions, while unsupported reposition requests return typed
+diagnostics. Late callbacks from timed-out frames or replaced roles are ignored
+instead of releasing a newer pacing gate; the current surface generation
+snapshot remains available for diagnostics.
 
 Icon bitmap/SVG and font-glyph preparation still share a bounded render resource
 broker, with revision-aware cache handoff and linked-file invalidation. Typed
@@ -70,7 +74,7 @@ repository-settings fixture, which rejects its `revision` key as unknown.
 
 ## Next
 
-Complete the remaining semantic presentation state diff and consume negotiated
-capability versions for popup identity/reposition safety. Pointer-button
-identity, IME/text-input-v3, connection recreation, and resource
-preparation/text shaping remain separate follow-up work.
+Complete the remaining semantic presentation state diff and safe popup
+recreation/reactive-parent handling. Pointer-button identity, IME/text-input-v3,
+connection recreation, and resource preparation/text shaping remain separate
+follow-up work.

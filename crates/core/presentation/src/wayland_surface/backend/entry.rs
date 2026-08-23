@@ -167,6 +167,16 @@ pub(in crate::wayland_surface) struct PopupRole {
     /// `surface_id` of the parent surface this popup is a child of. The parent
     /// may be either a layer surface or a window.
     pub(in crate::wayland_surface) parent_id: String,
+    /// Object generation of the parent at popup creation. A logical surface
+    /// id can survive role replacement, but the existing xdg parent cannot.
+    pub(in crate::wayland_surface) parent_object_generation: u64,
+    pub(in crate::wayland_surface) placement: PopupPlacement,
+    pub(in crate::wayland_surface) next_reposition_token: u32,
+    pub(in crate::wayland_surface) pending_reposition_token: Option<u32>,
+}
+
+pub(super) fn next_popup_reposition_token(previous: u32) -> Option<u32> {
+    previous.checked_add(1).filter(|token| *token != 0)
 }
 
 impl WaylandRole {

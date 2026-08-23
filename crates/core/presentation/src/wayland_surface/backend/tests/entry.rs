@@ -113,3 +113,10 @@ fn negotiated_capabilities_clamp_versions_and_gate_popup_reposition() {
     assert_eq!(capabilities.generation, 2);
     assert!(capabilities.supports_xdg_popup_reposition());
 }
+
+#[test]
+fn popup_reposition_tokens_are_nonzero_and_never_wrap() {
+    assert_eq!(next_popup_reposition_token(0), Some(1));
+    assert_eq!(next_popup_reposition_token(41), Some(42));
+    assert_eq!(next_popup_reposition_token(u32::MAX), None);
+}

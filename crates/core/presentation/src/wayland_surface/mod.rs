@@ -48,7 +48,7 @@ use smithay_client_toolkit::{
         },
         xdg::{
             XdgPositioner, XdgShell, XdgSurface as XdgSurfaceExt,
-            popup::{Popup, PopupConfigure, PopupHandler},
+            popup::{ConfigureKind, Popup, PopupConfigure, PopupHandler},
             window::{
                 Window, WindowConfigure, WindowDecorations as SctkWindowDecorations, WindowHandler,
             },
