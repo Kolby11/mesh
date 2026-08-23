@@ -220,7 +220,7 @@ live compositor/lifecycle matrix remain separate follow-up work.
 
 ## Next
 
-The next open backlog item is in the UI element core audit: use one stateful
-input dispatcher with pointer capture, press-origin identity, activation
-semantics, focus eligibility, and invalidation output; the remaining
-presentation/resource follow-ups stay separate.
+The next open backlog item is in the UI element core audit: generate element
+types, source/runtime tags, contracts, events, attributes, style hooks, and
+accessibility defaults from one schema; the remaining presentation/resource
+follow-ups stay separate.

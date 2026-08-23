@@ -65,7 +65,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/08-ui-element-core/improvements.md)
 
-- [ ] Use one stateful input dispatcher with pointer capture, press-origin identity, activation semantics, focus eligibility, and invalidation output.
 - [ ] Generate element types, source/runtime tags, contracts, events, attributes, style hooks, and accessibility defaults from one schema.
 - [ ] Detect CSS custom-property cycles with structured diagnostics and specified invalid-value fallback.
 - [ ] Preserve explicit/inherited property masks through retained style resolution and targeted restyle.

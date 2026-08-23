@@ -36,7 +36,9 @@ pub use element::{
     element_contract_for_tag, element_contract_tags, element_snapshot, element_snapshot_json,
     element_type_for_tag, validate_element_attribute, validate_element_event,
 };
-pub use events::{EventDispatcher, InputState, Modifiers, RawInputEvent, UiEvent};
+pub use events::{
+    EventDispatcher, InputDispatchResult, InputState, Modifiers, RawInputEvent, UiEvent,
+};
 pub use layout::{
     IntrinsicLayoutCache, LayoutEngine, LayoutRect, PerSurfaceLayoutState, TextMeasurer,
 };
