@@ -166,6 +166,59 @@ pub struct SurfaceGeneration {
     pub output: u64,
 }
 
+/// Outputs currently associated with a surface, ordered by most recent
+/// `wl_surface::enter`. Wayland surfaces may overlap more than one output;
+/// retaining the complete membership prevents a late leave for one output from
+/// clearing another output that still owns the surface. The last member is the
+/// deterministic output used for geometry that requires one logical extent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OutputMembership<T> {
+    members: Vec<T>,
+}
+
+impl<T> Default for OutputMembership<T> {
+    fn default() -> Self {
+        Self {
+            members: Vec::new(),
+        }
+    }
+}
+
+impl<T: PartialEq> OutputMembership<T> {
+    pub(crate) fn enter(&mut self, output: T) -> bool {
+        if let Some(index) = self.members.iter().position(|member| member == &output) {
+            if index + 1 == self.members.len() {
+                return false;
+            }
+            let output = self.members.remove(index);
+            self.members.push(output);
+            return true;
+        }
+        self.members.push(output);
+        true
+    }
+
+    pub(crate) fn leave(&mut self, output: &T) -> bool {
+        let Some(index) = self.members.iter().position(|member| member == output) else {
+            return false;
+        };
+        self.members.remove(index);
+        true
+    }
+
+    pub(crate) fn contains(&self, output: &T) -> bool {
+        self.members.iter().any(|member| member == output)
+    }
+
+    pub(crate) fn active(&self) -> Option<&T> {
+        self.members.last()
+    }
+
+    pub(crate) fn as_slice(&self) -> &[T] {
+        &self.members
+    }
+}
+
 /// Protocol versions and optional globals negotiated when the Wayland
 /// connection was established. A zero version means that the compositor did
 /// not advertise that protocol. The generation identifies the revision of
@@ -311,6 +364,8 @@ struct TestingBackend {
     buffer_backpressured_surfaces: HashSet<String>,
     surface_scales: HashMap<String, f32>,
     full_redraw_surfaces: HashSet<String>,
+    surface_outputs: HashMap<String, OutputMembership<u32>>,
+    surface_output_generations: HashMap<String, u64>,
     text_input_state: Option<(String, TextInputState)>,
     text_input_surface: Option<String>,
     text_input_pending: TestingPendingTextInput,
@@ -371,6 +426,8 @@ fn clear_testing_surface_runtime_state(backend: &mut TestingBackend, surface_id:
     clear_testing_presentation_waits(backend, surface_id);
     backend.surface_scales.remove(surface_id);
     backend.full_redraw_surfaces.remove(surface_id);
+    backend.surface_outputs.remove(surface_id);
+    backend.surface_output_generations.remove(surface_id);
 }
 
 /// Keep the deterministic backend's retained text-input publication aligned
@@ -521,6 +578,75 @@ impl PresentationEngine {
             backend.full_redraw_surfaces.insert(surface_id.to_string());
         }
         true
+    }
+
+    /// Simulate `wl_surface::enter`/`leave` output membership for a live
+    /// testing surface. The output id is a deterministic stand-in for the
+    /// compositor's `wl_output` object identity. Entered outputs are retained
+    /// together, with the most recent one selected for geometry resolution;
+    /// every real membership change invalidates retained pixels.
+    #[doc(hidden)]
+    pub fn testing_set_surface_output(
+        &mut self,
+        surface_id: &str,
+        output_id: u32,
+        entered: bool,
+    ) -> bool {
+        let Backend::Testing(backend) = &mut self.backend else {
+            return false;
+        };
+        if backend.connection_lost.is_some()
+            || backend.missing_surfaces.contains(surface_id)
+            || (!backend.surface_configs.contains_key(surface_id)
+                && !backend.popup_configs.contains_key(surface_id))
+        {
+            return false;
+        }
+
+        let membership = backend
+            .surface_outputs
+            .entry(surface_id.to_string())
+            .or_default();
+        let changed = if entered {
+            membership.enter(output_id)
+        } else {
+            membership.leave(&output_id)
+        };
+        if !changed {
+            return false;
+        }
+
+        let generation = backend
+            .surface_output_generations
+            .entry(surface_id.to_string())
+            .or_default();
+        *generation = generation.saturating_add(1);
+        backend.full_redraw_surfaces.insert(surface_id.to_string());
+        true
+    }
+
+    #[doc(hidden)]
+    pub fn testing_surface_outputs(&self, surface_id: &str) -> Vec<u32> {
+        match &self.backend {
+            Backend::Testing(backend) => backend
+                .surface_outputs
+                .get(surface_id)
+                .map(|outputs| outputs.as_slice().to_vec())
+                .unwrap_or_default(),
+            Backend::WaylandSurface(_) | Backend::DevWindow(_) => Vec::new(),
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn testing_surface_output_generation(&self, surface_id: &str) -> u64 {
+        match &self.backend {
+            Backend::Testing(backend) => backend
+                .surface_output_generations
+                .get(surface_id)
+                .copied()
+                .unwrap_or_default(),
+            Backend::WaylandSurface(_) | Backend::DevWindow(_) => 0,
+        }
     }
 
     #[doc(hidden)]
@@ -2148,6 +2274,39 @@ mod tests {
         assert_eq!(engine.surface_scale("panel"), 1.0);
         assert!(!engine.surface_needs_full_redraw("panel"));
         assert!(!engine.testing_set_surface_scale("panel", f32::NAN));
+    }
+
+    #[test]
+    fn testing_backend_retains_multi_output_membership_and_invalidates_once_per_change() {
+        let mut engine = PresentationEngine::testing_with_popup_support(false);
+        engine
+            .configure("panel", SurfaceConfig::default())
+            .expect("testing surface configuration succeeds");
+
+        assert!(engine.testing_set_surface_output("panel", 1, true));
+        assert!(engine.testing_set_surface_output("panel", 2, true));
+        assert_eq!(engine.testing_surface_outputs("panel"), [1, 2]);
+        assert_eq!(engine.testing_surface_output_generation("panel"), 2);
+        assert!(engine.surface_needs_full_redraw("panel"));
+        engine.clear_surface_needs_full_redraw("panel");
+
+        // A leave for output 1 must preserve output 2 and still record the
+        // membership revision. Re-entering output 1 promotes it to the active
+        // geometry choice without creating a duplicate member.
+        assert!(engine.testing_set_surface_output("panel", 1, false));
+        assert_eq!(engine.testing_surface_outputs("panel"), [2]);
+        assert_eq!(engine.testing_surface_output_generation("panel"), 3);
+        assert!(engine.surface_needs_full_redraw("panel"));
+        engine.clear_surface_needs_full_redraw("panel");
+
+        assert!(engine.testing_set_surface_output("panel", 1, true));
+        assert_eq!(engine.testing_surface_outputs("panel"), [2, 1]);
+        assert!(!engine.testing_set_surface_output("panel", 1, true));
+        assert_eq!(engine.testing_surface_output_generation("panel"), 4);
+
+        engine.testing_set_surface_missing("panel", true);
+        assert!(engine.testing_surface_outputs("panel").is_empty());
+        assert_eq!(engine.testing_surface_output_generation("panel"), 0);
     }
 
     #[test]

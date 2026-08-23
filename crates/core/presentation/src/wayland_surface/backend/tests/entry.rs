@@ -100,6 +100,29 @@ fn output_generation_advances_for_each_membership_revision() {
 }
 
 #[test]
+fn output_membership_keeps_surviving_outputs_after_an_unordered_leave() {
+    let mut membership = crate::OutputMembership::default();
+
+    assert!(membership.enter(1));
+    assert!(membership.enter(2));
+    assert_eq!(membership.as_slice(), &[1, 2]);
+    assert_eq!(membership.active(), Some(&2));
+
+    // Leaving the older output must not clear the newer output's geometry
+    // choice. Re-entering an existing output makes it the active choice again
+    // without duplicating its membership.
+    assert!(membership.leave(&1));
+    assert_eq!(membership.as_slice(), &[2]);
+    assert_eq!(membership.active(), Some(&2));
+    assert!(membership.enter(1));
+    assert_eq!(membership.as_slice(), &[2, 1]);
+    assert_eq!(membership.active(), Some(&1));
+
+    assert!(!membership.leave(&9));
+    assert!(!membership.enter(1));
+}
+
+#[test]
 fn negotiated_capabilities_clamp_versions_and_gate_popup_reposition() {
     let capabilities = NegotiatedCapabilities::from_versions(1, 9, 2, 4, 3, 2, 2, 2, 8, 9);
 

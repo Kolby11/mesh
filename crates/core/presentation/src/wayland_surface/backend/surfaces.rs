@@ -694,8 +694,10 @@ impl WaylandSurfaceBackend {
 
     /// Logical size of the output a specific surface is actually displayed
     /// on. Layer surfaces are created with `output: None` (the compositor
-    /// picks one), so `entry.output` — populated from `wl_surface::enter` —
-    /// is the only reliable way to know which output that was.
+    /// picks one), so the output membership populated from
+    /// `wl_surface::enter` is the only reliable way to know which output(s)
+    /// they overlap. The most recent member supplies the single logical extent
+    /// used by layer-shell geometry.
     ///
     /// Deliberately returns `None`, not a guess, when `enter` hasn't fired
     /// yet: on multi-monitor setups `wl_surface::enter` for a freshly-mapped
@@ -714,7 +716,7 @@ impl WaylandSurfaceBackend {
             .state
             .surfaces
             .get(surface_id)
-            .and_then(|entry| entry.output.as_ref())?;
+            .and_then(|entry| entry.active_output())?;
         Self::logical_size_of(&self.state.output_state, output)
     }
 

@@ -267,13 +267,10 @@ pub(in crate::wayland_surface) struct SurfaceEntry {
     /// is what forces a freshly created (or recreated) surface to publish its
     /// region again instead of inheriting a stale "already applied" belief.
     pub(in crate::wayland_surface) applied_input_region: Option<Option<DamageRect>>,
-    /// The output this surface's `wl_surface` currently overlaps, tracked via
-    /// `wl_surface::enter`/`leave`. A surface can technically straddle more
-    /// than one output; the most recent `enter` wins, which is exactly what a
-    /// single-output-bound layer surface (the common case: `output: None` at
-    /// creation, compositor picks one) needs. `None` before the first `enter`
-    /// arrives (e.g. between surface creation and the first frame).
-    pub(in crate::wayland_surface) output: Option<wl_output::WlOutput>,
+    /// All outputs this surface's `wl_surface` currently overlaps, tracked via
+    /// `wl_surface::enter`/`leave`. The most recent member is used when one
+    /// logical output extent is required for geometry resolution.
+    pub(in crate::wayland_surface) outputs: crate::OutputMembership<wl_output::WlOutput>,
 }
 
 impl SurfaceEntry {
@@ -310,7 +307,7 @@ impl SurfaceEntry {
             pending_opaque_region: None,
             opaque_region_dirty: false,
             applied_input_region: None,
-            output: None,
+            outputs: crate::OutputMembership::default(),
         }
     }
 
@@ -335,19 +332,34 @@ impl SurfaceEntry {
     }
 
     /// Adopt a new output membership. The compositor can send enter/leave in
-    /// either order while a surface moves between outputs, so only a real
-    /// association change advances the output generation. A changed output
-    /// requires a full redraw because output-dependent size and scale inputs
-    /// may have changed even when the retained tree did not.
-    pub(in crate::wayland_surface) fn update_output(
-        &mut self,
-        output: Option<wl_output::WlOutput>,
-    ) -> bool {
-        if self.output.as_ref() == output.as_ref() {
+    /// either order while a surface moves between outputs, so all live
+    /// associations are retained and only real membership/order changes
+    /// advance the output generation. A changed association requires a full
+    /// redraw because output-dependent size and scale inputs may have changed
+    /// even when the retained tree did not.
+    pub(in crate::wayland_surface) fn enter_output(&mut self, output: wl_output::WlOutput) -> bool {
+        if !self.outputs.enter(output) {
             return false;
         }
-        self.output = output;
         self.mark_output_revision_changed()
+    }
+
+    pub(in crate::wayland_surface) fn leave_output(
+        &mut self,
+        output: &wl_output::WlOutput,
+    ) -> bool {
+        if !self.outputs.leave(output) {
+            return false;
+        }
+        self.mark_output_revision_changed()
+    }
+
+    pub(in crate::wayland_surface) fn is_on_output(&self, output: &wl_output::WlOutput) -> bool {
+        self.outputs.contains(output)
+    }
+
+    pub(in crate::wayland_surface) fn active_output(&self) -> Option<&wl_output::WlOutput> {
+        self.outputs.active()
     }
 
     /// Invalidate output-dependent presentation state after the compositor

@@ -104,7 +104,7 @@ impl CompositorHandler for State {
             .find(|(_, entry)| entry.wl_surface() == surface)
         {
             tracing::debug!(surface_id = surface_id.as_str(), "wl_surface::enter fired");
-            if entry.update_output(Some(output.clone())) {
+            if entry.enter_output(output.clone()) {
                 tracing::debug!(
                     surface_id = surface_id.as_str(),
                     output_generation = entry.surface_generation().output,
@@ -125,8 +125,7 @@ impl CompositorHandler for State {
             .surfaces
             .iter_mut()
             .find(|(_, entry)| entry.wl_surface() == surface)
-            && entry.output.as_ref() == Some(output)
-            && entry.update_output(None)
+            && entry.leave_output(output)
         {
             tracing::debug!(
                 surface_id = surface_id.as_str(),
@@ -151,7 +150,7 @@ impl OutputHandler for State {
         output: wl_output::WlOutput,
     ) {
         for (surface_id, entry) in &mut self.surfaces {
-            if entry.output.as_ref() == Some(&output) && entry.mark_output_revision_changed() {
+            if entry.is_on_output(&output) && entry.mark_output_revision_changed() {
                 tracing::debug!(
                     surface_id = surface_id.as_str(),
                     output_generation = entry.surface_generation().output,
@@ -168,7 +167,7 @@ impl OutputHandler for State {
         output: wl_output::WlOutput,
     ) {
         for (surface_id, entry) in &mut self.surfaces {
-            if entry.output.as_ref() == Some(&output) && entry.update_output(None) {
+            if entry.leave_output(&output) {
                 tracing::debug!(
                     surface_id = surface_id.as_str(),
                     output_generation = entry.surface_generation().output,
