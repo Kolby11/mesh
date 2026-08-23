@@ -1281,6 +1281,12 @@ impl PresentationEngine {
                 if visible && backend.missing_surfaces.contains(surface_id) {
                     return Ok(PresentStatus::SurfaceMissing);
                 }
+                if visible
+                    && !backend.surface_configs.contains_key(surface_id)
+                    && !backend.popup_configs.contains_key(surface_id)
+                {
+                    return Ok(PresentStatus::SurfaceMissing);
+                }
                 if visible && backend.unconfigured_surfaces.contains(surface_id) {
                     return Ok(PresentStatus::NotReady);
                 }
@@ -1316,6 +1322,11 @@ impl PresentationEngine {
                     return Err(PresentationError::ConnectionLost(reason.clone()));
                 }
                 if backend.missing_surfaces.contains(surface_id) {
+                    return Ok(SurfaceStateStatus::SurfaceMissing);
+                }
+                if !backend.surface_configs.contains_key(surface_id)
+                    && !backend.popup_configs.contains_key(surface_id)
+                {
                     return Ok(SurfaceStateStatus::SurfaceMissing);
                 }
                 if backend.unconfigured_surfaces.contains(surface_id) {
@@ -2653,6 +2664,12 @@ mod tests {
         }];
 
         engine
+            .configure("panel", SurfaceConfig::default())
+            .expect("panel config should be accepted");
+        engine
+            .configure("overlay", SurfaceConfig::default())
+            .expect("overlay config should be accepted");
+        engine
             .present_with_damage("panel", "Panel", true, &buffer, &damage)
             .unwrap();
         engine
@@ -2663,6 +2680,40 @@ mod tests {
         engine.finish_frame().unwrap();
         assert_eq!(engine.testing_completed_frames(), 1);
         assert_eq!(engine.testing_presented_surfaces(), ["panel", "overlay"]);
+    }
+
+    #[test]
+    fn testing_backend_does_not_deliver_unknown_visible_surface_work() {
+        let mut engine = PresentationEngine::testing_with_popup_support(false);
+        let buffer = PixelBuffer::new(32, 16);
+        let damage = [DamageRect {
+            x: 0,
+            y: 0,
+            width: 32,
+            height: 16,
+        }];
+
+        assert_eq!(
+            engine
+                .present_with_damage("missing", "Missing", true, &buffer, &damage)
+                .expect("unknown visible surface is a normal retry outcome"),
+            PresentStatus::SurfaceMissing
+        );
+        assert_eq!(
+            engine
+                .commit_surface_state("missing")
+                .expect("unknown state-only target is a normal retry outcome"),
+            SurfaceStateStatus::SurfaceMissing
+        );
+        assert!(engine.testing_presented_surfaces().is_empty());
+        assert!(engine.testing_surface_state_commits().is_empty());
+
+        assert_eq!(
+            engine
+                .present_with_damage("missing", "Missing", false, &buffer, &damage)
+                .expect("hidden surfaces do not require a compositor object"),
+            PresentStatus::Presented
+        );
     }
 
     fn pointer_move(surface_id: &str, x: f32, y: f32) -> WindowEvent {

@@ -20,6 +20,11 @@ mutated. Parent-close simulation now dismisses popup descendants before
 publishing the parent's `Closed` event. Live compositor conformance and
 connection recreation remain open.
 
+Visible unknown testing targets now return `SurfaceMissing` for both pixel
+presentation and state-only commits, matching the live backend and preserving
+shell retry semantics instead of recording delivery against a nonexistent
+surface.
+
 Presentation now keeps frame-callback pacing separate from SHM buffer-release
 backpressure. When all reusable buffers are compositor-owned, the live backend
 retains an explicit release gate, refreshes it from dispatched
