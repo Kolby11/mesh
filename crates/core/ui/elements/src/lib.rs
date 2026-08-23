@@ -47,6 +47,7 @@ pub use layout::{
 };
 pub use popover::{
     PopoverAnchor, PopoverConstraintAdjustment, PopoverGrab, PopoverGravity, PopoverPlacement,
+    PopoverPlacementDiagnostic, PopoverPlacementDiagnosticKind, PopoverPlacementField,
 };
 pub use pseudo_state::{
     PSEUDO_STATE_TABLE, PseudoState, PseudoStateKind, PseudoStateSpec, authored_element_state,

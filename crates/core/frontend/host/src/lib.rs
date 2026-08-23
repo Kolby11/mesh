@@ -5,8 +5,11 @@ use std::time::{Duration, Instant};
 use mesh_core_capability::CapabilitySet;
 use mesh_core_debug::ProfilingStage;
 use mesh_core_diagnostics::Diagnostics;
-pub use mesh_core_elements::PopoverPlacement;
 use mesh_core_elements::WidgetNode;
+pub use mesh_core_elements::{
+    PopoverPlacement, PopoverPlacementDiagnostic, PopoverPlacementDiagnosticKind,
+    PopoverPlacementField,
+};
 use mesh_core_locale::LocaleEngine;
 use mesh_core_render::{DamageRect, DisplayPaintCommand, PixelBuffer};
 use mesh_core_scripting::ScriptError;
@@ -50,6 +53,44 @@ pub struct ChildSurfaceRequest {
     /// overshoot, so shadows don't clip at the popup buffer edge.
     pub content_padding: (u32, u32, u32, u32),
     pub placement: PopoverPlacement,
+    /// The authored trigger reference for an inline popover. The shell
+    /// resolves this reference before promotion and carries the resulting
+    /// surface relationship on the promoted target.
+    pub popover_trigger: Option<PopoverTriggerReference>,
+}
+
+/// A stable authored reference to the element that opens/anchors an inline
+/// popover. It intentionally remains a reference rather than a `NodeId`: the
+/// shell's retained tree assigns runtime node identities after composition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PopoverTriggerReference {
+    pub reference: String,
+}
+
+/// The cross-surface relationship created when an inline popover is promoted.
+/// This is the observable seam shared by shell focus, dismissal, diagnostics,
+/// and accessibility integrations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PopoverSurfaceRelationship {
+    pub trigger_surface_id: SurfaceId,
+    pub trigger_reference: PopoverTriggerReference,
+    pub popup_surface_id: SurfaceId,
+    pub popup_node_key: String,
+}
+
+/// A typed child-surface validation failure attached to an authored popover
+/// node. Invalid requests are not promoted, so the compositor never observes
+/// a silently substituted placement or anchor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChildSurfaceDiagnostic {
+    Placement {
+        node_key: String,
+        diagnostic: PopoverPlacementDiagnostic,
+    },
+    MissingTrigger {
+        node_key: String,
+        reference: PopoverTriggerReference,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

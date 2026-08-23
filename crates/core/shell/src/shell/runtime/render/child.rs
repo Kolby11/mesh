@@ -149,11 +149,26 @@ impl Shell {
                 if request.kind != ChildSurfaceKind::Window {
                     target.popup_parent_surface = Some(parent_surface_id.to_string());
                 }
+                let popover_relationship = (request.kind == ChildSurfaceKind::Popover)
+                    .then(|| {
+                        request
+                            .popover_trigger
+                            .as_ref()
+                            .map(|trigger| PopoverSurfaceRelationship {
+                                trigger_surface_id: parent_surface_id.to_string(),
+                                trigger_reference: trigger.clone(),
+                                popup_surface_id: child_surface_id.clone(),
+                                popup_node_key: request.node_key.clone(),
+                            })
+                    })
+                    .flatten();
+                target.popover_relationship = popover_relationship.clone();
                 target.force_full_present = true;
                 self.components[index].children.push(ChildSurface {
                     target,
                     kind: request.kind,
                     node_key: request.node_key.clone(),
+                    popover_relationship,
                     anchor_rect: request.anchor_rect,
                     content_padding: request.content_padding,
                     closing_until: None,
@@ -172,6 +187,24 @@ impl Shell {
             };
             self.components[index].children[child_index].anchor_rect = request.anchor_rect;
             self.components[index].children[child_index].content_padding = request.content_padding;
+            let popover_relationship = (request.kind == ChildSurfaceKind::Popover)
+                .then(|| {
+                    request
+                        .popover_trigger
+                        .as_ref()
+                        .map(|trigger| PopoverSurfaceRelationship {
+                            trigger_surface_id: parent_surface_id.to_string(),
+                            trigger_reference: trigger.clone(),
+                            popup_surface_id: child_surface_id.clone(),
+                            popup_node_key: request.node_key.clone(),
+                        })
+                })
+                .flatten();
+            self.components[index].children[child_index].popover_relationship =
+                popover_relationship.clone();
+            self.components[index].children[child_index]
+                .target
+                .popover_relationship = popover_relationship;
             if self
                 .presentation_engine
                 .surface_waiting_for_frame_callback(&child_surface_id)

@@ -1,6 +1,6 @@
 use super::super::*;
 use super::service_state;
-use crate::shell::types::TabFocusTarget;
+use crate::shell::types::{PopoverSurfaceRelationship, PopoverTriggerReference, TabFocusTarget};
 use mesh_core_debug::{
     BenchmarkScenarioId, BenchmarkScenarioStatus, DebugBenchmarkRunState, ProfilingBackendStage,
 };
@@ -865,6 +865,15 @@ impl Shell {
                     if let Some(idx) = self.component_index_for_surface(&surface_id) {
                         self.components[idx].parent.popup_parent_surface =
                             Some(trigger_surface.clone());
+                        self.components[idx].parent.popover_relationship =
+                            (!trigger_key.is_empty()).then(|| PopoverSurfaceRelationship {
+                                trigger_surface_id: trigger_surface.clone(),
+                                trigger_reference: PopoverTriggerReference {
+                                    reference: trigger_key.clone(),
+                                },
+                                popup_surface_id: surface_id.clone(),
+                                popup_node_key: "root".to_string(),
+                            });
                         self.components[idx].parent.popup_config = Some(popup_config);
                         self.components[idx].parent.last_popup_size = None;
                         self.components[idx].component.set_popup_promoted(true);
@@ -2162,6 +2171,7 @@ impl Shell {
                         // Tear down the xdg_popup surface so it can be recreated
                         // fresh on the next ActivatePopover call.
                         runtime.parent.popup_parent_surface = None;
+                        runtime.parent.popover_relationship = None;
                         runtime.parent.popup_config = None;
                         runtime.parent.last_popup_size = None;
                         runtime.component.set_popup_promoted(false);

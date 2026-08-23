@@ -1,4 +1,5 @@
 use super::*;
+use crate::shell::PopoverTriggerReference;
 
 #[test]
 fn fractional_damage_scales_edges_into_physical_buffer_space() {
@@ -280,6 +281,59 @@ fn open_popover_anchor_ref_uses_trigger_bounds() {
 
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].anchor_rect, (12, 8, 44, 20));
+    assert_eq!(
+        requests[0].popover_trigger,
+        Some(PopoverTriggerReference {
+            reference: "menu_button".into(),
+        })
+    );
+}
+
+#[test]
+fn invalid_popover_placement_is_not_promoted_and_reports_typed_diagnostics() {
+    let mut root = keyed_node("row", "root", 0.0, 0.0, 200.0, 80.0);
+    let mut popover = keyed_node("popover", "root/menu", 20.0, 42.0, 80.0, 10.0);
+    popover.attributes.insert("open".into(), "true".into());
+    popover
+        .attributes
+        .insert("gravity".into(), "diagonal".into());
+    root.children.push(popover);
+
+    let mut requests = Vec::new();
+    let mut diagnostics = Vec::new();
+    collect_child_surface_requests_with_diagnostics(&root, &root, &mut requests, &mut diagnostics);
+
+    assert!(requests.is_empty());
+    assert!(matches!(
+        diagnostics.as_slice(),
+        [ChildSurfaceDiagnostic::Placement { node_key, diagnostic }]
+            if node_key == "root/menu"
+                && diagnostic.field == mesh_core_elements::PopoverPlacementField::Gravity
+                && diagnostic.kind
+                    == mesh_core_elements::PopoverPlacementDiagnosticKind::UnknownToken
+    ));
+}
+
+#[test]
+fn missing_popover_trigger_is_not_promoted_and_reports_relationship_diagnostic() {
+    let mut root = keyed_node("row", "root", 0.0, 0.0, 200.0, 80.0);
+    let mut popover = keyed_node("popover", "root/menu", 20.0, 42.0, 80.0, 10.0);
+    popover.attributes.insert("open".into(), "true".into());
+    popover
+        .attributes
+        .insert("anchor-ref".into(), "missing-trigger".into());
+    root.children.push(popover);
+
+    let mut requests = Vec::new();
+    let mut diagnostics = Vec::new();
+    collect_child_surface_requests_with_diagnostics(&root, &root, &mut requests, &mut diagnostics);
+
+    assert!(requests.is_empty());
+    assert!(matches!(
+        diagnostics.as_slice(),
+        [ChildSurfaceDiagnostic::MissingTrigger { node_key, reference }]
+            if node_key == "root/menu" && reference.reference == "missing-trigger"
+    ));
 }
 
 #[test]

@@ -35,6 +35,7 @@ fn component_runtime_resolves_parent_and_child_surface_targets() {
             ),
             kind: super::types::ChildSurfaceKind::Popover,
             node_key: "root/0/popover".to_string(),
+            popover_relationship: None,
             anchor_rect: (12, 0, 40, 56),
             content_padding: (0, 0, 0, 0),
             closing_until: None,
@@ -118,13 +119,35 @@ fn child_surface_reconcile_creates_popup_and_paints_subtree() {
     let mut shell = Shell::new();
     shell.presentation_engine =
         mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
-    let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
+    let state = Arc::new(Mutex::new(PopoverHarnessState {
+        popover_trigger: Some(super::types::PopoverTriggerReference {
+            reference: "volume-button".into(),
+        }),
+        ..PopoverHarnessState::default()
+    }));
     shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
 
     render_components_until_child_popup(&mut shell);
 
     assert_eq!(shell.components[0].children.len(), 1);
     let child_id = shell.components[0].children[0].target.surface_id.clone();
+    let relationship = super::types::PopoverSurfaceRelationship {
+        trigger_surface_id: "@test/popover-host".into(),
+        trigger_reference: super::types::PopoverTriggerReference {
+            reference: "volume-button".into(),
+        },
+        popup_surface_id: child_id.clone(),
+        popup_node_key: "root/popover".into(),
+    };
+    assert_eq!(
+        shell.components[0].children[0].popover_relationship,
+        Some(relationship.clone())
+    );
+    assert_eq!(
+        shell.components[0].children[0].target.popover_relationship,
+        Some(relationship.clone())
+    );
+    assert_eq!(shell.popover_surface_relationships(), vec![relationship]);
     let config = shell
         .presentation_engine
         .testing_popup_config(&child_id)

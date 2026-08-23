@@ -5,9 +5,9 @@ use super::service::{
 };
 use super::surface_layout::{SurfaceLayoutSettings, resolve_frontend_module_settings_with_props};
 use super::types::{
-    ChildSurfaceKind, ChildSurfaceRequest, ComponentContext, ComponentError, ComponentInput,
-    ComponentProfilingRecord, CoreEvent, CoreRequest, KeyModifiers, ServiceEvent, ShellComponent,
-    SurfaceExtent, TabFocusTarget,
+    ChildSurfaceDiagnostic, ChildSurfaceKind, ChildSurfaceRequest, ComponentContext,
+    ComponentError, ComponentInput, ComponentProfilingRecord, CoreEvent, CoreRequest, KeyModifiers,
+    ServiceEvent, ShellComponent, SurfaceExtent, TabFocusTarget,
 };
 use mesh_core_config::SettingsStore;
 use mesh_core_interaction::{

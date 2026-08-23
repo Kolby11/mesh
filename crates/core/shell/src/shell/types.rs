@@ -1,6 +1,7 @@
 pub use mesh_core_frontend_host::{
-    ChildSurfaceKind, ChildSurfaceRequest, ComponentContext, ComponentError, ComponentInput,
-    ComponentProfilingRecord, CoreEvent, CoreRequest, KeyModifiers, ServiceEvent,
+    ChildSurfaceDiagnostic, ChildSurfaceKind, ChildSurfaceRequest, ComponentContext,
+    ComponentError, ComponentInput, ComponentProfilingRecord, CoreEvent, CoreRequest, KeyModifiers,
+    PopoverSurfaceRelationship, PopoverTriggerReference, ServiceEvent,
     ServiceInterfaceEventSubscription, ServiceObservationSummary, ShellComponent, SurfaceExtent,
     SurfaceId, TabFocusTarget,
 };
@@ -50,6 +51,10 @@ pub(super) struct SurfaceTarget {
     /// Popup config; `placement.size` is updated each render frame to the
     /// measured content size before being handed to `configure_popup`.
     pub(super) popup_config: Option<PopupConfig>,
+    /// Typed trigger/child identity retained after popup promotion. The
+    /// legacy `popup_parent_surface` field remains as a compact routing index,
+    /// while this record is the observable semantic relationship.
+    pub(super) popover_relationship: Option<PopoverSurfaceRelationship>,
     /// Last size handed to `configure_popup`; used to skip redundant calls.
     pub(super) last_popup_size: Option<(u32, u32)>,
     pub(super) last_region_state: Option<(u64, Option<(u32, u32)>, Option<(u32, u32)>)>,
@@ -67,6 +72,7 @@ impl SurfaceTarget {
             pending_present_damage: Vec::new(),
             popup_parent_surface: None,
             popup_config: None,
+            popover_relationship: None,
             last_popup_size: None,
             last_region_state: None,
         }
@@ -88,6 +94,8 @@ pub(super) struct ChildSurface {
     #[allow(dead_code)]
     /// Stable `_mesh_key` of the originating `WidgetNode`.
     pub(super) node_key: String,
+    /// Trigger-to-surface identity after this child is promoted as a popup.
+    pub(super) popover_relationship: Option<PopoverSurfaceRelationship>,
     #[allow(dead_code)]
     /// Anchor rectangle in the parent surface's coordinate space.
     pub(super) anchor_rect: (i32, i32, i32, i32),

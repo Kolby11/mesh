@@ -1,9 +1,20 @@
 use super::*;
+use crate::shell::PopoverTriggerReference;
 
 pub(super) fn collect_child_surface_requests(
     root: &WidgetNode,
     node: &WidgetNode,
     requests: &mut Vec<ChildSurfaceRequest>,
+) {
+    let mut diagnostics = Vec::new();
+    collect_child_surface_requests_with_diagnostics(root, node, requests, &mut diagnostics);
+}
+
+pub(super) fn collect_child_surface_requests_with_diagnostics(
+    root: &WidgetNode,
+    node: &WidgetNode,
+    requests: &mut Vec<ChildSurfaceRequest>,
+    diagnostics: &mut Vec<ChildSurfaceDiagnostic>,
 ) {
     if node.is_promoted_window()
         && let Some(node_key) = node.mesh_key()
@@ -24,6 +35,7 @@ pub(super) fn collect_child_surface_requests(
             ),
             content_padding: (0, 0, 0, 0),
             placement: PopoverPlacement::default(),
+            popover_trigger: None,
         });
         // A promoted widget owns its entire subtree. Descendant popovers are
         // intentionally not promoted as siblings of this window target; they
@@ -34,21 +46,69 @@ pub(super) fn collect_child_surface_requests(
     if source_element_tag(node) == "popover"
         && popover_is_open(node)
         && let Some(node_key) = node.mesh_key()
-        && let Some(anchor) = popover_anchor_bounds(root, node, node_key)
     {
-        let content = (
-            node.layout.width.ceil().max(1.0) as u32,
-            node.layout.height.ceil().max(1.0) as u32,
-        );
-        let content_padding = popover_content_padding(node);
-        requests.push(ChildSurfaceRequest {
-            node_key: node_key.to_string(),
-            kind: ChildSurfaceKind::Popover,
-            anchor_rect: bounds_to_i32_rect(anchor),
-            content_size: content,
-            content_padding,
-            placement: PopoverPlacement::from_node(node),
-        });
+        let placement = match PopoverPlacement::from_node(node) {
+            Ok(placement) => Some(placement),
+            Err(placement_diagnostics) => {
+                diagnostics.extend(placement_diagnostics.into_iter().map(|diagnostic| {
+                    ChildSurfaceDiagnostic::Placement {
+                        node_key: node_key.to_string(),
+                        diagnostic,
+                    }
+                }));
+                None
+            }
+        };
+        if let Some(placement) = placement {
+            let (popover_trigger, trigger_is_valid) =
+                if let Some(reference) = popover_anchor_reference(node) {
+                    (
+                        Some(PopoverTriggerReference {
+                            reference: reference.to_string(),
+                        }),
+                        true,
+                    )
+                } else if let Some(reference) = popover_anchor_attribute_value(node) {
+                    diagnostics.push(ChildSurfaceDiagnostic::MissingTrigger {
+                        node_key: node_key.to_string(),
+                        reference: PopoverTriggerReference {
+                            reference: reference.to_string(),
+                        },
+                    });
+                    (None, false)
+                } else {
+                    (None, true)
+                };
+            if trigger_is_valid {
+                let anchor = match popover_trigger.as_ref() {
+                    Some(trigger) => {
+                        find_node_bounds_by_reference(root, &trigger.reference, 0.0, 0.0)
+                    }
+                    None => find_node_bounds_by_key(root, node_key, 0.0, 0.0),
+                };
+                if let Some(anchor) = anchor {
+                    let content = (
+                        node.layout.width.ceil().max(1.0) as u32,
+                        node.layout.height.ceil().max(1.0) as u32,
+                    );
+                    let content_padding = popover_content_padding(node);
+                    requests.push(ChildSurfaceRequest {
+                        node_key: node_key.to_string(),
+                        kind: ChildSurfaceKind::Popover,
+                        anchor_rect: bounds_to_i32_rect(anchor),
+                        content_size: content,
+                        content_padding,
+                        placement,
+                        popover_trigger,
+                    });
+                } else if let Some(popover_trigger) = popover_trigger {
+                    diagnostics.push(ChildSurfaceDiagnostic::MissingTrigger {
+                        node_key: node_key.to_string(),
+                        reference: popover_trigger,
+                    });
+                }
+            }
+        }
     }
 
     // A positioned overlay cannot be painted beyond its parent SHM buffer.
@@ -62,11 +122,11 @@ pub(super) fn collect_child_surface_requests(
             root.layout.x + root.layout.width,
             root.layout.y + root.layout.height,
         );
-        collect_overflow_surface_requests(root, root, root_bounds, false, requests);
+        collect_overflow_surface_requests(root, root, root_bounds, false, requests, diagnostics);
     }
 
     for child in &node.children {
-        collect_child_surface_requests(root, child, requests);
+        collect_child_surface_requests_with_diagnostics(root, child, requests, diagnostics);
     }
 }
 
@@ -76,6 +136,7 @@ fn collect_overflow_surface_requests(
     root_bounds: (f32, f32, f32, f32),
     clipped_by_ancestor: bool,
     requests: &mut Vec<ChildSurfaceRequest>,
+    _diagnostics: &mut Vec<ChildSurfaceDiagnostic>,
 ) {
     let children_clipped = clipped_by_ancestor
         || node.computed_style.overflow_x.clips_contents()
@@ -106,10 +167,18 @@ fn collect_overflow_surface_requests(
                 content_size: (anchor_rect.2 as u32, anchor_rect.3 as u32),
                 content_padding: popover_content_padding(child),
                 placement,
+                popover_trigger: None,
             });
         }
 
-        collect_overflow_surface_requests(root, child, root_bounds, children_clipped, requests);
+        collect_overflow_surface_requests(
+            root,
+            child,
+            root_bounds,
+            children_clipped,
+            requests,
+            _diagnostics,
+        );
     }
 }
 
@@ -120,16 +189,6 @@ fn bounds_escape_container(bounds: (f32, f32, f32, f32), container: (f32, f32, f
         || bounds.3 > container.3
 }
 
-pub(super) fn popover_anchor_bounds(
-    root: &WidgetNode,
-    popover: &WidgetNode,
-    popover_key: &str,
-) -> Option<(f32, f32, f32, f32)> {
-    popover_anchor_reference(popover)
-        .and_then(|reference| find_node_bounds_by_reference(root, reference, 0.0, 0.0))
-        .or_else(|| find_node_bounds_by_key(root, popover_key, 0.0, 0.0))
-}
-
 pub(super) fn popover_anchor_reference(popover: &WidgetNode) -> Option<&str> {
     for name in ["anchor-ref", "anchor-target", "anchor-element", "target"] {
         if let Some(value) = non_empty_attr(popover, name) {
@@ -137,27 +196,14 @@ pub(super) fn popover_anchor_reference(popover: &WidgetNode) -> Option<&str> {
         }
     }
 
-    let anchor = non_empty_attr(popover, "anchor")?;
-    if mesh_core_elements::PopoverPlacement::from_node(popover).anchor
-        == mesh_core_elements::PopoverPlacement::from_attributes(&Default::default()).anchor
-        && !matches!(
-            anchor.trim().to_ascii_lowercase().as_str(),
-            "center"
-                | "top"
-                | "bottom"
-                | "left"
-                | "right"
-                | "top-left"
-                | "top_left"
-                | "top-right"
-                | "top_right"
-                | "bottom-left"
-                | "bottom_left"
-                | "bottom-right"
-                | "bottom_right"
-        )
-    {
-        return Some(anchor);
+    None
+}
+
+fn popover_anchor_attribute_value(popover: &WidgetNode) -> Option<&str> {
+    for name in ["anchor-ref", "anchor-target", "anchor-element", "target"] {
+        if let Some(value) = popover.attributes.get(name) {
+            return Some(value.trim());
+        }
     }
     None
 }

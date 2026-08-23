@@ -9,7 +9,9 @@ mod tests;
 use popup::*;
 
 use super::super::*;
-use crate::shell::types::{ChildSurface, ChildSurfaceKind, SurfaceTarget};
+use crate::shell::types::{
+    ChildSurface, ChildSurfaceKind, PopoverSurfaceRelationship, SurfaceTarget,
+};
 use mesh_core_elements::style::BackgroundPaint;
 use mesh_core_elements::{PopoverAnchor, PopoverConstraintAdjustment, PopoverGrab, PopoverGravity};
 use mesh_core_presentation::{

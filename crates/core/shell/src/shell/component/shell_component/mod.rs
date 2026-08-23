@@ -1414,7 +1414,16 @@ impl ShellComponent for FrontendSurfaceComponent {
         };
 
         let mut requests = Vec::new();
-        collect_child_surface_requests(tree, tree, &mut requests);
+        let mut diagnostics = Vec::new();
+        collect_child_surface_requests_with_diagnostics(
+            tree,
+            tree,
+            &mut requests,
+            &mut diagnostics,
+        );
+        for diagnostic in diagnostics {
+            self.record_child_surface_diagnostic(&diagnostic);
+        }
         requests
     }
 

@@ -39,6 +39,39 @@ pub(super) fn record_localized_miss(
 }
 
 impl FrontendSurfaceComponent {
+    pub(super) fn record_child_surface_diagnostic(
+        &self,
+        diagnostic: &ChildSurfaceDiagnostic,
+    ) -> bool {
+        let Some(diagnostics) = &self.diagnostics else {
+            return false;
+        };
+        let (issue_code, message) = match diagnostic {
+            ChildSurfaceDiagnostic::Placement {
+                node_key,
+                diagnostic,
+            } => (
+                format!("popover-placement:{node_key}:{}", diagnostic.code()),
+                format!("node '{node_key}': {diagnostic}"),
+            ),
+            ChildSurfaceDiagnostic::MissingTrigger {
+                node_key,
+                reference,
+            } => (
+                format!("popover-trigger:{node_key}"),
+                format!(
+                    "node '{node_key}' references missing popover trigger '{}'",
+                    reference.reference
+                ),
+            ),
+        };
+        diagnostics.record_issue(
+            issue_code,
+            mesh_core_diagnostics::IssueSeverity::Error,
+            message,
+        )
+    }
+
     pub(super) fn record_localized_miss(
         &self,
         resolution: &mesh_core_locale::LocalizedTextResolution,

@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-08-23
+**Updated:** 2026-08-24
 
 ## Now
 
@@ -16,8 +16,8 @@ the canonical generated element schema landed 2026-08-23 — see
 
 ## Next
 
-Make popover placement tokens and trigger/surface relationships typed,
-validated, and observable across promotion (`docs/BACKLOG.md`).
+Introduce an immutable frame snapshot with phase stamps, semantic diffs, stable
+identities, and property-based invariant tests (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

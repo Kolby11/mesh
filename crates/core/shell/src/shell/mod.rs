@@ -60,16 +60,17 @@ use surface_layout::{
     apply_font_family, default_surface_visibility, load_active_theme, prepare_theme_for_graph,
     selected_theme_mode,
 };
+pub use types::{
+    ChildSurfaceDiagnostic, ComponentContext, ComponentError, ComponentInput, CoreEvent,
+    CoreRequest, KeyModifiers, PopoverSurfaceRelationship, PopoverTriggerReference, ServiceEvent,
+    ServiceInterfaceEventSubscription, ServiceObservationSummary, ShellComponent, SurfaceExtent,
+    SurfaceId, TabFocusTarget,
+};
 use types::{
     CommandThrottleState, CompiledContractField, ComponentRuntime, ContractValidationCache,
     LatestServiceState, PendingBoundServiceState, PendingServiceCommand, ServiceCallRoute,
     ServiceCommandMsg, ServiceDeliveryIndex, SettingsWatchState, ShellCoreState, ShellMessage,
     SurfaceState, TargetRef, ThemeWatchState,
-};
-pub use types::{
-    ComponentContext, ComponentError, ComponentInput, CoreEvent, CoreRequest, KeyModifiers,
-    ServiceEvent, ServiceInterfaceEventSubscription, ServiceObservationSummary, ShellComponent,
-    SurfaceExtent, SurfaceId, TabFocusTarget,
 };
 
 use service::{service_capabilities, service_name_from_interface};
@@ -499,6 +500,32 @@ pub struct Shell {
     pending_service_call_routes: HashMap<u64, ServiceCallRoute>,
     pending_popover_hides: HashMap<SurfaceId, std::time::Instant>,
     profiling: runtime::profiling::ProfilingRuntimeState,
+}
+
+impl Shell {
+    /// Return the live trigger-to-popup relationships retained by promoted
+    /// popovers. The relationship is deliberately exposed at the shell
+    /// boundary so focus, dismissal, accessibility, and debug integrations
+    /// can observe the same identity after promotion instead of reconstructing
+    /// it from compositor parentage.
+    pub fn popover_surface_relationships(&self) -> Vec<PopoverSurfaceRelationship> {
+        let mut relationships = self
+            .components
+            .iter()
+            .flat_map(|runtime| {
+                runtime
+                    .targets()
+                    .filter_map(|target| target.popover_relationship.clone())
+            })
+            .collect::<Vec<_>>();
+        relationships.sort_by(|left, right| {
+            left.popup_surface_id
+                .cmp(&right.popup_surface_id)
+                .then_with(|| left.trigger_surface_id.cmp(&right.trigger_surface_id))
+                .then_with(|| left.popup_node_key.cmp(&right.popup_node_key))
+        });
+        relationships
+    }
 }
 
 type BackendRuntimeStatusMap = HashMap<String, HashMap<String, BackendRuntimeStatusEntry>>;
