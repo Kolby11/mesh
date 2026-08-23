@@ -211,7 +211,7 @@ the monthly log, so they are intentionally absent from the open backlog.
 - [ ] Make input ownership per seat and cancel pointer, touch, gesture, focus, and repeat transactions during teardown.
 - [ ] Validate buffer length/stride/scale, propagate attach/region errors, expose connection loss, and reap clipboard children.
 - [ ] Replace the recorder backend with a deterministic protocol-state lifecycle simulator plus a focused live compositor matrix.
-- [ ] Add full pointer-button identity and IME/text-input-v3 support while preserving normalized Escape behavior.
+- [ ] Add IME/text-input-v3 protocol support for preedit, surrounding text, deletion, and lifecycle.
 - [ ] Build the transactional, capability-aware presentation engine with version reporting, reactive popups, multi-output membership, per-seat input, and shared SHM/dmabuf/GPU frame contracts.
 
 ### 15. Shell core and orchestration

@@ -393,6 +393,7 @@ impl Shell {
                     component_key_released_input(key, self.active_key_modifiers)
                 }
                 RoutedWindowEvent::Char { ch } => ComponentInput::Char { ch },
+                RoutedWindowEvent::TextInput { text } => ComponentInput::TextInput { text },
             };
             tracing::trace!(
                 "[hover] dispatch_wayland: routing event to surface_id={}",
@@ -670,13 +671,19 @@ enum RoutedWindowEvent {
     Char {
         ch: char,
     },
+    TextInput {
+        text: String,
+    },
 }
 
 impl RoutedWindowEvent {
     fn is_keyboard(&self) -> bool {
         matches!(
             self,
-            Self::KeyPressed { .. } | Self::KeyReleased { .. } | Self::Char { .. }
+            Self::KeyPressed { .. }
+                | Self::KeyReleased { .. }
+                | Self::Char { .. }
+                | Self::TextInput { .. }
         )
     }
 }
@@ -743,6 +750,12 @@ fn split_window_event(event: WindowEvent) -> (std::sync::Arc<str>, RoutedWindowE
             WindowKeyEvent::Released(key) => (surface_id, RoutedWindowEvent::KeyReleased { key }),
         },
         WindowEvent::Char { surface_id, ch } => (surface_id, RoutedWindowEvent::Char { ch }),
+        WindowEvent::TextInput { surface_id, text } => (
+            surface_id,
+            RoutedWindowEvent::TextInput {
+                text: text.to_string(),
+            },
+        ),
         WindowEvent::GestureSwipeBegin {
             surface_id,
             fingers,
@@ -812,6 +825,7 @@ fn profiling_trigger_for_event(event: &WindowEvent) -> &'static str {
         WindowEvent::TwoFingerScroll { .. } => "two_finger_scroll",
         WindowEvent::Key { .. } => "key",
         WindowEvent::Char { .. } => "char",
+        WindowEvent::TextInput { .. } => "text_input",
         WindowEvent::GestureSwipeBegin { .. } => "gesture_swipe_begin",
         WindowEvent::GestureSwipeUpdate { .. } => "gesture_swipe_update",
         WindowEvent::GestureSwipeEnd { .. } => "gesture_swipe_end",
@@ -925,6 +939,17 @@ mod tests {
                 ref key,
                 ref mods
             } if key == "Enter" && mods.ctrl && !mods.shift && mods.alt
+        ));
+
+        let (surface_id, event) = split_window_event(WindowEvent::TextInput {
+            surface_id: "launcher".into(),
+            text: "A🙂B".into(),
+        });
+        assert_eq!(surface_id.as_ref(), "launcher");
+        assert!(event.is_keyboard());
+        assert!(matches!(
+            event,
+            RoutedWindowEvent::TextInput { ref text } if text == "A🙂B"
         ));
     }
 

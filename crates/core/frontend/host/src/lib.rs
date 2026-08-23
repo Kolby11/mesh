@@ -231,6 +231,14 @@ pub enum ComponentInput {
         id: i32,
     },
     TouchCancel,
+    /// A committed text payload from the compositor or an input method.
+    ///
+    /// Unlike [`Self::Char`], this preserves the payload's commit boundary
+    /// and can carry multiple Unicode scalars (for example a composed input
+    /// sequence) without making the shell dispatch several partial values.
+    TextInput {
+        text: String,
+    },
     KeyPressed {
         key: String,
         modifiers: KeyModifiers,

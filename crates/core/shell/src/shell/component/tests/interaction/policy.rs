@@ -696,6 +696,66 @@ end
 }
 
 #[test]
+fn committed_text_preserves_multiple_scalars_and_one_change_boundary() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+text_seen = ""
+change_count = 0
+function onTextChange(value)
+    text_seen = value
+    change_count = change_count + 1
+end
+</script>
+"#,
+    );
+    component.last_tree = Some(root_with(vec![event_node(
+        "input",
+        "root/0",
+        0.0,
+        0.0,
+        100.0,
+        24.0,
+        &[("change", "onTextChange")],
+    )]));
+
+    let theme = default_theme();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::PointerButton {
+                button: 0x110,
+                x: 4.0,
+                y: 4.0,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::TextInput {
+                text: "A🙂B".into(),
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        runtime_value(&component, "text_seen"),
+        Some(serde_json::json!("A🙂B"))
+    );
+    assert_eq!(
+        runtime_value(&component, "change_count"),
+        Some(serde_json::json!(1))
+    );
+}
+
+#[test]
 fn switch_change_handler_receives_boolean_on_click() {
     let mut component = test_frontend_component(
         r#"

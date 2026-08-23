@@ -677,6 +677,51 @@ impl FrontendSurfaceComponent {
                     return Ok(requests);
                 }
             }
+            ComponentInput::TextInput { text } => {
+                if text.is_empty() {
+                    return Ok(Vec::new());
+                }
+                if let Some(focused_key) = self.focused_key.clone() {
+                    let input_node = find_node_by_key(tree, &focused_key);
+                    if is_input_key(tree, &focused_key)
+                        && let Some(input_node) = input_node
+                    {
+                        let accepted: String = text
+                            .chars()
+                            .filter(|ch| input_accepts_char(input_node, *ch))
+                            .collect();
+                        if !accepted.is_empty() {
+                            self.clear_selection();
+                            let value = self.input_values.entry(input_node.id).or_default();
+                            value.push_str(&accepted);
+                            let current = value.clone();
+                            self.invalidate_text_state();
+                            return self.dispatch_text_input_value_handlers(
+                                tree,
+                                &focused_key,
+                                &current,
+                            );
+                        }
+                    }
+                }
+
+                // Key bindings are driven by key events. Preserve the old
+                // single-character shortcut behavior for backends that only
+                // provide a committed text event, but never interpret a
+                // multi-character composition as several shortcuts.
+                let mut chars = text.chars();
+                if let (Some(ch), None) = (chars.next(), chars.next()) {
+                    let keyboard_settings = self.current_keyboard_settings();
+                    if let Some(requests) = self.dispatch_surface_shortcut(
+                        tree,
+                        &ch.to_string(),
+                        KeyModifiers::default(),
+                        &keyboard_settings,
+                    )? {
+                        return Ok(requests);
+                    }
+                }
+            }
             ComponentInput::KeyPressed { key, modifiers } => {
                 return self.handle_key_pressed(tree, key, modifiers);
             }

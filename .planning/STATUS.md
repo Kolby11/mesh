@@ -4,6 +4,12 @@
 
 ## Now
 
+Wayland keyboard commits now preserve the compositor's complete Unicode text
+payload through presentation, shell routing, keyboard repeat, and the
+component input boundary. Focused inputs apply one accepted multi-scalar
+commit and dispatch one change boundary; the developer backend's existing
+single-character path remains compatible.
+
 Wayland presentation now classifies compositor I/O/EOF failures as typed
 `ConnectionLost` errors. The first loss clears retained compositor surface
 identities, protocol-owned input handles, focus/repeat/touch/gesture ownership,
@@ -111,6 +117,6 @@ expectation failures unrelated to pointer input.
 
 ## Next
 
-Complete the remaining semantic presentation state diff, IME/text-input-v3,
-connection recreation, and resource preparation/text shaping as separate
-follow-up work.
+Complete the remaining semantic presentation state diff, actual
+IME/text-input-v3 preedit/surrounding-text/deletion lifecycle, connection
+recreation, and resource preparation/text shaping as separate follow-up work.

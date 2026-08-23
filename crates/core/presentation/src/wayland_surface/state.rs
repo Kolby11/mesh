@@ -17,7 +17,7 @@ pub(super) struct KeyboardRepeatState {
     pub(super) surface_id: Arc<str>,
     pub(super) key: String,
     pub(super) mods: KeyMods,
-    pub(super) ch: Option<char>,
+    pub(super) text: Option<Arc<str>>,
     pub(super) next_at: Instant,
     pub(super) interval: Duration,
 }
@@ -96,10 +96,10 @@ impl KeyboardRepeatState {
                 surface_id: self.surface_id.clone(),
                 event: DevWindowKeyEvent::Pressed(self.key.clone(), self.mods.clone()),
             });
-            if let Some(ch) = self.ch {
-                events.push(DevWindowEvent::Char {
+            if let Some(text) = self.text.as_ref() {
+                events.push(DevWindowEvent::TextInput {
                     surface_id: self.surface_id.clone(),
-                    ch,
+                    text: text.clone(),
                 });
             }
             self.next_at += self.interval;
@@ -247,11 +247,11 @@ impl State {
         surface_id: &str,
         key: &str,
         mods: KeyMods,
-        ch: Option<char>,
+        text: Option<Arc<str>>,
         now: Instant,
     ) -> Option<KeyboardRepeatState> {
         let repeat_info = self.input_seats.get(seat_id)?.keyboard_repeat_info;
-        keyboard_repeat_state_for(repeat_info, surface_id, key, mods, ch, now)
+        keyboard_repeat_state_for(repeat_info, surface_id, key, mods, text, now)
     }
 
     pub(super) fn clear_keyboard_repeat_for_key(&mut self, seat_id: &SeatId, key: &str) {
@@ -1072,7 +1072,7 @@ fn is_pointer_event(event: &DevWindowEvent) -> bool {
 fn is_keyboard_event(event: &DevWindowEvent) -> bool {
     matches!(
         event,
-        DevWindowEvent::Key { .. } | DevWindowEvent::Char { .. }
+        DevWindowEvent::Key { .. } | DevWindowEvent::Char { .. } | DevWindowEvent::TextInput { .. }
     )
 }
 
@@ -1091,7 +1091,7 @@ fn keyboard_repeat_state_for(
     surface_id: &str,
     key: &str,
     mods: KeyMods,
-    ch: Option<char>,
+    text: Option<Arc<str>>,
     now: Instant,
 ) -> Option<KeyboardRepeatState> {
     let RepeatInfo::Repeat { rate, delay } = repeat_info else {
@@ -1105,7 +1105,7 @@ fn keyboard_repeat_state_for(
         surface_id: Arc::from(surface_id),
         key: key.to_string(),
         mods,
-        ch,
+        text,
         next_at: now + Duration::from_millis(delay as u64),
         interval,
     })
@@ -1211,11 +1211,36 @@ mod performance_tests {
         );
 
         let repeat =
-            keyboard_repeat_state_for(repeat_info, "panel", "a", mods, Some('a'), now).unwrap();
+            keyboard_repeat_state_for(repeat_info, "panel", "a", mods, Some(Arc::from("a")), now)
+                .unwrap();
         assert_eq!(repeat.surface_id.as_ref(), "panel");
         assert_eq!(repeat.key, "a");
-        assert_eq!(repeat.ch, Some('a'));
+        assert_eq!(repeat.text.as_deref(), Some("a"));
         assert_eq!(repeat.next_at, now + Duration::from_millis(250));
+    }
+
+    #[test]
+    fn keyboard_repeat_preserves_the_committed_text_payload() {
+        let now = Instant::now();
+        let mut repeat = KeyboardRepeatState {
+            surface_id: Arc::from("panel"),
+            key: "a".into(),
+            mods: KeyMods::default(),
+            text: Some(Arc::from("A🙂B")),
+            next_at: now,
+            interval: Duration::from_millis(30),
+        };
+        let mut events = Vec::new();
+
+        repeat.push_due_events(now, &mut events);
+
+        assert!(matches!(
+            events.as_slice(),
+            [
+                DevWindowEvent::Key { .. },
+                DevWindowEvent::TextInput { text, .. }
+            ] if text.as_ref() == "A🙂B"
+        ));
     }
 
     #[test]
@@ -1295,10 +1320,10 @@ mod performance_tests {
             surface_id: String,
             key: String,
             mods: KeyMods,
-            ch: Option<char>,
+            text: Option<Arc<str>>,
             now: Instant,
         ) -> Option<KeyboardRepeatState> {
-            keyboard_repeat_state_for(repeat_info, &surface_id, &key, mods, ch, now)
+            keyboard_repeat_state_for(repeat_info, &surface_id, &key, mods, text, now)
         }
 
         let started = Instant::now();
@@ -1356,7 +1381,7 @@ mod performance_tests {
             surface_id: &str,
             key: &str,
             mods: KeyMods,
-            ch: Option<char>,
+            text: Option<Arc<str>>,
             now: Instant,
         ) -> Option<KeyboardRepeatState> {
             if is_non_repeating_key(key) {
@@ -1370,7 +1395,7 @@ mod performance_tests {
                 surface_id: Arc::from(surface_id),
                 key: key.to_string(),
                 mods,
-                ch,
+                text,
                 next_at: now + Duration::from_millis(delay as u64),
                 interval,
             })
@@ -1558,7 +1583,7 @@ mod input_teardown_tests {
             surface_id: Arc::from("panel"),
             key: "a".to_string(),
             mods: KeyMods::default(),
-            ch: Some('a'),
+            text: Some(Arc::from("a")),
             next_at: Instant::now(),
             interval: Duration::from_millis(30),
         });
@@ -1645,7 +1670,7 @@ mod input_teardown_tests {
             surface_id: Arc::from("other"),
             key: "a".to_string(),
             mods: KeyMods::default(),
-            ch: Some('a'),
+            text: Some(Arc::from("a")),
             next_at: Instant::now(),
             interval: Duration::from_millis(30),
         });
@@ -1826,7 +1851,7 @@ mod input_capability_tests {
             surface_id: Arc::from("panel"),
             key: "a".to_string(),
             mods: KeyMods::default(),
-            ch: Some('a'),
+            text: Some(Arc::from("a")),
             next_at: Instant::now(),
             interval: Duration::from_millis(30),
         });

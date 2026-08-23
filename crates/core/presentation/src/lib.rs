@@ -1343,6 +1343,7 @@ pub fn event_surface_id(event: &WindowEvent) -> &str {
         | WindowEvent::TwoFingerScroll { surface_id, .. }
         | WindowEvent::Key { surface_id, .. }
         | WindowEvent::Char { surface_id, .. }
+        | WindowEvent::TextInput { surface_id, .. }
         | WindowEvent::GestureSwipeBegin { surface_id, .. }
         | WindowEvent::GestureSwipeUpdate { surface_id, .. }
         | WindowEvent::GestureSwipeEnd { surface_id, .. }

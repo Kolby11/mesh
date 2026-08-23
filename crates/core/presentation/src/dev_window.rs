@@ -57,6 +57,12 @@ pub enum DevWindowEvent {
         surface_id: Arc<str>,
         ch: char,
     },
+    /// A committed text payload. This stays whole so composed or IME text is
+    /// not delivered as a series of partial field updates.
+    TextInput {
+        surface_id: Arc<str>,
+        text: Arc<str>,
+    },
     /// `zwp_pointer_gesture_swipe_v1` begin — a 3+ finger trackpad swipe started.
     GestureSwipeBegin {
         surface_id: Arc<str>,

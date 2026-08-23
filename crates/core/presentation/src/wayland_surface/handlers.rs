@@ -1,7 +1,7 @@
 use super::backend::WaylandRole;
 use super::state::{FrameCallbackData, GestureKind};
 use super::*;
-use std::borrow::Cow;
+use std::{borrow::Cow, sync::Arc};
 
 impl Dispatch<wl_callback::WlCallback, FrameCallbackData> for State {
     fn event(
@@ -888,17 +888,13 @@ impl KeyboardHandler for State {
                 shift: input.keyboard_mods.shift,
                 alt: input.keyboard_mods.alt,
             });
-        let ch = event
-            .utf8
-            .as_deref()
-            .and_then(|s| s.chars().next())
-            .filter(|ch| !ch.is_control());
+        let text = committed_text(event.utf8.as_deref());
         let repeat = self.keyboard_repeat_state(
             &seat_id,
             &surface_id,
             name.as_ref(),
             mods.clone(),
-            ch,
+            text.clone(),
             Instant::now(),
         );
         if let Some(input) = self.input_seats.get_mut(&seat_id) {
@@ -912,8 +908,8 @@ impl KeyboardHandler for State {
                 event: DevWindowKeyEvent::Pressed(name.into_owned(), mods),
             },
         );
-        if let Some(ch) = ch {
-            self.queue_event(&seat_id, DevWindowEvent::Char { surface_id, ch });
+        if let Some(text) = text {
+            self.queue_event(&seat_id, DevWindowEvent::TextInput { surface_id, text });
         }
     }
 
@@ -998,6 +994,15 @@ fn keysym_name(sym: Keysym) -> Cow<'static, str> {
     sym.name()
         .map(normalize_keysym_name)
         .unwrap_or_else(|| Cow::Owned(format!("{:#x}", sym.raw())))
+}
+
+/// Preserve the compositor's complete committed payload. `KeyEvent::utf8`
+/// can contain more than one scalar for composed input, and splitting it into
+/// `Char` events would make one logical commit run the input/change handlers
+/// several times with partial values.
+fn committed_text(utf8: Option<&str>) -> Option<Arc<str>> {
+    let text: String = utf8?.chars().filter(|ch| !ch.is_control()).collect();
+    (!text.is_empty()).then(|| Arc::from(text))
 }
 
 fn normalize_keysym_name(name: &'static str) -> Cow<'static, str> {
@@ -1497,6 +1502,7 @@ delegate_touch!(State);
 
 #[cfg(test)]
 mod tests {
+    use super::committed_text;
     use super::normalize_keysym_name;
     use super::normalized_axis_delta;
 
@@ -1538,5 +1544,11 @@ mod tests {
             Cow::Borrowed("Enter")
         ));
         assert!(matches!(normalize_keysym_name("XK_a"), Cow::Borrowed("a")));
+    }
+
+    #[test]
+    fn committed_text_keeps_the_complete_unicode_payload() {
+        assert_eq!(committed_text(Some("A🙂B")).as_deref(), Some("A🙂B"));
+        assert_eq!(committed_text(Some("\n\t")).as_deref(), None);
     }
 }
