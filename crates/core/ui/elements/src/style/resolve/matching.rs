@@ -66,22 +66,29 @@ pub(super) fn inherit_retained_text_style(
     style: &mut ComputedStyle,
     parent: &ParentInheritedStyle,
 ) {
-    let defaults = ComputedStyle::default();
-    if style.color.a == 0 {
+    let explicit = style.explicit_properties;
+    let mut inherited = StylePropertyMask::default();
+    if !explicit.color {
         style.color = parent.color;
+        inherited.color = true;
     }
-    if style.font_family == defaults.font_family {
+    if !explicit.font_family {
         style.font_family = parent.font_family.clone();
+        inherited.font_family = true;
     }
-    if (style.font_size - defaults.font_size).abs() < f32::EPSILON {
+    if !explicit.font_size {
         style.font_size = parent.font_size;
+        inherited.font_size = true;
     }
-    if style.font_weight == defaults.font_weight {
+    if !explicit.font_weight {
         style.font_weight = parent.font_weight;
+        inherited.font_weight = true;
     }
-    if (style.line_height - defaults.line_height).abs() < f32::EPSILON {
+    if !explicit.line_height {
         style.line_height = parent.line_height;
+        inherited.line_height = true;
     }
+    style.inherited_properties = inherited;
 }
 
 pub(super) fn selector_index_key(selector: &Selector) -> Option<SelectorIndexKey<'_>> {

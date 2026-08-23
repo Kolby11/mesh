@@ -415,6 +415,101 @@ fn targeted_restyle_recomputes_only_named_stateful_nodes() {
 }
 
 #[test]
+fn retained_restyle_preserves_explicit_transparent_and_default_inherited_values() {
+    let theme = mesh_core_theme::default_theme();
+    let resolver = StyleResolver::new(&theme);
+    let rules = vec![
+        StyleRule {
+            selector: Selector::Class("parent".to_string()),
+            declarations: vec![Declaration {
+                property: "color".to_string(),
+                value: StyleValue::Literal("#123456".to_string()),
+            }],
+            container_query: None,
+        },
+        StyleRule {
+            selector: Selector::State("row".to_string(), "hover".to_string()),
+            declarations: vec![Declaration {
+                property: "color".to_string(),
+                value: StyleValue::Literal("#654321".to_string()),
+            }],
+            container_query: None,
+        },
+        StyleRule {
+            selector: Selector::Class("child".to_string()),
+            declarations: vec![
+                Declaration {
+                    property: "color".to_string(),
+                    value: StyleValue::Literal("transparent".to_string()),
+                },
+                Declaration {
+                    property: "font-size".to_string(),
+                    value: StyleValue::Literal("14px".to_string()),
+                },
+                Declaration {
+                    property: "font-weight".to_string(),
+                    value: StyleValue::Literal("400".to_string()),
+                },
+                Declaration {
+                    property: "line-height".to_string(),
+                    value: StyleValue::Literal("1.4".to_string()),
+                },
+            ],
+            container_query: None,
+        },
+    ];
+    let mut root = crate::tree::WidgetNode::new("row");
+    root.id = 1;
+    root.attributes.insert("class".into(), "parent".into());
+    let mut child = crate::tree::WidgetNode::new("text");
+    child.id = 2;
+    child.attributes.insert("class".into(), "child".into());
+    root.children.push(child);
+
+    resolver.restyle_subtree_cached(&mut root, &rules, StyleContext::default(), &mut None);
+    let initial_child = &root.children[0].computed_style;
+    assert_eq!(initial_child.color, Color::TRANSPARENT);
+    assert_eq!(initial_child.font_size, 14.0);
+    assert_eq!(initial_child.font_weight, 400);
+    assert!((initial_child.line_height - 1.4).abs() < f32::EPSILON);
+    assert!(initial_child.explicit_properties.color);
+    assert!(initial_child.explicit_properties.font_size);
+    assert!(initial_child.explicit_properties.font_weight);
+    assert!(initial_child.explicit_properties.line_height);
+    assert_eq!(
+        initial_child.inherited_properties,
+        StylePropertyMask {
+            font_family: true,
+            ..StylePropertyMask::default()
+        }
+    );
+    let initial_explicit = initial_child.explicit_properties;
+
+    root.state.hovered = true;
+    let root_id = root.id;
+    resolver.restyle_subtree_for_ids(
+        &mut root,
+        &rules,
+        StyleContext::default(),
+        &std::collections::HashSet::from([root_id]),
+    );
+
+    let restyled_child = &root.children[0].computed_style;
+    assert_eq!(restyled_child.color, Color::TRANSPARENT);
+    assert_eq!(restyled_child.font_size, 14.0);
+    assert_eq!(restyled_child.font_weight, 400);
+    assert!((restyled_child.line_height - 1.4).abs() < f32::EPSILON);
+    assert_eq!(restyled_child.explicit_properties, initial_explicit);
+    assert_eq!(
+        restyled_child.inherited_properties,
+        StylePropertyMask {
+            font_family: true,
+            ..StylePropertyMask::default()
+        }
+    );
+}
+
+#[test]
 fn targeted_restyle_skips_descendant_rule_resolution_for_non_inherited_change() {
     let theme = mesh_core_theme::default_theme();
     let resolver = StyleResolver::new(&theme);

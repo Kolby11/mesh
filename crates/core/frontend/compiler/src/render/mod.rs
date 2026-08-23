@@ -1,11 +1,12 @@
 use crate::style::{
-    InheritedStyleMask, child_style_context, inherit_text_style, inherited_style_mask, slot_style,
+    child_style_context, inherit_text_style, inherited_style_mask, slot_style,
     synthetic_wrapper_style,
 };
 use crate::tags::lower_source_tag;
 use crate::{FrontendCompositionResolver, LayeredStore};
 
 use mesh_core_component::template::{AttributeValue, ElementNode, ForNode, TemplateNode};
+use mesh_core_elements::style::StylePropertyMask;
 use mesh_core_elements::{
     ComputedStyle, NodeId, StyleContext, StyleResolver, VariableStore, WidgetNode,
     authored_element_state, normalize_accessibility,
@@ -514,7 +515,7 @@ fn build_widget_node_inner(
                 inherit_text_style(
                     &mut node.computed_style,
                     parent_style,
-                    InheritedStyleMask::default(),
+                    StylePropertyMask::default(),
                 );
             }
             node
@@ -555,7 +556,7 @@ fn build_widget_node_inner(
                 inherit_text_style(
                     &mut node.computed_style,
                     parent_style,
-                    InheritedStyleMask::default(),
+                    StylePropertyMask::default(),
                 );
             }
             node
@@ -601,7 +602,7 @@ fn build_widget_node_inner(
                 inherit_text_style(
                     &mut node.computed_style,
                     parent_style,
-                    InheritedStyleMask::default(),
+                    StylePropertyMask::default(),
                 );
             }
             node
@@ -678,7 +679,7 @@ fn build_widget_node_inner(
                 inherit_text_style(
                     &mut node.computed_style,
                     parent_style,
-                    InheritedStyleMask::default(),
+                    StylePropertyMask::default(),
                 );
             }
             node
@@ -726,7 +727,7 @@ fn build_widget_node_inner(
                 inherit_text_style(
                     &mut node.computed_style,
                     parent_style,
-                    InheritedStyleMask::default(),
+                    StylePropertyMask::default(),
                 );
             }
             node

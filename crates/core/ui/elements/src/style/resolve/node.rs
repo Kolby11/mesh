@@ -353,6 +353,7 @@ impl<'a> StyleResolver<'a> {
             shared = Some(defaults);
             (style, None)
         };
+        let mut explicit_properties = StylePropertyMask::default();
 
         VARIABLE_SCRATCH.with(|scratch| {
             let mut scratch_variables = scratch.borrow_mut();
@@ -399,11 +400,12 @@ impl<'a> StyleResolver<'a> {
                             let diagnostic_sink = diagnostics
                                 .as_mut()
                                 .map(|diagnostics| (selector, &mut **diagnostics));
-                            self.apply_indexed_declaration(
+                            self.apply_indexed_declaration_with_mask(
                                 &mut style,
                                 decl,
                                 diagnostic_sink,
                                 &mut scratch_variables,
+                                Some(&mut explicit_properties),
                             );
                         }
                         attribution.record(rule_idx, started.elapsed());
@@ -422,11 +424,12 @@ impl<'a> StyleResolver<'a> {
                             let diagnostic_sink = diagnostics
                                 .as_mut()
                                 .map(|diagnostics| (selector, &mut **diagnostics));
-                            self.apply_indexed_declaration(
+                            self.apply_indexed_declaration_with_mask(
                                 &mut style,
                                 decl,
                                 diagnostic_sink,
                                 &mut scratch_variables,
+                                Some(&mut explicit_properties),
                             );
                         }
                     }
@@ -440,11 +443,12 @@ impl<'a> StyleResolver<'a> {
                             let diagnostic_sink = diagnostics
                                 .as_mut()
                                 .map(|diagnostics| ("@inline", &mut **diagnostics));
-                            self.apply_indexed_declaration(
+                            self.apply_indexed_declaration_with_mask(
                                 &mut style,
                                 declaration,
                                 diagnostic_sink,
                                 &mut scratch_variables,
+                                Some(&mut explicit_properties),
                             );
                         }
                     }
@@ -464,6 +468,8 @@ impl<'a> StyleResolver<'a> {
         VARIABLE_SCRATCH.with(|scratch| {
             style.custom_properties = scratch.borrow().clone();
         });
+        style.explicit_properties = explicit_properties;
+        style.inherited_properties = StylePropertyMask::default();
         style
     }
 

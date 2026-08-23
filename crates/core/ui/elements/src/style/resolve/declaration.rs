@@ -136,7 +136,7 @@ macro_rules! css_property_table {
             $resolver: &StyleResolver,
             $variables: &HashMap<String, StyleValue>,
             $context: &mut ResolutionContext,
-        ) {
+        ) -> bool {
             let mut $resolver = ContextualStyleResolver {
                 resolver: $resolver,
                 context: $context,
@@ -152,12 +152,13 @@ macro_rules! css_property_table {
                     )
                     .is_err()
             {
-                return;
+                return false;
             }
             match $property {
                 $($parsed)*
                 _ => tracing::warn!("unsupported CSS property '{}'", $property),
             }
+            true
         }
     };
 }
@@ -329,8 +330,19 @@ impl<'a> StyleResolver<'a> {
         &self,
         style: &mut ComputedStyle,
         decl: &IndexedDeclaration,
+        diagnostics: Option<(&str, &mut Vec<StyleDiagnostic>)>,
+        variables: &mut HashMap<String, StyleValue>,
+    ) {
+        self.apply_indexed_declaration_with_mask(style, decl, diagnostics, variables, None);
+    }
+
+    pub(super) fn apply_indexed_declaration_with_mask(
+        &self,
+        style: &mut ComputedStyle,
+        decl: &IndexedDeclaration,
         mut diagnostics: Option<(&str, &mut Vec<StyleDiagnostic>)>,
         variables: &mut HashMap<String, StyleValue>,
+        mut explicit_properties: Option<&mut StylePropertyMask>,
     ) {
         match &decl.property {
             IndexedProperty::Custom(property) => {
@@ -348,6 +360,10 @@ impl<'a> StyleResolver<'a> {
                 if let Some(literal) = decl.literal
                     && apply_typed_literal(style, name, literal)
                 {
+                    style.explicit_properties.mark_property(name);
+                    if let Some(explicit_properties) = explicit_properties.as_deref_mut() {
+                        explicit_properties.mark_property(name);
+                    }
                     return;
                 }
                 if let StyleValue::Var(variable_name) = &decl.value
@@ -405,7 +421,7 @@ impl<'a> StyleResolver<'a> {
                         return;
                     }
                 }
-                apply_declaration_with_context(
+                let applied = apply_declaration_with_context(
                     style,
                     name,
                     &decl.value,
@@ -413,6 +429,12 @@ impl<'a> StyleResolver<'a> {
                     variables,
                     &mut context,
                 );
+                if applied {
+                    style.explicit_properties.mark_property(name);
+                    if let Some(explicit_properties) = explicit_properties.as_deref_mut() {
+                        explicit_properties.mark_property(name);
+                    }
+                }
                 push_indexed_cycle_diagnostics(&mut diagnostics, name, &mut context);
             }
         }
@@ -457,7 +479,9 @@ impl<'a> StyleResolver<'a> {
                 return;
             }
         }
-        apply_declaration_with_context(style, property, value, self, variables, &mut context);
+        if apply_declaration_with_context(style, property, value, self, variables, &mut context) {
+            style.explicit_properties.mark_property(property);
+        }
     }
 
     pub(super) fn apply_declaration_with_diagnostics(
@@ -597,7 +621,7 @@ impl<'a> StyleResolver<'a> {
                 return;
             }
         }
-        apply_declaration_with_context(
+        let applied = apply_declaration_with_context(
             style,
             &decl.property,
             &decl.value,
@@ -605,6 +629,9 @@ impl<'a> StyleResolver<'a> {
             variables,
             &mut context,
         );
+        if applied {
+            style.explicit_properties.mark_property(&decl.property);
+        }
         push_cycle_diagnostics(
             diagnostics,
             &decl.property,
@@ -676,7 +703,9 @@ pub(super) fn apply_declaration(
     variables: &HashMap<String, StyleValue>,
 ) {
     let mut context = ResolutionContext::default();
-    apply_declaration_with_context(style, property, value, resolver, variables, &mut context);
+    if apply_declaration_with_context(style, property, value, resolver, variables, &mut context) {
+        style.explicit_properties.mark_property(property);
+    }
 }
 
 fn has_dynamic_style_references(value: &StyleValue) -> bool {

@@ -220,10 +220,10 @@ live compositor/lifecycle matrix remain separate follow-up work.
 
 ## Next
 
-CSS custom-property resolution now tracks direct and indirect dependency cycles
-across typed, embedded, and animation paths, emits structured diagnostics with
-the dependency path, applies nested `var()` fallbacks, and preserves the prior
-computed property value when a cyclic declaration is invalid. The next open
-backlog item is preserving explicit/inherited property masks through retained
-style resolution and targeted restyle; the remaining presentation/resource
-follow-ups stay separate.
+Retained style resolution now carries shared explicit and inherited masks for
+color, font family, font size, font weight, and line height. Matching authored
+declarations, including transparent and default-valued declarations, survive
+full and targeted restyles without being mistaken for unset values; compiler
+and indexed/uncached paths use the same mask contract. The next open backlog
+item is deriving accessibility focus from canonical live focus state; the
+remaining presentation/resource follow-ups stay separate.

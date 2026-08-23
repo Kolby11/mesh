@@ -1,34 +1,15 @@
 use mesh_core_component::style::{Selector, StyleRule};
-use mesh_core_elements::style::{FlexDirection, StyleNodeAttrs, selector_matches_attrs};
+use mesh_core_elements::style::{
+    FlexDirection, StyleNodeAttrs, StylePropertyMask, selector_matches_attrs,
+};
 use mesh_core_elements::{ComputedStyle, Dimension, ElementState, StyleContext};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct InheritedStyleMask {
-    color: bool,
-    font_family: bool,
-    font_size: bool,
-    font_weight: bool,
-    line_height: bool,
-}
-
-impl InheritedStyleMask {
-    /// True when every bit this mask sets is already set in `accumulated`, so
-    /// matching its rule cannot change the result.
-    fn adds_nothing_to(self, accumulated: Self) -> bool {
-        (!self.color || accumulated.color)
-            && (!self.font_family || accumulated.font_family)
-            && (!self.font_size || accumulated.font_size)
-            && (!self.font_weight || accumulated.font_weight)
-            && (!self.line_height || accumulated.line_height)
-    }
-}
-
 #[derive(Clone, Copy)]
 struct InheritedStyleRuleCandidate {
     index: usize,
-    mask: InheritedStyleMask,
+    mask: StylePropertyMask,
 }
 
 /// Candidates grouped by a selector key that is *necessary* for a match.
@@ -151,7 +132,7 @@ impl InheritedStyleRuleIndex {
 
         for (index, rule) in rules.iter().enumerate() {
             let mask = inherited_declaration_mask(rule);
-            if mask == InheritedStyleMask::default() {
+            if mask == StylePropertyMask::default() {
                 continue;
             }
             let candidate = InheritedStyleRuleCandidate { index, mask };
@@ -172,23 +153,31 @@ thread_local! {
 pub(crate) fn inherit_text_style(
     style: &mut ComputedStyle,
     parent_style: &ComputedStyle,
-    explicit: InheritedStyleMask,
+    explicit: StylePropertyMask,
 ) {
+    let mut inherited = StylePropertyMask::default();
     if !explicit.color {
         style.color = parent_style.color;
+        inherited.color = true;
     }
     if !explicit.font_family {
         style.font_family = parent_style.font_family.clone();
+        inherited.font_family = true;
     }
     if !explicit.font_size {
         style.font_size = parent_style.font_size;
+        inherited.font_size = true;
     }
     if !explicit.font_weight {
         style.font_weight = parent_style.font_weight;
+        inherited.font_weight = true;
     }
     if !explicit.line_height {
         style.line_height = parent_style.line_height;
+        inherited.line_height = true;
     }
+    style.explicit_properties = explicit;
+    style.inherited_properties = inherited;
 }
 
 pub(crate) fn inherited_style_mask(
@@ -198,7 +187,7 @@ pub(crate) fn inherited_style_mask(
     id: Option<&str>,
     state: ElementState,
     context: StyleContext,
-) -> InheritedStyleMask {
+) -> StylePropertyMask {
     INHERITED_STYLE_RULE_INDEX.with(|cache| {
         let mut cache = cache.borrow_mut();
         if !cache.is_for(rules) {
@@ -206,7 +195,7 @@ pub(crate) fn inherited_style_mask(
         }
 
         let attrs = StyleNodeAttrs::new(tag, classes, id, state);
-        let mut mask = InheritedStyleMask::default();
+        let mut mask = StylePropertyMask::default();
         cache
             .non_container
             .visit_matching(tag, classes, id, |candidates| {
@@ -269,7 +258,7 @@ pub(crate) fn inherited_style_mask_scan(
     id: Option<&str>,
     state: ElementState,
     context: StyleContext,
-) -> InheritedStyleMask {
+) -> StylePropertyMask {
     FLAT_INHERITED_STYLE_RULE_INDEX.with(|cache| {
         let mut cache = cache.borrow_mut();
         if cache.rules_ptr != rules.as_ptr() as usize || cache.rules_len != rules.len() {
@@ -279,7 +268,7 @@ pub(crate) fn inherited_style_mask_scan(
             cache.container.clear();
             for (index, rule) in rules.iter().enumerate() {
                 let mask = inherited_declaration_mask(rule);
-                if mask == InheritedStyleMask::default() {
+                if mask == StylePropertyMask::default() {
                     continue;
                 }
                 let candidate = InheritedStyleRuleCandidate { index, mask };
@@ -292,7 +281,7 @@ pub(crate) fn inherited_style_mask_scan(
         }
 
         let attrs = StyleNodeAttrs::new(tag, classes, id, state);
-        let mut mask = InheritedStyleMask::default();
+        let mut mask = StylePropertyMask::default();
         for candidate in &cache.non_container {
             let rule = &rules[candidate.index];
             if selector_matches_attrs(&rule.selector, &attrs) {
@@ -313,29 +302,12 @@ pub(crate) fn inherited_style_mask_scan(
     })
 }
 
-fn inherited_declaration_mask(rule: &StyleRule) -> InheritedStyleMask {
-    let mut mask = InheritedStyleMask::default();
+fn inherited_declaration_mask(rule: &StyleRule) -> StylePropertyMask {
+    let mut mask = StylePropertyMask::default();
     for decl in &rule.declarations {
-        match decl.property.as_str() {
-            "color" => mask.color = true,
-            "font-family" => mask.font_family = true,
-            "font-size" => mask.font_size = true,
-            "font-weight" => mask.font_weight = true,
-            "line-height" => mask.line_height = true,
-            _ => {}
-        }
+        mask.mark_property(&decl.property);
     }
     mask
-}
-
-impl std::ops::BitOrAssign for InheritedStyleMask {
-    fn bitor_assign(&mut self, rhs: Self) {
-        self.color |= rhs.color;
-        self.font_family |= rhs.font_family;
-        self.font_size |= rhs.font_size;
-        self.font_weight |= rhs.font_weight;
-        self.line_height |= rhs.line_height;
-    }
 }
 
 pub(crate) fn child_style_context(

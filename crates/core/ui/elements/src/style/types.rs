@@ -12,6 +12,56 @@ pub struct StyleDiagnostic {
     pub message: String,
 }
 
+/// The inherited text properties whose authored state must survive a style
+/// resolution and any later targeted restyle.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StylePropertyMask {
+    pub color: bool,
+    pub font_family: bool,
+    pub font_size: bool,
+    pub font_weight: bool,
+    pub line_height: bool,
+}
+
+impl StylePropertyMask {
+    /// Mark every inherited field affected by a supported CSS declaration.
+    pub fn mark_property(&mut self, property: &str) {
+        match property {
+            "color" => self.color = true,
+            "font" => {
+                self.font_family = true;
+                self.font_size = true;
+                self.font_weight = true;
+                self.line_height = true;
+            }
+            "font-family" => self.font_family = true,
+            "font-size" => self.font_size = true,
+            "font-weight" => self.font_weight = true,
+            "line-height" => self.line_height = true,
+            _ => {}
+        }
+    }
+
+    /// True when every field set by this mask is already set by `accumulated`.
+    pub fn adds_nothing_to(self, accumulated: Self) -> bool {
+        (!self.color || accumulated.color)
+            && (!self.font_family || accumulated.font_family)
+            && (!self.font_size || accumulated.font_size)
+            && (!self.font_weight || accumulated.font_weight)
+            && (!self.line_height || accumulated.line_height)
+    }
+}
+
+impl std::ops::BitOrAssign for StylePropertyMask {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.color |= rhs.color;
+        self.font_family |= rhs.font_family;
+        self.font_size |= rhs.font_size;
+        self.font_weight |= rhs.font_weight;
+        self.line_height |= rhs.line_height;
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StyleProfileStatus {
     Implemented,
@@ -643,6 +693,10 @@ pub struct ComputedStyle {
     /// targeted restyles pass inherited variables without a separate side
     /// channel.
     pub custom_properties: HashMap<String, StyleValue>,
+    /// Authored inherited properties that won the node's cascade.
+    pub explicit_properties: StylePropertyMask,
+    /// Inherited properties copied from the parent during this resolution.
+    pub inherited_properties: StylePropertyMask,
     pub width: Dimension,
     pub height: Dimension,
     pub min_width: Dimension,
@@ -718,6 +772,8 @@ impl Default for ComputedStyle {
     fn default() -> Self {
         Self {
             custom_properties: HashMap::new(),
+            explicit_properties: StylePropertyMask::default(),
+            inherited_properties: StylePropertyMask::default(),
             width: Dimension::Auto,
             height: Dimension::Auto,
             min_width: Dimension::Auto,
