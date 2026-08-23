@@ -184,6 +184,18 @@ impl SurfaceEntry {
         self.role.wl_surface()
     }
 
+    pub(in crate::wayland_surface) fn destroy_auxiliary_protocol_objects(&self) {
+        if let Some(viewport) = self.viewport.as_ref() {
+            viewport.destroy();
+        }
+        if let Some(fractional_scale) = self.fractional_scale.as_ref() {
+            fractional_scale.destroy();
+        }
+        if let Some(blur) = self.kde_blur.as_ref() {
+            blur.release();
+        }
+    }
+
     /// The input region this surface should currently have: its
     /// compositor-configured size minus the reserve it declared.
     ///

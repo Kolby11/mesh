@@ -79,7 +79,7 @@ impl WaylandSurfaceBackend {
             keyboard_repeat: None,
             events: Vec::new(),
             xdg_shell,
-            dismissed_popups: Vec::new(),
+            lifecycle_events: Vec::new(),
             close_requests: Vec::new(),
         };
 
@@ -485,23 +485,11 @@ impl WaylandSurfaceBackend {
         if !is_popup {
             return;
         }
-        if let Some(entry) = self.state.remove_surface(surface_id) {
-            if let Some(viewport) = entry.viewport.as_ref() {
-                viewport.destroy();
-            }
-            if let Some(fractional_scale) = entry.fractional_scale.as_ref() {
-                fractional_scale.destroy();
-            }
-            if let Some(blur) = entry.kde_blur.as_ref() {
-                blur.release();
-            }
-        }
+        self.state.teardown_surface(surface_id);
     }
 
     /// Tear down a top-level layer surface and any popup children it owns.
     pub fn destroy_surface(&mut self, surface_id: &str) {
-        self.destroy_popups_for_parent(surface_id);
-        self.state.release_surface_focus_grab(surface_id);
         // Popups own a separate teardown path (`destroy_popup`) with its own
         // dismissal bookkeeping; parent surfaces — layer surfaces and windows —
         // are torn down here.
@@ -513,17 +501,7 @@ impl WaylandSurfaceBackend {
         if !is_parent_surface {
             return;
         }
-        if let Some(entry) = self.state.remove_surface(surface_id) {
-            if let Some(viewport) = entry.viewport.as_ref() {
-                viewport.destroy();
-            }
-            if let Some(fractional_scale) = entry.fractional_scale.as_ref() {
-                fractional_scale.destroy();
-            }
-            if let Some(blur) = entry.kde_blur.as_ref() {
-                blur.release();
-            }
-        }
+        self.state.teardown_surface_tree(surface_id);
     }
 
     /// Destroy every popup parented to `parent_surface_id`. The compositor
@@ -541,14 +519,18 @@ impl WaylandSurfaceBackend {
             })
             .collect();
         for id in children {
-            self.destroy_popup(&id);
+            self.state.teardown_surface(&id);
         }
+    }
+
+    pub fn take_surface_lifecycle_events(&mut self) -> Vec<SurfaceLifecycleEvent> {
+        self.state.take_surface_lifecycle_events()
     }
 
     /// Drain the ids of popups the compositor dismissed since the last call so
     /// the shell can drop the matching popup targets from its own bookkeeping.
     pub fn take_dismissed_popups(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.state.dismissed_popups)
+        self.state.take_dismissed_popups()
     }
 
     fn clamp_surface_config(&self, surface_id: &str, cfg: SurfaceConfig) -> SurfaceConfig {

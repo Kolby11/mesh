@@ -138,8 +138,19 @@ impl LayerShellHandler for State {
             tracing::debug!(
                 "[focus] layer_shell: layer surface closed, releasing focus grab if active for surface_id={id}"
             );
-            self.release_surface_focus_grab(&id);
-            self.remove_surface(&id);
+            let removed = self.teardown_surface_tree_after_compositor_event(&id);
+            for removed_id in removed {
+                if removed_id == id.as_ref() {
+                    self.lifecycle_events.push(SurfaceLifecycleEvent::Closed {
+                        surface_id: removed_id,
+                    });
+                } else {
+                    self.lifecycle_events
+                        .push(SurfaceLifecycleEvent::Dismissed {
+                            surface_id: removed_id,
+                        });
+                }
+            }
         }
     }
 
@@ -772,8 +783,12 @@ impl PopupHandler for State {
         let dismissed = self.surface_id_for_wl_surface(popup.wl_surface());
         if let Some(id) = dismissed {
             tracing::debug!("[popover] layer_shell: compositor dismissed popup surface_id={id}");
-            self.remove_surface(&id);
-            self.dismissed_popups.push(id.to_string());
+            if self.teardown_surface_after_compositor_event(&id) {
+                self.lifecycle_events
+                    .push(SurfaceLifecycleEvent::Dismissed {
+                        surface_id: id.to_string(),
+                    });
+            }
         }
     }
 }

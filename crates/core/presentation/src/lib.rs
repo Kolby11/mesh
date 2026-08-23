@@ -65,6 +65,18 @@ pub enum PresentStatus {
     SurfaceMissing,
 }
 
+/// A compositor-owned surface lifecycle transition that the shell must
+/// reconcile with its retained surface targets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SurfaceLifecycleEvent {
+    /// The compositor closed a layer surface. The shell may keep its component
+    /// alive, but must invalidate the accepted object state before retrying.
+    Closed { surface_id: String },
+    /// The compositor dismissed an xdg popup, usually because of outside-click
+    /// handling or destruction of its parent surface.
+    Dismissed { surface_id: String },
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum PresentationError {
     #[error("failed to connect to Wayland: {0}")]
@@ -108,7 +120,9 @@ struct TestingBackend {
     surface_config_history: Vec<(String, SurfaceConfig)>,
     destroyed_popups: Vec<String>,
     destroyed_surfaces: Vec<String>,
-    dismissed_popups: Vec<String>,
+    destroyed_popup_ids: HashSet<String>,
+    destroyed_surface_ids: HashSet<String>,
+    lifecycle_events: Vec<SurfaceLifecycleEvent>,
     close_requests: Vec<String>,
     events: Vec<WindowEvent>,
     presented: Vec<String>,
@@ -247,7 +261,28 @@ impl PresentationEngine {
     #[doc(hidden)]
     pub fn testing_push_dismissed_popup(&mut self, surface_id: impl Into<String>) {
         if let Backend::Testing(backend) = &mut self.backend {
-            backend.dismissed_popups.push(surface_id.into());
+            let surface_id = surface_id.into();
+            if backend.popup_configs.remove(&surface_id).is_some() {
+                backend.missing_surfaces.insert(surface_id.clone());
+                backend.destroyed_popup_ids.insert(surface_id.clone());
+                backend
+                    .lifecycle_events
+                    .push(SurfaceLifecycleEvent::Dismissed { surface_id });
+            }
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn testing_push_surface_closed(&mut self, surface_id: impl Into<String>) {
+        if let Backend::Testing(backend) = &mut self.backend {
+            let surface_id = surface_id.into();
+            if backend.surface_configs.remove(&surface_id).is_some() {
+                backend.missing_surfaces.insert(surface_id.clone());
+                backend.destroyed_surface_ids.insert(surface_id.clone());
+                backend
+                    .lifecycle_events
+                    .push(SurfaceLifecycleEvent::Closed { surface_id });
+            }
         }
     }
 
@@ -271,6 +306,7 @@ impl PresentationEngine {
                     return Err(PresentationError::SurfaceCreate(message));
                 }
                 backend.missing_surfaces.remove(surface_id);
+                backend.destroyed_surface_ids.remove(surface_id);
                 backend
                     .surface_config_history
                     .push((surface_id.to_string(), cfg.clone()));
@@ -384,6 +420,8 @@ impl PresentationEngine {
             Backend::WaylandSurface(bridge) => bridge.configure_popup(surface_id, config),
             Backend::DevWindow(_) => Ok(()),
             Backend::Testing(backend) => {
+                backend.missing_surfaces.remove(surface_id);
+                backend.destroyed_popup_ids.remove(surface_id);
                 backend.popup_configs.insert(surface_id.to_string(), config);
                 Ok(())
             }
@@ -397,7 +435,9 @@ impl PresentationEngine {
             Backend::DevWindow(_) => {}
             Backend::Testing(backend) => {
                 backend.popup_configs.remove(surface_id);
-                backend.destroyed_popups.push(surface_id.to_string());
+                if backend.destroyed_popup_ids.insert(surface_id.to_string()) {
+                    backend.destroyed_popups.push(surface_id.to_string());
+                }
             }
         }
     }
@@ -408,6 +448,7 @@ impl PresentationEngine {
             Backend::WaylandSurface(bridge) => bridge.destroy_surface(surface_id),
             Backend::DevWindow(bridge) => bridge.destroy_surface(surface_id),
             Backend::Testing(backend) => {
+                backend.missing_surfaces.remove(surface_id);
                 let child_ids = backend
                     .popup_configs
                     .iter()
@@ -417,9 +458,14 @@ impl PresentationEngine {
                     .collect::<Vec<_>>();
                 for child_id in child_ids {
                     backend.popup_configs.remove(&child_id);
-                    backend.destroyed_popups.push(child_id);
+                    if backend.destroyed_popup_ids.insert(child_id.clone()) {
+                        backend.destroyed_popups.push(child_id);
+                    }
                 }
-                backend.destroyed_surfaces.push(surface_id.to_string());
+                backend.surface_configs.remove(surface_id);
+                if backend.destroyed_surface_ids.insert(surface_id.to_string()) {
+                    backend.destroyed_surfaces.push(surface_id.to_string());
+                }
             }
         }
     }
@@ -440,9 +486,20 @@ impl PresentationEngine {
                     .collect::<Vec<_>>();
                 for id in ids {
                     backend.popup_configs.remove(&id);
-                    backend.destroyed_popups.push(id);
+                    if backend.destroyed_popup_ids.insert(id.clone()) {
+                        backend.destroyed_popups.push(id);
+                    }
                 }
             }
+        }
+    }
+
+    /// Drain compositor-owned surface lifecycle transitions.
+    pub fn take_surface_lifecycle_events(&mut self) -> Vec<SurfaceLifecycleEvent> {
+        match &mut self.backend {
+            Backend::WaylandSurface(bridge) => bridge.take_surface_lifecycle_events(),
+            Backend::DevWindow(_) => Vec::new(),
+            Backend::Testing(backend) => std::mem::take(&mut backend.lifecycle_events),
         }
     }
 
@@ -452,7 +509,19 @@ impl PresentationEngine {
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => bridge.take_dismissed_popups(),
             Backend::DevWindow(_) => Vec::new(),
-            Backend::Testing(backend) => std::mem::take(&mut backend.dismissed_popups),
+            Backend::Testing(backend) => {
+                let events = std::mem::take(&mut backend.lifecycle_events);
+                let mut dismissed = Vec::new();
+                for event in events {
+                    match event {
+                        SurfaceLifecycleEvent::Dismissed { surface_id } => {
+                            dismissed.push(surface_id)
+                        }
+                        other => backend.lifecycle_events.push(other),
+                    }
+                }
+                dismissed
+            }
         }
     }
 
@@ -1105,6 +1174,51 @@ mod tests {
             engine.testing_surface_config_history(),
             [("panel".to_string(), accepted)]
         );
+    }
+
+    #[test]
+    fn lifecycle_events_are_typed_and_testing_teardown_is_idempotent() {
+        let mut engine = PresentationEngine::testing_with_popup_support(false);
+        engine
+            .configure("panel", SurfaceConfig::default())
+            .expect("surface config should be accepted");
+        engine.testing_push_surface_closed("panel");
+
+        assert_eq!(
+            engine.take_surface_lifecycle_events(),
+            [SurfaceLifecycleEvent::Closed {
+                surface_id: "panel".to_string()
+            }]
+        );
+        assert!(engine.take_surface_lifecycle_events().is_empty());
+        assert!(engine.testing_surface_configs().is_empty());
+
+        engine
+            .configure_popup(
+                "popup",
+                PopupConfig {
+                    parent_surface_id: "panel".to_string(),
+                    placement: PopupPlacement::default(),
+                    padding: SurfacePadding::default(),
+                    grab: false,
+                    grab_serial: None,
+                },
+            )
+            .expect("popup config should be accepted by the testing backend");
+        engine.testing_push_dismissed_popup("popup");
+        assert_eq!(
+            engine.take_surface_lifecycle_events(),
+            [SurfaceLifecycleEvent::Dismissed {
+                surface_id: "popup".to_string()
+            }]
+        );
+
+        engine
+            .configure("panel", SurfaceConfig::default())
+            .expect("a closed surface should be configurable again");
+        engine.destroy_surface("panel");
+        engine.destroy_surface("panel");
+        assert_eq!(engine.testing_destroyed_surfaces(), ["panel"]);
     }
 
     #[test]

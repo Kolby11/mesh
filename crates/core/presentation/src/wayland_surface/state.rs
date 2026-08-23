@@ -1,4 +1,4 @@
-use super::backend::{SurfaceEntry, apply_config, surface_config_fingerprint};
+use super::backend::{SurfaceEntry, WaylandRole, apply_config, surface_config_fingerprint};
 use super::*;
 use std::sync::Arc;
 
@@ -84,11 +84,10 @@ pub(super) struct State {
     /// `xdg_shell` (`xdg_wm_base`) global, bound when available. Required to
     /// create `xdg_positioner`/`xdg_popup` objects for promoted `<popover>`s.
     pub(super) xdg_shell: Option<XdgShell>,
-    /// `surface_id`s of popups the compositor dismissed (e.g. outside-click on a
-    /// grabbed popup, or parent surface destroyed). Drained by the shell so it
-    /// can drop the matching popup target. Entries are removed from `surfaces`
-    /// immediately; this only carries the id outward.
-    pub(super) dismissed_popups: Vec<String>,
+    /// Lifecycle transitions for popups the compositor dismissed (e.g.
+    /// outside-click or parent destruction) and surfaces it closed. Entries are
+    /// removed from `surfaces` before an event is exposed.
+    pub(super) lifecycle_events: Vec<SurfaceLifecycleEvent>,
     /// `surface_id`s of windows whose close button (or compositor close
     /// binding) was activated. Drained by the shell, which decides what closing
     /// means; unlike `dismissed_popups` the surface is *not* removed here,
@@ -296,13 +295,23 @@ impl State {
     }
 
     pub(super) fn release_surface_focus_grab(&mut self, surface_id: &str) {
+        self.release_surface_focus_grab_inner(surface_id, true);
+    }
+
+    pub(super) fn release_surface_focus_grab_for_teardown(&mut self, surface_id: &str) {
+        self.release_surface_focus_grab_inner(surface_id, false);
+    }
+
+    fn release_surface_focus_grab_inner(&mut self, surface_id: &str, reapply_config: bool) {
         if self.focus_grab_surface_id.as_deref() != Some(surface_id) {
             return;
         }
         let Some(grab) = self.focus_grab.take() else {
             self.focus_grab_surface_id = None;
             self.focus_grab_requested_at = None;
-            self.reapply_surface_config(surface_id);
+            if reapply_config {
+                self.reapply_surface_config(surface_id);
+            }
             return;
         };
         if let Some(entry) = self.surfaces.get(surface_id) {
@@ -317,7 +326,9 @@ impl State {
         grab.destroy();
         self.focus_grab_surface_id = None;
         self.focus_grab_requested_at = None;
-        self.reapply_surface_config(surface_id);
+        if reapply_config {
+            self.reapply_surface_config(surface_id);
+        }
     }
 
     pub(super) fn insert_surface(&mut self, surface_id: String, entry: SurfaceEntry) {
@@ -334,6 +345,86 @@ impl State {
         let entry = self.surfaces.remove(surface_id)?;
         self.surface_ids_by_wl_id.remove(&entry.wl_surface().id());
         Some(entry)
+    }
+
+    /// Remove one live surface and release all presentation-owned auxiliary
+    /// protocol objects. Callers use this for explicit destruction and for
+    /// compositor-originated close/dismiss callbacks, so teardown remains
+    /// idempotent regardless of which lifecycle path arrives first.
+    pub(super) fn teardown_surface(&mut self, surface_id: &str) -> bool {
+        self.teardown_surface_with_focus(surface_id, true)
+    }
+
+    pub(super) fn teardown_surface_after_compositor_event(&mut self, surface_id: &str) -> bool {
+        self.teardown_surface_with_focus(surface_id, false)
+    }
+
+    fn teardown_surface_with_focus(&mut self, surface_id: &str, reapply_focus: bool) -> bool {
+        if reapply_focus {
+            self.release_surface_focus_grab(surface_id);
+        } else {
+            self.release_surface_focus_grab_for_teardown(surface_id);
+        }
+        let Some(entry) = self.remove_surface(surface_id) else {
+            return false;
+        };
+        entry.destroy_auxiliary_protocol_objects();
+        true
+    }
+
+    /// Tear down a parent and all popup descendants. The returned ids are in
+    /// child-first order so compositor-originated callers can publish a
+    /// dismissal for each child before the parent close transition.
+    pub(super) fn teardown_surface_tree(&mut self, surface_id: &str) -> Vec<String> {
+        self.teardown_surface_tree_with_focus(surface_id, true)
+    }
+
+    pub(super) fn teardown_surface_tree_after_compositor_event(
+        &mut self,
+        surface_id: &str,
+    ) -> Vec<String> {
+        self.teardown_surface_tree_with_focus(surface_id, false)
+    }
+
+    fn teardown_surface_tree_with_focus(
+        &mut self,
+        surface_id: &str,
+        reapply_focus: bool,
+    ) -> Vec<String> {
+        let children = self
+            .surfaces
+            .iter()
+            .filter_map(|(id, entry)| match &entry.role {
+                WaylandRole::Popup(role) if role.parent_id == surface_id => Some(id.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let mut removed = Vec::with_capacity(children.len() + 1);
+        for child_id in children {
+            if self.teardown_surface_with_focus(&child_id, reapply_focus) {
+                removed.push(child_id);
+            }
+        }
+        if self.teardown_surface_with_focus(surface_id, reapply_focus) {
+            removed.push(surface_id.to_string());
+        }
+        removed
+    }
+
+    pub(super) fn take_surface_lifecycle_events(&mut self) -> Vec<SurfaceLifecycleEvent> {
+        std::mem::take(&mut self.lifecycle_events)
+    }
+
+    pub(super) fn take_dismissed_popups(&mut self) -> Vec<String> {
+        let events = self.take_surface_lifecycle_events();
+        let mut dismissed = Vec::new();
+        for event in events {
+            match event {
+                SurfaceLifecycleEvent::Dismissed { surface_id } => dismissed.push(surface_id),
+                other => self.lifecycle_events.push(other),
+            }
+        }
+        dismissed
     }
 
     pub(super) fn surface_id_for_wl_surface(

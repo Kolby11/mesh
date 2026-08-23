@@ -12,6 +12,9 @@ damage, clears the accepted-config cache, and retries surface creation instead
 of acknowledging an unshown frame. Surface configuration now returns typed
 creation failures, prepares a replacement role before destroying the last-good
 role, and updates shell config caches only after acceptance.
+Compositor-closed layers and dismissed popups now emit typed lifecycle events;
+their auxiliary protocol objects and identity mappings go through one
+idempotent teardown helper, and the shell invalidates/recreates closed targets.
 
 Icon bitmap/SVG and font-glyph preparation still share a bounded render resource
 broker, with revision-aware cache handoff and linked-file invalidation. Typed
@@ -26,6 +29,7 @@ repository-settings fixture, which rejects its `revision` key as unknown.
 
 ## Next
 
-Return typed lost outcomes and centralize idempotent presentation teardown,
-including the remaining close, dismiss, parent-destruction, and connection-loss
-paths. Resource preparation and text shaping remain separate follow-up work.
+Extend lifecycle loss handling to connection loss and per-seat input ownership,
+then add object/configure/frame generations and the remaining semantic
+presentation diff. Resource preparation and text shaping remain separate
+follow-up work.

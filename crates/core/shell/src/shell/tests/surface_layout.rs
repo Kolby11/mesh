@@ -314,6 +314,64 @@ fn failed_surface_configure_is_not_cached_and_can_be_retried() {
     );
 }
 
+#[test]
+fn compositor_closed_surface_invalidates_state_and_recreates_on_next_frame() {
+    const SURFACE: &str = "@test/compositor-closed";
+
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(SurfaceConfigLifecycleComponent::new(
+        SURFACE,
+        (920, 700),
+    )));
+    let mut emitted = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: SURFACE.into(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    shell.render_components().unwrap();
+    assert_eq!(
+        shell.presentation_engine.testing_presented_surfaces(),
+        [SURFACE]
+    );
+
+    shell
+        .presentation_engine
+        .testing_push_surface_closed(SURFACE);
+    assert!(
+        shell
+            .presentation_engine
+            .testing_surface_configs()
+            .is_empty()
+    );
+    shell
+        .render_components()
+        .expect("a compositor close should schedule a replacement");
+
+    let runtime = shell
+        .components
+        .iter()
+        .find(|runtime| runtime.surface_id == SURFACE)
+        .expect("closed surface component remains mounted");
+    assert!(runtime.parent.last_surface_config.is_some());
+    assert_eq!(
+        shell
+            .presentation_engine
+            .testing_surface_config_history()
+            .iter()
+            .filter(|(surface_id, _)| surface_id == SURFACE)
+            .count(),
+        2,
+        "the closed object must be replaced with one accepted configure"
+    );
+    assert_eq!(
+        shell.presentation_engine.testing_presented_surfaces(),
+        [SURFACE, SURFACE]
+    );
+}
+
 /// The invariant: a layer-surface configure never carries a size the protocol
 /// layer would have to invent.
 ///

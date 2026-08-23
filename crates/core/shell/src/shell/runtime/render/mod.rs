@@ -14,7 +14,7 @@ use mesh_core_elements::style::BackgroundPaint;
 use mesh_core_elements::{PopoverAnchor, PopoverConstraintAdjustment, PopoverGrab, PopoverGravity};
 use mesh_core_presentation::{
     LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint, PopupGravity,
-    PopupPlacement, PresentStatus, SurfacePadding,
+    PopupPlacement, PresentStatus, SurfaceLifecycleEvent, SurfacePadding,
 };
 use mesh_core_render::{DamageRect, DisplayPaintCommand};
 use mesh_core_wayland::SurfaceRole;
@@ -31,7 +31,7 @@ impl Shell {
                 runtime.component.request_paint();
             }
         }
-        self.drain_dismissed_popups()?;
+        self.drain_surface_lifecycle_events()?;
         self.drain_window_close_requests()?;
 
         let font_revision = self.font_registry.revision();
@@ -763,26 +763,50 @@ impl Shell {
         Ok(())
     }
 
-    fn drain_dismissed_popups(&mut self) -> Result<(), ShellRunError> {
-        for surface_id in self.presentation_engine.take_dismissed_popups() {
-            match self.component_target_for_surface(&surface_id) {
-                Some((index, TargetRef::Child(child_index))) => {
-                    let node_key = self.components[index].children[child_index]
-                        .node_key
-                        .clone();
-                    self.destroy_child_surface_at(index, child_index);
-                    if let Some(runtime) = self.components.get_mut(index) {
-                        runtime.dismissed_child_node_keys.insert(node_key);
+    fn drain_surface_lifecycle_events(&mut self) -> Result<(), ShellRunError> {
+        for event in self.presentation_engine.take_surface_lifecycle_events() {
+            match event {
+                SurfaceLifecycleEvent::Dismissed { surface_id } => {
+                    match self.component_target_for_surface(&surface_id) {
+                        Some((index, TargetRef::Child(child_index))) => {
+                            let node_key = self.components[index].children[child_index]
+                                .node_key
+                                .clone();
+                            self.destroy_child_surface_at(index, child_index);
+                            if let Some(runtime) = self.components.get_mut(index) {
+                                runtime.dismissed_child_node_keys.insert(node_key);
+                            }
+                        }
+                        Some((index, TargetRef::Parent))
+                            if self.components[index].parent.popup_parent_surface.is_some() =>
+                        {
+                            self.pending_popover_hides.remove(&surface_id);
+                            let mut pending = self.set_surface_visibility_now(surface_id, false)?;
+                            self.drain_requests(&mut pending)?;
+                        }
+                        _ => {}
                     }
                 }
-                Some((index, TargetRef::Parent))
-                    if self.components[index].parent.popup_parent_surface.is_some() =>
-                {
-                    self.pending_popover_hides.remove(&surface_id);
-                    let mut pending = self.set_surface_visibility_now(surface_id, false)?;
-                    self.drain_requests(&mut pending)?;
+                SurfaceLifecycleEvent::Closed { surface_id } => {
+                    let Some((index, target)) = self.component_target_for_surface(&surface_id)
+                    else {
+                        continue;
+                    };
+                    match target {
+                        TargetRef::Child(child_index) => {
+                            self.destroy_child_surface_at(index, child_index);
+                        }
+                        TargetRef::Parent => {
+                            self.destroy_all_child_surfaces(index);
+                            let target = self.components[index].target_mut(TargetRef::Parent);
+                            target.last_surface_config = None;
+                            target.known_surface_size = None;
+                            target.last_region_state = None;
+                            target.force_full_present = true;
+                        }
+                    }
+                    self.components[index].component.request_paint();
                 }
-                _ => {}
             }
         }
         Ok(())
