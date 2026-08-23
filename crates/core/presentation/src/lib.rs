@@ -149,6 +149,12 @@ impl NegotiatedCapabilities {
     pub const fn supports_xdg_popup_reposition(self) -> bool {
         self.xdg_shell_version >= 3
     }
+
+    /// Reactive popup configures use the xdg-positioner `set_reactive` request,
+    /// which was introduced by the same xdg-shell version as repositioning.
+    pub const fn supports_xdg_popup_reactive_positioner(self) -> bool {
+        self.xdg_shell_version >= 3
+    }
 }
 
 /// A compositor-owned surface lifecycle transition that the shell must

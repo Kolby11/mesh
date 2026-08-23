@@ -418,7 +418,13 @@ impl WaylandSurfaceBackend {
                 .xdg_shell
                 .as_ref()
                 .expect("xdg_shell presence checked above");
-            let positioner = build_positioner(xdg_shell, &config.placement)?;
+            let positioner = build_positioner(
+                xdg_shell,
+                &config.placement,
+                self.state
+                    .negotiated_capabilities
+                    .supports_xdg_popup_reactive_positioner(),
+            )?;
             let surface = Surface::new(&self.state.compositor_state, &qh)
                 .map_err(|e| PresentationError::SurfaceCreate(format!("popup surface: {e}")))?;
             // For a layer parent the role is supplied below via `get_popup`, so
@@ -473,6 +479,7 @@ impl WaylandSurfaceBackend {
                 parent_id: config.parent_surface_id.clone(),
                 parent_object_generation,
                 placement: config.placement,
+                position: (0, 0),
                 next_reposition_token: 0,
                 pending_reposition_token: None,
             }),
@@ -566,7 +573,7 @@ impl WaylandSurfaceBackend {
                 "xdg_wm_base unavailable; cannot reposition popup".into(),
             ));
         };
-        let positioner = build_positioner(xdg_shell, placement)?;
+        let positioner = build_positioner(xdg_shell, placement, false)?;
         let Some(entry) = self.state.surfaces.get_mut(surface_id) else {
             return Err(PresentationError::SurfaceCreate(format!(
                 "popup surface '{surface_id}' no longer exists"
@@ -701,8 +708,8 @@ impl WaylandSurfaceBackend {
 
 /// Read the compositor's advertised global versions once, clamping them to
 /// the protocol versions this build can safely use. Binding code below still
-/// decides availability; this snapshot is intentionally diagnostic and is the
-/// input for future capability-gated operations such as popup repositioning.
+/// decides availability; popup creation and repositioning consume the xdg-shell
+/// version gates from this snapshot.
 fn negotiated_capabilities(
     globals: &wayland_client::globals::GlobalList,
 ) -> NegotiatedCapabilities {

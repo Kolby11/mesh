@@ -1041,17 +1041,18 @@ impl PopupHandler for State {
         if config.height > 0 {
             entry.height = config.height as u32;
         }
-        if let WaylandRole::Popup(role) = &mut entry.role
-            && let ConfigureKind::Reposition { token } = config.kind
-        {
-            if role.pending_reposition_token != Some(token) {
-                tracing::warn!(
-                    expected_token = ?role.pending_reposition_token,
-                    received_token = token,
-                    "layer_shell: popup reposition configure token did not match the live request"
-                );
-            } else {
-                role.pending_reposition_token = None;
+        if let WaylandRole::Popup(role) = &mut entry.role {
+            role.position = config.position;
+            if let ConfigureKind::Reposition { token } = &config.kind {
+                if role.pending_reposition_token != Some(*token) {
+                    tracing::warn!(
+                        expected_token = ?role.pending_reposition_token,
+                        received_token = token,
+                        "layer_shell: popup reposition configure token did not match the live request"
+                    );
+                } else {
+                    role.pending_reposition_token = None;
+                }
             }
         }
         entry.accept_configure();

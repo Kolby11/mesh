@@ -171,6 +171,10 @@ pub(in crate::wayland_surface) struct PopupRole {
     /// id can survive role replacement, but the existing xdg parent cannot.
     pub(in crate::wayland_surface) parent_object_generation: u64,
     pub(in crate::wayland_surface) placement: PopupPlacement,
+    /// Last compositor-resolved popup position, relative to the parent's
+    /// window geometry. Reactive configures may adjust this without a new
+    /// shell placement request.
+    pub(in crate::wayland_surface) position: (i32, i32),
     pub(in crate::wayland_surface) next_reposition_token: u32,
     pub(in crate::wayland_surface) pending_reposition_token: Option<u32>,
 }
