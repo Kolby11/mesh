@@ -234,6 +234,59 @@ fn child_popup_recreates_after_parent_role_replacement() {
 }
 
 #[test]
+fn child_popup_retries_after_rejected_reposition() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(Arc::clone(&state))));
+
+    render_components_until_child_popup(&mut shell);
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+    let presents_before = shell
+        .presentation_engine
+        .testing_presented_surfaces()
+        .iter()
+        .filter(|surface| *surface == &child_id)
+        .count();
+
+    // A real v1/v2 compositor rejects xdg_popup.reposition. Model that
+    // rejection after the popup has already been created; the shell must drop
+    // the stale role and retry the requested placement as a fresh popup.
+    shell
+        .presentation_engine
+        .testing_fail_next_popup_configure("reposition rejected by compositor");
+    state.lock().unwrap().anchor_rect = (24, 18, 40, 16);
+    shell.render_components().unwrap();
+    assert!(
+        shell.components[0].children.is_empty(),
+        "a rejected reposition must remove the unusable popup role"
+    );
+
+    // Child creation preserves the normal entrance transition: the first
+    // retry schedules the subtree, and the following pass maps it.
+    shell.render_components().unwrap();
+    shell.render_components().unwrap();
+    assert!(
+        shell
+            .presentation_engine
+            .testing_popup_config(&child_id)
+            .is_some(),
+        "the next scheduled render must recreate the popup"
+    );
+    assert!(
+        shell
+            .presentation_engine
+            .testing_presented_surfaces()
+            .iter()
+            .filter(|surface| *surface == &child_id)
+            .count()
+            > presents_before,
+        "the recreated popup must be presented"
+    );
+}
+
+#[test]
 fn promoting_an_embedded_child_replaces_its_popup_with_a_toplevel() {
     let mut shell = Shell::new();
     shell.presentation_engine =

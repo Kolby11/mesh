@@ -334,6 +334,12 @@ impl Shell {
                 {
                     tracing::warn!("configure_popup for child {child_surface_id} failed: {error}");
                     self.destroy_child_surface_at(index, child_index);
+                    // A rejected reposition destroys the old popup so the
+                    // next attempt can create it with the requested placement.
+                    // Keep the component scheduled even when it has no other
+                    // dirty work; otherwise a real component can lose the
+                    // popup until an unrelated event causes another render.
+                    self.components[index].component.request_paint();
                     continue;
                 }
                 if popup_config_changed {

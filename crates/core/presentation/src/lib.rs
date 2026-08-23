@@ -226,6 +226,7 @@ enum Backend {
 struct TestingBackend {
     popup_supported: bool,
     configure_error: Option<String>,
+    popup_configure_error: Option<String>,
     popup_configs: HashMap<String, PopupConfig>,
     surface_configs: HashMap<String, SurfaceConfig>,
     surface_config_history: Vec<(String, SurfaceConfig)>,
@@ -322,6 +323,13 @@ impl PresentationEngine {
     pub fn testing_fail_next_configure(&mut self, message: impl Into<String>) {
         if let Backend::Testing(backend) = &mut self.backend {
             backend.configure_error = Some(message.into());
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn testing_fail_next_popup_configure(&mut self, message: impl Into<String>) {
+        if let Backend::Testing(backend) = &mut self.backend {
+            backend.popup_configure_error = Some(message.into());
         }
     }
 
@@ -582,6 +590,9 @@ impl PresentationEngine {
             Backend::Testing(backend) => {
                 if let Some(reason) = &backend.connection_lost {
                     return Err(PresentationError::ConnectionLost(reason.clone()));
+                }
+                if let Some(message) = backend.popup_configure_error.take() {
+                    return Err(PresentationError::SurfaceCreate(message));
                 }
                 backend.missing_surfaces.remove(surface_id);
                 backend.destroyed_popup_ids.remove(surface_id);

@@ -83,6 +83,11 @@ well. If a parent role replacement destroys its popup or window descendants,
 the next reconciliation recreates those child objects and forces a retained
 content present instead of trusting the old child target cache.
 
+Rejected child `configure_popup`, including a compositor-rejected
+reposition, now destroys the stale popup role and requests a paint retry. The
+next normal child reconciliation recreates the popup with the requested
+placement while preserving its normal entrance transition.
+
 Icon bitmap/SVG and font-glyph preparation still share a bounded render resource
 broker, with revision-aware cache handoff and linked-file invalidation. Typed
 icon/glyph caches and shell polling remain separate at the handoff boundary.
@@ -98,7 +103,6 @@ repository-settings fixture, which rejects its `revision` key as unknown.
 
 ## Next
 
-Complete safe popup recovery for rejected reposition and the remaining
-semantic presentation state diff. Carry full pointer-button
-identity, IME/text-input-v3, connection recreation, and resource
+Complete the remaining semantic presentation state diff. Carry full
+pointer-button identity, IME/text-input-v3, connection recreation, and resource
 preparation/text shaping as separate follow-up work.
