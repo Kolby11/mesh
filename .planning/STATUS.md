@@ -4,6 +4,12 @@
 
 ## Now
 
+Presentation surface configuration now computes a role-aware semantic diff:
+layer surfaces ignore inert toplevel fields, windows ignore inert layer
+placement fields, and live window size/title/identity, input padding, and
+effective keyboard changes remain explicit. The presentation seam no longer
+reconfigures a compositor object for fields its active role cannot consume.
+
 Display paint now carries parsed `font-style` into the text renderer. Cosmic
 text shaping, layout caching, ellipsis truncation, selection geometry, and
 editable-input rendering use the same normal/italic style, and the style is

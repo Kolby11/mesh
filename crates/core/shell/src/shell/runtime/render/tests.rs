@@ -1,7 +1,9 @@
 use super::*;
 use mesh_core_elements::{
     BoxShadow, LayoutRect, VisualFilter,
-    style::{BackgroundPaint, Color, Edges, Overflow, TextAlign, TextDirection, TextOverflow},
+    style::{
+        BackgroundPaint, Color, Edges, FontStyle, Overflow, TextAlign, TextDirection, TextOverflow,
+    },
 };
 use mesh_core_render::{
     DamageRect, DisplayListClip, DisplayPaintCommand, DisplayPaintCommandKind,
@@ -50,6 +52,7 @@ fn make_cmd(x: f32, y: f32, width: f32, height: f32, blur_radius: f32) -> Displa
                 font_family: Arc::from(""),
                 font_size: 16.0,
                 font_weight: 400,
+                font_style: FontStyle::Normal,
                 line_height: 1.0,
                 text_align: TextAlign::Left,
                 text_overflow: TextOverflow::Clip,

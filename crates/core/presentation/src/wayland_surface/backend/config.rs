@@ -224,7 +224,25 @@ pub(super) fn surface_config_change(
         return SurfaceConfigChange::Configure;
     }
 
-    if previous != next || previous_keyboard_mode != next_keyboard_mode {
+    // `SurfaceConfig` is shared by layer and toplevel roles, so comparing the
+    // whole struct here would treat fields ignored by the active protocol as
+    // compositor work. Keep the semantic diff role-aware: only fields that
+    // can reach the live role or the shared input/geometry state should wake
+    // an already configured surface.
+    let live_state_changed = match previous.role {
+        SurfaceRole::Layer => {
+            previous.padding != next.padding || previous_keyboard_mode != next_keyboard_mode
+        }
+        SurfaceRole::Window => {
+            previous.window.title != next.window.title
+                || previous.window.app_id != next.window.app_id
+                || previous.window.resizable != next.window.resizable
+                || previous.width != next.width
+                || previous.height != next.height
+                || previous.padding != next.padding
+        }
+    };
+    if live_state_changed {
         SurfaceConfigChange::Live
     } else {
         SurfaceConfigChange::Unchanged

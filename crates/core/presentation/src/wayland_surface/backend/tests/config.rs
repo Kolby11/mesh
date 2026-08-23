@@ -118,6 +118,51 @@ fn keyboard_mode_only_change_is_live() {
 }
 
 #[test]
+fn layer_diff_ignores_toplevel_only_fields() {
+    let previous = base_cfg();
+    let mut next = previous.clone();
+    next.window.title = "ignored for layer surfaces".into();
+    next.window.app_id = "ignored.layer".into();
+    next.window.resizable = !next.window.resizable;
+    next.size_policy = LayerSurfaceSizePolicy::Flexible;
+    next.keyboard_mode = KeyboardMode::Exclusive;
+
+    assert_eq!(
+        surface_config_change(
+            &previous,
+            previous.keyboard_mode,
+            &next,
+            previous.keyboard_mode,
+        ),
+        SurfaceConfigChange::Unchanged,
+        "layer diffs must not react to toplevel-only or desired keyboard fields"
+    );
+}
+
+#[test]
+fn window_diff_ignores_layer_only_fields() {
+    let previous = window_cfg();
+    let mut next = previous.clone();
+    next.edge = Some(Edge::Bottom);
+    next.layer = MeshLayer::Background;
+    next.size_policy = LayerSurfaceSizePolicy::Flexible;
+    next.exclusive_zone = 48;
+    next.margin_top = 12;
+    next.margin_right = 8;
+    next.margin_bottom = 4;
+    next.margin_left = 16;
+    next.namespace = "ignored.window.namespace".into();
+    next.blur = !next.blur;
+    next.keyboard_mode = KeyboardMode::Exclusive;
+
+    assert_eq!(
+        surface_config_change(&previous, KeyboardMode::None, &next, KeyboardMode::None),
+        SurfaceConfigChange::Unchanged,
+        "window diffs must not react to layer-only placement fields"
+    );
+}
+
+#[test]
 fn layer_geometry_change_requires_fresh_configure() {
     let previous = base_cfg();
     let mut next = previous.clone();

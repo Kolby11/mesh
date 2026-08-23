@@ -150,7 +150,8 @@ mod tests {
         DisplayScrollbars, DisplaySliderPaint,
     };
     use mesh_core_elements::style::{
-        BackgroundPaint, BlendMode, Color, Edges, Overflow, TextAlign, TextDirection, TextOverflow,
+        BackgroundPaint, BlendMode, Color, Edges, FontStyle, Overflow, TextAlign, TextDirection,
+        TextOverflow,
     };
     use mesh_core_elements::{BoxShadow, LayoutRect, VisualFilter};
     use std::sync::Arc;
@@ -169,6 +170,7 @@ mod tests {
             font_family: Arc::from(""),
             font_size: 14.0,
             font_weight: 400,
+            font_style: FontStyle::Normal,
             line_height: 16.0,
             text_align: TextAlign::Left,
             text_overflow: TextOverflow::Clip,
