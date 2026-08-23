@@ -27,6 +27,9 @@ That shared teardown now cancels the current single-seat pointer focus,
 keyboard focus/repeat, touch ids, and active gesture before removing a surface,
 while preserving ownership belonging to other surfaces and emitting local
 cancellation events.
+Seat capability and seat removal now perform the corresponding pointer/gesture,
+keyboard/repeat, touch, and focus-grab cancellation before dropping their
+Wayland objects.
 
 Icon bitmap/SVG and font-glyph preparation still share a bounded render resource
 broker, with revision-aware cache handoff and linked-file invalidation. Typed
@@ -41,7 +44,7 @@ repository-settings fixture, which rejects its `revision` key as unknown.
 
 ## Next
 
-Move input ownership into per-seat state and wire seat/capability teardown,
+Move input ownership into per-seat state and complete multi-seat event routing,
 then add object/configure/frame generations and the remaining semantic
 presentation diff. Resource preparation and text shaping remain separate
 follow-up work.

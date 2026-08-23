@@ -310,25 +310,40 @@ impl SeatHandler for State {
         capability: SeatCapability,
     ) {
         if capability == SeatCapability::Pointer {
+            self.cancel_pointer_input();
             self.gesture_swipe.take().map(|g| g.destroy());
             self.gesture_pinch.take().map(|g| g.destroy());
             self.gesture_hold.take().map(|g| g.destroy());
             let _ = self.pointer.take();
         }
-        if capability == SeatCapability::Touch
-            && let Some(touch) = self.touch.take()
-        {
-            touch.release();
-            self.touch_surfaces.clear();
+        if capability == SeatCapability::Touch {
+            self.cancel_touch_input();
+            if let Some(touch) = self.touch.take() {
+                touch.release();
+            }
         }
-        if capability == SeatCapability::Keyboard
-            && let Some(keyboard) = self.keyboard.take()
-        {
-            keyboard.release();
+        if capability == SeatCapability::Keyboard {
+            self.cancel_keyboard_input();
+            self.release_focus_grab_for_seat_teardown();
+            if let Some(keyboard) = self.keyboard.take() {
+                keyboard.release();
+            }
         }
     }
 
     fn remove_seat(&mut self, _c: &Connection, _q: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
+        self.cancel_all_input();
+        self.release_focus_grab_for_seat_teardown();
+        self.gesture_swipe.take().map(|g| g.destroy());
+        self.gesture_pinch.take().map(|g| g.destroy());
+        self.gesture_hold.take().map(|g| g.destroy());
+        let _ = self.pointer.take();
+        if let Some(touch) = self.touch.take() {
+            touch.release();
+        }
+        if let Some(keyboard) = self.keyboard.take() {
+            keyboard.release();
+        }
         if self.activation_seat.as_ref() == Some(&seat) {
             self.activation_seat = None;
         }
