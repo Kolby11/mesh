@@ -228,6 +228,7 @@ popover.$0
             std::process::id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("module.json"), "{}").unwrap();
         std::fs::write(
             dir.join("item-row.mesh"),
             r#"<template>
@@ -578,6 +579,7 @@ audio.$0
         let dir =
             std::env::temp_dir().join(format!("mesh-lsp-component-attrs-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("module.json"), "{}").unwrap();
         std::fs::write(
             dir.join("item-row.mesh"),
             r#"<template>

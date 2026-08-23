@@ -159,7 +159,11 @@ fn source_fingerprint(paths: &[PathBuf]) -> Option<u64> {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for path in paths {
         path.hash(&mut hasher);
-        std::fs::read(path).ok()?.hash(&mut hasher);
+        let metadata = std::fs::symlink_metadata(&path).ok()?;
+        if metadata.file_type().is_symlink() {
+            return None;
+        }
+        std::fs::read(&path).ok()?.hash(&mut hasher);
     }
     Some(hasher.finish())
 }
@@ -181,9 +185,14 @@ fn compile_catalog_entry(
     // whole graph or silently losing hot reload coverage.
     for contributions in module.manifest.extension_point_contributions.values() {
         for contribution in contributions {
-            let path = module.path.join(&contribution.entry);
-            if !compiled.watched_paths.contains(&path) {
-                compiled.watched_paths.push(path);
+            if let Ok(path) = mesh_core_module::package::resolve_contained_module_file(
+                &module.path,
+                &contribution.entry,
+                "frontend contribution entry",
+            ) {
+                if !compiled.watched_paths.contains(&path) {
+                    compiled.watched_paths.push(path);
+                }
             }
         }
     }
@@ -546,10 +555,18 @@ impl FrontendCatalog {
                     if !catalog.extension_point_entries.contains_key(&entry_key) {
                         // Reuse an unchanged compilation across graph-only
                         // rebuilds, on the same terms as the primary entry.
+                        let entry_path = mesh_core_module::package::resolve_contained_module_file(
+                            &module.path,
+                            &contribution.entry,
+                            "frontend contribution entry",
+                        )
+                        .ok();
                         let reused = previous
                             .and_then(|catalog| catalog.extension_point_entries.get(&entry_key))
                             .filter(|compiled| {
-                                compiled.source_path == module.path.join(&contribution.entry)
+                                entry_path
+                                    .as_ref()
+                                    .is_some_and(|path| compiled.source_path == *path)
                                     && compiled.source_fingerprint.is_some_and(|fingerprint| {
                                         source_fingerprint(&compiled.watched_paths)
                                             == Some(fingerprint)
@@ -569,7 +586,9 @@ impl FrontendCatalog {
                                         FrontendCatalogDiagnostic::contribution(
                                             &contribution.source_module_id,
                                             &contribution.contribution_id,
-                                            module.path.join(&contribution.entry),
+                                            entry_path.clone().unwrap_or_else(|| {
+                                                module.path.join(&contribution.entry)
+                                            }),
                                             &error,
                                         ),
                                     );
@@ -1016,6 +1035,19 @@ mod performance_tests {
             &*surface.compiled,
             &*catalog_entry.compiled,
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn watched_source_fingerprint_does_not_follow_symlinks() {
+        let temp = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("outside.mesh");
+        let link = temp.path().join("watched.mesh");
+        std::fs::write(&target, "outside").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        assert_eq!(source_fingerprint(&[link]), None);
     }
 
     /// The Stage 1 gate at the catalog boundary: a module's contributed page is

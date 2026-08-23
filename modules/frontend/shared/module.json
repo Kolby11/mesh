@@ -1,0 +1,10 @@
+{
+  "name": "@mesh/bubble-options",
+  "version": "0.1.0",
+  "description": "Reusable bubble option picker component.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "component",
+    "entry": "components/bubble-options.mesh"
+  }
+}

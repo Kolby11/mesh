@@ -135,6 +135,187 @@ pub fn contained_path(
     Ok(target)
 }
 
+/// Resolve an existing regular file declared relative to a module root.
+///
+/// The returned path is canonical, so callers can use it as a stable identity
+/// for dependency tracking and watching. Every existing path component is
+/// checked before the final canonicalization; symlinked files and directories
+/// are rejected even when their targets remain inside the module root.
+pub fn resolve_contained_module_file(
+    module_root: &Path,
+    relative: &str,
+    label: &str,
+) -> Result<PathBuf, ModuleManifestError> {
+    let canonical_root = canonical_module_root(module_root, label)?;
+    let target = contained_path(&canonical_root, relative, label)?;
+    canonical_regular_file(&canonical_root, &target, label)
+}
+
+/// Resolve an existing local component import relative to its owning source
+/// file while keeping it inside the owning module root.
+///
+/// `@src/foo.mesh` is rooted at the module's `src` directory. Other local
+/// imports are relative to the importing file, so `../../shared/foo.mesh` is
+/// valid when it normalizes to a path inside the module. Absolute paths,
+/// backslash-separated paths, and paths that normalize outside the module are
+/// rejected before any source is read.
+pub fn resolve_contained_component_file(
+    module_root: &Path,
+    owner_file: &Path,
+    source: &str,
+    label: &str,
+) -> Result<PathBuf, ModuleManifestError> {
+    let target = resolve_contained_component_path(module_root, owner_file, source, label)?;
+    let canonical_root = canonical_module_root(module_root, label)?;
+    canonical_regular_file(&canonical_root, &target, label)
+}
+
+/// Resolve a local component path with containment and symlink checks but
+/// without requiring the final file to exist. Compiler validation uses this
+/// form when it only needs a stable path for an already-parsed component.
+pub fn resolve_contained_component_path(
+    module_root: &Path,
+    owner_file: &Path,
+    source: &str,
+    label: &str,
+) -> Result<PathBuf, ModuleManifestError> {
+    if source.is_empty()
+        || source.contains('\\')
+        || source.contains('\0')
+        || Path::new(source).is_absolute()
+    {
+        return Err(ModuleManifestError::Validation(format!(
+            "{label} '{source}' must be relative to its owning module"
+        )));
+    }
+
+    let canonical_root = canonical_module_root(module_root, label)?;
+    let owner = absolute_path(owner_file)?;
+    validate_no_symlink_path(&owner, label)?;
+    let owner_parent = owner.parent().ok_or_else(|| {
+        ModuleManifestError::Validation(format!(
+            "{label} owner {} has no parent directory",
+            owner.display()
+        ))
+    })?;
+    let canonical_owner_parent =
+        fs::canonicalize(owner_parent).map_err(|source| ModuleManifestError::Io {
+            path: owner_parent.to_path_buf(),
+            source,
+        })?;
+    if !canonical_owner_parent.starts_with(&canonical_root) {
+        return Err(ModuleManifestError::Validation(format!(
+            "{label} owner {} is outside module root {}",
+            owner.display(),
+            canonical_root.display()
+        )));
+    }
+
+    let raw_target = if let Some(rest) = source.strip_prefix("@src/") {
+        canonical_root.join("src").join(rest)
+    } else {
+        canonical_owner_parent.join(source)
+    };
+    let mut target = normalize_absolute_path(&raw_target, label)?;
+    if target.extension().is_none() {
+        target.set_extension("mesh");
+    }
+
+    let relative = target.strip_prefix(&canonical_root).map_err(|_| {
+        ModuleManifestError::Validation(format!(
+            "{label} {} escapes module root {}",
+            target.display(),
+            canonical_root.display()
+        ))
+    })?;
+    let relative = relative.to_str().ok_or_else(|| {
+        ModuleManifestError::Validation(format!("{label} {} is not valid UTF-8", target.display()))
+    })?;
+    contained_path(&canonical_root, relative, label)
+}
+
+fn canonical_module_root(root: &Path, label: &str) -> Result<PathBuf, ModuleManifestError> {
+    let metadata = fs::symlink_metadata(root).map_err(|source| ModuleManifestError::Io {
+        path: root.to_path_buf(),
+        source,
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(ModuleManifestError::Validation(format!(
+            "{label} module root {} must be a real directory",
+            root.display()
+        )));
+    }
+    fs::canonicalize(root).map_err(|source| ModuleManifestError::Io {
+        path: root.to_path_buf(),
+        source,
+    })
+}
+
+fn canonical_regular_file(
+    canonical_root: &Path,
+    target: &Path,
+    label: &str,
+) -> Result<PathBuf, ModuleManifestError> {
+    validate_no_symlink_path(target, label)?;
+    let metadata = fs::symlink_metadata(target).map_err(|source| ModuleManifestError::Io {
+        path: target.to_path_buf(),
+        source,
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(ModuleManifestError::Validation(format!(
+            "{label} {} must be a regular, non-symlink file",
+            target.display()
+        )));
+    }
+    let canonical = fs::canonicalize(target).map_err(|source| ModuleManifestError::Io {
+        path: target.to_path_buf(),
+        source,
+    })?;
+    validate_no_symlink_path(target, label)?;
+    if !canonical.starts_with(canonical_root) {
+        return Err(ModuleManifestError::Validation(format!(
+            "{label} {} escapes module root {}",
+            target.display(),
+            canonical_root.display()
+        )));
+    }
+    Ok(canonical)
+}
+
+fn absolute_path(path: &Path) -> Result<PathBuf, ModuleManifestError> {
+    if path.is_absolute() {
+        Ok(path.to_path_buf())
+    } else {
+        Ok(std::env::current_dir()
+            .map_err(|source| ModuleManifestError::Io {
+                path: PathBuf::from("."),
+                source,
+            })?
+            .join(path))
+    }
+}
+
+fn normalize_absolute_path(path: &Path, label: &str) -> Result<PathBuf, ModuleManifestError> {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::Normal(name) => normalized.push(name),
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "{label} {} escapes its root",
+                        path.display()
+                    )));
+                }
+            }
+        }
+    }
+    Ok(normalized)
+}
+
 pub(crate) fn validate_regular_file(path: &Path, label: &str) -> Result<(), ModuleManifestError> {
     validate_no_symlink_path(path, label)?;
     let metadata = fs::symlink_metadata(path).map_err(|source| ModuleManifestError::Io {
@@ -392,6 +573,63 @@ mod tests {
         {
             std::os::unix::fs::symlink(&root, root.join("link")).unwrap();
             assert!(contained_path(&root, "link/module", "module").is_err());
+        }
+    }
+
+    #[test]
+    fn component_imports_are_owner_relative_and_return_canonical_files() {
+        let root = temp_dir("component-import");
+        let owner = root.join("src/main.mesh");
+        let target = root.join("shared/button.mesh");
+        fs::create_dir_all(owner.parent().unwrap()).unwrap();
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::write(&owner, "").unwrap();
+        fs::write(&target, "").unwrap();
+
+        let resolved = resolve_contained_component_file(
+            &root,
+            &owner,
+            "../shared/./button",
+            "component import",
+        )
+        .unwrap();
+        assert_eq!(resolved, target.canonicalize().unwrap());
+        assert_eq!(
+            resolve_contained_component_file(&root, &owner, "@src/../shared/button.mesh", "import")
+                .unwrap(),
+            resolved
+        );
+    }
+
+    #[test]
+    fn component_imports_reject_absolute_escape_and_symlink_paths() {
+        let root = temp_dir("component-import-safety");
+        let owner = root.join("src/main.mesh");
+        fs::create_dir_all(owner.parent().unwrap()).unwrap();
+        fs::write(&owner, "").unwrap();
+        fs::write(root.join("inside.mesh"), "").unwrap();
+
+        assert!(
+            resolve_contained_component_file(&root, &owner, "/tmp/outside.mesh", "import").is_err()
+        );
+        assert!(
+            resolve_contained_component_file(&root, &owner, "@src/../../outside", "import")
+                .is_err()
+        );
+        assert!(
+            resolve_contained_component_file(&root, &owner, "../../outside", "import").is_err()
+        );
+
+        #[cfg(unix)]
+        {
+            let outside = temp_dir("component-import-outside");
+            let outside_file = outside.join("secret.mesh");
+            fs::write(&outside_file, "").unwrap();
+            std::os::unix::fs::symlink(&outside_file, root.join("linked.mesh")).unwrap();
+            assert!(
+                resolve_contained_component_file(&root, &owner, "../linked.mesh", "import")
+                    .is_err()
+            );
         }
     }
 

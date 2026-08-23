@@ -101,28 +101,29 @@ pub(crate) fn resolve_import_target(
 
 fn resolve_local_component_path(doc: &Document, path: &str) -> Option<PathBuf> {
     let doc_path = doc.uri.to_file_path().ok()?;
-    if path.starts_with("@src/") {
-        let module_root = find_module_root(&doc_path)?;
-        return Some(
-            module_root
-                .join("src")
-                .join(path.trim_start_matches("@src/")),
-        );
-    }
-
-    let base = if Path::new(path).is_absolute() {
-        PathBuf::from(path)
-    } else {
-        doc_path.parent()?.join(path)
-    };
-    Some(base)
+    let module_root = find_module_root(&doc_path)?;
+    mesh_core_module::package::resolve_contained_component_file(
+        &module_root,
+        &doc_path,
+        path,
+        "local component import",
+    )
+    .ok()
 }
 
 fn find_module_root(path: &Path) -> Option<PathBuf> {
     let mut current = path.parent()?;
     loop {
-        if current.join("module.json").exists() {
-            return Some(current.to_path_buf());
+        let directory = std::fs::symlink_metadata(current).ok()?;
+        if directory.file_type().is_symlink() || !directory.is_dir() {
+            return None;
+        }
+        let manifest = current.join("module.json");
+        if std::fs::symlink_metadata(&manifest)
+            .ok()
+            .is_some_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
+        {
+            return std::fs::canonicalize(current).ok();
         }
         current = current.parent()?;
     }
@@ -223,6 +224,19 @@ mod tests {
 
     #[test]
     fn template_custom_component_definitions_resolve_to_local_file() {
+        let root = std::env::temp_dir().join(format!(
+            "mesh-lsp-definition-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let source_path = root.join("src/main.mesh");
+        let target_path = root.join("src/components/theme-button.mesh");
+        std::fs::create_dir_all(target_path.parent().unwrap()).unwrap();
+        std::fs::write(root.join("module.json"), "{}").unwrap();
+        std::fs::write(&target_path, "<template><button /></template>").unwrap();
+        std::fs::write(&source_path, "").unwrap();
         let (source, position) = fixture_position(
             r#"<template>
   <ThemeBut$0ton />
@@ -233,10 +247,7 @@ local ThemeButton = require("./components/theme-button.mesh")
 </script>
 "#,
         );
-        let doc = Document::new(
-            Url::parse("file:///workspace/module/src/main.mesh").unwrap(),
-            source,
-        );
+        let doc = Document::new(Url::from_file_path(&source_path).unwrap(), source);
         let location = definition(&doc, position, &ModuleRegistry::empty())
             .and_then(|response| match response {
                 GotoDefinitionResponse::Scalar(location) => Some(location),
@@ -246,8 +257,48 @@ local ThemeButton = require("./components/theme-button.mesh")
 
         assert_eq!(
             location.uri.to_file_path().unwrap(),
-            PathBuf::from("/workspace/module/src/components/theme-button.mesh")
+            target_path.canonicalize().unwrap()
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn local_component_definitions_reject_paths_outside_the_module() {
+        let root =
+            std::env::temp_dir().join(format!("mesh-lsp-definition-safety-{}", std::process::id()));
+        let source_path = root.join("src/main.mesh");
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(root.join("module.json"), "{}").unwrap();
+        std::fs::write(&source_path, "").unwrap();
+        let outside = root.parent().unwrap().join(format!(
+            "mesh-lsp-definition-outside-{}",
+            std::process::id()
+        ));
+        std::fs::write(&outside, "<template />").unwrap();
+
+        let doc = Document::new(
+            Url::from_file_path(&source_path).unwrap(),
+            "<template></template>\n<script lang=\"luau\"></script>".into(),
+        );
+        assert!(
+            resolve_import_target(
+                &doc,
+                &ComponentImportTarget::ComponentLocal("../../outside".into()),
+                &ModuleRegistry::empty(),
+            )
+            .is_none()
+        );
+        assert!(
+            resolve_import_target(
+                &doc,
+                &ComponentImportTarget::ComponentLocal(outside.to_string_lossy().into_owned()),
+                &ModuleRegistry::empty(),
+            )
+            .is_none()
+        );
+
+        std::fs::remove_file(outside).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

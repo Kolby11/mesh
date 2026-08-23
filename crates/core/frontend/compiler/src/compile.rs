@@ -31,6 +31,9 @@ pub enum CompileFrontendError {
         source: mesh_core_component::ParseError,
     },
 
+    #[error("invalid component source path {path}: {message}")]
+    InvalidSourcePath { path: PathBuf, message: String },
+
     #[error("component import alias '{alias}' is declared with multiple targets")]
     ConflictingImportAlias { alias: String },
 
@@ -86,7 +89,7 @@ pub fn compile_frontend_entrypoint(
         });
     }
 
-    let source_path = module_dir.join(entrypoint);
+    let source_path = resolve_module_entrypoint_path(module_dir, entrypoint)?;
     let component = parse_component_file(&source_path)?;
     let mut local_components: HashMap<String, ComponentFile> = HashMap::new();
     let mut module_component_imports = HashMap::new();
@@ -215,7 +218,7 @@ fn collect_imports(
     for import in &component.imports {
         match &import.target {
             ComponentImportTarget::ComponentLocal(source) => {
-                let target_path = resolve_local_component_path(source, component_path, module_dir);
+                let target_path = resolve_local_component_file(source, component_path, module_dir)?;
                 let parsed = parse_component_file(&target_path)?;
                 insert_local_component(
                     &import.alias,
@@ -223,8 +226,7 @@ fn collect_imports(
                     parsed.clone(),
                     local_components,
                 )?;
-                let canonical = target_path.canonicalize().unwrap_or(target_path.clone());
-                if seen_local_paths.insert(canonical) {
+                if seen_local_paths.insert(target_path.clone()) {
                     collect_imports(
                         &parsed,
                         &target_path,
@@ -274,18 +276,53 @@ fn insert_module_component_import(
     Ok(())
 }
 
-fn resolve_local_component_path(source: &str, component_path: &Path, module_dir: &Path) -> PathBuf {
-    let mut path = if let Some(rest) = source.strip_prefix("@src/") {
-        module_dir.join("src").join(rest)
-    } else if source.starts_with('/') {
-        PathBuf::from(source)
-    } else {
-        component_path.parent().unwrap_or(module_dir).join(source)
-    };
-    if path.extension().is_none() {
-        path.set_extension("mesh");
-    }
-    path
+fn resolve_module_entrypoint_path(
+    module_dir: &Path,
+    entrypoint: &str,
+) -> Result<PathBuf, CompileFrontendError> {
+    mesh_core_module::package::resolve_contained_module_file(
+        module_dir,
+        entrypoint,
+        "frontend entrypoint",
+    )
+    .map_err(|source| CompileFrontendError::InvalidSourcePath {
+        path: module_dir.join(entrypoint),
+        message: source.to_string(),
+    })
+}
+
+fn resolve_local_component_file(
+    source: &str,
+    component_path: &Path,
+    module_dir: &Path,
+) -> Result<PathBuf, CompileFrontendError> {
+    mesh_core_module::package::resolve_contained_component_file(
+        module_dir,
+        component_path,
+        source,
+        "local component import",
+    )
+    .map_err(|error| CompileFrontendError::InvalidSourcePath {
+        path: component_path.parent().unwrap_or(module_dir).join(source),
+        message: error.to_string(),
+    })
+}
+
+fn resolve_local_component_path(
+    source: &str,
+    component_path: &Path,
+    module_dir: &Path,
+) -> Result<PathBuf, CompileFrontendError> {
+    mesh_core_module::package::resolve_contained_component_path(
+        module_dir,
+        component_path,
+        source,
+        "local component import",
+    )
+    .map_err(|error| CompileFrontendError::InvalidSourcePath {
+        path: component_path.parent().unwrap_or(module_dir).join(source),
+        message: error.to_string(),
+    })
 }
 
 fn validate_standalone_imports(
@@ -445,7 +482,7 @@ fn validate_template_nodes(
                 )?;
 
                 if let Some(source) = local_imports.get(component_ref.name.as_str()) {
-                    let child_path = resolve_local_component_path(source, path, module_dir);
+                    let child_path = resolve_local_component_path(source, path, module_dir)?;
                     let Some(child_component) = local_components.get(&component_ref.name) else {
                         continue;
                     };
@@ -888,6 +925,31 @@ import Child from "./child.mesh"
             &HashMap::from([("Child".to_string(), child)]),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn local_component_source_paths_are_contained_and_canonical() {
+        let root = std::env::temp_dir().join(format!(
+            "mesh-frontend-component-paths-{}",
+            std::process::id()
+        ));
+        let owner = root.join("src/main.mesh");
+        let child = root.join("src/components/child.mesh");
+        std::fs::create_dir_all(child.parent().unwrap()).unwrap();
+        std::fs::write(&owner, "").unwrap();
+        std::fs::write(&child, "").unwrap();
+
+        let resolved = resolve_local_component_file("./components/child", &owner, &root)
+            .expect("contained component path");
+        assert_eq!(resolved, child.canonicalize().unwrap());
+
+        let error = resolve_local_component_file("/tmp/outside.mesh", &owner, &root)
+            .expect_err("absolute component path must fail");
+        assert!(matches!(
+            error,
+            CompileFrontendError::InvalidSourcePath { .. }
+        ));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

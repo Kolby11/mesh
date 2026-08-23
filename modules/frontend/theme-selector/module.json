@@ -9,6 +9,9 @@
       "interfaces": {
         "mesh.theme": ">=1.0"
       },
+      "modules": {
+        "@mesh/bubble-options": ">=0.1.0"
+      },
       "resources": {
         "icons": [
           "@mesh/icons-material-symbols",

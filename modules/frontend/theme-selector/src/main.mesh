@@ -31,7 +31,7 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
 
 <script lang="luau">
 local theme = require("mesh.theme")
-local BubbleOptions = require("../../shared/components/bubble-options.mesh")
+local BubbleOptions = require("@mesh/bubble-options")
 
 open = false
 local CLOSE_BRIDGE_KEY = "theme-popover-close"

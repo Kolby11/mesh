@@ -9,6 +9,9 @@
     "apiVersion": "0.1",
     "kind": "component",
     "uses": {
+      "modules": {
+        "@mesh/bubble-options": ">=0.1.0"
+      },
       "resources": {
         "icons": [
           "@mesh/icons-material-symbols",

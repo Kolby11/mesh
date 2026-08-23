@@ -96,8 +96,9 @@ fn shipped_module_graph_loads_repo_module_fixture() {
         .into_iter()
         .map(|module| module.id.as_str())
         .collect();
-    assert_eq!(component_ids.len(), 4);
+    assert_eq!(component_ids.len(), 5);
     assert!(component_ids.contains("@mesh/audio-popover"));
+    assert!(component_ids.contains("@mesh/bubble-options"));
     assert!(component_ids.contains("@mesh/quick-settings"));
     assert!(component_ids.contains("@mesh/theme-selector"));
     assert!(graph.module("@mesh/language-popover").unwrap().enabled);

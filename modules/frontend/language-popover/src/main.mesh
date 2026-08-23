@@ -31,7 +31,7 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
 
 <script lang="luau">
 local t = import("mesh.i18n", "t")
-local BubbleOptions = require("../../shared/components/bubble-options.mesh")
+local BubbleOptions = require("@mesh/bubble-options")
 
 -- The ring's contents, in order. Flags are regional-indicator pairs, so they
 -- need a colour emoji font (Noto Color Emoji ships one); without it they fall

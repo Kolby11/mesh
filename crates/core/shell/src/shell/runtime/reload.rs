@@ -1,3 +1,4 @@
+use super::super::types::watched_source_mtime;
 use super::super::*;
 
 const FRONTEND_RELOAD_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
@@ -24,12 +25,10 @@ impl Shell {
                     continue;
                 }
 
-                let changed_path_index =
-                    runtime.source_paths.iter().position(|(path, last_mtime)| {
-                        std::fs::metadata(path)
-                            .and_then(|metadata| metadata.modified())
-                            .is_ok_and(|modified_at| *last_mtime != Some(modified_at))
-                    });
+                let changed_path_index = runtime
+                    .source_paths
+                    .iter()
+                    .position(|(path, last_mtime)| watched_source_mtime(path) != *last_mtime);
                 let Some(trigger_index) = changed_path_index else {
                     continue;
                 };
@@ -47,9 +46,7 @@ impl Shell {
                     .watched_source_paths()
                     .into_iter()
                     .map(|path| {
-                        let mtime = std::fs::metadata(&path)
-                            .ok()
-                            .and_then(|m| m.modified().ok());
+                        let mtime = watched_source_mtime(&path);
                         (path, mtime)
                     })
                     .collect();

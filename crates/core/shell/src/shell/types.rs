@@ -8,9 +8,16 @@ use mesh_core_presentation::{LayerSurfaceSizePolicy, PopupConfig, SurfaceConfig}
 use mesh_core_render::{DamageRect, PixelBuffer};
 use mesh_core_service::{InterfaceContract, InterfaceTypeDef, TypeExpr};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
+
+pub(super) fn watched_source_mtime(path: &Path) -> Option<SystemTime> {
+    std::fs::symlink_metadata(path)
+        .ok()
+        .filter(|metadata| !metadata.file_type().is_symlink())
+        .and_then(|metadata| metadata.modified().ok())
+}
 
 /// Identifies which surface owned by a [`ComponentRuntime`] a piece of work
 /// refers to: the component's primary (parent) surface, or one of its
@@ -219,9 +226,7 @@ impl ComponentRuntime {
             .watched_source_paths()
             .into_iter()
             .map(|path| {
-                let mtime = std::fs::metadata(&path)
-                    .ok()
-                    .and_then(|metadata| metadata.modified().ok());
+                let mtime = watched_source_mtime(&path);
                 (path, mtime)
             })
             .collect();
