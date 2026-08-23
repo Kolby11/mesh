@@ -15,204 +15,69 @@ pub fn from_document(doc: &Document) -> Vec<Diagnostic> {
 }
 
 fn diagnostics_from_error(err: &ParseError, source: &str) -> Vec<Diagnostic> {
-    match err {
-        ParseError::UnclosedBlock { tag, line } => vec![make_diag(
-            source,
-            "template",
-            *line,
-            0,
-            format!("Unclosed block <{tag}>"),
-            DiagnosticSeverity::ERROR,
-        )],
-
-        ParseError::UnexpectedClose { tag, line } => vec![make_diag(
-            source,
-            "template",
-            *line,
-            0,
+    let (message, severity) = match err {
+        ParseError::UnclosedBlock { tag, .. } => {
+            (format!("Unclosed block <{tag}>"), DiagnosticSeverity::ERROR)
+        }
+        ParseError::UnexpectedClose { tag, .. } => (
             format!("Unexpected closing tag </{tag}>"),
             DiagnosticSeverity::ERROR,
-        )],
-
-        ParseError::MissingRequiredBlock { name } => vec![top_level_diag(
+        ),
+        ParseError::MissingRequiredBlock { name, .. } => (
             format!("Missing required block <{name}>"),
             DiagnosticSeverity::ERROR,
-        )],
-
-        ParseError::DuplicateBlock { name, line } => vec![source_line_diag(
-            *line,
+        ),
+        ParseError::DuplicateBlock { name, .. } => (
             format!("Duplicate block <{name}>"),
             DiagnosticSeverity::ERROR,
-        )],
-
-        ParseError::InvalidBlockAttributes {
-            name,
-            line,
-            message,
-        } => vec![source_line_diag(
-            *line,
+        ),
+        ParseError::InvalidBlockAttributes { name, message, .. } => (
             format!("Block <{name}> attributes: {message}"),
             DiagnosticSeverity::ERROR,
-        )],
-
-        ParseError::UnsupportedScriptLanguage { language, line } => vec![source_line_diag(
-            *line,
+        ),
+        ParseError::UnsupportedScriptLanguage { language, .. } => (
             format!("Unsupported script language `{language}`; expected `luau`"),
             DiagnosticSeverity::ERROR,
-        )],
-
-        ParseError::UnexpectedTopLevelContent { line, message }
-        | ParseError::MalformedTopLevelBlock { line, message } => vec![source_line_diag(
-            *line,
-            message.clone(),
-            DiagnosticSeverity::ERROR,
-        )],
-
-        ParseError::InvalidTemplate { message } => vec![make_diag(
-            source,
-            "template",
-            0,
-            0,
+        ),
+        ParseError::UnexpectedTopLevelContent { message, .. }
+        | ParseError::MalformedTopLevelBlock { message, .. } => {
+            (message.clone(), DiagnosticSeverity::ERROR)
+        }
+        ParseError::InvalidTemplate { message, .. } => (
             format!("Template error: {message}"),
             DiagnosticSeverity::ERROR,
-        )],
-
-        ParseError::InvalidStyle { message, line } => vec![make_diag(
-            source,
-            "style",
-            *line,
-            0,
-            format!("Style error: {message}"),
-            DiagnosticSeverity::ERROR,
-        )],
-
-        ParseError::InvalidProps { message } => vec![make_diag(
-            source,
-            "props",
-            0,
-            0,
-            format!("Props error: {message}"),
-            DiagnosticSeverity::ERROR,
-        )],
-
-        ParseError::InvalidSemantics {
-            message,
-            line,
-            column: _,
-        } => vec![source_line_diag(
-            *line,
+        ),
+        ParseError::InvalidStyle { message, .. } => {
+            (format!("Style error: {message}"), DiagnosticSeverity::ERROR)
+        }
+        ParseError::InvalidProps { message, .. } => {
+            (format!("Props error: {message}"), DiagnosticSeverity::ERROR)
+        }
+        ParseError::InvalidSemantics { message, .. } => (
             format!("Component semantic error: {message}"),
             DiagnosticSeverity::ERROR,
-        )],
-
-        ParseError::InvalidI18n { message, line } => vec![Diagnostic {
-            range: Range {
-                start: Position {
-                    line: line.saturating_sub(1) as u32,
-                    character: 0,
-                },
-                end: Position {
-                    line: line.saturating_sub(1) as u32,
-                    character: u32::MAX,
-                },
-            },
-            severity: Some(DiagnosticSeverity::ERROR),
-            message: format!("i18n error: {message}"),
-            source: Some("mesh-tools-lsp".to_string()),
-            ..Default::default()
-        }],
-
-        ParseError::InvalidImport { line, message } => vec![make_diag(
-            source,
-            "script",
-            *line,
-            0,
+        ),
+        ParseError::InvalidI18n { message, .. } => {
+            (format!("i18n error: {message}"), DiagnosticSeverity::ERROR)
+        }
+        ParseError::InvalidImport { message, .. } => (
             format!("Import error: {message}"),
             DiagnosticSeverity::ERROR,
-        )],
-
-        ParseError::UnknownBlock { name, line } => vec![make_diag(
-            source,
-            "template",
-            *line,
-            0,
+        ),
+        ParseError::UnknownBlock { name, .. } => (
             format!("Unknown block <{name}>"),
             DiagnosticSeverity::WARNING,
-        )],
-    }
-}
-
-fn top_level_diag(message: String, severity: DiagnosticSeverity) -> Diagnostic {
-    source_line_diag(1, message, severity)
-}
-
-fn source_line_diag(line: usize, message: String, severity: DiagnosticSeverity) -> Diagnostic {
-    let line = line.saturating_sub(1) as u32;
-    Diagnostic {
-        range: Range {
-            start: Position { line, character: 0 },
-            end: Position {
-                line,
-                character: u32::MAX,
-            },
-        },
-        severity: Some(severity),
-        message,
-        source: Some("mesh-tools-lsp".to_string()),
-        ..Default::default()
-    }
-}
-
-/// Build a diagnostic anchored to the start of a named block, offset by `line_in_block`
-/// (0 = report at the opening tag line of the block; N = N lines into the block content).
-fn make_diag(
-    source: &str,
-    block_name: &str,
-    line_in_block: usize,
-    _col: usize,
-    message: String,
-    severity: DiagnosticSeverity,
-) -> Diagnostic {
-    let range = diag_range(source, block_name, line_in_block);
-    Diagnostic {
-        range,
-        severity: Some(severity),
-        message,
-        source: Some("mesh-tools-lsp".to_string()),
-        ..Default::default()
-    }
-}
-
-fn diag_range(source: &str, block_name: &str, line_in_block: usize) -> Range {
-    // Find the start byte of the block
-    let block_start_byte = block_content_range(source, block_name)
-        .map(|(s, _)| s)
-        .unwrap_or(0);
-
-    // Count newlines in source up to block_start_byte to get the absolute line number
-    let block_start_line = source[..block_start_byte]
-        .chars()
-        .filter(|&c| c == '\n')
-        .count() as u32;
-
-    // line_in_block: 0 → block opening line, 1 → first content line, etc.
-    // ParseError lines are 1-based when they refer to source lines, 0 when unknown.
-    let abs_line = if line_in_block == 0 {
-        block_start_line
-    } else {
-        block_start_line + (line_in_block as u32).saturating_sub(1)
+        ),
     };
 
-    Range {
-        start: Position {
-            line: abs_line,
-            character: 0,
-        },
-        end: Position {
-            line: abs_line,
-            character: u32::MAX,
-        },
-    }
+    let span = err.span();
+    vec![Diagnostic {
+        range: byte_range_to_lsp_range(source, span.start, span.end),
+        severity: Some(severity),
+        message,
+        source: Some("mesh-tools-lsp".to_string()),
+        ..Default::default()
+    }]
 }
 
 fn diagnostics_from_script_refs(doc: &Document) -> Vec<Diagnostic> {
@@ -463,7 +328,8 @@ fn byte_range_to_lsp_range(source: &str, start: usize, end: usize) -> Range {
 
 fn byte_offset_to_position(source: &str, target: usize) -> Position {
     let mut line = 0u32;
-    let mut line_start = 0usize;
+    let mut character = 0u32;
+    let target = target.min(source.len());
 
     for (index, ch) in source.char_indices() {
         if index >= target {
@@ -471,14 +337,13 @@ fn byte_offset_to_position(source: &str, target: usize) -> Position {
         }
         if ch == '\n' {
             line += 1;
-            line_start = index + 1;
+            character = 0;
+        } else {
+            character += ch.len_utf16() as u32;
         }
     }
 
-    Position {
-        line,
-        character: target.saturating_sub(line_start) as u32,
-    }
+    Position { line, character }
 }
 
 #[cfg(test)]
@@ -562,5 +427,14 @@ function onTap() end
             .filter(|diag| diag.message.contains("Quoted expression attribute"))
             .count();
         assert_eq!(messages, 2);
+    }
+
+    #[test]
+    fn source_spans_convert_utf8_bytes_to_utf16_ranges() {
+        let source = "é😀x\n";
+        let range = byte_range_to_lsp_range(source, 6, 7);
+
+        assert_eq!(range.start, Position::new(0, 3));
+        assert_eq!(range.end, Position::new(0, 4));
     }
 }

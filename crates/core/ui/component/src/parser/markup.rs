@@ -54,6 +54,7 @@ fn preprocess_template(source: &str, braces: &BraceLex) -> Result<String, ParseE
                 {
                     return Err(ParseError::InvalidTemplate {
                         message: "attribute interpolation must follow `=`".into(),
+                        span: token.span,
                     });
                 }
                 let marker = BraceLex::marker(id);
@@ -72,6 +73,7 @@ fn preprocess_template(source: &str, braces: &BraceLex) -> Result<String, ParseE
                 if markup.in_tag {
                     return Err(ParseError::InvalidTemplate {
                         message: "control-flow directives cannot appear inside a tag".into(),
+                        span: token.span,
                     });
                 }
                 let close_end = token.matching_end.expect("validated control-flow match");
@@ -89,6 +91,7 @@ fn preprocess_template(source: &str, braces: &BraceLex) -> Result<String, ParseE
                 if markup.in_tag {
                     return Err(ParseError::InvalidTemplate {
                         message: "control-flow directives cannot appear inside a tag".into(),
+                        span: token.span,
                     });
                 }
                 let close_end = token.matching_end.expect("validated control-flow match");
@@ -192,14 +195,16 @@ pub(super) fn parse_markup_at(
     source_base: usize,
     imported_components: &HashMap<String, ComponentImportTarget>,
 ) -> Result<TemplateBlock, ParseError> {
-    let braces = brace::lex(source)?;
-    let preprocessed = preprocess_template(source, &braces)?;
+    let braces = brace::lex(source).map_err(|error| error.with_base(source_base))?;
+    let preprocessed =
+        preprocess_template(source, &braces).map_err(|error| error.with_base(source_base))?;
     let wrapped = format!("<mesh-root>{}</mesh-root>", preprocessed);
     let mut reader = Reader::from_str(&wrapped);
     reader.config_mut().trim_text(false);
 
     let mut stack: Vec<OpenNode> = Vec::new();
     let mut root = Vec::new();
+    let mut source_cursor = 0usize;
 
     loop {
         match reader.read_event() {
@@ -208,11 +213,18 @@ pub(super) fn parse_markup_at(
                 if tag == "mesh-root" {
                     continue;
                 }
-                let attrs = parse_xml_attributes(source, &reader, &event, &braces, source_base)?;
+                let node_span = add_base(
+                    locate_open_span(source, &tag, &event, &braces, &mut source_cursor),
+                    source_base,
+                );
+                let attrs =
+                    parse_xml_attributes(source, &reader, &event, &braces, source_base, node_span)?;
                 stack.push(OpenNode {
                     tag,
                     attributes: attrs,
                     children: Vec::new(),
+                    span: node_span,
+                    synthetic_end: event_static_id(&event, "data-mesh-end"),
                 });
             }
             Ok(Event::Empty(event)) => {
@@ -220,7 +232,12 @@ pub(super) fn parse_markup_at(
                 if tag == "mesh-root" {
                     continue;
                 }
-                let attrs = parse_xml_attributes(source, &reader, &event, &braces, source_base)?;
+                let node_span = add_base(
+                    locate_open_span(source, &tag, &event, &braces, &mut source_cursor),
+                    source_base,
+                );
+                let attrs =
+                    parse_xml_attributes(source, &reader, &event, &braces, source_base, node_span)?;
                 let node = build_template_node(
                     tag,
                     attrs,
@@ -229,6 +246,7 @@ pub(super) fn parse_markup_at(
                     source,
                     &braces,
                     source_base,
+                    node_span,
                 )?;
                 push_template_node(&mut stack, &mut root, node);
             }
@@ -237,14 +255,20 @@ pub(super) fn parse_markup_at(
                     .xml_content()
                     .map_err(|err| ParseError::InvalidTemplate {
                         message: err.to_string(),
+                        span: SourceSpan::new(
+                            source_base + source_cursor,
+                            source_base + source_cursor,
+                        ),
                     })?
                     .into_owned();
                 if !text.trim().is_empty() {
+                    let span = locate_text_span(source, &text, &mut source_cursor, source_base);
                     push_template_node(
                         &mut stack,
                         &mut root,
                         TemplateNode::Text(TextNode {
                             content: text.trim().to_string(),
+                            span,
                         }),
                     );
                 }
@@ -254,14 +278,20 @@ pub(super) fn parse_markup_at(
                     .xml_content()
                     .map_err(|err| ParseError::InvalidTemplate {
                         message: err.to_string(),
+                        span: SourceSpan::new(
+                            source_base + source_cursor,
+                            source_base + source_cursor,
+                        ),
                     })?
                     .into_owned();
                 if !text.trim().is_empty() {
+                    let span = locate_text_span(source, &text, &mut source_cursor, source_base);
                     push_template_node(
                         &mut stack,
                         &mut root,
                         TemplateNode::Text(TextNode {
                             content: text.trim().to_string(),
+                            span,
                         }),
                     );
                 }
@@ -272,13 +302,24 @@ pub(super) fn parse_markup_at(
                     break;
                 }
 
+                let close_span = locate_close_span(
+                    source,
+                    &tag,
+                    &mut source_cursor,
+                    source_base,
+                    &braces,
+                    stack.last().and_then(|node| node.synthetic_end),
+                );
                 let open = stack.pop().ok_or_else(|| ParseError::UnexpectedClose {
                     tag: tag.clone(),
-                    line: 0,
+                    span: close_span,
                 })?;
 
                 if open.tag != tag {
-                    return Err(ParseError::UnexpectedClose { tag, line: 0 });
+                    return Err(ParseError::UnexpectedClose {
+                        tag,
+                        span: close_span,
+                    });
                 }
 
                 let node = build_template_node(
@@ -289,6 +330,7 @@ pub(super) fn parse_markup_at(
                     source,
                     &braces,
                     source_base,
+                    SourceSpan::new(open.span.start, close_span.end),
                 )?;
                 push_template_node(&mut stack, &mut root, node);
             }
@@ -301,6 +343,7 @@ pub(super) fn parse_markup_at(
             Err(err) => {
                 return Err(ParseError::InvalidTemplate {
                     message: err.to_string(),
+                    span: SourceSpan::new(source_base + source_cursor, source_base + source_cursor),
                 });
             }
         }
@@ -309,12 +352,15 @@ pub(super) fn parse_markup_at(
     if let Some(open) = stack.pop() {
         return Err(ParseError::UnclosedBlock {
             tag: open.tag,
-            line: 0,
+            span: open.span,
         });
     }
 
     assign_duplicate_component_ordinals(&mut root);
-    Ok(TemplateBlock { root })
+    Ok(TemplateBlock {
+        root,
+        span: SourceSpan::new(source_base, source_base + source.len()),
+    })
 }
 
 fn visit_component_refs(nodes: &[TemplateNode], visit: &mut impl FnMut(&ComponentRef)) {
@@ -404,18 +450,21 @@ fn parse_xml_attributes(
     event: &quick_xml::events::BytesStart<'_>,
     braces: &BraceLex,
     source_base: usize,
+    element_span: SourceSpan,
 ) -> Result<Vec<Attribute>, ParseError> {
     let mut attrs = Vec::new();
 
     for attr in event.attributes().with_checks(false) {
         let attr = attr.map_err(|err| ParseError::InvalidTemplate {
             message: err.to_string(),
+            span: element_span,
         })?;
         let name = decode_name(attr.key.as_ref());
         let value = attr
             .decode_and_unescape_value(reader.decoder())
             .map_err(|err| ParseError::InvalidTemplate {
                 message: err.to_string(),
+                span: element_span,
             })?
             .into_owned();
 
@@ -432,7 +481,6 @@ fn parse_xml_attributes(
                 ),
             ))
         });
-        let expression_span = expression.as_ref().map(|(_, span)| *span);
         let binding = expression.as_ref().map(|(value, _)| value.as_str());
 
         let (attr_name, attr_value) = if name == "bind:this" {
@@ -468,7 +516,14 @@ fn parse_xml_attributes(
         attrs.push(Attribute {
             name: attr_name,
             value: attr_value,
-            span: expression_span,
+            // Dynamic attributes retain the exact brace expression range for
+            // compatibility with expression tooling. Static attributes have
+            // no token offsets from quick-xml, so anchor them to their owning
+            // element rather than dropping the location entirely.
+            span: expression
+                .as_ref()
+                .map(|(_, span)| *span)
+                .or(Some(element_span)),
         });
     }
 
@@ -557,21 +612,25 @@ fn build_template_node(
     source: &str,
     braces: &BraceLex,
     source_base: usize,
+    node_span: SourceSpan,
 ) -> Result<TemplateNode, ParseError> {
     if tag == "mesh-expr" {
         let id = find_static_attr(&attributes, "data-mesh-id")
             .and_then(|value| value.parse::<usize>().ok())
             .ok_or_else(|| ParseError::InvalidTemplate {
                 message: "synthetic interpolation is missing its token id".into(),
+                span: node_span,
             })?;
         let token = braces
             .token(id)
             .ok_or_else(|| ParseError::InvalidTemplate {
                 message: "synthetic interpolation has an unknown token id".into(),
+                span: node_span,
             })?;
         let BraceKind::Expression { expression } = &token.kind else {
             return Err(ParseError::InvalidTemplate {
                 message: "synthetic interpolation points to a control-flow token".into(),
+                span: node_span,
             });
         };
         return Ok(TemplateNode::Expr(ExprNode {
@@ -590,10 +649,12 @@ fn build_template_node(
             .token(id)
             .ok_or_else(|| ParseError::InvalidTemplate {
                 message: "synthetic for-loop has an unknown token id".into(),
+                span: node_span,
             })?;
         let BraceKind::ForOpen { iterable, key, .. } = &token.kind else {
             return Err(ParseError::InvalidTemplate {
                 message: "synthetic for-loop points to a non-for token".into(),
+                span: node_span,
             });
         };
         let close_end = synthetic_end(&attributes, "data-mesh-end")?;
@@ -614,6 +675,7 @@ fn build_template_node(
             source,
             braces,
             source_base,
+            node_span,
         ));
     }
     // mesh-ifthen / mesh-else remain as Element so build_if_node can extract them.
@@ -623,6 +685,7 @@ fn build_template_node(
             tag_kind: crate::template::SourceTag::Unknown,
             attributes,
             children,
+            span: node_span,
         }));
     }
 
@@ -635,6 +698,7 @@ fn build_template_node(
                 AttributeValue::Static(value) => Ok(Some(value.clone())),
                 _ => Err(ParseError::InvalidTemplate {
                     message: format!("<slot> attribute '{name}' must be static"),
+                    span: node_span,
                 }),
             }
         };
@@ -649,12 +713,14 @@ fn build_template_node(
                     message: format!(
                         "<slot> mode must be 'automatic' or 'customizable', got '{other}'"
                     ),
+                    span: node_span,
                 });
             }
         };
         if customizable && name.as_ref().is_none_or(|name| name.trim().is_empty()) {
             return Err(ParseError::InvalidTemplate {
                 message: "a customizable <slot> requires a non-empty static name".into(),
+                span: node_span,
             });
         }
 
@@ -662,6 +728,7 @@ fn build_template_node(
             extension_point,
             name,
             customizable,
+            span: node_span,
         }));
     }
 
@@ -672,6 +739,7 @@ fn build_template_node(
             tag_kind,
             attributes,
             children,
+            span: node_span,
         }));
     }
 
@@ -681,6 +749,7 @@ fn build_template_node(
                 "built-in UI tag <{tag}> must be lowercase; use <{}> instead",
                 lowercase_primitive_name(&tag)
             ),
+            span: node_span,
         });
     }
 
@@ -695,6 +764,7 @@ fn build_template_node(
                     message: format!(
                         "component <{tag}> refers to interface import `{interface}`; component tags must use mounted component definitions, not service/interface instances"
                     ),
+                    span: node_span,
                 });
             }
             None => {
@@ -702,6 +772,7 @@ fn build_template_node(
                     message: format!(
                         "component <{tag}> is not imported; add `import {tag} from \"...\"` to the script block"
                     ),
+                    span: node_span,
                 });
             }
         }
@@ -712,6 +783,7 @@ fn build_template_node(
             repeated_by_loop: false,
             props: attributes,
             children,
+            span: node_span,
         }));
     }
 
@@ -719,6 +791,7 @@ fn build_template_node(
         message: format!(
             "unknown UI tag <{tag}>; use lowercase MESH primitives like <box>, <row>, <column>, <text>, <button>, <input>, <text-input>, <slider>, <icon>, or a PascalCase custom component tag"
         ),
+        span: node_span,
     })
 }
 
@@ -883,6 +956,7 @@ fn build_if_node(
     _source: &str,
     braces: &BraceLex,
     source_base: usize,
+    node_span: SourceSpan,
 ) -> TemplateNode {
     let outer_id = synthetic_token_id(&attributes, "data-mesh-id").unwrap_or_default();
     let outer = braces.token(outer_id);
@@ -928,6 +1002,7 @@ fn build_if_node(
             tag_kind: crate::template::SourceTag::Box,
             attributes: vec![],
             children: else_children,
+            span: node_span,
         });
     }
 
@@ -952,6 +1027,11 @@ fn synthetic_token_id(attrs: &[Attribute], name: &str) -> Result<usize, ParseErr
         .and_then(|value| value.parse::<usize>().ok())
         .ok_or_else(|| ParseError::InvalidTemplate {
             message: format!("synthetic node is missing `{name}`"),
+            span: attrs
+                .iter()
+                .find(|attribute| attribute.name == name)
+                .map(|attribute| attribute.span.unwrap_or_default())
+                .unwrap_or_default(),
         })
 }
 
@@ -981,6 +1061,103 @@ fn push_template_node(stack: &mut [OpenNode], root: &mut Vec<TemplateNode>, node
     }
 }
 
+fn locate_open_span(
+    source: &str,
+    tag: &str,
+    event: &quick_xml::events::BytesStart<'_>,
+    braces: &BraceLex,
+    cursor: &mut usize,
+) -> SourceSpan {
+    if let Some(id) = event_static_id(event, "data-mesh-id")
+        && let Some(token) = braces.token(id)
+    {
+        *cursor = token.span.end;
+        let end = token.matching_end.unwrap_or(token.span.end);
+        return token_span(token.span.start, end);
+    }
+    if let Some(id) = event_static_id(event, "data-mesh-condition-id")
+        && let Some(token) = braces.token(id)
+    {
+        *cursor = token.span.end;
+        return token_span(token.span.start, token.span.end);
+    }
+    let needle = format!("<{tag}");
+    if let Some(relative) = source[*cursor..].find(&needle) {
+        let start = *cursor + relative;
+        let end = super::find_tag_end(source, start + 1)
+            .map(|end| end + 1)
+            .unwrap_or(start + needle.len());
+        *cursor = end;
+        return token_span(start, end);
+    }
+    token_span(*cursor, *cursor)
+}
+
+fn locate_close_span(
+    source: &str,
+    tag: &str,
+    cursor: &mut usize,
+    source_base: usize,
+    braces: &BraceLex,
+    synthetic_end: Option<usize>,
+) -> SourceSpan {
+    if let Some(end) = synthetic_end {
+        let is_expected_close = |token: &&brace::BraceToken| {
+            matches!(
+                (&token.kind, tag),
+                (BraceKind::IfClose, "mesh-if") | (BraceKind::ForClose, "mesh-for")
+            ) && token.span.end == end
+        };
+        if let Some(token) = braces.tokens.iter().find(is_expected_close) {
+            *cursor = token.span.end;
+            return SourceSpan::new(source_base + token.span.start, source_base + token.span.end);
+        }
+    }
+    let needle = format!("</{tag}>");
+    if let Some(relative) = source[*cursor..].find(&needle) {
+        let start = *cursor + relative;
+        let end = start + needle.len();
+        *cursor = end;
+        return SourceSpan::new(source_base + start, source_base + end);
+    }
+    SourceSpan::new(source_base + *cursor, source_base + *cursor)
+}
+
+fn locate_text_span(
+    source: &str,
+    text: &str,
+    cursor: &mut usize,
+    source_base: usize,
+) -> SourceSpan {
+    if let Some(relative) = source[*cursor..].find(text) {
+        let start = *cursor + relative;
+        let end = start + text.len();
+        *cursor = end;
+        return SourceSpan::new(source_base + start, source_base + end);
+    }
+    let start = *cursor;
+    SourceSpan::new(
+        source_base + start,
+        source_base + start + text.len().min(source.len() - start),
+    )
+}
+
+fn event_static_id(event: &quick_xml::events::BytesStart<'_>, name: &str) -> Option<usize> {
+    event
+        .attributes()
+        .with_checks(false)
+        .filter_map(Result::ok)
+        .find_map(|attr| {
+            (decode_name(attr.key.as_ref()) == name)
+                .then(|| String::from_utf8_lossy(attr.value.as_ref()).parse().ok())
+                .flatten()
+        })
+}
+
+fn token_span(start: usize, end: usize) -> SourceSpan {
+    SourceSpan::new(start, end)
+}
+
 fn decode_name(name: &[u8]) -> String {
     String::from_utf8_lossy(name).into_owned()
 }
@@ -989,6 +1166,8 @@ struct OpenNode {
     tag: String,
     attributes: Vec<Attribute>,
     children: Vec<TemplateNode>,
+    span: SourceSpan,
+    synthetic_end: Option<usize>,
 }
 
 #[cfg(test)]

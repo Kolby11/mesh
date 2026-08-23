@@ -1,8 +1,8 @@
 use crate::CompiledFrontendModule;
 
 use mesh_core_component::{
-    ComponentFile, ComponentImportTarget, PropDef, PropType, PropValue, parse_component,
-    referenced_identifiers,
+    ComponentFile, ComponentImportTarget, PropDef, PropType, PropValue, SourceSpan,
+    parse_component, referenced_identifiers,
     template::{Attribute, AttributeValue, TemplateNode},
 };
 use mesh_core_module::{Manifest, ModuleType};
@@ -25,9 +25,10 @@ pub enum CompileFrontendError {
         source: std::io::Error,
     },
 
-    #[error("failed to parse component source {path}: {source}")]
+    #[error("failed to parse component source {path} at bytes {span:?}: {source}")]
     ParseSource {
         path: PathBuf,
+        span: SourceSpan,
         #[source]
         source: mesh_core_component::ParseError,
     },
@@ -48,8 +49,31 @@ pub enum CompileFrontendError {
     #[error("component import cycle detected: {cycle}")]
     ImportCycle { cycle: ImportCyclePath },
 
-    #[error("standalone component validation failed for {path}: {message}")]
-    StandaloneComponentViolation { path: PathBuf, message: String },
+    #[error("standalone component validation failed for {path} at bytes {span:?}: {message}")]
+    StandaloneComponentViolation {
+        path: PathBuf,
+        message: String,
+        span: SourceSpan,
+    },
+}
+
+impl CompileFrontendError {
+    /// Return the source range associated with a component-level failure.
+    /// Filesystem, module-graph, and import-cycle failures intentionally have
+    /// no component source range.
+    pub fn source_span(&self) -> Option<SourceSpan> {
+        match self {
+            Self::ParseSource { span, .. } | Self::StandaloneComponentViolation { span, .. } => {
+                Some(*span)
+            }
+            Self::NotFrontendModule { .. }
+            | Self::MissingFrontendEntrypoint { .. }
+            | Self::ReadSource { .. }
+            | Self::InvalidSourcePath { .. }
+            | Self::ConflictingImportAlias { .. }
+            | Self::ImportCycle { .. } => None,
+        }
+    }
 }
 
 pub fn is_frontend_module(manifest: &Manifest) -> bool {
@@ -199,12 +223,14 @@ fn validate_customizable_slots(
             return Err(CompileFrontendError::StandaloneComponentViolation {
                 path: source_path.to_path_buf(),
                 message: format!("duplicate customizable slot name '{name}'"),
+                span: slot.span,
             });
         }
         let Some(point) = slot.extension_point.as_deref() else {
             return Err(CompileFrontendError::StandaloneComponentViolation {
                 path: source_path.to_path_buf(),
                 message: format!("customizable slot '{name}' requires an extension-point"),
+                span: slot.span,
             });
         };
         let Some(hosted) = manifest.hosted_extension_points.get(point) else {
@@ -213,6 +239,7 @@ fn validate_customizable_slots(
                 message: format!(
                     "customizable slot '{name}' hosts undeclared extension point '{point}'"
                 ),
+                span: slot.span,
             });
         };
         if !hosted.slots.contains_key(name) {
@@ -221,6 +248,7 @@ fn validate_customizable_slots(
                 message: format!(
                     "customizable slot '{name}' has no mesh.hosts.{point}.slots.{name} declaration"
                 ),
+                span: slot.span,
             });
         }
     }
@@ -235,6 +263,7 @@ fn parse_component_file(path: &Path) -> Result<ComponentFile, CompileFrontendErr
         })?;
     parse_component(&source).map_err(|source| CompileFrontendError::ParseSource {
         path: path.to_path_buf(),
+        span: source.span(),
         source,
     })
 }
@@ -511,12 +540,24 @@ fn validate_template_nodes(
             TemplateNode::Text(_) | TemplateNode::Slot(_) => {}
             TemplateNode::Expr(expr) => {
                 if strict_scope {
-                    validate_expression(&expr.expression, path, allowed_symbols, loop_locals)?;
+                    validate_expression(
+                        &expr.expression,
+                        path,
+                        allowed_symbols,
+                        loop_locals,
+                        expr.span,
+                    )?;
                 }
             }
             TemplateNode::If(if_node) => {
                 if strict_scope {
-                    validate_expression(&if_node.condition, path, allowed_symbols, loop_locals)?;
+                    validate_expression(
+                        &if_node.condition,
+                        path,
+                        allowed_symbols,
+                        loop_locals,
+                        if_node.condition_span,
+                    )?;
                 }
                 validate_template_nodes(
                     &if_node.then_children,
@@ -543,7 +584,13 @@ fn validate_template_nodes(
             }
             TemplateNode::For(for_node) => {
                 if strict_scope {
-                    validate_expression(&for_node.iterable, path, allowed_symbols, loop_locals)?;
+                    validate_expression(
+                        &for_node.iterable,
+                        path,
+                        allowed_symbols,
+                        loop_locals,
+                        for_node.iterable_span,
+                    )?;
                 }
                 let mut child_loop_locals = loop_locals.clone();
                 child_loop_locals.insert(for_node.item_name.clone());
@@ -640,6 +687,7 @@ fn validate_child_component_props(
                 parent_path,
                 &reference.name,
                 &attribute.name,
+                attribute.span.unwrap_or(reference.span),
                 format!(
                     "child component `{}` has no public prop or field named `{}`",
                     reference.name, attribute.name
@@ -652,6 +700,7 @@ fn validate_child_component_props(
                 parent_path,
                 &reference.name,
                 &attribute.name,
+                attribute.span.unwrap_or(reference.span),
                 format!(
                     "child component `{}` prop `{}` is private (`expose: false`)",
                     reference.name, attribute.name
@@ -661,13 +710,20 @@ fn validate_child_component_props(
 
         if let AttributeValue::Static(value) = &attribute.value {
             let parsed = static_prop_value(definition, value).map_err(|message| {
-                component_prop_error(parent_path, &reference.name, &attribute.name, message)
+                component_prop_error(
+                    parent_path,
+                    &reference.name,
+                    &attribute.name,
+                    attribute.span.unwrap_or(reference.span),
+                    message,
+                )
             })?;
             mesh_core_component::validate_prop_value(definition, &parsed).map_err(|error| {
                 component_prop_error(
                     parent_path,
                     &reference.name,
                     &attribute.name,
+                    attribute.span.unwrap_or(reference.span),
                     format!("invalid value for child prop `{}`: {error}", attribute.name),
                 )
             })?;
@@ -719,11 +775,13 @@ fn component_prop_error(
     path: &Path,
     component: &str,
     prop: &str,
+    span: SourceSpan,
     message: String,
 ) -> CompileFrontendError {
     CompileFrontendError::StandaloneComponentViolation {
         path: path.to_path_buf(),
         message: format!("component `{component}` attribute `{prop}`: {message}"),
+        span,
     }
 }
 
@@ -736,17 +794,41 @@ fn validate_attributes(
     for attr in attrs {
         match &attr.value {
             AttributeValue::Binding(expr) | AttributeValue::TwoWayBinding(expr) => {
-                validate_expression(expr, path, allowed_symbols, loop_locals)?;
+                validate_expression(
+                    expr,
+                    path,
+                    allowed_symbols,
+                    loop_locals,
+                    attr.span.unwrap_or_default(),
+                )?;
             }
             // bind:this targets a local variable by design — skip public-symbol validation.
             AttributeValue::InstanceBinding(_) => {}
             AttributeValue::EventHandler(handler) => {
-                validate_identifier(handler, path, allowed_symbols, loop_locals)?;
+                validate_identifier(
+                    handler,
+                    path,
+                    allowed_symbols,
+                    loop_locals,
+                    attr.span.unwrap_or_default(),
+                )?;
             }
             AttributeValue::EventHandlerCall { handler, args } => {
-                validate_identifier(handler, path, allowed_symbols, loop_locals)?;
+                validate_identifier(
+                    handler,
+                    path,
+                    allowed_symbols,
+                    loop_locals,
+                    attr.span.unwrap_or_default(),
+                )?;
                 for arg in args {
-                    validate_expression(arg, path, allowed_symbols, loop_locals)?;
+                    validate_expression(
+                        arg,
+                        path,
+                        allowed_symbols,
+                        loop_locals,
+                        attr.span.unwrap_or_default(),
+                    )?;
                 }
             }
             AttributeValue::Static(_) => {}
@@ -760,6 +842,7 @@ fn validate_expression(
     path: &Path,
     allowed_symbols: &HashSet<String>,
     loop_locals: &HashSet<String>,
+    span: SourceSpan,
 ) -> Result<(), CompileFrontendError> {
     for identifier in referenced_identifiers(expr) {
         if allowed_symbols.contains(&identifier) || loop_locals.contains(&identifier) {
@@ -768,6 +851,7 @@ fn validate_expression(
         return Err(CompileFrontendError::StandaloneComponentViolation {
             path: path.to_path_buf(),
             message: format!("unknown standalone component symbol `{identifier}` in `{expr}`"),
+            span,
         });
     }
     Ok(())
@@ -778,6 +862,7 @@ fn validate_identifier(
     path: &Path,
     allowed_symbols: &HashSet<String>,
     loop_locals: &HashSet<String>,
+    span: SourceSpan,
 ) -> Result<(), CompileFrontendError> {
     if allowed_symbols.contains(identifier) || loop_locals.contains(identifier) {
         return Ok(());
@@ -786,6 +871,7 @@ fn validate_identifier(
     Err(CompileFrontendError::StandaloneComponentViolation {
         path: path.to_path_buf(),
         message: format!("unknown standalone component symbol `{identifier}`"),
+        span,
     })
 }
 
@@ -870,6 +956,7 @@ theme_icon = "weather-clear"
             err,
             CompileFrontendError::StandaloneComponentViolation { .. }
         ));
+        assert!(err.source_span().is_some_and(|span| span.start < span.end));
         assert!(err.to_string().contains("theme_icon"));
     }
 

@@ -16,8 +16,12 @@ The post-parse semantic pass links `<props>` declarations to exact and embedded
 component inputs are checked for public visibility and static types. Undefined,
 empty, or incompatible style props and unknown, private, or invalid child props
 fail before lowering; LSP retains a tooling parse path for incomplete refs.
-Focused component and frontend tests plus workspace checking pass. The broad elements and LSP suites retain
-their existing theme-color and locale-completion failures respectively.
+Component AST blocks and template nodes now retain absolute byte spans, parser
+errors expose those spans, compiler validation errors preserve the offending
+node range, and CLI/LSP diagnostics render the same source ownership (including
+UTF-16 LSP positions). Focused component, frontend, and LSP diagnostics tests
+plus workspace checking pass. The broad LSP suite retains its existing
+locale-completion expectation failure.
 
 The deterministic presentation backend now models compositor preferred-scale
 updates for live surfaces: valid 0.5x..4x changes are observable through the
@@ -216,6 +220,5 @@ live compositor/lifecycle matrix remain separate follow-up work.
 
 ## Next
 
-The next component-language item carries reliable source spans through
-component AST nodes, compiler errors, CLI diagnostics, and LSP output; the
-remaining presentation/resource follow-ups stay separate from this work.
+The next open backlog item is in the UI element core audit; the remaining
+presentation/resource follow-ups stay separate from this work.

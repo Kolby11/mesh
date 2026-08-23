@@ -606,5 +606,6 @@ fn error_at(source: &str, offset: usize, message: impl Into<String>) -> ParseErr
             message.into(),
             offset
         ),
+        span: SourceSpan::new(offset, offset.saturating_add(1).min(source.len())),
     }
 }

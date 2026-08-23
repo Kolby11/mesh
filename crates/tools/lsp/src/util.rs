@@ -97,17 +97,29 @@ pub enum ScriptContext {
     General,
 }
 
-/// Convert an LSP Position (0-based line + UTF-16 char) to a byte offset.
-/// Treats character as a byte offset within the line for ASCII-heavy content;
-/// full UTF-16 conversion is not required for .mesh files.
+/// Convert an LSP Position (0-based line + UTF-16 character units) to a byte
+/// offset in the UTF-8 source.
 pub fn position_to_offset(source: &str, pos: Position) -> usize {
     let mut current_line = 0u32;
     let mut line_byte_start = 0;
 
     for (i, ch) in source.char_indices() {
         if current_line == pos.line {
-            // Approximate: character == byte offset within line
-            return line_byte_start + pos.character as usize;
+            let mut utf16 = 0u32;
+            for (offset, line_char) in source[line_byte_start..].char_indices() {
+                if line_char == '\n' {
+                    return line_byte_start + offset;
+                }
+                let width = line_char.len_utf16() as u32;
+                if utf16 + width > pos.character {
+                    return line_byte_start + offset;
+                }
+                utf16 += width;
+                if utf16 == pos.character {
+                    return line_byte_start + offset + line_char.len_utf8();
+                }
+            }
+            return source.len();
         }
         if ch == '\n' {
             current_line += 1;
@@ -116,7 +128,7 @@ pub fn position_to_offset(source: &str, pos: Position) -> usize {
     }
 
     if current_line == pos.line {
-        return (line_byte_start + pos.character as usize).min(source.len());
+        return source.len();
     }
 
     source.len()

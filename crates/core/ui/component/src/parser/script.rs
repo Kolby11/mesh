@@ -25,10 +25,10 @@ pub(super) fn parse_script(
     let ast = parse_ast(&masked_source);
     let mut visitor = ScriptVisitor::default();
     visitor.visit_ast(&ast);
-    if let Some(line) = visitor.invalid_require_line {
+    if let Some(span) = visitor.invalid_require_span {
         return Err(ParseError::InvalidImport {
-            line,
             message: "require source must be a quoted string".into(),
+            span,
         });
     }
     let metadata = visitor.metadata;
@@ -42,8 +42,8 @@ pub(super) fn parse_script(
     for candidate in require_imports {
         if !aliases.insert(candidate.import.alias.clone()) {
             return Err(ParseError::InvalidImport {
-                line: candidate.line,
                 message: format!("duplicate import alias `{}`", candidate.import.alias),
+                span: candidate.import.span,
             });
         }
         imports.push(candidate.import);
@@ -55,6 +55,7 @@ pub(super) fn parse_script(
             lang: ScriptLang::Luau,
             source: masked_source,
             metadata,
+            span: SourceSpan::new(0, source.len()),
         },
     ))
 }
@@ -101,20 +102,26 @@ fn scan_explicit_imports(source: &str) -> Result<(Vec<ComponentImport>, String),
         let source_name = string_literal(source_token).unwrap_or_default();
         let target =
             classify_import_target(&source_name).ok_or_else(|| ParseError::InvalidImport {
-                line: import.start_position().line(),
                 message: format!("unsupported import source `{source_name}`"),
+                span: token_span(import),
             })?;
 
         if !aliases.insert(alias_name.clone()) {
             return Err(ParseError::InvalidImport {
-                line: import.start_position().line(),
                 message: format!("duplicate import alias `{alias_name}`"),
+                span: token_span(alias),
             });
         }
 
         imports.push(ComponentImport {
             alias: alias_name,
             target,
+            span: SourceSpan::new(
+                import.start_position().bytes(),
+                source_token.end_position().bytes(),
+            ),
+            alias_span: token_span(alias),
+            target_span: token_span(source_token),
         });
         masked_ranges.push((
             import.start_position().bytes(),
@@ -172,14 +179,13 @@ fn on_parser_stack<T: Send>(work: impl FnOnce() -> T + Send) -> T {
 #[derive(Debug)]
 struct RequireImport {
     import: ComponentImport,
-    line: usize,
 }
 
 #[derive(Default)]
 struct ScriptVisitor {
     metadata: ScriptMetadata,
     require_imports: Vec<RequireImport>,
-    invalid_require_line: Option<usize>,
+    invalid_require_span: Option<SourceSpan>,
 }
 
 impl Visitor for ScriptVisitor {
@@ -204,6 +210,9 @@ impl Visitor for ScriptVisitor {
         let Some(name_text) = identifier(name) else {
             return;
         };
+        let statement_span = full_moon::node::Node::range(assignment)
+            .map(position_span)
+            .unwrap_or_else(|| token_span(name));
         let Some(expression) = assignment.expressions().iter().next() else {
             return;
         };
@@ -222,7 +231,7 @@ impl Visitor for ScriptVisitor {
 
         let Some(source) = string_arguments(arguments).next() else {
             if callee == "require" {
-                self.invalid_require_line = Some(name.start_position().line());
+                self.invalid_require_span = Some(statement_span);
             }
             return;
         };
@@ -231,16 +240,19 @@ impl Visitor for ScriptVisitor {
         if callee == "require" {
             push_unique(&mut self.metadata.required_aliases, name_text.to_string());
             if has_extra_argument {
-                self.invalid_require_line = Some(name.start_position().line());
+                self.invalid_require_span = Some(statement_span);
                 return;
             }
             if let Some(target) = classify_import_target(&source) {
+                let target_span = first_string_span(arguments).unwrap_or(statement_span);
                 self.require_imports.push(RequireImport {
                     import: ComponentImport {
                         alias: name_text.to_string(),
                         target: target.clone(),
+                        span: statement_span,
+                        alias_span: token_span(name),
+                        target_span,
                     },
-                    line: name.start_position().line(),
                 });
                 if let ComponentImportTarget::InterfaceApi { interface, .. } = target {
                     self.metadata
@@ -531,6 +543,30 @@ fn expression_path(expression: &Expression) -> Option<String> {
 fn push_unique(values: &mut Vec<String>, value: String) {
     if !values.iter().any(|existing| existing == &value) {
         values.push(value);
+    }
+}
+
+fn token_span(token: &TokenReference) -> SourceSpan {
+    SourceSpan::new(token.start_position().bytes(), token.end_position().bytes())
+}
+
+fn position_span(
+    range: (
+        full_moon::tokenizer::Position,
+        full_moon::tokenizer::Position,
+    ),
+) -> SourceSpan {
+    SourceSpan::new(range.0.bytes(), range.1.bytes())
+}
+
+fn first_string_span(arguments: &FunctionArgs) -> Option<SourceSpan> {
+    match arguments {
+        FunctionArgs::Parentheses { arguments, .. } => arguments.iter().find_map(|expression| {
+            expression_string_literal(expression)
+                .and_then(|_| full_moon::node::Node::range(expression).map(position_span))
+        }),
+        FunctionArgs::String(token) => Some(token_span(token)),
+        _ => None,
     }
 }
 

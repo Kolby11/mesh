@@ -5,6 +5,8 @@
 pub struct StyleBlock {
     pub rules: Vec<StyleRule>,
     pub keyframes: Vec<KeyframeRule>,
+    /// The style body in the owning `.mesh` source.
+    pub span: crate::SourceSpan,
 }
 
 /// A single style rule: selector + declarations.

@@ -38,6 +38,12 @@ use lightningcss::{
 pub struct ComponentImport {
     pub alias: String,
     pub target: ComponentImportTarget,
+    /// The complete import statement in the owning script block.
+    pub span: SourceSpan,
+    /// The imported local name.
+    pub alias_span: SourceSpan,
+    /// The quoted import target, including its quotes when authored that way.
+    pub target_span: SourceSpan,
 }
 
 /// Supported explicit import targets.
@@ -71,7 +77,7 @@ pub struct ComponentFile {
 }
 
 /// A half-open byte range into the original `.mesh` source.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SourceSpan {
     pub start: usize,
     pub end: usize,
@@ -118,12 +124,15 @@ pub struct ComponentBlock {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PropsBlock {
     pub props: Vec<PropDef>,
+    pub span: SourceSpan,
 }
 
 /// A single declared prop.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PropDef {
     pub name: String,
+    /// The complete `name: { ... }` declaration.
+    pub span: SourceSpan,
     pub ty: PropType,
     pub default: Option<PropValue>,
     pub label: Option<LocalizedLabel>,
@@ -735,6 +744,8 @@ pub struct ScriptBlock {
     pub lang: ScriptLang,
     pub source: String,
     pub metadata: ScriptMetadata,
+    /// The script body in the owning `.mesh` source.
+    pub span: SourceSpan,
 }
 
 /// Metadata collected from a Luau script by the component parser.

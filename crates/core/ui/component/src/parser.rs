@@ -9,7 +9,7 @@ mod semantic;
 mod styles;
 
 use crate::{BlockAttribute, ComponentBlock, ComponentFile, ComponentImportTarget, SourceSpan};
-use props::parse_props;
+use props::parse_props_at;
 use script::parse_script;
 pub use script::referenced_identifiers;
 use std::collections::{HashMap, HashSet};
@@ -17,58 +17,163 @@ use styles::parse_style;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ParseError {
-    #[error("unclosed block <{tag}> opened at line {line}")]
-    UnclosedBlock { tag: String, line: usize },
+    #[error("unclosed block <{tag}> at {span:?}")]
+    UnclosedBlock { tag: String, span: SourceSpan },
 
-    #[error("unexpected closing tag </{tag}> at line {line}")]
-    UnexpectedClose { tag: String, line: usize },
+    #[error("unexpected closing tag </{tag}> at {span:?}")]
+    UnexpectedClose { tag: String, span: SourceSpan },
 
     #[error("missing required block <{name}>")]
-    MissingRequiredBlock { name: String },
+    MissingRequiredBlock { name: String, span: SourceSpan },
 
-    #[error("duplicate block <{name}> at line {line}")]
-    DuplicateBlock { name: String, line: usize },
+    #[error("duplicate block <{name}> at {span:?}")]
+    DuplicateBlock { name: String, span: SourceSpan },
 
-    #[error("invalid attributes on <{name}> at line {line}: {message}")]
+    #[error("invalid attributes on <{name}> at {span:?}: {message}")]
     InvalidBlockAttributes {
         name: String,
-        line: usize,
         message: String,
+        span: SourceSpan,
     },
 
-    #[error("unsupported script language `{language}` at line {line}; expected `luau`")]
-    UnsupportedScriptLanguage { language: String, line: usize },
+    #[error("unsupported script language `{language}` at {span:?}; expected `luau`")]
+    UnsupportedScriptLanguage { language: String, span: SourceSpan },
 
-    #[error("unexpected top-level content at line {line}: {message}")]
-    UnexpectedTopLevelContent { line: usize, message: String },
+    #[error("unexpected top-level content at {span:?}: {message}")]
+    UnexpectedTopLevelContent { message: String, span: SourceSpan },
 
-    #[error("malformed top-level block at line {line}: {message}")]
-    MalformedTopLevelBlock { line: usize, message: String },
+    #[error("malformed top-level block at {span:?}: {message}")]
+    MalformedTopLevelBlock { message: String, span: SourceSpan },
 
-    #[error("invalid template syntax: {message}")]
-    InvalidTemplate { message: String },
+    #[error("invalid template syntax at {span:?}: {message}")]
+    InvalidTemplate { message: String, span: SourceSpan },
 
-    #[error("invalid style syntax at line {line}: {message}")]
-    InvalidStyle { message: String, line: usize },
+    #[error("invalid style syntax at {span:?}: {message}")]
+    InvalidStyle { message: String, span: SourceSpan },
 
-    #[error("invalid props block: {message}")]
-    InvalidProps { message: String },
+    #[error("invalid props block at {span:?}: {message}")]
+    InvalidProps { message: String, span: SourceSpan },
 
-    #[error("invalid component semantics at line {line}, column {column}: {message}")]
-    InvalidSemantics {
-        message: String,
-        line: usize,
-        column: usize,
-    },
+    #[error("invalid component semantics at {span:?}: {message}")]
+    InvalidSemantics { message: String, span: SourceSpan },
 
-    #[error("invalid i18n block at line {line}: {message}")]
-    InvalidI18n { message: String, line: usize },
+    #[error("invalid i18n block at {span:?}: {message}")]
+    InvalidI18n { message: String, span: SourceSpan },
 
-    #[error("invalid import at line {line}: {message}")]
-    InvalidImport { line: usize, message: String },
+    #[error("invalid import at {span:?}: {message}")]
+    InvalidImport { message: String, span: SourceSpan },
 
-    #[error("unknown block <{name}> at line {line}")]
-    UnknownBlock { name: String, line: usize },
+    #[error("unknown block <{name}> at {span:?}")]
+    UnknownBlock { name: String, span: SourceSpan },
+}
+
+impl ParseError {
+    /// The source range owned by the diagnostic. A missing template has no
+    /// offending token and is intentionally represented by an empty range.
+    pub fn span(&self) -> SourceSpan {
+        match self {
+            Self::MissingRequiredBlock { span, .. } => *span,
+            Self::UnclosedBlock { span, .. }
+            | Self::UnexpectedClose { span, .. }
+            | Self::DuplicateBlock { span, .. }
+            | Self::InvalidBlockAttributes { span, .. }
+            | Self::UnsupportedScriptLanguage { span, .. }
+            | Self::UnexpectedTopLevelContent { span, .. }
+            | Self::MalformedTopLevelBlock { span, .. }
+            | Self::InvalidTemplate { span, .. }
+            | Self::InvalidStyle { span, .. }
+            | Self::InvalidProps { span, .. }
+            | Self::InvalidSemantics { span, .. }
+            | Self::InvalidI18n { span, .. }
+            | Self::InvalidImport { span, .. }
+            | Self::UnknownBlock { span, .. } => *span,
+        }
+    }
+
+    /// Rebase a parser-local span into the owning component source.
+    pub(crate) fn with_base(self, base: usize) -> Self {
+        self.map_span(|span| SourceSpan::new(base + span.start, base + span.end))
+    }
+
+    /// Give internally generated diagnostics a reliable owning-block range
+    /// when the underlying library did not report a token location.
+    pub(crate) fn with_fallback(self, fallback: SourceSpan) -> Self {
+        if self.span().len() != 0 {
+            self
+        } else {
+            self.map_span(|_| fallback)
+        }
+    }
+
+    fn map_span(self, map: impl Fn(SourceSpan) -> SourceSpan) -> Self {
+        match self {
+            Self::UnclosedBlock { tag, span } => Self::UnclosedBlock {
+                tag,
+                span: map(span),
+            },
+            Self::UnexpectedClose { tag, span } => Self::UnexpectedClose {
+                tag,
+                span: map(span),
+            },
+            Self::MissingRequiredBlock { name, span } => Self::MissingRequiredBlock {
+                name,
+                span: map(span),
+            },
+            Self::DuplicateBlock { name, span } => Self::DuplicateBlock {
+                name,
+                span: map(span),
+            },
+            Self::InvalidBlockAttributes {
+                name,
+                message,
+                span,
+            } => Self::InvalidBlockAttributes {
+                name,
+                message,
+                span: map(span),
+            },
+            Self::UnsupportedScriptLanguage { language, span } => Self::UnsupportedScriptLanguage {
+                language,
+                span: map(span),
+            },
+            Self::UnexpectedTopLevelContent { message, span } => Self::UnexpectedTopLevelContent {
+                message,
+                span: map(span),
+            },
+            Self::MalformedTopLevelBlock { message, span } => Self::MalformedTopLevelBlock {
+                message,
+                span: map(span),
+            },
+            Self::InvalidTemplate { message, span } => Self::InvalidTemplate {
+                message,
+                span: map(span),
+            },
+            Self::InvalidStyle { message, span } => Self::InvalidStyle {
+                message,
+                span: map(span),
+            },
+            Self::InvalidProps { message, span } => Self::InvalidProps {
+                message,
+                span: map(span),
+            },
+            Self::InvalidSemantics { message, span } => Self::InvalidSemantics {
+                message,
+                span: map(span),
+            },
+            Self::InvalidI18n { message, span } => Self::InvalidI18n {
+                message,
+                span: map(span),
+            },
+            Self::InvalidImport { message, span } => Self::InvalidImport {
+                message,
+                span: map(span),
+            },
+            Self::UnknownBlock { name, span } => Self::UnknownBlock {
+                name,
+                span: map(span),
+            },
+        }
+    }
 }
 
 pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
@@ -92,7 +197,15 @@ fn parse_component_impl(
 
     let (imports, script) = if let Some(block) = blocks.iter().find(|block| block.name == "script")
     {
-        let (imports, script) = parse_script(&source[block.content.start..block.content.end])?;
+        let (mut imports, mut script) =
+            parse_script(&source[block.content.start..block.content.end])
+                .map_err(|error| error.with_base(block.content.start))?;
+        script.span = SourceSpan::new(block.content.start, block.content.end);
+        for import in &mut imports {
+            import.span = add_base(import.span, block.content.start);
+            import.alias_span = add_base(import.alias_span, block.content.start);
+            import.target_span = add_base(import.target_span, block.content.start);
+        }
         (imports, Some(script))
     } else {
         (Vec::new(), None)
@@ -117,13 +230,23 @@ fn parse_component_impl(
     let style = blocks
         .iter()
         .find(|block| block.name == "style")
-        .map(|block| parse_style(&source[block.content.start..block.content.end]))
+        .map(|block| {
+            parse_style(
+                &source[block.content.start..block.content.end],
+                block.content.start,
+            )
+        })
         .transpose()?;
 
     let props = blocks
         .iter()
         .find(|block| block.name == "props")
-        .map(|block| parse_props(&source[block.content.start..block.content.end]))
+        .map(|block| {
+            parse_props_at(
+                &source[block.content.start..block.content.end],
+                block.content.start,
+            )
+        })
         .transpose()?;
 
     let component = ComponentFile {
@@ -171,8 +294,8 @@ fn parse_top_level_blocks(source: &str) -> Result<Vec<ComponentBlock>, ParseErro
 
         if source.as_bytes()[offset] != b'<' {
             return Err(ParseError::UnexpectedTopLevelContent {
-                line: line_at(source, offset),
                 message: "expected a component block".into(),
+                span: SourceSpan::new(offset, offset + 1),
             });
         }
 
@@ -180,7 +303,10 @@ fn parse_top_level_blocks(source: &str) -> Result<Vec<ComponentBlock>, ParseErro
             let name = scan_tag_name(source, offset + 2).unwrap_or_default();
             return Err(ParseError::UnexpectedClose {
                 tag: name,
-                line: line_at(source, offset),
+                span: SourceSpan::new(
+                    offset,
+                    find_tag_end(source, offset + 2).map_or(offset + 2, |end| end + 1),
+                ),
             });
         }
 
@@ -188,33 +314,35 @@ fn parse_top_level_blocks(source: &str) -> Result<Vec<ComponentBlock>, ParseErro
         if !TOP_LEVEL_BLOCKS.contains(&opening.name.as_str()) {
             return Err(ParseError::UnknownBlock {
                 name: opening.name,
-                line: line_at(source, offset),
+                span: SourceSpan::new(offset, opening.end),
             });
         }
 
         if !seen.insert(opening.name.clone()) {
             return Err(ParseError::DuplicateBlock {
                 name: opening.name,
-                line: line_at(source, offset),
+                span: SourceSpan::new(offset, opening.end),
             });
         }
 
-        validate_block_attributes(source, offset, &opening)?;
+        validate_block_attributes(offset, &opening)?;
 
         let content_start = opening.end;
         let (content_end, close_end) = find_block_close(source, content_start, &opening.name);
         let Some((content_end, close_end)) = content_end.zip(close_end) else {
             return Err(ParseError::UnclosedBlock {
                 tag: opening.name,
-                line: line_at(source, offset),
+                span: SourceSpan::new(offset, opening.end),
             });
         };
 
         if opening.name == "i18n" {
             return Err(ParseError::InvalidI18n {
-                message: "inline catalogs are not supported; declare files in mesh.provides.i18n"
-                    .into(),
-                line: line_at(source, offset),
+                message: format!(
+                    "inline catalogs are not supported; declare files in mesh.provides.i18n (line {})",
+                    line_at(source, offset)
+                ),
+                span: SourceSpan::new(offset, close_end),
             });
         }
 
@@ -232,6 +360,7 @@ fn parse_top_level_blocks(source: &str) -> Result<Vec<ComponentBlock>, ParseErro
     if !seen.contains("template") {
         return Err(ParseError::MissingRequiredBlock {
             name: "template".into(),
+            span: SourceSpan::new(source.len(), source.len()),
         });
     }
 
@@ -247,16 +376,16 @@ struct OpeningTag {
 fn parse_opening_tag(source: &str, start: usize) -> Result<OpeningTag, ParseError> {
     let Some(end) = find_tag_end(source, start + 1) else {
         return Err(ParseError::MalformedTopLevelBlock {
-            line: line_at(source, start),
             message: "opening tag has no closing `>`".into(),
+            span: SourceSpan::new(start, source.len()),
         });
     };
 
     let name_start = start + 1;
     let Some(name_end) = scan_tag_name_end(source, name_start) else {
         return Err(ParseError::MalformedTopLevelBlock {
-            line: line_at(source, start),
             message: "opening tag has no valid name".into(),
+            span: SourceSpan::new(start, end + 1),
         });
     };
     let name = source[name_start..name_end].to_string();
@@ -272,16 +401,16 @@ fn parse_opening_tag(source: &str, start: usize) -> Result<OpeningTag, ParseErro
         if source.as_bytes()[cursor] == b'/' {
             return Err(ParseError::InvalidBlockAttributes {
                 name,
-                line: line_at(source, start),
                 message: "top-level blocks must use an explicit closing tag".into(),
+                span: SourceSpan::new(cursor, end + 1),
             });
         }
 
         let attribute_start = cursor;
         let Some(attribute_end) = scan_attribute_name_end(source, cursor) else {
             return Err(ParseError::MalformedTopLevelBlock {
-                line: line_at(source, start),
                 message: "invalid attribute name".into(),
+                span: SourceSpan::new(cursor, end + 1),
             });
         };
         let attribute_name = source[attribute_start..attribute_end].to_string();
@@ -289,29 +418,29 @@ fn parse_opening_tag(source: &str, start: usize) -> Result<OpeningTag, ParseErro
         if source.as_bytes().get(cursor) != Some(&b'=') {
             return Err(ParseError::InvalidBlockAttributes {
                 name,
-                line: line_at(source, start),
                 message: format!("attribute `{attribute_name}` must have a quoted value"),
+                span: SourceSpan::new(attribute_start, attribute_end),
             });
         }
         cursor = skip_ascii_whitespace(source, cursor + 1);
         let Some(&quote) = source.as_bytes().get(cursor) else {
             return Err(ParseError::MalformedTopLevelBlock {
-                line: line_at(source, start),
                 message: "attribute value is missing".into(),
+                span: SourceSpan::new(cursor, end + 1),
             });
         };
         if quote != b'"' && quote != b'\'' {
             return Err(ParseError::InvalidBlockAttributes {
                 name,
-                line: line_at(source, start),
                 message: format!("attribute `{attribute_name}` must use single or double quotes"),
+                span: SourceSpan::new(attribute_start, cursor + 1),
             });
         }
         let value_start = cursor + 1;
         let Some(relative_end) = source[value_start..].find(quote as char) else {
             return Err(ParseError::MalformedTopLevelBlock {
-                line: line_at(source, start),
                 message: format!("attribute `{attribute_name}` is unclosed"),
+                span: SourceSpan::new(attribute_start, end + 1),
             });
         };
         let value_end = value_start + relative_end;
@@ -319,8 +448,8 @@ fn parse_opening_tag(source: &str, start: usize) -> Result<OpeningTag, ParseErro
         if !attribute_names.insert(attribute_name.clone()) {
             return Err(ParseError::InvalidBlockAttributes {
                 name,
-                line: line_at(source, start),
                 message: format!("duplicate attribute `{attribute_name}`"),
+                span: SourceSpan::new(attribute_start, cursor),
             });
         }
         attributes.push(BlockAttribute {
@@ -338,12 +467,7 @@ fn parse_opening_tag(source: &str, start: usize) -> Result<OpeningTag, ParseErro
     })
 }
 
-fn validate_block_attributes(
-    source: &str,
-    start: usize,
-    opening: &OpeningTag,
-) -> Result<(), ParseError> {
-    let line = line_at(source, start);
+fn validate_block_attributes(start: usize, opening: &OpeningTag) -> Result<(), ParseError> {
     match opening.name.as_str() {
         "script" => {
             // Luau is the established default for an unadorned script block.
@@ -355,21 +479,21 @@ fn validate_block_attributes(
             let Some(attribute) = opening.attributes.first() else {
                 return Err(ParseError::InvalidBlockAttributes {
                     name: opening.name.clone(),
-                    line,
                     message: "expected lang=\"luau\"".into(),
+                    span: SourceSpan::new(start, opening.end),
                 });
             };
             if opening.attributes.len() != 1 || attribute.name != "lang" {
                 return Err(ParseError::InvalidBlockAttributes {
                     name: opening.name.clone(),
-                    line,
                     message: "only lang=\"luau\" is supported".into(),
+                    span: SourceSpan::new(start, opening.end),
                 });
             }
             if attribute.value != "luau" {
                 return Err(ParseError::UnsupportedScriptLanguage {
                     language: attribute.value.clone(),
-                    line,
+                    span: attribute.value_span,
                 });
             }
         }
@@ -377,8 +501,8 @@ fn validate_block_attributes(
             if !opening.attributes.is_empty() {
                 return Err(ParseError::InvalidBlockAttributes {
                     name: opening.name.clone(),
-                    line,
                     message: "this block does not accept attributes".into(),
+                    span: SourceSpan::new(start, opening.end),
                 });
             }
         }
@@ -596,7 +720,7 @@ fn parse_inner_open_tag(source: &str, start: usize) -> Option<(String, usize, bo
     ))
 }
 
-fn find_tag_end(source: &str, start: usize) -> Option<usize> {
+pub(super) fn find_tag_end(source: &str, start: usize) -> Option<usize> {
     let mut cursor = start;
     let mut quote = None;
     while cursor < source.len() {
@@ -685,6 +809,10 @@ fn skip_escaped_char(source: &str, offset: usize) -> usize {
     }
 }
 
+fn add_base(span: SourceSpan, base: usize) -> SourceSpan {
+    SourceSpan::new(base + span.start, base + span.end)
+}
+
 fn line_at(source: &str, offset: usize) -> usize {
     source[..offset.min(source.len())]
         .bytes()
@@ -714,6 +842,64 @@ mod tests {
         assert!(file.script.is_none());
         assert!(file.style.is_none());
         assert!(file.props.is_none());
+    }
+
+    #[test]
+    fn component_ast_nodes_retain_absolute_source_spans() {
+        let source = "\n<props>\nwidth: { type: \"size\", default: \"10px\" }\n</props>\n<template>\n  <box><text>Hello</text></box>\n</template>\n<script lang=\"luau\">\nlocal count = 1\n</script>\n<style>\nbox { opacity: 1; }\n</style>\n";
+        let file = parse_component(source).expect("component parses");
+
+        let props = file.props.as_ref().expect("props block");
+        assert_eq!(
+            &source[props.span.start..props.span.end],
+            "\nwidth: { type: \"size\", default: \"10px\" }\n"
+        );
+        let prop = &props.props[0];
+        assert_eq!(
+            &source[prop.span.start..prop.span.end],
+            "width: { type: \"size\", default: \"10px\" }"
+        );
+
+        let template = file.template.as_ref().expect("template block");
+        let TemplateNode::Element(box_node) = &template.root[0] else {
+            panic!("expected root element");
+        };
+        let box_start = source.find("<box>").expect("box opening");
+        let box_end = source.find("</box>").expect("box closing") + "</box>".len();
+        assert_eq!(box_node.span, SourceSpan::new(box_start, box_end));
+        let TemplateNode::Element(text_node) = &box_node.children[0] else {
+            panic!("expected nested text element");
+        };
+        let text_start = source.find("<text>").expect("text opening");
+        let text_end = source.find("</text>").expect("text closing") + "</text>".len();
+        assert_eq!(text_node.span, SourceSpan::new(text_start, text_end));
+        let TemplateNode::Text(text) = &text_node.children[0] else {
+            panic!("expected text node");
+        };
+        let hello_start = source.find("Hello").expect("text content");
+        assert_eq!(text.span, SourceSpan::new(hello_start, hello_start + 5));
+
+        let script = file.script.as_ref().expect("script block");
+        let script_start = source.find("\nlocal count").expect("script body");
+        let script_end = source.find("\n</script>").expect("script close") + 1;
+        assert_eq!(script.span, SourceSpan::new(script_start, script_end));
+        let style = file.style.as_ref().expect("style block");
+        let style_start = source.find("\nbox { opacity").expect("style body");
+        let style_end = source.find("\n</style>").expect("style close") + 1;
+        assert_eq!(style.span, SourceSpan::new(style_start, style_end));
+    }
+
+    #[test]
+    fn parser_errors_retain_component_absolute_spans() {
+        let source = "\n<template>\n{#if}\n</template>\n";
+        let error = parse_component(source).expect_err("invalid condition accepted");
+        let span = error.span();
+        let directive = source.find("{#if}").expect("directive");
+        assert_eq!(span, SourceSpan::new(directive, directive + 1));
+
+        let source = "<script lang=\"luau\">value = 1</script>";
+        let error = parse_component(source).expect_err("missing template accepted");
+        assert_eq!(error.span(), SourceSpan::new(source.len(), source.len()));
     }
 
     #[test]
@@ -1622,6 +1808,20 @@ mesh.state.set("ready", true)
             file.imports[2].target,
             ComponentImportTarget::InterfaceApi { .. }
         ));
+        let first_import = &file.imports[0];
+        let first_start = source.find("import BatteryWidget").expect("first import");
+        let first_end = source[first_start..]
+            .find('\n')
+            .map(|offset| first_start + offset)
+            .expect("import line end");
+        assert_eq!(
+            &source[first_import.span.start..first_import.span.end],
+            &source[first_start..first_end]
+        );
+        assert_eq!(
+            &source[first_import.alias_span.start..first_import.alias_span.end],
+            "BatteryWidget"
+        );
         let script = file.script.unwrap();
         assert!(!script.source.contains("import BatteryWidget"));
         assert_eq!(script.source.lines().count(), 5);

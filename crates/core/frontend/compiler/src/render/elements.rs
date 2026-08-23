@@ -1,5 +1,6 @@
 use crate::FrontendCompositionResolver;
 
+use mesh_core_component::SourceSpan;
 use mesh_core_component::template::{
     Attribute, AttributeValue, ComponentRef, ElementNode, SourceTag, TemplateNode,
 };
@@ -184,6 +185,7 @@ pub(super) fn build_component_ref(
         tag_kind: SourceTag::Box,
         attributes: component.props.clone(),
         children: component.children.clone(),
+        span: SourceSpan::default(),
     };
     let mut node = build_element_node(
         &fake_element,

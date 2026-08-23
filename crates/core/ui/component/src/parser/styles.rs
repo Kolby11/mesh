@@ -18,8 +18,9 @@ use lightningcss::{
 };
 
 use super::ParseError;
+use crate::SourceSpan;
 
-pub(super) fn parse_style(source: &str) -> Result<StyleBlock, ParseError> {
+pub(super) fn parse_style(source: &str, source_base: usize) -> Result<StyleBlock, ParseError> {
     let stylesheet = StyleSheet::parse(
         source,
         CssParserOptions {
@@ -28,17 +29,23 @@ pub(super) fn parse_style(source: &str) -> Result<StyleBlock, ParseError> {
             ..CssParserOptions::default()
         },
     )
-    .map_err(map_lightning_error)?;
+    .map_err(|error| map_lightning_error(error, source, source_base))?;
 
     let mut rules = Vec::new();
     let mut keyframes = Vec::new();
-    lower_css_rules(&stylesheet.rules.0, None, &mut rules, &mut keyframes)?;
-    Ok(StyleBlock { rules, keyframes })
+    let span = SourceSpan::new(source_base, source_base + source.len());
+    lower_css_rules(&stylesheet.rules.0, None, &mut rules, &mut keyframes)
+        .map_err(|error| error.with_fallback(span))?;
+    Ok(StyleBlock {
+        rules,
+        keyframes,
+        span,
+    })
 }
 
 pub(super) fn parse_inline_style(source: &str) -> Result<Vec<Declaration>, ParseError> {
     let wrapped = format!(".mesh-inline-style {{ {source} }}");
-    let mut block = parse_style(&wrapped)?;
+    let mut block = parse_style(&wrapped, 0)?;
     Ok(block
         .rules
         .pop()
@@ -71,7 +78,7 @@ fn lower_css_rules(
             other => {
                 return Err(ParseError::InvalidStyle {
                     message: format!("unsupported at-rule '{}'", css_rule_name(other)),
-                    line: 0,
+                    span: SourceSpan::default(),
                 });
             }
         }
@@ -104,7 +111,7 @@ fn lower_keyframes_rule(
     if stops.is_empty() {
         return Err(ParseError::InvalidStyle {
             message: format!("keyframes '{name}' has no supported animatable properties"),
-            line: 0,
+            span: SourceSpan::default(),
         });
     }
 
@@ -124,11 +131,11 @@ fn lower_keyframe_selector(selector: &KeyframeSelector) -> Result<f32, ParseErro
         KeyframeSelector::Percentage(value) => Ok(value.0.clamp(0.0, 1.0)),
         KeyframeSelector::From | KeyframeSelector::To => Err(ParseError::InvalidStyle {
             message: "from/to keyframe aliases are not supported".into(),
-            line: 0,
+            span: SourceSpan::default(),
         }),
         KeyframeSelector::TimelineRangePercentage(_) => Err(ParseError::InvalidStyle {
             message: "timeline-range keyframe selectors are not supported".into(),
-            line: 0,
+            span: SourceSpan::default(),
         }),
     }
 }
@@ -160,13 +167,13 @@ fn validate_keyframe_declaration(
     if contains_keyframe_value_reference(&declaration.value) {
         return Err(ParseError::InvalidStyle {
             message: format!("keyframes '{rule_name}' cannot use var() references in stop values"),
-            line: 0,
+            span: SourceSpan::default(),
         });
     }
     if !is_transition_safe_keyframe_property(&declaration.property) {
         return Err(ParseError::InvalidStyle {
             message: format!("unsupported keyframe property '{}'", declaration.property),
-            line: 0,
+            span: SourceSpan::default(),
         });
     }
     Ok(())
@@ -180,7 +187,7 @@ fn lower_style_rule(
     if !source_rule.rules.0.is_empty() {
         return Err(ParseError::InvalidStyle {
             message: "nested style rules are not supported".into(),
-            line: 0,
+            span: SourceSpan::default(),
         });
     }
 
@@ -235,7 +242,7 @@ fn lower_container_query(
     let Some(condition) = &source_rule.condition else {
         return Err(ParseError::InvalidStyle {
             message: "container query is missing a condition".into(),
-            line: 0,
+            span: SourceSpan::default(),
         });
     };
 
@@ -273,18 +280,52 @@ fn css_rule_name(rule: &LightningCssRule<'_>) -> &'static str {
     }
 }
 
-fn map_lightning_error<T: std::fmt::Display>(err: lightningcss::error::Error<T>) -> ParseError {
+fn map_lightning_error<T: std::fmt::Display>(
+    err: lightningcss::error::Error<T>,
+    source: &str,
+    source_base: usize,
+) -> ParseError {
+    let span = err
+        .loc
+        .map(|loc| {
+            let offset = line_column_to_offset(source, loc.line as usize, loc.column as usize);
+            SourceSpan::new(source_base + offset, source_base + offset + 1)
+        })
+        .unwrap_or_else(|| SourceSpan::new(source_base, source_base + source.len()));
     ParseError::InvalidStyle {
         message: err.kind.to_string(),
-        line: err.loc.map(|loc| loc.line as usize + 1).unwrap_or(0),
+        span,
     }
 }
 
 fn map_lightning_printer_error(err: lightningcss::error::PrinterError) -> ParseError {
     ParseError::InvalidStyle {
         message: err.to_string(),
-        line: 0,
+        span: SourceSpan::default(),
     }
+}
+
+fn line_column_to_offset(source: &str, line: usize, column: usize) -> usize {
+    let mut current_line = 0;
+    let mut line_start = 0;
+    for (offset, ch) in source.char_indices() {
+        if current_line == line {
+            break;
+        }
+        if ch == '\n' {
+            current_line += 1;
+            line_start = offset + 1;
+        }
+    }
+    source[line_start..]
+        .char_indices()
+        .take_while(|(_, ch)| *ch != '\n')
+        .take(column.saturating_sub(1))
+        .last()
+        .map_or(line_start, |(offset, ch)| {
+            line_start + offset + ch.len_utf8()
+        })
+        .min(source.len())
 }
 
 fn lower_container_condition(
@@ -307,23 +348,23 @@ fn lower_container_condition(
             ..
         } => Err(ParseError::InvalidStyle {
             message: "container queries with 'or' are not supported".into(),
-            line: 0,
+            span: SourceSpan::default(),
         }),
         ContainerCondition::Not(_) => Err(ParseError::InvalidStyle {
             message: "negated container queries are not supported".into(),
-            line: 0,
+            span: SourceSpan::default(),
         }),
         ContainerCondition::Style(_) => Err(ParseError::InvalidStyle {
             message: "style container queries are not supported".into(),
-            line: 0,
+            span: SourceSpan::default(),
         }),
         ContainerCondition::ScrollState(_) => Err(ParseError::InvalidStyle {
             message: "scroll-state container queries are not supported".into(),
-            line: 0,
+            span: SourceSpan::default(),
         }),
         ContainerCondition::Unknown(_) => Err(ParseError::InvalidStyle {
             message: "unsupported container query condition".into(),
-            line: 0,
+            span: SourceSpan::default(),
         }),
     }
 }
@@ -367,7 +408,7 @@ fn lower_container_feature(
         }
         LightningQueryFeature::Boolean { .. } => Err(ParseError::InvalidStyle {
             message: "boolean container queries are not supported".into(),
-            line: 0,
+            span: SourceSpan::default(),
         }),
     }
 }
@@ -386,12 +427,12 @@ fn container_feature_axis(
         }
         MediaFeatureName::Standard(other) => Err(ParseError::InvalidStyle {
             message: format!("unsupported container query property '{other:?}'"),
-            line: 0,
+            span: SourceSpan::default(),
         }),
         MediaFeatureName::Custom(_) | MediaFeatureName::Unknown(_) => {
             Err(ParseError::InvalidStyle {
                 message: "custom container query properties are not supported".into(),
-                line: 0,
+                span: SourceSpan::default(),
             })
         }
     }
@@ -402,12 +443,12 @@ fn container_feature_length(value: &MediaFeatureValue<'_>) -> Result<f32, ParseE
         MediaFeatureValue::Length(length) => {
             length.to_px().ok_or_else(|| ParseError::InvalidStyle {
                 message: "container query length must be convertible to px".into(),
-                line: 0,
+                span: SourceSpan::default(),
             })
         }
         other => Err(ParseError::InvalidStyle {
             message: format!("unsupported container query value '{other:?}'"),
-            line: 0,
+            span: SourceSpan::default(),
         }),
     }
 }
@@ -463,8 +504,10 @@ enum ContainerAxis {
 }
 
 fn parse_selector(source: &str) -> Result<Selector, ParseError> {
-    mesh_core_theme::css::parse_selector(source)
-        .map_err(|message| ParseError::InvalidStyle { message, line: 0 })
+    mesh_core_theme::css::parse_selector(source).map_err(|message| ParseError::InvalidStyle {
+        message,
+        span: SourceSpan::default(),
+    })
 }
 
 fn classify_style_value(value: &str) -> StyleValue {

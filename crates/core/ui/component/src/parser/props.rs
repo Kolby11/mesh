@@ -12,7 +12,7 @@
 //! ```
 
 use crate::{
-    LocalizedLabel, PropDef, PropType, PropValue, PropsBlock, validate_prop_definition,
+    LocalizedLabel, PropDef, PropType, PropValue, PropsBlock, SourceSpan, validate_prop_definition,
     validate_prop_value,
 };
 
@@ -34,12 +34,18 @@ enum RawValue {
 
 struct Scanner<'a> {
     chars: std::iter::Peekable<std::str::Chars<'a>>,
+    offset: usize,
+    base: usize,
+    len: usize,
 }
 
 impl<'a> Scanner<'a> {
-    fn new(source: &'a str) -> Self {
+    fn new(source: &'a str, base: usize) -> Self {
         Self {
             chars: source.chars().peekable(),
+            offset: 0,
+            base,
+            len: source.len(),
         }
     }
 
@@ -48,7 +54,19 @@ impl<'a> Scanner<'a> {
     }
 
     fn next(&mut self) -> Option<char> {
-        self.chars.next()
+        let ch = self.chars.next()?;
+        self.offset += ch.len_utf8();
+        Some(ch)
+    }
+
+    fn invalid(&self, message: impl Into<String>) -> ParseError {
+        ParseError::InvalidProps {
+            message: message.into(),
+            span: SourceSpan::new(
+                self.base + self.offset,
+                self.base + (self.offset + 1).min(self.len),
+            ),
+        }
     }
 
     /// Skip whitespace and entry/field separators (commas).
@@ -100,7 +118,7 @@ impl<'a> Scanner<'a> {
                 c => out.push(c),
             }
         }
-        Err(invalid("unterminated string literal"))
+        Err(self.invalid("unterminated string literal"))
     }
 
     fn read_number(&mut self) -> Result<f64, ParseError> {
@@ -114,7 +132,7 @@ impl<'a> Scanner<'a> {
             }
         }
         raw.parse::<f64>()
-            .map_err(|_| invalid(format!("invalid number `{raw}`")))
+            .map_err(|_| self.invalid(format!("invalid number `{raw}`")))
     }
 
     fn read_value(&mut self) -> Result<RawValue, ParseError> {
@@ -143,10 +161,7 @@ impl<'a> Scanner<'a> {
                     }
                 }
             }
-            other => Err(invalid(format!(
-                "expected a value, found {}",
-                describe(other)
-            ))),
+            other => Err(self.invalid(format!("expected a value, found {}", describe(other)))),
         }
     }
 
@@ -160,7 +175,7 @@ impl<'a> Scanner<'a> {
                     self.next();
                     return Ok(RawValue::Array(items));
                 }
-                None => return Err(invalid("unterminated array")),
+                None => return Err(self.invalid("unterminated array")),
                 _ => items.push(self.read_value()?),
             }
         }
@@ -176,7 +191,7 @@ impl<'a> Scanner<'a> {
                     self.next();
                     return Ok(args);
                 }
-                None => return Err(invalid("unterminated call")),
+                None => return Err(self.invalid("unterminated call")),
                 _ => args.push(self.read_value()?),
             }
         }
@@ -186,7 +201,7 @@ impl<'a> Scanner<'a> {
     fn read_object(&mut self) -> Result<Vec<(String, RawValue)>, ParseError> {
         self.skip_ws();
         if self.next() != Some('{') {
-            return Err(invalid("expected `{` to open a prop definition"));
+            return Err(self.invalid("expected `{` to open a prop definition"));
         }
         let mut fields = Vec::new();
         loop {
@@ -196,16 +211,16 @@ impl<'a> Scanner<'a> {
                     self.next();
                     return Ok(fields);
                 }
-                None => return Err(invalid("unterminated prop definition (missing `}`)")),
+                None => return Err(self.invalid("unterminated prop definition (missing `}`)")),
                 _ => {}
             }
             let key = self.read_ident();
             if key.is_empty() {
-                return Err(invalid("expected a field name inside a prop definition"));
+                return Err(self.invalid("expected a field name inside a prop definition"));
             }
             self.skip_ws();
             if self.next() != Some(':') {
-                return Err(invalid(format!("expected `:` after field `{key}`")));
+                return Err(self.invalid(format!("expected `:` after field `{key}`")));
             }
             let value = self.read_value()?;
             fields.push((key, value));
@@ -213,8 +228,13 @@ impl<'a> Scanner<'a> {
     }
 }
 
+#[cfg(test)]
 pub(super) fn parse_props(source: &str) -> Result<PropsBlock, ParseError> {
-    let mut scanner = Scanner::new(source);
+    parse_props_at(source, 0)
+}
+
+pub(super) fn parse_props_at(source: &str, source_base: usize) -> Result<PropsBlock, ParseError> {
+    let mut scanner = Scanner::new(source, source_base);
     let mut props: Vec<PropDef> = Vec::new();
 
     loop {
@@ -222,28 +242,38 @@ pub(super) fn parse_props(source: &str) -> Result<PropsBlock, ParseError> {
         if scanner.peek().is_none() {
             break;
         }
+        let prop_start = scanner.offset;
         let name = scanner.read_ident();
         if name.is_empty() {
-            return Err(invalid(format!(
-                "expected a prop name, found {}",
-                describe(scanner.peek())
-            )));
+            let next = scanner.peek();
+            return Err(scanner.invalid(format!("expected a prop name, found {}", describe(next))));
         }
         scanner.skip_ws();
         if scanner.next() != Some(':') {
-            return Err(invalid(format!("expected `:` after prop `{name}`")));
+            return Err(scanner.invalid(format!("expected `:` after prop `{name}`")));
         }
         let fields = scanner.read_object()?;
+        let prop_end = scanner.offset;
         if props.iter().any(|p| p.name == name) {
-            return Err(invalid(format!("duplicate prop `{name}`")));
+            return Err(scanner.invalid(format!("duplicate prop `{name}`")));
         }
-        props.push(build_prop(name, fields)?);
+        let prop_span = SourceSpan::new(source_base + prop_start, source_base + prop_end);
+        props.push(
+            build_prop(name, fields, prop_span).map_err(|error| with_span(error, prop_span))?,
+        );
     }
 
-    Ok(PropsBlock { props })
+    Ok(PropsBlock {
+        props,
+        span: SourceSpan::new(source_base, source_base + source.len()),
+    })
 }
 
-fn build_prop(name: String, fields: Vec<(String, RawValue)>) -> Result<PropDef, ParseError> {
+fn build_prop(
+    name: String,
+    fields: Vec<(String, RawValue)>,
+    span: SourceSpan,
+) -> Result<PropDef, ParseError> {
     let mut ty: Option<PropType> = None;
     let mut default: Option<PropValue> = None;
     let mut label: Option<LocalizedLabel> = None;
@@ -329,6 +359,7 @@ fn build_prop(name: String, fields: Vec<(String, RawValue)>) -> Result<PropDef, 
 
     let mut def = PropDef {
         name,
+        span,
         ty,
         default,
         label,
@@ -454,6 +485,14 @@ fn describe(c: Option<char>) -> String {
 fn invalid(message: impl Into<String>) -> ParseError {
     ParseError::InvalidProps {
         message: message.into(),
+        span: SourceSpan::default(),
+    }
+}
+
+fn with_span(error: ParseError, span: SourceSpan) -> ParseError {
+    match error {
+        ParseError::InvalidProps { message, .. } => ParseError::InvalidProps { message, span },
+        error => error,
     }
 }
 

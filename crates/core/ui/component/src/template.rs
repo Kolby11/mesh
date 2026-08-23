@@ -169,6 +169,8 @@ impl SourceTag {
 #[derive(Debug, Clone)]
 pub struct TemplateBlock {
     pub root: Vec<TemplateNode>,
+    /// The template body, excluding the surrounding block tags.
+    pub span: crate::SourceSpan,
 }
 
 #[derive(Debug, Clone)]
@@ -198,6 +200,8 @@ pub struct ElementNode {
     pub attributes: Vec<Attribute>,
     /// Child nodes.
     pub children: Vec<TemplateNode>,
+    /// The complete element, including its opening and closing tags.
+    pub span: crate::SourceSpan,
 }
 
 /// A single attribute on an element.
@@ -205,8 +209,7 @@ pub struct ElementNode {
 pub struct Attribute {
     pub name: String,
     pub value: AttributeValue,
-    /// Source span of the dynamic brace expression, when this attribute is
-    /// backed by one. Static attributes have no span yet.
+    /// The complete authored attribute, including its name and value.
     pub span: Option<crate::SourceSpan>,
 }
 
@@ -231,6 +234,7 @@ pub enum AttributeValue {
 #[derive(Debug, Clone)]
 pub struct TextNode {
     pub content: String,
+    pub span: crate::SourceSpan,
 }
 
 /// An interpolation expression: `{ formatTime(time) }`.
@@ -283,6 +287,7 @@ pub struct SlotNode {
     /// True selects placements from the active composition/profile instead of
     /// automatically rendering every compatible contribution.
     pub customizable: bool,
+    pub span: crate::SourceSpan,
 }
 
 /// A reference to a child component.
@@ -298,4 +303,6 @@ pub struct ComponentRef {
     pub repeated_by_loop: bool,
     pub props: Vec<Attribute>,
     pub children: Vec<TemplateNode>,
+    /// The complete component element, including its children.
+    pub span: crate::SourceSpan,
 }

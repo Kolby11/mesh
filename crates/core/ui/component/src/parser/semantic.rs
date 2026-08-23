@@ -134,18 +134,8 @@ fn find_prop_reference(source: &str, name: &str, span: Option<SourceSpan>) -> Op
 
 fn semantic_error(source: &str, offset: usize, message: impl Into<String>) -> ParseError {
     let offset = offset.min(source.len());
-    let line = source[..offset]
-        .bytes()
-        .filter(|byte| *byte == b'\n')
-        .count()
-        + 1;
-    let column = source[..offset]
-        .rsplit('\n')
-        .next()
-        .map_or(1, |line| line.chars().count() + 1);
     ParseError::InvalidSemantics {
         message: message.into(),
-        line,
-        column,
+        span: SourceSpan::new(offset, offset.saturating_add(1).min(source.len())),
     }
 }

@@ -61,8 +61,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/07-component-language/improvements.md)
 
-- [ ] Carry reliable source spans through component AST nodes, compiler errors, CLI diagnostics, and LSP output.
-
 ### 8. UI element core
 
 [Audit](../.planning/log/sections/08-ui-element-core/improvements.md)
