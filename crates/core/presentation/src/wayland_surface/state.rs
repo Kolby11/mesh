@@ -62,6 +62,22 @@ pub(super) fn clear_text_input_for_surface(
     *text_input_state_applied = None;
 }
 
+/// Drop the shell's retained surrounding-text publication when its compositor
+/// surface identity disappears. The next focused-input sync must publish a
+/// fresh snapshot for the replacement object instead of replaying state for a
+/// destroyed surface id.
+pub(super) fn clear_text_input_state_for_surface(
+    surface_id: &str,
+    text_input_state: &mut Option<(Arc<str>, TextInputState)>,
+) {
+    if text_input_state
+        .as_ref()
+        .is_some_and(|(active_surface_id, _)| active_surface_id.as_ref() == surface_id)
+    {
+        *text_input_state = None;
+    }
+}
+
 impl PendingTextInput {
     pub(super) fn is_empty(&self) -> bool {
         self.preedit.is_none()
@@ -774,6 +790,7 @@ impl State {
     /// arrive after teardown, so clearing the ownership maps and queued stale
     /// events is part of removing the surface, not an optional shell policy.
     fn cancel_surface_input(&mut self, surface_id: &str) {
+        clear_text_input_state_for_surface(surface_id, &mut self.text_input_state);
         let seat_ids = self.input_seat_order.clone();
         for seat_id in seat_ids {
             let Some(seat) = self.input_seats.get_mut(&seat_id) else {
@@ -2133,6 +2150,28 @@ mod text_input_tests {
         assert!(!pending.is_empty());
         assert!(enabled);
         assert!(applied.is_some());
+    }
+
+    #[test]
+    fn surface_teardown_clears_only_its_published_text_input_state() {
+        let mut published = Some((
+            Arc::from("panel") as Arc<str>,
+            TextInputState::new("panel", 6, 6),
+        ));
+        clear_text_input_state_for_surface("panel", &mut published);
+        assert!(published.is_none());
+
+        let mut published = Some((
+            Arc::from("other") as Arc<str>,
+            TextInputState::new("other", 5, 5),
+        ));
+        clear_text_input_state_for_surface("panel", &mut published);
+        assert_eq!(
+            published
+                .as_ref()
+                .map(|(surface_id, _)| surface_id.as_ref()),
+            Some("other")
+        );
     }
 
     #[test]

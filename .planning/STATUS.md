@@ -4,6 +4,11 @@
 
 ## Now
 
+The deterministic presentation backend now clears its retained text-input
+surrounding-text snapshot whenever the owning surface, popup, parent tree, or
+connection is torn down, while preserving state published for other surfaces.
+Its lifecycle simulation now matches the real Wayland teardown boundary.
+
 Wayland keyboard commits now preserve the compositor's complete Unicode text
 payload through presentation, shell routing, keyboard repeat, and the
 component input boundary. Focused inputs apply one accepted multi-scalar

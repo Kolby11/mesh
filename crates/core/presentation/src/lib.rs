@@ -315,6 +315,20 @@ fn drop_testing_events_for_surface(backend: &mut TestingBackend, surface_id: &st
         .retain(|event| event_surface_id(event) != surface_id);
 }
 
+/// Keep the deterministic backend's retained text-input publication aligned
+/// with the compositor identity it represents. The real Wayland backend drops
+/// this snapshot while tearing down a surface, so a later shell sync cannot
+/// accidentally replay surrounding text for a destroyed object.
+fn clear_testing_text_input_for_surface(backend: &mut TestingBackend, surface_id: &str) {
+    if backend
+        .text_input_state
+        .as_ref()
+        .is_some_and(|(active_surface_id, _)| active_surface_id == surface_id)
+    {
+        backend.text_input_state = None;
+    }
+}
+
 impl PresentationEngine {
     pub fn select() -> Self {
         let forced = std::env::var("MESH_BACKEND").ok();
@@ -461,6 +475,7 @@ impl PresentationEngine {
             let surface_id = surface_id.into();
             if backend.popup_configs.remove(&surface_id).is_some() {
                 drop_testing_events_for_surface(backend, &surface_id);
+                clear_testing_text_input_for_surface(backend, &surface_id);
                 backend.pending_surface_states.remove(&surface_id);
                 backend.missing_surfaces.insert(surface_id.clone());
                 backend.destroyed_popup_ids.insert(surface_id.clone());
@@ -477,6 +492,7 @@ impl PresentationEngine {
             let surface_id = surface_id.into();
             if backend.surface_configs.remove(&surface_id).is_some() {
                 drop_testing_events_for_surface(backend, &surface_id);
+                clear_testing_text_input_for_surface(backend, &surface_id);
                 backend.pending_surface_states.remove(&surface_id);
                 backend.missing_surfaces.insert(surface_id.clone());
                 backend.destroyed_surface_ids.insert(surface_id.clone());
@@ -500,6 +516,7 @@ impl PresentationEngine {
             let reason = reason.into();
             backend.connection_lost = Some(reason.clone());
             backend.events.clear();
+            backend.text_input_state = None;
             let mut surface_ids = backend
                 .surface_configs
                 .keys()
@@ -687,6 +704,7 @@ impl PresentationEngine {
             Backend::DevWindow(_) => {}
             Backend::Testing(backend) => {
                 drop_testing_events_for_surface(backend, surface_id);
+                clear_testing_text_input_for_surface(backend, surface_id);
                 backend.popup_configs.remove(surface_id);
                 backend.pending_surface_states.remove(surface_id);
                 if backend.destroyed_popup_ids.insert(surface_id.to_string()) {
@@ -704,6 +722,7 @@ impl PresentationEngine {
             Backend::Testing(backend) => {
                 backend.missing_surfaces.remove(surface_id);
                 drop_testing_events_for_surface(backend, surface_id);
+                clear_testing_text_input_for_surface(backend, surface_id);
                 let child_ids = backend
                     .popup_configs
                     .iter()
@@ -713,6 +732,7 @@ impl PresentationEngine {
                     .collect::<Vec<_>>();
                 for child_id in child_ids {
                     drop_testing_events_for_surface(backend, &child_id);
+                    clear_testing_text_input_for_surface(backend, &child_id);
                     backend.popup_configs.remove(&child_id);
                     backend.pending_surface_states.remove(&child_id);
                     if backend.destroyed_popup_ids.insert(child_id.clone()) {
@@ -720,6 +740,7 @@ impl PresentationEngine {
                     }
                 }
                 backend.surface_configs.remove(surface_id);
+                clear_testing_text_input_for_surface(backend, surface_id);
                 backend.pending_surface_states.remove(surface_id);
                 if backend.destroyed_surface_ids.insert(surface_id.to_string()) {
                     backend.destroyed_surfaces.push(surface_id.to_string());
@@ -744,6 +765,7 @@ impl PresentationEngine {
                     .collect::<Vec<_>>();
                 for id in ids {
                     drop_testing_events_for_surface(backend, &id);
+                    clear_testing_text_input_for_surface(backend, &id);
                     backend.popup_configs.remove(&id);
                     if backend.destroyed_popup_ids.insert(id.clone()) {
                         backend.destroyed_popups.push(id);
@@ -1546,6 +1568,87 @@ mod tests {
                 surface_id: "panel".to_string()
             }]
         );
+    }
+
+    #[test]
+    fn testing_surface_teardown_clears_only_its_text_input_state() {
+        let mut engine = PresentationEngine::testing_with_popup_support(true);
+        engine
+            .configure("panel", SurfaceConfig::default())
+            .expect("surface config should be accepted");
+        engine
+            .configure("other", SurfaceConfig::default())
+            .expect("second surface config should be accepted");
+
+        let other_state = TextInputState::new("other", 5, 5);
+        engine
+            .set_text_input_state(Some("other"), Some(other_state.clone()))
+            .expect("other surface text-input state should be accepted");
+        engine.testing_push_surface_closed("panel");
+        assert_eq!(
+            engine.testing_text_input_state(),
+            Some(("other".to_string(), other_state))
+        );
+
+        engine
+            .set_text_input_state(Some("panel"), Some(TextInputState::new("panel", 5, 5)))
+            .expect("panel text-input state should be accepted");
+        engine
+            .configure("panel", SurfaceConfig::default())
+            .expect("a closed surface should be configurable again");
+        engine.destroy_surface("panel");
+        assert!(engine.testing_text_input_state().is_none());
+
+        engine
+            .configure("panel", SurfaceConfig::default())
+            .expect("the parent should be configurable again");
+        engine
+            .configure_popup(
+                "popup",
+                PopupConfig {
+                    parent_surface_id: "panel".to_string(),
+                    placement: PopupPlacement::default(),
+                    padding: SurfacePadding::default(),
+                    grab: false,
+                    grab_identity: None,
+                },
+            )
+            .expect("popup config should be accepted");
+        engine
+            .set_text_input_state(Some("popup"), Some(TextInputState::new("popup", 5, 5)))
+            .expect("popup text-input state should be accepted");
+        engine.testing_push_dismissed_popup("popup");
+        assert!(engine.testing_text_input_state().is_none());
+
+        engine
+            .configure_popup(
+                "popup",
+                PopupConfig {
+                    parent_surface_id: "panel".to_string(),
+                    placement: PopupPlacement::default(),
+                    padding: SurfacePadding::default(),
+                    grab: false,
+                    grab_identity: None,
+                },
+            )
+            .expect("popup config should be accepted again");
+        engine
+            .set_text_input_state(Some("popup"), Some(TextInputState::new("popup", 5, 5)))
+            .expect("popup text-input state should be accepted again");
+        engine.destroy_surface("panel");
+        assert!(engine.testing_text_input_state().is_none());
+
+        engine
+            .configure("settings", SurfaceConfig::default())
+            .expect("another surface should be accepted");
+        engine
+            .set_text_input_state(
+                Some("settings"),
+                Some(TextInputState::new("settings", 8, 8)),
+            )
+            .expect("settings text-input state should be accepted");
+        engine.testing_push_connection_lost("compositor exited");
+        assert!(engine.testing_text_input_state().is_none());
     }
 
     #[test]
