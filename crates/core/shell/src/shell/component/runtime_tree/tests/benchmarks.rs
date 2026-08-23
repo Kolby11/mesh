@@ -1332,6 +1332,7 @@ fn fused_runtime_overflow_annotation_beats_two_tree_walks() {
         let mut slider_values = HashMap::new();
         let mut slider_script_values = HashMap::new();
         let checked_values = HashMap::new();
+        let input_preedits = HashMap::new();
         let mut context = RuntimeAnnotationContext::new(
             None,
             None,
@@ -1339,6 +1340,7 @@ fn fused_runtime_overflow_annotation_beats_two_tree_walks() {
             None,
             None,
             &input_values,
+            &input_preedits,
             &mut slider_values,
             &mut slider_script_values,
             &checked_values,

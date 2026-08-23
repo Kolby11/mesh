@@ -23,6 +23,7 @@ pub(super) fn annotate_runtime_tree(
     checked_values: &HashMap<NodeId, bool>,
     scroll_offsets: &mut HashMap<NodeId, ScrollOffsetState>,
 ) {
+    let input_preedits = HashMap::new();
     let mut context = crate::shell::component::runtime_tree::RuntimeAnnotationContext::new(
         focused_key.as_deref().map(runtime_node_id_for_key),
         focus_visible_key.as_deref().map(runtime_node_id_for_key),
@@ -30,6 +31,7 @@ pub(super) fn annotate_runtime_tree(
         active_id,
         active_slider_id,
         input_values,
+        &input_preedits,
         slider_values,
         slider_script_values,
         checked_values,

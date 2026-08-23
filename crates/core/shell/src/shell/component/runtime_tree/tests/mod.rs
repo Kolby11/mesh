@@ -6,6 +6,7 @@ mod service_deps;
 mod tree;
 
 use super::*;
+use crate::shell::component::TextPreeditState;
 use std::time::Instant;
 
 fn annotate_with_empty_context(node: &mut WidgetNode) {
@@ -13,6 +14,7 @@ fn annotate_with_empty_context(node: &mut WidgetNode) {
     let mut slider_values = HashMap::new();
     let mut slider_script_values = HashMap::new();
     let checked_values = HashMap::new();
+    let input_preedits = HashMap::new();
     let mut scroll_offsets = HashMap::new();
     let mut context = RuntimeAnnotationContext::new(
         None,
@@ -21,12 +23,55 @@ fn annotate_with_empty_context(node: &mut WidgetNode) {
         None,
         None,
         &input_values,
+        &input_preedits,
         &mut slider_values,
         &mut slider_script_values,
         &checked_values,
         &mut scroll_offsets,
     );
     annotate_runtime_tree(node, "root".to_string(), &mut context);
+}
+
+#[test]
+fn input_preedit_is_composed_into_visual_value_only() {
+    let mut node = WidgetNode::new("input");
+    let node_id = stable_runtime_node_id("root");
+    node.id = node_id;
+    let input_values = HashMap::from([(node_id, "A🙂B".to_owned())]);
+    let input_preedits = HashMap::from([(
+        node_id,
+        TextPreeditState {
+            text: "候".to_owned(),
+            cursor_begin: 0,
+            cursor_end: "候".len() as i32,
+            insert_at: "A🙂".len(),
+        },
+    )]);
+    let mut slider_values = HashMap::new();
+    let mut slider_script_values = HashMap::new();
+    let checked_values = HashMap::new();
+    let mut scroll_offsets = HashMap::new();
+    let mut context = RuntimeAnnotationContext::new(
+        Some(node_id),
+        None,
+        &[],
+        None,
+        None,
+        &input_values,
+        &input_preedits,
+        &mut slider_values,
+        &mut slider_script_values,
+        &checked_values,
+        &mut scroll_offsets,
+    );
+
+    annotate_runtime_tree(&mut node, "root".to_owned(), &mut context);
+
+    assert_eq!(
+        node.attributes.get("value").map(String::as_str),
+        Some("A🙂候B")
+    );
+    assert_eq!(input_values.get(&node_id).map(String::as_str), Some("A🙂B"));
 }
 
 fn benchmark_plain_tree(width: usize, depth: usize) -> WidgetNode {

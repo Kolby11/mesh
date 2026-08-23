@@ -1,4 +1,5 @@
 use super::*;
+use crate::shell::component::TextPreeditState;
 
 pub(in crate::shell::component) fn input_accepts_char(node: &WidgetNode, ch: char) -> bool {
     if ch.is_control() {
@@ -117,6 +118,7 @@ pub(in crate::shell::component) struct RuntimeAnnotationContext<'a> {
     pub(super) active_id: Option<NodeId>,
     pub(super) active_slider_id: Option<NodeId>,
     pub(super) input_values: &'a HashMap<NodeId, String>,
+    pub(super) input_preedits: &'a HashMap<NodeId, TextPreeditState>,
     pub(super) slider_values: &'a mut HashMap<NodeId, f32>,
     pub(super) slider_script_values: &'a mut HashMap<NodeId, f32>,
     pub(super) checked_values: &'a HashMap<NodeId, bool>,
@@ -132,6 +134,7 @@ impl<'a> RuntimeAnnotationContext<'a> {
         active_id: Option<NodeId>,
         active_slider_id: Option<NodeId>,
         input_values: &'a HashMap<NodeId, String>,
+        input_preedits: &'a HashMap<NodeId, TextPreeditState>,
         slider_values: &'a mut HashMap<NodeId, f32>,
         slider_script_values: &'a mut HashMap<NodeId, f32>,
         checked_values: &'a HashMap<NodeId, bool>,
@@ -144,6 +147,7 @@ impl<'a> RuntimeAnnotationContext<'a> {
             active_id,
             active_slider_id,
             input_values,
+            input_preedits,
             slider_values,
             slider_script_values,
             checked_values,
@@ -163,6 +167,22 @@ impl<'a> RuntimeAnnotationContext<'a> {
         self.window = window;
         self
     }
+}
+
+fn compose_input_value(value: &str, preedit: Option<&TextPreeditState>) -> String {
+    let Some(preedit) = preedit.filter(|preedit| !preedit.text.is_empty()) else {
+        return value.to_owned();
+    };
+    let insert_at = preedit.insert_at.min(value.len());
+    let insert_at = value
+        .is_char_boundary(insert_at)
+        .then_some(insert_at)
+        .unwrap_or(value.len());
+    let mut composed = String::with_capacity(value.len() + preedit.text.len());
+    composed.push_str(&value[..insert_at]);
+    composed.push_str(&preedit.text);
+    composed.push_str(&value[insert_at..]);
+    composed
 }
 
 #[cfg(test)]
@@ -265,6 +285,10 @@ pub(super) fn annotate_runtime_tree_inner(
             .cloned()
             .or(authored_value.clone())
             .unwrap_or_default();
+        let preedit = (context.focused_id == Some(node_id))
+            .then(|| context.input_preedits.get(&node_id))
+            .flatten();
+        let value = compose_input_value(&value, preedit);
         node.attributes.insert("value".into(), value);
     } else if is_slider {
         annotate_slider_node(node, node_id, context);

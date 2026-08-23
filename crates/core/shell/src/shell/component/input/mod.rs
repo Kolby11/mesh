@@ -867,10 +867,10 @@ impl FrontendSurfaceComponent {
                 }
             }
             ComponentInput::TextInputEdit {
-                preedit_present: _,
-                preedit: _,
-                preedit_cursor_begin: _,
-                preedit_cursor_end: _,
+                preedit_present,
+                preedit,
+                preedit_cursor_begin,
+                preedit_cursor_end,
                 commit,
                 before_bytes,
                 after_bytes,
@@ -900,9 +900,37 @@ impl FrontendSurfaceComponent {
                             .get(&input_node.id)
                             .cloned()
                             .unwrap_or_default();
+                        let insert_at = self
+                            .input_cursors
+                            .get(&input_node.id)
+                            .copied()
+                            .filter(|cursor| {
+                                *cursor <= current.len() && current.is_char_boundary(*cursor)
+                            })
+                            .unwrap_or(current.len());
+                        let next_preedit = preedit_present
+                            .then(|| preedit.filter(|text| !text.is_empty()))
+                            .flatten()
+                            .map(|text| TextPreeditState {
+                                text,
+                                cursor_begin: preedit_cursor_begin,
+                                cursor_end: preedit_cursor_end,
+                                insert_at,
+                            });
+                        let preedit_changed = match next_preedit.as_ref() {
+                            Some(next) => self.input_preedits.get(&input_node.id) != Some(next),
+                            None => self.input_preedits.contains_key(&input_node.id),
+                        };
+                        if let Some(next) = next_preedit {
+                            self.input_preedits.insert(input_node.id, next);
+                        } else {
+                            self.input_preedits.remove(&input_node.id);
+                        }
+                        if preedit_changed {
+                            self.invalidate_text_state();
+                        }
                         if current != previous {
                             self.clear_selection();
-                            self.invalidate_text_state();
                             return self.dispatch_text_input_value_handlers(
                                 tree,
                                 &focused_key,

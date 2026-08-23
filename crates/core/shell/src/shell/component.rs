@@ -602,6 +602,17 @@ pub(super) struct TextSelectionState {
     pub(super) dragging: bool,
 }
 
+/// Transient IME composition for an input. The committed value remains in
+/// `input_values`; this state is only projected into the rendered input value
+/// until the compositor sends the next text-input transaction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct TextPreeditState {
+    pub(super) text: String,
+    pub(super) cursor_begin: i32,
+    pub(super) cursor_end: i32,
+    pub(super) insert_at: usize,
+}
+
 #[derive(Debug)]
 pub(super) struct GestureTargetCapture {
     pub(super) node_key: String,
@@ -769,6 +780,7 @@ pub(super) struct FrontendSurfaceComponent {
     pub(super) triggered_popovers: HashMap<String, String>,
     selection: Option<TextSelectionState>,
     input_values: HashMap<NodeId, String>,
+    input_preedits: HashMap<NodeId, TextPreeditState>,
     /// UTF-8 byte cursor positions for editable inputs. A missing entry is
     /// initialized to the value's end, preserving the historic append-only
     /// behavior until an editor operation moves the cursor.
@@ -1131,6 +1143,7 @@ impl FrontendSurfaceComponent {
             triggered_popovers: HashMap::new(),
             selection: None,
             input_values: HashMap::new(),
+            input_preedits: HashMap::new(),
             input_cursors: HashMap::new(),
             slider_values: HashMap::new(),
             slider_script_values: HashMap::new(),

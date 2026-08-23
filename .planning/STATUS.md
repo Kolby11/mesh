@@ -92,8 +92,9 @@ surface, preedit/commit/deletion events are buffered through each compositor
 `done` boundary, and the shell publishes a validated, UTF-8 byte-indexed
 surrounding-text snapshot for the focused input. The resulting transaction
 reaches the component boundary atomically, preserving one commit/delete change
-boundary; preedit is carried in the typed transaction but is not yet rendered
-as an input composition decoration.
+boundary. Components retain preedit separately from committed input state and
+project it inline at the UTF-8 cursor for rendering without firing a change
+handler; composition decoration/cursor styling is still pending.
 
 Popup targets now invalidate their cached creation size when presentation
 reports `SurfaceMissing`, including state-only commits, and force a full retry
@@ -120,14 +121,15 @@ Text shaping remains synchronous and outside that broker.
 Focused presentation, Wayland routing, and shell text-transaction tests plus
 `cargo check --workspace`, formatting, and `git diff --check` pass. The full
 presentation library passes (90 active, 11 ignored). The broad shell library
-run compiles and reaches 665 passed tests, but retains 48 existing fixture and
+run compiles and reaches 668 passed tests, but retains 46 existing fixture and
 runtime failures and 130 ignored tests; none are text-input failures. Existing
 shell dead-code/private-interface warnings remain. Connection recreation, a
-live compositor matrix, and preedit rendering remain separate follow-up work.
+live compositor matrix, and composition decoration/cursor styling remain
+separate follow-up work.
 
 ## Next
 
-Complete the remaining semantic presentation state diff and actual
-`zwp_text_input_v3` object lifecycle/event wiring for preedit, commit,
-surrounding text, and deletion; connection recreation and resource
-preparation/text shaping remain separate follow-up work.
+Complete the remaining semantic presentation state diff and text-input-v3
+composition decoration/cursor styling plus live compositor lifecycle matrix;
+connection recreation and resource preparation/text shaping remain separate
+follow-up work.

@@ -510,6 +510,7 @@ impl FrontendSurfaceComponent {
             self.pointer_down_id,
             self.active_slider_id,
             &self.input_values,
+            &self.input_preedits,
             &mut self.slider_values,
             &mut self.slider_script_values,
             &self.checked_values,

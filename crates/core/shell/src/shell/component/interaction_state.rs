@@ -206,6 +206,7 @@ impl FrontendSurfaceComponent {
                             .map(json_value_to_string)
                             .unwrap_or_default();
                         self.input_cursors.insert(node.id, text.len());
+                        self.input_preedits.remove(&node.id);
                         self.input_values.insert(node.id, text);
                         self.invalidate_text_state();
                     }

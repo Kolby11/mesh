@@ -809,8 +809,44 @@ end
     );
     assert_eq!(component.input_cursors.get(&input_id), Some(&"Aé🙂".len()));
     assert_eq!(
+        component.input_preedits.get(&input_id),
+        Some(&TextPreeditState {
+            text: "候".into(),
+            cursor_begin: 0,
+            cursor_end: "候".len() as i32,
+            insert_at: "Aé🙂".len(),
+        })
+    );
+    assert_eq!(
         runtime_value(&component, "text_seen"),
         Some(serde_json::json!("Aé🙂"))
+    );
+    assert_eq!(
+        runtime_value(&component, "change_count"),
+        Some(serde_json::json!(1))
+    );
+
+    component
+        .handle_input(
+            &default_theme(),
+            240,
+            160,
+            ComponentInput::TextInputEdit {
+                preedit_present: true,
+                preedit: None,
+                preedit_cursor_begin: 0,
+                preedit_cursor_end: 0,
+                commit: None,
+                before_bytes: 0,
+                after_bytes: 0,
+            },
+        )
+        .unwrap();
+
+    assert!(!component.input_preedits.contains_key(&input_id));
+    assert_eq!(
+        component.input_values.get(&input_id).map(String::as_str),
+        Some("Aé🙂")
     );
     assert_eq!(
         runtime_value(&component, "change_count"),

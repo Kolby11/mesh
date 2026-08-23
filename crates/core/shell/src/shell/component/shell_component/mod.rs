@@ -162,6 +162,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 if !visible {
                     self.surface_exiting = false;
                     self.clear_selection();
+                    self.input_preedits.clear();
                     self.focused_key = None;
                     self.focus_visible_key = None;
                     self.focused_id = None;

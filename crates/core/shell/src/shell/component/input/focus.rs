@@ -13,6 +13,7 @@ impl FrontendSurfaceComponent {
 
         if previous_key != next_key {
             self.keyboard_button_press_activations.clear();
+            self.input_preedits.clear();
             if let Some(previous_key) = previous_key.as_deref() {
                 let event = self.build_focus_event(tree, previous_key, "blur");
                 requests.extend(self.call_node_handler(tree, previous_key, "blur", &[event])?);
@@ -194,6 +195,7 @@ impl FrontendSurfaceComponent {
             }
         };
         if let Some(key) = new_key {
+            self.input_preedits.clear();
             self.focused_key = Some(key.clone());
             self.focus_visible_key = Some(key);
             self.focused_id = self.focused_key.as_deref().map(runtime_node_id_for_key);
@@ -208,6 +210,7 @@ impl FrontendSurfaceComponent {
     /// surface. Called from the shell's `TransferTabFocus` handler on the
     /// source side.
     pub(in crate::shell::component) fn clear_focus_for_transfer(&mut self) {
+        self.input_preedits.clear();
         self.focused_key = None;
         self.focus_visible_key = None;
         self.focused_id = None;
@@ -255,6 +258,7 @@ impl FrontendSurfaceComponent {
             return;
         }
         if let Some(first) = next_focus_target(tree, None, false) {
+            self.input_preedits.clear();
             self.focused_key = Some(first.clone());
             self.focus_visible_key = Some(first);
             self.focused_id = self.focused_key.as_deref().map(runtime_node_id_for_key);
@@ -267,6 +271,7 @@ impl FrontendSurfaceComponent {
         if find_node_by_key(tree, &focused_key).is_some() {
             Some(focused_key)
         } else {
+            self.input_preedits.clear();
             self.focused_key = None;
             self.focus_visible_key = None;
             self.focused_id = None;
