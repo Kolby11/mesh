@@ -887,7 +887,7 @@ pub(super) struct FrontendSurfaceComponent {
     last_tree: Option<WidgetNode>,
     intrinsic_layout_cache: IntrinsicLayoutCache,
     layout_state: PerSurfaceLayoutState,
-    pub(super) retained_tree: RetainedWidgetTree,
+    pub(in crate::shell::component) retained_tree: RetainedWidgetTree,
     /// Authoritative roots touched by the latest targeted retained restyle.
     /// Consumed by the retained-tree fingerprint pass in the same paint.
     retained_update_dirty_roots: Option<HashSet<NodeId>>,

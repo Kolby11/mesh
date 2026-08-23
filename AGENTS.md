@@ -89,7 +89,11 @@ Use these terms precisely in code, documentation, and architecture discussions:
   rejected with migration diagnostics — not accepted as compatibility inputs.
   `mesh.kind` also includes `component`: an embeddable `.mesh` component
   consumed by other modules via `require("@scope/name")`, with no
-  `mesh.surface` block of its own.
+  `mesh.surface` block of its own. `mesh.kind: "composition"` is a profile
+  that is also a module: it binds root component instances, surface
+  placement, provider/resource selection, and slots into one named,
+  installable, versioned shell family, but declares no `entry`,
+  `mesh.surface`, `mesh.implements`, or capabilities of its own.
 - **Element**: a base UI primitive exposed by MESH core, such as `box`,
   `row`, `button`, `icon`, `input`, `slider`, or `text`. Elements are the
   built-in building blocks with predefined runtime behavior, styling hooks,
@@ -216,6 +220,7 @@ spec, not yet implemented**: see `docs/spec/03-components.md`.
 - interface
 - component
 - library
+- composition
 - theme
 - icon-pack
 - font-pack

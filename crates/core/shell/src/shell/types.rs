@@ -348,7 +348,6 @@ pub(super) struct SettingsWatchState {
 
 #[derive(Debug)]
 pub(super) enum ShellMessage {
-    Service(ServiceEvent),
     BackendServiceUpdate {
         interface: String,
         provider_id: String,

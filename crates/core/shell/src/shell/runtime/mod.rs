@@ -389,7 +389,6 @@ impl Shell {
     ) -> Result<(), ShellRunError> {
         let message_started = self.profiling_enabled().then(std::time::Instant::now);
         let trigger_kind = match &message {
-            ShellMessage::Service(_) => "service_event",
             ShellMessage::BackendServiceUpdate { .. } => "backend_service_update",
             ShellMessage::BackendLifecycle { .. } => "backend_lifecycle",
             ShellMessage::BackendCommandResult { .. } => "backend_command_result",
@@ -399,9 +398,6 @@ impl Shell {
             ShellMessage::Ipc(_) => "ipc",
         };
         match message {
-            ShellMessage::Service(event) => {
-                pending.extend(self.broadcast_service_event(event)?);
-            }
             ShellMessage::BackendServiceUpdate {
                 interface,
                 provider_id,

@@ -1091,13 +1091,6 @@ pub(super) struct DiscoveredModuleManifest {
         Result<mesh_core_module::LoadedManifest, mesh_core_module::manifest::ManifestError>,
 }
 
-pub(super) fn discover_shell_module_manifests(
-    module_dirs: &[PathBuf],
-) -> Vec<DiscoveredModuleManifest> {
-    let manifest_dirs = discover_shell_module_manifest_dirs(module_dirs);
-    load_shell_module_manifests(&manifest_dirs)
-}
-
 pub(super) fn discover_shell_module_manifest_dirs(module_dirs: &[PathBuf]) -> Vec<PathBuf> {
     let mut discovered = Vec::new();
     for dir in module_dirs {

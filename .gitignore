@@ -2,3 +2,8 @@
 /profiles/
 /perf.data
 /.claude/worktrees/
+/rust_out
+/*.log
+/.codex
+/.codex-continuation.md
+/codex-until-limit.sh

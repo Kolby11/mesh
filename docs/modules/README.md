@@ -16,8 +16,11 @@ from their `@mesh` scope and may be replaced by compatible third-party modules.
 | `@mesh/quick-settings` | frontend | `src/main.mesh` | Quick settings surface |
 | `@mesh/settings` | frontend | `src/main.mesh` | Current settings surface |
 | `@mesh/debug-inspector` | frontend | `src/main.mesh` | Runtime inspection surface |
+| `@mesh/composition-editor` | frontend | `src/main.mesh` | Replaceable visual editor for author-declared component slots |
 | `@mesh/text-selection-proof` | frontend | `src/main.mesh` | Text-selection proof surface |
 | `@mesh/touch-gesture-proof` | frontend | `src/main.mesh` | Touch and gesture proof surface |
+| `@mesh/blur-test` | frontend | `src/main.mesh` | Isolated `backdrop-filter`/blur debugging surface (disabled by default) |
+| `@mesh/opacity-test` | frontend | `src/main.mesh` | Opacity control surface without compositor blur (disabled by default) |
 | `@mesh/language-popover` | component | `src/main.mesh` | Embeddable language chooser |
 | `@mesh/theme-selector` | component | `src/main.mesh` | Embeddable theme chooser |
 
@@ -30,14 +33,27 @@ from their `@mesh` scope and may be replaced by compatible third-party modules.
 | `@mesh/backlight-brightness` | backend | `src/main.luau` | `mesh.brightness` through `brightnessctl` |
 | `@mesh/upower-power` | backend | `src/main.luau` | Power state through UPower tooling |
 | `@mesh/hyprland-wm` | backend | `src/main.luau` | Hyprland shell/window-manager integration |
+| `@mesh/device-info` | backend | `src/main.luau` | Linux device information for system/settings surfaces |
 
 ## Interfaces and resource packs
 
 | Module | Kind | Contribution |
 | --- | --- | --- |
 | `@mesh/audio-interface` | interface | `mesh.audio` contract |
+| `@mesh/device-interface` | interface | Base device-information interface for settings/system surfaces |
+| `@mesh/shell-ui-interface` | interface | Named UI extension-point contracts a host surface renders foreign module UI into |
 | `@mesh/icons-default` | icon-pack | Default semantic icon mappings |
 | `@mesh/icons-material-symbols` | icon-pack | Material Symbols font and codepoint mappings |
+
+## Compositions
+
+A composition module (`mesh.kind: "composition"`) binds root component
+instances, surface placement, and provider selection into one named, active
+desktop layout. See [module-system §5](../spec/01-module-system.md).
+
+| Module | Kind | Contribution |
+| --- | --- | --- |
+| `@mesh/desk` | composition | The default desktop: a top navigation bar and a settings window, bound to the PipeWire and backlight providers |
 
 ## Module anatomy
 

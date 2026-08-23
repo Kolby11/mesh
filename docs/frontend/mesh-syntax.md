@@ -14,6 +14,10 @@ The broader [Native element model](elements.md) defines built-in element familie
 ## File structure
 
 ```xml
+<props>
+  <!-- typed, defaulted, localized component configuration goes here -->
+</props>
+
 <template>
   <!-- markup goes here -->
 </template>
@@ -28,6 +32,37 @@ The broader [Native element model](elements.md) defines built-in element familie
 ```
 
 Only `<template>` is required. All other blocks are optional.
+
+---
+
+## `<props>`
+
+One entry per configurable value. Each entry auto-projects to three places at
+once: a typed `prop(name)` reference usable anywhere in `<style>`, a reactive
+`props.name` field in `<script>`, and a generated settings-UI row.
+
+```xml
+<props>
+  width:    { type: "size",  default: "fit-content", label: t("var.width") }
+  density:  { type: "enum",  options: ["compact", "cozy"], default: "cozy" }
+  show_pct: { type: "bool",  default: true, label: t("var.show_percent") }
+  accent:   { type: "token", default: "color-primary" }
+  icon:     { type: "icon",  default: "audio-volume-high" }
+  anim_ms:  { type: "duration", default: 120, min: 0, max: 1000 }
+</props>
+```
+
+`type` is required; `default`, `label`/`description` (localized), `options`
+(enum), `min`/`max`/`step`/`unit`, and `expose` (default `true`; `false` keeps
+the prop CSS/script-only, with no settings row) are optional. Supported
+types: `size`, `number`/`int`, `bool`, `enum`, `string`, `color`, `token`,
+`icon`, `duration` — see [component spec §3](../spec/03-components.md#3-the-props-block)
+for the full type table and CSS/Lua/control mapping per type.
+
+`prop()` is not `var(--…)`: prop names are component-scoped (two components
+can both declare `width` with no collision), and it is a typed reference
+checked at the use site — `width: prop(density)` is a compile error.
+`prop(name)` is usable anywhere `var()` is, including inside `calc()`.
 
 ---
 

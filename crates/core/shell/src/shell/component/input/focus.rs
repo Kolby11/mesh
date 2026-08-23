@@ -151,22 +151,6 @@ impl FrontendSurfaceComponent {
     /// `TransferTabFocus` request handler. The component must already have
     /// painted at least once (otherwise tree traversal is empty); for
     /// freshly-shown surfaces, the shell pairs this with a paint pass.
-    pub(in crate::shell::component) fn apply_focus_transfer(
-        &mut self,
-        tree: &WidgetNode,
-        target: &super::super::TabFocusTarget,
-        return_focus: Option<(String, String)>,
-        close_on_focus_leave: bool,
-    ) {
-        let traversal = collect_focus_traversal(tree);
-        self.apply_focus_transfer_from_traversal(
-            &traversal,
-            target,
-            return_focus,
-            close_on_focus_leave,
-        );
-    }
-
     pub(in crate::shell::component) fn apply_focus_transfer_from_traversal(
         &mut self,
         traversal: &[String],

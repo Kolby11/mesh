@@ -89,21 +89,26 @@ services are graph diagnostics.
 
 ## Shell profiles
 
-Named shell profiles replace a single root layout decision. A profile selects
-root component instances, surface placement, ambiguous service providers,
-resources, root background services,
-and profile-scoped configuration. Required services remain inferred from
-component contracts.
+Named shell profiles replace a single root layout decision. **Shipped:**
+profile documents, scoped preferences, multiple root instances, the activation
+closure, transactional live switching, and composition instantiation. A
+profile is an instance of a **composition module** (`mesh.kind: "composition"`,
+e.g. the shipped `@mesh/desk`) plus the user's deltas: root component
+instances, surface placement, ambiguous service providers, resources, root
+background services, and profile-scoped configuration. Required services
+remain inferred from component contracts. A composition binds — it selects
+providers and resources — but never owns them and holds no privilege of its
+own; it can only select among what its member modules already declare.
 
-Live switching must be transactional: validate and prepare a candidate graph,
+Live switching is transactional: validate and prepare a candidate graph,
 preserve identical service instances, initialize new surfaces, commit the
 visible switch, and only then remove orphaned runtime objects. Durable
 service-owned data remains shared while configuration is profile-scoped.
 
-The root `config/module.json` remains the installed-module inventory and legacy
-fallback. Profiles are the active composition boundary once `active-profile`
-exists. Typed profile/package services for replaceable settings frontends are
-still target architecture.
+The root `config/module.json` remains the installed-module inventory and
+legacy fallback for the absence of `config/active-profile`. Profiles are the
+active composition boundary once `active-profile` exists. Typed profile/package
+services for replaceable settings frontends remain target architecture.
 
 ## Directory structure
 

@@ -233,11 +233,6 @@ impl FrontendRenderEngine {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn paint_backend_capabilities(&self) -> PainterBackendCapabilities {
-        self.paint_backend.capabilities()
-    }
-
-    #[allow(dead_code)]
     pub(crate) fn painter_diagnostics(&self) -> Vec<PainterDiagnostic> {
         self.painter_diagnostics
             .lock()
