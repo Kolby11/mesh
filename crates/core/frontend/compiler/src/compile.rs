@@ -2,6 +2,7 @@ use crate::CompiledFrontendModule;
 
 use mesh_core_component::{
     ComponentFile, ComponentImportTarget, PropDef, PropType, PropValue, parse_component,
+    referenced_identifiers,
     template::{Attribute, AttributeValue, TemplateNode},
 };
 use mesh_core_module::{Manifest, ModuleType};
@@ -678,9 +679,8 @@ fn validate_child_component_props(
 fn public_component_fields(component: &ComponentFile) -> HashSet<String> {
     let mut fields = HashSet::new();
     if let Some(script) = &component.script {
-        let (state_vars, _, functions, _) = extract_script_symbols(&script.source);
-        fields.extend(state_vars);
-        fields.extend(functions);
+        fields.extend(script.metadata.state_vars.iter().cloned());
+        fields.extend(script.metadata.public_functions.iter().cloned());
     }
     fields
 }
@@ -809,202 +809,20 @@ fn component_allowed_symbols(
     }
 
     if let Some(script) = &component.script {
-        let (state_vars, service_bindings, functions, interface_proxies) =
-            extract_script_symbols(&script.source);
-        allowed.extend(state_vars);
-        allowed.extend(service_bindings);
-        allowed.extend(functions);
-        allowed.extend(interface_proxies);
+        allowed.extend(script.metadata.state_vars.iter().cloned());
+        allowed.extend(
+            script
+                .metadata
+                .service_bindings
+                .iter()
+                .map(|(_, local)| local.clone()),
+        );
+        allowed.extend(script.metadata.public_functions.iter().cloned());
+        allowed.extend(script.metadata.required_aliases.iter().cloned());
+        allowed.extend(script.metadata.interface_proxies.keys().cloned());
     }
 
     allowed
-}
-
-fn extract_script_symbols(source: &str) -> (Vec<String>, Vec<String>, Vec<String>, Vec<String>) {
-    let mut state_vars = Vec::new();
-    let mut service_bindings = Vec::new();
-    let mut functions = Vec::new();
-    let mut interface_proxies = Vec::new();
-
-    for line in source.lines() {
-        let trimmed = line.trim();
-
-        if let Some(rest) = trimmed.strip_prefix("mesh.state.set(") {
-            if let Some(key) = parse_first_string_arg(rest) {
-                push_unique(&mut state_vars, key);
-            }
-        }
-
-        if let Some(rest) = trimmed.strip_prefix("mesh.service.bind(") {
-            if let Some((_, local)) = parse_two_string_args(rest) {
-                push_unique(&mut service_bindings, local);
-            }
-        }
-
-        if let Some((_, local)) = parse_proxy_bind_args(trimmed) {
-            push_unique(&mut service_bindings, local);
-        }
-
-        if let Some(rest) = trimmed.strip_prefix("function ") {
-            if let Some(name) = rest.split('(').next() {
-                let name = name.trim();
-                if is_identifier(name) {
-                    push_unique(&mut functions, name.to_string());
-                }
-            }
-        }
-
-        if let Some(rest) = trimmed.strip_prefix("local ") {
-            if let Some(req_pos) = rest.find("= require(") {
-                let var_name = rest[..req_pos].trim();
-                if is_identifier(var_name) {
-                    push_unique(&mut interface_proxies, var_name.to_string());
-                }
-            }
-        }
-
-        if let Some(name) = parse_global_assignment(trimmed) {
-            push_unique(&mut state_vars, name);
-        }
-    }
-
-    (state_vars, service_bindings, functions, interface_proxies)
-}
-
-fn parse_global_assignment(line: &str) -> Option<String> {
-    if line.is_empty()
-        || line.starts_with("--")
-        || line.starts_with("local ")
-        || line.starts_with("function ")
-        || line.starts_with("if ")
-        || line.starts_with("elseif ")
-        || line.starts_with("for ")
-        || line.starts_with("while ")
-        || line.starts_with("return ")
-    {
-        return None;
-    }
-
-    let eq = line.find('=')?;
-    let lhs = line[..eq].trim_end();
-    if lhs.ends_with('>') || lhs.ends_with('<') || lhs.ends_with('~') || lhs.ends_with('=') {
-        return None;
-    }
-    let name = lhs.split_whitespace().next()?;
-    if is_identifier(name) {
-        Some(name.to_string())
-    } else {
-        None
-    }
-}
-
-fn parse_first_string_arg(source: &str) -> Option<String> {
-    let s = source.trim_start();
-    let quote = s.chars().next()?;
-    if quote != '"' && quote != '\'' {
-        return None;
-    }
-    let rest = &s[1..];
-    let end = rest.find(quote)?;
-    Some(rest[..end].to_string())
-}
-
-fn parse_two_string_args(source: &str) -> Option<(String, String)> {
-    let first = parse_first_string_arg(source)?;
-    let s = source.trim_start();
-    let quote = s.chars().next()?;
-    let first_quoted_len = 1 + s[1..].find(quote)? + 1;
-    let after_first = s.get(first_quoted_len..)?.trim_start_matches([',', ' ']);
-    let second = parse_first_string_arg(after_first)?;
-    Some((first, second))
-}
-
-fn parse_proxy_bind_args(source: &str) -> Option<(String, String)> {
-    let bind_pos = source.find(":bind(").or_else(|| source.find(".bind("))?;
-    parse_two_string_args(&source[bind_pos + 6..])
-}
-
-fn referenced_identifiers(expr: &str) -> Vec<String> {
-    let mut refs = Vec::new();
-    let bytes = expr.as_bytes();
-    let mut i = 0usize;
-    let mut prev_non_ws: Option<u8> = None;
-
-    while i < bytes.len() {
-        let byte = bytes[i];
-        if byte == b'"' || byte == b'\'' {
-            let quote = byte;
-            i += 1;
-            while i < bytes.len() {
-                if bytes[i] == quote && bytes.get(i.wrapping_sub(1)) != Some(&b'\\') {
-                    i += 1;
-                    break;
-                }
-                i += 1;
-            }
-            continue;
-        }
-
-        if is_ident_start(byte) {
-            let start = i;
-            i += 1;
-            while i < bytes.len() && is_ident_continue(bytes[i]) {
-                i += 1;
-            }
-            let ident = &expr[start..i];
-            let next_non_ws = next_non_ws(bytes, i);
-            let is_member = prev_non_ws == Some(b'.');
-            let is_keyword = matches!(ident, "and" | "or" | "not" | "true" | "false" | "nil");
-            let is_builtin_call = ident == "t" && next_non_ws == Some(b'(');
-            if !is_member && !is_keyword && !is_builtin_call && !refs.iter().any(|r| r == ident) {
-                refs.push(ident.to_string());
-            }
-            prev_non_ws = Some(bytes[i - 1]);
-            continue;
-        }
-
-        if !byte.is_ascii_whitespace() {
-            prev_non_ws = Some(byte);
-        }
-        i += 1;
-    }
-
-    refs
-}
-
-fn next_non_ws(bytes: &[u8], mut index: usize) -> Option<u8> {
-    while index < bytes.len() {
-        if !bytes[index].is_ascii_whitespace() {
-            return Some(bytes[index]);
-        }
-        index += 1;
-    }
-    None
-}
-
-fn push_unique(values: &mut Vec<String>, value: String) {
-    if !values.iter().any(|existing| existing == &value) {
-        values.push(value);
-    }
-}
-
-fn is_identifier(value: &str) -> bool {
-    let mut chars = value.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !(first.is_ascii_alphabetic() || first == '_') {
-        return false;
-    }
-    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-}
-
-fn is_ident_start(byte: u8) -> bool {
-    byte.is_ascii_alphabetic() || byte == b'_'
-}
-
-fn is_ident_continue(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
 #[cfg(test)]

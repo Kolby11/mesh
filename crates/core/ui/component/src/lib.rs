@@ -15,7 +15,7 @@ pub mod style;
 /// any other mesh crate.
 pub mod template;
 
-pub use parser::{ParseError, parse_component, parse_inline_style};
+pub use parser::{ParseError, parse_component, parse_inline_style, referenced_identifiers};
 pub use style::*;
 pub use template::*;
 
@@ -729,11 +729,60 @@ pub enum LocalizedLabel {
     },
 }
 
-/// A script block with its language and source code.
+/// A script block with its language, source code, and parser-derived metadata.
 #[derive(Debug, Clone)]
 pub struct ScriptBlock {
     pub lang: ScriptLang,
     pub source: String,
+    pub metadata: ScriptMetadata,
+}
+
+/// Metadata collected from a Luau script by the component parser.
+///
+/// The metadata is deliberately shared by compiler and editor tooling.  It is
+/// derived from the Luau AST rather than from source lines, so comments,
+/// strings, multiline calls, and nested expressions cannot make consumers
+/// disagree about what the script declares.
+#[derive(Debug, Clone, Default)]
+pub struct ScriptMetadata {
+    pub state_vars: Vec<String>,
+    pub service_bindings: Vec<(String, String)>,
+    pub functions: Vec<String>,
+    pub public_functions: Vec<String>,
+    pub required_aliases: Vec<String>,
+    pub interface_proxies: std::collections::HashMap<String, String>,
+    pub symbols: Vec<ScriptSymbol>,
+    pub element_ref_aliases: Vec<ScriptAlias>,
+}
+
+/// A script symbol and its source location, relative to the script block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptSymbol {
+    pub name: String,
+    pub kind: ScriptSymbolKind,
+    pub span: SourceSpan,
+}
+
+/// The kinds of symbols exported by a component script or made available to
+/// editor navigation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptSymbolKind {
+    Function,
+    Variable,
+}
+
+/// A script alias used for element-reference tooling.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptAlias {
+    pub alias: String,
+    pub target: ScriptAliasTarget,
+}
+
+/// The target of a script alias.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScriptAliasTarget {
+    Ref(String),
+    CurrentTarget,
 }
 
 /// Supported scripting languages.

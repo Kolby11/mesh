@@ -1,7 +1,7 @@
 use mesh_core_component::{
-    ComponentFile, ComponentImport,
-    parser::ParseError,
-    parser::parse_component,
+    ComponentFile, ComponentImport, ScriptAliasTarget,
+    ScriptSymbolKind as ComponentScriptSymbolKind,
+    parser::{ParseError, parse_component, parse_luau_script},
     template::{AttributeValue, TemplateNode},
 };
 use mesh_core_elements::element_type_for_tag;
@@ -109,7 +109,7 @@ impl Document {
             script_symbols,
             interface_proxies,
             element_ref_aliases,
-        ) = extract_script_info(&source);
+        ) = extract_script_info(&source, parsed.as_ref());
 
         let element_refs = parsed
             .as_ref()
@@ -281,42 +281,22 @@ fn component_instance_binding(
 /// `ScriptContext::public_function_names` / `install_live_binding`. Returns
 /// `(variables, functions)`.
 pub fn public_component_members(source: &str) -> (Vec<String>, Vec<String>) {
-    let mut variables: Vec<String> = Vec::new();
-    let mut functions: Vec<String> = Vec::new();
-
     let Some((script_start, script_end)) = block_content_range(source, "script") else {
-        return (variables, functions);
+        return (Vec::new(), Vec::new());
     };
-    let script = &source[script_start..script_end];
 
-    for line in script.lines() {
-        let t = line.trim();
-
-        // Public function: `function Name(...)` — `local function` is private.
-        if let Some(rest) = t.strip_prefix("function ") {
-            if let Some(name) = rest.split('(').next() {
-                let name = name.trim();
-                if !name.is_empty()
-                    && !name.contains(['.', ':'])
-                    && !is_reserved_component_hook(name)
-                    && !functions.iter().any(|existing| existing == name)
-                {
-                    functions.push(name.to_string());
-                }
-            }
-            continue;
-        }
-
-        // Public reactive variable: bare `name = value` (rejects `local`,
-        // comparisons, and compound LHS — see `parse_public_assignment`).
-        if let Some(name) = parse_public_assignment(t) {
-            if !variables.contains(&name) {
-                variables.push(name);
-            }
-        }
-    }
-
-    (variables, functions)
+    let Some(script) = parse_luau_script(&source[script_start..script_end]).ok() else {
+        return (Vec::new(), Vec::new());
+    };
+    (
+        script.metadata.state_vars,
+        script
+            .metadata
+            .public_functions
+            .into_iter()
+            .filter(|name| !is_reserved_component_hook(name))
+            .collect(),
+    )
 }
 
 /// Lifecycle hooks that stay host-private and do not cross `bind:this`.
@@ -369,9 +349,10 @@ fn push_element_ref(refs: &mut Vec<ElementRef>, name: String, tag: &str, source:
 }
 
 /// Extract state vars, service bindings, function names, and interface proxy
-/// bindings from the script block via line-by-line pattern matching.
+/// bindings from parser-owned Luau metadata.
 fn extract_script_info(
     source: &str,
+    parsed: Option<&ComponentFile>,
 ) -> (
     Vec<String>,
     Vec<(String, String)>,
@@ -380,238 +361,67 @@ fn extract_script_info(
     HashMap<String, String>,
     Vec<ElementRefAlias>,
 ) {
-    let mut state_vars: Vec<String> = Vec::new();
-    let mut service_bindings: Vec<(String, String)> = Vec::new();
-    let mut functions: Vec<String> = Vec::new();
-    let mut script_symbols: Vec<ScriptSymbol> = Vec::new();
-    let mut interface_proxies: HashMap<String, String> = HashMap::new();
-    let mut element_ref_aliases: Vec<ElementRefAlias> = Vec::new();
-
     let Some((script_start, script_end)) = block_content_range(source, "script") else {
         return (
-            state_vars,
-            service_bindings,
-            functions,
-            script_symbols,
-            interface_proxies,
-            element_ref_aliases,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            HashMap::new(),
+            Vec::new(),
         );
     };
-    let script = &source[script_start..script_end];
-    let mut line_start = script_start;
+    let script = parsed
+        .and_then(|file| file.script.as_ref())
+        .cloned()
+        .or_else(|| parse_luau_script(&source[script_start..script_end]).ok());
+    let Some(script) = script else {
+        return (
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            HashMap::new(),
+            Vec::new(),
+        );
+    };
+    let metadata = script.metadata;
 
-    for line in script.lines() {
-        let t = line.trim();
-
-        if let Some(rest) = t.strip_prefix("mesh.state.set(") {
-            if let Some(key) = parse_first_string_arg(rest) {
-                if !state_vars.contains(&key) {
-                    state_vars.push(key);
-                }
-            }
-        }
-
-        if let Some(rest) = t.strip_prefix("mesh.service.bind(") {
-            if let Some((svc, local)) = parse_two_string_args(rest) {
-                service_bindings.push((svc, local));
-            }
-        }
-
-        if let Some((svc, local)) = parse_proxy_bind_args(t, &interface_proxies) {
-            service_bindings.push((svc, local));
-        }
-
-        if let Some(rest) = t.strip_prefix("function ") {
-            if let Some(name) = rest.split('(').next() {
-                let name = name.trim().to_string();
-                if !name.is_empty() && !functions.contains(&name) {
-                    functions.push(name);
-                }
-            }
-        }
-
-        if let Some((name, span)) = parse_function_definition(line, line_start) {
-            push_script_symbol(&mut script_symbols, name, ScriptSymbolKind::Function, span);
-        }
-
-        // Bare non-local assignment (`name = value`) is a public reactive member.
-        if let Some(name) = parse_public_assignment(t) {
-            if !state_vars.contains(&name) {
-                state_vars.push(name.clone());
-            }
-            if let Some(span) = assignment_name_span(line, line_start, &name) {
-                push_script_symbol(&mut script_symbols, name, ScriptSymbolKind::Variable, span);
-            }
-        }
-
-        if let Some(rest) = t.strip_prefix("local ") {
-            if rest.contains("= function") || rest.contains("=function") {
-                if let Some(name) = rest.split('=').next() {
-                    let name = name.trim().to_string();
-                    if !name.is_empty() && !functions.contains(&name) {
-                        functions.push(name.clone());
-                    }
-                    if let Some(span) = assignment_name_span(line, line_start, &name) {
-                        push_script_symbol(
-                            &mut script_symbols,
-                            name,
-                            ScriptSymbolKind::Function,
-                            span,
-                        );
-                    }
-                }
-            }
-
-            // Detect: local <var> = require("mesh....")
-            //     or: local <var> = import("mesh....")  (default import, no names)
-            // A default `import(...)` with no extra arguments resolves to the
-            // same proxy table as `require(...)`, so it binds the same shape.
-            let binder = ["= require(", "= import("]
-                .into_iter()
-                .find_map(|kw| rest.find(kw).map(|pos| (kw, pos)));
-            if let Some((kw, req_pos)) = binder {
-                let var_name = rest[..req_pos].trim().to_string();
-                let after_req = &rest[req_pos + kw.len()..];
-                // Strip opening quote
-                let after_quote = after_req.trim_start_matches(|c| c == '"' || c == '\'');
-                // Extract the module string up to closing quote
-                let module = after_quote
-                    .split(|c| c == '"' || c == '\'')
-                    .next()
-                    .unwrap_or("");
-                // Only a single-argument import maps to one proxy variable;
-                // `import("spec", "a", "b")` returns several values, not a proxy.
-                let rest_after_module = after_quote
-                    .get(module.len()..)
-                    .unwrap_or("")
-                    .trim_start_matches(|c| c == '"' || c == '\'');
-                let is_default_import =
-                    kw == "= require(" || !rest_after_module.trim_start().starts_with(',');
-                let iface = canonicalize_interface_name(module);
-                if is_default_import && !var_name.is_empty() && !iface.is_empty() {
-                    interface_proxies.insert(var_name, iface);
-                }
-            }
-        }
-
-        if let Some((alias, target)) = parse_element_ref_alias(t) {
-            if !element_ref_aliases
-                .iter()
-                .any(|existing| existing.alias == alias)
-            {
-                element_ref_aliases.push(ElementRefAlias { alias, target });
-            }
-        }
-
-        line_start += line.len() + 1;
-    }
+    let symbols = metadata
+        .symbols
+        .into_iter()
+        .map(|symbol| ScriptSymbol {
+            name: symbol.name,
+            kind: match symbol.kind {
+                ComponentScriptSymbolKind::Function => ScriptSymbolKind::Function,
+                ComponentScriptSymbolKind::Variable => ScriptSymbolKind::Variable,
+            },
+            span: ByteSpan {
+                start: script_start + symbol.span.start,
+                end: script_start + symbol.span.end,
+            },
+        })
+        .collect();
+    let aliases = metadata
+        .element_ref_aliases
+        .into_iter()
+        .map(|alias| ElementRefAlias {
+            alias: alias.alias,
+            target: match alias.target {
+                ScriptAliasTarget::Ref(name) => ElementRefAliasTarget::Ref(name),
+                ScriptAliasTarget::CurrentTarget => ElementRefAliasTarget::CurrentTarget,
+            },
+        })
+        .collect();
 
     (
-        state_vars,
-        service_bindings,
-        functions,
-        script_symbols,
-        interface_proxies,
-        element_ref_aliases,
+        metadata.state_vars,
+        metadata.service_bindings,
+        metadata.functions,
+        symbols,
+        metadata.interface_proxies,
+        aliases,
     )
-}
-
-fn push_script_symbol(
-    symbols: &mut Vec<ScriptSymbol>,
-    name: String,
-    kind: ScriptSymbolKind,
-    span: ByteSpan,
-) {
-    if symbols
-        .iter()
-        .any(|symbol| symbol.name == name && symbol.kind == kind)
-    {
-        return;
-    }
-    symbols.push(ScriptSymbol { name, kind, span });
-}
-
-fn parse_function_definition(line: &str, line_start: usize) -> Option<(String, ByteSpan)> {
-    let trimmed = line.trim_start();
-    let prefix = if trimmed.starts_with("local function ") {
-        "local function "
-    } else if trimmed.starts_with("function ") {
-        "function "
-    } else {
-        return None;
-    };
-
-    let name = trimmed
-        .strip_prefix(prefix)?
-        .split('(')
-        .next()?
-        .trim()
-        .to_string();
-    if name.is_empty() {
-        return None;
-    }
-
-    let column = line.find(&name)?;
-    Some((
-        name.clone(),
-        ByteSpan {
-            start: line_start + column,
-            end: line_start + column + name.len(),
-        },
-    ))
-}
-
-fn assignment_name_span(line: &str, line_start: usize, name: &str) -> Option<ByteSpan> {
-    let column = line.find(name)?;
-    Some(ByteSpan {
-        start: line_start + column,
-        end: line_start + column + name.len(),
-    })
-}
-
-fn parse_element_ref_alias(line: &str) -> Option<(String, ElementRefAliasTarget)> {
-    let line = line.strip_prefix("local ").unwrap_or(line);
-    let (alias, value) = line.split_once('=')?;
-    let alias = alias.trim();
-    if alias.is_empty()
-        || !alias
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-    {
-        return None;
-    }
-
-    let value = value.trim();
-    if value.starts_with("event.current_target") {
-        return Some((alias.to_string(), ElementRefAliasTarget::CurrentTarget));
-    }
-
-    let rest = value.strip_prefix("refs.")?;
-    let ref_name: String = rest
-        .chars()
-        .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
-        .collect();
-    (!ref_name.is_empty()).then(|| (alias.to_string(), ElementRefAliasTarget::Ref(ref_name)))
-}
-
-/// Convert a require module string to a canonical interface name.
-/// "mesh.audio@>=1.0" → "mesh.audio", "mesh.audio" → "mesh.audio"
-fn canonicalize_interface_name(module: &str) -> String {
-    // Strip version suffix
-    let module = if let Some((left, _)) = module.rsplit_once('@') {
-        if left.starts_with("mesh.") {
-            left
-        } else {
-            module
-        }
-    } else {
-        module
-    };
-    if module.starts_with("mesh.") {
-        module.to_string()
-    } else {
-        String::new()
-    }
 }
 
 /// Extract the raw text content inside `<block_name>...</block_name>`.
@@ -644,104 +454,6 @@ pub fn block_content_range(source: &str, block_name: &str) -> Option<(usize, usi
     let content_start = tag_start + close_angle + 1;
     let close_pos = source[content_start..].find(&close)?;
     Some((content_start, content_start + close_pos))
-}
-
-/// Detects a bare public assignment `name = value` (a public reactive script
-/// member). Returns the member name. Rejects `local`/keyword lines, comparisons
-/// (`==`, `~=`, `<=`, `>=`), compound LHS (`t.x`, `t:m`, `t[i]`), and multi-assign.
-fn parse_public_assignment(line: &str) -> Option<String> {
-    let line = line.trim();
-    let eq = line.find('=')?;
-    // Reject comparison / inequality operators.
-    let before = line.as_bytes()[eq.checked_sub(1)?];
-    let after = line.as_bytes().get(eq + 1).copied();
-    if matches!(before, b'=' | b'~' | b'<' | b'>' | b'!') || after == Some(b'=') {
-        return None;
-    }
-
-    let name = line[..eq].trim();
-    if name.is_empty() {
-        return None;
-    }
-    // LHS must be a single plain identifier.
-    let mut chars = name.chars();
-    let first = chars.next()?;
-    if !(first.is_ascii_alphabetic() || first == '_') {
-        return None;
-    }
-    if !chars.all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        return None;
-    }
-    if is_lua_keyword(name) {
-        return None;
-    }
-    Some(name.to_string())
-}
-
-fn is_lua_keyword(word: &str) -> bool {
-    matches!(
-        word,
-        "and"
-            | "break"
-            | "do"
-            | "else"
-            | "elseif"
-            | "end"
-            | "false"
-            | "for"
-            | "function"
-            | "if"
-            | "in"
-            | "local"
-            | "nil"
-            | "not"
-            | "or"
-            | "repeat"
-            | "return"
-            | "then"
-            | "true"
-            | "until"
-            | "while"
-    )
-}
-
-fn parse_first_string_arg(s: &str) -> Option<String> {
-    let s = s.trim_start();
-    let quote = if s.starts_with('"') {
-        '"'
-    } else if s.starts_with('\'') {
-        '\''
-    } else {
-        return None;
-    };
-    let inner = &s[1..];
-    let end = inner.find(quote)?;
-    Some(inner[..end].to_string())
-}
-
-fn parse_two_string_args(s: &str) -> Option<(String, String)> {
-    let first = parse_first_string_arg(s)?;
-    // Advance past the first quoted string + comma
-    let s = s.trim_start();
-    let first_quoted_len = first.len() + 2; // quotes
-    let after_first = s.get(first_quoted_len..)?.trim_start_matches([',', ' ']);
-    let second = parse_first_string_arg(after_first)?;
-    Some((first, second))
-}
-
-fn parse_proxy_bind_args(
-    line: &str,
-    interface_proxies: &HashMap<String, String>,
-) -> Option<(String, String)> {
-    let bind_pos = line.find(":bind(").or_else(|| line.find(".bind("))?;
-    let proxy_expr = line[..bind_pos].trim();
-    let proxy_name = proxy_expr
-        .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-        .find(|segment| !segment.is_empty())?;
-    let iface = interface_proxies.get(proxy_name)?;
-    let service = iface.strip_prefix("mesh.").unwrap_or(iface).to_string();
-    let (_, local) = parse_two_string_args(&line[bind_pos + 6..])?;
-    Some((service, local))
 }
 
 #[cfg(test)]

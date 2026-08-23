@@ -216,6 +216,6 @@ live compositor/lifecycle matrix remain separate follow-up work.
 
 ## Next
 
-The next component-language item replaces line-oriented script/import/symbol
-scans with one Luau lexer/parser and source metadata;
-the remaining presentation/resource follow-ups stay separate from this work.
+The next component-language item carries reliable source spans through
+component AST nodes, compiler errors, CLI diagnostics, and LSP output; the
+remaining presentation/resource follow-ups stay separate from this work.

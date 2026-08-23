@@ -10,7 +10,8 @@ mod styles;
 
 use crate::{BlockAttribute, ComponentBlock, ComponentFile, ComponentImportTarget, SourceSpan};
 use props::parse_props;
-use script::{extract_imports, parse_script};
+use script::parse_script;
+pub use script::referenced_identifiers;
 use std::collections::{HashMap, HashSet};
 use styles::parse_style;
 
@@ -89,11 +90,10 @@ fn parse_component_impl(
 ) -> Result<ComponentFile, ParseError> {
     let blocks = parse_top_level_blocks(source)?;
 
-    let (imports, script_source) = if let Some(block) =
-        blocks.iter().find(|block| block.name == "script")
+    let (imports, script) = if let Some(block) = blocks.iter().find(|block| block.name == "script")
     {
-        let (imports, stripped) = extract_imports(&source[block.content.start..block.content.end])?;
-        (imports, Some(stripped))
+        let (imports, script) = parse_script(&source[block.content.start..block.content.end])?;
+        (imports, Some(script))
     } else {
         (Vec::new(), None)
     };
@@ -113,8 +113,6 @@ fn parse_component_impl(
             )
         })
         .transpose()?;
-
-    let script = script_source.map(|s| parse_script(&s));
 
     let style = blocks
         .iter()
@@ -140,6 +138,11 @@ fn parse_component_impl(
         semantic::validate(source, &component)?;
     }
     Ok(component)
+}
+
+/// Parse a standalone Luau script block for editor tooling.
+pub fn parse_luau_script(source: &str) -> Result<crate::ScriptBlock, ParseError> {
+    parse_script(source).map(|(_, script)| script)
 }
 
 /// Parse the declaration list carried by an element's `style` attribute.
@@ -1656,6 +1659,62 @@ local audio = require("mesh.audio@>=1.0")
             script
                 .source
                 .contains("local BatteryWidget = require(\"./components/battery-widget.mesh\")")
+        );
+    }
+
+    #[test]
+    fn derives_script_metadata_from_luau_ast() {
+        let source = r#"
+<template><box /></template>
+<script lang="luau">
+-- function Fake() end
+local docs = [=[import Fake from "./fake.mesh" mesh.state.set("fake", true) function Fake() end]=]
+import
+  BatteryWidget
+from
+  "./battery.mesh"
+local audio = require(
+  "mesh.audio@>=1.0"
+)
+mesh.state.set(
+  "ready",
+  true
+)
+mesh.service.bind(
+  "battery.level",
+  "battery_level"
+)
+function
+  refresh()
+end
+</script>
+"#;
+
+        let file = parse_component(source).unwrap();
+        assert_eq!(file.imports.len(), 2);
+        let script = file.script.unwrap();
+        assert!(script.metadata.state_vars.contains(&"ready".to_string()));
+        assert!(!script.metadata.state_vars.contains(&"fake".to_string()));
+        assert!(script.metadata.functions.contains(&"refresh".to_string()));
+        assert!(!script.metadata.functions.contains(&"Fake".to_string()));
+        assert_eq!(
+            script.metadata.service_bindings,
+            vec![("battery.level".into(), "battery_level".into())]
+        );
+        assert_eq!(
+            script.metadata.interface_proxies.get("audio"),
+            Some(&"mesh.audio".to_string())
+        );
+        assert!(!script.source.contains("\nimport\n"));
+    }
+
+    #[test]
+    fn referenced_identifiers_use_luau_syntax() {
+        assert_eq!(
+            super::referenced_identifiers(
+                r#"value .. object.field .. [=[not_an_identifier]=] -- ignored"#
+            ),
+            vec!["value", "object"]
         );
     }
 
