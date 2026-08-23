@@ -1,12 +1,78 @@
-use super::StyleResolver;
 use super::attrs::StyleNodeAttrs;
 use super::index::*;
 use super::matching::*;
+use super::value::split_reference;
+use super::{ResolutionContext, StyleResolver};
 use crate::style::parse::*;
 use crate::style::*;
 use mesh_core_component::style::{Declaration, Selector, StyleValue};
 use mesh_core_theme::TokenValue;
 use std::collections::HashMap;
+
+struct ContextualStyleResolver<'a, 'b> {
+    resolver: &'a StyleResolver<'b>,
+    context: &'a mut ResolutionContext,
+}
+
+impl<'a, 'b> ContextualStyleResolver<'a, 'b> {
+    fn resolve_color_with_variables(
+        &mut self,
+        value: &StyleValue,
+        variables: &HashMap<String, StyleValue>,
+    ) -> Color {
+        self.resolver
+            .resolve_color_with_variables_context(value, variables, self.context)
+    }
+
+    fn resolve_number_with_variables(
+        &mut self,
+        value: &StyleValue,
+        variables: &HashMap<String, StyleValue>,
+    ) -> f32 {
+        self.resolver
+            .resolve_number_with_variables_context(value, variables, self.context)
+    }
+
+    fn resolve_value_with_variables(
+        &mut self,
+        value: &StyleValue,
+        variables: &HashMap<String, StyleValue>,
+    ) -> String {
+        self.resolver
+            .resolve_value_with_variables_mode_context(value, variables, false, self.context)
+            .unwrap_or_default()
+    }
+
+    fn resolve_value_with_variables_mode(
+        &mut self,
+        value: &StyleValue,
+        variables: &HashMap<String, StyleValue>,
+        strict_animation_tokens: bool,
+    ) -> String {
+        self.resolver
+            .resolve_value_with_variables_mode_context(
+                value,
+                variables,
+                strict_animation_tokens,
+                self.context,
+            )
+            .unwrap_or_default()
+    }
+
+    fn with_resolved_str<R>(
+        &mut self,
+        value: &StyleValue,
+        variables: &HashMap<String, StyleValue>,
+        read: impl FnOnce(&str) -> R,
+    ) -> R {
+        self.resolver
+            .with_resolved_str_context(value, variables, self.context, read)
+    }
+
+    fn resolve_font_family_reference(&self, family: &str) -> String {
+        self.resolver.resolve_font_family_reference(family)
+    }
+}
 
 macro_rules! css_property_table {
     (
@@ -16,11 +82,12 @@ macro_rules! css_property_table {
             $value:ident: &StyleValue,
             $resolver:ident: &StyleResolver,
             $variables:ident: &HashMap<String, StyleValue>,
+            $context:ident: &mut ResolutionContext,
         ) { $($arms:tt)* }
     ) => {
         css_property_table! {
             @parse
-            [$apply, $style, $property, $value, $resolver, $variables]
+            [$apply, $style, $property, $value, $resolver, $variables, $context]
             []
             []
             $($arms)*
@@ -56,7 +123,7 @@ macro_rules! css_property_table {
     };
     (
         @parse
-        [$apply:ident, $style:ident, $property:ident, $value:ident, $resolver:ident, $variables:ident]
+        [$apply:ident, $style:ident, $property:ident, $value:ident, $resolver:ident, $variables:ident, $context:ident]
         [$($names:expr,)*]
         [$($parsed:tt)*]
     ) => {
@@ -68,7 +135,25 @@ macro_rules! css_property_table {
             $value: &StyleValue,
             $resolver: &StyleResolver,
             $variables: &HashMap<String, StyleValue>,
+            $context: &mut ResolutionContext,
         ) {
+            let mut $resolver = ContextualStyleResolver {
+                resolver: $resolver,
+                context: $context,
+            };
+            if has_dynamic_style_references($value)
+                && $resolver
+                    .resolver
+                    .resolve_value_with_variables_mode_context(
+                        $value,
+                        $variables,
+                        false,
+                        $resolver.context,
+                    )
+                    .is_err()
+            {
+                return;
+            }
             match $property {
                 $($parsed)*
                 _ => tracing::warn!("unsupported CSS property '{}'", $property),
@@ -259,6 +344,7 @@ impl<'a> StyleResolver<'a> {
                 strict_animation,
                 background_image,
             } => {
+                let mut context = ResolutionContext::default();
                 if let Some(literal) = decl.literal
                     && apply_typed_literal(style, name, literal)
                 {
@@ -266,8 +352,13 @@ impl<'a> StyleResolver<'a> {
                 }
                 if let StyleValue::Var(variable_name) = &decl.value
                     && !*strict_animation
-                    && !variables.contains_key(variable_name)
+                    && {
+                        let (name, fallback) = split_reference(variable_name);
+                        fallback.is_none() && !variables.contains_key(name.trim())
+                    }
                 {
+                    let (variable_name, _) = split_reference(variable_name);
+                    let variable_name = variable_name.trim();
                     if let Some(error) = self.cached_theme_token_error(variable_name) {
                         push_indexed_style_diagnostic(&mut diagnostics, name.clone(), error);
                     } else if self.cached_theme_token_value(variable_name).is_missing() {
@@ -281,9 +372,13 @@ impl<'a> StyleResolver<'a> {
                     }
                 }
                 if *strict_animation
-                    && let Err(token_name) =
-                        self.validate_animation_value_with_variables(&decl.value, variables)
+                    && let Err(token_name) = self.validate_animation_value_with_variables_context(
+                        &decl.value,
+                        variables,
+                        &mut context,
+                    )
                 {
+                    push_indexed_cycle_diagnostics(&mut diagnostics, name, &mut context);
                     push_indexed_style_diagnostic(
                         &mut diagnostics,
                         name.clone(),
@@ -292,8 +387,16 @@ impl<'a> StyleResolver<'a> {
                     return;
                 }
                 if *background_image {
-                    let resolved = self.resolve_value_with_variables(&decl.value, variables);
+                    let resolved = self
+                        .resolve_value_with_variables_mode_context(
+                            &decl.value,
+                            variables,
+                            false,
+                            &mut context,
+                        )
+                        .unwrap_or_default();
                     if !is_supported_background_image(&resolved) {
+                        push_indexed_cycle_diagnostics(&mut diagnostics, name, &mut context);
                         push_indexed_style_diagnostic(
                             &mut diagnostics,
                             name.clone(),
@@ -302,7 +405,15 @@ impl<'a> StyleResolver<'a> {
                         return;
                     }
                 }
-                apply_declaration(style, name, &decl.value, self, variables);
+                apply_declaration_with_context(
+                    style,
+                    name,
+                    &decl.value,
+                    self,
+                    variables,
+                    &mut context,
+                );
+                push_indexed_cycle_diagnostics(&mut diagnostics, name, &mut context);
             }
         }
     }
@@ -315,6 +426,7 @@ impl<'a> StyleResolver<'a> {
         value: &StyleValue,
         variables: &mut HashMap<String, StyleValue>,
     ) {
+        let mut context = ResolutionContext::default();
         if property.starts_with("--") {
             variables.insert(property.to_string(), value.clone());
             return;
@@ -332,18 +444,20 @@ impl<'a> StyleResolver<'a> {
         }
         if is_strict_animation_property(property)
             && self
-                .validate_animation_value_with_variables(value, variables)
+                .validate_animation_value_with_variables_context(value, variables, &mut context)
                 .is_err()
         {
             return;
         }
         if property == "background-image" {
-            let resolved = self.resolve_value_with_variables(value, variables);
+            let resolved = self
+                .resolve_value_with_variables_mode_context(value, variables, false, &mut context)
+                .unwrap_or_default();
             if !is_supported_background_image(&resolved) {
                 return;
             }
         }
-        apply_declaration(style, property, value, self, variables);
+        apply_declaration_with_context(style, property, value, self, variables, &mut context);
     }
 
     pub(super) fn apply_declaration_with_diagnostics(
@@ -413,10 +527,16 @@ impl<'a> StyleResolver<'a> {
             });
             return;
         }
+        let mut context = ResolutionContext::default();
         if let StyleValue::Var(name) = &decl.value
             && !is_strict_animation_property(&decl.property)
-            && !variables.contains_key(name)
+            && {
+                let (name, fallback) = split_reference(name);
+                fallback.is_none() && !variables.contains_key(name.trim())
+            }
         {
+            let (name, _) = split_reference(name);
+            let name = name.trim();
             let message = self.cached_theme_token_error(name).or_else(|| {
                 self.cached_theme_token_value(name).is_missing().then(|| {
                     format!(
@@ -434,9 +554,18 @@ impl<'a> StyleResolver<'a> {
             }
         }
         if is_strict_animation_property(&decl.property)
-            && let Err(token_name) =
-                self.validate_animation_value_with_variables(&decl.value, variables)
+            && let Err(token_name) = self.validate_animation_value_with_variables_context(
+                &decl.value,
+                variables,
+                &mut context,
+            )
         {
+            push_cycle_diagnostics(
+                diagnostics,
+                &decl.property,
+                selector.as_deref(),
+                &mut context,
+            );
             diagnostics.push(StyleDiagnostic {
                 property: decl.property.clone(),
                 selector,
@@ -445,8 +574,21 @@ impl<'a> StyleResolver<'a> {
             return;
         }
         if decl.property == "background-image" {
-            let resolved = self.resolve_value_with_variables(&decl.value, variables);
+            let resolved = self
+                .resolve_value_with_variables_mode_context(
+                    &decl.value,
+                    variables,
+                    false,
+                    &mut context,
+                )
+                .unwrap_or_default();
             if !is_supported_background_image(&resolved) {
+                push_cycle_diagnostics(
+                    diagnostics,
+                    &decl.property,
+                    selector.as_deref(),
+                    &mut context,
+                );
                 diagnostics.push(StyleDiagnostic {
                     property: decl.property.clone(),
                     selector,
@@ -455,7 +597,20 @@ impl<'a> StyleResolver<'a> {
                 return;
             }
         }
-        apply_declaration(style, &decl.property, &decl.value, self, variables);
+        apply_declaration_with_context(
+            style,
+            &decl.property,
+            &decl.value,
+            self,
+            variables,
+            &mut context,
+        );
+        push_cycle_diagnostics(
+            diagnostics,
+            &decl.property,
+            selector.as_deref(),
+            &mut context,
+        );
     }
 }
 
@@ -487,13 +642,58 @@ pub(super) fn push_indexed_static_style_diagnostic(
     }
 }
 
-css_property_table! {
-fn apply_declaration(
+fn push_indexed_cycle_diagnostics(
+    diagnostics: &mut Option<(&str, &mut Vec<StyleDiagnostic>)>,
+    property: &str,
+    context: &mut ResolutionContext,
+) {
+    for message in context.take_cycle_messages() {
+        push_indexed_style_diagnostic(diagnostics, property.to_owned(), message);
+    }
+}
+
+fn push_cycle_diagnostics(
+    diagnostics: &mut Vec<StyleDiagnostic>,
+    property: &str,
+    selector: Option<&str>,
+    context: &mut ResolutionContext,
+) {
+    for message in context.take_cycle_messages() {
+        diagnostics.push(StyleDiagnostic {
+            property: property.to_owned(),
+            selector: selector.map(str::to_owned),
+            message,
+        });
+    }
+}
+
+#[cfg(test)]
+pub(super) fn apply_declaration(
     style: &mut ComputedStyle,
     property: &str,
     value: &StyleValue,
     resolver: &StyleResolver,
     variables: &HashMap<String, StyleValue>,
+) {
+    let mut context = ResolutionContext::default();
+    apply_declaration_with_context(style, property, value, resolver, variables, &mut context);
+}
+
+fn has_dynamic_style_references(value: &StyleValue) -> bool {
+    match value {
+        StyleValue::Literal(value) => references_style_function(value),
+        StyleValue::Var(_) | StyleValue::Prop(_) => true,
+    }
+}
+
+css_property_table! {
+fn apply_declaration_with_context(
+    style: &mut ComputedStyle,
+    property: &str,
+        value: &StyleValue,
+        resolver: &StyleResolver,
+        variables: &HashMap<String, StyleValue>,
+        context: &mut ResolutionContext,
 ) {
         "background" | "background-color" => {
             style.background_color = resolver.resolve_color_with_variables(value, variables)

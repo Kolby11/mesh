@@ -20,6 +20,7 @@ pub use attrs::StyleNodeAttrs;
 pub(super) use declaration::lowered_css_properties;
 pub use index::{StyleRuleAttribution, StyleRuleAttributionEntry, StyleRuleIndex};
 pub use matching::selector_matches_attrs;
+pub(super) use value::ResolutionContext;
 
 use cache::*;
 

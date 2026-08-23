@@ -9,6 +9,87 @@ use mesh_core_theme::TokenValue;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+#[derive(Debug, Default)]
+pub struct ResolutionContext {
+    stack: Vec<String>,
+    cycles: Vec<Vec<String>>,
+}
+
+impl ResolutionContext {
+    fn enter(&mut self, name: &str) -> bool {
+        if let Some(start) = self.stack.iter().position(|entry| entry == name) {
+            let mut cycle = self.stack[start..].to_vec();
+            cycle.push(name.to_owned());
+            if !self.cycles.iter().any(|known| known == &cycle) {
+                self.cycles.push(cycle);
+            }
+            return false;
+        }
+
+        self.stack.push(name.to_owned());
+        true
+    }
+
+    fn leave(&mut self, name: &str) {
+        debug_assert_eq!(self.stack.last().map(String::as_str), Some(name));
+        self.stack.pop();
+    }
+
+    fn cycle_message(&self, name: &str) -> String {
+        let start = self
+            .stack
+            .iter()
+            .position(|entry| entry == name)
+            .unwrap_or(0);
+        let mut cycle = self.stack[start..].to_vec();
+        cycle.push(name.to_owned());
+        format!(
+            "cyclic CSS custom-property reference: {}",
+            cycle.join(" -> ")
+        )
+    }
+
+    pub(super) fn take_cycle_messages(&mut self) -> impl Iterator<Item = String> + '_ {
+        self.cycles.drain(..).map(|cycle| {
+            format!(
+                "cyclic CSS custom-property reference: {}",
+                cycle.join(" -> ")
+            )
+        })
+    }
+}
+
+pub(super) fn split_reference(contents: &str) -> (&str, Option<&str>) {
+    let mut depth = 0usize;
+    for (index, character) in contents.char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => return (&contents[..index], Some(&contents[index + 1..])),
+            _ => {}
+        }
+    }
+    (contents, None)
+}
+
+fn function_end(value: &str, contents_start: usize) -> Option<usize> {
+    let mut depth = 1usize;
+    for (offset, character) in value[contents_start..].char_indices() {
+        let index = contents_start + offset;
+        match character {
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 impl<'a> StyleResolver<'a> {
     pub(super) fn resolve_font_family_reference(&self, family: &str) -> String {
         let Some((pack_id, role)) = family.split_once('/') else {
@@ -44,34 +125,172 @@ impl<'a> StyleResolver<'a> {
         variables: &HashMap<String, StyleValue>,
         strict_animation_tokens: bool,
     ) -> String {
+        let mut context = ResolutionContext::default();
+        self.resolve_value_with_variables_mode_context(
+            value,
+            variables,
+            strict_animation_tokens,
+            &mut context,
+        )
+        .unwrap_or_default()
+    }
+
+    pub(super) fn resolve_value_with_variables_mode_context(
+        &self,
+        value: &StyleValue,
+        variables: &HashMap<String, StyleValue>,
+        strict_animation_tokens: bool,
+        context: &mut ResolutionContext,
+    ) -> Result<String, String> {
         match value {
-            StyleValue::Literal(s) => self
-                .resolve_embedded_references_cached(s, variables, strict_animation_tokens)
-                .unwrap_or_default(),
-            StyleValue::Var(name) => variables
-                .get(name)
-                .map(|value| {
-                    self.resolve_value_with_variables_mode(
-                        value,
-                        variables,
-                        strict_animation_tokens,
-                    )
-                })
-                .unwrap_or_else(|| {
-                    self.resolve_theme_reference(name, strict_animation_tokens)
-                        .unwrap_or_default()
-                }),
-            StyleValue::Prop(name) => self
-                .lookup_variable(variables, &prop_variable_key(name))
-                .map(|value| {
-                    self.resolve_value_with_variables_mode(
-                        value,
-                        variables,
-                        strict_animation_tokens,
-                    )
-                })
-                .unwrap_or_default(),
+            StyleValue::Literal(s) => self.resolve_embedded_references_cached_context(
+                s,
+                variables,
+                strict_animation_tokens,
+                context,
+            ),
+            StyleValue::Var(name) => {
+                self.resolve_var_reference(name, variables, strict_animation_tokens, context)
+            }
+            StyleValue::Prop(name) => {
+                self.resolve_prop_reference(name, variables, strict_animation_tokens, context)
+            }
         }
+    }
+
+    fn resolve_var_reference(
+        &self,
+        contents: &str,
+        variables: &HashMap<String, StyleValue>,
+        strict_animation_tokens: bool,
+        context: &mut ResolutionContext,
+    ) -> Result<String, String> {
+        let (name, fallback) = split_reference(contents);
+        self.resolve_named_reference(name, fallback, variables, strict_animation_tokens, context)
+    }
+
+    fn resolve_prop_reference(
+        &self,
+        contents: &str,
+        variables: &HashMap<String, StyleValue>,
+        strict_animation_tokens: bool,
+        context: &mut ResolutionContext,
+    ) -> Result<String, String> {
+        let (name, fallback) = split_reference(contents);
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("empty component prop reference".to_string());
+        }
+
+        let key = prop_variable_key(name);
+        let Some(value) = self.lookup_variable(variables, &key) else {
+            return fallback
+                .map(|fallback| {
+                    self.resolve_value_with_variables_mode_context(
+                        &StyleValue::Literal(fallback.trim().to_owned()),
+                        variables,
+                        strict_animation_tokens,
+                        context,
+                    )
+                })
+                .unwrap_or_else(|| Ok(String::new()));
+        };
+
+        if !context.enter(&key) {
+            return self.resolve_fallback_or_error(
+                fallback,
+                context.cycle_message(&key),
+                variables,
+                strict_animation_tokens,
+                context,
+            );
+        }
+        let result = self.resolve_value_with_variables_mode_context(
+            value,
+            variables,
+            strict_animation_tokens,
+            context,
+        );
+        context.leave(&key);
+        match result {
+            Ok(value) => Ok(value),
+            Err(error) => self.resolve_fallback_or_error(
+                fallback,
+                error,
+                variables,
+                strict_animation_tokens,
+                context,
+            ),
+        }
+    }
+
+    fn resolve_named_reference(
+        &self,
+        name: &str,
+        fallback: Option<&str>,
+        variables: &HashMap<String, StyleValue>,
+        strict_animation_tokens: bool,
+        context: &mut ResolutionContext,
+    ) -> Result<String, String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("empty CSS variable reference".to_string());
+        }
+
+        let result = if let Some(value) = self.lookup_variable(variables, name) {
+            if !context.enter(name) {
+                Err(context.cycle_message(name))
+            } else {
+                let result = self.resolve_value_with_variables_mode_context(
+                    value,
+                    variables,
+                    strict_animation_tokens,
+                    context,
+                );
+                context.leave(name);
+                result
+            }
+        } else if fallback.is_some()
+            && matches!(
+                self.cached_theme_token_value(name),
+                CachedThemeTokenValue::Missing | CachedThemeTokenValue::Error(_)
+            )
+        {
+            Err(format!("unresolved CSS variable reference '{name}'"))
+        } else {
+            self.resolve_theme_reference(name, strict_animation_tokens)
+        };
+
+        match result {
+            Ok(value) => Ok(value),
+            Err(error) => self.resolve_fallback_or_error(
+                fallback,
+                error,
+                variables,
+                strict_animation_tokens,
+                context,
+            ),
+        }
+    }
+
+    fn resolve_fallback_or_error(
+        &self,
+        fallback: Option<&str>,
+        error: String,
+        variables: &HashMap<String, StyleValue>,
+        strict_animation_tokens: bool,
+        context: &mut ResolutionContext,
+    ) -> Result<String, String> {
+        fallback
+            .map(|fallback| {
+                self.resolve_value_with_variables_mode_context(
+                    &StyleValue::Literal(fallback.trim().to_owned()),
+                    variables,
+                    strict_animation_tokens,
+                    context,
+                )
+            })
+            .unwrap_or(Err(error))
     }
 
     pub(super) fn with_resolved_str<R>(
@@ -84,6 +303,22 @@ impl<'a> StyleResolver<'a> {
             return read(resolved);
         }
         let resolved = self.resolve_value_with_variables(value, variables);
+        read(&resolved)
+    }
+
+    pub(super) fn with_resolved_str_context<R>(
+        &self,
+        value: &StyleValue,
+        variables: &HashMap<String, StyleValue>,
+        context: &mut ResolutionContext,
+        read: impl FnOnce(&str) -> R,
+    ) -> R {
+        let resolved = match self
+            .resolve_value_with_variables_mode_context(value, variables, false, context)
+        {
+            Ok(resolved) => resolved,
+            Err(_) => String::new(),
+        };
         read(&resolved)
     }
 
@@ -157,6 +392,22 @@ impl<'a> StyleResolver<'a> {
         variables: &HashMap<String, StyleValue>,
         strict_animation_tokens: bool,
     ) -> Result<String, String> {
+        let mut context = ResolutionContext::default();
+        self.resolve_embedded_references_cached_context(
+            value,
+            variables,
+            strict_animation_tokens,
+            &mut context,
+        )
+    }
+
+    pub(super) fn resolve_embedded_references_cached_context(
+        &self,
+        value: &str,
+        variables: &HashMap<String, StyleValue>,
+        strict_animation_tokens: bool,
+        context: &mut ResolutionContext,
+    ) -> Result<String, String> {
         let mut output = String::with_capacity(value.len());
         let mut rest = value;
 
@@ -175,147 +426,33 @@ impl<'a> StyleResolver<'a> {
             output.push_str(&rest[..start]);
             let prefix_len = if is_prop { "prop(".len() } else { "var(".len() };
             let reference_start = start + prefix_len;
-            let Some(end) = rest[reference_start..].find(')') else {
+            let Some(end) = function_end(rest, reference_start) else {
                 output.push_str(&rest[start..]);
                 return Ok(output);
             };
 
-            let name = rest[reference_start..reference_start + end].trim();
-            if is_prop {
-                let prop_key = prop_variable_key(name);
-                if let Some(value) = self.lookup_variable(variables, &prop_key) {
-                    let resolved = self.style_value_to_string_cached(
-                        value,
-                        variables,
-                        strict_animation_tokens,
-                    )?;
-                    output.push_str(&self.resolve_embedded_references_cached(
-                        &resolved,
-                        variables,
-                        strict_animation_tokens,
-                    )?);
-                }
-            } else if let Some(value) = self.lookup_variable(variables, name) {
-                let resolved =
-                    self.style_value_to_string_cached(value, variables, strict_animation_tokens)?;
-                output.push_str(&self.resolve_embedded_references_cached(
-                    &resolved,
-                    variables,
-                    strict_animation_tokens,
-                )?);
+            let contents = &rest[reference_start..end];
+            let resolved = if is_prop {
+                self.resolve_prop_reference(contents, variables, strict_animation_tokens, context)?
             } else {
-                match self.cached_theme_token_value(name) {
-                    CachedThemeTokenValue::String(s) => output.push_str(&s),
-                    CachedThemeTokenValue::Number(n) => output.push_str(&format!("{n}")),
-                    CachedThemeTokenValue::Bool(b) => output.push_str(&format!("{b}")),
-                    CachedThemeTokenValue::Error(error) => {
-                        if strict_animation_tokens {
-                            return Err(error.to_string());
-                        }
-                        tracing::warn!("unresolved theme token dependency: {error}");
-                    }
-                    CachedThemeTokenValue::Missing => {
-                        let token_name = self.cached_theme_token_name(name);
-                        if strict_animation_tokens && token_name.starts_with("animation.") {
-                            return Err(token_name.to_string());
-                        }
-                        tracing::warn!("unresolved theme token: {token_name}");
-                    }
-                }
-            }
-            rest = &rest[reference_start + end + 1..];
+                self.resolve_var_reference(contents, variables, strict_animation_tokens, context)?
+            };
+            output.push_str(&resolved);
+            rest = &rest[end + 1..];
         }
 
         output.push_str(rest);
         Ok(output)
     }
 
-    pub(super) fn style_value_to_string_cached(
+    pub(super) fn validate_animation_value_with_variables_context(
         &self,
         value: &StyleValue,
         variables: &HashMap<String, StyleValue>,
-        strict_animation_tokens: bool,
-    ) -> Result<String, String> {
-        match value {
-            StyleValue::Literal(value) => {
-                self.resolve_embedded_references_cached(value, variables, strict_animation_tokens)
-            }
-            StyleValue::Prop(name) => {
-                if let Some(value) = self.lookup_variable(variables, &prop_variable_key(name)) {
-                    return self.style_value_to_string_cached(
-                        value,
-                        variables,
-                        strict_animation_tokens,
-                    );
-                }
-                Ok(String::new())
-            }
-            StyleValue::Var(name) => {
-                if let Some(value) = self.lookup_variable(variables, name) {
-                    return self.style_value_to_string_cached(
-                        value,
-                        variables,
-                        strict_animation_tokens,
-                    );
-                }
-                self.resolve_theme_reference(name, strict_animation_tokens)
-            }
-        }
-    }
-
-    pub(super) fn find_unresolved_animation_token_cached(&self, value: &str) -> Option<String> {
-        let mut rest = value;
-
-        loop {
-            let var_start = rest.find("var(");
-            let Some(start) = var_start else {
-                break;
-            };
-
-            let reference_start = start + "var(".len();
-            let end = rest[reference_start..].find(')')?;
-            let reference = rest[reference_start..reference_start + end].trim();
-            let token_name = self.cached_theme_token_name(reference);
-            let token_value = self.cached_theme_token_value(reference);
-            if token_name.starts_with("animation.") && token_value.is_missing() {
-                return Some(token_name.to_string());
-            }
-            rest = &rest[reference_start + end + 1..];
-        }
-
-        None
-    }
-
-    pub(super) fn validate_animation_value_with_variables(
-        &self,
-        value: &StyleValue,
-        variables: &HashMap<String, StyleValue>,
+        context: &mut ResolutionContext,
     ) -> Result<(), String> {
-        match value {
-            StyleValue::Literal(value) => {
-                if let Some(name) = self.find_unresolved_animation_token_cached(value) {
-                    return Err(name);
-                }
-                Ok(())
-            }
-            StyleValue::Var(name) => variables
-                .get(name)
-                .map(|value| self.validate_animation_value_with_variables(value, variables))
-                .unwrap_or_else(|| {
-                    let token_name = self.cached_theme_token_name(name);
-                    match self.cached_theme_token_value(name) {
-                        CachedThemeTokenValue::Error(error) => Err(error.to_string()),
-                        value if token_name.starts_with("animation.") && value.is_missing() => {
-                            Err(token_name.to_string())
-                        }
-                        _ => Ok(()),
-                    }
-                }),
-            StyleValue::Prop(name) => self
-                .lookup_variable(variables, &prop_variable_key(name))
-                .map(|value| self.validate_animation_value_with_variables(value, variables))
-                .unwrap_or(Ok(())),
-        }
+        self.resolve_value_with_variables_mode_context(value, variables, true, context)
+            .map(|_| ())
     }
 
     pub(super) fn resolve_color_with_variables(
@@ -323,10 +460,24 @@ impl<'a> StyleResolver<'a> {
         value: &StyleValue,
         variables: &HashMap<String, StyleValue>,
     ) -> Color {
-        self.resolve_color_with_variables_inner(value, variables, 0)
+        let mut context = ResolutionContext::default();
+        self.resolve_color_with_variables_context(value, variables, &mut context)
+    }
+
+    pub(super) fn resolve_color_with_variables_context(
+        &self,
+        value: &StyleValue,
+        variables: &HashMap<String, StyleValue>,
+        context: &mut ResolutionContext,
+    ) -> Color {
+        self.resolve_color_with_variables_inner(value, variables, 0, context)
             .unwrap_or_else(|| {
-                let resolved = self.resolve_value_with_variables(value, variables);
-                Color::from_css(&resolved).unwrap_or(Color::TRANSPARENT)
+                match self
+                    .resolve_value_with_variables_mode_context(value, variables, false, context)
+                {
+                    Ok(resolved) => Color::from_css(&resolved).unwrap_or(Color::TRANSPARENT),
+                    Err(_) => Color::TRANSPARENT,
+                }
             })
     }
 
@@ -335,6 +486,7 @@ impl<'a> StyleResolver<'a> {
         value: &StyleValue,
         variables: &HashMap<String, StyleValue>,
         depth: u8,
+        context: &mut ResolutionContext,
     ) -> Option<Color> {
         if depth > 16 {
             return None;
@@ -347,13 +499,25 @@ impl<'a> StyleResolver<'a> {
                     Some(Color::from_css(value).unwrap_or(Color::TRANSPARENT))
                 }
             }
+            StyleValue::Var(name) if name.contains(',') => {
+                let resolved = self
+                    .resolve_value_with_variables_mode_context(value, variables, false, context)
+                    .ok()?;
+                Some(Color::from_css(&resolved).unwrap_or(Color::TRANSPARENT))
+            }
             StyleValue::Var(name) => {
                 if let Some(value) = self.lookup_variable(variables, name) {
-                    return self.resolve_color_with_variables_inner(
+                    if !context.enter(name) {
+                        return None;
+                    }
+                    let result = self.resolve_color_with_variables_inner(
                         value,
                         variables,
                         depth.saturating_add(1),
+                        context,
                     );
+                    context.leave(name);
+                    return result;
                 }
                 match self.cached_theme_token_value(name) {
                     CachedThemeTokenValue::String(value) => {
@@ -366,15 +530,21 @@ impl<'a> StyleResolver<'a> {
                     CachedThemeTokenValue::Missing => None,
                 }
             }
-            StyleValue::Prop(name) => self
-                .lookup_variable(variables, &prop_variable_key(name))
-                .and_then(|value| {
-                    self.resolve_color_with_variables_inner(
-                        value,
-                        variables,
-                        depth.saturating_add(1),
-                    )
-                }),
+            StyleValue::Prop(name) => {
+                let key = prop_variable_key(name);
+                let value = self.lookup_variable(variables, &key)?;
+                if !context.enter(&key) {
+                    return None;
+                }
+                let result = self.resolve_color_with_variables_inner(
+                    value,
+                    variables,
+                    depth.saturating_add(1),
+                    context,
+                );
+                context.leave(&key);
+                result
+            }
         }
     }
 
@@ -383,8 +553,25 @@ impl<'a> StyleResolver<'a> {
         value: &StyleValue,
         variables: &HashMap<String, StyleValue>,
     ) -> f32 {
-        self.resolve_number_with_variables_inner(value, variables, 0)
-            .unwrap_or_else(|| parse_px(&self.resolve_value_with_variables(value, variables)))
+        let mut context = ResolutionContext::default();
+        self.resolve_number_with_variables_context(value, variables, &mut context)
+    }
+
+    pub(super) fn resolve_number_with_variables_context(
+        &self,
+        value: &StyleValue,
+        variables: &HashMap<String, StyleValue>,
+        context: &mut ResolutionContext,
+    ) -> f32 {
+        self.resolve_number_with_variables_inner(value, variables, 0, context)
+            .unwrap_or_else(|| {
+                match self
+                    .resolve_value_with_variables_mode_context(value, variables, false, context)
+                {
+                    Ok(resolved) => parse_px(&resolved),
+                    Err(_) => 0.0,
+                }
+            })
     }
 
     pub(super) fn resolve_number_with_variables_inner(
@@ -392,6 +579,7 @@ impl<'a> StyleResolver<'a> {
         value: &StyleValue,
         variables: &HashMap<String, StyleValue>,
         depth: u8,
+        context: &mut ResolutionContext,
     ) -> Option<f32> {
         if depth > 16 {
             return None;
@@ -404,13 +592,25 @@ impl<'a> StyleResolver<'a> {
                     Some(parse_px(value))
                 }
             }
+            StyleValue::Var(name) if name.contains(',') => {
+                let resolved = self
+                    .resolve_value_with_variables_mode_context(value, variables, false, context)
+                    .ok()?;
+                Some(parse_px(&resolved))
+            }
             StyleValue::Var(name) => {
                 if let Some(value) = self.lookup_variable(variables, name) {
-                    return self.resolve_number_with_variables_inner(
+                    if !context.enter(name) {
+                        return None;
+                    }
+                    let result = self.resolve_number_with_variables_inner(
                         value,
                         variables,
                         depth.saturating_add(1),
+                        context,
                     );
+                    context.leave(name);
+                    return result;
                 }
                 match self.cached_theme_token_value(name) {
                     CachedThemeTokenValue::Number(value) => Some(value as f32),
@@ -420,15 +620,21 @@ impl<'a> StyleResolver<'a> {
                     CachedThemeTokenValue::Missing => None,
                 }
             }
-            StyleValue::Prop(name) => self
-                .lookup_variable(variables, &prop_variable_key(name))
-                .and_then(|value| {
-                    self.resolve_number_with_variables_inner(
-                        value,
-                        variables,
-                        depth.saturating_add(1),
-                    )
-                }),
+            StyleValue::Prop(name) => {
+                let key = prop_variable_key(name);
+                let value = self.lookup_variable(variables, &key)?;
+                if !context.enter(&key) {
+                    return None;
+                }
+                let result = self.resolve_number_with_variables_inner(
+                    value,
+                    variables,
+                    depth.saturating_add(1),
+                    context,
+                );
+                context.leave(&key);
+                result
+            }
         }
     }
 

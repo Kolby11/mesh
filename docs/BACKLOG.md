@@ -65,7 +65,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/08-ui-element-core/improvements.md)
 
-- [ ] Detect CSS custom-property cycles with structured diagnostics and specified invalid-value fallback.
 - [ ] Preserve explicit/inherited property masks through retained style resolution and targeted restyle.
 - [ ] Derive accessibility focus from canonical live focus state during snapshot generation.
 - [ ] Include all shaping inputs and resource/measurer revisions in text measurement contexts and cache keys.

@@ -220,11 +220,10 @@ live compositor/lifecycle matrix remain separate follow-up work.
 
 ## Next
 
-The UI element core now generates source/runtime tags, element kinds and
-runtime types, family-specific attributes, event/style profiles,
-source-specific input defaults, and accessibility defaults from one canonical
-schema. Unknown element lookup is diagnostic, and compiler lowering consumes
-the same source/runtime mapping. The next open backlog item is CSS
-custom-property cycle detection with structured diagnostics and specified
-invalid-value fallback; the remaining presentation/resource follow-ups stay
-separate.
+CSS custom-property resolution now tracks direct and indirect dependency cycles
+across typed, embedded, and animation paths, emits structured diagnostics with
+the dependency path, applies nested `var()` fallbacks, and preserves the prior
+computed property value when a cyclic declaration is invalid. The next open
+backlog item is preserving explicit/inherited property masks through retained
+style resolution and targeted restyle; the remaining presentation/resource
+follow-ups stay separate.

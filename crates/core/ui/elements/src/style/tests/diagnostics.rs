@@ -3,6 +3,97 @@ use super::common::*;
 use crate::tree::ElementState;
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
 
+fn resolve_cycle_rules(declarations: Vec<Declaration>) -> (ComputedStyle, Vec<StyleDiagnostic>) {
+    let theme = mesh_core_theme::default_theme();
+    let resolver = StyleResolver::new(&theme);
+    resolver.resolve_node_style_with_diagnostics(
+        &[StyleRule {
+            selector: Selector::Class("cycle".to_string()),
+            declarations,
+            container_query: None,
+        }],
+        "box",
+        &["cycle".to_string()],
+        None,
+        StyleContext::default(),
+        ElementState::default(),
+    )
+}
+
+#[test]
+fn direct_custom_property_cycle_is_diagnostic_instead_of_recursing() {
+    let (style, diagnostics) = resolve_cycle_rules(vec![
+        Declaration {
+            property: "color".to_string(),
+            value: StyleValue::Literal("#00ff00".to_string()),
+        },
+        Declaration {
+            property: "--a".to_string(),
+            value: StyleValue::Var("--a".to_string()),
+        },
+        Declaration {
+            property: "color".to_string(),
+            value: StyleValue::Var("--a".to_string()),
+        },
+    ]);
+
+    assert_eq!(style.color, Color::from_hex("#00ff00").unwrap());
+    assert_eq!(diagnostics.len(), 1);
+    assert!(
+        diagnostics[0]
+            .message
+            .contains("cyclic CSS custom-property")
+    );
+    assert!(diagnostics[0].message.contains("--a -> --a"));
+}
+
+#[test]
+fn indirect_custom_property_cycle_reports_the_dependency_path() {
+    let (_style, diagnostics) = resolve_cycle_rules(vec![
+        Declaration {
+            property: "--a".to_string(),
+            value: StyleValue::Var("--b".to_string()),
+        },
+        Declaration {
+            property: "--b".to_string(),
+            value: StyleValue::Var("--a".to_string()),
+        },
+        Declaration {
+            property: "font-size".to_string(),
+            value: StyleValue::Var("--a".to_string()),
+        },
+    ]);
+
+    assert_eq!(diagnostics.len(), 1);
+    assert!(diagnostics[0].message.contains("--a -> --b -> --a"));
+}
+
+#[test]
+fn custom_property_cycle_uses_var_fallback_and_remains_diagnostic() {
+    let (style, diagnostics) = resolve_cycle_rules(vec![
+        Declaration {
+            property: "--a".to_string(),
+            value: StyleValue::Var("--b".to_string()),
+        },
+        Declaration {
+            property: "--b".to_string(),
+            value: StyleValue::Var("--a".to_string()),
+        },
+        Declaration {
+            property: "color".to_string(),
+            value: StyleValue::Var("--a, var(--cycle-fallback, #ff0000)".to_string()),
+        },
+    ]);
+
+    assert_eq!(style.color, Color::from_hex("#ff0000").unwrap());
+    assert_eq!(diagnostics.len(), 1);
+    assert!(
+        diagnostics[0]
+            .message
+            .contains("cyclic CSS custom-property")
+    );
+}
+
 #[test]
 fn style_diagnostics_unsupported_property_produces_style_diagnostic() {
     let theme = mesh_core_theme::default_theme();
