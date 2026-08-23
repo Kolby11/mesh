@@ -23,6 +23,10 @@ role, and updates shell config caches only after acceptance.
 Compositor-closed layers and dismissed popups now emit typed lifecycle events;
 their auxiliary protocol objects and identity mappings go through one
 idempotent teardown helper, and the shell invalidates/recreates closed targets.
+That shared teardown now cancels the current single-seat pointer focus,
+keyboard focus/repeat, touch ids, and active gesture before removing a surface,
+while preserving ownership belonging to other surfaces and emitting local
+cancellation events.
 
 Icon bitmap/SVG and font-glyph preparation still share a bounded render resource
 broker, with revision-aware cache handoff and linked-file invalidation. Typed
@@ -37,7 +41,7 @@ repository-settings fixture, which rejects its `revision` key as unknown.
 
 ## Next
 
-Complete per-seat input ownership and cancellation for ordinary surface/seat
-teardown, then add object/configure/frame generations and the remaining
-semantic presentation diff. Resource preparation and text shaping remain
-separate follow-up work.
+Move input ownership into per-seat state and wire seat/capability teardown,
+then add object/configure/frame generations and the remaining semantic
+presentation diff. Resource preparation and text shaping remain separate
+follow-up work.

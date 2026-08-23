@@ -373,6 +373,10 @@ impl State {
     }
 
     fn teardown_surface_with_focus(&mut self, surface_id: &str, reapply_focus: bool) -> bool {
+        if !self.surfaces.contains_key(surface_id) {
+            return false;
+        }
+        self.cancel_surface_input(surface_id);
         if reapply_focus {
             self.release_surface_focus_grab(surface_id);
         } else {
@@ -383,6 +387,24 @@ impl State {
         };
         entry.destroy_auxiliary_protocol_objects();
         true
+    }
+
+    /// Cancel input transactions that are still owned by one surface before
+    /// its Wayland identity is removed. Follow-up protocol callbacks may
+    /// arrive after teardown, so clearing the ownership maps and queued stale
+    /// events is part of removing the surface, not an optional shell policy.
+    fn cancel_surface_input(&mut self, surface_id: &str) {
+        cancel_surface_input_state(
+            surface_id,
+            &mut self.pointer_focus,
+            &mut self.keyboard_focus,
+            &mut self.keyboard_mods,
+            &mut self.keyboard_repeat,
+            &mut self.touch_surfaces,
+            &mut self.gesture_surface,
+            &mut self.gesture_kind,
+            &mut self.events,
+        );
     }
 
     /// Tear down a parent and all popup descendants. The returned ids are in
@@ -538,6 +560,82 @@ impl State {
         self.fractional_scale_manager
             .as_ref()
             .map(|mgr| mgr.get_fractional_scale(surface, qh, surface_id))
+    }
+}
+
+fn cancel_surface_input_state(
+    surface_id: &str,
+    pointer_focus: &mut Option<Arc<str>>,
+    keyboard_focus: &mut Option<Arc<str>>,
+    keyboard_mods: &mut Modifiers,
+    keyboard_repeat: &mut Option<KeyboardRepeatState>,
+    touch_surfaces: &mut HashMap<i32, Arc<str>>,
+    gesture_surface: &mut Option<Arc<str>>,
+    gesture_kind: &mut Option<GestureKind>,
+    events: &mut Vec<DevWindowEvent>,
+) {
+    // Events already queued for this identity were observed before teardown
+    // but cannot be routed safely after it. Retain only the cancellation
+    // events emitted below.
+    events.retain(|event| crate::event_surface_id(event) != surface_id);
+
+    if pointer_focus
+        .as_deref()
+        .is_some_and(|focused_surface| focused_surface == surface_id)
+    {
+        let surface_id = pointer_focus
+            .take()
+            .expect("pointer focus was present after the identity check");
+        events.push(DevWindowEvent::PointerLeave { surface_id });
+    }
+
+    let keyboard_focus_owned = keyboard_focus
+        .as_deref()
+        .is_some_and(|focused_surface| focused_surface == surface_id);
+    let keyboard_repeat_owned = keyboard_repeat
+        .as_ref()
+        .is_some_and(|repeat| repeat.surface_id.as_ref() == surface_id);
+    if keyboard_focus_owned {
+        *keyboard_focus = None;
+        *keyboard_mods = Modifiers::default();
+    }
+    if keyboard_repeat_owned {
+        *keyboard_repeat = None;
+    }
+
+    if gesture_surface
+        .as_deref()
+        .is_some_and(|owned_surface| owned_surface == surface_id)
+    {
+        let gesture_surface = gesture_surface
+            .take()
+            .expect("gesture surface was present after the identity check");
+        let gesture_kind = gesture_kind.take();
+        match gesture_kind {
+            Some(GestureKind::Swipe) => events.push(DevWindowEvent::GestureSwipeEnd {
+                surface_id: gesture_surface,
+                cancelled: true,
+            }),
+            Some(GestureKind::Pinch) => events.push(DevWindowEvent::GesturePinchEnd {
+                surface_id: gesture_surface,
+                cancelled: true,
+            }),
+            Some(GestureKind::Hold) => events.push(DevWindowEvent::GestureHoldEnd {
+                surface_id: gesture_surface,
+                cancelled: true,
+            }),
+            None => {}
+        }
+    }
+
+    let touch_owned = touch_surfaces
+        .values()
+        .any(|owned_surface| owned_surface.as_ref() == surface_id);
+    touch_surfaces.retain(|_, owned_surface| owned_surface.as_ref() != surface_id);
+    if touch_owned {
+        events.push(DevWindowEvent::TouchCancel {
+            surface_id: Arc::from(surface_id),
+        });
     }
 }
 
@@ -987,6 +1085,149 @@ mod performance_tests {
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert!(new_time < old_time);
+    }
+}
+
+#[cfg(test)]
+mod input_teardown_tests {
+    use super::*;
+
+    #[test]
+    fn surface_input_cancellation_clears_ownership_and_emits_local_cancels() {
+        let mut pointer_focus = Some(Arc::from("panel") as Arc<str>);
+        let mut keyboard_focus = Some(Arc::from("panel") as Arc<str>);
+        let mut keyboard_mods = Modifiers {
+            ctrl: true,
+            shift: true,
+            ..Modifiers::default()
+        };
+        let mut keyboard_repeat = Some(KeyboardRepeatState {
+            surface_id: Arc::from("panel"),
+            key: "a".to_string(),
+            mods: KeyMods::default(),
+            ch: Some('a'),
+            next_at: Instant::now(),
+            interval: Duration::from_millis(30),
+        });
+        let mut touch_surfaces = HashMap::from([
+            (1, Arc::from("panel") as Arc<str>),
+            (2, Arc::from("panel") as Arc<str>),
+            (3, Arc::from("other") as Arc<str>),
+        ]);
+        let mut gesture_surface = Some(Arc::from("panel") as Arc<str>);
+        let mut gesture_kind = Some(GestureKind::Pinch);
+        let mut events = vec![
+            DevWindowEvent::PointerMove {
+                surface_id: Arc::from("panel"),
+                x: 4.0,
+                y: 8.0,
+            },
+            DevWindowEvent::Key {
+                surface_id: Arc::from("panel"),
+                event: DevWindowKeyEvent::Pressed("a".to_string(), KeyMods::default()),
+            },
+            DevWindowEvent::PointerMove {
+                surface_id: Arc::from("other"),
+                x: 1.0,
+                y: 2.0,
+            },
+        ];
+
+        cancel_surface_input_state(
+            "panel",
+            &mut pointer_focus,
+            &mut keyboard_focus,
+            &mut keyboard_mods,
+            &mut keyboard_repeat,
+            &mut touch_surfaces,
+            &mut gesture_surface,
+            &mut gesture_kind,
+            &mut events,
+        );
+
+        assert!(pointer_focus.is_none());
+        assert!(keyboard_focus.is_none());
+        assert!(keyboard_repeat.is_none());
+        assert!(!keyboard_mods.ctrl);
+        assert!(!keyboard_mods.shift);
+        assert!(gesture_surface.is_none());
+        assert!(gesture_kind.is_none());
+        assert_eq!(touch_surfaces.len(), 1);
+        assert_eq!(touch_surfaces.get(&3).map(Arc::as_ref), Some("other"));
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            DevWindowEvent::PointerMove { surface_id, x, y }
+                if surface_id.as_ref() == "other" && (*x, *y) == (1.0, 2.0)
+        )));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| crate::event_surface_id(event) == "panel")
+                .count(),
+            3,
+            "only pointer leave, gesture end, and touch cancel should remain"
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            DevWindowEvent::PointerLeave { surface_id } if surface_id.as_ref() == "panel"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            DevWindowEvent::GesturePinchEnd { surface_id, cancelled }
+                if surface_id.as_ref() == "panel" && *cancelled
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            DevWindowEvent::TouchCancel { surface_id } if surface_id.as_ref() == "panel"
+        )));
+    }
+
+    #[test]
+    fn surface_input_cancellation_preserves_other_surface_ownership() {
+        let mut pointer_focus = Some(Arc::from("other") as Arc<str>);
+        let mut keyboard_focus = Some(Arc::from("other") as Arc<str>);
+        let mut keyboard_mods = Modifiers::default();
+        let mut keyboard_repeat = Some(KeyboardRepeatState {
+            surface_id: Arc::from("other"),
+            key: "a".to_string(),
+            mods: KeyMods::default(),
+            ch: Some('a'),
+            next_at: Instant::now(),
+            interval: Duration::from_millis(30),
+        });
+        let mut touch_surfaces = HashMap::from([(1, Arc::from("other") as Arc<str>)]);
+        let mut gesture_surface = Some(Arc::from("other") as Arc<str>);
+        let mut gesture_kind = Some(GestureKind::Swipe);
+        let mut events = vec![DevWindowEvent::PointerMove {
+            surface_id: Arc::from("other"),
+            x: 1.0,
+            y: 2.0,
+        }];
+
+        cancel_surface_input_state(
+            "panel",
+            &mut pointer_focus,
+            &mut keyboard_focus,
+            &mut keyboard_mods,
+            &mut keyboard_repeat,
+            &mut touch_surfaces,
+            &mut gesture_surface,
+            &mut gesture_kind,
+            &mut events,
+        );
+
+        assert_eq!(pointer_focus.as_deref(), Some("other"));
+        assert_eq!(keyboard_focus.as_deref(), Some("other"));
+        assert!(keyboard_repeat.is_some());
+        assert_eq!(touch_surfaces.get(&1).map(Arc::as_ref), Some("other"));
+        assert_eq!(gesture_surface.as_deref(), Some("other"));
+        assert!(matches!(gesture_kind, Some(GestureKind::Swipe)));
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            DevWindowEvent::PointerMove { surface_id, .. } if surface_id.as_ref() == "other"
+        ));
     }
 }
 
