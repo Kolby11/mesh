@@ -14,7 +14,7 @@ use mesh_core_elements::style::BackgroundPaint;
 use mesh_core_elements::{PopoverAnchor, PopoverConstraintAdjustment, PopoverGrab, PopoverGravity};
 use mesh_core_presentation::{
     LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint, PopupGravity,
-    PopupPlacement, PresentStatus, SurfaceLifecycleEvent, SurfacePadding,
+    PopupPlacement, PresentStatus, SurfaceLifecycleEvent, SurfacePadding, SurfaceStateStatus,
 };
 use mesh_core_render::{DamageRect, DisplayPaintCommand};
 use mesh_core_wayland::SurfaceRole;
@@ -241,6 +241,7 @@ impl Shell {
                     runtime.parent.known_surface_size = None;
                     runtime.parent.last_surface_config = None;
                     runtime.parent.last_popup_size = None;
+                    runtime.parent.last_region_state = None;
                     break;
                 }
 
@@ -373,7 +374,13 @@ impl Shell {
                     self.presentation_engine
                         .configure(&surface_id, cfg.clone())
                         .map_err(ShellRunError::Presentation)?;
-                    self.components[index].parent.last_surface_config = Some(cfg);
+                    let target = &mut self.components[index].parent;
+                    target.last_surface_config = Some(cfg);
+                    // A successful configure may have recreated the Wayland
+                    // role. Region state belongs to the compositor object, so
+                    // force it to be restaged for the replacement even when
+                    // display-list generation and geometry are unchanged.
+                    target.last_region_state = None;
                     // A geometry-changing configure invalidates the
                     // compositor's previously-acked size: `apply_config`
                     // flips the backend's `entry.configured` to false until a
@@ -1082,6 +1089,25 @@ impl Shell {
                     self.components[index]
                         .target_mut(target)
                         .pending_present_damage = present_damage;
+                    self.components[index].component.request_paint();
+                    return Err(ShellRunError::Presentation(error));
+                }
+            }
+        } else if visible {
+            match self.presentation_engine.commit_surface_state(&surface_id) {
+                Ok(SurfaceStateStatus::Committed) => presented = true,
+                Ok(SurfaceStateStatus::Unchanged) => {}
+                Ok(SurfaceStateStatus::NotReady) => {
+                    self.components[index].component.request_paint();
+                }
+                Ok(SurfaceStateStatus::SurfaceMissing) => {
+                    let target = self.components[index].target_mut(target);
+                    target.last_surface_config = None;
+                    target.known_surface_size = None;
+                    target.last_region_state = None;
+                    self.components[index].component.request_paint();
+                }
+                Err(error) => {
                     self.components[index].component.request_paint();
                     return Err(ShellRunError::Presentation(error));
                 }

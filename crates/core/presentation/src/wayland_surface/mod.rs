@@ -13,7 +13,7 @@ pub use backend::{LayerSurfaceSizePolicy, SurfaceConfig, SurfacePadding, Wayland
 pub use popup::{PopupAnchor, PopupConfig, PopupConstraint, PopupGravity, PopupPlacement};
 
 use crate::dev_window::{DevWindowEvent, DevWindowKeyEvent, KeyMods};
-use crate::{PresentStatus, PresentationError, SurfaceLifecycleEvent};
+use crate::{PresentStatus, PresentationError, SurfaceLifecycleEvent, SurfaceStateStatus};
 use mesh_core_render::PixelBuffer;
 use mesh_core_wayland::{
     Edge, KeyboardMode, Layer as MeshLayer, SurfaceRole, WindowDecorations, WindowOptions,

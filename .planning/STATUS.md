@@ -36,6 +36,11 @@ fingerprint: live changes, layer geometry that needs a fresh configure, and
 creation-time identity changes that require replacement are distinct. Layer
 namespace/blur and window decoration changes now take the safe replacement
 path rather than being silently applied to the wrong live role.
+Opaque, blur, input-region, and window-geometry updates now share a pending
+surface-state transaction. Pixel-free render passes issue a state-only
+`wl_surface.commit`, while buffer attach failures leave those updates pending;
+shell region caches are invalidated whenever a configure can replace or remap
+the compositor object.
 
 Icon bitmap/SVG and font-glyph preparation still share a bounded render resource
 broker, with revision-aware cache handoff and linked-file invalidation. Typed
@@ -51,6 +56,5 @@ repository-settings fixture, which rejects its `revision` key as unknown.
 ## Next
 
 Add object/configure/frame generations and the remaining semantic presentation
-state diff, including region-only commits. Pointer-button identity,
-IME/text-input-v3, connection recreation, and resource preparation/text shaping
-remain separate follow-up work.
+state diff. Pointer-button identity, IME/text-input-v3, connection recreation,
+and resource preparation/text shaping remain separate follow-up work.

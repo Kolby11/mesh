@@ -253,6 +253,9 @@ impl Shell {
                     self.components[index].children[child_index]
                         .target
                         .known_surface_size = None;
+                    self.components[index].children[child_index]
+                        .target
+                        .last_region_state = None;
                 }
                 self.presentation_engine
                     .window_configured_size(&child_surface_id)

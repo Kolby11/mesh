@@ -28,7 +28,7 @@ pub(in crate::wayland_surface) struct WindowRole {
     /// re-sent on every frame.
     pub(in crate::wayland_surface) applied_size_hints: Option<WindowSizeHints>,
     /// Last window geometry committed via `xdg_surface.set_window_geometry`.
-    pub(in crate::wayland_surface) applied_geometry: Option<(u32, u32)>,
+    pub(in crate::wayland_surface) applied_geometry: Option<DamageRect>,
     /// `xdg_toplevel` states from the last configure, projected by the shell
     /// onto the surface tree as CSS state.
     pub(in crate::wayland_surface) states: WindowStates,
@@ -125,6 +125,10 @@ pub(in crate::wayland_surface) struct SurfaceEntry {
     pub(in crate::wayland_surface) blur_regions: Vec<DamageRect>,
     pub(in crate::wayland_surface) blur_committed: bool,
     pub(in crate::wayland_surface) blur_region_dirty: bool,
+    /// Desired opaque region staged by the shell. It becomes committed only
+    /// after the next successful wl_surface commit.
+    pub(in crate::wayland_surface) pending_opaque_region: Option<DamageRect>,
+    pub(in crate::wayland_surface) opaque_region_dirty: bool,
     /// Which part of this surface is paint-only reserve. Copied from the
     /// config/popup-config that sized the surface, and the *only* input the
     /// input region is derived from — see [`SurfacePadding`].
@@ -173,6 +177,8 @@ impl SurfaceEntry {
             blur_regions: Vec::new(),
             blur_committed: false,
             blur_region_dirty: false,
+            pending_opaque_region: None,
+            opaque_region_dirty: false,
             applied_input_region: None,
             output: None,
         }
@@ -321,21 +327,84 @@ impl SurfaceEntry {
     /// it looks. The content rect is the same one the input region is confined
     /// to, so a click landing outside the window and a compositor drawing
     /// outside the window are ruled out by the same number.
-    pub(super) fn apply_window_geometry(&mut self, content: DamageRect) {
-        let WaylandRole::Window(role) = &mut self.role else {
-            return;
+    pub(super) fn stage_window_geometry(&self, content: DamageRect) -> Option<DamageRect> {
+        let WaylandRole::Window(role) = &self.role else {
+            return None;
         };
-        let geometry = (content.width.max(1), content.height.max(1));
+        let geometry = DamageRect {
+            x: content.x,
+            y: content.y,
+            width: content.width.max(1),
+            height: content.height.max(1),
+        };
         if role.applied_geometry == Some(geometry) {
-            return;
+            return None;
         }
-        role.applied_geometry = Some(geometry);
         role.window.xdg_surface().set_window_geometry(
             content.x as i32,
             content.y as i32,
-            geometry.0 as i32,
-            geometry.1 as i32,
+            geometry.width as i32,
+            geometry.height as i32,
         );
+        Some(geometry)
+    }
+
+    pub(super) fn mark_window_geometry_committed(&mut self, geometry: DamageRect) {
+        if let WaylandRole::Window(role) = &mut self.role {
+            role.applied_geometry = Some(geometry);
+        }
+    }
+
+    pub(super) fn input_region_needs_commit(&self) -> bool {
+        self.applied_input_region != Some(self.content_input_region())
+    }
+
+    pub(super) fn stage_input_region(&self, compositor_state: &CompositorState) -> bool {
+        let Some(rect) = self.content_input_region() else {
+            self.wl_surface().set_input_region(None);
+            return true;
+        };
+        let Ok(region) = Region::new(compositor_state) else {
+            return false;
+        };
+        region.add(
+            rect.x as i32,
+            rect.y as i32,
+            rect.width as i32,
+            rect.height as i32,
+        );
+        self.wl_surface().set_input_region(Some(region.wl_region()));
+        true
+    }
+
+    pub(super) fn mark_input_region_committed(&mut self, region: Option<DamageRect>) {
+        self.applied_input_region = Some(region);
+    }
+
+    pub(super) fn stage_opaque_region(&self, compositor_state: &CompositorState) -> bool {
+        if !self.opaque_region_dirty {
+            return false;
+        }
+        let Some(rect) = self.pending_opaque_region else {
+            self.wl_surface().set_opaque_region(None);
+            return true;
+        };
+        let Ok(region) = Region::new(compositor_state) else {
+            return false;
+        };
+        region.add(
+            rect.x as i32,
+            rect.y as i32,
+            rect.width as i32,
+            rect.height as i32,
+        );
+        self.wl_surface()
+            .set_opaque_region(Some(region.wl_region()));
+        true
+    }
+
+    pub(super) fn mark_opaque_region_committed(&mut self) {
+        self.opaque_region_dirty = false;
     }
 
     pub(super) fn hide(&mut self) {

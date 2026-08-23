@@ -65,6 +65,20 @@ pub enum PresentStatus {
     SurfaceMissing,
 }
 
+/// Outcome of committing compositor state that does not require a new pixel
+/// buffer, such as opaque, blur, input-region, or window-geometry changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SurfaceStateStatus {
+    /// Pending surface state was committed to the compositor.
+    Committed,
+    /// No compositor state was pending, so no commit was needed.
+    Unchanged,
+    /// The compositor has not configured the surface yet.
+    NotReady,
+    /// The compositor surface no longer exists.
+    SurfaceMissing,
+}
+
 /// A compositor-owned surface lifecycle transition that the shell must
 /// reconcile with its retained surface targets.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,6 +149,8 @@ struct TestingBackend {
     events: Vec<WindowEvent>,
     presented: Vec<String>,
     presented_damage: Vec<(String, Vec<DamageRect>)>,
+    pending_surface_states: HashSet<String>,
+    surface_state_commits: Vec<String>,
     completed_frames: usize,
     window_states: HashMap<String, WindowStates>,
     unconfigured_surfaces: HashSet<String>,
@@ -260,6 +276,14 @@ impl PresentationEngine {
     }
 
     #[doc(hidden)]
+    pub fn testing_surface_state_commits(&self) -> &[String] {
+        match &self.backend {
+            Backend::Testing(backend) => &backend.surface_state_commits,
+            _ => &[],
+        }
+    }
+
+    #[doc(hidden)]
     pub fn testing_push_close_request(&mut self, surface_id: impl Into<String>) {
         if let Backend::Testing(backend) = &mut self.backend {
             backend.close_requests.push(surface_id.into());
@@ -271,6 +295,7 @@ impl PresentationEngine {
         if let Backend::Testing(backend) = &mut self.backend {
             let surface_id = surface_id.into();
             if backend.popup_configs.remove(&surface_id).is_some() {
+                backend.pending_surface_states.remove(&surface_id);
                 backend.missing_surfaces.insert(surface_id.clone());
                 backend.destroyed_popup_ids.insert(surface_id.clone());
                 backend
@@ -285,6 +310,7 @@ impl PresentationEngine {
         if let Backend::Testing(backend) = &mut self.backend {
             let surface_id = surface_id.into();
             if backend.surface_configs.remove(&surface_id).is_some() {
+                backend.pending_surface_states.remove(&surface_id);
                 backend.missing_surfaces.insert(surface_id.clone());
                 backend.destroyed_surface_ids.insert(surface_id.clone());
                 backend
@@ -317,6 +343,7 @@ impl PresentationEngine {
             for surface_id in surface_ids {
                 backend.surface_configs.remove(&surface_id);
                 backend.popup_configs.remove(&surface_id);
+                backend.pending_surface_states.remove(&surface_id);
                 backend.missing_surfaces.insert(surface_id.clone());
                 backend.lifecycle_events.push(SurfaceLifecycleEvent::Lost {
                     surface_id,
@@ -481,6 +508,7 @@ impl PresentationEngine {
             Backend::DevWindow(_) => {}
             Backend::Testing(backend) => {
                 backend.popup_configs.remove(surface_id);
+                backend.pending_surface_states.remove(surface_id);
                 if backend.destroyed_popup_ids.insert(surface_id.to_string()) {
                     backend.destroyed_popups.push(surface_id.to_string());
                 }
@@ -504,11 +532,13 @@ impl PresentationEngine {
                     .collect::<Vec<_>>();
                 for child_id in child_ids {
                     backend.popup_configs.remove(&child_id);
+                    backend.pending_surface_states.remove(&child_id);
                     if backend.destroyed_popup_ids.insert(child_id.clone()) {
                         backend.destroyed_popups.push(child_id);
                     }
                 }
                 backend.surface_configs.remove(surface_id);
+                backend.pending_surface_states.remove(surface_id);
                 if backend.destroyed_surface_ids.insert(surface_id.to_string()) {
                     backend.destroyed_surfaces.push(surface_id.to_string());
                 }
@@ -626,6 +656,36 @@ impl PresentationEngine {
         }
     }
 
+    /// Commit pending compositor surface state without attaching a new pixel
+    /// buffer. This keeps region-only changes observable when a render pass
+    /// produced no pixel damage.
+    pub fn commit_surface_state(
+        &mut self,
+        surface_id: &str,
+    ) -> Result<SurfaceStateStatus, PresentationError> {
+        match &mut self.backend {
+            Backend::WaylandSurface(bridge) => bridge.commit_surface_state(surface_id),
+            Backend::DevWindow(_) => Ok(SurfaceStateStatus::Unchanged),
+            Backend::Testing(backend) => {
+                if let Some(reason) = &backend.connection_lost {
+                    return Err(PresentationError::ConnectionLost(reason.clone()));
+                }
+                if backend.missing_surfaces.contains(surface_id) {
+                    return Ok(SurfaceStateStatus::SurfaceMissing);
+                }
+                if backend.unconfigured_surfaces.contains(surface_id) {
+                    return Ok(SurfaceStateStatus::NotReady);
+                }
+                if backend.pending_surface_states.remove(surface_id) {
+                    backend.surface_state_commits.push(surface_id.to_string());
+                    Ok(SurfaceStateStatus::Committed)
+                } else {
+                    Ok(SurfaceStateStatus::Unchanged)
+                }
+            }
+        }
+    }
+
     /// Finish one shell frame after all surface presents have staged their
     /// protocol requests. The Wayland backend flushes and progresses its event
     /// queue once here instead of doing connection work for every surface.
@@ -666,8 +726,18 @@ impl PresentationEngine {
     }
 
     pub fn update_opaque_region(&mut self, surface_id: &str, opaque_rect: Option<DamageRect>) {
-        if let Backend::WaylandSurface(bridge) = &mut self.backend {
-            bridge.update_opaque_region(surface_id, opaque_rect);
+        match &mut self.backend {
+            Backend::WaylandSurface(bridge) => bridge.update_opaque_region(surface_id, opaque_rect),
+            Backend::Testing(backend) => {
+                if backend.surface_configs.contains_key(surface_id)
+                    || backend.popup_configs.contains_key(surface_id)
+                {
+                    backend
+                        .pending_surface_states
+                        .insert(surface_id.to_string());
+                }
+            }
+            Backend::DevWindow(_) => {}
         }
     }
 
@@ -706,8 +776,18 @@ impl PresentationEngine {
     /// compositor. No protocol calls are emitted if no blur region has ever
     /// been set for this surface.
     pub fn update_blur_regions(&mut self, surface_id: &str, blur_regions: Vec<DamageRect>) {
-        if let Backend::WaylandSurface(bridge) = &mut self.backend {
-            bridge.update_blur_regions(surface_id, blur_regions);
+        match &mut self.backend {
+            Backend::WaylandSurface(bridge) => bridge.update_blur_regions(surface_id, blur_regions),
+            Backend::Testing(backend) => {
+                if backend.surface_configs.contains_key(surface_id)
+                    || backend.popup_configs.contains_key(surface_id)
+                {
+                    backend
+                        .pending_surface_states
+                        .insert(surface_id.to_string());
+                }
+            }
+            Backend::DevWindow(_) => {}
         }
     }
 
@@ -1156,6 +1236,51 @@ pub fn event_surface_id(event: &WindowEvent) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn state_only_commit_reports_pending_region_work_once() {
+        let mut engine = PresentationEngine::testing_with_popup_support(false);
+        engine
+            .configure("panel", SurfaceConfig::default())
+            .expect("testing surface configuration succeeds");
+
+        assert_eq!(
+            engine.commit_surface_state("panel").unwrap(),
+            SurfaceStateStatus::Unchanged
+        );
+
+        engine.update_opaque_region(
+            "panel",
+            Some(DamageRect {
+                x: 2,
+                y: 3,
+                width: 20,
+                height: 10,
+            }),
+        );
+        assert_eq!(
+            engine.commit_surface_state("panel").unwrap(),
+            SurfaceStateStatus::Committed
+        );
+        assert_eq!(engine.testing_surface_state_commits(), ["panel"]);
+        assert_eq!(
+            engine.commit_surface_state("panel").unwrap(),
+            SurfaceStateStatus::Unchanged
+        );
+
+        engine.testing_set_surface_configured("panel", false);
+        engine.update_blur_regions("panel", Vec::new());
+        assert_eq!(
+            engine.commit_surface_state("panel").unwrap(),
+            SurfaceStateStatus::NotReady
+        );
+        engine.testing_set_surface_configured("panel", true);
+        assert_eq!(
+            engine.commit_surface_state("panel").unwrap(),
+            SurfaceStateStatus::Committed
+        );
+        assert_eq!(engine.testing_surface_state_commits(), ["panel", "panel"]);
+    }
 
     #[test]
     fn unconfigured_surface_returns_typed_not_ready_without_recording_present() {
