@@ -42,6 +42,13 @@ surface-state transaction. Pixel-free render passes issue a state-only
 shell region caches are invalidated whenever a configure can replace or remap
 the compositor object.
 
+Live presentation entries now carry monotonic object, configure, and frame
+generations. Role creation reserves a unique object generation, accepted
+compositor configures advance the per-object configure generation, and each
+`wl_surface.frame` request carries an exact object/frame token. Late callbacks
+from timed-out frames or replaced roles are ignored instead of releasing a
+newer pacing gate; the current generation snapshot is available to diagnostics.
+
 Icon bitmap/SVG and font-glyph preparation still share a bounded render resource
 broker, with revision-aware cache handoff and linked-file invalidation. Typed
 icon/glyph caches and shell polling remain separate at the handoff boundary.
@@ -55,6 +62,7 @@ repository-settings fixture, which rejects its `revision` key as unknown.
 
 ## Next
 
-Add object/configure/frame generations and the remaining semantic presentation
-state diff. Pointer-button identity, IME/text-input-v3, connection recreation,
-and resource preparation/text shaping remain separate follow-up work.
+Add buffer/output/capability generations and the remaining semantic
+presentation state diff. Pointer-button identity, IME/text-input-v3, connection
+recreation, and resource preparation/text shaping remain separate follow-up
+work.

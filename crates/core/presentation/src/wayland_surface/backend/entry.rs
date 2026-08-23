@@ -1,8 +1,81 @@
+use super::state::FrameCallbackData;
 use super::*;
 use mesh_core_render::DamageRect;
 use smallvec::{SmallVec, smallvec};
+use std::sync::Arc;
 
 const MAX_FRAME_CALLBACK_WAIT: Duration = Duration::from_millis(50);
+
+/// Generation state retained by one live compositor object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct SurfaceGenerations {
+    object: u64,
+    configure: u64,
+    frame: u64,
+    pending_frame: Option<u64>,
+}
+
+impl SurfaceGenerations {
+    pub(super) fn new(object: u64) -> Self {
+        Self {
+            object,
+            configure: 0,
+            frame: 0,
+            pending_frame: None,
+        }
+    }
+
+    pub(super) fn accept_configure(&mut self) -> bool {
+        let Some(configure) = self.configure.checked_add(1) else {
+            return false;
+        };
+        self.configure = configure;
+        true
+    }
+
+    pub(super) fn begin_frame(
+        &mut self,
+        surface_id: &str,
+    ) -> Result<FrameCallbackData, PresentationError> {
+        let frame = self
+            .frame
+            .checked_add(1)
+            .ok_or_else(|| PresentationError::BufferAttach("frame generation exhausted".into()))?;
+        self.frame = frame;
+        self.pending_frame = Some(self.frame);
+        Ok(FrameCallbackData {
+            surface_id: Arc::from(surface_id),
+            object_generation: self.object,
+            frame_generation: self.frame,
+        })
+    }
+
+    pub(super) fn complete_frame(&mut self, callback: &FrameCallbackData) -> bool {
+        if callback.object_generation != self.object
+            || self.pending_frame != Some(callback.frame_generation)
+        {
+            return false;
+        }
+        self.pending_frame = None;
+        true
+    }
+
+    pub(super) fn clear_pending_frame(&mut self) {
+        self.pending_frame = None;
+    }
+
+    pub(super) fn has_pending_frame(&self) -> bool {
+        self.pending_frame.is_some()
+    }
+
+    pub(super) fn snapshot(self) -> SurfaceGeneration {
+        SurfaceGeneration {
+            object: self.object,
+            configure: self.configure,
+            frame: self.frame,
+        }
+    }
+}
 
 /// The compositor-side object backing a [`SurfaceEntry`]. Layer surfaces own
 /// shell chrome (panels, launchers, overlays); windows are `xdg_toplevel`s the
@@ -115,8 +188,8 @@ pub(in crate::wayland_surface) struct SurfaceEntry {
     shm_buffer_bytes: usize,
     shm_pool_config: Option<ShmPoolConfig>,
     next_shm_buffer: usize,
-    pub(in crate::wayland_surface) frame_pending: bool,
     pub(in crate::wayland_surface) frame_pending_since: Option<Instant>,
+    generations: SurfaceGenerations,
     pub(in crate::wayland_surface) scale: f32,
     pub(in crate::wayland_surface) needs_full_redraw: bool,
     pub(in crate::wayland_surface) fractional_scale: Option<WpFractionalScaleV1>,
@@ -153,6 +226,7 @@ impl SurfaceEntry {
         role: WaylandRole,
         cfg: SurfaceConfig,
         applied_keyboard_mode: KeyboardMode,
+        object_generation: u64,
     ) -> Self {
         Self {
             role,
@@ -167,8 +241,8 @@ impl SurfaceEntry {
             shm_buffer_bytes: 0,
             shm_pool_config: None,
             next_shm_buffer: 0,
-            frame_pending: false,
             frame_pending_since: None,
+            generations: SurfaceGenerations::new(object_generation),
             scale: 1.0,
             needs_full_redraw: false,
             fractional_scale: None,
@@ -186,6 +260,38 @@ impl SurfaceEntry {
 
     pub(in crate::wayland_surface) fn wl_surface(&self) -> &wl_surface::WlSurface {
         self.role.wl_surface()
+    }
+
+    pub(in crate::wayland_surface) fn accept_configure(&mut self) {
+        if self.generations.accept_configure() {
+            self.configured = true;
+        } else {
+            tracing::error!(
+                object_generation = self.generations.snapshot().object,
+                "layer_shell: configure generation exhausted"
+            );
+            self.configured = false;
+        }
+    }
+
+    pub(super) fn surface_generation(&self) -> SurfaceGeneration {
+        self.generations.snapshot()
+    }
+
+    pub(in crate::wayland_surface) fn complete_frame_callback(
+        &mut self,
+        callback: &FrameCallbackData,
+    ) -> bool {
+        if !self.generations.complete_frame(callback) {
+            return false;
+        }
+        self.frame_pending_since = None;
+        true
+    }
+
+    pub(in crate::wayland_surface) fn complete_legacy_frame_callback(&mut self) {
+        self.generations.clear_pending_frame();
+        self.frame_pending_since = None;
     }
 
     pub(in crate::wayland_surface) fn destroy_auxiliary_protocol_objects(&self) {
@@ -408,7 +514,7 @@ impl SurfaceEntry {
     }
 
     pub(super) fn hide(&mut self) {
-        self.frame_pending = false;
+        self.generations.clear_pending_frame();
         self.frame_pending_since = None;
         let wl_surface = self.role.wl_surface();
         wl_surface.attach(None, 0, 0);
@@ -528,6 +634,7 @@ impl SurfaceEntry {
     pub(super) fn attach_shm_buffer(
         &mut self,
         qh: &QueueHandle<State>,
+        surface_id: &str,
         index: usize,
         logical_width: u32,
         logical_height: u32,
@@ -606,9 +713,9 @@ impl SurfaceEntry {
             viewport.set_destination(logical_width as i32, logical_height as i32);
         }
 
-        wl_surface.frame(qh, wl_surface.clone());
+        let callback = self.generations.begin_frame(surface_id)?;
+        wl_surface.frame(qh, callback);
         wl_surface.commit();
-        self.frame_pending = true;
         self.frame_pending_since = Some(Instant::now());
         self.width = logical_width;
         self.height = logical_height;
@@ -627,7 +734,7 @@ impl SurfaceEntry {
     }
 
     pub(in crate::wayland_surface) fn waiting_for_frame_callback(&self) -> bool {
-        self.frame_pending
+        self.generations.has_pending_frame()
             && self
                 .frame_pending_since
                 .is_some_and(|since| since.elapsed() < MAX_FRAME_CALLBACK_WAIT)

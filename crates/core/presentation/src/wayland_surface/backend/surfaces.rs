@@ -60,6 +60,7 @@ impl WaylandSurfaceBackend {
             pool,
             surfaces: HashMap::new(),
             surface_ids_by_wl_id: HashMap::new(),
+            next_object_generation: 1,
             pointer_interactive: false,
             input_seats: HashMap::new(),
             input_seat_order: Vec::new(),
@@ -141,12 +142,19 @@ impl WaylandSurfaceBackend {
             // installed. A missing protocol global or compositor allocation
             // failure must leave the existing surface usable for the next
             // retry, rather than turning a failed configure into a teardown.
+            let object_generation = self.state.reserve_object_generation()?;
             let role = self.create_surface_role(&cfg, &qh)?;
             if cfg.keyboard_mode != KeyboardMode::OnDemand {
                 self.state.release_surface_focus_grab(surface_id);
             }
             self.destroy_surface(surface_id);
-            self.install_surface_role(surface_id, role, cfg, effective_keyboard_mode);
+            self.install_surface_role(
+                surface_id,
+                role,
+                cfg,
+                effective_keyboard_mode,
+                object_generation,
+            );
             return Ok(());
         }
 
@@ -168,8 +176,15 @@ impl WaylandSurfaceBackend {
                 }
             }
             None => {
+                let object_generation = self.state.reserve_object_generation()?;
                 let role = self.create_surface_role(&cfg, &qh)?;
-                self.install_surface_role(surface_id, role, cfg, effective_keyboard_mode);
+                self.install_surface_role(
+                    surface_id,
+                    role,
+                    cfg,
+                    effective_keyboard_mode,
+                    object_generation,
+                );
             }
         }
         Ok(())
@@ -181,10 +196,11 @@ impl WaylandSurfaceBackend {
         role: WaylandRole,
         cfg: SurfaceConfig,
         effective_keyboard_mode: KeyboardMode,
+        object_generation: u64,
     ) {
         self.state.insert_surface(
             surface_id.to_string(),
-            SurfaceEntry::new(role, cfg, effective_keyboard_mode),
+            SurfaceEntry::new(role, cfg, effective_keyboard_mode, object_generation),
         );
         if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
             let cfg = entry.cfg.clone();
@@ -345,6 +361,8 @@ impl WaylandSurfaceBackend {
             ));
         }
 
+        let object_generation = self.state.reserve_object_generation()?;
+
         // The popup's Wayland parent is either a layer surface or a window, and
         // the two are parented by different protocol calls: a layer surface
         // adopts the popup afterwards via `zwlr_layer_surface_v1.get_popup`,
@@ -437,6 +455,7 @@ impl WaylandSurfaceBackend {
             }),
             cfg,
             KeyboardMode::None,
+            object_generation,
         );
         let wl_surface = entry.wl_surface().clone();
         self.state.insert_surface(surface_id.to_string(), entry);

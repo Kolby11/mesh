@@ -13,7 +13,9 @@ pub use backend::{LayerSurfaceSizePolicy, SurfaceConfig, SurfacePadding, Wayland
 pub use popup::{PopupAnchor, PopupConfig, PopupConstraint, PopupGravity, PopupPlacement};
 
 use crate::dev_window::{DevWindowEvent, DevWindowKeyEvent, KeyMods};
-use crate::{PresentStatus, PresentationError, SurfaceLifecycleEvent, SurfaceStateStatus};
+use crate::{
+    PresentStatus, PresentationError, SurfaceGeneration, SurfaceLifecycleEvent, SurfaceStateStatus,
+};
 use mesh_core_render::PixelBuffer;
 use mesh_core_wayland::{
     Edge, KeyboardMode, Layer as MeshLayer, SurfaceRole, WindowDecorations, WindowOptions,
@@ -65,7 +67,9 @@ use wayland_client::{
     Connection, Dispatch, DispatchError, EventQueue, Proxy, QueueHandle,
     backend::{ObjectId, WaylandError},
     globals::registry_queue_init,
-    protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface, wl_touch},
+    protocol::{
+        wl_callback, wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface, wl_touch,
+    },
 };
 use wayland_protocols::wp::fractional_scale::v1::client::{
     wp_fractional_scale_manager_v1, wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,

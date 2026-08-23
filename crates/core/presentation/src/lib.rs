@@ -79,6 +79,18 @@ pub enum SurfaceStateStatus {
     SurfaceMissing,
 }
 
+/// Monotonic identities for the compositor object and the protocol state it
+/// has accepted. A replacement role gets a new object generation, configure
+/// callbacks advance the configure generation, and each requested frame gets
+/// a new frame generation. Presentation callbacks must match the object and
+/// frame generations that are still current before they can release pacing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SurfaceGeneration {
+    pub object: u64,
+    pub configure: u64,
+    pub frame: u64,
+}
+
 /// A compositor-owned surface lifecycle transition that the shell must
 /// reconcile with its retained surface targets.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -817,6 +829,16 @@ impl PresentationEngine {
             }
             Backend::DevWindow(_) => false,
             Backend::Testing(_) => false,
+        }
+    }
+
+    /// Return the compositor-object/configure/frame generations for a live
+    /// Wayland surface. The value is intended for diagnostics and lifecycle
+    /// correlation; non-Wayland backends do not have compositor generations.
+    pub fn surface_generation(&self, surface_id: &str) -> Option<SurfaceGeneration> {
+        match &self.backend {
+            Backend::WaylandSurface(bridge) => bridge.surface_generation(surface_id),
+            Backend::DevWindow(_) | Backend::Testing(_) => None,
         }
     }
 

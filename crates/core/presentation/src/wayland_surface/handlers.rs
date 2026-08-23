@@ -1,7 +1,22 @@
 use super::backend::WaylandRole;
-use super::state::GestureKind;
+use super::state::{FrameCallbackData, GestureKind};
 use super::*;
 use std::borrow::Cow;
+
+impl Dispatch<wl_callback::WlCallback, FrameCallbackData> for State {
+    fn event(
+        state: &mut Self,
+        _callback: &wl_callback::WlCallback,
+        event: wl_callback::Event,
+        data: &FrameCallbackData,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        if matches!(event, wl_callback::Event::Done { .. }) {
+            state.complete_frame_callback(data);
+        }
+    }
+}
 
 impl CompositorHandler for State {
     fn scale_factor_changed(
@@ -59,8 +74,11 @@ impl CompositorHandler for State {
             .values_mut()
             .find(|entry| entry.wl_surface() == surface)
         {
-            entry.frame_pending = false;
-            entry.frame_pending_since = None;
+            // This compatibility path is used only for callbacks created
+            // with the legacy surface userdata. MESH's own frame requests use
+            // `FrameCallbackData` above, which performs exact generation
+            // matching before releasing the pacing gate.
+            entry.complete_legacy_frame_callback();
         }
     }
 
@@ -174,7 +192,7 @@ impl LayerShellHandler for State {
             if h > 0 {
                 entry.height = h;
             }
-            entry.configured = true;
+            entry.accept_configure();
         }
     }
 }
@@ -242,7 +260,7 @@ impl WindowHandler for State {
             role.compositor_size = size;
             role.states = states;
         }
-        entry.configured = true;
+        entry.accept_configure();
         entry.needs_full_redraw = true;
         tracing::debug!(
             surface_id = surface_id.as_str(),
@@ -988,7 +1006,7 @@ impl PopupHandler for State {
         if config.height > 0 {
             entry.height = config.height as u32;
         }
-        entry.configured = true;
+        entry.accept_configure();
         entry.needs_full_redraw = true;
     }
 

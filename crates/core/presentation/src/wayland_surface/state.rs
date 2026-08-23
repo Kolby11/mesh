@@ -28,6 +28,18 @@ pub(super) struct QueuedInputEvent {
     pub(super) event: DevWindowEvent,
 }
 
+/// User data attached to one `wl_surface.frame` request. The callback object
+/// only carries this value back to the client, so it must identify both the
+/// live compositor object and the particular frame request. A callback from a
+/// timed-out older frame or a replaced object must never release a newer
+/// pacing gate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct FrameCallbackData {
+    pub(super) surface_id: Arc<str>,
+    pub(super) object_generation: u64,
+    pub(super) frame_generation: u64,
+}
+
 pub(super) struct SeatInputState {
     pub(super) seat: wl_seat::WlSeat,
     pub(super) pointer: Option<ThemedPointer>,
@@ -114,6 +126,10 @@ pub(super) struct State {
     pub(super) pool: Option<SlotPool>,
     pub(super) surfaces: HashMap<String, SurfaceEntry>,
     pub(super) surface_ids_by_wl_id: HashMap<ObjectId, Arc<str>>,
+    /// Next unique identity for a compositor surface role. Values are never
+    /// reused after a failed create or a successful replacement, so a late
+    /// callback cannot be mistaken for the new role under the same surface id.
+    pub(super) next_object_generation: u64,
     pub(super) pointer_interactive: bool,
     /// `zwp_pointer_gestures_v1` global, bound when the compositor advertises
     /// it. `None` on compositors without the protocol — gesture events simply
@@ -153,6 +169,35 @@ pub(super) struct State {
 }
 
 impl State {
+    pub(super) fn reserve_object_generation(&mut self) -> Result<u64, PresentationError> {
+        let generation = self.next_object_generation;
+        self.next_object_generation = generation.checked_add(1).ok_or_else(|| {
+            PresentationError::SurfaceCreate("surface object generation exhausted".into())
+        })?;
+        Ok(generation)
+    }
+
+    pub(super) fn complete_frame_callback(&mut self, callback: &FrameCallbackData) {
+        let Some(entry) = self.surfaces.get_mut(callback.surface_id.as_ref()) else {
+            return;
+        };
+        if entry.complete_frame_callback(callback) {
+            tracing::trace!(
+                surface_id = callback.surface_id.as_ref(),
+                object_generation = callback.object_generation,
+                frame_generation = callback.frame_generation,
+                "layer_shell: accepted frame callback"
+            );
+        } else {
+            tracing::debug!(
+                surface_id = callback.surface_id.as_ref(),
+                object_generation = callback.object_generation,
+                frame_generation = callback.frame_generation,
+                "layer_shell: ignored stale frame callback"
+            );
+        }
+    }
+
     pub(super) fn seat_id_for_pointer(&self, pointer: &wl_pointer::WlPointer) -> Option<SeatId> {
         self.pointer_seats.get(&pointer.id()).cloned()
     }

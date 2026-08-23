@@ -157,6 +157,7 @@ impl WaylandSurfaceBackend {
         };
         if let Err(error) = entry.attach_shm_buffer(
             &qh,
+            surface_id,
             buffer_index,
             logical_w,
             logical_h,
@@ -316,6 +317,13 @@ impl WaylandSurfaceBackend {
             .surfaces
             .get(surface_id)
             .is_some_and(SurfaceEntry::waiting_for_frame_callback)
+    }
+
+    pub fn surface_generation(&self, surface_id: &str) -> Option<SurfaceGeneration> {
+        self.state
+            .surfaces
+            .get(surface_id)
+            .map(SurfaceEntry::surface_generation)
     }
 
     pub fn surface_scale(&self, surface_id: &str) -> f32 {
