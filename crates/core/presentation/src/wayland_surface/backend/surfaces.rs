@@ -1,4 +1,5 @@
 use super::*;
+use crate::NegotiatedCapabilities;
 
 impl WaylandSurfaceBackend {
     pub fn new() -> Result<Self, PresentationError> {
@@ -14,6 +15,7 @@ impl WaylandSurfaceBackend {
             .map_err(|e| PresentationError::ProtocolUnsupported(format!("wl_compositor: {e}")))?;
         let shm = Shm::bind(&globals, &qh)
             .map_err(|e| PresentationError::ProtocolUnsupported(format!("wl_shm: {e}")))?;
+        let negotiated_capabilities = negotiated_capabilities(&globals);
         let layer_shell = LayerShell::bind(&globals, &qh).map_err(|e| {
             PresentationError::ProtocolUnsupported(format!("zwlr_layer_shell_v1: {e}"))
         })?;
@@ -48,6 +50,7 @@ impl WaylandSurfaceBackend {
             compositor_state,
             shm,
             layer_shell,
+            negotiated_capabilities,
             activation_state,
             focus_grab_manager,
             viewporter,
@@ -606,4 +609,33 @@ impl WaylandSurfaceBackend {
                 })
         })
     }
+}
+
+/// Read the compositor's advertised global versions once, clamping them to
+/// the protocol versions this build can safely use. Binding code below still
+/// decides availability; this snapshot is intentionally diagnostic and is the
+/// input for future capability-gated operations such as popup repositioning.
+fn negotiated_capabilities(
+    globals: &wayland_client::globals::GlobalList,
+) -> NegotiatedCapabilities {
+    let version = |interface: &str| {
+        globals.contents().with_list(|globals| {
+            globals
+                .iter()
+                .find(|global| global.interface == interface)
+                .map_or(0, |global| global.version)
+        })
+    };
+
+    NegotiatedCapabilities::from_versions(
+        1,
+        version("zwlr_layer_shell_v1"),
+        version("xdg_wm_base"),
+        version("wp_viewporter"),
+        version("wp_fractional_scale_manager_v1"),
+        version("org_kde_kwin_blur_manager"),
+        version("xdg_activation_v1"),
+        version("hyprland_focus_grab_manager_v1"),
+        version("zwp_pointer_gestures_v1"),
+    )
 }

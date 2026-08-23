@@ -99,6 +99,58 @@ pub struct SurfaceGeneration {
     pub output: u64,
 }
 
+/// Protocol versions and optional globals negotiated when the Wayland
+/// connection was established. A zero version means that the compositor did
+/// not advertise that protocol. The generation identifies the revision of
+/// this capability snapshot within its presentation connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct NegotiatedCapabilities {
+    /// Monotonic within one presentation backend connection.
+    pub generation: u64,
+    pub layer_shell_version: u32,
+    pub xdg_shell_version: u32,
+    pub viewporter_version: u32,
+    pub fractional_scale_version: u32,
+    pub blur_version: u32,
+    pub activation_version: u32,
+    pub focus_grab_version: u32,
+    pub pointer_gestures_version: u32,
+}
+
+impl NegotiatedCapabilities {
+    /// Construct a snapshot from advertised versions after clamping each
+    /// version to the protocol surface supported by this build.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_versions(
+        generation: u64,
+        layer_shell_version: u32,
+        xdg_shell_version: u32,
+        viewporter_version: u32,
+        fractional_scale_version: u32,
+        blur_version: u32,
+        activation_version: u32,
+        focus_grab_version: u32,
+        pointer_gestures_version: u32,
+    ) -> Self {
+        Self {
+            generation,
+            layer_shell_version: layer_shell_version.min(4),
+            xdg_shell_version: xdg_shell_version.min(6),
+            viewporter_version: viewporter_version.min(1),
+            fractional_scale_version: fractional_scale_version.min(1),
+            blur_version: blur_version.min(1),
+            activation_version: activation_version.min(1),
+            focus_grab_version: focus_grab_version.min(1),
+            pointer_gestures_version: pointer_gestures_version.min(3),
+        }
+    }
+
+    /// `xdg_popup.reposition` was introduced by xdg-shell version 3.
+    pub const fn supports_xdg_popup_reposition(self) -> bool {
+        self.xdg_shell_version >= 3
+    }
+}
+
 /// A compositor-owned surface lifecycle transition that the shell must
 /// reconcile with its retained surface targets.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -847,6 +899,15 @@ impl PresentationEngine {
         match &self.backend {
             Backend::WaylandSurface(bridge) => bridge.surface_generation(surface_id),
             Backend::DevWindow(_) | Backend::Testing(_) => None,
+        }
+    }
+
+    /// Return the protocol versions negotiated for the live presentation
+    /// connection. Non-Wayland backends report an empty snapshot.
+    pub fn negotiated_capabilities(&self) -> NegotiatedCapabilities {
+        match &self.backend {
+            Backend::WaylandSurface(bridge) => bridge.negotiated_capabilities(),
+            Backend::DevWindow(_) | Backend::Testing(_) => NegotiatedCapabilities::default(),
         }
     }
 

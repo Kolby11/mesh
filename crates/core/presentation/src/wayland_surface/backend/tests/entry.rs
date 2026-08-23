@@ -1,4 +1,5 @@
 use super::*;
+use crate::NegotiatedCapabilities;
 use mesh_core_render::DamageRect;
 
 #[test]
@@ -96,4 +97,19 @@ fn output_generation_advances_for_each_membership_revision() {
     assert_eq!(generations.snapshot().output, 1);
     assert!(generations.advance_output());
     assert_eq!(generations.snapshot().output, 2);
+}
+
+#[test]
+fn negotiated_capabilities_clamp_versions_and_gate_popup_reposition() {
+    let capabilities = NegotiatedCapabilities::from_versions(1, 9, 2, 4, 3, 2, 2, 2, 8);
+
+    assert_eq!(capabilities.generation, 1);
+    assert_eq!(capabilities.layer_shell_version, 4);
+    assert_eq!(capabilities.xdg_shell_version, 2);
+    assert_eq!(capabilities.viewporter_version, 1);
+    assert!(!capabilities.supports_xdg_popup_reposition());
+
+    let capabilities = NegotiatedCapabilities::from_versions(2, 4, 3, 1, 1, 1, 1, 1, 3);
+    assert_eq!(capabilities.generation, 2);
+    assert!(capabilities.supports_xdg_popup_reposition());
 }

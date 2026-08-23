@@ -1,5 +1,6 @@
 use super::backend::{SurfaceEntry, WaylandRole, apply_config};
 use super::*;
+use crate::NegotiatedCapabilities;
 use std::sync::Arc;
 
 const MAX_REPEAT_EVENTS_PER_POLL: usize = 64;
@@ -113,6 +114,7 @@ pub(super) struct State {
     pub(super) compositor_state: CompositorState,
     pub(super) shm: Shm,
     pub(super) layer_shell: LayerShell,
+    pub(super) negotiated_capabilities: NegotiatedCapabilities,
     pub(super) activation_state: Option<ActivationState>,
     pub(super) focus_grab_manager: Option<HyprlandFocusGrabManagerV1>,
     pub(super) viewporter: Option<WpViewporter>,

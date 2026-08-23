@@ -1,4 +1,5 @@
 use super::*;
+use crate::NegotiatedCapabilities;
 use mesh_core_render::DamageRect;
 use smallvec::SmallVec;
 
@@ -324,6 +325,10 @@ impl WaylandSurfaceBackend {
             .surfaces
             .get(surface_id)
             .map(SurfaceEntry::surface_generation)
+    }
+
+    pub fn negotiated_capabilities(&self) -> NegotiatedCapabilities {
+        self.state.negotiated_capabilities
     }
 
     pub fn surface_scale(&self, surface_id: &str) -> f32 {
