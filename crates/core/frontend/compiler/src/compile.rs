@@ -1,7 +1,7 @@
 use crate::CompiledFrontendModule;
 
 use mesh_core_component::{
-    ComponentFile, ComponentImportTarget, parse_component,
+    ComponentFile, ComponentImportTarget, PropDef, PropType, PropValue, parse_component,
     template::{Attribute, AttributeValue, TemplateNode},
 };
 use mesh_core_module::{Manifest, ModuleType};
@@ -586,6 +586,7 @@ fn validate_template_nodes(
                     let Some(child_component) = child_component else {
                         continue;
                     };
+                    validate_child_component_props(component_ref, child_component, path)?;
                     let explicit_props = component_ref
                         .props
                         .iter()
@@ -605,6 +606,125 @@ fn validate_template_nodes(
         }
     }
     Ok(())
+}
+
+fn validate_child_component_props(
+    reference: &mesh_core_component::template::ComponentRef,
+    child: &ComponentFile,
+    parent_path: &Path,
+) -> Result<(), CompileFrontendError> {
+    let declarations = child
+        .props
+        .as_ref()
+        .map(|block| {
+            block
+                .props
+                .iter()
+                .map(|definition| (definition.name.as_str(), definition))
+                .collect::<HashMap<_, _>>()
+        })
+        .unwrap_or_default();
+    let public_fields = public_component_fields(child);
+
+    for attribute in &reference.props {
+        if attribute.name == "bind:this" {
+            continue;
+        }
+
+        let Some(definition) = declarations.get(attribute.name.as_str()) else {
+            if public_fields.contains(&attribute.name) {
+                continue;
+            }
+            return Err(component_prop_error(
+                parent_path,
+                &reference.name,
+                &attribute.name,
+                format!(
+                    "child component `{}` has no public prop or field named `{}`",
+                    reference.name, attribute.name
+                ),
+            ));
+        };
+
+        if !definition.expose {
+            return Err(component_prop_error(
+                parent_path,
+                &reference.name,
+                &attribute.name,
+                format!(
+                    "child component `{}` prop `{}` is private (`expose: false`)",
+                    reference.name, attribute.name
+                ),
+            ));
+        }
+
+        if let AttributeValue::Static(value) = &attribute.value {
+            let parsed = static_prop_value(definition, value).map_err(|message| {
+                component_prop_error(parent_path, &reference.name, &attribute.name, message)
+            })?;
+            mesh_core_component::validate_prop_value(definition, &parsed).map_err(|error| {
+                component_prop_error(
+                    parent_path,
+                    &reference.name,
+                    &attribute.name,
+                    format!("invalid value for child prop `{}`: {error}", attribute.name),
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn public_component_fields(component: &ComponentFile) -> HashSet<String> {
+    let mut fields = HashSet::new();
+    if let Some(script) = &component.script {
+        let (state_vars, _, functions, _) = extract_script_symbols(&script.source);
+        fields.extend(state_vars);
+        fields.extend(functions);
+    }
+    fields
+}
+
+fn static_prop_value(definition: &PropDef, value: &str) -> Result<PropValue, String> {
+    match definition.ty {
+        PropType::Bool => match value.trim() {
+            "" | "true" | "1" => Ok(PropValue::Bool(true)),
+            "false" | "0" => Ok(PropValue::Bool(false)),
+            other => Err(format!(
+                "child prop `{}` expects a boolean literal, got `{other}`",
+                definition.name
+            )),
+        },
+        PropType::Number | PropType::Int => value
+            .trim()
+            .parse::<f64>()
+            .map(PropValue::Number)
+            .map_err(|_| {
+                format!(
+                    "child prop `{}` expects a numeric literal, got `{value}`",
+                    definition.name
+                )
+            }),
+        PropType::Duration if value.trim().parse::<f64>().is_ok() => Ok(PropValue::Number(
+            value
+                .trim()
+                .parse::<f64>()
+                .expect("checked numeric duration"),
+        )),
+        _ => Ok(PropValue::String(value.to_string())),
+    }
+}
+
+fn component_prop_error(
+    path: &Path,
+    component: &str,
+    prop: &str,
+    message: String,
+) -> CompileFrontendError {
+    CompileFrontendError::StandaloneComponentViolation {
+        path: path.to_path_buf(),
+        message: format!("component `{component}` attribute `{prop}`: {message}"),
+    }
 }
 
 fn validate_attributes(
@@ -983,6 +1103,9 @@ theme_icon = "weather-clear"
         );
         let child = component(
             r#"
+<props>
+theme_icon: { type: "icon" }
+</props>
 <template>
   <icon name="{theme_icon}" />
 </template>
@@ -996,6 +1119,118 @@ theme_icon = "weather-clear"
             &HashMap::from([("Child".to_string(), child)]),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn child_component_props_validate_publicity_and_static_types() {
+        let root = component(
+            r#"
+<template>
+  <Child mode="wrong" />
+</template>
+<script lang="luau">
+import Child from "./child.mesh"
+</script>
+"#,
+        );
+        let child = component(
+            r#"
+<props>
+mode: { type: "enum", options: ["compact", "cozy"] }
+</props>
+<template><box /></template>
+"#,
+        );
+
+        let error = validate_standalone_imports(
+            &root,
+            &path("main.mesh"),
+            Path::new("/tmp"),
+            &HashMap::from([("Child".to_string(), child)]),
+        )
+        .expect_err("invalid child enum value accepted");
+        assert!(
+            error
+                .to_string()
+                .contains("invalid value for child prop `mode`")
+        );
+
+        let root = component(
+            r#"
+<template>
+  <Child secret="value" />
+</template>
+<script lang="luau">
+import Child from "./child.mesh"
+</script>
+"#,
+        );
+        let child = component(
+            r#"
+<props>
+secret: { type: "string", expose: false }
+</props>
+<template><box /></template>
+"#,
+        );
+        let error = validate_standalone_imports(
+            &root,
+            &path("main.mesh"),
+            Path::new("/tmp"),
+            &HashMap::from([("Child".to_string(), child)]),
+        )
+        .expect_err("private child prop accepted");
+        assert!(error.to_string().contains("is private"));
+
+        let root = component(
+            r#"
+<template>
+  <Child missing="value" />
+</template>
+<script lang="luau">
+import Child from "./child.mesh"
+</script>
+"#,
+        );
+        let child = component(r#"<template><box /></template>"#);
+        let error = validate_standalone_imports(
+            &root,
+            &path("main.mesh"),
+            Path::new("/tmp"),
+            &HashMap::from([("Child".to_string(), child)]),
+        )
+        .expect_err("unknown child prop accepted");
+        assert!(error.to_string().contains("has no public prop or field"));
+    }
+
+    #[test]
+    fn child_public_script_fields_remain_valid_component_inputs() {
+        let root = component(
+            r#"
+<template>
+  <Child title="From parent" />
+</template>
+<script lang="luau">
+import Child from "./child.mesh"
+</script>
+"#,
+        );
+        let child = component(
+            r#"
+<template><text>{title}</text></template>
+<script lang="luau">
+title = "Default"
+</script>
+"#,
+        );
+
+        validate_standalone_imports(
+            &root,
+            &path("main.mesh"),
+            Path::new("/tmp"),
+            &HashMap::from([("Child".to_string(), child)]),
+        )
+        .expect("public script field rejected as child input");
     }
 
     #[test]

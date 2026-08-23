@@ -95,6 +95,10 @@ impl Document {
     pub fn new(uri: Url, source: String) -> Self {
         let (parsed, parse_error) = match parse_component(&source) {
             Ok(file) => (Some(file), None),
+            Err(err @ mesh_core_component::ParseError::InvalidSemantics { .. }) => (
+                mesh_core_component::parser::parse_component_for_tooling(&source).ok(),
+                Some(err),
+            ),
             Err(err) => (None, Some(err)),
         };
 

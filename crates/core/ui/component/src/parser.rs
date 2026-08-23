@@ -5,6 +5,7 @@ mod brace;
 mod markup;
 mod props;
 mod script;
+mod semantic;
 mod styles;
 
 use crate::{BlockAttribute, ComponentBlock, ComponentFile, ComponentImportTarget, SourceSpan};
@@ -52,6 +53,13 @@ pub enum ParseError {
     #[error("invalid props block: {message}")]
     InvalidProps { message: String },
 
+    #[error("invalid component semantics at line {line}, column {column}: {message}")]
+    InvalidSemantics {
+        message: String,
+        line: usize,
+        column: usize,
+    },
+
     #[error("invalid i18n block at line {line}: {message}")]
     InvalidI18n { message: String, line: usize },
 
@@ -63,6 +71,22 @@ pub enum ParseError {
 }
 
 pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
+    parse_component_impl(source, true)
+}
+
+/// Parse the structural component tree for editor tooling while allowing
+/// incomplete cross-block references to remain available for completion.
+///
+/// Compiler and runtime callers must use [`parse_component`], which runs the
+/// semantic contract pass before accepting the component.
+pub fn parse_component_for_tooling(source: &str) -> Result<ComponentFile, ParseError> {
+    parse_component_impl(source, false)
+}
+
+fn parse_component_impl(
+    source: &str,
+    validate_semantics: bool,
+) -> Result<ComponentFile, ParseError> {
     let blocks = parse_top_level_blocks(source)?;
 
     let (imports, script_source) = if let Some(block) =
@@ -104,14 +128,18 @@ pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
         .map(|block| parse_props(&source[block.content.start..block.content.end]))
         .transpose()?;
 
-    Ok(ComponentFile {
+    let component = ComponentFile {
         blocks,
         imports,
         props,
         template,
         script,
         style,
-    })
+    };
+    if validate_semantics {
+        semantic::validate(source, &component)?;
+    }
+    Ok(component)
 }
 
 /// Parse the declaration list carried by an element's `style` attribute.
@@ -1010,6 +1038,10 @@ button {
     #[test]
     fn classifies_standalone_prop_reference() {
         let source = r#"
+<props>
+track_width: { type: "size", default: "20px" }
+gap: { type: "size", default: "4px" }
+</props>
 <template><box /></template>
 <style>
 .mixer {
@@ -1029,6 +1061,54 @@ button {
         assert!(
             matches!(&decls[2].value, StyleValue::Literal(value) if value.contains("prop(gap)"))
         );
+    }
+
+    #[test]
+    fn rejects_undefined_and_empty_style_props() {
+        for style in [
+            ".root { width: prop(missing); }",
+            ".root { width: prop(); }",
+        ] {
+            let source = format!("<template><box /></template><style>{style}</style>");
+            let error = parse_component(&source).expect_err("invalid style prop accepted");
+            assert!(matches!(error, ParseError::InvalidSemantics { .. }));
+            assert!(error.to_string().contains("prop"));
+        }
+    }
+
+    #[test]
+    fn rejects_prop_type_when_css_domain_does_not_match() {
+        let source = r##"
+<props>
+accent: { type: "color", default: "#fff" }
+</props>
+<template><box /></template>
+<style>
+.root { width: prop(accent); }
+</style>
+"##;
+        let error = parse_component(source).expect_err("wrong CSS prop domain accepted");
+        assert!(matches!(error, ParseError::InvalidSemantics { .. }));
+        assert!(error.to_string().contains("requires a length value"));
+    }
+
+    #[test]
+    fn accepts_embedded_props_that_match_css_domains() {
+        let source = r#"
+<props>
+gap: { type: "size", default: "4px" }
+anim_ms: { type: "duration", default: 120 }
+</props>
+<template><box /></template>
+<style>
+.root {
+  width: calc(prop(gap) * 2);
+  transition-duration: prop(anim_ms);
+  content: "prop(not_a_component_prop)";
+}
+</style>
+"#;
+        parse_component(source).expect("matching CSS prop domains rejected");
     }
 
     #[test]

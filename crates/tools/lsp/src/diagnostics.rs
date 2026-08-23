@@ -95,6 +95,16 @@ fn diagnostics_from_error(err: &ParseError, source: &str) -> Vec<Diagnostic> {
             DiagnosticSeverity::ERROR,
         )],
 
+        ParseError::InvalidSemantics {
+            message,
+            line,
+            column: _,
+        } => vec![source_line_diag(
+            *line,
+            format!("Component semantic error: {message}"),
+            DiagnosticSeverity::ERROR,
+        )],
+
         ParseError::InvalidI18n { message, line } => vec![Diagnostic {
             range: Range {
                 start: Position {

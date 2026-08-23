@@ -11,6 +11,11 @@ inline `<i18n>` as an explicit migration error. Its brace-aware template lexer
 and parser validates Luau expressions and control-flow nesting, rejects empty,
 unterminated, malformed, and mismatched braces, and preserves absolute spans
 for expressions, attributes, conditions, loops, and control-flow blocks.
+The post-parse semantic pass links `<props>` declarations to exact and embedded
+`prop()` style references and common CSS value domains, while local child
+component inputs are checked for public visibility and static types. Undefined,
+empty, or incompatible style props and unknown, private, or invalid child props
+fail before lowering; LSP retains a tooling parse path for incomplete refs.
 Focused component and frontend tests plus workspace checking pass. The broad elements and LSP suites retain
 their existing theme-color and locale-completion failures respectively.
 
@@ -211,6 +216,6 @@ live compositor/lifecycle matrix remain separate follow-up work.
 
 ## Next
 
-The next component-language item is semantic validation linking `<props>`,
-`prop()` references, child props, visibility, types, and CSS domains; the
-remaining presentation/resource follow-ups stay separate from this parser work.
+The next component-language item selects the highest valid value across
+prop/configuration layers while retaining invalid overrides only in diagnostics;
+the remaining presentation/resource follow-ups stay separate from this work.

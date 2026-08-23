@@ -61,7 +61,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/07-component-language/improvements.md)
 
-- [ ] Add semantic validation linking `<props>`, `prop()` references, child props, visibility, types, and CSS domains.
 - [ ] Select the highest valid value across prop/configuration layers while retaining invalid overrides only in diagnostics.
 - [ ] Make JSON-to-prop conversion scalar-only until an explicit structured prop type exists.
 - [ ] Normalize and validate `PropDef` constraints, units, options, tokens, and CSS-domain values once.
