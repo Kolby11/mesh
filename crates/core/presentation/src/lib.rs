@@ -48,6 +48,37 @@ impl TextInputState {
     }
 }
 
+pub(crate) fn validate_text_input_state(
+    surface_id: Option<&str>,
+    state: Option<&TextInputState>,
+) -> Result<(), PresentationError> {
+    if let Some(snapshot) = state {
+        let text_len = snapshot.surrounding_text.len();
+        if text_len > 4000 {
+            return Err(PresentationError::TextInputInvalid(
+                "surrounding text exceeds the 4000-byte Wayland message limit".into(),
+            ));
+        }
+        for (name, offset) in [("cursor", snapshot.cursor), ("anchor", snapshot.anchor)] {
+            if offset > text_len || !snapshot.surrounding_text.is_char_boundary(offset) {
+                return Err(PresentationError::TextInputInvalid(format!(
+                    "text-input {name} offset {offset} is not a UTF-8 boundary in {text_len} bytes"
+                )));
+            }
+        }
+    }
+
+    match (surface_id.filter(|id| !id.is_empty()), state) {
+        (Some(_), Some(_)) | (None, None) => Ok(()),
+        (Some(_), None) => Err(PresentationError::TextInputInvalid(
+            "a focused surface requires a text-input state".into(),
+        )),
+        (None, Some(_)) => Err(PresentationError::TextInputInvalid(
+            "text-input state requires a focused surface".into(),
+        )),
+    }
+}
+
 use dev_window::DevWindowBackend;
 use wayland_surface::WaylandSurfaceBackend;
 
@@ -275,6 +306,7 @@ struct TestingBackend {
     window_states: HashMap<String, WindowStates>,
     unconfigured_surfaces: HashSet<String>,
     missing_surfaces: HashSet<String>,
+    text_input_state: Option<(String, TextInputState)>,
 }
 
 fn drop_testing_events_for_surface(backend: &mut TestingBackend, surface_id: &str) {
@@ -493,6 +525,14 @@ impl PresentationEngine {
     pub fn testing_push_event(&mut self, event: WindowEvent) {
         if let Backend::Testing(backend) = &mut self.backend {
             backend.events.push(event);
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn testing_text_input_state(&self) -> Option<(String, TextInputState)> {
+        match &self.backend {
+            Backend::Testing(backend) => backend.text_input_state.clone(),
+            Backend::WaylandSurface(_) | Backend::DevWindow(_) => None,
         }
     }
 
@@ -1046,7 +1086,22 @@ impl PresentationEngine {
     ) -> Result<(), PresentationError> {
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => bridge.set_text_input_state(surface_id, state),
-            Backend::DevWindow(_) | Backend::Testing(_) => Ok(()),
+            Backend::DevWindow(_) => {
+                validate_text_input_state(surface_id, state.as_ref())?;
+                Ok(())
+            }
+            Backend::Testing(backend) => {
+                if let Some(reason) = &backend.connection_lost {
+                    return Err(PresentationError::ConnectionLost(reason.clone()));
+                }
+                validate_text_input_state(surface_id, state.as_ref())?;
+                backend.text_input_state = match (surface_id.filter(|id| !id.is_empty()), state) {
+                    (Some(surface_id), Some(state)) => Some((surface_id.to_string(), state)),
+                    (None, None) => None,
+                    _ => unreachable!("text-input state was validated before storage"),
+                };
+                Ok(())
+            }
         }
     }
 
@@ -1416,6 +1471,40 @@ pub fn event_surface_id(event: &WindowEvent) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn testing_backend_publishes_and_clears_text_input_state() {
+        let mut engine = PresentationEngine::testing_with_popup_support(false);
+        let state = TextInputState::new("A🙂B", 5, 1);
+
+        engine
+            .set_text_input_state(Some("launcher"), Some(state.clone()))
+            .expect("valid surrounding state should be accepted");
+        assert_eq!(
+            engine.testing_text_input_state(),
+            Some(("launcher".to_string(), state))
+        );
+
+        engine
+            .set_text_input_state(None, None)
+            .expect("clearing text-input state should be accepted");
+        assert!(engine.testing_text_input_state().is_none());
+    }
+
+    #[test]
+    fn text_input_state_rejects_non_boundary_cursor_without_storage() {
+        let mut engine = PresentationEngine::testing_with_popup_support(false);
+
+        let error = engine
+            .set_text_input_state(Some("launcher"), Some(TextInputState::new("A🙂B", 2, 2)))
+            .expect_err("cursor inside a UTF-8 scalar must be rejected");
+        assert!(matches!(
+            error,
+            PresentationError::TextInputInvalid(message)
+                if message.contains("cursor") && message.contains("UTF-8 boundary")
+        ));
+        assert!(engine.testing_text_input_state().is_none());
+    }
 
     #[test]
     fn testing_surface_teardown_drops_queued_input_for_destroyed_surface() {

@@ -100,7 +100,9 @@ preedit cursor without decorating masked password input. Surface teardown now
 clears the entered text-input surface, pending `done` transaction, and applied
 surrounding state before the compositor identity disappears; the deterministic
 testing backend drops queued input for destroyed surfaces while preserving
-other seats/surfaces.
+other seats/surfaces. The deterministic backend also validates and retains the
+published surrounding-text snapshot, including explicit clear transitions, so
+shell-side text-input publication is observable without a live compositor.
 
 Popup targets now invalidate their cached creation size when presentation
 reports `SurfaceMissing`, including state-only commits, and force a full retry
@@ -127,7 +129,7 @@ Text shaping remains synchronous and outside that broker.
 Focused presentation, Wayland routing, shell text-transaction, and preedit
 rendering tests plus `cargo check --workspace`, formatting, and `git diff
 --check` pass. The full
-presentation library passes (90 active, 11 ignored). The broad shell library
+presentation library passes (95 active, 11 ignored). The broad shell library
 run compiles and reaches 667 passed tests, but retains 47 existing fixture and
 runtime failures and 130 ignored tests; none are text-input failures. Existing
 shell dead-code/private-interface warnings remain. Connection recreation and a

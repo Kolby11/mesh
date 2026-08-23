@@ -1,6 +1,6 @@
 use super::*;
 use crate::NegotiatedCapabilities;
-use crate::TextInputState;
+use crate::{TextInputState, validate_text_input_state};
 use std::sync::Arc;
 
 impl WaylandSurfaceBackend {
@@ -122,35 +122,11 @@ impl WaylandSurfaceBackend {
         surface_id: Option<&str>,
         state: Option<TextInputState>,
     ) -> Result<(), PresentationError> {
-        if let Some(snapshot) = state.as_ref() {
-            let text_len = snapshot.surrounding_text.len();
-            if text_len > 4000 {
-                return Err(PresentationError::TextInputInvalid(
-                    "surrounding text exceeds the 4000-byte Wayland message limit".into(),
-                ));
-            }
-            for (name, offset) in [("cursor", snapshot.cursor), ("anchor", snapshot.anchor)] {
-                if offset > text_len || !snapshot.surrounding_text.is_char_boundary(offset) {
-                    return Err(PresentationError::TextInputInvalid(format!(
-                        "text-input {name} offset {offset} is not a UTF-8 boundary in {text_len} bytes"
-                    )));
-                }
-            }
-        }
-
+        validate_text_input_state(surface_id, state.as_ref())?;
         self.state.text_input_state = match (surface_id.filter(|id| !id.is_empty()), state) {
             (Some(surface_id), Some(state)) => Some((Arc::from(surface_id), state)),
             (None, None) => None,
-            (Some(_), None) => {
-                return Err(PresentationError::TextInputInvalid(
-                    "a focused surface requires a text-input state".into(),
-                ));
-            }
-            (None, Some(_)) => {
-                return Err(PresentationError::TextInputInvalid(
-                    "text-input state requires a focused surface".into(),
-                ));
-            }
+            _ => unreachable!("text-input state was validated before storage"),
         };
         let seat_ids = self.state.input_seat_order.clone();
         for seat_id in seat_ids {
