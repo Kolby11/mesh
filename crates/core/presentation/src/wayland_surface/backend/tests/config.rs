@@ -234,6 +234,27 @@ fn dynamic_left_surface_uses_output_height_when_configure_height_is_unspecified(
 }
 
 #[test]
+fn dynamic_surface_padding_uses_the_resolved_extent() {
+    let mut cfg = base_cfg();
+    cfg.edge = Some(Edge::Top);
+    cfg.width = 0;
+    cfg.height = 50;
+    cfg.padding = SurfacePadding::trailing(0, 12);
+
+    let extent = resolved_surface_size_for_config(&cfg, 1, 50, Some((1920, 1080)));
+    assert_eq!(extent, (1920, 50));
+    assert_eq!(
+        cfg.padding.content_rect(extent.0, extent.1),
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 38,
+        })
+    );
+}
+
+#[test]
 fn clamp_skips_when_surface_output_is_unknown() {
     // Multi-monitor regression: `wl_surface::enter` for a freshly-mapped
     // layer surface arrives *after* the compositor's own `configure`, so

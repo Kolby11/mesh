@@ -389,17 +389,27 @@ impl SurfaceEntry {
         }
     }
 
-    /// The input region this surface should currently have: its
-    /// compositor-configured size minus the reserve it declared.
+    /// Resolve the one logical extent used by paint, protocol attach, and
+    /// surface-state preparation. Layer-shell can report zero for a spanning
+    /// axis, in which case the output size is part of the authoritative
+    /// extent; windows and popups use their compositor-configured size.
+    pub(super) fn resolved_extent(&self, output_size: Option<(u32, u32)>) -> (u32, u32) {
+        resolved_surface_size(self, output_size)
+    }
+
+    /// The input region this surface should currently have: its resolved
+    /// logical extent minus the reserve it declared.
     ///
     /// Derived on every commit rather than pushed by the shell. A derived value
     /// cannot be missed by a caller, cannot be dropped because the surface did
     /// not exist yet, and is automatically re-established when the compositor
     /// object is torn down and recreated (role swap, window hide/show) — the
     /// three ways this has regressed before.
-    pub(in crate::wayland_surface) fn content_input_region(&self) -> Option<DamageRect> {
-        self.padding
-            .content_rect(self.width.max(1), self.height.max(1))
+    pub(in crate::wayland_surface) fn content_input_region_for_extent(
+        &self,
+        extent: (u32, u32),
+    ) -> Option<DamageRect> {
+        self.padding.content_rect(extent.0.max(1), extent.1.max(1))
     }
 
     pub(super) fn needs_reconfigure(
@@ -544,12 +554,16 @@ impl SurfaceEntry {
         }
     }
 
-    pub(super) fn input_region_needs_commit(&self) -> bool {
-        self.applied_input_region != Some(self.content_input_region())
+    pub(super) fn input_region_needs_commit(&self, input_region: Option<DamageRect>) -> bool {
+        self.applied_input_region != Some(input_region)
     }
 
-    pub(super) fn stage_input_region(&self, compositor_state: &CompositorState) -> bool {
-        let Some(rect) = self.content_input_region() else {
+    pub(super) fn stage_input_region(
+        &self,
+        input_region: Option<DamageRect>,
+        compositor_state: &CompositorState,
+    ) -> bool {
+        let Some(rect) = input_region else {
             self.wl_surface().set_input_region(None);
             return true;
         };

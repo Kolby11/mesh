@@ -205,7 +205,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 - [ ] Return typed create/configure/present/lost outcomes, cache only accepted generations, and retain damage for missing surfaces.
 - [ ] Route close, dismiss, parent destruction, role replacement, and connection loss through one idempotent teardown supervisor.
 - [ ] Gate popup reposition by negotiated protocol version and validate popup role, parent, identity, and reparenting.
-- [ ] Use one authoritative logical extent for paint, buffer validation, viewport, regions, attach, and queries.
 - [ ] Commit opaque, blur, and other surface-state changes even when pixel damage is empty.
 - [ ] Separate frame-callback waiting from buffer-release backpressure and prevent hot retry loops.
 - [ ] Make input ownership per seat and cancel pointer, touch, gesture, focus, and repeat transactions during teardown.

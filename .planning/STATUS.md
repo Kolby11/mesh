@@ -4,6 +4,13 @@
 
 ## Now
 
+Presentation now resolves dynamic layer-shell zero dimensions against the
+surface's actual output before buffer attach and surface-state preparation.
+The resolved logical extent is shared by paint-facing queries, input regions,
+window geometry, viewport destination, and commit state, so a spanning bar or
+rail cannot be painted at output size and presented through a one-pixel
+logical destination.
+
 Presentation surface configuration now computes a role-aware semantic diff:
 layer surfaces ignore inert toplevel fields, windows ignore inert layer
 placement fields, and live window size/title/identity, input padding, and
