@@ -63,6 +63,14 @@ pub enum DevWindowEvent {
         surface_id: Arc<str>,
         text: Arc<str>,
     },
+    /// Delete UTF-8 bytes around the focused text-input cursor. The Wayland
+    /// text-input-v3 adapter will preserve the protocol's byte lengths here;
+    /// the shell applies them only at valid UTF-8 boundaries.
+    TextDelete {
+        surface_id: Arc<str>,
+        before_bytes: usize,
+        after_bytes: usize,
+    },
     /// `zwp_pointer_gesture_swipe_v1` begin — a 3+ finger trackpad swipe started.
     GestureSwipeBegin {
         surface_id: Arc<str>,

@@ -127,6 +127,138 @@ end
 }
 
 #[test]
+fn text_delete_preserves_utf8_boundaries_and_dispatches_once() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+input_seen = ""
+change_count = 0
+function onInputChange(value)
+    input_seen = value
+    change_count = change_count + 1
+end
+</script>
+"#,
+    );
+    component.last_tree = Some(root_with(vec![event_node(
+        "input",
+        "root/0",
+        0.0,
+        0.0,
+        120.0,
+        24.0,
+        &[("change", "onInputChange")],
+    )]));
+    component.focused_key = Some("root/0".into());
+    let input_id = find_node_by_key(component.last_tree.as_ref().unwrap(), "root/0")
+        .unwrap()
+        .id;
+    component.input_values.insert(input_id, "A🙂B🙂C".into());
+    // Cursor after the first composed scalar: delete one scalar on each side.
+    component.input_cursors.insert(input_id, "A🙂".len());
+
+    component
+        .handle_input(
+            &default_theme(),
+            240,
+            160,
+            ComponentInput::TextDelete {
+                before_bytes: "🙂".len(),
+                after_bytes: "B".len(),
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        component.input_values.get(&input_id).map(String::as_str),
+        Some("A🙂C")
+    );
+    assert_eq!(component.input_cursors.get(&input_id), Some(&1));
+    assert_eq!(
+        runtime_value(&component, "input_seen"),
+        Some(serde_json::Value::String("A🙂C".into()))
+    );
+    assert_eq!(
+        runtime_value(&component, "change_count"),
+        Some(serde_json::json!(1))
+    );
+
+    // One byte is not a valid prefix of the following emoji; the request is
+    // ignored rather than splitting its UTF-8 sequence.
+    component
+        .handle_input(
+            &default_theme(),
+            240,
+            160,
+            ComponentInput::TextDelete {
+                before_bytes: 0,
+                after_bytes: 1,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        component.input_values.get(&input_id).map(String::as_str),
+        Some("A🙂C")
+    );
+    assert_eq!(
+        runtime_value(&component, "change_count"),
+        Some(serde_json::json!(1))
+    );
+}
+
+#[test]
+fn keyboard_activation_focused_input_delete_edits_next_scalar() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+input_seen = ""
+function onInputChange(value)
+    input_seen = value
+end
+</script>
+"#,
+    );
+    component.last_tree = Some(root_with(vec![event_node(
+        "input",
+        "root/0",
+        0.0,
+        0.0,
+        120.0,
+        24.0,
+        &[("change", "onInputChange")],
+    )]));
+    component.focused_key = Some("root/0".into());
+    let input_id = find_node_by_key(component.last_tree.as_ref().unwrap(), "root/0")
+        .unwrap()
+        .id;
+    component.input_values.insert(input_id, "A🙂B".into());
+    component.input_cursors.insert(input_id, "A".len());
+
+    component
+        .handle_input(
+            &default_theme(),
+            240,
+            160,
+            ComponentInput::KeyPressed {
+                key: "Delete".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        component.input_values.get(&input_id).map(String::as_str),
+        Some("AB")
+    );
+    assert_eq!(
+        runtime_value(&component, "input_seen"),
+        Some(serde_json::Value::String("AB".into()))
+    );
+}
+
+#[test]
 fn hovered_target_is_interactive_for_clickable_ancestor_label() {
     let mut component = test_frontend_component(
         r#"

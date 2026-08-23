@@ -105,11 +105,29 @@ impl FrontendSurfaceComponent {
                 let input_id = find_node_by_key(tree, &focused_key)
                     .expect("is_input_key verified the focused input exists")
                     .id;
-                let value = self.input_values.entry(input_id).or_default();
                 match key.as_str() {
                     "Backspace" => {
-                        value.pop();
-                        let current = value.clone();
+                        let current = self.delete_input_text(
+                            input_id,
+                            self.input_previous_scalar_bytes(input_id),
+                            0,
+                        );
+                        self.clear_selection();
+                        self.invalidate_text_state();
+                        requests.extend(self.dispatch_text_input_value_handlers(
+                            tree,
+                            &focused_key,
+                            &current,
+                        )?);
+                        return Ok(requests);
+                    }
+                    "Delete" => {
+                        let current = self.delete_input_text(
+                            input_id,
+                            0,
+                            self.input_next_scalar_bytes(input_id),
+                        );
+                        self.clear_selection();
                         self.invalidate_text_state();
                         requests.extend(self.dispatch_text_input_value_handlers(
                             tree,

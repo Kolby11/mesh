@@ -769,6 +769,10 @@ pub(super) struct FrontendSurfaceComponent {
     pub(super) triggered_popovers: HashMap<String, String>,
     selection: Option<TextSelectionState>,
     input_values: HashMap<NodeId, String>,
+    /// UTF-8 byte cursor positions for editable inputs. A missing entry is
+    /// initialized to the value's end, preserving the historic append-only
+    /// behavior until an editor operation moves the cursor.
+    input_cursors: HashMap<NodeId, usize>,
     slider_values: HashMap<NodeId, f32>,
     slider_script_values: HashMap<NodeId, f32>,
     checked_values: HashMap<NodeId, bool>,
@@ -1127,6 +1131,7 @@ impl FrontendSurfaceComponent {
             triggered_popovers: HashMap::new(),
             selection: None,
             input_values: HashMap::new(),
+            input_cursors: HashMap::new(),
             slider_values: HashMap::new(),
             slider_script_values: HashMap::new(),
             checked_values: HashMap::new(),

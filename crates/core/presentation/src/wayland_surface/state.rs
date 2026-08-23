@@ -1072,7 +1072,10 @@ fn is_pointer_event(event: &DevWindowEvent) -> bool {
 fn is_keyboard_event(event: &DevWindowEvent) -> bool {
     matches!(
         event,
-        DevWindowEvent::Key { .. } | DevWindowEvent::Char { .. } | DevWindowEvent::TextInput { .. }
+        DevWindowEvent::Key { .. }
+            | DevWindowEvent::Char { .. }
+            | DevWindowEvent::TextInput { .. }
+            | DevWindowEvent::TextDelete { .. }
     )
 }
 

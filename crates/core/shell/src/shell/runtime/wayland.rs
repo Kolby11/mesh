@@ -394,6 +394,13 @@ impl Shell {
                 }
                 RoutedWindowEvent::Char { ch } => ComponentInput::Char { ch },
                 RoutedWindowEvent::TextInput { text } => ComponentInput::TextInput { text },
+                RoutedWindowEvent::TextDelete {
+                    before_bytes,
+                    after_bytes,
+                } => ComponentInput::TextDelete {
+                    before_bytes,
+                    after_bytes,
+                },
             };
             tracing::trace!(
                 "[hover] dispatch_wayland: routing event to surface_id={}",
@@ -674,6 +681,10 @@ enum RoutedWindowEvent {
     TextInput {
         text: String,
     },
+    TextDelete {
+        before_bytes: usize,
+        after_bytes: usize,
+    },
 }
 
 impl RoutedWindowEvent {
@@ -684,6 +695,7 @@ impl RoutedWindowEvent {
                 | Self::KeyReleased { .. }
                 | Self::Char { .. }
                 | Self::TextInput { .. }
+                | Self::TextDelete { .. }
         )
     }
 }
@@ -756,6 +768,17 @@ fn split_window_event(event: WindowEvent) -> (std::sync::Arc<str>, RoutedWindowE
                 text: text.to_string(),
             },
         ),
+        WindowEvent::TextDelete {
+            surface_id,
+            before_bytes,
+            after_bytes,
+        } => (
+            surface_id,
+            RoutedWindowEvent::TextDelete {
+                before_bytes,
+                after_bytes,
+            },
+        ),
         WindowEvent::GestureSwipeBegin {
             surface_id,
             fingers,
@@ -826,6 +849,7 @@ fn profiling_trigger_for_event(event: &WindowEvent) -> &'static str {
         WindowEvent::Key { .. } => "key",
         WindowEvent::Char { .. } => "char",
         WindowEvent::TextInput { .. } => "text_input",
+        WindowEvent::TextDelete { .. } => "text_delete",
         WindowEvent::GestureSwipeBegin { .. } => "gesture_swipe_begin",
         WindowEvent::GestureSwipeUpdate { .. } => "gesture_swipe_update",
         WindowEvent::GestureSwipeEnd { .. } => "gesture_swipe_end",
@@ -950,6 +974,21 @@ mod tests {
         assert!(matches!(
             event,
             RoutedWindowEvent::TextInput { ref text } if text == "A🙂B"
+        ));
+
+        let (surface_id, event) = split_window_event(WindowEvent::TextDelete {
+            surface_id: "launcher".into(),
+            before_bytes: 5,
+            after_bytes: 4,
+        });
+        assert_eq!(surface_id.as_ref(), "launcher");
+        assert!(event.is_keyboard());
+        assert!(matches!(
+            event,
+            RoutedWindowEvent::TextDelete {
+                before_bytes: 5,
+                after_bytes: 4,
+            }
         ));
     }
 

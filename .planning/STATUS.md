@@ -9,6 +9,9 @@ payload through presentation, shell routing, keyboard repeat, and the
 component input boundary. Focused inputs apply one accepted multi-scalar
 commit and dispatch one change boundary; the developer backend's existing
 single-character path remains compatible.
+The component input boundary now also carries UTF-8 byte-range deletion;
+focused inputs retain a scalar-safe byte cursor, support surrounding deletion
+and keyboard Delete, and dispatch one change boundary for each effective edit.
 
 Wayland presentation now classifies compositor I/O/EOF failures as typed
 `ConnectionLost` errors. The first loss clears retained compositor surface
@@ -117,6 +120,7 @@ expectation failures unrelated to pointer input.
 
 ## Next
 
-Complete the remaining semantic presentation state diff, actual
-IME/text-input-v3 preedit/surrounding-text/deletion lifecycle, connection
-recreation, and resource preparation/text shaping as separate follow-up work.
+Complete the remaining semantic presentation state diff and actual
+`zwp_text_input_v3` object lifecycle/event wiring for preedit, commit,
+surrounding text, and deletion; connection recreation and resource
+preparation/text shaping remain separate follow-up work.

@@ -1344,6 +1344,7 @@ pub fn event_surface_id(event: &WindowEvent) -> &str {
         | WindowEvent::Key { surface_id, .. }
         | WindowEvent::Char { surface_id, .. }
         | WindowEvent::TextInput { surface_id, .. }
+        | WindowEvent::TextDelete { surface_id, .. }
         | WindowEvent::GestureSwipeBegin { surface_id, .. }
         | WindowEvent::GestureSwipeUpdate { surface_id, .. }
         | WindowEvent::GestureSwipeEnd { surface_id, .. }

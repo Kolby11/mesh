@@ -239,6 +239,15 @@ pub enum ComponentInput {
     TextInput {
         text: String,
     },
+    /// Delete UTF-8 bytes around the focused input cursor.
+    ///
+    /// Text-input protocols report these lengths in bytes. The component
+    /// runtime clamps them to Unicode scalar boundaries before mutating the
+    /// value, so malformed or stale protocol payloads cannot split UTF-8.
+    TextDelete {
+        before_bytes: usize,
+        after_bytes: usize,
+    },
     KeyPressed {
         key: String,
         modifiers: KeyModifiers,

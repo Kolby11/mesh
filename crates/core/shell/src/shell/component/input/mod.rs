@@ -36,6 +36,83 @@ fn hover_path_suffixes<'a>(
 }
 
 impl FrontendSurfaceComponent {
+    /// Insert text at the focused input's UTF-8 cursor and return its new
+    /// value. Cursor positions stay byte-based because that is the unit used
+    /// by text-input-v3, but every mutation is kept on scalar boundaries.
+    pub(super) fn insert_input_text(&mut self, node_id: NodeId, text: &str) -> String {
+        let value = self.input_values.entry(node_id).or_default();
+        let cursor = self.input_cursors.entry(node_id).or_insert(value.len());
+        if *cursor > value.len() || !value.is_char_boundary(*cursor) {
+            *cursor = value.len();
+        }
+        value.insert_str(*cursor, text);
+        *cursor += text.len();
+        value.clone()
+    }
+
+    /// Delete the requested UTF-8 byte ranges around the focused input's
+    /// cursor. Invalid protocol lengths are clamped inward so a stale or
+    /// malformed request cannot split a code point or delete more bytes than
+    /// requested.
+    pub(super) fn delete_input_text(
+        &mut self,
+        node_id: NodeId,
+        before_bytes: usize,
+        after_bytes: usize,
+    ) -> String {
+        let value = self.input_values.entry(node_id).or_default();
+        let cursor = self.input_cursors.entry(node_id).or_insert(value.len());
+        if *cursor > value.len() || !value.is_char_boundary(*cursor) {
+            *cursor = value.len();
+        }
+        let cursor_position = *cursor;
+
+        let mut start = cursor_position.saturating_sub(before_bytes);
+        while start < cursor_position && !value.is_char_boundary(start) {
+            start += 1;
+        }
+
+        let mut end = cursor_position.saturating_add(after_bytes).min(value.len());
+        while end > cursor_position && !value.is_char_boundary(end) {
+            end -= 1;
+        }
+
+        if start < end {
+            value.replace_range(start..end, "");
+            *cursor = start;
+        }
+        value.clone()
+    }
+
+    pub(super) fn input_previous_scalar_bytes(&self, node_id: NodeId) -> usize {
+        let Some(value) = self.input_values.get(&node_id) else {
+            return 0;
+        };
+        let cursor = self
+            .input_cursors
+            .get(&node_id)
+            .copied()
+            .filter(|cursor| *cursor <= value.len() && value.is_char_boundary(*cursor))
+            .unwrap_or(value.len());
+        value[..cursor]
+            .chars()
+            .next_back()
+            .map_or(0, char::len_utf8)
+    }
+
+    pub(super) fn input_next_scalar_bytes(&self, node_id: NodeId) -> usize {
+        let Some(value) = self.input_values.get(&node_id) else {
+            return 0;
+        };
+        let cursor = self
+            .input_cursors
+            .get(&node_id)
+            .copied()
+            .filter(|cursor| *cursor <= value.len() && value.is_char_boundary(*cursor))
+            .unwrap_or(value.len());
+        value[cursor..].chars().next().map_or(0, char::len_utf8)
+    }
+
     pub(in crate::shell::component) fn handle_component_input(
         &mut self,
         theme: &Theme,
@@ -654,9 +731,7 @@ impl FrontendSurfaceComponent {
                         && let Some(input_node) = input_node
                     {
                         self.clear_selection();
-                        let value = self.input_values.entry(input_node.id).or_default();
-                        value.push(ch);
-                        let current = value.clone();
+                        let current = self.insert_input_text(input_node.id, &ch.to_string());
                         self.invalidate_text_state();
                         return self.dispatch_text_input_value_handlers(
                             tree,
@@ -692,9 +767,7 @@ impl FrontendSurfaceComponent {
                             .collect();
                         if !accepted.is_empty() {
                             self.clear_selection();
-                            let value = self.input_values.entry(input_node.id).or_default();
-                            value.push_str(&accepted);
-                            let current = value.clone();
+                            let current = self.insert_input_text(input_node.id, &accepted);
                             self.invalidate_text_state();
                             return self.dispatch_text_input_value_handlers(
                                 tree,
@@ -719,6 +792,34 @@ impl FrontendSurfaceComponent {
                         &keyboard_settings,
                     )? {
                         return Ok(requests);
+                    }
+                }
+            }
+            ComponentInput::TextDelete {
+                before_bytes,
+                after_bytes,
+            } => {
+                if let Some(focused_key) = self.focused_key.clone() {
+                    let input_node = find_node_by_key(tree, &focused_key);
+                    if is_input_key(tree, &focused_key)
+                        && let Some(input_node) = input_node
+                    {
+                        let previous = self
+                            .input_values
+                            .get(&input_node.id)
+                            .cloned()
+                            .unwrap_or_default();
+                        let current =
+                            self.delete_input_text(input_node.id, before_bytes, after_bytes);
+                        if current != previous {
+                            self.clear_selection();
+                            self.invalidate_text_state();
+                            return self.dispatch_text_input_value_handlers(
+                                tree,
+                                &focused_key,
+                                &current,
+                            );
+                        }
                     }
                 }
             }
