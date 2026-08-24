@@ -49,10 +49,16 @@ revision, typed decisions, dirty outputs, immutable tree snapshot, and ordered
 phase stamps from input/state through style invalidation, layout, animation,
 paint, and semantics.
 
+Frontend entrypoints and recursive component imports now resolve through the
+canonical module-root path boundary. Absolute and escaping traversal paths are
+rejected, symlinked source files and directories are rejected, and accepted
+sources retain canonical identities for compilation and dependency tracking.
+
 ## Next
 
-Reject absolute, traversal, and symlinked frontend entrypoint/import paths
-outside the module root (`docs/BACKLOG.md`).
+Keep service payloads Rust-owned unless the consumer has the resolved read
+capability; event subscriptions alone must not expose state
+(`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

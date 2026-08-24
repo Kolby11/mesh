@@ -73,7 +73,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/10-frontend-compiler-and-host/improvements.md)
 
-- [ ] Reject absolute, traversal, and symlinked frontend entrypoint/import paths outside the module root.
 - [ ] Keep service payloads Rust-owned unless the consumer has the resolved read capability; event subscriptions alone must not expose state.
 - [ ] Reload primary and contribution roots together as one atomic catalog generation.
 - [ ] Validate contribution roots against interface requirements, availability, and version ranges.

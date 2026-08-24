@@ -1280,6 +1280,93 @@ import Child from "./child.mesh"
     }
 
     #[test]
+    fn frontend_entrypoint_paths_are_contained_and_canonical() {
+        let workspace = tempfile::tempdir().unwrap();
+        let directory = workspace.path().join("module");
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("src/main.mesh");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, "<template><box /></template>").unwrap();
+
+        let resolved = resolve_module_entrypoint_path(&directory, "src/main.mesh")
+            .expect("contained frontend entrypoint");
+        assert_eq!(resolved, source.canonicalize().unwrap());
+
+        let outside = workspace.path().join("outside.mesh");
+        std::fs::write(&outside, "<template><box /></template>").unwrap();
+        for entrypoint in ["../outside.mesh", outside.to_str().unwrap()] {
+            assert!(
+                resolve_module_entrypoint_path(&directory, entrypoint).is_err(),
+                "entrypoint {entrypoint:?} must remain inside the module root"
+            );
+        }
+
+        #[cfg(unix)]
+        {
+            let linked = directory.join("linked.mesh");
+            std::os::unix::fs::symlink(&outside, &linked).unwrap();
+            assert!(
+                resolve_module_entrypoint_path(&directory, "linked.mesh").is_err(),
+                "symlinked entrypoints must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn recursive_component_imports_reject_external_paths() {
+        let workspace = tempfile::tempdir().unwrap();
+        let directory = workspace.path().join("module");
+        std::fs::create_dir_all(&directory).unwrap();
+        let owner_path = directory.join("src/main.mesh");
+        std::fs::create_dir_all(owner_path.parent().unwrap()).unwrap();
+        let outside = workspace.path().join("outside.mesh");
+        std::fs::write(&outside, "<template><box /></template>").unwrap();
+
+        let assert_rejected = |source: &str| {
+            std::fs::write(
+                &owner_path,
+                format!(
+                    "<template><Item /></template><script lang=\"luau\">import Item from \"{source}\"</script>"
+                ),
+            )
+            .unwrap();
+            let root = parse_component_file(&owner_path).unwrap();
+            let mut local_components = HashMap::new();
+            let mut module_component_imports = HashMap::new();
+            let mut seen_local_paths = HashSet::new();
+            let mut parsed_components = HashMap::from([(owner_path.clone(), root.clone())]);
+            let mut import_bindings = HashMap::new();
+            let mut ancestry = vec![owner_path.clone()];
+            let error = collect_imports(
+                &root,
+                &owner_path,
+                &directory,
+                &mut local_components,
+                &mut module_component_imports,
+                &mut seen_local_paths,
+                &mut parsed_components,
+                &mut import_bindings,
+                &mut ancestry,
+            )
+            .expect_err("external component import must be rejected");
+            assert!(
+                matches!(error, CompileFrontendError::InvalidSourcePath { .. }),
+                "unexpected error for {source:?}: {error:?}"
+            );
+        };
+
+        assert_rejected("../../outside.mesh");
+        assert_rejected(outside.to_str().unwrap());
+
+        #[cfg(unix)]
+        {
+            let linked = directory.join("linked.mesh");
+            std::os::unix::fs::symlink(&outside, &linked).unwrap();
+            assert_rejected("../linked.mesh");
+        }
+    }
+
+    #[test]
     fn root_component_keeps_its_own_scope() {
         let root = component(
             r#"
