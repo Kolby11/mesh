@@ -4,6 +4,11 @@
 
 ## Now
 
+Contribution roots now share primary-root interface validation: imports must be
+declared by the contributing module, explicit ranges are checked against the
+resolved graph contract/provider, and invalid contribution entries receive
+scoped diagnostics without entering the host catalog.
+
 Focus, pointer capture, press origin, gesture ownership, and scroll ownership
 now publish through one staged `mesh-core-interaction` transaction. The shell
 keeps key-based lookup caches for script/render compatibility, while ownership
@@ -66,9 +71,8 @@ compilation leaves the last-known-good catalog in place.
 
 ## Next
 
-Validate contribution roots against interface requirements, availability, and
-version ranges
-(`docs/BACKLOG.md`).
+Validate root and nested expression scopes uniformly using parser/runtime symbol
+tables and source spans (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

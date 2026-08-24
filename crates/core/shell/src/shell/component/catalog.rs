@@ -669,6 +669,24 @@ impl FrontendCatalog {
                                 }
                             },
                         };
+                        if let Err(message) = catalog.validate_interface_imports(
+                            &contribution.source_module_id,
+                            &compiled,
+                            graph,
+                        ) {
+                            let error = ShellRunError::FrontendComposition { message };
+                            catalog
+                                .diagnostics
+                                .push(FrontendCatalogDiagnostic::contribution(
+                                    &contribution.source_module_id,
+                                    &contribution.contribution_id,
+                                    entry_path
+                                        .clone()
+                                        .unwrap_or_else(|| module.path.join(&contribution.entry)),
+                                    &error,
+                                ));
+                            continue;
+                        }
                         catalog
                             .extension_point_entries
                             .insert(entry_key.clone(), compiled);
@@ -994,16 +1012,63 @@ impl FrontendCatalog {
         let Some(requirements) = graph.requirements_for_frontend(module_id) else {
             return Ok(());
         };
-        let declared = requirements
-            .backend
-            .keys()
-            .chain(requirements.optional_backend.keys())
-            .collect::<std::collections::HashSet<_>>();
-
-        for interface in compiled_interface_imports(compiled) {
-            if !declared.contains(&interface) {
+        for (interface, requested_version) in compiled_interface_imports(compiled) {
+            let required = requirements.backend.contains_key(&interface);
+            let optional = requirements.optional_backend.contains_key(&interface);
+            if !required && !optional {
                 return Err(format!(
                     "module '{module_id}' imports interface '{interface}' but does not declare it in mesh.uses.interfaces or mesh.uses.optionalInterfaces"
+                ));
+            }
+            let requested_range = requested_version
+                .as_deref()
+                .map(|version| {
+                    mesh_core_service::parse_version_req(version).ok_or_else(|| {
+                        format!(
+                            "module '{module_id}' imports interface '{interface}' with invalid version range '{version}'"
+                        )
+                    })
+                })
+                .transpose()
+                ?;
+
+            let graph_knows_interface = graph.declared_interface(&interface).is_some()
+                || !graph.backend_providers_for_interface(&interface).is_empty();
+            if !graph_knows_interface {
+                // Built-in interfaces are registered by the shell after the
+                // installed graph is built. The graph cannot validate their
+                // provider/version tuple yet, so leave those checks to the
+                // runtime registry while still enforcing the manifest edge.
+                continue;
+            }
+
+            let Some(provider) = graph.active_provider(&interface) else {
+                // The installed graph keeps frontends with no provider active
+                // so the runtime can expose an unavailable interface health
+                // state. Optional imports also intentionally degrade here.
+                continue;
+            };
+
+            let Some(request) = requested_range else {
+                continue;
+            };
+            let contract_version = graph
+                .interface_contract(&interface)
+                .map(|contract| contract.version.clone());
+            let provider_version = provider
+                .version
+                .as_deref()
+                .and_then(mesh_core_service::parse_contract_version);
+            let compatible = contract_version
+                .as_ref()
+                .is_none_or(|version| request.matches(version))
+                && provider_version
+                    .as_ref()
+                    .is_none_or(|version| request.matches(version));
+            if !compatible && required {
+                return Err(format!(
+                    "module '{module_id}' imports interface '{interface}@{}', but the available contract/provider versions are incompatible",
+                    requested_version.as_deref().unwrap_or_default()
                 ));
             }
         }
@@ -1154,6 +1219,102 @@ mod performance_tests {
         );
     }
 
+    fn catalog_with_navigation_contribution_source(
+        settings_source: &str,
+    ) -> (tempfile::TempDir, FrontendCatalog) {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let graph = mesh_core_module::package::load_installed_module_graph(
+            &workspace_root.join("config/module.json"),
+        )
+        .expect("shipped graph loads");
+        let mut modules = shipped_frontend_modules();
+        let navigation = modules
+            .remove("@mesh/navigation-bar")
+            .expect("shipped navigation module");
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(
+            temp.path().join("src/main.mesh"),
+            "<template><box /></template>",
+        )
+        .unwrap();
+        for entries in graph.all_extension_point_contributions().values() {
+            for entry in entries {
+                if entry.source_module_id != "@mesh/navigation-bar" {
+                    continue;
+                }
+                let path = temp.path().join(&entry.entry);
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent).unwrap();
+                }
+                let source = if entry.entry == "src/settings.mesh" {
+                    settings_source
+                } else {
+                    "<template><text /></template>"
+                };
+                std::fs::write(path, source).unwrap();
+            }
+        }
+        modules.insert(
+            "@mesh/navigation-bar".into(),
+            ModuleInstance::new(
+                navigation.manifest,
+                temp.path().to_path_buf(),
+                temp.path().join("module.json"),
+                navigation.manifest_source,
+            ),
+        );
+
+        let catalog = FrontendCatalog::from_modules(&modules, Some(&graph)).unwrap();
+        (temp, catalog)
+    }
+
+    #[test]
+    fn contribution_roots_must_declare_imported_interfaces() {
+        let (_temp, catalog) = catalog_with_navigation_contribution_source(
+            r#"
+<template><text /></template>
+<script lang="luau">
+local unknown = require("mesh.unknown")
+</script>
+"#,
+        );
+
+        assert!(
+            catalog
+                .contribution_entry("@mesh/navigation-bar", "navigation-bar")
+                .is_none()
+        );
+        assert!(catalog.diagnostics().iter().any(|diagnostic| {
+            diagnostic.module_id == "@mesh/navigation-bar"
+                && diagnostic.contribution_id.as_deref() == Some("navigation-bar")
+                && diagnostic.message.contains("does not declare it")
+        }));
+    }
+
+    #[test]
+    fn contribution_roots_reject_incompatible_required_interface_ranges() {
+        let (_temp, catalog) = catalog_with_navigation_contribution_source(
+            r#"
+<template><text /></template>
+<script lang="luau">
+local audio = require("mesh.audio@>=2.0")
+</script>
+"#,
+        );
+
+        assert!(
+            catalog
+                .contribution_entry("@mesh/navigation-bar", "navigation-bar")
+                .is_none()
+        );
+        assert!(catalog.diagnostics().iter().any(|diagnostic| {
+            diagnostic.module_id == "@mesh/navigation-bar"
+                && diagnostic.contribution_id.as_deref() == Some("navigation-bar")
+                && diagnostic.message.contains("versions are incompatible")
+        }));
+    }
+
     #[test]
     fn graph_only_catalog_rebuild_reuses_unchanged_compilations() {
         let modules = shipped_frontend_modules();
@@ -1273,9 +1434,8 @@ mod performance_tests {
     }
 }
 
-fn compiled_interface_imports(
-    compiled: &CompiledFrontendModule,
-) -> std::collections::HashSet<String> {
+fn compiled_interface_imports(compiled: &CompiledFrontendModule) -> Vec<(String, Option<String>)> {
+    let mut imports = std::collections::BTreeSet::new();
     compiled
         .all_local_components()
         .into_iter()
@@ -1286,10 +1446,17 @@ fn compiled_interface_imports(
                 .iter()
                 .filter_map(|import| match &import.target {
                     mesh_core_component::ComponentImportTarget::InterfaceApi {
-                        interface, ..
-                    } => Some(interface.clone()),
+                        interface,
+                        version,
+                    } => Some((
+                        mesh_core_service::canonical_interface_name(interface),
+                        version.clone(),
+                    )),
                     _ => None,
                 })
         })
-        .collect()
+        .for_each(|import| {
+            imports.insert(import);
+        });
+    imports.into_iter().collect()
 }
