@@ -141,6 +141,17 @@ impl InterfaceProxy {
             .unwrap_or_else(|| Self::can_read(caps, &contract.interface))
     }
 
+    /// Whether a consumer may create a proxy for a contract. State reads and
+    /// event subscriptions are separate grants, so a consumer with only an
+    /// explicit event grant may resolve the proxy without receiving state.
+    pub fn can_access_contract(caps: &CapabilitySet, contract: &InterfaceContract) -> bool {
+        Self::can_read_contract(caps, contract)
+            || contract
+                .events
+                .iter()
+                .any(|event| Self::can_subscribe_contract_event(caps, contract, &event.name))
+    }
+
     pub fn can_call_contract_method(
         caps: &CapabilitySet,
         contract: &InterfaceContract,
@@ -233,5 +244,10 @@ mod tests {
             "calibrate"
         ));
         assert!(!InterfaceProxy::can_read_contract(&control, &contract));
+
+        let mut subscribe = CapabilitySet::new();
+        subscribe.grant(Capability::new("alice.thermal.subscribe"));
+        assert!(InterfaceProxy::can_access_contract(&subscribe, &contract));
+        assert!(!InterfaceProxy::can_read_contract(&subscribe, &contract));
     }
 }

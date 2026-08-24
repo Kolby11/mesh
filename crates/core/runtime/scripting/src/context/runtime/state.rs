@@ -3,7 +3,6 @@ use super::super::element_ref::install_bound_element_proxies;
 use super::super::lookup::{lua_err, map_lua_error};
 use super::super::proxy::interface_event_channel;
 use super::*;
-use crate::host_api::InterfaceProxy;
 use mesh_core_elements::VariableStore;
 use mlua::{Function, LuaSerdeExt, Value as LuaValue};
 use serde_json::Value;
@@ -31,7 +30,7 @@ impl ScriptContext {
         payload: &Value,
         payload_fingerprint: u64,
     ) {
-        if !InterfaceProxy::can_read_service(&self.capabilities, service) {
+        if !self.can_read_service_interface(service) {
             return;
         }
         self.service_context_state

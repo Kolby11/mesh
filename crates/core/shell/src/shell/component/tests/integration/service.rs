@@ -95,6 +95,67 @@ function init() end
 }
 
 #[test]
+fn event_only_subscription_receives_events_without_service_state() {
+    let mut component = test_frontend_component_with_catalog(
+        r#"
+<template>
+  <box />
+</template>
+<script lang="luau">
+seen_level = 0
+seen_percent = -1
+
+function init()
+    local audio = require("mesh.audio@>=1.0")
+    audio.events.VolumeChanged:subscribe(function(event)
+        seen_level = event.level
+        seen_percent = audio.percent or -1
+    end)
+end
+</script>
+"#,
+        event_only_audio_network_catalog(),
+        &["service.audio.events"],
+    );
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({ "percent": 73 }),
+        })
+        .unwrap();
+
+    {
+        let runtimes = component.runtimes.lock().unwrap();
+        let runtime = runtimes.values().next().expect("mounted root runtime");
+        assert_eq!(runtime.script_ctx.service_context_generation(), 0);
+    }
+
+    component
+        .handle_service_event(&ServiceEvent::InterfaceEvent {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            name: "VolumeChanged".into(),
+            payload: serde_json::json!({ "device_id": "default", "level": 42 }),
+        })
+        .unwrap();
+
+    {
+        let runtimes = component.runtimes.lock().unwrap();
+        let runtime = runtimes.values().next().expect("mounted root runtime");
+        assert_eq!(
+            runtime.script_ctx.state().get("seen_level"),
+            Some(serde_json::json!(42))
+        );
+        assert_eq!(
+            runtime.script_ctx.state().get("seen_percent"),
+            Some(serde_json::json!(-1))
+        );
+    }
+}
+
+#[test]
 fn frontend_proxy_update_reaches_panel_or_quick_settings_render_state() {
     let mut ctx = make_audio_ctx();
     ctx.load_script(

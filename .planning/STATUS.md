@@ -54,10 +54,14 @@ canonical module-root path boundary. Absolute and escaping traversal paths are
 rejected, symlinked source files and directories are rejected, and accepted
 sources retain canonical identities for compilation and dependency tracking.
 
+Service payloads remain in capability-filtered, per-context Rust-owned
+snapshots. Interface proxies may resolve event-only contracts, but the shell
+applies state payloads only with the resolved read policy and delivers event
+payloads through the separate event policy.
+
 ## Next
 
-Keep service payloads Rust-owned unless the consumer has the resolved read
-capability; event subscriptions alone must not expose state
+Reload primary and contribution roots together as one atomic catalog generation
 (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups

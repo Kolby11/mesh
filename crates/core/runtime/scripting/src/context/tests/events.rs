@@ -67,6 +67,45 @@ end
 }
 
 #[test]
+fn event_only_subscription_cannot_read_service_state() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("service.audio.events"));
+    let mut ctx = ScriptContext::new("@mesh/event-only", caps).unwrap();
+    ctx.set_interface_catalog(event_only_audio_catalog());
+    ctx.load_script(
+        r#"
+seen_level = 0
+seen_percent = -1
+
+function init()
+    local audio = require("mesh.audio@>=1.0")
+    audio.events.VolumeChanged:subscribe(function(event)
+        seen_level = event.level
+        seen_percent = audio.percent or -1
+    end)
+end
+"#,
+    )
+    .unwrap();
+
+    assert!(ctx.can_subscribe_service_event("mesh.audio", "VolumeChanged"));
+    assert!(!ctx.can_read_service_interface("mesh.audio"));
+    ctx.call_init().unwrap();
+    ctx.apply_service_payload("audio", &serde_json::json!({ "percent": 73 }));
+    assert_eq!(ctx.service_context_generation(), 0);
+
+    ctx.emit_interface_event(
+        "audio",
+        "VolumeChanged",
+        &serde_json::json!({ "device_id": "default", "level": 42 }),
+    )
+    .unwrap();
+
+    assert_eq!(ctx.state.get("seen_level"), Some(serde_json::json!(42)));
+    assert_eq!(ctx.state.get("seen_percent"), Some(serde_json::json!(-1)));
+}
+
+#[test]
 fn interface_named_event_channel_subscribes_with_on_alias() {
     let mut caps = CapabilitySet::new();
     caps.grant(Capability::new("service.audio.read"));

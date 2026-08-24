@@ -487,6 +487,22 @@ impl ScriptContext {
         )
     }
 
+    /// Check the resolved contract policy for an interface-event subscription.
+    /// Event delivery intentionally has its own capability decision: an
+    /// event-only consumer may receive the event payload, but it must not make
+    /// the service state snapshot available to that context.
+    pub fn can_subscribe_service_event(&self, interface: &str, event: &str) -> bool {
+        let canonical = crate::host_api::InterfaceProxy::canonical_name(interface);
+        let resolution = self.interface_catalog.resolve(&canonical, None);
+        resolution.contract.as_ref().map_or(true, |contract| {
+            crate::host_api::InterfaceProxy::can_subscribe_contract_event(
+                &self.capabilities,
+                contract,
+                event,
+            )
+        })
+    }
+
     /// Load a script source after installing explicit interface imports as Lua globals.
     pub fn load_script_with_interface_imports(
         &mut self,

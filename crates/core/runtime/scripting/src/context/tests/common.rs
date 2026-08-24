@@ -110,6 +110,23 @@ pub(super) fn audio_catalog() -> InterfaceCatalog {
     catalog
 }
 
+pub(super) fn event_only_audio_catalog() -> InterfaceCatalog {
+    let mut catalog = audio_catalog();
+    let mut contract = catalog
+        .contracts
+        .get("mesh.audio")
+        .and_then(|contracts| contracts.first())
+        .expect("audio contract")
+        .to_interface_contract();
+    contract
+        .capabilities
+        .events
+        .insert("VolumeChanged".into(), vec!["service.audio.events".into()]);
+    catalog.contracts.remove("mesh.audio");
+    catalog.register_contract(contract);
+    catalog
+}
+
 pub(super) fn theme_provider_only_catalog() -> InterfaceCatalog {
     let mut catalog = InterfaceCatalog::default();
     catalog.register_provider(InterfaceProvider {

@@ -376,7 +376,10 @@ impl FrontendSurfaceComponent {
                 if !Self::runtime_observes_service_event(runtime, event) {
                     continue;
                 }
-                if !script_has_service_read(&runtime.script_ctx, service, &service_name) {
+                if !runtime
+                    .script_ctx
+                    .can_subscribe_service_event(service, name)
+                {
                     continue;
                 }
                 runtime

@@ -213,6 +213,41 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
     catalog
 }
 
+pub(super) fn event_only_audio_network_catalog() -> InterfaceCatalog {
+    let mut catalog = InterfaceCatalog::default();
+    catalog.register_contract(InterfaceContract {
+        interface: "mesh.audio".into(),
+        version: parse_contract_version("1.0").unwrap(),
+        state_fields: vec![ContractStateField {
+            name: "percent".into(),
+            field_type: "float".into(),
+            description: None,
+        }],
+        methods: Vec::new(),
+        events: vec![InterfaceEvent {
+            name: "VolumeChanged".into(),
+            payload: vec![InterfaceArgument {
+                name: "level".into(),
+                arg_type: "float".into(),
+            }],
+        }],
+        types: HashMap::new(),
+        capabilities: ContractCapabilities {
+            events: HashMap::from([("VolumeChanged".into(), vec!["service.audio.events".into()])]),
+            ..ContractCapabilities::default()
+        },
+    });
+    catalog.register_provider(InterfaceProvider {
+        interface: "mesh.audio".into(),
+        version: Some("1.0".into()),
+        base_module: Some("@mesh/audio-interface".into()),
+        provider_module: "@mesh/pipewire-audio".into(),
+        backend_name: "PipeWire".into(),
+        priority: 100,
+    });
+    catalog
+}
+
 pub(super) fn audio_network_power_catalog() -> InterfaceCatalog {
     let mut catalog = audio_network_catalog();
     catalog.register_contract(InterfaceContract {

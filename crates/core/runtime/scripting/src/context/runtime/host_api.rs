@@ -464,7 +464,7 @@ impl ScriptContext {
 
                 let canonical = InterfaceProxy::canonical_name(&interface);
                 let resolution = interface_catalog.resolve(&canonical, version.as_deref());
-                let readable = resolution.contract.as_ref().map_or_else(
+                let authorized = resolution.contract.as_ref().map_or_else(
                     || {
                         canonical == "mesh.theme" && has_theme_read
                             || canonical == "mesh.locale" && has_locale_read
@@ -472,10 +472,10 @@ impl ScriptContext {
                             || !canonical.starts_with("mesh.")
                     },
                     |contract| {
-                        InterfaceProxy::can_read_contract(&capabilities_for_require, contract)
+                        InterfaceProxy::can_access_contract(&capabilities_for_require, contract)
                     },
                 );
-                if canonical.starts_with("mesh.") && !readable {
+                if canonical.starts_with("mesh.") && !authorized {
                     return Err(record_lookup_diagnostic_lua(
                         &diagnostics_for_require,
                         &pending_diagnostics_for_require,
@@ -611,16 +611,16 @@ impl ScriptContext {
             let resolution = self
                 .interface_catalog
                 .resolve(&canonical, import.version.as_deref());
-            let readable = resolution.contract.as_ref().map_or_else(
+            let authorized = resolution.contract.as_ref().map_or_else(
                 || {
                     canonical == "mesh.theme" && manifest.has_theme_read
                         || canonical == "mesh.locale" && manifest.has_locale_read
                         || manifest.interface_capabilities.contains(&canonical)
                         || !canonical.starts_with("mesh.")
                 },
-                |contract| InterfaceProxy::can_read_contract(&self.capabilities, contract),
+                |contract| InterfaceProxy::can_access_contract(&self.capabilities, contract),
             );
-            if canonical.starts_with("mesh.") && !readable {
+            if canonical.starts_with("mesh.") && !authorized {
                 record_lookup_diagnostic(
                     &self.shared_diagnostics,
                     &self.pending_side_channels,
