@@ -940,6 +940,15 @@ pub(super) struct FrontendSurfaceComponent {
     /// needed, while this cache makes that raster a command replay.
     child_display_lists: RefCell<ChildDisplayListCache>,
     diagnostics: Option<Diagnostics>,
+    /// A root runtime that failed during initialization/replacement leaves no
+    /// usable runtime state to evaluate. Keep the failure outside the tree so
+    /// every subsequent paint can publish the same bounded placeholder until
+    /// the next successful runtime creation.
+    runtime_failure: RefCell<Option<String>>,
+    /// Set only for the duration of a tree build. Expression evaluation is a
+    /// value-returning frontend API, so the resolver records the failure here
+    /// and the host swaps the incomplete tree for its last-known-good copy.
+    template_expression_failure: RefCell<Option<(String, String)>>,
     /// Desired visibility for surface portals (`<ImportedSurface hidden={...} />`).
     /// Updated during build_tree; compared to last_surface_states in tick().
     pending_surface_states: RefCell<HashMap<String, bool>>,
@@ -1260,6 +1269,8 @@ impl FrontendSurfaceComponent {
             retained_display_list: RetainedDisplayList::default(),
             child_display_lists: RefCell::new(ChildDisplayListCache::default()),
             diagnostics: None,
+            runtime_failure: RefCell::new(None),
+            template_expression_failure: RefCell::new(None),
             pending_surface_states: RefCell::new(HashMap::new()),
             last_surface_states: HashMap::new(),
             portal_hidden_bindings: RefCell::new(HashMap::new()),

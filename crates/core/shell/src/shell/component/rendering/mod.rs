@@ -309,9 +309,13 @@ impl FrontendSurfaceComponent {
         self.composition_occurrences.borrow_mut().clear();
         self.has_promoted_popover_wrappers.set(false);
         self.has_error_placeholders.set(false);
+        self.template_expression_failure.borrow_mut().take();
         let measurer = SharedTextMeasurer;
         let tree_build_started = std::time::Instant::now();
-        let mut tree = if let Some((previous, rebuild_node_ids)) = selective {
+        let fallback_tree = selective.map(|(previous, _)| previous);
+        let mut tree = if let Some(runtime_failure) = self.runtime_failure.borrow().clone() {
+            self.build_error_widget(runtime_failure)
+        } else if let Some((previous, rebuild_node_ids)) = selective {
             self.compiled.build_tree_with_state_selective(
                 theme,
                 width,
@@ -336,6 +340,17 @@ impl FrontendSurfaceComponent {
                 Some(&measurer),
             )
         };
+        if let Some((_failed_instance_key, failure)) =
+            self.template_expression_failure.borrow_mut().take()
+        {
+            self.composition_occurrences.borrow_mut().clear();
+            self.pending_surface_states.borrow_mut().clear();
+            self.portal_hidden_bindings.borrow_mut().clear();
+            tree = fallback_tree
+                .cloned()
+                .or_else(|| self.last_tree.clone())
+                .unwrap_or_else(|| self.build_error_widget(failure));
+        }
         #[cfg(test)]
         {
             self.last_template_build_reused_nodes = selective
@@ -416,6 +431,13 @@ impl FrontendSurfaceComponent {
                     .map(|previous| (previous, &selective_rebuild_nodes)),
             )
         } else {
+            if let Some(previous) = previous.as_ref() {
+                // The narrow path takes the retained tree out before a full
+                // rebuild. Put a copy back as the fallback input so a failed
+                // expression cannot replace the last-known-good frame with
+                // an error placeholder merely because the update was broad.
+                self.last_tree = Some(previous.clone());
+            }
             self.build_tree_with_surface_css_props(theme, width, height, surface_css_props)
         };
         if scope_is_safe

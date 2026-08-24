@@ -2,6 +2,152 @@ use super::*;
 use std::fs;
 
 #[test]
+fn template_expression_failure_retains_last_tree_and_records_actionable_diagnostic() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <box><text>{should_fail and explode() or label}</text></box>
+</template>
+<script lang="luau">
+label = "healthy"
+should_fail = false
+
+function explode()
+    error("expression boom")
+end
+
+function fail_expression()
+    should_fail = true
+end
+
+function recover_expression()
+    should_fail = false
+end
+</script>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(240, 40);
+
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
+    assert_eq!(rendered_text(&component), vec!["healthy"]);
+
+    component
+        .call_namespaced_handler("fail_expression", &[])
+        .unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
+
+    assert_eq!(
+        rendered_text(&component),
+        vec!["healthy"],
+        "an expression failure must not publish a partially evaluated tree"
+    );
+    let diagnostics = component
+        .diagnostics
+        .as_ref()
+        .expect("diagnostics handle")
+        .clone();
+    assert!(diagnostics.active_issues().iter().any(|issue| {
+        issue.category == mesh_core_diagnostics::DiagnosticCategory::Template
+            && issue.message.contains("expression boom")
+            && issue.message.contains("last-known-good")
+            && issue.source_path.is_some()
+    }));
+
+    component
+        .call_namespaced_handler("recover_expression", &[])
+        .unwrap();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
+    assert_eq!(rendered_text(&component), vec!["healthy"]);
+    assert!(
+        diagnostics
+            .active_issues()
+            .iter()
+            .all(|issue| { issue.category != mesh_core_diagnostics::DiagnosticCategory::Template })
+    );
+}
+
+#[test]
+fn first_template_expression_failure_uses_bounded_error_placeholder() {
+    let mut component = test_frontend_component(
+        r#"
+<template><text>{explode()}</text></template>
+<script lang="luau">
+function explode()
+    error("initial expression boom")
+end
+</script>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(240, 40);
+
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
+
+    let tree = component.last_tree.as_ref().expect("placeholder tree");
+    assert_eq!(
+        tree.attributes.get(ERROR_PLACEHOLDER_MARKER),
+        Some(&"true".to_string())
+    );
+    assert!(
+        rendered_text(&component)
+            .iter()
+            .any(|text| text.contains("initial expression boom"))
+    );
+    assert!(
+        component
+            .diagnostics
+            .as_ref()
+            .expect("diagnostics handle")
+            .active_issues()
+            .iter()
+            .any(|issue| issue.category == mesh_core_diagnostics::DiagnosticCategory::Template)
+    );
+}
+
+#[test]
+fn frontend_runtime_initialization_failure_uses_bounded_placeholder_and_diagnostic() {
+    let mut component = test_frontend_component(
+        r#"
+<template><text>unavailable</text></template>
+<script lang="luau">
+function init()
+    error("init boom")
+end
+</script>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(240, 40);
+
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .unwrap();
+
+    let tree = component.last_tree.as_ref().expect("placeholder tree");
+    assert_eq!(
+        tree.attributes
+            .get(ERROR_PLACEHOLDER_MARKER)
+            .map(String::as_str),
+        Some("true")
+    );
+    let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
+    assert!(diagnostics.active_issues().iter().any(|issue| {
+        issue.category == mesh_core_diagnostics::DiagnosticCategory::Runtime
+            && issue.message.contains("init boom")
+            && issue.source_path.is_some()
+    }));
+}
+
+#[test]
 fn failing_handler_is_reported_once_and_does_not_clear_render_state() {
     let mut component = test_frontend_component(
         r#"

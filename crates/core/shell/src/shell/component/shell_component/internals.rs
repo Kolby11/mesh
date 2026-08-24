@@ -371,32 +371,31 @@ impl FrontendSurfaceComponent {
             let mut runtimes = self.runtimes.lock().unwrap();
             std::mem::take(&mut *runtimes)
         };
-        let emit_result: Result<(), ComponentError> = (|| {
-            for runtime in runtimes.values_mut() {
-                if !Self::runtime_observes_service_event(runtime, event) {
-                    continue;
-                }
-                if !runtime
-                    .script_ctx
-                    .can_subscribe_service_event(service, name)
-                {
-                    continue;
-                }
+        for runtime in runtimes.values_mut() {
+            if !Self::runtime_observes_service_event(runtime, event) {
+                continue;
+            }
+            if !runtime
+                .script_ctx
+                .can_subscribe_service_event(service, name)
+            {
+                continue;
+            }
+            if let Err(source) =
                 runtime
                     .script_ctx
                     .emit_interface_event(&service_name, name, payload)
-                    .map_err(|source| ComponentError::Script {
-                        component_id: runtime.module_id.clone(),
-                        source,
-                    })?;
-                if runtime.script_ctx.state().is_dirty() {
-                    needs_rebuild = true;
-                }
+            {
+                let instance_key = runtime.script_ctx.instance_id.clone();
+                let _ =
+                    self.record_frontend_runtime_issue("interface event", &instance_key, source);
+                continue;
             }
-            Ok(())
-        })();
+            if runtime.script_ctx.state().is_dirty() {
+                needs_rebuild = true;
+            }
+        }
         *self.runtimes.lock().unwrap() = runtimes;
-        emit_result?;
         if needs_rebuild {
             self.render_hooks_pending = true;
             self.invalidate_script_state();

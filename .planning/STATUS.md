@@ -94,8 +94,8 @@ source of truth.
 
 ## Next
 
-Contain expression/runtime failures with last-known-good trees or bounded error
-placeholders and actionable diagnostics (`docs/BACKLOG.md`).
+Publish normalized public-prop schemas and validate imported/contribution props
+at the import boundary (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

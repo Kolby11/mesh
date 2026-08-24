@@ -778,6 +778,8 @@ impl FrontendSurfaceComponent {
             runtime,
         );
         self.register_runtime_generation(self.root_instance_key(), generation);
+        self.runtime_failure.borrow_mut().take();
+        self.resolve_frontend_runtime_issue("initialization", self.root_instance_key());
         Ok(())
     }
 
@@ -803,6 +805,7 @@ impl FrontendSurfaceComponent {
         };
         if let Some(generation) = existing_generation {
             self.sync_runtime_generation(instance_key, generation);
+            self.resolve_frontend_runtime_issue("render", instance_key);
             return Ok(());
         }
 
@@ -820,6 +823,7 @@ impl FrontendSurfaceComponent {
             runtime,
         );
         self.register_runtime_generation(instance_key, generation);
+        self.resolve_frontend_runtime_issue("render", instance_key);
 
         Ok(())
     }
@@ -829,6 +833,21 @@ impl FrontendSurfaceComponent {
         self.error_placeholder_marks
             .set(self.error_placeholder_marks.get().wrapping_add(1));
         bounded_error_widget(message)
+    }
+
+    pub(super) fn take_template_expression_failure_for(
+        &self,
+        instance_key: &str,
+    ) -> Option<String> {
+        let mut failure = self.template_expression_failure.borrow_mut();
+        if failure
+            .as_ref()
+            .is_some_and(|(failed_instance_key, _)| failed_instance_key == instance_key)
+        {
+            failure.take().map(|(_, message)| message)
+        } else {
+            None
+        }
     }
 
     pub(super) fn ensure_local_component_runtime(
@@ -856,6 +875,7 @@ impl FrontendSurfaceComponent {
         };
         if let Some(generation) = existing_generation {
             self.sync_runtime_generation(instance_key, generation);
+            self.resolve_frontend_runtime_issue("render", instance_key);
             return Ok(());
         }
 
@@ -879,6 +899,7 @@ impl FrontendSurfaceComponent {
             runtime,
         );
         self.register_runtime_generation(instance_key, generation);
+        self.resolve_frontend_runtime_issue("render", instance_key);
 
         Ok(())
     }
@@ -903,7 +924,8 @@ impl FrontendSurfaceComponent {
             component,
             props,
         ) {
-            return self.build_error_widget(err.to_string());
+            let message = self.record_frontend_runtime_issue("render", instance_key, &err);
+            return self.build_error_widget(message);
         }
 
         let theme = self.active_theme.borrow().clone();
@@ -949,7 +971,9 @@ impl FrontendSurfaceComponent {
                 &prepared_styles,
                 source_path,
             );
-        node
+        self.take_template_expression_failure_for(instance_key)
+            .map(|message| self.build_error_widget(message))
+            .unwrap_or(node)
     }
 
     pub(super) fn render_embedded_instance(
@@ -991,7 +1015,8 @@ impl FrontendSurfaceComponent {
         }
 
         if let Err(err) = self.ensure_runtime_for_compiled(instance_key, compiled, props) {
-            return self.build_error_widget(err.to_string());
+            let message = self.record_frontend_runtime_issue("render", instance_key, &err);
+            return self.build_error_widget(message);
         }
 
         let state = self.runtime_state(instance_key).unwrap_or_default();
@@ -1013,12 +1038,15 @@ impl FrontendSurfaceComponent {
             Some(self),
             Some(&measurer),
         );
+        let expression_failure = self.take_template_expression_failure_for(instance_key);
         super::composition::annotate_source_file(
             &mut tree,
             &compiled.source_path.display().to_string(),
         );
         self.render_stack.borrow_mut().pop();
-        tree
+        expression_failure
+            .map(|message| self.build_error_widget(message))
+            .unwrap_or(tree)
     }
 
     #[cfg(test)]

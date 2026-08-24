@@ -82,17 +82,15 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             .script_ctx
             .evaluate_compiled_template_expression(expression, locals)
         {
-            Ok((value, service_reads)) => Some(mesh_core_frontend::TemplateExpressionResult {
-                value,
-                service_reads,
-            }),
+            Ok((value, service_reads)) => {
+                self.resolve_template_expression_failure(instance_key);
+                Some(mesh_core_frontend::TemplateExpressionResult {
+                    value,
+                    service_reads,
+                })
+            }
             Err(error) => {
-                tracing::warn!(
-                    instance_key,
-                    expression = %expression.source(),
-                    %error,
-                    "template expression failed"
-                );
+                self.record_template_expression_failure(instance_key, expression.source(), error);
                 Some(mesh_core_frontend::TemplateExpressionResult {
                     value: serde_json::Value::Null,
                     service_reads: Vec::new(),

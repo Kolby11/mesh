@@ -39,6 +39,89 @@ pub(super) fn record_localized_miss(
 }
 
 impl FrontendSurfaceComponent {
+    pub(super) fn record_frontend_runtime_issue(
+        &self,
+        phase: &str,
+        instance_key: &str,
+        error: impl std::fmt::Display,
+    ) -> String {
+        let message = format!(
+            "frontend runtime '{instance_key}' failed during {phase}: {error}; the failed work was contained and the last successful tree or a bounded error placeholder is retained"
+        );
+        tracing::warn!(
+            component_id = %self.compiled.manifest.package.id,
+            instance_key,
+            phase,
+            error = %error,
+            "frontend runtime failure contained"
+        );
+        if let Some(diagnostics) = &self.diagnostics {
+            diagnostics.record_issue_with_source(
+                format!(
+                    "frontend-runtime:{phase}:{}:{instance_key}",
+                    self.compiled.manifest.package.id
+                ),
+                mesh_core_diagnostics::DiagnosticCategory::Runtime,
+                mesh_core_diagnostics::IssueSeverity::Error,
+                message.clone(),
+                Some(self.compiled.source_path.display().to_string()),
+                None,
+            );
+        }
+        message
+    }
+
+    pub(super) fn resolve_frontend_runtime_issue(&self, phase: &str, instance_key: &str) {
+        if let Some(diagnostics) = &self.diagnostics {
+            diagnostics.resolve_issue(&format!(
+                "frontend-runtime:{phase}:{}:{instance_key}",
+                self.compiled.manifest.package.id
+            ));
+        }
+    }
+
+    pub(super) fn record_template_expression_failure(
+        &self,
+        instance_key: &str,
+        expression: &str,
+        error: impl std::fmt::Display,
+    ) {
+        let message = format!(
+            "template expression '{expression}' failed for frontend runtime '{instance_key}': {error}; retaining the last-known-good tree or showing a bounded error placeholder until the expression recovers"
+        );
+        *self.template_expression_failure.borrow_mut() =
+            Some((instance_key.to_string(), message.clone()));
+        tracing::warn!(
+            component_id = %self.compiled.manifest.package.id,
+            instance_key,
+            expression,
+            error = %error,
+            "template expression failure contained"
+        );
+        if let Some(diagnostics) = &self.diagnostics {
+            diagnostics.record_issue_with_source(
+                format!(
+                    "template-expression:{}:{instance_key}",
+                    self.compiled.manifest.package.id
+                ),
+                mesh_core_diagnostics::DiagnosticCategory::Template,
+                mesh_core_diagnostics::IssueSeverity::Error,
+                message,
+                Some(self.compiled.source_path.display().to_string()),
+                None,
+            );
+        }
+    }
+
+    pub(super) fn resolve_template_expression_failure(&self, instance_key: &str) {
+        if let Some(diagnostics) = &self.diagnostics {
+            diagnostics.resolve_issue(&format!(
+                "template-expression:{}:{instance_key}",
+                self.compiled.manifest.package.id
+            ));
+        }
+    }
+
     pub(super) fn record_child_surface_diagnostic(
         &self,
         diagnostic: &ChildSurfaceDiagnostic,

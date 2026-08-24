@@ -116,7 +116,14 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.diagnostics = Some(ctx.diagnostics);
         self.load_graph_i18n_catalogs();
         self.record_declared_missing_icon_diagnostics();
-        self.init_root_runtime()?;
+        if let Err(error) = self.init_root_runtime() {
+            let message = self.record_frontend_runtime_issue(
+                "initialization",
+                self.root_instance_key(),
+                &error,
+            );
+            *self.runtime_failure.borrow_mut() = Some(message);
+        }
         self.render_hooks_pending = true;
         self.invalidate_script_state();
         Ok(vec![CoreRequest::PublishDiagnostics {
@@ -180,16 +187,28 @@ impl ShellComponent for FrontendSurfaceComponent {
                         // surface root's `self.id()`.
                         let component_id = owner_instance_key;
                         let mut state_dirty = false;
-                        if let Some(runtime) = self.runtimes.lock().unwrap().get_mut(&component_id)
+                        let state_error = if let Some(runtime) =
+                            self.runtimes.lock().unwrap().get_mut(&component_id)
                         {
-                            runtime
+                            match runtime
                                 .script_ctx
                                 .set_member_state(&binding, serde_json::json!(!*visible))
-                                .map_err(|source| ComponentError::Script {
-                                    component_id: component_id.to_string(),
-                                    source,
-                                })?;
-                            state_dirty = true;
+                            {
+                                Ok(()) => {
+                                    state_dirty = true;
+                                    None
+                                }
+                                Err(source) => Some(source),
+                            }
+                        } else {
+                            None
+                        };
+                        if let Some(error) = state_error {
+                            let _ = self.record_frontend_runtime_issue(
+                                "surface visibility update",
+                                &component_id,
+                                error,
+                            );
                         }
                         if state_dirty {
                             self.invalidate_script_state();
@@ -1318,7 +1337,14 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.unmount_runtimes()?;
         self.frontend_catalog_changed();
         self.clear_runtime_generation_index();
-        self.init_root_runtime()?;
+        if let Err(error) = self.init_root_runtime() {
+            let message = self.record_frontend_runtime_issue(
+                "replacement initialization",
+                self.root_instance_key(),
+                &error,
+            );
+            *self.runtime_failure.borrow_mut() = Some(message);
+        }
         self.render_hooks_pending = true;
         self.invalidate_script_state();
         // Prepared local-component rules own cloned selectors and declarations
