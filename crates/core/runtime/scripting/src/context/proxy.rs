@@ -1,5 +1,6 @@
 use super::PublishedEvent;
 use super::state::ServiceContextState;
+use crate::policy::ResourceBudget;
 use mesh_core_capability::{Capability, CapabilitySet};
 pub(super) use mesh_core_service::service_name_from_interface;
 use mesh_core_service::{InterfaceContract, InterfaceResolution, TypeExpr};
@@ -30,6 +31,7 @@ pub(super) fn create_interface_proxy(
     subscribed_interface_events: Arc<Mutex<HashMap<String, HashMap<String, usize>>>>,
     published_events: Arc<Mutex<Vec<PublishedEvent>>>,
     pending_side_channels: Arc<AtomicBool>,
+    resources: ResourceBudget,
 ) -> mlua::Result<Table> {
     create_service_proxy(
         lua,
@@ -46,6 +48,7 @@ pub(super) fn create_interface_proxy(
         subscribed_interface_events,
         published_events,
         pending_side_channels,
+        resources,
     )
 }
 
@@ -64,6 +67,7 @@ pub(super) fn create_service_proxy(
     subscribed_interface_events: Arc<Mutex<HashMap<String, HashMap<String, usize>>>>,
     published_events: Arc<Mutex<Vec<PublishedEvent>>>,
     pending_side_channels: Arc<AtomicBool>,
+    resources: ResourceBudget,
 ) -> mlua::Result<Table> {
     let proxy = lua.create_table()?;
     // Method closures use this private marker to distinguish a Lua colon-call
@@ -177,6 +181,7 @@ pub(super) fn create_service_proxy(
                 let source_instance_id = source_instance_id.clone();
                 let source_capabilities = source_capabilities.clone();
                 let service_call_completions = Arc::clone(&service_call_completions);
+                let method_resources = resources.clone();
                 return Ok(LuaValue::Function(lua.create_function(
                     move |lua, args: mlua::Variadic<LuaValue>| {
                         let authorized = method_contract.as_ref().map_or_else(
@@ -248,10 +253,20 @@ pub(super) fn create_service_proxy(
                             })
                             .collect::<mlua::Result<serde_json::Map<String, Value>>>()?;
                         let call_id = NEXT_SERVICE_CALL_ID.fetch_add(1, Ordering::Relaxed);
+                        let payload = Value::Object(payload);
+                        let output_bytes = serde_json::to_vec(&payload)
+                            .map_err(mlua::Error::external)?
+                            .len();
+                        method_resources
+                            .reserve_output(output_bytes)
+                            .map_err(|error| mlua::Error::external(error.to_string()))?;
+                        method_resources
+                            .reserve_queue()
+                            .map_err(|error| mlua::Error::external(error.to_string()))?;
                         pending_side_channels.store(true, Ordering::Release);
                         events.lock().unwrap().push(PublishedEvent {
                             channel: format!("{}.{}", iface, method.name),
-                            payload: Value::Object(payload),
+                            payload,
                             source_module_id: source_module_id.clone(),
                             source_capabilities: source_capabilities.clone(),
                             call_id: Some(call_id),
@@ -267,6 +282,7 @@ pub(super) fn create_service_proxy(
                             Arc::clone(&service_call_completions),
                             Arc::clone(&events),
                             Arc::clone(&pending_side_channels),
+                            method_resources.clone(),
                         )
                         .map(LuaValue::Table)
                     },
@@ -579,10 +595,13 @@ fn create_service_call_ticket(
     completions: Arc<Mutex<HashMap<u64, super::ServiceCallCompletion>>>,
     published_events: Arc<Mutex<Vec<PublishedEvent>>>,
     pending_side_channels: Arc<AtomicBool>,
+    resources: ResourceBudget,
 ) -> mlua::Result<Table> {
     let ticket = lua.create_table()?;
     ticket.set("call_id", call_id)?;
     ticket.set("status", "pending")?;
+    ticket.set("ok", true)?;
+    ticket.set("queued", true)?;
 
     let poll_completions = Arc::clone(&completions);
     let poll = lua.create_function(move |lua, _args: mlua::Variadic<LuaValue>| {
@@ -600,6 +619,7 @@ fn create_service_call_ticket(
     let cancel_module = source_module_id.clone();
     let cancel_instance = source_instance_id.clone();
     let cancel_capabilities = source_capabilities.clone();
+    let cancel_resources = resources;
     let cancel_requested = Arc::new(AtomicBool::new(false));
     let cancel_requested_for_call = Arc::clone(&cancel_requested);
     ticket.set(
@@ -610,13 +630,23 @@ fn create_service_call_ticket(
             {
                 return Ok(false);
             }
+            let payload = serde_json::json!({
+                "interface": interface,
+                "call_id": call_id,
+            });
+            let output_bytes = serde_json::to_vec(&payload)
+                .map_err(mlua::Error::external)?
+                .len();
+            cancel_resources
+                .reserve_output(output_bytes)
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
+            cancel_resources
+                .reserve_queue()
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
             cancel_pending.store(true, Ordering::Release);
             cancel_events.lock().unwrap().push(PublishedEvent {
                 channel: "mesh.service.cancel".to_string(),
-                payload: serde_json::json!({
-                    "interface": interface,
-                    "call_id": call_id,
-                }),
+                payload,
                 source_module_id: cancel_module.clone(),
                 source_capabilities: cancel_capabilities.clone(),
                 call_id: Some(call_id),

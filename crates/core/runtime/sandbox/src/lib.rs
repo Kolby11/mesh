@@ -6,19 +6,41 @@
 use mesh_core_capability::CapabilitySet;
 
 /// Configuration for the module sandbox.
-#[derive(Debug, Clone)]
+///
+/// The policy is deliberately shared by every Luau host.  Keeping the limits
+/// together prevents frontend and backend realms from silently acquiring
+/// different resource ceilings as host APIs evolve.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SandboxConfig {
     /// Maximum memory the module can allocate (bytes).
     pub memory_limit: u64,
+    /// Maximum Luau instructions allowed during one callback execution.
+    pub instruction_budget: u64,
     /// Maximum CPU time per frame (microseconds).
     pub frame_budget_us: u64,
+    /// Maximum bytes returned or logged by one callback execution.
+    pub output_budget: u64,
+    /// Maximum number of queued host side effects and stream lines.
+    pub queue_budget: u64,
+    /// Maximum serialized bytes in one durable storage document.
+    pub storage_budget: u64,
+    /// Maximum simultaneously active child processes for one realm.
+    pub child_process_budget: u64,
+    /// Maximum runtime for one synchronous child-process request.
+    pub child_process_timeout_ms: u64,
 }
 
 impl Default for SandboxConfig {
     fn default() -> Self {
         Self {
             memory_limit: 64 * 1024 * 1024, // 64 MB
-            frame_budget_us: 4_000,         // 4ms
+            instruction_budget: 1_000_000,
+            frame_budget_us: 4_000,     // 4ms
+            output_budget: 1024 * 1024, // 1 MiB per callback
+            queue_budget: 1024,
+            storage_budget: 1024 * 1024, // 1 MiB per scoped document
+            child_process_budget: 8,
+            child_process_timeout_ms: 5_000,
         }
     }
 }

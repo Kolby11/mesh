@@ -144,6 +144,7 @@ impl ScriptContext {
     /// `init()` still works — Luau ignores extra arguments.
     pub fn call_init(&mut self) -> Result<(), ScriptError> {
         self.ensure_initialized()?;
+        let _budget = self.realm_policy.begin_callback();
         if let Ok(init) = self.env().get::<Function>("init") {
             tracing::debug!("calling init() for {}", self.module_id);
             let current_self = self.current_self_table()?;
@@ -157,6 +158,7 @@ impl ScriptContext {
     /// Call a named event handler.
     pub fn call_handler(&mut self, name: &str, args: &[Value]) -> Result<(), ScriptError> {
         self.ensure_initialized()?;
+        let _budget = self.realm_policy.begin_callback();
         let handler = self
             .env()
             .get::<Function>(name)
@@ -298,7 +300,9 @@ impl ScriptContext {
 
     pub fn drain_published_events(&mut self) -> Vec<PublishedEvent> {
         self.sync_side_channels();
-        std::mem::take(&mut self.published_events)
+        let events = std::mem::take(&mut self.published_events);
+        self.realm_policy.budget().release_queue(events.len());
+        events
     }
 
     /// Deliver a terminal result to a ticket created by this context.
@@ -335,7 +339,9 @@ impl ScriptContext {
     /// script so the shell can execute them against the real widget tree.
     pub fn drain_element_actions(&mut self) -> Vec<ElementAction> {
         self.sync_side_channels();
-        std::mem::take(&mut self.element_actions)
+        let actions = std::mem::take(&mut self.element_actions);
+        self.realm_policy.budget().release_queue(actions.len());
+        actions
     }
 
     pub fn flush_storage(&mut self) {

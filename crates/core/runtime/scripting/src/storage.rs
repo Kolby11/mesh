@@ -1,3 +1,4 @@
+use mesh_core_runtime::SandboxConfig;
 use serde_json::{Map, Value};
 use std::fmt;
 use std::fs;
@@ -93,11 +94,19 @@ pub struct StorageDiagnostic {
 #[derive(Debug, Clone)]
 pub struct StorageManager {
     root: PathBuf,
+    max_document_bytes: u64,
 }
 
 impl StorageManager {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self::new_with_limit(root, SandboxConfig::default().storage_budget)
+    }
+
+    pub fn new_with_limit(root: impl Into<PathBuf>, max_document_bytes: u64) -> Self {
+        Self {
+            root: root.into(),
+            max_document_bytes,
+        }
     }
 
     pub fn root(&self) -> &Path {
@@ -117,7 +126,7 @@ impl StorageManager {
     pub fn open(&self, scope: StorageScope) -> ScopedStorage {
         let path = self.path_for_scope(&scope);
         let mut diagnostics = Vec::new();
-        let document = match fs::read_to_string(&path) {
+        let mut document = match fs::read_to_string(&path) {
             Ok(contents) => match serde_json::from_str::<Value>(&contents) {
                 Ok(Value::Object(map)) => map,
                 Ok(_) => {
@@ -148,12 +157,28 @@ impl StorageManager {
             }
         };
 
+        if serde_json::to_vec_pretty(&Value::Object(document.clone()))
+            .map(|bytes| bytes.len() as u64 > self.max_document_bytes)
+            .unwrap_or(true)
+        {
+            diagnostics.push(StorageDiagnostic {
+                scope: scope.clone(),
+                path: path.clone(),
+                reason: format!(
+                    "storage document exceeds {} byte budget",
+                    self.max_document_bytes
+                ),
+            });
+            document = Map::new();
+        }
+
         ScopedStorage {
             scope,
             path,
             document,
             diagnostics,
             dirty: false,
+            max_document_bytes: self.max_document_bytes,
         }
     }
 }
@@ -165,6 +190,15 @@ pub struct ScopedStorage {
     document: Map<String, Value>,
     diagnostics: Vec<StorageDiagnostic>,
     dirty: bool,
+    max_document_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum StorageError {
+    #[error("storage document exceeds {limit} byte budget (attempted {attempted} bytes)")]
+    QuotaExceeded { limit: u64, attempted: u64 },
+    #[error("storage value could not be serialized: {0}")]
+    Serialization(String),
 }
 
 impl ScopedStorage {
@@ -189,9 +223,28 @@ impl ScopedStorage {
     }
 
     pub fn set(&mut self, key: impl Into<String>, value: Value) -> Option<Value> {
-        let previous = self.document.insert(key.into(), value);
+        self.try_set(key, value).ok().flatten()
+    }
+
+    pub fn try_set(
+        &mut self,
+        key: impl Into<String>,
+        value: Value,
+    ) -> Result<Option<Value>, StorageError> {
+        let key = key.into();
+        let mut candidate = self.document.clone();
+        let previous = candidate.insert(key.clone(), value);
+        let attempted = serde_json::to_vec_pretty(&Value::Object(candidate.clone()))
+            .map_err(|error| StorageError::Serialization(error.to_string()))?;
+        if attempted.len() as u64 > self.max_document_bytes {
+            return Err(StorageError::QuotaExceeded {
+                limit: self.max_document_bytes,
+                attempted: attempted.len() as u64,
+            });
+        }
+        self.document = candidate;
         self.dirty = true;
-        previous
+        Ok(previous)
     }
 
     pub fn remove(&mut self, key: &str) -> Option<Value> {
@@ -221,6 +274,12 @@ impl ScopedStorage {
         let temp_path = self.temp_path();
         let bytes = serde_json::to_vec_pretty(&self.snapshot())
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        if bytes.len() as u64 > self.max_document_bytes {
+            return Err(io::Error::other(format!(
+                "storage document exceeds {} byte budget",
+                self.max_document_bytes
+            )));
+        }
         fs::write(&temp_path, bytes)?;
         fs::rename(temp_path, &self.path)?;
         self.dirty = false;
@@ -299,10 +358,13 @@ pub fn create_lua_storage_table(
                     }
 
                     match lua.from_value::<Value>(value) {
-                        Ok(value) => {
-                            newindex_storage.lock().unwrap().set(key, value);
-                            write_sink(key);
-                        }
+                        Ok(value) => match newindex_storage.lock().unwrap().try_set(key, value) {
+                            Ok(_) => write_sink(key),
+                            Err(error) => {
+                                diagnostic_sink(error.to_string());
+                                return Err(mlua::Error::external(error));
+                            }
+                        },
                         Err(error) => {
                             diagnostic_sink(format!(
                                 "unsupported storage value for key '{key}': {error}"

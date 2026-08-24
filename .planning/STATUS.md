@@ -108,7 +108,7 @@ source of truth.
 
 ## Next
 
-Enforce one sandbox/resource policy for every Luau realm (`docs/BACKLOG.md`).
+Keep service state Rust-owned, generation-aware, and capability-filtered (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

@@ -13,6 +13,7 @@ use std::collections::VecDeque;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
+use crate::policy::{ResourceBudget, ResourceLimit};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Notify;
@@ -27,11 +28,12 @@ pub struct StreamLine {
 
 /// Shared state between the backend script context (producer of stream
 /// registrations) and the backend service loop (consumer of stream events).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct StreamState {
     pending: Mutex<VecDeque<StreamLine>>,
     notify: Notify,
     processes: Mutex<Vec<StreamProcess>>,
+    resources: ResourceBudget,
 }
 
 #[derive(Debug)]
@@ -45,7 +47,18 @@ struct StreamProcess {
 
 impl StreamState {
     pub fn new() -> Arc<Self> {
-        Arc::new(Self::default())
+        Self::new_with_budget(ResourceBudget::new(
+            mesh_core_runtime::SandboxConfig::default(),
+        ))
+    }
+
+    pub(crate) fn new_with_budget(resources: ResourceBudget) -> Arc<Self> {
+        Arc::new(Self {
+            pending: Mutex::new(VecDeque::new()),
+            notify: Notify::new(),
+            processes: Mutex::new(Vec::new()),
+            resources,
+        })
     }
 
     /// Wait until at least one new line is available or a stream lifecycle
@@ -56,7 +69,12 @@ impl StreamState {
 
     /// Drain all pending lines. Called after `wait_for_event()` returns.
     pub fn drain_lines(&self) -> Vec<StreamLine> {
-        self.pending.lock().unwrap().drain(..).collect()
+        self.reap_finished();
+        let lines: Vec<_> = self.pending.lock().unwrap().drain(..).collect();
+        self.resources.release_queue(lines.len());
+        self.resources
+            .release_queued_output(lines.iter().map(|line| line.line.len()).sum());
+        lines
     }
 
     /// Kill every active subprocess (best effort). Called on backend stop.
@@ -65,7 +83,12 @@ impl StreamState {
         for mut entry in processes.drain(..) {
             entry.reader.abort();
             let _ = entry.child.start_kill();
+            self.resources.release_child();
         }
+        let pending = self.pending.lock().unwrap().drain(..).collect::<Vec<_>>();
+        self.resources.release_queue(pending.len());
+        self.resources
+            .release_queued_output(pending.iter().map(|line| line.line.len()).sum());
     }
 
     /// Number of active stream subprocesses. Used for tests.
@@ -75,8 +98,37 @@ impl StreamState {
     }
 
     fn push_line(&self, line: StreamLine) {
+        if self.resources.reserve_queue().is_err() {
+            tracing::warn!(program = %line.program, "exec_stream queue budget exceeded; dropping line");
+            self.notify.notify_one();
+            return;
+        }
+        if let Err(error) = self.resources.reserve_queued_output(line.line.len()) {
+            self.resources.release_queue(1);
+            tracing::warn!(program = %line.program, "exec_stream output budget exceeded: {error}; dropping line");
+            self.notify.notify_one();
+            return;
+        }
         self.pending.lock().unwrap().push_back(line);
         self.notify.notify_one();
+    }
+
+    fn reap_finished(&self) {
+        let mut processes = self.processes.lock().unwrap();
+        processes.retain_mut(|entry| match entry.child.try_wait() {
+            Ok(Some(_status)) => {
+                entry.reader.abort();
+                self.resources.release_child();
+                false
+            }
+            Ok(None) => true,
+            Err(error) => {
+                tracing::warn!(program = %entry.program, "exec_stream wait failed: {error}");
+                entry.reader.abort();
+                self.resources.release_child();
+                false
+            }
+        });
     }
 }
 
@@ -89,18 +141,23 @@ pub fn spawn_stream(
     program: String,
     args: Vec<String>,
 ) -> std::io::Result<()> {
+    state
+        .resources
+        .acquire_child()
+        .map_err(|error: ResourceLimit| std::io::Error::other(error.to_string()))?;
     let mut child = Command::new(&program)
         .args(&args)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .stdin(Stdio::null())
         .kill_on_drop(true)
-        .spawn()?;
+        .spawn()
+        .inspect_err(|_| state.resources.release_child())?;
 
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| std::io::Error::other("subprocess stdout was not piped"))?;
+    let stdout = child.stdout.take().ok_or_else(|| {
+        state.resources.release_child();
+        std::io::Error::other("subprocess stdout was not piped")
+    })?;
 
     let state_for_reader = Arc::clone(state);
     let program_for_reader = program.clone();

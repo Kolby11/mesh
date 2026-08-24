@@ -1947,6 +1947,7 @@ dependencies = [
  "mesh-core-elements",
  "mesh-core-expression",
  "mesh-core-locale",
+ "mesh-core-runtime",
  "mesh-core-service",
  "mesh-core-theme",
  "mlua",

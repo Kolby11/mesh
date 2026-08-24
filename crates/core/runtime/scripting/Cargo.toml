@@ -14,6 +14,7 @@ mesh-core-locale = { workspace = true }
 mesh-core-config = { workspace = true }
 mesh-core-capability = { workspace = true }
 mesh-core-service = { workspace = true }
+mesh-core-runtime = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

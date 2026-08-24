@@ -1,4 +1,5 @@
 use super::super::element_ref::ElementMetricsStore;
+use crate::policy::RuntimePolicy;
 use crate::pool;
 use mesh_core_service::InterfaceResolution;
 use mlua::Lua;
@@ -80,6 +81,7 @@ impl ScriptVm {
 #[derive(Clone, Debug)]
 pub struct SurfaceVm {
     pub(super) lua: Lua,
+    pub(super) policy: RuntimePolicy,
     pub(super) element_metrics: Arc<Mutex<ElementMetricsStore>>,
 }
 
@@ -88,12 +90,17 @@ impl SurfaceVm {
     pub fn new() -> Self {
         Self {
             lua: pool::thread_vm(),
+            policy: pool::thread_policy(),
             element_metrics: Arc::new(Mutex::new(ElementMetricsStore::default())),
         }
     }
 
     pub(crate) fn handle(&self) -> Lua {
         self.lua.clone()
+    }
+
+    pub(crate) fn policy(&self) -> RuntimePolicy {
+        self.policy.clone()
     }
 }
 

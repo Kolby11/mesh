@@ -6,6 +6,7 @@ use super::super::{
     ScriptState, ServiceCallCompletion,
 };
 use super::*;
+use crate::policy::RuntimePolicy;
 use crate::pool;
 use crate::storage::{ScopedStorage, StorageManager, StorageScope};
 use crate::util::default_runtime_storage_root;
@@ -38,6 +39,8 @@ pub struct ScriptContext {
     /// Optional surface-owned handle to the thread realm. Must be attached
     /// before the script is loaded so live bindings use the surface's handle.
     pub(super) shared_vm: Option<Lua>,
+    /// Immutable policy and resource broker for the backing Luau realm.
+    pub(super) realm_policy: RuntimePolicy,
     pub(super) env_table: Option<Table>,
     /// Scalar reactive globals, removed from the raw `_ENV` so every assignment
     /// passes through `__newindex`. Handler sync then consumes the write log
@@ -132,6 +135,7 @@ impl ScriptContext {
             return;
         }
         self.shared_vm = Some(vm.handle());
+        self.realm_policy = vm.policy();
         self.shared_element_metrics = Arc::clone(&vm.element_metrics);
     }
 
@@ -259,11 +263,14 @@ impl ScriptContext {
         capabilities: CapabilitySet,
         storage_root: impl Into<PathBuf>,
     ) -> Result<Self, ScriptError> {
-        let storage = StorageManager::new(storage_root.into()).open(StorageScope::frontend(
-            module_id.clone(),
-            component_id,
-            instance_id.clone(),
-        ));
+        let realm_policy = pool::thread_policy();
+        let storage =
+            StorageManager::new_with_limit(storage_root.into(), realm_policy.storage_budget())
+                .open(StorageScope::frontend(
+                    module_id.clone(),
+                    component_id,
+                    instance_id.clone(),
+                ));
         let storage_diagnostics = storage
             .diagnostics()
             .iter()
@@ -283,6 +290,7 @@ impl ScriptContext {
             optional_interfaces: Arc::new(HashSet::new()),
             vm: None,
             shared_vm: None,
+            realm_policy,
             env_table: None,
             reactive_scalar_globals: None,
             interface_catalog: Arc::new(InterfaceCatalog::default()),
@@ -528,17 +536,44 @@ impl ScriptContext {
                 shared_interface_bindings.generation.wrapping_add(1);
             self.interface_bindings_generation = shared_interface_bindings.generation;
         }
-        self.shared_published_events.lock().unwrap().clear();
+        let published_event_count = self.published_events.len();
+        self.published_events.clear();
+        self.realm_policy
+            .budget()
+            .release_queue(published_event_count);
+        let element_action_count = self.element_actions.len();
+        self.element_actions.clear();
+        self.realm_policy
+            .budget()
+            .release_queue(element_action_count);
+        let published_event_count = {
+            let mut published_events = self.shared_published_events.lock().unwrap();
+            let count = published_events.len();
+            published_events.clear();
+            count
+        };
+        self.realm_policy
+            .budget()
+            .release_queue(published_event_count);
         self.service_call_completions.lock().unwrap().clear();
         self.shared_diagnostics.lock().unwrap().clear();
         self.localized_misses.lock().unwrap().clear();
-        self.shared_element_actions.lock().unwrap().clear();
+        let element_action_count = {
+            let mut element_actions = self.shared_element_actions.lock().unwrap();
+            let count = element_actions.len();
+            element_actions.clear();
+            count
+        };
+        self.realm_policy
+            .budget()
+            .release_queue(element_action_count);
         self.changed_storage_keys.lock().unwrap().clear();
         self.pending_side_channels.store(false, Ordering::Release);
         self.clear_tracked_service_fields();
         self.clear_subscribed_interface_events();
         self.clear_tracked_storage_keys();
         self.install_interface_imports(imports)?;
+        let _budget = self.realm_policy.begin_callback();
         self.lua()
             .load(source)
             .set_name(&self.module_id)

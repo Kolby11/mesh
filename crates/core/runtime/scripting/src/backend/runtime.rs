@@ -3,6 +3,7 @@ use super::exec::{exec_denied_to_lua, missing_exec_capability, run_exec};
 use super::exec_stream::{StreamState, spawn_stream};
 use super::logging::log_message;
 use super::{BackendScriptError, MIN_POLL_INTERVAL_MS};
+use crate::policy::RuntimePolicy;
 use crate::storage::{ScopedStorage, StorageManager, StorageScope, create_lua_storage_table};
 use crate::util::{default_runtime_storage_root, is_named_event_channel};
 use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
@@ -28,10 +29,12 @@ pub struct BackendScriptContext {
     module_id: String,
     capabilities: HashSet<String>,
     pub(super) lua: Option<Lua>,
+    script_environment: Option<Table>,
     runtime: Arc<Mutex<BackendRuntime>>,
     builtin_globals: HashSet<String>,
     storage: Arc<Mutex<ScopedStorage>>,
     streams: Arc<StreamState>,
+    policy: RuntimePolicy,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -106,11 +109,11 @@ impl BackendScriptContext {
         storage_root: impl Into<PathBuf>,
     ) -> Self {
         let module_id = module_id.into();
-        let storage = StorageManager::new(storage_root.into()).open(StorageScope::backend(
-            module_id.clone(),
-            module_id.clone(),
-            module_id.clone(),
-        ));
+        let policy = RuntimePolicy::default();
+        let storage =
+            StorageManager::new_with_limit(storage_root.into(), policy.storage_budget()).open(
+                StorageScope::backend(module_id.clone(), module_id.clone(), module_id.clone()),
+            );
         let storage_diagnostics = storage
             .diagnostics()
             .iter()
@@ -129,10 +132,12 @@ impl BackendScriptContext {
             module_id,
             capabilities: capabilities.into_iter().collect(),
             lua: None,
+            script_environment: None,
             runtime,
             builtin_globals: HashSet::new(),
             storage: Arc::new(Mutex::new(storage)),
-            streams: StreamState::new(),
+            streams: StreamState::new_with_budget(policy.budget()),
+            policy,
         }
     }
 
@@ -141,6 +146,9 @@ impl BackendScriptContext {
             return lua;
         }
         let lua = Lua::new();
+        self.policy
+            .install(&lua)
+            .expect("backend sandbox policy init failed");
         self.lua = Some(lua);
         let globals = self.lua.as_ref().unwrap().globals();
         self.install_host_api(&globals)
@@ -162,6 +170,7 @@ impl BackendScriptContext {
 
     /// Load and execute a backend Luau script.
     pub fn load_script(&mut self, source: &str) -> Result<(), BackendScriptError> {
+        let _budget = self.policy.begin_callback();
         self.ensure_lua()
             .load(source)
             .set_name(&self.module_id)
@@ -170,14 +179,26 @@ impl BackendScriptContext {
                 module_id: self.module_id.clone(),
                 message: err.to_string(),
             })?;
+        self.bind_script_environment_to_host_table()
+            .map_err(|err| BackendScriptError::Runtime {
+                module_id: self.module_id.clone(),
+                message: err.to_string(),
+            })?;
+        self.script_environment = self
+            .ensure_lua()
+            .globals()
+            .get::<Function>("start")
+            .ok()
+            .and_then(|function| function.environment());
         tracing::info!("loaded backend script for {}", self.module_id);
         Ok(())
     }
 
     /// Call the backend script's `start(self)` startup entrypoint once after load.
     pub fn call_init(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
+        let _budget = self.policy.begin_callback();
         self.reset_for_call(JsonValue::Null);
-        let globals = self.ensure_lua().globals();
+        let globals = self.script_environment();
         let entrypoint = globals.get::<Function>("start").map_err(|_| {
             BackendScriptError::MissingEntrypoint {
                 module_id: self.module_id.clone(),
@@ -201,9 +222,10 @@ impl BackendScriptContext {
 
     /// Call the backend script's optional `stop(self)` lifecycle hook.
     pub fn call_stop(&mut self) -> Result<(), BackendScriptError> {
+        let _budget = self.policy.begin_callback();
         self.kill_streams();
         self.reset_for_call(JsonValue::Null);
-        let globals = self.ensure_lua().globals();
+        let globals = self.script_environment();
         let stop = match globals.get::<Function>("stop") {
             Ok(stop) => stop,
             Err(_) => {
@@ -247,8 +269,9 @@ impl BackendScriptContext {
         if lines.is_empty() {
             return Ok(None);
         }
+        let _budget = self.policy.begin_callback();
         self.reset_for_call(JsonValue::Null);
-        let globals = self.ensure_lua().globals();
+        let globals = self.script_environment();
         if let Ok(batch_handler) = globals.get::<Function>("on_stream_batch") {
             let current_self =
                 self.current_self_table()
@@ -300,8 +323,9 @@ impl BackendScriptContext {
 
     /// Call `on_poll()` if it exists. Returns any exported service state.
     pub fn run_poll(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
+        let _budget = self.policy.begin_callback();
         self.reset_for_call(JsonValue::Null);
-        let globals = self.ensure_lua().globals();
+        let globals = self.script_environment();
         let handler = match globals.get::<Function>("on_poll") {
             Ok(handler) => handler,
             Err(_) => return Ok(None),
@@ -327,10 +351,11 @@ impl BackendScriptContext {
         command: &str,
         payload: &JsonValue,
     ) -> Result<Option<JsonValue>, BackendScriptError> {
+        let _budget = self.policy.begin_callback();
         self.reset_for_call(payload.clone());
         let normalized = command.replace('-', "_");
 
-        let globals = self.ensure_lua().globals();
+        let globals = self.script_environment();
         let handler_name = format!("on_command_{normalized}");
         let handler = match globals
             .get::<Function>(handler_name.as_str())
@@ -359,10 +384,11 @@ impl BackendScriptContext {
         command: &str,
         payload: &JsonValue,
     ) -> Result<BackendCommandOutcome, BackendScriptError> {
+        let _budget = self.policy.begin_callback();
         self.reset_for_call(payload.clone());
         let normalized = command.replace('-', "_");
 
-        let globals = self.ensure_lua().globals();
+        let globals = self.script_environment();
         let handler_name = format!("on_command_{normalized}");
         let handler = match globals
             .get::<Function>(handler_name.as_str())
@@ -395,7 +421,6 @@ impl BackendScriptContext {
                 });
             }
         };
-
         let state = self.take_service_state_snapshot()?;
         let module_id = self.module_id.clone();
         let lua = self.ensure_lua();
@@ -412,7 +437,7 @@ impl BackendScriptContext {
             return Ok(Some(payload));
         }
 
-        let globals = self.ensure_lua().globals();
+        let globals = self.script_environment();
         let state =
             globals
                 .get::<LuaValue>("state")
@@ -425,17 +450,32 @@ impl BackendScriptContext {
             return Ok(None);
         }
 
-        self.ensure_lua()
+        let payload = self
+            .ensure_lua()
             .from_value::<JsonValue>(state)
-            .map(Some)
             .map_err(|err| BackendScriptError::SnapshotFailed {
                 module_id: self.module_id.clone(),
                 message: format!("failed to convert state to JSON: {err}"),
-            })
+            })?;
+        let output_bytes =
+            serde_json::to_vec(&payload).map_err(|error| BackendScriptError::SnapshotFailed {
+                module_id: self.module_id.clone(),
+                message: format!("failed to size state snapshot: {error}"),
+            })?;
+        self.policy
+            .budget()
+            .reserve_output(output_bytes.len())
+            .map_err(|error| BackendScriptError::SnapshotFailed {
+                module_id: self.module_id.clone(),
+                message: error.to_string(),
+            })?;
+        Ok(Some(payload))
     }
 
     pub fn drain_events(&self) -> Vec<BackendScriptEvent> {
-        std::mem::take(&mut self.runtime.lock().unwrap().pending_events)
+        let events = std::mem::take(&mut self.runtime.lock().unwrap().pending_events);
+        self.policy.budget().release_queue(events.len());
+        events
     }
 
     pub fn drain_storage_diagnostics(&self) -> Vec<String> {
@@ -454,7 +494,7 @@ impl BackendScriptContext {
     }
 
     pub fn public_function_names(&mut self) -> Vec<String> {
-        let globals = self.ensure_lua().globals();
+        let globals = self.script_environment();
         let mut names = globals
             .pairs::<String, LuaValue>()
             .filter_map(|pair| {
@@ -484,8 +524,27 @@ impl BackendScriptContext {
         Ok(())
     }
 
+    fn script_environment(&mut self) -> Table {
+        self.script_environment
+            .clone()
+            .unwrap_or_else(|| self.ensure_lua().globals())
+    }
+
+    fn bind_script_environment_to_host_table(&mut self) -> mlua::Result<()> {
+        let lua = self.ensure_lua();
+        let globals = lua.globals();
+        let mesh = globals.get::<Table>("mesh")?;
+        if let Ok(start) = globals.get::<Function>("start")
+            && let Some(environment) = start.environment()
+        {
+            environment.raw_set("mesh", mesh)?;
+        }
+        Ok(())
+    }
+
     fn install_service_api(&mut self, mesh: &Table) -> mlua::Result<()> {
         let service = self.ensure_lua().create_table()?;
+        let resources = self.policy.budget();
         let module_id = self.module_id.clone();
         let runtime = Arc::clone(&self.runtime);
         service.set(
@@ -507,17 +566,25 @@ impl BackendScriptContext {
 
         let module_id = self.module_id.clone();
         let runtime = Arc::clone(&self.runtime);
+        let resources_for_emit = resources.clone();
         service.set(
             "emit",
             self.ensure_lua()
                 .create_function(move |lua, value: LuaValue| {
                     let payload = lua.from_value::<JsonValue>(value)?;
+                    let output_bytes = serde_json::to_vec(&payload)
+                        .map_err(mlua::Error::external)?
+                        .len();
+                    resources_for_emit
+                        .reserve_output(output_bytes)
+                        .map_err(|error| mlua::Error::external(error.to_string()))?;
                     runtime.lock().unwrap().pending_emit = Some(payload);
                     Ok(())
                 })?,
         )?;
 
         let runtime = Arc::clone(&self.runtime);
+        let resources_for_json = resources.clone();
         service.set(
             "emit_json",
             self.ensure_lua()
@@ -532,15 +599,25 @@ impl BackendScriptContext {
                         }
                         Some(other) => lua.from_value::<JsonValue>(other)?,
                     };
+                    let output_bytes = serde_json::to_vec(&payload)
+                        .map_err(mlua::Error::external)?
+                        .len();
+                    resources_for_json
+                        .reserve_output(output_bytes)
+                        .map_err(|error| mlua::Error::external(error.to_string()))?;
                     runtime.lock().unwrap().pending_emit = Some(payload);
                     Ok(())
                 })?,
         )?;
 
         let runtime = Arc::clone(&self.runtime);
+        let resources_for_unavailable = resources.clone();
         service.set(
             "emit_unavailable",
             self.ensure_lua().create_function(move |_lua, ()| {
+                resources_for_unavailable
+                    .reserve_output(64)
+                    .map_err(|error| mlua::Error::external(error.to_string()))?;
                 runtime.lock().unwrap().pending_emit = Some(serde_json::json!({
                     "available": false,
                     "source_module": module_id,
@@ -550,6 +627,7 @@ impl BackendScriptContext {
         )?;
 
         let runtime = Arc::clone(&self.runtime);
+        let resources_for_event = resources.clone();
         service.set(
             "emit_event",
             self.ensure_lua().create_function(
@@ -558,6 +636,15 @@ impl BackendScriptContext {
                         Some(value) => lua.from_value::<JsonValue>(value)?,
                         None => JsonValue::Null,
                     };
+                    let output_bytes = serde_json::to_vec(&payload)
+                        .map_err(mlua::Error::external)?
+                        .len();
+                    resources_for_event
+                        .reserve_output(output_bytes)
+                        .map_err(|error| mlua::Error::external(error.to_string()))?;
+                    resources_for_event
+                        .reserve_queue()
+                        .map_err(|error| mlua::Error::external(error.to_string()))?;
                     runtime
                         .lock()
                         .unwrap()
@@ -593,6 +680,7 @@ impl BackendScriptContext {
     fn install_exec_api(&mut self, mesh: &Table) -> mlua::Result<()> {
         let capabilities = self.capabilities.clone();
         let module_id = self.module_id.clone();
+        let resources = self.policy.budget();
         mesh.set(
             "exec",
             self.ensure_lua().create_function(
@@ -604,10 +692,10 @@ impl BackendScriptContext {
                             required_capability = %required,
                             "denied backend exec"
                         );
-                        return exec_denied_to_lua(lua, &program, &required);
+                        return exec_denied_to_lua(lua, &program, &required, &resources);
                     }
 
-                    run_exec(lua, &program, &args)
+                    run_exec(lua, &program, &args, &resources)
                 },
             )?,
         )?;
@@ -648,10 +736,17 @@ impl BackendScriptContext {
 
     fn install_config_api(&mut self, mesh: &Table) -> mlua::Result<()> {
         let runtime = Arc::clone(&self.runtime);
+        let resources = self.policy.budget();
         mesh.set(
             "config",
             self.ensure_lua().create_function(move |lua, ()| {
                 let settings = runtime.lock().unwrap().settings.clone();
+                let output_bytes = serde_json::to_vec(&settings)
+                    .map_err(mlua::Error::external)?
+                    .len();
+                resources
+                    .reserve_output(output_bytes)
+                    .map_err(|error| mlua::Error::external(error.to_string()))?;
                 lua.to_value(&settings)
             })?,
         )?;
@@ -661,8 +756,13 @@ impl BackendScriptContext {
     fn install_log_api(&mut self, mesh: &Table) -> mlua::Result<()> {
         let log = self.ensure_lua().create_table()?;
         let module_id = self.module_id.clone();
+        let resources = self.policy.budget();
+        let resources_for_call = resources.clone();
         let call_log = self.ensure_lua().create_function(
             move |_lua, (_self, level, message): (mlua::Table, String, String)| {
+                resources_for_call
+                    .reserve_output(message.len())
+                    .map_err(|error| mlua::Error::external(error.to_string()))?;
                 log_message(&module_id, &level, &message);
                 Ok(())
             },
@@ -680,10 +780,14 @@ impl BackendScriptContext {
             ("debug", "debug"),
         ] {
             let module_id = module_id.clone();
+            let resources_for_level = resources.clone();
             log.set(
                 name,
                 self.ensure_lua()
                     .create_function(move |_lua, message: String| {
+                        resources_for_level
+                            .reserve_output(message.len())
+                            .map_err(|error| mlua::Error::external(error.to_string()))?;
                         log_message(&module_id, level, &message);
                         Ok(())
                     })?,
@@ -697,7 +801,11 @@ impl BackendScriptContext {
     fn reset_for_call(&mut self, payload: JsonValue) {
         let mut runtime = self.runtime.lock().unwrap();
         runtime.pending_emit = None;
+        let event_count = runtime.pending_events.len();
         runtime.pending_events.clear();
+        drop(runtime);
+        self.policy.budget().release_queue(event_count);
+        let mut runtime = self.runtime.lock().unwrap();
         runtime.current_payload = payload;
     }
 
@@ -731,6 +839,7 @@ impl BackendScriptContext {
         )?;
         current_self.set("storage", storage)?;
         let runtime = Arc::clone(&self.runtime);
+        let resources = self.policy.budget();
         let self_events_meta = self.ensure_lua().create_table()?;
         self_events_meta.set(
             "__index",
@@ -742,7 +851,12 @@ impl BackendScriptContext {
                     if !is_named_event_channel(&key) {
                         return Ok(LuaValue::Nil);
                     }
-                    let channel = create_backend_event_channel(lua, &key, Arc::clone(&runtime))?;
+                    let channel = create_backend_event_channel(
+                        lua,
+                        &key,
+                        Arc::clone(&runtime),
+                        resources.clone(),
+                    )?;
                     table.set(key.as_str(), channel.clone())?;
                     Ok(LuaValue::Table(channel))
                 })?,
@@ -760,6 +874,7 @@ fn create_backend_event_channel(
     lua: &Lua,
     event_name: &str,
     runtime: Arc<Mutex<BackendRuntime>>,
+    resources: crate::policy::ResourceBudget,
 ) -> mlua::Result<Table> {
     let channel = lua.create_table()?;
     let subscribers = lua.create_table()?;
@@ -783,6 +898,15 @@ fn create_backend_event_channel(
                 Some(value) => lua.from_value::<JsonValue>(value)?,
                 None => JsonValue::Null,
             };
+            let output_bytes = serde_json::to_vec(&payload)
+                .map_err(mlua::Error::external)?
+                .len();
+            resources
+                .reserve_output(output_bytes)
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
+            resources
+                .reserve_queue()
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
             let subscribers: Table = table.get("__subscribers")?;
             for callback in subscribers.sequence_values::<Function>().flatten() {
                 callback.call::<()>(lua.to_value(&payload)?)?;

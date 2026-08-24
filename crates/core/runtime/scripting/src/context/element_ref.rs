@@ -1,3 +1,4 @@
+use crate::policy::ResourceBudget;
 use mlua::{Lua, LuaSerdeExt, Table, Value as LuaValue, Variadic};
 use serde_json::Value;
 use std::sync::{
@@ -74,6 +75,7 @@ pub(super) fn create_refs_proxy(
     metrics_store: Arc<Mutex<ElementMetricsStore>>,
     actions: Arc<Mutex<Vec<ElementAction>>>,
     pending_side_channels: Arc<AtomicBool>,
+    resources: ResourceBudget,
 ) -> mlua::Result<Table> {
     let proxy = lua.create_table()?;
     let meta = lua.create_table()?;
@@ -86,6 +88,7 @@ pub(super) fn create_refs_proxy(
                 Arc::clone(&metrics_store),
                 Arc::clone(&actions),
                 Arc::clone(&pending_side_channels),
+                resources.clone(),
             )?;
             proxy.raw_set(name.as_str(), node.clone())?;
             Ok(LuaValue::Table(node))
@@ -102,6 +105,7 @@ pub(super) fn install_bound_element_proxies(
     metrics_store: Arc<Mutex<ElementMetricsStore>>,
     actions: Arc<Mutex<Vec<ElementAction>>>,
     pending_side_channels: Arc<AtomicBool>,
+    resources: ResourceBudget,
 ) -> mlua::Result<()> {
     let Some(entries) = metrics.as_object() else {
         return Ok(());
@@ -122,6 +126,7 @@ pub(super) fn install_bound_element_proxies(
             Arc::clone(&metrics_store),
             Arc::clone(&actions),
             Arc::clone(&pending_side_channels),
+            resources.clone(),
         )?;
         scope.raw_set(name.as_str(), proxy)?;
     }
@@ -135,6 +140,7 @@ fn create_element_node_proxy(
     metrics_store: Arc<Mutex<ElementMetricsStore>>,
     actions: Arc<Mutex<Vec<ElementAction>>>,
     pending_side_channels: Arc<AtomicBool>,
+    resources: ResourceBudget,
 ) -> mlua::Result<Table> {
     let node = lua.create_table()?;
     // Tag the proxy so imperative methods can recognize the implicit `self` from
@@ -149,6 +155,7 @@ fn create_element_node_proxy(
     let write_actions = Arc::clone(&actions);
     let write_pending_side_channels = Arc::clone(&pending_side_channels);
     let write_name = name_owned.clone();
+    let index_resources = resources.clone();
     meta.set(
         "__index",
         lua.create_function(move |lua, (_node, key): (Table, String)| {
@@ -164,6 +171,7 @@ fn create_element_node_proxy(
             if ELEMENT_METHODS.contains(&key.as_str()) {
                 let actions = Arc::clone(&actions);
                 let pending_side_channels = Arc::clone(&pending_side_channels);
+                let resources = index_resources.clone();
                 let target = name_owned.clone();
                 let action = key.clone();
                 if let LuaValue::Function(method) = method_cache.get::<LuaValue>(key.as_str())? {
@@ -193,6 +201,9 @@ fn create_element_node_proxy(
                             }
                         }
                     }
+                    resources
+                        .reserve_queue()
+                        .map_err(|error| mlua::Error::external(error.to_string()))?;
                     pending_side_channels.store(true, Ordering::Release);
                     actions.lock().unwrap().push(ElementAction {
                         target: target.clone(),
@@ -238,6 +249,9 @@ fn create_element_node_proxy(
             if key != "value" {
                 if let Some(attribute_name) = element_member_attribute_name(&key) {
                     let payload = lua.from_value::<Value>(value)?;
+                    resources
+                        .reserve_queue()
+                        .map_err(|error| mlua::Error::external(error.to_string()))?;
                     write_pending_side_channels.store(true, Ordering::Release);
                     write_actions.lock().unwrap().push(ElementAction {
                         target: write_name.clone(),
@@ -252,6 +266,9 @@ fn create_element_node_proxy(
                 )));
             }
             let payload = lua.from_value::<Value>(value)?;
+            resources
+                .reserve_queue()
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
             write_pending_side_channels.store(true, Ordering::Release);
             write_actions.lock().unwrap().push(ElementAction {
                 target: write_name.clone(),

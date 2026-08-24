@@ -97,6 +97,7 @@ impl ScriptContext {
             Arc::clone(&self.shared_element_metrics),
             Arc::clone(&self.shared_element_actions),
             Arc::clone(&self.pending_side_channels),
+            self.realm_policy.budget(),
         );
     }
 
@@ -107,6 +108,7 @@ impl ScriptContext {
         payload: &Value,
     ) -> Result<(), ScriptError> {
         self.ensure_initialized()?;
+        let _budget = self.realm_policy.begin_callback();
         let scope = self.env().clone();
         let channel = interface_event_channel(self.lua(), &scope, service, event_name, None, true)
             .map_err(lua_err)?;

@@ -81,6 +81,7 @@ impl ScriptContext {
     fn install_events_api(&mut self, mesh_core_events: &Table) -> Result<(), ScriptError> {
         let published_events = Arc::clone(&self.shared_published_events);
         let pending_side_channels = Arc::clone(&self.pending_side_channels);
+        let resources = self.realm_policy.budget();
         let module_id = self.module_id.clone();
         let capabilities = self.capabilities.clone();
         mesh_core_events
@@ -98,6 +99,7 @@ impl ScriptContext {
                             payload,
                             &module_id,
                             &capabilities,
+                            &resources,
                         )
                     })
                     .map_err(lua_err)?,
@@ -156,6 +158,7 @@ impl ScriptContext {
             let pending_side_channels_for_locale = Arc::clone(&self.pending_side_channels);
             let module_id_for_locale = self.module_id.clone();
             let capabilities_for_locale = self.capabilities.clone();
+            let resources_for_locale = self.realm_policy.budget();
             mesh_locale
                 .set(
                     "set",
@@ -168,6 +171,7 @@ impl ScriptContext {
                                 serde_json::json!({ "locale": locale }),
                                 &module_id_for_locale,
                                 &capabilities_for_locale,
+                                &resources_for_locale,
                             )
                         })
                         .map_err(lua_err)?,
@@ -179,12 +183,17 @@ impl ScriptContext {
     }
 
     fn install_log_api(&mut self, mesh_log: &Table) -> Result<(), ScriptError> {
+        let resources = self.realm_policy.budget();
         let module_id = self.module_id.clone();
+        let resources_for_info = resources.clone();
         mesh_log
             .set(
                 "info",
                 self.lua()
                     .create_function(move |_lua, message: String| {
+                        resources_for_info
+                            .reserve_output(message.len())
+                            .map_err(|error| LuaError::external(error.to_string()))?;
                         tracing::info!("{}: {}", module_id, message);
                         Ok(())
                     })
@@ -192,11 +201,15 @@ impl ScriptContext {
             )
             .map_err(lua_err)?;
         let module_id = self.module_id.clone();
+        let resources_for_warn = resources.clone();
         mesh_log
             .set(
                 "warn",
                 self.lua()
                     .create_function(move |_lua, message: String| {
+                        resources_for_warn
+                            .reserve_output(message.len())
+                            .map_err(|error| LuaError::external(error.to_string()))?;
                         tracing::warn!("{}: {}", module_id, message);
                         Ok(())
                     })
@@ -204,11 +217,15 @@ impl ScriptContext {
             )
             .map_err(lua_err)?;
         let module_id = self.module_id.clone();
+        let resources_for_error = resources;
         mesh_log
             .set(
                 "error",
                 self.lua()
                     .create_function(move |_lua, message: String| {
+                        resources_for_error
+                            .reserve_output(message.len())
+                            .map_err(|error| LuaError::external(error.to_string()))?;
                         tracing::error!("{}: {}", module_id, message);
                         Ok(())
                     })
@@ -222,6 +239,7 @@ impl ScriptContext {
         let pending_side_channels_for_popover = Arc::clone(&self.pending_side_channels);
         let module_id_for_popover = self.module_id.clone();
         let capabilities_for_popover = self.capabilities.clone();
+        let resources_for_popover = self.realm_policy.budget();
         mesh_popover
             .set(
                 "activate",
@@ -287,6 +305,7 @@ impl ScriptContext {
                             payload,
                             &module_id_for_popover,
                             &capabilities_for_popover,
+                            &resources_for_popover,
                         )
                     })
                     .map_err(lua_err)?,
@@ -297,6 +316,7 @@ impl ScriptContext {
         let pending_side_channels_for_popover = Arc::clone(&self.pending_side_channels);
         let module_id_for_popover = self.module_id.clone();
         let capabilities_for_popover = self.capabilities.clone();
+        let resources_for_popover = self.realm_policy.budget();
         mesh_popover
             .set(
                 "hide",
@@ -332,6 +352,7 @@ impl ScriptContext {
                             }),
                             &module_id_for_popover,
                             &capabilities_for_popover,
+                            &resources_for_popover,
                         )
                     })
                     .map_err(lua_err)?,
@@ -346,12 +367,22 @@ impl ScriptContext {
         payload: Value,
         module_id: &str,
         capabilities: &mesh_core_capability::CapabilitySet,
+        resources: &crate::policy::ResourceBudget,
     ) -> Result<(), LuaError> {
         OperationRegistry::builtin()
             .authorize_event(&channel, &payload, module_id, capabilities)
             .map_err(|rejection| {
                 LuaError::external(ScriptError::OperationRejected(rejection.to_string()))
             })?;
+        let output_bytes = serde_json::to_vec(&payload)
+            .map_err(LuaError::external)?
+            .len();
+        resources
+            .reserve_output(output_bytes)
+            .map_err(|error| LuaError::external(error.to_string()))?;
+        resources
+            .reserve_queue()
+            .map_err(|error| LuaError::external(error.to_string()))?;
         pending_side_channels.store(true, Ordering::Release);
         published_events.lock().unwrap().push(PublishedEvent {
             channel,
@@ -377,6 +408,7 @@ impl ScriptContext {
         let has_locale_write = manifest.has_locale_write;
         let published_events = Arc::clone(&self.shared_published_events);
         let pending_side_channels = Arc::clone(&self.pending_side_channels);
+        let resources = self.realm_policy.budget();
         let tracked_service_fields = Arc::clone(&self.tracked_service_fields);
         let subscribed_interface_events = Arc::clone(&self.subscribed_interface_events);
         let service_context_state = Arc::clone(&self.service_context_state);
@@ -518,6 +550,7 @@ impl ScriptContext {
                     Arc::clone(&subscribed_interface_events),
                     Arc::clone(&published_events),
                     Arc::clone(&pending_side_channels),
+                    resources.clone(),
                 )?;
                 Ok(LuaValue::Table(proxy))
             })
@@ -590,6 +623,7 @@ impl ScriptContext {
             Arc::clone(&self.shared_element_metrics),
             Arc::clone(&self.shared_element_actions),
             Arc::clone(&self.pending_side_channels),
+            self.realm_policy.budget(),
         )
         .map_err(lua_err)?;
         globals.set("refs", refs_proxy).map_err(lua_err)?;
@@ -678,6 +712,7 @@ impl ScriptContext {
                 Arc::clone(&self.subscribed_interface_events),
                 Arc::clone(&self.shared_published_events),
                 Arc::clone(&self.pending_side_channels),
+                self.realm_policy.budget(),
             )
             .map_err(lua_err)?;
             globals.set(import.alias.as_str(), proxy).map_err(lua_err)?;

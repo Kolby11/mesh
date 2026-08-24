@@ -1,26 +1,39 @@
+use crate::policy::RuntimePolicy;
 use mlua::Lua;
 
-fn new_sandboxed_lua() -> Lua {
+#[derive(Clone)]
+struct ThreadRealm {
+    lua: Lua,
+    policy: RuntimePolicy,
+}
+
+fn new_sandboxed_realm() -> ThreadRealm {
     let lua = Lua::new();
-    lua.sandbox(true).expect("sandbox init failed");
-    lua
+    let policy = RuntimePolicy::default();
+    policy.install(&lua).expect("sandbox policy init failed");
+    ThreadRealm { lua, policy }
 }
 
 thread_local! {
     /// One sandboxed Luau realm per execution thread. ScriptContext `_ENV`
     /// tables are the isolation boundary; cloning this handle does not create
     /// another VM or duplicate the standard-library heap.
-    static THREAD_VM: Lua = new_sandboxed_lua();
+    static THREAD_REALM: ThreadRealm = new_sandboxed_realm();
 }
 
 /// Return a cheap handle to this thread's shared sandboxed Luau realm.
 pub fn thread_vm() -> Lua {
-    THREAD_VM.with(Clone::clone)
+    THREAD_REALM.with(|realm| realm.lua.clone())
+}
+
+/// Return the policy and host-resource broker for this thread's shared realm.
+pub(crate) fn thread_policy() -> RuntimePolicy {
+    THREAD_REALM.with(|realm| realm.policy.clone())
 }
 
 #[cfg(test)]
 fn fresh_vm_for_benchmark() -> Lua {
-    new_sandboxed_lua()
+    new_sandboxed_realm().lua
 }
 
 #[cfg(test)]
