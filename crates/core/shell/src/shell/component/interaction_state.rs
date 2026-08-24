@@ -3,6 +3,112 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 impl FrontendSurfaceComponent {
+    pub(super) fn commit_interaction_delta(
+        &mut self,
+        transaction: mesh_core_interaction::InteractionTransaction,
+    ) -> InteractionDelta {
+        let delta = transaction.commit(&mut self.interaction_state);
+        if delta.changed() {
+            self.invalidate_interaction_restyle();
+        }
+        delta
+    }
+
+    pub(super) fn reconcile_interaction_state(&mut self, tree: &WidgetNode) -> InteractionDelta {
+        let mut transaction = self.interaction_state.begin();
+        transaction.reconcile(tree);
+        self.commit_interaction_delta(transaction)
+    }
+
+    pub(super) fn stage_pointer_press(
+        &mut self,
+        pointer_id: NodeId,
+        button: u32,
+        focus_id: Option<NodeId>,
+        focus_visible: bool,
+    ) -> InteractionDelta {
+        let mut transaction = self.interaction_state.begin();
+        transaction.focus(focus_id, focus_visible);
+        transaction.capture_pointer(Some(mesh_core_interaction::PressOrigin {
+            node_id: pointer_id,
+            button,
+        }));
+        self.commit_interaction_delta(transaction)
+    }
+
+    pub(super) fn stage_scrollbar_press(
+        &mut self,
+        node_id: NodeId,
+        button: u32,
+    ) -> InteractionDelta {
+        let mut transaction = self.interaction_state.begin();
+        transaction.capture_pointer(Some(mesh_core_interaction::PressOrigin { node_id, button }));
+        transaction.transfer_scroll(node_id);
+        self.commit_interaction_delta(transaction)
+    }
+
+    pub(super) fn release_pointer_capture(&mut self, button: Option<u32>) -> InteractionDelta {
+        let mut transaction = self.interaction_state.begin();
+        transaction.release_pointer(button);
+        self.commit_interaction_delta(transaction)
+    }
+
+    pub(super) fn claim_scroll_owner(&mut self, node_id: NodeId) -> InteractionDelta {
+        let mut transaction = self.interaction_state.begin();
+        transaction.transfer_scroll(node_id);
+        self.commit_interaction_delta(transaction)
+    }
+
+    pub(super) fn release_scroll_owner(&mut self, node_id: Option<NodeId>) -> InteractionDelta {
+        let mut transaction = self.interaction_state.begin();
+        transaction.release_scroll(node_id);
+        self.commit_interaction_delta(transaction)
+    }
+
+    pub(super) fn claim_gesture_owner(&mut self, node_id: NodeId, kind: GestureKind) -> bool {
+        let mut transaction = self.interaction_state.begin();
+        let decision = transaction.claim_gesture(node_id, kind);
+        if matches!(decision, mesh_core_interaction::OwnershipDecision::Rejected) {
+            return false;
+        }
+        self.commit_interaction_delta(transaction);
+        true
+    }
+
+    pub(super) fn release_gesture_owner(&mut self, node_id: Option<NodeId>) -> InteractionDelta {
+        let mut transaction = self.interaction_state.begin();
+        transaction.release_gesture(node_id);
+        self.commit_interaction_delta(transaction)
+    }
+
+    pub(super) fn claim_touch_owner(&mut self, touch_id: i32, node_id: NodeId) -> bool {
+        let mut transaction = self.interaction_state.begin();
+        let decision = transaction.claim_touch(touch_id, node_id);
+        if matches!(decision, mesh_core_interaction::OwnershipDecision::Rejected) {
+            return false;
+        }
+        self.commit_interaction_delta(transaction);
+        true
+    }
+
+    pub(super) fn release_touch_owner(&mut self, touch_id: i32) -> InteractionDelta {
+        let mut transaction = self.interaction_state.begin();
+        transaction.release_touch(touch_id);
+        self.commit_interaction_delta(transaction)
+    }
+
+    pub(super) fn reset_interaction_owners(&mut self) -> InteractionDelta {
+        let mut transaction = self.interaction_state.begin();
+        transaction.focus(None, false);
+        transaction.capture_pointer(None);
+        transaction.release_gesture(None);
+        transaction.release_scroll(None);
+        for touch_id in self.interaction_state.touch_ids() {
+            transaction.release_touch(touch_id);
+        }
+        self.commit_interaction_delta(transaction)
+    }
+
     pub(super) fn clear_selection(&mut self) {
         self.selection = None;
     }
@@ -494,6 +600,7 @@ impl FrontendSurfaceComponent {
     /// maps are never pruned here — their cleanup rules are deliberate and covered
     /// by separate logic when elements are explicitly removed by the user.
     pub(super) fn prune_stale_interaction_targets(&mut self, tree: &WidgetNode) {
+        self.reconcile_interaction_state(tree);
         if let Some(key) = &self.focused_key {
             if find_node_by_key(tree, key).is_none() {
                 self.focused_key = None;

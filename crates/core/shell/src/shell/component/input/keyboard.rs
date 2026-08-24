@@ -89,6 +89,9 @@ impl FrontendSurfaceComponent {
                 return Ok(requests);
             }
         }
+        let mut transaction = self.interaction_state.begin();
+        transaction.focus(self.focused_id, true);
+        self.commit_interaction_delta(transaction);
         self.focus_visible_key = self.focused_key.clone();
         self.focus_visible_id = self.focused_id;
         if let Some(focused_key) = focused_key {
@@ -207,6 +210,9 @@ impl FrontendSurfaceComponent {
         modifiers: KeyModifiers,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         let keyboard_settings = self.current_keyboard_settings();
+        let mut transaction = self.interaction_state.begin();
+        transaction.focus(self.focused_id, true);
+        self.commit_interaction_delta(transaction);
         self.focus_visible_key = self.focused_key.clone();
         self.focus_visible_id = self.focused_id;
         if let Some(focused_key) = self.normalized_focused_key(tree) {

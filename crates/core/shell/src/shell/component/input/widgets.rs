@@ -877,10 +877,18 @@ impl FrontendSurfaceComponent {
         fingers: u32,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         let Some(target) = self.capture_gesture_target(tree, "swipe", fingers) else {
+            self.release_gesture_owner(None);
             self.gesture_capture = None;
             return Ok(Vec::new());
         };
+        let Some(node_id) = find_node_by_key(tree, &target.node_key).map(|node| node.id) else {
+            return Ok(Vec::new());
+        };
+        if !self.claim_gesture_owner(node_id, GestureKind::Swipe) {
+            return Ok(Vec::new());
+        }
         let Some((node, event)) = self.gesture_event(tree, &target, "swipe") else {
+            self.release_gesture_owner(Some(node_id));
             return Ok(Vec::new());
         };
         let event = add_event_fields(
@@ -893,7 +901,13 @@ impl FrontendSurfaceComponent {
                 "cancelled": false,
             }),
         );
-        let requests = self.call_resolved_node_handler(node, "swipe", &[event])?;
+        let requests = match self.call_resolved_node_handler(node, "swipe", &[event]) {
+            Ok(requests) => requests,
+            Err(error) => {
+                self.release_gesture_owner(Some(node_id));
+                return Err(error);
+            }
+        };
         self.gesture_capture = Some(GestureCapture::Swipe {
             target,
             dx: 0.0,
@@ -948,6 +962,7 @@ impl FrontendSurfaceComponent {
         let Some(GestureCapture::Swipe { target, dx, dy }) = self.gesture_capture.take() else {
             return Ok(Vec::new());
         };
+        self.release_gesture_owner(None);
         let Some((node, event)) = self.gesture_event(tree, &target, "swipe") else {
             return Ok(Vec::new());
         };
@@ -974,10 +989,18 @@ impl FrontendSurfaceComponent {
         fingers: u32,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         let Some(target) = self.capture_gesture_target(tree, "pinch", fingers) else {
+            self.release_gesture_owner(None);
             self.gesture_capture = None;
             return Ok(Vec::new());
         };
+        let Some(node_id) = find_node_by_key(tree, &target.node_key).map(|node| node.id) else {
+            return Ok(Vec::new());
+        };
+        if !self.claim_gesture_owner(node_id, GestureKind::Pinch) {
+            return Ok(Vec::new());
+        }
         let Some((node, event)) = self.gesture_event(tree, &target, "pinch") else {
+            self.release_gesture_owner(Some(node_id));
             return Ok(Vec::new());
         };
         let event = add_event_fields(
@@ -991,7 +1014,13 @@ impl FrontendSurfaceComponent {
                 "cancelled": false,
             }),
         );
-        let requests = self.call_resolved_node_handler(node, "pinch", &[event])?;
+        let requests = match self.call_resolved_node_handler(node, "pinch", &[event]) {
+            Ok(requests) => requests,
+            Err(error) => {
+                self.release_gesture_owner(Some(node_id));
+                return Err(error);
+            }
+        };
         self.gesture_capture = Some(GestureCapture::Pinch {
             target,
             dx: 0.0,
@@ -1063,6 +1092,7 @@ impl FrontendSurfaceComponent {
         else {
             return Ok(Vec::new());
         };
+        self.release_gesture_owner(None);
         let Some((node, event)) = self.gesture_event(tree, &target, "pinch") else {
             return Ok(Vec::new());
         };
@@ -1087,10 +1117,18 @@ impl FrontendSurfaceComponent {
         fingers: u32,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         let Some(target) = self.capture_gesture_target(tree, "hold", fingers) else {
+            self.release_gesture_owner(None);
             self.gesture_capture = None;
             return Ok(Vec::new());
         };
+        let Some(node_id) = find_node_by_key(tree, &target.node_key).map(|node| node.id) else {
+            return Ok(Vec::new());
+        };
+        if !self.claim_gesture_owner(node_id, GestureKind::Hold) {
+            return Ok(Vec::new());
+        }
         let Some((node, event)) = self.gesture_event(tree, &target, "hold") else {
+            self.release_gesture_owner(Some(node_id));
             return Ok(Vec::new());
         };
         let event = add_event_fields(
@@ -1102,7 +1140,13 @@ impl FrontendSurfaceComponent {
                 "cancelled": false,
             }),
         );
-        let requests = self.call_resolved_node_handler(node, "hold", &[event])?;
+        let requests = match self.call_resolved_node_handler(node, "hold", &[event]) {
+            Ok(requests) => requests,
+            Err(error) => {
+                self.release_gesture_owner(Some(node_id));
+                return Err(error);
+            }
+        };
         self.gesture_capture = Some(GestureCapture::Hold { target });
         Ok(requests)
     }
@@ -1115,6 +1159,7 @@ impl FrontendSurfaceComponent {
         let Some(GestureCapture::Hold { target }) = self.gesture_capture.take() else {
             return Ok(Vec::new());
         };
+        self.release_gesture_owner(None);
         let Some((node, event)) = self.gesture_event(tree, &target, "hold") else {
             return Ok(Vec::new());
         };
@@ -1187,6 +1232,12 @@ impl FrontendSurfaceComponent {
         let Some(node_key) = touch_target_key(tree, x, y) else {
             return Ok(Vec::new());
         };
+        let Some(node_id) = find_node_by_key(tree, &node_key).map(|node| node.id) else {
+            return Ok(Vec::new());
+        };
+        if !self.claim_touch_owner(id, node_id) {
+            return Ok(Vec::new());
+        }
         self.touch_targets.insert(id, node_key.clone());
         let long_press_enabled = find_node_by_key(tree, &node_key)
             .is_some_and(|node| node_has_handler(node, "longpress"));
@@ -1228,6 +1279,7 @@ impl FrontendSurfaceComponent {
         id: i32,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         let point = self.active_touches.remove(&id).unwrap_or(self.hovered_pos);
+        self.release_touch_owner(id);
         let mut requests = self.dispatch_touch_to_captured(tree, "touchend", id, point, false)?;
         if let Some(touch) = self.touch_gestures.remove(&id) {
             let duration = touch.started_at.elapsed();
@@ -1298,6 +1350,9 @@ impl FrontendSurfaceComponent {
         keys.sort();
         keys.dedup();
         self.active_touches.clear();
+        for id in self.touch_targets.keys().copied().collect::<Vec<_>>() {
+            self.release_touch_owner(id);
+        }
         self.touch_targets.clear();
         self.touch_gestures.clear();
         self.last_tap = None;

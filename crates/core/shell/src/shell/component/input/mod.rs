@@ -192,6 +192,7 @@ impl FrontendSurfaceComponent {
         tree: &WidgetNode,
         input: ComponentInput,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
+        self.reconcile_interaction_state(tree);
         match input {
             ComponentInput::PointerButton {
                 x,
@@ -207,6 +208,8 @@ impl FrontendSurfaceComponent {
                     return Ok(Vec::new());
                 }
                 if !pressed && self.active_scrollbar_drag.take().is_some() {
+                    self.release_pointer_capture(Some(button));
+                    self.release_scroll_owner(None);
                     self.invalidate_paint();
                     return Ok(Vec::new());
                 }
@@ -219,6 +222,7 @@ impl FrontendSurfaceComponent {
                             ScrollbarAxis::Vertical => y,
                         };
                         if hit.on_thumb {
+                            self.stage_scrollbar_press(hit.node_id, button);
                             self.active_scrollbar_drag = Some(ScrollbarDragState {
                                 node_id: hit.node_id,
                                 axis: hit.axis,
@@ -229,6 +233,7 @@ impl FrontendSurfaceComponent {
                                 max_scroll: hit.max_scroll,
                             });
                         } else {
+                            self.claim_scroll_owner(hit.node_id);
                             let thumb_range = (hit.track_extent - hit.thumb_extent).max(0.0);
                             let ratio = if thumb_range <= f32::EPSILON {
                                 0.0
@@ -280,9 +285,14 @@ impl FrontendSurfaceComponent {
                             target.node,
                             target.bounds,
                         ));
+                        let focus_id = focusable_key
+                            .as_deref()
+                            .and_then(|key| find_node_by_key(tree, key).map(|node| node.id));
+                        let focus_visible = focusable_key
+                            .as_deref()
+                            .is_some_and(|key| self.pointer_focus_visible_for_key(tree, key));
+                        self.stage_pointer_press(target.node.id, button, focus_id, focus_visible);
                         let mut requests = if let Some(focused_key) = focusable_key {
-                            let focus_visible =
-                                self.pointer_focus_visible_for_key(tree, &focused_key);
                             self.set_focus_target(tree, Some(focused_key), focus_visible)?
                         } else {
                             self.set_focus_target(tree, None, false)?
@@ -340,6 +350,7 @@ impl FrontendSurfaceComponent {
                             return Ok(requests);
                         }
                     } else {
+                        self.release_pointer_capture(Some(button));
                         let requests = self.set_focus_target(tree, None, false)?;
                         self.pointer_down_id = None;
                         self.pointer_down_bounds = None;
@@ -351,6 +362,7 @@ impl FrontendSurfaceComponent {
                         }
                     }
                 } else {
+                    self.release_pointer_capture(Some(button));
                     let mut requests = Vec::new();
                     if let Some(slider_key) = self
                         .active_slider_id
@@ -614,6 +626,7 @@ impl FrontendSurfaceComponent {
                 }
 
                 if let Some(scroll_hit) = find_scrollable_at_with_limits(tree, x, y) {
+                    self.claim_scroll_owner(scroll_hit.node_id);
                     self.scroll_inertia.remove(&scroll_hit.node_id);
                     let current = self
                         .scroll_offsets
@@ -649,6 +662,7 @@ impl FrontendSurfaceComponent {
                 // A surface that does not opt into `ontwofingerscroll` keeps
                 // the existing continuous-scroll behavior.
                 if let Some(scroll_hit) = find_scrollable_at_with_limits(tree, x, y) {
+                    self.claim_scroll_owner(scroll_hit.node_id);
                     let now = Instant::now();
                     self.scroll_animations.remove(&scroll_hit.node_id);
                     let current = self

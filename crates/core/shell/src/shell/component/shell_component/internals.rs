@@ -7,6 +7,9 @@ impl FrontendSurfaceComponent {
             if let Some(key) = self.embedded_popover_return_focus.take()
                 && find_node_by_key(tree, &key).is_some()
             {
+                let mut transaction = self.interaction_state.begin();
+                transaction.focus(Some(runtime_node_id_for_key(&key)), true);
+                self.commit_interaction_delta(transaction);
                 self.focused_key = Some(key.clone());
                 self.focus_visible_key = Some(key);
                 self.focused_id = self.focused_key.as_deref().map(runtime_node_id_for_key);
@@ -25,6 +28,9 @@ impl FrontendSurfaceComponent {
 
         if let Some(key) = first_focusable_in_open_popover(tree) {
             self.embedded_popover_return_focus = self.focused_key.clone();
+            let mut transaction = self.interaction_state.begin();
+            transaction.focus(Some(runtime_node_id_for_key(&key)), true);
+            self.commit_interaction_delta(transaction);
             self.focused_key = Some(key.clone());
             self.focus_visible_key = Some(key);
             self.focused_id = self.focused_key.as_deref().map(runtime_node_id_for_key);

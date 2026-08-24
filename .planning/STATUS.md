@@ -4,6 +4,12 @@
 
 ## Now
 
+Focus, pointer capture, press origin, gesture ownership, and scroll ownership
+now publish through one staged `mesh-core-interaction` transaction. The shell
+keeps key-based lookup caches for script/render compatibility, while ownership
+changes, eligibility reconciliation, and typed dirty-node output share one
+commit boundary.
+
 Keyframe playback now preserves active progress through pause/resume, including
 delay, direction, iteration boundaries, and finite completion state.
 
@@ -26,8 +32,8 @@ the canonical generated element schema landed 2026-08-23 — see
 
 ## Next
 
-Consolidate focus, pointer capture, press origin, gesture ownership, and scroll
-ownership into one transaction (`docs/BACKLOG.md`).
+Preserve the previous discrete value during visibility transitions until the
+transition completes (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

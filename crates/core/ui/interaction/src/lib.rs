@@ -7,6 +7,7 @@ use mesh_core_elements::{
 mod focus;
 mod hit_test;
 mod scroll;
+mod transaction;
 
 pub use focus::{collect_focus_traversal, find_focusable_at, next_focus_target};
 pub use hit_test::find_click_handler;
@@ -24,6 +25,10 @@ pub use scroll::{
     ScrollableHit, ScrollbarAxis, ScrollbarHit, annotate_overflow_node, annotate_overflow_tree,
     find_scrollable_at, find_scrollable_at_with_limits, find_scrollbar_at, measure_content_size,
     scroll_into_view_offsets, scroll_limits,
+};
+pub use transaction::{
+    GestureKind, InteractionDelta, InteractionInvalidation, InteractionState,
+    InteractionTransaction, OwnershipDecision, PressOrigin, ScrollOwner,
 };
 
 pub type ContentBounds = (f32, f32, f32, f32);

@@ -8,8 +8,17 @@ impl FrontendSurfaceComponent {
         next_key: Option<String>,
         focus_visible: bool,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let next_key = next_key
+            .filter(|key| node_can_receive_interaction(tree, key, InteractionTarget::Focus));
         let previous_key = self.focused_key.clone();
         let mut requests = Vec::new();
+
+        let next_id = next_key
+            .as_deref()
+            .and_then(|key| find_node_by_key(tree, key).map(|node| node.id));
+        let mut transaction = self.interaction_state.begin();
+        transaction.focus(next_id, focus_visible);
+        self.commit_interaction_delta(transaction);
 
         if previous_key != next_key {
             self.keyboard_button_press_activations.clear();
@@ -180,6 +189,10 @@ impl FrontendSurfaceComponent {
         };
         if let Some(key) = new_key {
             self.input_preedits.clear();
+            let node_id = Some(runtime_node_id_for_key(&key));
+            let mut transaction = self.interaction_state.begin();
+            transaction.focus(node_id, true);
+            self.commit_interaction_delta(transaction);
             self.focused_key = Some(key.clone());
             self.focus_visible_key = Some(key);
             self.focused_id = self.focused_key.as_deref().map(runtime_node_id_for_key);
@@ -195,6 +208,9 @@ impl FrontendSurfaceComponent {
     /// source side.
     pub(in crate::shell::component) fn clear_focus_for_transfer(&mut self) {
         self.input_preedits.clear();
+        let mut transaction = self.interaction_state.begin();
+        transaction.focus(None, false);
+        self.commit_interaction_delta(transaction);
         self.focused_key = None;
         self.focus_visible_key = None;
         self.focused_id = None;
@@ -243,6 +259,10 @@ impl FrontendSurfaceComponent {
         }
         if let Some(first) = next_focus_target(tree, None, false) {
             self.input_preedits.clear();
+            let node_id = find_node_by_key(tree, &first).map(|node| node.id);
+            let mut transaction = self.interaction_state.begin();
+            transaction.focus(node_id, true);
+            self.commit_interaction_delta(transaction);
             self.focused_key = Some(first.clone());
             self.focus_visible_key = Some(first);
             self.focused_id = self.focused_key.as_deref().map(runtime_node_id_for_key);
@@ -256,6 +276,9 @@ impl FrontendSurfaceComponent {
             Some(focused_key)
         } else {
             self.input_preedits.clear();
+            let mut transaction = self.interaction_state.begin();
+            transaction.focus(None, false);
+            self.commit_interaction_delta(transaction);
             self.focused_key = None;
             self.focus_visible_key = None;
             self.focused_id = None;
