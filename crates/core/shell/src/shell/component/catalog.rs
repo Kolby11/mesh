@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
@@ -394,56 +394,157 @@ fn catalog_changes(
         }
     }
 
-    // Walk the reverse composition graph. A module is affected when it imports
-    // an affected component, or when one of the extension points it hosts
-    // changed.
-    let mut affected = changed.clone();
-    // Recompiling a contribution changes the host's rendered tree even when
-    // the resolved contribution metadata is unchanged. Include every host
-    // that currently consumes a changed module's contribution roots.
-    for catalog in [previous, next] {
-        for (key, contributions) in &catalog.extension_point_contributions {
-            if contributions
-                .iter()
-                .any(|contribution| changed.contains(&contribution.source_module_id))
-                && let Some((host_module_id, _)) = key.split_once('\u{1}')
-            {
-                affected.insert(host_module_id.to_string());
-            }
-        }
-    }
-    loop {
-        let mut discovered = Vec::new();
-        for catalog in [previous, next] {
-            for (module_id, entry) in &catalog.modules {
-                if affected.contains(module_id) {
-                    continue;
-                }
-                let imports_affected = entry
-                    .compiled
-                    .module_component_imports
-                    .values()
-                    .any(|dependency| affected.contains(dependency));
-                let hosted_point_affected = entry
-                    .compiled
-                    .manifest
-                    .hosted_extension_points
-                    .keys()
-                    .any(|point| {
-                        changed_extension_points.contains(&extension_point_key(module_id, point))
-                    });
-                if imports_affected || hosted_point_affected {
-                    discovered.push(module_id.clone());
-                }
-            }
-        }
-        if discovered.is_empty() {
-            break;
-        }
-        affected.extend(discovered);
-    }
+    // Use one graph spanning both catalog generations. Keeping removed edges
+    // in the union is intentional: a root that was present in either
+    // generation must be invalidated when a dependency or contribution is
+    // removed, otherwise an instance can retain the old tree.
+    let graph = FrontendDependencyGraph::from_catalogs(previous, next);
+    let affected = graph.affected_modules(&changed, &changed_extension_points);
 
     (changed, affected)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum FrontendRoot {
+    Primary {
+        module_id: String,
+    },
+    Contribution {
+        source_module_id: String,
+        contribution_id: String,
+    },
+}
+
+/// Reverse ownership and import edges for every compiled frontend root.
+///
+/// Primary roots and extension-point contributions share this graph so a
+/// dependency used only by a contribution can invalidate the host surface that
+/// renders it. The graph deliberately records root consumers separately from
+/// importers: a contribution is owned by its source module but consumed by one
+/// or more host modules.
+#[derive(Debug, Clone, Default)]
+struct FrontendDependencyGraph {
+    reverse_dependencies: HashMap<String, HashSet<FrontendRoot>>,
+    owned_roots: HashMap<String, HashSet<FrontendRoot>>,
+    root_consumers: HashMap<FrontendRoot, HashSet<String>>,
+}
+
+impl FrontendDependencyGraph {
+    fn from_catalogs(previous: &FrontendCatalog, next: &FrontendCatalog) -> Self {
+        let mut graph = Self::default();
+        graph.extend_catalog(previous);
+        graph.extend_catalog(next);
+        graph
+    }
+
+    fn extend_catalog(&mut self, catalog: &FrontendCatalog) {
+        for (module_id, entry) in &catalog.modules {
+            self.register_root(
+                module_id,
+                FrontendRoot::Primary {
+                    module_id: module_id.clone(),
+                },
+                &entry.compiled,
+            );
+        }
+
+        for (entry_key, compiled) in &catalog.extension_point_entries {
+            let Some((source_module_id, contribution_id)) = entry_key.split_once('\u{1}') else {
+                continue;
+            };
+            self.register_root(
+                source_module_id,
+                FrontendRoot::Contribution {
+                    source_module_id: source_module_id.to_string(),
+                    contribution_id: contribution_id.to_string(),
+                },
+                compiled,
+            );
+        }
+
+        for (point_key, contributions) in &catalog.extension_point_contributions {
+            let Some((host_module_id, _)) = point_key.split_once('\u{1}') else {
+                continue;
+            };
+            for contribution in contributions {
+                let root = FrontendRoot::Contribution {
+                    source_module_id: contribution.source_module_id.clone(),
+                    contribution_id: contribution.contribution_id.clone(),
+                };
+                if self.root_consumers.contains_key(&root) {
+                    self.root_consumers
+                        .entry(root)
+                        .or_default()
+                        .insert(host_module_id.to_string());
+                }
+            }
+        }
+    }
+
+    fn register_root(
+        &mut self,
+        owner_module_id: &str,
+        root: FrontendRoot,
+        compiled: &SharedCompiledFrontendModule,
+    ) {
+        self.owned_roots
+            .entry(owner_module_id.to_string())
+            .or_default()
+            .insert(root.clone());
+        self.root_consumers
+            .entry(root.clone())
+            .or_default()
+            .insert(owner_module_id.to_string());
+        for dependency in compiled.module_component_imports.values() {
+            self.reverse_dependencies
+                .entry(dependency.clone())
+                .or_default()
+                .insert(root.clone());
+        }
+    }
+
+    fn affected_modules(
+        &self,
+        changed_modules: &HashSet<String>,
+        changed_extension_points: &HashSet<String>,
+    ) -> HashSet<String> {
+        let mut affected = changed_modules.clone();
+        let mut pending = VecDeque::from_iter(changed_modules.iter().cloned());
+
+        for point_key in changed_extension_points {
+            if let Some((host_module_id, _)) = point_key.split_once('\u{1}')
+                && affected.insert(host_module_id.to_string())
+            {
+                pending.push_back(host_module_id.to_string());
+            }
+        }
+
+        let mut visited_roots = HashSet::new();
+        while let Some(module_id) = pending.pop_front() {
+            let mut roots = HashSet::new();
+            if let Some(owned) = self.owned_roots.get(&module_id) {
+                roots.extend(owned.iter().cloned());
+            }
+            if let Some(importers) = self.reverse_dependencies.get(&module_id) {
+                roots.extend(importers.iter().cloned());
+            }
+
+            for root in roots {
+                if !visited_roots.insert(root.clone()) {
+                    continue;
+                }
+                if let Some(consumers) = self.root_consumers.get(&root) {
+                    for consumer in consumers {
+                        if affected.insert(consumer.clone()) {
+                            pending.push_back(consumer.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        affected
+    }
 }
 
 impl FrontendCatalog {

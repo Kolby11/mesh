@@ -1717,6 +1717,100 @@ fn source_reload_recompiles_primary_and_contribution_roots_atomically() {
 }
 
 #[test]
+fn contribution_only_import_dependency_invalidates_its_host() {
+    use crate::shell::component::catalog::{
+        FrontendCatalog, FrontendCatalogEntry, FrontendCatalogHandle,
+        ResolvedExtensionPointContribution, contribution_entry_key, extension_point_key,
+    };
+    use mesh_core_component::parse_component;
+    use mesh_core_frontend::CompiledFrontendModule;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    fn compiled(
+        module_id: &str,
+        module_component_imports: HashMap<String, String>,
+    ) -> crate::shell::component::catalog::SharedCompiledFrontendModule {
+        CompiledFrontendModule {
+            manifest: minimal_test_manifest(module_id),
+            source_path: format!("{module_id}/src/main.mesh").into(),
+            component: parse_component("<template><text /></template>").unwrap(),
+            local_components: HashMap::new(),
+            module_component_imports,
+            watched_paths: Vec::new(),
+        }
+        .into()
+    }
+
+    let host_id = "@test/host";
+    let contribution_module_id = "@test/contributor";
+    let dependency_id = "@test/contribution-only-dependency";
+    let unrelated_id = "@test/unrelated";
+    let contribution_id = "contribution";
+
+    let catalog = FrontendCatalog {
+        modules: HashMap::from([
+            (
+                host_id.into(),
+                FrontendCatalogEntry {
+                    module_dir: PathBuf::from("host"),
+                    compiled: compiled(host_id, HashMap::new()),
+                },
+            ),
+            (
+                contribution_module_id.into(),
+                FrontendCatalogEntry {
+                    module_dir: PathBuf::from("contributor"),
+                    compiled: compiled(contribution_module_id, HashMap::new()),
+                },
+            ),
+            (
+                dependency_id.into(),
+                FrontendCatalogEntry {
+                    module_dir: PathBuf::from("dependency"),
+                    compiled: compiled(dependency_id, HashMap::new()),
+                },
+            ),
+            (
+                unrelated_id.into(),
+                FrontendCatalogEntry {
+                    module_dir: PathBuf::from("unrelated"),
+                    compiled: compiled(unrelated_id, HashMap::new()),
+                },
+            ),
+        ]),
+        diagnostics: Default::default(),
+        extension_point_contributions: HashMap::from([(
+            extension_point_key(host_id, "test.slot"),
+            vec![ResolvedExtensionPointContribution {
+                source_module_id: contribution_module_id.into(),
+                contribution_id: contribution_id.into(),
+                order: 0,
+                props_fingerprint: 0,
+                props: Default::default(),
+            }],
+        )]),
+        extension_point_entries: HashMap::from([(
+            contribution_entry_key(contribution_module_id, contribution_id),
+            compiled(
+                contribution_module_id,
+                HashMap::from([("Imported".into(), dependency_id.into())]),
+            ),
+        )]),
+        node_slot_placements: Default::default(),
+    };
+
+    let handle = FrontendCatalogHandle::from(catalog.clone());
+    handle.replace(catalog, Some(dependency_id));
+    let state = handle.snapshot();
+
+    assert!(state.affected_modules.contains(host_id));
+    assert!(state.affected_modules.contains(contribution_module_id));
+    assert!(state.affected_modules.contains(dependency_id));
+    assert!(!state.affected_modules.contains(unrelated_id));
+}
+
+#[test]
 fn source_reload_rebuilds_imported_component_style_cache() {
     use crate::shell::component::catalog::FrontendCatalog;
     use mesh_core_frontend::compile_frontend_module;

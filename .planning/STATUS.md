@@ -73,10 +73,14 @@ contribution roots into one candidate catalog generation. The candidate is
 published atomically, contribution paths remain watched, and a failed root
 compilation leaves the last-known-good catalog in place.
 
+Primary and contribution roots now share one reverse dependency graph for
+catalog invalidation, so a dependency used only by a contribution reaches the
+host surface that renders it.
+
 ## Next
 
-Build one reverse dependency graph over primary and contribution roots for
-invalidation (`docs/BACKLOG.md`).
+Scope local component aliases by owner and canonical source, rejecting
+collisions (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 
