@@ -8,8 +8,6 @@
 use super::ParseError;
 use crate::SourceSpan;
 
-const PARSER_STACK_BYTES: usize = 16 * 1024 * 1024;
-
 #[derive(Debug, Clone)]
 pub(super) struct BraceToken {
     pub(super) span: SourceSpan,
@@ -456,26 +454,13 @@ fn validate_expression(source: &str, span: SourceSpan, context: &str) -> Result<
         return Err(error_at(source, span.start, format!("{context} is empty")));
     }
     let expression = source[span.start..span.end].to_string();
-    let candidate = format!("return ({expression})");
-    let parsed = std::thread::Builder::new()
-        .stack_size(PARSER_STACK_BYTES)
-        .spawn(move || full_moon::parse(&candidate).is_ok())
-        .map_err(|err| {
-            error_at(
-                source,
-                span.start,
-                format!("could not start expression parser: {err}"),
-            )
-        })?
-        .join()
-        .map_err(|_| error_at(source, span.start, "expression parser panicked"))?;
-    if !parsed {
-        return Err(error_at(
+    crate::compile_expression(&expression).map_err(|error| {
+        error_at(
             source,
             span.start,
-            format!("malformed Luau {context}"),
-        ));
-    }
+            format!("malformed Luau {context}: {error}"),
+        )
+    })?;
     Ok(())
 }
 

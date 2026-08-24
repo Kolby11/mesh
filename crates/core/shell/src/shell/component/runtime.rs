@@ -600,7 +600,7 @@ impl FrontendSurfaceComponent {
                 })
                 .collect::<Vec<_>>();
             script_ctx
-                .compile_and_execute_component(
+                .compile_and_execute_component_with_compiled(
                     component
                         .script
                         .as_ref()

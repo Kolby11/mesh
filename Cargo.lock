@@ -1707,6 +1707,7 @@ version = "0.1.0"
 dependencies = [
  "full_moon",
  "lightningcss",
+ "mesh-core-expression",
  "mesh-core-theme",
  "quick-xml",
  "serde",
@@ -1761,11 +1762,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "mesh-core-expression"
+version = "0.1.0"
+dependencies = [
+ "full_moon",
+ "mlua",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "mesh-core-frontend"
 version = "0.1.0"
 dependencies = [
  "mesh-core-component",
  "mesh-core-elements",
+ "mesh-core-expression",
  "mesh-core-module",
  "mesh-core-theme",
  "serde_json",
@@ -1922,6 +1934,7 @@ dependencies = [
  "mesh-core-component",
  "mesh-core-config",
  "mesh-core-elements",
+ "mesh-core-expression",
  "mesh-core-locale",
  "mesh-core-service",
  "mesh-core-theme",
@@ -1957,6 +1970,7 @@ dependencies = [
  "mesh-core-debug",
  "mesh-core-diagnostics",
  "mesh-core-elements",
+ "mesh-core-expression",
  "mesh-core-frontend",
  "mesh-core-frontend-host",
  "mesh-core-icon",

@@ -1,5 +1,6 @@
 mod accessibility;
 mod compile;
+#[cfg(test)]
 mod expr;
 mod render;
 mod style;
@@ -92,7 +93,7 @@ pub trait FrontendCompositionResolver {
     fn evaluate_template_expression(
         &self,
         instance_key: &str,
-        expression: &str,
+        expression: &mesh_core_expression::CompiledExpression,
         locals: &serde_json::Map<String, serde_json::Value>,
     ) -> Option<TemplateExpressionResult>;
 
@@ -129,74 +130,10 @@ pub struct TemplateExpressionResult {
     pub service_reads: Vec<(String, String)>,
 }
 
-pub fn collect_template_expressions(component: &ComponentFile) -> Vec<String> {
-    fn insert(expression: &str, seen: &mut HashSet<String>, out: &mut Vec<String>) {
-        if seen.insert(expression.to_owned()) {
-            out.push(expression.to_owned());
-        }
-    }
-    fn attributes(
-        attributes: &[mesh_core_component::template::Attribute],
-        seen: &mut HashSet<String>,
-        out: &mut Vec<String>,
-    ) {
-        use mesh_core_component::template::AttributeValue;
-        for attribute in attributes {
-            match &attribute.value {
-                AttributeValue::Binding(expression) | AttributeValue::TwoWayBinding(expression) => {
-                    insert(expression, seen, out)
-                }
-                AttributeValue::EventHandlerCall { args, .. } => {
-                    for expression in args {
-                        insert(expression, seen, out);
-                    }
-                }
-                AttributeValue::Static(_)
-                | AttributeValue::InstanceBinding(_)
-                | AttributeValue::EventHandler(_) => {}
-            }
-        }
-    }
-    fn nodes(
-        template_nodes: &[mesh_core_component::template::TemplateNode],
-        seen: &mut HashSet<String>,
-        out: &mut Vec<String>,
-    ) {
-        use mesh_core_component::template::TemplateNode;
-        for node in template_nodes {
-            match node {
-                TemplateNode::Element(node) => {
-                    attributes(&node.attributes, seen, out);
-                    nodes(&node.children, seen, out);
-                }
-                TemplateNode::Component(node) => {
-                    attributes(&node.props, seen, out);
-                    nodes(&node.children, seen, out);
-                }
-                TemplateNode::Expr(node) => insert(&node.expression, seen, out),
-                TemplateNode::If(node) => {
-                    insert(&node.condition, seen, out);
-                    nodes(&node.then_children, seen, out);
-                    nodes(&node.else_children, seen, out);
-                }
-                TemplateNode::For(node) => {
-                    insert(&node.iterable, seen, out);
-                    if let Some(key) = &node.key {
-                        insert(key, seen, out);
-                    }
-                    nodes(&node.children, seen, out);
-                }
-                TemplateNode::Text(_) | TemplateNode::Slot(_) => {}
-            }
-        }
-    }
-
-    let mut seen = HashSet::new();
-    let mut expressions = Vec::new();
-    if let Some(template) = &component.template {
-        nodes(&template.root, &mut seen, &mut expressions);
-    }
-    expressions
+pub fn collect_template_expressions(
+    component: &ComponentFile,
+) -> Vec<mesh_core_expression::SharedCompiledExpression> {
+    component.template_expressions.clone()
 }
 
 #[derive(Debug, Clone)]
@@ -959,7 +896,11 @@ mod tests {
             serde_json::json!(12.0).to_string()
         );
         assert_eq!(expr::eval_expr("count > limit", &store), "true");
-        assert_eq!(expr::eval_expr("count == '12'", &store), "true");
+        assert_eq!(
+            expr::eval_expr("count == '12'", &store),
+            "false",
+            "preview follows Luau's typed equality rather than coercing numbers to strings"
+        );
         assert_eq!(expr::eval_expr("enabled and count > limit", &store), "true");
         assert_eq!(expr::eval_expr("not empty", &store), "false");
     }

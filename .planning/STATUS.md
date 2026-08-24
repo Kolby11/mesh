@@ -75,8 +75,8 @@ compilation leaves the last-known-good catalog in place.
 
 ## Next
 
-Compile expressions once into shared semantics so preview, live, translation, and
-composition paths behave identically (`docs/BACKLOG.md`).
+Split the frontend host into a renderer-neutral ABI and shell adapters with typed
+capability-scoped effects (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

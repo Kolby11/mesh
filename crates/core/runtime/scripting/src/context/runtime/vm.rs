@@ -22,9 +22,9 @@ pub(super) struct TemplateExpressionCache {
     pub(super) hits: u64,
 }
 
-pub(super) fn component_source_with_template_expressions(
+pub(super) fn component_source_with_compiled_template_expressions(
     source: &str,
-    expressions: &[String],
+    expressions: &[mesh_core_expression::SharedCompiledExpression],
 ) -> String {
     let mut combined = String::with_capacity(source.len() + expressions.len() * 192);
     combined.push_str(source);
@@ -32,7 +32,8 @@ pub(super) fn component_source_with_template_expressions(
         "\nlocal __mesh_component_env = getfenv(1)\nlocal __mesh_setfenv = setfenv\nlocal __mesh_setmetatable = setmetatable\n__mesh_template_expressions = {}\n__mesh_template_expression_member_reads = {}\n",
     );
     for expression in expressions {
-        let key = serde_json::to_string(expression).expect("template expression string");
+        let source = expression.source();
+        let key = serde_json::to_string(source).expect("template expression string");
         combined.push_str("__mesh_template_expressions[");
         combined.push_str(&key);
         combined.push_str("] = (function()\n");
@@ -50,7 +51,7 @@ pub(super) fn component_source_with_template_expressions(
         combined.push_str("  end })\n");
         combined.push_str("  __mesh_setfenv(1, __mesh_expression_env)\n");
         combined.push_str("  return (");
-        combined.push_str(expression);
+        combined.push_str(source);
         combined.push_str(")\n  end\nend)()\n");
     }
     combined

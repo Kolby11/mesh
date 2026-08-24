@@ -249,6 +249,8 @@ fn parse_component_impl(
         })
         .transpose()?;
 
+    let template_expressions = compile_template_expressions(template.as_ref())?;
+
     let component = ComponentFile {
         blocks,
         imports,
@@ -256,11 +258,133 @@ fn parse_component_impl(
         template,
         script,
         style,
+        template_expressions,
     };
     if validate_semantics {
         semantic::validate(source, &component)?;
     }
     Ok(component)
+}
+
+fn compile_template_expressions(
+    template: Option<&crate::TemplateBlock>,
+) -> Result<Vec<crate::SharedCompiledExpression>, ParseError> {
+    use crate::template::{AttributeValue, TemplateNode};
+
+    fn compile(
+        source: &str,
+        span: SourceSpan,
+        seen: &mut HashSet<String>,
+        expressions: &mut Vec<crate::SharedCompiledExpression>,
+    ) -> Result<(), ParseError> {
+        let normalized = source.trim();
+        if !seen.insert(normalized.to_owned()) {
+            return Ok(());
+        }
+        let expression =
+            crate::compile_expression(source).map_err(|error| ParseError::InvalidTemplate {
+                message: format!("invalid Luau expression: {error}"),
+                span,
+            })?;
+        expressions.push(expression);
+        Ok(())
+    }
+
+    fn attributes(
+        attributes: &[crate::template::Attribute],
+        seen: &mut HashSet<String>,
+        expressions: &mut Vec<crate::SharedCompiledExpression>,
+    ) -> Result<(), ParseError> {
+        for attribute in attributes {
+            match &attribute.value {
+                AttributeValue::Binding(expression) | AttributeValue::TwoWayBinding(expression) => {
+                    compile(
+                        expression,
+                        attribute.span.unwrap_or_default(),
+                        seen,
+                        expressions,
+                    )?;
+                }
+                AttributeValue::EventHandlerCall { args, .. } => {
+                    for expression in args {
+                        compile(
+                            expression,
+                            attribute.span.unwrap_or_default(),
+                            seen,
+                            expressions,
+                        )?;
+                    }
+                }
+                AttributeValue::Static(_)
+                | AttributeValue::InstanceBinding(_)
+                | AttributeValue::EventHandler(_) => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn nodes(
+        template_nodes: &[TemplateNode],
+        seen: &mut HashSet<String>,
+        expressions: &mut Vec<crate::SharedCompiledExpression>,
+    ) -> Result<(), ParseError> {
+        for node in template_nodes {
+            match node {
+                TemplateNode::Element(element) => {
+                    attributes(&element.attributes, seen, expressions)?;
+                    nodes(&element.children, seen, expressions)?;
+                }
+                TemplateNode::Component(component) => {
+                    attributes(&component.props, seen, expressions)?;
+                    nodes(&component.children, seen, expressions)?;
+                }
+                TemplateNode::Expr(expression) => {
+                    compile(
+                        &expression.expression,
+                        expression.expression_span,
+                        seen,
+                        expressions,
+                    )?;
+                }
+                TemplateNode::If(condition) => {
+                    compile(
+                        &condition.condition,
+                        condition.condition_span,
+                        seen,
+                        expressions,
+                    )?;
+                    nodes(&condition.then_children, seen, expressions)?;
+                    nodes(&condition.else_children, seen, expressions)?;
+                }
+                TemplateNode::For(for_node) => {
+                    compile(
+                        &for_node.iterable,
+                        for_node.iterable_span,
+                        seen,
+                        expressions,
+                    )?;
+                    if let Some(key) = &for_node.key {
+                        compile(
+                            key,
+                            for_node.key_span.unwrap_or_default(),
+                            seen,
+                            expressions,
+                        )?;
+                    }
+                    nodes(&for_node.children, seen, expressions)?;
+                }
+                TemplateNode::Text(_) | TemplateNode::Slot(_) => {}
+            }
+        }
+        Ok(())
+    }
+
+    let mut seen = HashSet::new();
+    let mut expressions = Vec::new();
+    if let Some(template) = template {
+        nodes(&template.root, &mut seen, &mut expressions)?;
+    }
+    Ok(expressions)
 }
 
 /// Parse a standalone Luau script block for editor tooling.
@@ -1118,6 +1242,26 @@ button {
             }
             _ => panic!("expected element"),
         }
+    }
+
+    #[test]
+    fn template_expressions_are_deduplicated_compiled_artifacts() {
+        let file = parse_component(
+            r#"
+<template>
+  <text>{count > 0}</text>
+  <text>{ count > 0 }</text>
+</template>
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(file.template_expressions.len(), 1);
+        let cached = crate::compile_expression("count > 0").unwrap();
+        assert!(std::sync::Arc::ptr_eq(
+            &file.template_expressions[0],
+            &cached
+        ));
     }
 
     #[test]

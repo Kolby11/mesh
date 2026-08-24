@@ -1,7 +1,9 @@
 use super::super::*;
 use mesh_core_capability::CapabilitySet;
 use mesh_core_elements::VariableStore;
+use mesh_core_expression::{compile_expression, evaluate_preview};
 use serde_json::Value;
+use std::collections::HashMap;
 
 #[test]
 fn if_then_end_executes_conditionally() {
@@ -67,6 +69,67 @@ fn template_expressions_use_component_lexical_scope_and_full_luau() {
             .0,
         serde_json::json!(42)
     );
+}
+
+#[test]
+fn compiled_template_semantics_match_preview_and_live_runtime() {
+    let expression = compile_expression("enabled and count or fallback").unwrap();
+    let variables = serde_json::Map::from_iter([
+        ("enabled".into(), Value::Bool(true)),
+        ("count".into(), serde_json::json!(7)),
+        ("fallback".into(), serde_json::json!(9)),
+    ]);
+    let preview =
+        evaluate_preview(&expression, &variables, &serde_json::Map::new(), |_| None).unwrap();
+
+    let mut ctx =
+        ScriptContext::new("@test/compiled-template-semantics", CapabilitySet::new()).unwrap();
+    ctx.compile_and_execute_component_with_compiled(
+        "enabled = true\ncount = 7\nfallback = 9",
+        &[],
+        &[expression.clone()],
+    )
+    .unwrap();
+    let live = ctx
+        .evaluate_compiled_template_expression(&expression, &serde_json::Map::new())
+        .unwrap()
+        .0;
+
+    assert_eq!(preview, Value::from(7));
+    assert_eq!(live, preview);
+}
+
+#[test]
+fn compiled_translation_semantics_match_preview_and_live_runtime() {
+    let expression = compile_expression("t('nav.open')").unwrap();
+    let preview = evaluate_preview(
+        &expression,
+        &serde_json::Map::new(),
+        &serde_json::Map::new(),
+        |key| (key == "nav.open").then(|| "Open".to_string()),
+    )
+    .unwrap();
+
+    let mut capabilities = CapabilitySet::new();
+    capabilities.grant(mesh_core_capability::Capability::new("locale.read"));
+    let mut ctx = ScriptContext::new("@test/compiled-translation-semantics", capabilities).unwrap();
+    ctx.set_i18n_translations(HashMap::from([(
+        "nav.open".to_string(),
+        "Open".to_string(),
+    )]));
+    ctx.compile_and_execute_component_with_compiled(
+        "local t = import(\"mesh.i18n\", \"t\")",
+        &[],
+        &[expression.clone()],
+    )
+    .unwrap();
+    let live = ctx
+        .evaluate_compiled_template_expression(&expression, &serde_json::Map::new())
+        .unwrap()
+        .0;
+
+    assert_eq!(preview, Value::String("Open".into()));
+    assert_eq!(live, preview);
 }
 
 #[test]

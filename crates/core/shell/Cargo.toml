@@ -21,6 +21,7 @@ mesh-core-wayland = { workspace = true }
 mesh-core-service = { workspace = true }
 mesh-core-frontend-host = { workspace = true }
 mesh-core-frontend = { workspace = true }
+mesh-core-expression = { workspace = true }
 mesh-core-surface-config = { workspace = true }
 mesh-core-render = { workspace = true }
 mesh-core-presentation = { workspace = true }

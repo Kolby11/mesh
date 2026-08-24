@@ -33,6 +33,11 @@ use lightningcss::{
     },
 };
 
+pub use mesh_core_expression::{
+    CompiledExpression, ExpressionCompileError, ExpressionEvaluationError,
+    SharedCompiledExpression, compile_expression,
+};
+
 /// A parsed authoring-time import from a `.mesh` script block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComponentImport {
@@ -74,6 +79,9 @@ pub struct ComponentFile {
     pub template: Option<TemplateBlock>,
     pub script: Option<ScriptBlock>,
     pub style: Option<StyleBlock>,
+    /// Every template expression, deduplicated and compiled once while the
+    /// component is parsed. Renderers and the Luau runtime share these values.
+    pub template_expressions: Vec<SharedCompiledExpression>,
 }
 
 /// A half-open byte range into the original `.mesh` source.

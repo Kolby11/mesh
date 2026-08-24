@@ -564,7 +564,24 @@ impl ScriptContext {
         imports: &[ScriptInterfaceImport],
         template_expressions: &[String],
     ) -> Result<(), ScriptError> {
-        let source = component_source_with_template_expressions(source, template_expressions);
+        let compiled = template_expressions
+            .iter()
+            .map(|expression| {
+                mesh_core_expression::compile_expression(expression)
+                    .map_err(|error| ScriptError::LuaError(error.to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.compile_and_execute_component_with_compiled(source, imports, &compiled)
+    }
+
+    pub fn compile_and_execute_component_with_compiled(
+        &mut self,
+        source: &str,
+        imports: &[ScriptInterfaceImport],
+        template_expressions: &[mesh_core_expression::SharedCompiledExpression],
+    ) -> Result<(), ScriptError> {
+        let source =
+            component_source_with_compiled_template_expressions(source, template_expressions);
         self.load_script_with_interface_imports(&source, imports)
     }
 }

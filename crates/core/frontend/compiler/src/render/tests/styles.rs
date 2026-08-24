@@ -29,7 +29,7 @@ fn component_handler_calls_preserve_authored_prop_identity() {
         fn evaluate_template_expression(
             &self,
             _instance_key: &str,
-            _expression: &str,
+            _expression: &mesh_core_expression::CompiledExpression,
             _locals: &serde_json::Map<String, serde_json::Value>,
         ) -> Option<TemplateExpressionResult> {
             None

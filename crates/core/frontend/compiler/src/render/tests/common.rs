@@ -25,19 +25,11 @@ impl FrontendCompositionResolver for IdentityTranslationComposition {
     fn evaluate_template_expression(
         &self,
         _instance_key: &str,
-        expression: &str,
+        expression: &mesh_core_expression::CompiledExpression,
         _locals: &serde_json::Map<String, serde_json::Value>,
     ) -> Option<TemplateExpressionResult> {
-        Some(TemplateExpressionResult {
-            value: serde_json::Value::String(
-                expression
-                    .strip_prefix("t('")
-                    .and_then(|value| value.strip_suffix("')"))
-                    .unwrap_or(expression)
-                    .to_string(),
-            ),
-            service_reads: Vec::new(),
-        })
+        let _ = expression;
+        None
     }
 
     fn render_import(
@@ -78,10 +70,10 @@ impl FrontendCompositionResolver for TypedExpressionComposition {
     fn evaluate_template_expression(
         &self,
         _instance_key: &str,
-        expression: &str,
+        expression: &mesh_core_expression::CompiledExpression,
         _locals: &serde_json::Map<String, serde_json::Value>,
     ) -> Option<TemplateExpressionResult> {
-        let value = match expression {
+        let value = match expression.source() {
             "enabled" => serde_json::json!(true),
             "minimum" => serde_json::json!(1.5),
             "metadata" => serde_json::json!({"source": "runtime"}),

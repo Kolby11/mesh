@@ -73,21 +73,26 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
     fn evaluate_template_expression(
         &self,
         instance_key: &str,
-        expression: &str,
+        expression: &mesh_core_expression::CompiledExpression,
         locals: &serde_json::Map<String, serde_json::Value>,
     ) -> Option<mesh_core_frontend::TemplateExpressionResult> {
         let runtimes = self.runtimes.lock().ok()?;
         let runtime = runtimes.get(instance_key)?;
         match runtime
             .script_ctx
-            .evaluate_template_expression(expression, locals)
+            .evaluate_compiled_template_expression(expression, locals)
         {
             Ok((value, service_reads)) => Some(mesh_core_frontend::TemplateExpressionResult {
                 value,
                 service_reads,
             }),
             Err(error) => {
-                tracing::warn!(instance_key, expression, %error, "template expression failed");
+                tracing::warn!(
+                    instance_key,
+                    expression = %expression.source(),
+                    %error,
+                    "template expression failed"
+                );
                 Some(mesh_core_frontend::TemplateExpressionResult {
                     value: serde_json::Value::Null,
                     service_reads: Vec::new(),

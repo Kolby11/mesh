@@ -1,6 +1,7 @@
 use super::super::ScriptError;
 use super::super::lookup::{lua_err, map_lua_error};
 use super::*;
+use mesh_core_expression::CompiledExpression;
 use mlua::{LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value;
 
@@ -10,13 +11,24 @@ impl ScriptContext {
         expression: &str,
         locals: &serde_json::Map<String, Value>,
     ) -> Result<(Value, Vec<(String, String)>), ScriptError> {
+        let expression = mesh_core_expression::compile_expression(expression)
+            .map_err(|error| ScriptError::LuaError(error.to_string()))?;
+        self.evaluate_compiled_template_expression(&expression, locals)
+    }
+
+    pub fn evaluate_compiled_template_expression(
+        &self,
+        expression: &CompiledExpression,
+        locals: &serde_json::Map<String, Value>,
+    ) -> Result<(Value, Vec<(String, String)>), ScriptError> {
+        let expression_source = expression.source();
         let empty_locals = locals.is_empty();
         if empty_locals && !self.changed_public_members.is_empty() {
             let mut cache = self.template_expression_cache.lock().unwrap();
             let cached = cache
                 .member_reads
-                .get(expression)
-                .zip(cache.values.get(expression))
+                .get(expression_source)
+                .zip(cache.values.get(expression_source))
                 .filter(|(member_reads, _)| {
                     !member_reads.iter().any(|name| {
                         self.changed_public_members
@@ -34,7 +46,7 @@ impl ScriptContext {
             .env()
             .get("__mesh_template_expressions")
             .map_err(map_lua_error)?;
-        let closure: mlua::Function = closures.get(expression).map_err(map_lua_error)?;
+        let closure: mlua::Function = closures.get(expression_source).map_err(map_lua_error)?;
         let locals = self.lua().to_value(locals).map_err(lua_err)?;
         let previous_reads = {
             let mut tracked = self.tracked_service_fields.lock().unwrap();
@@ -69,7 +81,7 @@ impl ScriptContext {
                 .env()
                 .get::<Table>("__mesh_template_expression_member_reads")
                 .ok()
-                .and_then(|all_reads| all_reads.get::<Table>(expression).ok())
+                .and_then(|all_reads| all_reads.get::<Table>(expression_source).ok())
                 .map(|expression_reads| {
                     let mut names: Vec<_> = expression_reads
                         .pairs::<String, bool>()
@@ -91,11 +103,13 @@ impl ScriptContext {
                     .extend(member_reads.iter().cloned());
                 cache
                     .member_reads
-                    .insert(expression.to_string(), member_reads);
+                    .insert(expression_source.to_string(), member_reads);
                 if cacheable {
-                    cache.values.insert(expression.to_string(), value.clone());
+                    cache
+                        .values
+                        .insert(expression_source.to_string(), value.clone());
                 } else {
-                    cache.values.remove(expression);
+                    cache.values.remove(expression_source);
                 }
             }
         }
