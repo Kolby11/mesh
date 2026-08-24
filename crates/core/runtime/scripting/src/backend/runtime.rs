@@ -35,6 +35,8 @@ pub struct BackendScriptContext {
     storage: Arc<Mutex<ScopedStorage>>,
     streams: Arc<StreamState>,
     policy: RuntimePolicy,
+    script_loaded: bool,
+    stop_attempted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -138,6 +140,8 @@ impl BackendScriptContext {
             storage: Arc::new(Mutex::new(storage)),
             streams: StreamState::new_with_budget(policy.budget()),
             policy,
+            script_loaded: false,
+            stop_attempted: false,
         }
     }
 
@@ -190,6 +194,7 @@ impl BackendScriptContext {
             .get::<Function>("start")
             .ok()
             .and_then(|function| function.environment());
+        self.script_loaded = true;
         tracing::info!("loaded backend script for {}", self.module_id);
         Ok(())
     }
@@ -222,30 +227,37 @@ impl BackendScriptContext {
 
     /// Call the backend script's optional `stop(self)` lifecycle hook.
     pub fn call_stop(&mut self) -> Result<(), BackendScriptError> {
+        if self.stop_attempted {
+            return Ok(());
+        }
+        self.stop_attempted = true;
         let _budget = self.policy.begin_callback();
         self.kill_streams();
-        self.reset_for_call(JsonValue::Null);
-        let globals = self.script_environment();
-        let stop = match globals.get::<Function>("stop") {
-            Ok(stop) => stop,
-            Err(_) => {
-                self.flush_storage();
-                return Ok(());
-            }
+        let result = if !self.script_loaded {
+            Ok(())
+        } else {
+            (|| {
+                self.reset_for_call(JsonValue::Null);
+                let globals = self.script_environment();
+                let stop = match globals.get::<Function>("stop") {
+                    Ok(stop) => stop,
+                    Err(_) => return Ok(()),
+                };
+                let current_self =
+                    self.current_self_table()
+                        .map_err(|err| BackendScriptError::Runtime {
+                            module_id: self.module_id.clone(),
+                            message: err.to_string(),
+                        })?;
+                stop.call::<()>(current_self)
+                    .map_err(|err| BackendScriptError::Runtime {
+                        module_id: self.module_id.clone(),
+                        message: err.to_string(),
+                    })
+            })()
         };
-        let current_self =
-            self.current_self_table()
-                .map_err(|err| BackendScriptError::Runtime {
-                    module_id: self.module_id.clone(),
-                    message: err.to_string(),
-                })?;
-        stop.call::<()>(current_self)
-            .map_err(|err| BackendScriptError::Runtime {
-                module_id: self.module_id.clone(),
-                message: err.to_string(),
-            })?;
         self.flush_storage();
-        Ok(())
+        result
     }
 
     /// Shared subprocess-stream state. The backend service loop awaits on
@@ -863,6 +875,17 @@ impl BackendScriptContext {
         )?;
         current_self.set_metatable(Some(self_events_meta))?;
         Ok(current_self)
+    }
+}
+
+impl Drop for BackendScriptContext {
+    fn drop(&mut self) {
+        // A cancelled or panicking backend future cannot await the authored
+        // stop hook, but Rust-owned resources must still be reclaimed. The
+        // normal lifecycle guard calls call_stop() first; both operations are
+        // intentionally idempotent.
+        self.kill_streams();
+        self.flush_storage();
     }
 }
 

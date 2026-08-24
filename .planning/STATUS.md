@@ -111,8 +111,8 @@ source of truth.
 
 ## Next
 
-Route every backend early return, callback failure, stop, and crash through
-idempotent cleanup and one terminal lifecycle record (`docs/BACKLOG.md`).
+Make unsubscribe-safe event iteration and independent subscriber failure
+reporting explicit (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

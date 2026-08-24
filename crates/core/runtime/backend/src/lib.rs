@@ -216,15 +216,89 @@ pub async fn spawn_backend_service(
     settings: JsonValue,
     script_source: String,
     tx: mpsc::UnboundedSender<BackendServiceEvent>,
-    mut cmd_rx: mpsc::UnboundedReceiver<BackendServiceCommand>,
+    cmd_rx: mpsc::UnboundedReceiver<BackendServiceCommand>,
 ) {
     let module_id: Arc<str> = Arc::from(module_id);
     let service_name: Arc<str> = Arc::from(service_name);
+    // Declare the guard before the context so a cancellation or panic drops
+    // the context's Rust-owned resources before publishing the terminal
+    // lifecycle record.
+    let mut lifecycle = BackendLifecycleGuard::new(
+        Arc::clone(&service_name),
+        Arc::clone(&module_id),
+        tx.clone(),
+    );
     let mut ctx = BackendScriptContext::new_with_settings_and_capabilities(
         module_id.as_ref(),
         settings,
         capabilities,
     );
+    run_backend_service(&mut ctx, module_id, service_name, script_source, tx, cmd_rx).await;
+    lifecycle.finish(&mut ctx);
+}
+
+struct BackendLifecycleGuard {
+    service: Arc<str>,
+    source_module: Arc<str>,
+    tx: mpsc::UnboundedSender<BackendServiceEvent>,
+    terminal_sent: bool,
+}
+
+impl BackendLifecycleGuard {
+    fn new(
+        service: Arc<str>,
+        source_module: Arc<str>,
+        tx: mpsc::UnboundedSender<BackendServiceEvent>,
+    ) -> Self {
+        Self {
+            service,
+            source_module,
+            tx,
+            terminal_sent: false,
+        }
+    }
+
+    fn finish(&mut self, ctx: &mut BackendScriptContext) {
+        if let Err(err) = ctx.call_stop() {
+            let _ = self.tx.send(BackendServiceEvent::Failed {
+                service: Arc::clone(&self.service),
+                source_module: Arc::clone(&self.source_module),
+                stage: "stop".to_string(),
+                message: err.to_string(),
+            });
+        }
+        self.send_terminal();
+    }
+
+    fn send_terminal(&mut self) {
+        if self.terminal_sent {
+            return;
+        }
+        self.terminal_sent = true;
+        let _ = self.tx.send(BackendServiceEvent::Stopped {
+            service: Arc::clone(&self.service),
+            source_module: Arc::clone(&self.source_module),
+        });
+    }
+}
+
+impl Drop for BackendLifecycleGuard {
+    fn drop(&mut self) {
+        // The context Drop implementation handles synchronous resource
+        // cleanup when this is a panic or task cancellation path. Sending the
+        // terminal record here makes those paths lifecycle-visible too.
+        self.send_terminal();
+    }
+}
+
+async fn run_backend_service(
+    ctx: &mut BackendScriptContext,
+    module_id: Arc<str>,
+    service_name: Arc<str>,
+    script_source: String,
+    tx: mpsc::UnboundedSender<BackendServiceEvent>,
+    mut cmd_rx: mpsc::UnboundedReceiver<BackendServiceCommand>,
+) {
     if let Err(e) = ctx.load_script(&script_source) {
         tracing::error!("{} failed to load backend script: {e}", module_id.as_ref());
         let _ = tx.send(BackendServiceEvent::Failed {
@@ -251,10 +325,15 @@ pub async fn spawn_backend_service(
         }
     };
 
-    let _ = tx.send(BackendServiceEvent::Started {
-        service: service_name.clone(),
-        source_module: module_id.clone(),
-    });
+    if tx
+        .send(BackendServiceEvent::Started {
+            service: service_name.clone(),
+            source_module: module_id.clone(),
+        })
+        .is_err()
+    {
+        return;
+    }
 
     let mut interval_ms = bounded_poll_interval_ms(&ctx);
     let mut tick = make_interval(interval_ms, true);
@@ -268,7 +347,9 @@ pub async fn spawn_backend_service(
             return;
         }
     }
-    publish_script_events(&tx, &service_name, &module_id, ctx.drain_events());
+    if !publish_script_events(&tx, &service_name, &module_id, ctx.drain_events()) {
+        return;
+    }
 
     loop {
         tokio::select! {
@@ -387,7 +468,9 @@ pub async fn spawn_backend_service(
                 ) {
                     break;
                 }
-                publish_script_events(&tx, &service_name, &module_id, ctx.drain_events());
+                if !publish_script_events(&tx, &service_name, &module_id, ctx.drain_events()) {
+                    break;
+                }
             }
             cmd = cmd_rx.recv() => {
                 let Some(first) = cmd else { break };
@@ -491,12 +574,14 @@ pub async fn spawn_backend_service(
                                     break;
                                 }
                             }
-                            publish_script_events(
+                            if !publish_script_events(
                                 &tx,
                                 &service_name,
                                 &module_id,
                                 ctx.drain_events(),
-                            );
+                            ) {
+                                stop = true;
+                            }
                         }
                         Err(err) => {
                             let stage = match &err {
@@ -533,20 +618,6 @@ pub async fn spawn_backend_service(
             }
         }
     }
-
-    if let Err(err) = ctx.call_stop() {
-        let _ = tx.send(BackendServiceEvent::Failed {
-            service: service_name.clone(),
-            source_module: module_id.clone(),
-            stage: "stop".to_string(),
-            message: err.to_string(),
-        });
-    }
-
-    let _ = tx.send(BackendServiceEvent::Stopped {
-        service: service_name,
-        source_module: module_id,
-    });
 }
 
 fn publish_script_events(
@@ -1360,20 +1431,156 @@ mod tests {
             .expect("event channel should stay open");
         assert!(matches!(event, BackendServiceEvent::InitFailed { .. }));
 
-        match tokio::time::timeout(Duration::from_millis(150), event_rx.recv()).await {
-            Err(_) | Ok(None) => {}
-            Ok(Some(event)) => {
-                assert!(
-                    !matches!(event, BackendServiceEvent::Update(_)),
-                    "init failure must not poll or dispatch commands"
-                );
+        let mut terminal_records = 0;
+        while terminal_records == 0 {
+            let event = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+                .await
+                .expect("init failure should reach terminal cleanup")
+                .expect("event channel should stay open until terminal record");
+            match event {
+                BackendServiceEvent::Stopped { .. } => terminal_records += 1,
+                BackendServiceEvent::Update(_) => {
+                    panic!("init failure must not poll or dispatch commands")
+                }
+                _ => {}
             }
         }
+        assert_eq!(
+            terminal_records, 1,
+            "init failure must emit one terminal record"
+        );
 
         tokio::time::timeout(Duration::from_secs(1), task)
             .await
             .expect("backend task should exit after init failure")
             .expect("backend task should not panic");
+    }
+
+    #[tokio::test]
+    async fn spawn_backend_service_routes_load_failure_through_terminal_cleanup() {
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (_cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/load-fails".to_string(),
+            "audio".to_string(),
+            Vec::new(),
+            serde_json::json!({}),
+            "this is not valid Luau".to_string(),
+            event_tx,
+            cmd_rx,
+        ));
+
+        let mut saw_load_failure = false;
+        let mut terminal_records = 0;
+        while terminal_records == 0 {
+            let event = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+                .await
+                .expect("load failure should reach terminal cleanup")
+                .expect("event channel should stay open until terminal record");
+            match event {
+                BackendServiceEvent::Failed { stage, .. } => {
+                    assert_eq!(stage, "load");
+                    saw_load_failure = true;
+                }
+                BackendServiceEvent::Stopped { .. } => terminal_records += 1,
+                other => panic!("unexpected load-failure event: {other:?}"),
+            }
+        }
+        assert!(saw_load_failure);
+        assert_eq!(terminal_records, 1);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after load failure")
+            .expect("backend task should not panic");
+    }
+
+    #[tokio::test]
+    async fn spawn_backend_service_flushes_and_records_stop_hook_failure_once() {
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/stop-fails".to_string(),
+            "audio".to_string(),
+            Vec::new(),
+            serde_json::json!({}),
+            "function start()\nmesh.service.set_poll_interval(1000)\nend\n\
+             function stop()\nerror(\"stop boom\")\nend"
+                .to_string(),
+            event_tx,
+            cmd_rx,
+        ));
+
+        let started = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+            .await
+            .expect("runtime should emit Started")
+            .expect("event channel should stay open");
+        assert!(matches!(started, BackendServiceEvent::Started { .. }));
+        drop(cmd_tx);
+
+        let mut stop_failures = 0;
+        let mut terminal_records = 0;
+        while terminal_records == 0 {
+            let event = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+                .await
+                .expect("stop failure should reach terminal cleanup")
+                .expect("event channel should stay open until terminal record");
+            match event {
+                BackendServiceEvent::Failed { stage, message, .. } => {
+                    assert_eq!(stage, "stop");
+                    assert!(message.contains("stop boom"));
+                    stop_failures += 1;
+                }
+                BackendServiceEvent::Stopped { .. } => terminal_records += 1,
+                other => panic!("unexpected stop-failure event: {other:?}"),
+            }
+        }
+        assert_eq!(stop_failures, 1);
+        assert_eq!(terminal_records, 1);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closure")
+            .expect("backend task should not panic");
+    }
+
+    #[tokio::test]
+    async fn cancelling_backend_service_still_emits_one_terminal_record() {
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (_cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/cancelled".to_string(),
+            "audio".to_string(),
+            Vec::new(),
+            serde_json::json!({}),
+            "function start()\nmesh.service.set_poll_interval(1000)\nend".to_string(),
+            event_tx,
+            cmd_rx,
+        ));
+
+        let started = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+            .await
+            .expect("runtime should emit Started")
+            .expect("event channel should stay open");
+        assert!(matches!(started, BackendServiceEvent::Started { .. }));
+
+        task.abort();
+        let join = tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("cancelled backend should finish dropping")
+            .expect_err("backend task should report cancellation");
+        assert!(join.is_cancelled());
+
+        let stopped = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+            .await
+            .expect("cancellation should emit terminal cleanup")
+            .expect("terminal event should be delivered");
+        assert!(matches!(stopped, BackendServiceEvent::Stopped { .. }));
+        assert!(matches!(
+            event_rx.try_recv(),
+            Err(mpsc::error::TryRecvError::Disconnected)
+        ));
     }
 
     #[tokio::test]

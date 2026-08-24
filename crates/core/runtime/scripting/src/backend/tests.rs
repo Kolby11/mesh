@@ -189,6 +189,56 @@ end
 }
 
 #[test]
+fn stop_hook_failure_still_flushes_storage_and_is_idempotent() {
+    let root = temp_storage_root("stop-hook-failure");
+    let mut ctx = BackendScriptContext::new_with_storage_root("@test/stop-hook-failure", &root);
+    ctx.load_script(
+        r#"
+function start(self)
+    self.storage.stop_count = 0
+end
+
+function stop(self)
+    self.storage.stop_count = self.storage.stop_count + 1
+    error("stop boom")
+end
+"#,
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+
+    let error = ctx.call_stop().unwrap_err();
+    assert!(error.to_string().contains("stop boom"));
+    // A second caller must not invoke authored cleanup again.
+    ctx.call_stop().unwrap();
+    drop(ctx);
+
+    let mut reader = BackendScriptContext::new_with_storage_root("@test/stop-hook-failure", &root);
+    reader
+        .load_script("function start(self)\nstate = { stop_count = self.storage.stop_count }\nend")
+        .unwrap();
+    let payload = reader.call_init().unwrap().unwrap();
+    assert_eq!(
+        payload.get("stop_count").and_then(|value| value.as_u64()),
+        Some(1)
+    );
+}
+
+#[tokio::test]
+async fn dropping_backend_context_kills_streams_started_before_load_failure() {
+    let mut ctx =
+        BackendScriptContext::new_with_capabilities("@test/load-failure", ["exec.sh".to_string()]);
+    let streams = ctx.stream_state();
+    let error = ctx
+        .load_script("mesh.exec_stream(\"sh\", { \"-c\", \"sleep 60\" })\nerror(\"load boom\")")
+        .unwrap_err();
+    assert!(error.to_string().contains("load boom"));
+    assert_eq!(streams.active_stream_count(), 1);
+    drop(ctx);
+    assert_eq!(streams.active_stream_count(), 0);
+}
+
+#[test]
 fn stop_receives_backend_self_meta() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
