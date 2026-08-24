@@ -11,7 +11,7 @@ use full_moon::{
     tokenizer::{Lexer, LexerResult, TokenReference, TokenType},
     visitors::Visitor,
 };
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use super::ParseError;
 
@@ -45,15 +45,15 @@ pub(super) fn parse_script(
     let mut imports = explicit_imports;
     let mut aliases = imports
         .iter()
-        .map(|import| import.alias.clone())
-        .collect::<HashSet<_>>();
+        .map(|import| (import.alias.clone(), import.target.clone()))
+        .collect::<HashMap<_, _>>();
     for candidate in require_imports {
-        if !aliases.insert(candidate.import.alias.clone()) {
-            return Err(ParseError::InvalidImport {
-                message: format!("duplicate import alias `{}`", candidate.import.alias),
-                span: candidate.import.span,
-            });
-        }
+        check_import_alias(
+            &mut aliases,
+            &candidate.import.alias,
+            &candidate.import.target,
+            candidate.import.span,
+        )?;
         imports.push(candidate.import);
     }
 
@@ -91,7 +91,7 @@ fn scan_explicit_imports(source: &str) -> Result<(Vec<ComponentImport>, String),
     };
 
     let mut imports = Vec::new();
-    let mut aliases = HashSet::new();
+    let mut aliases = HashMap::new();
     let mut masked_ranges = Vec::new();
 
     for window in tokens.windows(4) {
@@ -114,12 +114,7 @@ fn scan_explicit_imports(source: &str) -> Result<(Vec<ComponentImport>, String),
                 span: token_span(import),
             })?;
 
-        if !aliases.insert(alias_name.clone()) {
-            return Err(ParseError::InvalidImport {
-                message: format!("duplicate import alias `{alias_name}`"),
-                span: token_span(alias),
-            });
-        }
+        check_import_alias(&mut aliases, &alias_name, &target, token_span(alias))?;
 
         imports.push(ComponentImport {
             alias: alias_name,
@@ -150,6 +145,32 @@ fn scan_explicit_imports(source: &str) -> Result<(Vec<ComponentImport>, String),
         imports,
         String::from_utf8(masked).expect("masking source preserves UTF-8 boundaries"),
     ))
+}
+
+fn check_import_alias(
+    aliases: &mut HashMap<String, ComponentImportTarget>,
+    alias: &str,
+    target: &ComponentImportTarget,
+    span: SourceSpan,
+) -> Result<(), ParseError> {
+    if let Some(existing) = aliases.get(alias) {
+        let message = match (existing, target) {
+            (
+                ComponentImportTarget::ComponentLocal(_),
+                ComponentImportTarget::ComponentModule(_),
+            )
+            | (
+                ComponentImportTarget::ComponentModule(_),
+                ComponentImportTarget::ComponentLocal(_),
+            ) => format!(
+                "import alias `{alias}` collides between local component and module component targets; imports share one namespace"
+            ),
+            _ => format!("duplicate import alias `{alias}`"),
+        };
+        return Err(ParseError::InvalidImport { message, span });
+    }
+    aliases.insert(alias.to_owned(), target.clone());
+    Ok(())
 }
 
 fn significant_tokens(source: &str) -> Option<Vec<TokenReference>> {

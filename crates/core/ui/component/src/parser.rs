@@ -2221,6 +2221,24 @@ import Thing from "./components/two.mesh"
     }
 
     #[test]
+    fn rejects_local_and_module_import_alias_collision() {
+        let source = r#"
+<template><box /></template>
+<script lang="luau">
+import Thing from "./components/thing.mesh"
+import Thing from "@mesh/thing"
+</script>
+"#;
+        let err = parse_component(source).expect_err("cross-kind alias collision accepted");
+        assert!(
+            err.to_string()
+                .contains("collides between local component and module component targets"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(err.category(), ParseDiagnosticCategory::Import);
+    }
+
+    #[test]
     fn rejects_duplicate_alias_between_import_and_require() {
         let source = r#"
 <template><box /></template>
@@ -2234,6 +2252,24 @@ local Thing = require("./components/two.mesh")
             err.to_string().contains("duplicate import alias `Thing`"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn rejects_local_and_module_alias_collision_between_import_and_require() {
+        let source = r#"
+<template><box /></template>
+<script lang="luau">
+import Thing from "./components/thing.mesh"
+local Thing = require("@mesh/thing")
+</script>
+"#;
+        let err = parse_component(source).expect_err("cross-kind alias collision accepted");
+        assert!(
+            err.to_string()
+                .contains("collides between local component and module component targets"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(err.category(), ParseDiagnosticCategory::Import);
     }
 
     #[test]

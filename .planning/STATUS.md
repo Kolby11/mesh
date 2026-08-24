@@ -14,6 +14,11 @@ source and target identity. Compiler output no longer publishes an unscoped
 alias index; same-owner collisions are rejected using typed canonical import
 targets, while shell/catalog lookup paths use the scoped records.
 
+Component script imports now keep local-component and frontend-module aliases in
+one typed namespace while parsing. Cross-kind collisions are rejected with an
+import diagnostic before template lowering, including explicit imports mixed
+with `require()` bindings.
+
 Root and nested template expressions now share parser-derived scope validation.
 Root expressions, keyed-loop keys, runtime props, and expression-body source
 spans are checked before compilation.
@@ -94,8 +99,9 @@ source of truth.
 
 ## Next
 
-Reject local/module import alias collisions or resolve them through one typed
-import namespace (`docs/BACKLOG.md`).
+Introduce a coherent revisioned `FrontendFrame` boundary for tree, catalog,
+runtime, services, invalidation, diagnostics, and effects
+(`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 
