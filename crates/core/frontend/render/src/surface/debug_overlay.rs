@@ -95,18 +95,7 @@ impl DebugOverlayRestore {
 /// second, stale set of boxes at the collapsed in-flow position in the parent
 /// surface — on top of the correct boxes the child surface already drew.
 fn node_is_hidden_from_bounds(node: &WidgetNode) -> bool {
-    use mesh_core_elements::style::{Display, Visibility};
-    node.computed_style.display == Display::None
-        || matches!(
-            node.computed_style.visibility,
-            Visibility::Hidden | Visibility::Collapse
-        )
-        || node.attributes.get("hidden").is_some_and(|value| {
-            matches!(
-                value.as_str(),
-                "" | "true" | "1" | "hidden" | "disabled" | "checked"
-            )
-        })
+    !mesh_core_elements::node_eligibility(node).allows(mesh_core_elements::InteractionTarget::Paint)
 }
 
 // Layout bounds palette — depth 0..7

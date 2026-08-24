@@ -1,6 +1,8 @@
 /// UI event types and dispatch.
 use crate::element::element_contract_for_tag;
-use crate::style::{Display, Visibility};
+use crate::interaction_contract::{
+    InteractionTarget, NodeEligibility, node_eligibility, transformed_layout_at, transformed_offset,
+};
 use crate::tree::{ElementState, NodeId, WidgetNode};
 
 /// A UI event targeted at a specific node.
@@ -179,7 +181,7 @@ impl EventDispatcher {
 
     /// Find the deepest node at the given coordinates.
     pub fn hit_test(root: &WidgetNode, x: f32, y: f32) -> Option<NodeId> {
-        hit_test_node(root, x, y)
+        hit_test_node(root, x, y, NodeEligibility::ROOT)
     }
 
     /// Apply one raw input event through the canonical stateful route and
@@ -190,7 +192,8 @@ impl EventDispatcher {
 
         match raw {
             RawInputEvent::PointerMotion { x, y } => {
-                let new_hovered = EventDispatcher::hit_test(root, *x, *y);
+                let new_hovered = EventDispatcher::hit_test(root, *x, *y)
+                    .filter(|node_id| node_can_receive_pointer(root, *node_id));
                 self.update_hover(root, new_hovered, &mut result);
 
                 if let Some(node_id) = self
@@ -299,7 +302,9 @@ impl EventDispatcher {
             }
 
             RawInputEvent::Scroll { x, y, dx, dy } => {
-                if let Some(node_id) = EventDispatcher::hit_test(root, *x, *y) {
+                if let Some(node_id) = EventDispatcher::hit_test(root, *x, *y).filter(|node_id| {
+                    node_can_receive_target(root, *node_id, InteractionTarget::Scroll)
+                }) {
                     result.events.push(UiEvent::Scroll {
                         node_id,
                         dx: *dx,
@@ -467,26 +472,8 @@ fn is_primary_button(button: u32) -> bool {
     matches!(button, 0x110)
 }
 
-fn node_is_hidden(node: &WidgetNode) -> bool {
-    matches!(node.computed_style.display, Display::None)
-        || !matches!(node.computed_style.visibility, Visibility::Visible)
-}
-
-fn boolean_attribute(node: &WidgetNode, name: &str) -> bool {
-    node.attributes.get(name).is_some_and(|value| {
-        value.is_empty() || value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case(name)
-    })
-}
-
-fn node_is_disabled(node: &WidgetNode) -> bool {
-    node.state.disabled
-        || boolean_attribute(node, "disabled")
-        || boolean_attribute(node, "aria-disabled")
-        || boolean_attribute(node, "inert")
-}
-
 fn node_is_focusable(node: &WidgetNode) -> bool {
-    if node_is_hidden(node) || node_is_disabled(node) {
+    if !node_eligibility(node).allows(InteractionTarget::Focus) {
         return false;
     }
     if node.accessibility.focusable || node.attributes.contains_key("tabindex") {
@@ -505,21 +492,30 @@ fn node_can_receive_pointer(root: &WidgetNode, node_id: NodeId) -> bool {
 }
 
 fn node_is_pointer_target(root: &WidgetNode, target: NodeId) -> bool {
-    node_is_pointer_target_with_ancestors(root, target, false)
+    node_can_receive_target(root, target, InteractionTarget::Pointer)
 }
 
-fn node_is_pointer_target_with_ancestors(
+fn node_can_receive_target(
+    root: &WidgetNode,
+    target: NodeId,
+    interaction: InteractionTarget,
+) -> bool {
+    node_can_receive_target_with_ancestors(root, target, interaction, false)
+}
+
+fn node_can_receive_target_with_ancestors(
     node: &WidgetNode,
     target: NodeId,
+    interaction: InteractionTarget,
     blocked_ancestor: bool,
 ) -> bool {
-    let blocked = blocked_ancestor || node_is_disabled(node) || node_is_hidden(node);
+    let blocked = blocked_ancestor || !node_eligibility(node).allows(interaction);
     if node.id == target {
         return !blocked;
     }
     node.children
         .iter()
-        .any(|child| node_is_pointer_target_with_ancestors(child, target, blocked))
+        .any(|child| node_can_receive_target_with_ancestors(child, target, interaction, blocked))
 }
 
 fn node_is_focusable_target(root: &WidgetNode, target: NodeId) -> bool {
@@ -531,7 +527,7 @@ fn node_is_focusable_target_with_ancestors(
     target: NodeId,
     blocked_ancestor: bool,
 ) -> bool {
-    let blocked = blocked_ancestor || node_is_disabled(node) || node_is_hidden(node);
+    let blocked = blocked_ancestor || !node_eligibility(node).allows(InteractionTarget::Focus);
     if node.id == target {
         return !blocked && node_is_focusable(node);
     }
@@ -541,7 +537,7 @@ fn node_is_focusable_target_with_ancestors(
 }
 
 fn focusable_at_point(root: &WidgetNode, x: f32, y: f32) -> Option<NodeId> {
-    focusable_at_point_with_offset(root, x, y, 0.0, 0.0, false)
+    focusable_at_point_with_offset(root, x, y, 0.0, 0.0, NodeEligibility::ROOT)
 }
 
 fn focusable_at_point_with_offset(
@@ -550,12 +546,13 @@ fn focusable_at_point_with_offset(
     y: f32,
     offset_x: f32,
     offset_y: f32,
-    disabled_ancestor: bool,
+    parent_policy: NodeEligibility,
 ) -> Option<NodeId> {
-    if node_is_hidden(node) {
+    let policy = parent_policy.child(node);
+    if !policy.allows(InteractionTarget::Focus) {
         return None;
     }
-    let disabled = disabled_ancestor || node_is_disabled(node);
+    let (offset_x, offset_y) = transformed_offset(node, offset_x, offset_y);
     let inside_self = layout_contains_with_offset(node, x, y, offset_x, offset_y);
     if !inside_self && node_clips_children(node) {
         return None;
@@ -564,16 +561,16 @@ fn focusable_at_point_with_offset(
     let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
     for child in node.children.iter().rev() {
         if let Some(id) =
-            focusable_at_point_with_offset(child, x, y, child_offset_x, child_offset_y, disabled)
+            focusable_at_point_with_offset(child, x, y, child_offset_x, child_offset_y, policy)
         {
             return Some(id);
         }
     }
-    (inside_self && !disabled && node_is_focusable(node)).then_some(node.id)
+    (inside_self && node_is_focusable(node)).then_some(node.id)
 }
 
 fn node_contains_point(root: &WidgetNode, target: NodeId, x: f32, y: f32) -> bool {
-    node_contains_point_with_offset(root, target, x, y, 0.0, 0.0)
+    node_contains_point_with_offset(root, target, x, y, 0.0, 0.0, NodeEligibility::ROOT)
 }
 
 fn node_contains_point_with_offset(
@@ -583,7 +580,13 @@ fn node_contains_point_with_offset(
     y: f32,
     offset_x: f32,
     offset_y: f32,
+    parent_policy: NodeEligibility,
 ) -> bool {
+    let policy = parent_policy.child(node);
+    if !policy.allows(InteractionTarget::Pointer) {
+        return false;
+    }
+    let (offset_x, offset_y) = transformed_offset(node, offset_x, offset_y);
     let inside = layout_contains_with_offset(node, x, y, offset_x, offset_y);
     if node.id == target {
         return inside;
@@ -593,12 +596,21 @@ fn node_contains_point_with_offset(
     }
     let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
     node.children.iter().any(|child| {
-        node_contains_point_with_offset(child, target, x, y, child_offset_x, child_offset_y)
+        node_contains_point_with_offset(child, target, x, y, child_offset_x, child_offset_y, policy)
     })
 }
 
-fn hit_test_node(node: &WidgetNode, x: f32, y: f32) -> Option<NodeId> {
-    hit_test_node_with_offset(node, x, y, 0.0, 0.0)
+fn hit_test_node(
+    node: &WidgetNode,
+    x: f32,
+    y: f32,
+    parent_policy: NodeEligibility,
+) -> Option<NodeId> {
+    let policy = parent_policy.child(node);
+    if !policy.allows(InteractionTarget::Paint) {
+        return None;
+    }
+    hit_test_node_with_offset(node, x, y, 0.0, 0.0, policy)
 }
 
 fn hit_test_node_with_offset(
@@ -607,7 +619,12 @@ fn hit_test_node_with_offset(
     y: f32,
     offset_x: f32,
     offset_y: f32,
+    policy: NodeEligibility,
 ) -> Option<NodeId> {
+    if !policy.allows(InteractionTarget::Paint) {
+        return None;
+    }
+    let (offset_x, offset_y) = transformed_offset(node, offset_x, offset_y);
     let inside_self = layout_contains_with_offset(node, x, y, offset_x, offset_y);
     if !inside_self && node_clips_children(node) {
         return None;
@@ -615,12 +632,23 @@ fn hit_test_node_with_offset(
 
     let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
     for child in node.children.iter().rev() {
-        if let Some(id) = hit_test_node_with_offset(child, x, y, child_offset_x, child_offset_y) {
+        if let Some(id) = hit_test_node_with_offset(
+            child,
+            x,
+            y,
+            child_offset_x,
+            child_offset_y,
+            policy.child(child),
+        ) {
             return Some(id);
         }
     }
 
-    if inside_self { Some(node.id) } else { None }
+    if inside_self && policy.allows(InteractionTarget::Paint) {
+        Some(node.id)
+    } else {
+        None
+    }
 }
 
 fn layout_contains_with_offset(
@@ -630,9 +658,8 @@ fn layout_contains_with_offset(
     offset_x: f32,
     offset_y: f32,
 ) -> bool {
-    let left = node.layout.x + offset_x;
-    let top = node.layout.y + offset_y;
-    x >= left && x < left + node.layout.width && y >= top && y < top + node.layout.height
+    let rect = transformed_layout_at(node, offset_x, offset_y);
+    x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height
 }
 
 fn child_offsets_with_scroll(node: &WidgetNode, offset_x: f32, offset_y: f32) -> (f32, f32) {
@@ -871,6 +898,31 @@ mod tests {
         let blocked_by_ancestor = dispatcher.set_focus_with_invalidation(&mut root, Some(left_id));
         assert!(blocked_by_ancestor.events.is_empty());
         assert!(blocked_by_ancestor.changed_nodes.is_empty());
+        let blocked_pointer = dispatcher.dispatch(
+            &mut root,
+            &RawInputEvent::PointerButton {
+                x: 25.0,
+                y: 25.0,
+                button: 0x110,
+                pressed: true,
+            },
+        );
+        assert!(blocked_pointer.events.is_empty());
+        let blocked_motion = dispatcher.dispatch(
+            &mut root,
+            &RawInputEvent::PointerMotion { x: 25.0, y: 25.0 },
+        );
+        assert!(blocked_motion.events.is_empty());
+        let blocked_scroll = dispatcher.dispatch(
+            &mut root,
+            &RawInputEvent::Scroll {
+                x: 25.0,
+                y: 25.0,
+                dx: 0.0,
+                dy: 10.0,
+            },
+        );
+        assert!(blocked_scroll.events.is_empty());
         root.attributes.remove("inert");
 
         let focus_events = dispatcher.set_focus_with_invalidation(&mut root, Some(left_id));

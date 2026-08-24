@@ -67,18 +67,7 @@ pub(super) fn build_paint_node_with_previous(
 }
 
 pub(super) fn transformed_layout_at(node: &WidgetNode, offset_x: f32, offset_y: f32) -> LayoutRect {
-    let scale_x = node.computed_style.transform.scale_x.max(0.0);
-    let scale_y = node.computed_style.transform.scale_y.max(0.0);
-    let base_x = node.layout.x + offset_x;
-    let base_y = node.layout.y + offset_y;
-    let width = node.layout.width * scale_x;
-    let height = node.layout.height * scale_y;
-    LayoutRect {
-        x: base_x - (width - node.layout.width) * 0.5,
-        y: base_y - (height - node.layout.height) * 0.5,
-        width,
-        height,
-    }
+    mesh_core_elements::transformed_layout_at(node, offset_x, offset_y)
 }
 
 pub(super) fn opacity_color(color: Color, opacity: f32) -> Color {

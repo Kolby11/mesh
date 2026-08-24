@@ -69,7 +69,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/09-interaction-and-motion/improvements.md)
 
-- [ ] Share visibility, transformed geometry, disabled/inert eligibility, and target filtering across interaction, rendering, focus, scrolling, tooltips, and accessibility.
 - [ ] Use one affine transform/clip contract for hit testing, paint bounds, scrolling, and focus geometry.
 - [ ] Prevent disabled and inert nodes, including descendants and captured targets, from receiving activation.
 - [ ] Preserve keyframe progress across pause/resume and iteration-boundary changes.

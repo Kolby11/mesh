@@ -33,9 +33,7 @@ pub(super) fn collect_backdrop_blur_regions(
     if node_is_explicitly_hidden(node) {
         return;
     }
-    let transform = node.computed_style.transform;
-    let offset_x = offset_x + transform.translate_x;
-    let offset_y = offset_y + transform.translate_y;
+    let (offset_x, offset_y) = mesh_core_elements::transformed_offset(node, offset_x, offset_y);
 
     if node.computed_style.backdrop_filter.blur_radius > 0.0
         && node.layout.width > 0.0

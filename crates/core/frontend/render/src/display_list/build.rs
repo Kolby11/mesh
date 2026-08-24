@@ -2,8 +2,10 @@ use std::collections::{HashMap, HashSet};
 use std::hash::Hasher;
 use std::sync::Arc;
 
-use mesh_core_elements::style::{Display, Position, Visibility};
-use mesh_core_elements::{NodeId, WidgetNode};
+use mesh_core_elements::style::Position;
+use mesh_core_elements::{
+    InteractionTarget, NodeId, WidgetNode, node_eligibility, transformed_offset,
+};
 
 use super::paint_node::*;
 use super::signature::*;
@@ -156,10 +158,7 @@ pub(super) fn collect_display_entries(
         return;
     }
 
-    let style = &node.computed_style;
-    let transform = style.transform;
-    let offset_x = offset_x + transform.translate_x;
-    let offset_y = offset_y + transform.translate_y;
+    let (offset_x, offset_y) = transformed_offset(node, offset_x, offset_y);
 
     if let Some(bounds) = damage_rect_for_node_at(node, offset_x, offset_y) {
         let selected = selected_node_ids.is_none_or(|node_ids| node_ids.contains(&node.id));
@@ -312,10 +311,7 @@ pub(super) fn build_paint_subtree(
         return subtree;
     }
 
-    let style = &node.computed_style;
-    let transform = style.transform;
-    let offset_x = offset_x + transform.translate_x;
-    let offset_y = offset_y + transform.translate_y;
+    let (offset_x, offset_y) = transformed_offset(node, offset_x, offset_y);
     let previous_paint_node = previous_subtrees
         .get(&node.id)
         .and_then(|subtree| subtree.commands.first())
@@ -568,19 +564,7 @@ pub(super) fn compute_child_order(node: &WidgetNode) -> Option<Arc<[usize]>> {
 }
 
 pub(super) fn node_is_explicitly_hidden(node: &WidgetNode) -> bool {
-    node.computed_style.display == Display::None
-        || matches!(
-            node.computed_style.visibility,
-            Visibility::Hidden | Visibility::Collapse
-        )
-        || node
-            .attributes
-            .get("hidden")
-            .is_some_and(|value| truthy_attribute(value))
-}
-
-pub(super) fn truthy_attribute(value: &str) -> bool {
-    matches!(value, "" | "true" | "1" | "hidden" | "disabled" | "checked")
+    !node_eligibility(node).allows(InteractionTarget::Paint)
 }
 
 pub(super) fn should_preclip_child_subtree(
@@ -601,9 +585,7 @@ pub(super) fn subtree_bounds_at(
         return None;
     }
 
-    let transform = node.computed_style.transform;
-    let offset_x = offset_x + transform.translate_x;
-    let offset_y = offset_y + transform.translate_y;
+    let (offset_x, offset_y) = transformed_offset(node, offset_x, offset_y);
     let mut bounds = node_visual_bounds_at(node, offset_x, offset_y);
     let scroll = node.resolved_scroll_metrics();
     let scroll_x = scroll.x;
@@ -648,9 +630,7 @@ pub(super) fn count_pruned_subtree(
         return PrunedSubtreeCounts::default();
     }
 
-    let transform = node.computed_style.transform;
-    let offset_x = offset_x + transform.translate_x;
-    let offset_y = offset_y + transform.translate_y;
+    let (offset_x, offset_y) = transformed_offset(node, offset_x, offset_y);
     let mut counts = PrunedSubtreeCounts::default();
     if node.layout.width > 0.0 && node.layout.height > 0.0 {
         counts.nodes = 1;

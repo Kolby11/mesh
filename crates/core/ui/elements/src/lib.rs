@@ -4,6 +4,7 @@ pub mod composition;
 pub mod element;
 pub mod events;
 pub mod frame;
+pub mod interaction_contract;
 pub mod layout;
 pub mod lru;
 pub mod popover;
@@ -46,6 +47,10 @@ pub use frame::{
     FrameNode, FramePhase, FramePhaseStamps, FrameSemanticNode, FrameSemanticRelationships,
     FrameSnapshot, FrameSnapshotError, PhaseStamp, SemanticChange, SemanticChangeKind,
     SemanticDiff, SemanticField, StableNodeIdentity,
+};
+pub use interaction_contract::{
+    InteractionTarget, NodeEligibility, child_eligibility, node_eligibility, transformed_layout_at,
+    transformed_layout_for, transformed_offset,
 };
 pub use layout::{
     IntrinsicLayoutCache, LayoutEngine, LayoutRect, PerSurfaceLayoutState, TextMeasureContext,

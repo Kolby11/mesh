@@ -1,4 +1,7 @@
-use mesh_core_elements::WidgetNode;
+use mesh_core_elements::{
+    InteractionTarget, NodeEligibility, WidgetNode, node_eligibility, transformed_layout_at,
+    transformed_offset,
+};
 
 mod focus;
 mod hit_test;
@@ -58,11 +61,12 @@ pub(crate) fn node_rect_with_offset(
     offset_x: f32,
     offset_y: f32,
 ) -> ContentBounds {
+    let rect = transformed_layout_at(node, offset_x, offset_y);
     (
-        node.layout.x + offset_x,
-        node.layout.y + offset_y,
-        node.layout.x + offset_x + node.layout.width.max(0.0),
-        node.layout.y + offset_y + node.layout.height.max(0.0),
+        rect.x,
+        rect.y,
+        rect.x + rect.width.max(0.0),
+        rect.y + rect.height.max(0.0),
     )
 }
 
@@ -91,15 +95,15 @@ pub(crate) fn child_offsets_with_scroll(
 /// Translate the incoming offset by this node's CSS `transform.translate_*`,
 /// mirroring what the painter does. Hit-testing must apply the same shift so
 /// pointer coordinates resolve to the visually displaced bounds, not the
-/// untransformed layout box. Scale and rotation are not yet visually
-/// rendered and so are not yet inverted here either.
+/// untransformed layout box. The shared geometry helper also applies the
+/// renderer's current axis-aligned scale; rotation and clipping remain a
+/// separate contract.
 pub(crate) fn apply_transform_offset(
     node: &WidgetNode,
     offset_x: f32,
     offset_y: f32,
 ) -> (f32, f32) {
-    let t = node.computed_style.transform;
-    (offset_x + t.translate_x, offset_y + t.translate_y)
+    transformed_offset(node, offset_x, offset_y)
 }
 
 pub(crate) fn layout_contains_with_offset(
@@ -109,31 +113,10 @@ pub(crate) fn layout_contains_with_offset(
     offset_x: f32,
     offset_y: f32,
 ) -> bool {
-    let left = node.layout.x + offset_x;
-    let top = node.layout.y + offset_y;
-    x >= left && x < left + node.layout.width && y >= top && y < top + node.layout.height
+    let rect = transformed_layout_at(node, offset_x, offset_y);
+    x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height
 }
 
-pub(crate) fn node_is_hidden(node: &WidgetNode) -> bool {
-    node.computed_style.display == mesh_core_elements::style::Display::None
-        || node.layout.width <= 0.0
-        || node.layout.height <= 0.0
-        || node
-            .attributes
-            .get("hidden")
-            .is_some_and(|value| truthy_attribute(value))
-}
-
-pub(crate) fn node_is_disabled(node: &WidgetNode) -> bool {
-    node.attributes
-        .get("disabled")
-        .is_some_and(|value| truthy_attribute(value))
-        || node
-            .attributes
-            .get("aria-disabled")
-            .is_some_and(|value| truthy_attribute(value))
-}
-
-fn truthy_attribute(value: &str) -> bool {
-    matches!(value, "" | "true" | "1" | "disabled" | "checked")
+pub(crate) fn node_allows(node: &WidgetNode, target: InteractionTarget) -> bool {
+    node_eligibility(node).allows(target)
 }

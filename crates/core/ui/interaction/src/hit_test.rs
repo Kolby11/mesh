@@ -48,7 +48,7 @@ fn inspect_hit_test_inner(
     offset_x: f32,
     offset_y: f32,
 ) -> Option<InspectHit<'_>> {
-    if node_is_hidden(node) {
+    if !node_allows(node, InteractionTarget::Paint) {
         return None;
     }
     let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
@@ -197,7 +197,7 @@ fn pointer_event_handler_hit_inner<'a>(
     offset_x: f32,
     offset_y: f32,
 ) -> Option<PointerEventHandlerHit<'a>> {
-    if node_is_hidden(node) {
+    if !node_allows(node, InteractionTarget::Pointer) {
         return None;
     }
 
@@ -234,7 +234,7 @@ fn pointer_press_hit_inner<'a>(
     offset_x: f32,
     offset_y: f32,
 ) -> Option<PointerPressHit<'a>> {
-    if node_is_hidden(node) {
+    if !node_allows(node, InteractionTarget::Pointer) {
         return None;
     }
 
@@ -281,7 +281,7 @@ fn pointer_hit_test_reversed<'a>(
     offset_y: f32,
     inherited_tooltip: Option<TooltipTarget<'a>>,
 ) -> Option<PointerHit> {
-    if node_is_hidden(node) {
+    if !node_allows(node, InteractionTarget::Pointer) {
         return None;
     }
     let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
@@ -289,11 +289,14 @@ fn pointer_hit_test_reversed<'a>(
     if !inside && node_clips_children(node) {
         return None;
     }
-    let owner_tooltip = node_tooltip_text_ref(node).map(|text| TooltipTarget {
-        owner: node,
-        text,
-        bounds: node_rect_with_offset(node, offset_x, offset_y),
-    });
+    let owner_tooltip = node_allows(node, InteractionTarget::Tooltip)
+        .then(|| node_tooltip_text_ref(node))
+        .flatten()
+        .map(|text| TooltipTarget {
+            owner: node,
+            text,
+            bounds: node_rect_with_offset(node, offset_x, offset_y),
+        });
     let tooltip = owner_tooltip.or(inherited_tooltip);
     let (child_ox, child_oy) = child_offsets_with_scroll(node, offset_x, offset_y);
     for child in node.children.iter().rev() {
@@ -358,7 +361,7 @@ fn collect_nodes_by_keys<'a>(
     offset_y: f32,
     found: &mut std::collections::HashMap<&'a str, (&'a WidgetNode, ContentBounds)>,
 ) {
-    if found.len() == keys.len() {
+    if found.len() == keys.len() || !node_allows(node, InteractionTarget::Pointer) {
         return;
     }
     let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
@@ -382,6 +385,9 @@ pub fn find_node_bounds_by_key(
     offset_x: f32,
     offset_y: f32,
 ) -> Option<ContentBounds> {
+    if !node_allows(node, InteractionTarget::Pointer) {
+        return None;
+    }
     let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
     if node.mesh_key().is_some_and(|value| value == key) {
         return Some(node_rect_with_offset(node, offset_x, offset_y));
@@ -412,6 +418,9 @@ fn find_node_with_bounds_by_key_at<'a>(
     offset_x: f32,
     offset_y: f32,
 ) -> Option<(&'a WidgetNode, ContentBounds)> {
+    if !node_allows(node, InteractionTarget::Pointer) {
+        return None;
+    }
     let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
     if node.mesh_key().is_some_and(|value| value == key) {
         return Some((node, node_rect_with_offset(node, offset_x, offset_y)));
@@ -454,7 +463,7 @@ fn find_node_path_reversed(
     offset_x: f32,
     offset_y: f32,
 ) -> Option<Vec<String>> {
-    if node_is_hidden(node) {
+    if !node_allows(node, InteractionTarget::Pointer) {
         return None;
     }
 
@@ -548,6 +557,9 @@ fn find_container_bounds_inner(
     offset_y: f32,
     nearest_clip: Option<ContentBounds>,
 ) -> Option<Option<ContentBounds>> {
+    if !node_allows(node, InteractionTarget::Tooltip) {
+        return None;
+    }
     let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
     if node.mesh_key().is_some_and(|k| k == key) {
         return Some(nearest_clip);
@@ -589,6 +601,9 @@ fn find_tooltip_by_key_with_inherited<'a>(
     key: &str,
     inherited: Option<TooltipRef<'a>>,
 ) -> Option<Option<TooltipRef<'a>>> {
+    if !node_allows(node, InteractionTarget::Tooltip) {
+        return None;
+    }
     let owner_tooltip = node_tooltip_text_ref(node).map(|text| TooltipRef { owner: node, text });
     let inherited = owner_tooltip.or(inherited);
     if node.mesh_key().is_some_and(|candidate| candidate == key) {
@@ -619,6 +634,9 @@ fn find_tooltip_target_by_key_inner<'a>(
     offset_y: f32,
     inherited: Option<TooltipTarget<'a>>,
 ) -> Option<Option<TooltipTarget<'a>>> {
+    if !node_allows(node, InteractionTarget::Tooltip) {
+        return None;
+    }
     let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
     let owner_tooltip = node_tooltip_text_ref(node).map(|text| TooltipTarget {
         owner: node,
@@ -671,7 +689,13 @@ pub fn find_click_handler(tree: &WidgetNode, key: &str) -> Option<HandlerTarget>
 }
 
 pub fn find_event_handler(tree: &WidgetNode, key: &str, event_name: &str) -> Option<HandlerTarget> {
+    let target = match event_name {
+        "scroll" => InteractionTarget::Scroll,
+        "click" => InteractionTarget::Pointer,
+        _ => InteractionTarget::Focus,
+    };
     find_node_by_key(tree, key)
+        .filter(|node| node_allows(node, target))
         .and_then(|node| node.event_handlers.get(event_name))
         .cloned()
 }
@@ -1091,6 +1115,116 @@ mod tests {
             bounds,
             &find_node_bounds_by_key(&root, "cell-1-1", 0.0, 0.0).unwrap()
         );
+    }
+
+    #[test]
+    fn transformed_pointer_bounds_match_the_shared_paint_geometry() {
+        let mut root = WidgetNode::new("surface");
+        root.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height: 100.0,
+        };
+        let mut button = WidgetNode::new("button");
+        button
+            .attributes
+            .insert("_mesh_key".into(), "button".into());
+        button.layout = LayoutRect {
+            x: 50.0,
+            y: 20.0,
+            width: 20.0,
+            height: 20.0,
+        };
+        button.computed_style.transform.scale_x = 2.0;
+        button.computed_style.transform.scale_y = 1.5;
+        root.children.push(button);
+
+        let bounds = find_node_bounds_by_key(&root, "button", 0.0, 0.0).expect("button bounds");
+        assert_eq!(bounds, (40.0, 15.0, 80.0, 45.0));
+        let hit = pointer_press_hit(&root, 75.0, 30.0);
+        assert_eq!(hit.target.map(|target| target.key), Some("button"));
+        assert_eq!(hit.target.map(|target| target.bounds), Some(bounds));
+        assert_eq!(
+            find_focusable_at(&root, 75.0, 30.0).as_deref(),
+            Some("button")
+        );
+    }
+
+    #[test]
+    fn disabled_and_inert_targets_are_filtered_across_interaction_queries() {
+        let mut root = WidgetNode::new("surface");
+        root.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height: 100.0,
+        };
+
+        let mut disabled = WidgetNode::new("button");
+        disabled
+            .attributes
+            .insert("_mesh_key".into(), "disabled".into());
+        disabled
+            .attributes
+            .insert("aria-disabled".into(), "true".into());
+        disabled
+            .attributes
+            .insert("tooltip".into(), "Disabled".into());
+        disabled
+            .event_handlers
+            .insert("click".into(), "activate".into());
+        disabled.layout = LayoutRect {
+            x: 10.0,
+            y: 10.0,
+            width: 40.0,
+            height: 30.0,
+        };
+        root.children.push(disabled);
+
+        let mut inert = WidgetNode::new("box");
+        inert.attributes.insert("_mesh_key".into(), "inert".into());
+        inert.attributes.insert("inert".into(), "true".into());
+        inert.layout = LayoutRect {
+            x: 100.0,
+            y: 10.0,
+            width: 80.0,
+            height: 60.0,
+        };
+        inert.computed_style.overflow_y = mesh_core_elements::style::Overflow::Scroll;
+        inert.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
+            max_y: 20.0,
+            content_height: 80.0,
+            ..Default::default()
+        });
+        let mut descendant = WidgetNode::new("button");
+        descendant
+            .attributes
+            .insert("_mesh_key".into(), "inert-descendant".into());
+        descendant
+            .event_handlers
+            .insert("click".into(), "activate".into());
+        descendant.layout = LayoutRect {
+            x: 5.0,
+            y: 5.0,
+            width: 30.0,
+            height: 20.0,
+        };
+        inert.children.push(descendant);
+        root.children.push(inert);
+
+        assert!(pointer_press_hit(&root, 20.0, 20.0).target.is_none());
+        assert!(pointer_event_handler_hit(&root, 20.0, 20.0, "click").is_none());
+        assert_eq!(find_focusable_at(&root, 20.0, 20.0), None);
+        assert!(
+            !collect_focus_traversal(&root)
+                .iter()
+                .any(|key| key == "disabled" || key == "inert-descendant")
+        );
+        assert_eq!(find_tooltip_text_by_key(&root, "disabled"), None);
+        assert_eq!(find_node_bounds_by_key(&root, "disabled", 0.0, 0.0), None);
+        assert_eq!(find_scrollable_at(&root, 110.0, 20.0), None);
+        assert!(pointer_press_hit(&root, 110.0, 20.0).target.is_none());
     }
 
     // cargo test -p mesh-core-interaction --release -- borrowed_find_nodes_keys_beat_owned_results --ignored --nocapture

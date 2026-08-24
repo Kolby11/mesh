@@ -55,6 +55,9 @@ pub fn scroll_limits(node: &WidgetNode) -> (f32, f32) {
 /// Root-to-target node chain, inclusive of both ends, or `None` if the key is
 /// absent. `[..len-1]` are the target's ancestors, outer to inner.
 fn node_path_by_key<'a>(node: &'a WidgetNode, target_key: &str) -> Option<Vec<&'a WidgetNode>> {
+    if !node_allows(node, InteractionTarget::Scroll) {
+        return None;
+    }
     if node.mesh_key().is_some_and(|value| value == target_key) {
         return Some(vec![node]);
     }
@@ -77,8 +80,7 @@ fn path_screen_offsets(
     let mut incoming = (0.0_f32, 0.0_f32);
     let mut result = Vec::with_capacity(path.len());
     for node in path {
-        let t = node.computed_style.transform;
-        let screen = (incoming.0 + t.translate_x, incoming.1 + t.translate_y);
+        let screen = transformed_offset(node, incoming.0, incoming.1);
         result.push(screen);
         let scroll = offsets.get(&node.id).copied().unwrap_or_default();
         incoming = (screen.0 - scroll.x, screen.1 - scroll.y);
@@ -129,14 +131,16 @@ pub fn scroll_into_view_offsets(
         let pad = &container.computed_style.padding;
 
         // Container content viewport and target box, both on screen.
-        let view_left = container.layout.x + cox + pad.left;
-        let view_top = container.layout.y + coy + pad.top;
-        let view_w = (container.layout.width - pad.horizontal()).max(0.0);
-        let view_h = (container.layout.height - pad.vertical()).max(0.0);
-        let t_left = target.layout.x + tox;
-        let t_top = target.layout.y + toy;
-        let t_w = target.layout.width.max(0.0);
-        let t_h = target.layout.height.max(0.0);
+        let container_rect = node_rect_with_offset(container, cox, coy);
+        let target_rect = node_rect_with_offset(target, tox, toy);
+        let view_left = container_rect.0 + pad.left;
+        let view_top = container_rect.1 + pad.top;
+        let view_w = (container_rect.2 - container_rect.0 - pad.horizontal()).max(0.0);
+        let view_h = (container_rect.3 - container_rect.1 - pad.vertical()).max(0.0);
+        let t_left = target_rect.0;
+        let t_top = target_rect.1;
+        let t_w = (target_rect.2 - target_rect.0).max(0.0);
+        let t_h = (target_rect.3 - target_rect.1).max(0.0);
 
         // A positive delta moves children up/left, reducing the target's
         // screen position by the same amount.
@@ -183,6 +187,9 @@ fn find_scrollable_at_with_offset(
     offset_x: f32,
     offset_y: f32,
 ) -> Option<ScrollableHit> {
+    if !node_allows(node, InteractionTarget::Scroll) {
+        return None;
+    }
     let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
     let inside_self = layout_contains_with_offset(node, x, y, offset_x, offset_y);
     if !inside_self && node_clips_children(node) {
@@ -218,6 +225,9 @@ fn find_scrollbar_at_with_offset(
     offset_x: f32,
     offset_y: f32,
 ) -> Option<ScrollbarHit> {
+    if !node_allows(node, InteractionTarget::Scroll) {
+        return None;
+    }
     let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
     let inside_self = layout_contains_with_offset(node, x, y, offset_x, offset_y);
     if !inside_self && node_clips_children(node) {
@@ -265,10 +275,11 @@ fn scrollbar_hit_for_node(
         return None;
     }
 
-    let left = node.layout.x + offset_x;
-    let top = node.layout.y + offset_y;
-    let width = node.layout.width.max(1.0);
-    let height = node.layout.height.max(1.0);
+    let bounds = node_rect_with_offset(node, offset_x, offset_y);
+    let left = bounds.0;
+    let top = bounds.1;
+    let width = (bounds.2 - bounds.0).max(1.0);
+    let height = (bounds.3 - bounds.1).max(1.0);
 
     if show_vertical {
         let track_extent = (height

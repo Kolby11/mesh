@@ -566,6 +566,32 @@ fn display_list_keeps_plain_opacity_zero_nodes_paintable() {
 }
 
 #[test]
+fn display_list_keeps_disabled_and_inert_nodes_paintable() {
+    let mut root = node(1, "box", 0.0, 0.0, 100.0, 60.0);
+    let mut disabled = node(2, "button", 4.0, 4.0, 30.0, 20.0);
+    disabled.attributes.insert("disabled".into(), "true".into());
+    let mut inert = node(3, "box", 44.0, 4.0, 30.0, 20.0);
+    inert.attributes.insert("inert".into(), "true".into());
+    root.children.push(disabled);
+    root.children.push(inert);
+
+    let mut list = RetainedDisplayList::default();
+    let metrics = list.update(&root, 100, 60, false, false);
+
+    assert!(
+        list.paint_commands()
+            .iter()
+            .any(|command| command.node.id == 2 && command.kind == DisplayPaintCommandKind::Node)
+    );
+    assert!(
+        list.paint_commands()
+            .iter()
+            .any(|command| command.node.id == 3 && command.kind == DisplayPaintCommandKind::Node)
+    );
+    assert_eq!(metrics.omitted_subtrees, 0);
+}
+
+#[test]
 fn display_list_preclips_fully_out_of_viewport_descendants() {
     let mut root = node(1, "box", 0.0, 0.0, 40.0, 40.0);
     root.computed_style.overflow_x = Overflow::Hidden;

@@ -4,10 +4,11 @@
 
 ## Now
 
-The immutable frame boundary now captures one validated tree after state,
-style, layout, and semantic phases. It carries phase stamps, stable identities,
-and semantic diffs for downstream consumers; the shell retains it alongside the
-mutable working tree.
+The shared interaction/rendering policy now carries visibility, transformed
+translation/scale geometry, disabled/inert eligibility, and target filtering
+through hit testing, focus, scrolling, tooltips, events, paint, and
+accessibility. The immutable frame boundary remains the validated downstream
+snapshot; see the dated log entry for this policy work.
 
 CSS custom-property resolution, retained explicit/inherited style masks, and
 the canonical generated element schema landed 2026-08-23 — see
@@ -15,9 +16,8 @@ the canonical generated element schema landed 2026-08-23 — see
 
 ## Next
 
-Share visibility, transformed geometry, disabled/inert eligibility, and target
-filtering across interaction, rendering, focus, scrolling, tooltips, and
-accessibility (`docs/BACKLOG.md`).
+Use one affine transform/clip contract for hit testing, paint bounds, scrolling,
+and focus geometry (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

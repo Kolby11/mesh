@@ -16,7 +16,7 @@ pub fn find_focusable_at(node: &WidgetNode, x: f32, y: f32) -> Option<String> {
 
 pub fn collect_focus_traversal(node: &WidgetNode) -> Vec<String> {
     let mut targets = Vec::new();
-    collect_focus_traversal_with_offset(node, 0.0, 0.0, None, &mut targets);
+    collect_focus_traversal_with_offset(node, 0.0, 0.0, None, NodeEligibility::ROOT, &mut targets);
 
     targets.sort_by(|left, right| compare_focus_targets(left, right));
     targets.into_iter().map(|target| target.key).collect()
@@ -57,6 +57,9 @@ fn find_focusable_at_with_offset(
     offset_x: f32,
     offset_y: f32,
 ) -> Option<String> {
+    if !node_allows(node, InteractionTarget::Focus) {
+        return None;
+    }
     let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
     let inside_self = layout_contains_with_offset(node, x, y, offset_x, offset_y);
     if !inside_self && node_clips_children(node) {
@@ -85,9 +88,11 @@ fn collect_focus_traversal_with_offset(
     offset_x: f32,
     offset_y: f32,
     clip: Option<ContentBounds>,
+    parent_policy: NodeEligibility,
     targets: &mut Vec<FocusTraversalTarget>,
 ) {
-    if node_is_hidden(node) {
+    let policy = parent_policy.child(node);
+    if !policy.allows(InteractionTarget::Focus) {
         return;
     }
 
@@ -131,6 +136,7 @@ fn collect_focus_traversal_with_offset(
             child_offset_x,
             child_offset_y,
             child_clip,
+            policy,
             targets,
         );
     }
@@ -179,13 +185,12 @@ fn parse_tabindex(node: &WidgetNode) -> Option<i32> {
 }
 
 pub(crate) fn node_is_pointer_focusable(node: &WidgetNode) -> bool {
-    !node_is_hidden(node)
-        && !node_is_disabled(node)
+    node_allows(node, InteractionTarget::Focus)
         && (node_is_native_focusable(node) || parse_tabindex(node).is_some())
 }
 
 fn node_is_tabbable(node: &WidgetNode) -> bool {
-    if node_is_hidden(node) || node_is_disabled(node) {
+    if !node_allows(node, InteractionTarget::Focus) {
         return false;
     }
 

@@ -1,4 +1,5 @@
 /// Accessibility tree — semantic representation for AT-SPI and screen readers.
+use crate::interaction_contract::{InteractionTarget, NodeEligibility};
 use crate::layout::LayoutRect;
 use crate::tree::{NodeId, WidgetNode};
 use serde::{Deserialize, Serialize};
@@ -165,7 +166,7 @@ pub struct AccessibilityTree {
 impl AccessibilityTree {
     /// Build a flat accessibility tree from a laid-out widget tree.
     pub fn from_widget_tree(root: &WidgetNode) -> Self {
-        let Some(mut root) = build_snapshot_node(root, false) else {
+        let Some(mut root) = build_snapshot_node(root, NodeEligibility::ROOT) else {
             return Self { nodes: Vec::new() };
         };
         let mut index = std::collections::HashMap::new();
@@ -190,7 +191,7 @@ impl AccessibilityTree {
 /// This mutates only the semantic projection; authored attributes, layout,
 /// and interaction state remain the source of truth for their own domains.
 pub fn normalize_accessibility(root: &mut WidgetNode) {
-    normalize_node(root, false);
+    normalize_node(root, NodeEligibility::ROOT);
 }
 
 #[derive(Debug, Clone)]
@@ -238,18 +239,19 @@ struct SnapshotReferenceText {
     visible_text: String,
 }
 
-fn normalize_node(node: &mut WidgetNode, ancestor_hidden: bool) -> String {
-    let local_hidden = locally_hidden(node);
-    let hidden = ancestor_hidden || local_hidden;
+fn normalize_node(node: &mut WidgetNode, parent_policy: NodeEligibility) -> String {
+    let policy = parent_policy.child(node);
+    let hidden = !policy.allows(InteractionTarget::Semantics);
     let mut child_text = Vec::new();
     for child in &mut node.children {
-        let text = normalize_node(child, hidden);
+        let text = normalize_node(child, policy);
         if !text.is_empty() {
             child_text.push(text);
         }
     }
     let child_text = child_text.join(" ");
-    let info = normalized_info(node, hidden, &child_text);
+    let mut info = normalized_info(node, hidden, &child_text);
+    info.state.disabled |= policy.is_disabled();
     let name_text = semantic_text(
         &info,
         visible_text(node, &child_text, info.hidden),
@@ -259,15 +261,15 @@ fn normalize_node(node: &mut WidgetNode, ancestor_hidden: bool) -> String {
     name_text
 }
 
-fn build_snapshot_node(node: &WidgetNode, ancestor_hidden: bool) -> Option<SnapshotNode> {
-    let hidden = ancestor_hidden || locally_hidden(node);
-    if hidden {
+fn build_snapshot_node(node: &WidgetNode, parent_policy: NodeEligibility) -> Option<SnapshotNode> {
+    let policy = parent_policy.child(node);
+    if !policy.allows(InteractionTarget::Semantics) {
         return None;
     }
     let children: Vec<_> = node
         .children
         .iter()
-        .filter_map(|child| build_snapshot_node(child, false))
+        .filter_map(|child| build_snapshot_node(child, policy))
         .collect();
     let child_text = children
         .iter()
@@ -275,7 +277,8 @@ fn build_snapshot_node(node: &WidgetNode, ancestor_hidden: bool) -> Option<Snaps
         .filter(|text| !text.is_empty())
         .collect::<Vec<_>>()
         .join(" ");
-    let info = normalized_info(node, false, &child_text);
+    let mut info = normalized_info(node, false, &child_text);
+    info.state.disabled |= policy.is_disabled();
     let visible_text = semantic_text(&info, visible_text(node, &child_text, false), false);
     Some(SnapshotNode {
         id: node.id,
@@ -448,15 +451,6 @@ fn semantic_text(info: &AccessibilityInfo, visible_text: String, hidden: bool) -
     } else {
         info.label.clone().unwrap_or_default()
     }
-}
-
-fn locally_hidden(node: &WidgetNode) -> bool {
-    bool_alias(&node.attributes, &["hidden", "aria-hidden"])
-        || matches!(node.computed_style.display, crate::style::Display::None)
-        || !matches!(
-            node.computed_style.visibility,
-            crate::style::Visibility::Visible
-        )
 }
 
 fn bool_alias(attributes: &crate::AttributeMap, names: &[&str]) -> bool {
@@ -870,6 +864,37 @@ mod tests {
         let snapshot = AccessibilityTree::publish(&root);
         assert_eq!(snapshot.nodes.len(), 1);
         assert!(snapshot.nodes[0].children.is_empty());
+    }
+
+    #[test]
+    fn snapshot_exposes_disabled_controls_but_removes_inert_subtrees() {
+        let mut root = WidgetNode::new("box");
+        let mut disabled = WidgetNode::new("button");
+        let disabled_id = disabled.id;
+        attr(&mut disabled, "aria-disabled", "true");
+        let mut inert = WidgetNode::new("box");
+        let inert_id = inert.id;
+        attr(&mut inert, "inert", "true");
+        let mut descendant = WidgetNode::new("button");
+        let descendant_id = descendant.id;
+        attr(&mut descendant, "label", "Not available");
+        inert.children.push(descendant);
+        root.children.push(disabled);
+        root.children.push(inert);
+
+        let snapshot = AccessibilityTree::publish(&root);
+        let disabled = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.id == disabled_id)
+            .expect("disabled control stays exposed");
+        assert!(disabled.info.state.disabled);
+        assert!(
+            snapshot
+                .nodes
+                .iter()
+                .all(|node| node.id != inert_id && node.id != descendant_id)
+        );
     }
 
     fn hidden_panel_id(root: &WidgetNode) -> NodeId {
