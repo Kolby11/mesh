@@ -1,7 +1,8 @@
 use super::PublishedEvent;
 use super::state::ServiceContextState;
+use crate::operation::{OperationRegistry, OperationRejection, reserve_side_effect};
 use crate::policy::ResourceBudget;
-use mesh_core_capability::{Capability, CapabilitySet};
+use mesh_core_capability::CapabilitySet;
 pub(super) use mesh_core_service::service_name_from_interface;
 use mesh_core_service::{InterfaceContract, InterfaceResolution, TypeExpr};
 use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
@@ -171,7 +172,6 @@ pub(super) fn create_service_proxy(
             }
             // Case A: known contract method — dispatch as a service command.
             if let Some(method) = methods.iter().find(|m| m.name == key) {
-                let required_capability = service_control_capability(&service_name);
                 let method_contract = contract_for_index.clone();
                 let method = method.clone();
                 let iface = interface_name.clone();
@@ -184,25 +184,6 @@ pub(super) fn create_service_proxy(
                 let method_resources = resources.clone();
                 return Ok(LuaValue::Function(lua.create_function(
                     move |lua, args: mlua::Variadic<LuaValue>| {
-                        let authorized = method_contract.as_ref().map_or_else(
-                            || source_capabilities.is_granted(&required_capability),
-                            |contract| {
-                                crate::host_api::InterfaceProxy::can_call_contract_method(
-                                    &source_capabilities,
-                                    contract,
-                                    &method.name,
-                                )
-                            },
-                        );
-                        if !authorized {
-                            return command_result_table(
-                                lua,
-                                false,
-                                false,
-                                Some("capability denied"),
-                            )
-                            .map(LuaValue::Table);
-                        }
                         let offset = consume_self_arg(&args)?;
                         let supplied = args.len().saturating_sub(offset);
                         let required = method
@@ -254,18 +235,42 @@ pub(super) fn create_service_proxy(
                             .collect::<mlua::Result<serde_json::Map<String, Value>>>()?;
                         let call_id = NEXT_SERVICE_CALL_ID.fetch_add(1, Ordering::Relaxed);
                         let payload = Value::Object(payload);
-                        let output_bytes = serde_json::to_vec(&payload)
-                            .map_err(mlua::Error::external)?
-                            .len();
-                        method_resources
-                            .reserve_output(output_bytes)
-                            .map_err(|error| mlua::Error::external(error.to_string()))?;
-                        method_resources
-                            .reserve_queue()
-                            .map_err(|error| mlua::Error::external(error.to_string()))?;
+                        let channel = format!("{}.{}", iface, method.name);
+                        let Some(contract) = method_contract.as_ref() else {
+                            return Err(mlua::Error::runtime(
+                                "service method has no resolved interface contract",
+                            ));
+                        };
+                        if let Err(rejection) = OperationRegistry::builtin().authorize_service_call(
+                            &channel,
+                            &method,
+                            contract,
+                            &payload,
+                            &source_module_id,
+                            &source_capabilities,
+                        ) {
+                            if matches!(rejection, OperationRejection::Unauthorized { .. }) {
+                                return command_result_table(
+                                    lua,
+                                    false,
+                                    false,
+                                    Some("capability denied"),
+                                )
+                                .map(LuaValue::Table);
+                            }
+                            return Err(mlua::Error::runtime(rejection.to_string()));
+                        }
+                        let output_bytes = serde_json::to_vec(&serde_json::json!({
+                            "channel": &channel,
+                            "payload": &payload,
+                        }))
+                        .map_err(mlua::Error::external)?
+                        .len();
+                        reserve_side_effect(&method_resources, output_bytes)
+                            .map_err(mlua::Error::external)?;
                         pending_side_channels.store(true, Ordering::Release);
                         events.lock().unwrap().push(PublishedEvent {
-                            channel: format!("{}.{}", iface, method.name),
+                            channel,
                             payload,
                             source_module_id: source_module_id.clone(),
                             source_capabilities: source_capabilities.clone(),
@@ -669,15 +674,13 @@ fn create_service_call_ticket(
                 "interface": interface,
                 "call_id": call_id,
             });
-            let output_bytes = serde_json::to_vec(&payload)
-                .map_err(mlua::Error::external)?
-                .len();
-            cancel_resources
-                .reserve_output(output_bytes)
-                .map_err(|error| mlua::Error::external(error.to_string()))?;
-            cancel_resources
-                .reserve_queue()
-                .map_err(|error| mlua::Error::external(error.to_string()))?;
+            let output_bytes = serde_json::to_vec(&serde_json::json!({
+                "channel": "mesh.service.cancel",
+                "payload": &payload,
+            }))
+            .map_err(mlua::Error::external)?
+            .len();
+            reserve_side_effect(&cancel_resources, output_bytes).map_err(mlua::Error::external)?;
             cancel_pending.store(true, Ordering::Release);
             cancel_events.lock().unwrap().push(PublishedEvent {
                 channel: "mesh.service.cancel".to_string(),
@@ -712,10 +715,6 @@ fn json_type_name(value: &Value) -> &'static str {
         Value::Array(_) => "array",
         Value::Object(_) => "object",
     }
-}
-
-fn service_control_capability(service_name: &str) -> Capability {
-    Capability::new(format!("service.{service_name}.control"))
 }
 
 #[cfg(test)]

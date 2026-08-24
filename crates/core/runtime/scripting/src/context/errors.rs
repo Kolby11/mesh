@@ -15,6 +15,16 @@ pub struct PublishedEvent {
     pub source_instance_id: Option<String>,
 }
 
+impl PublishedEvent {
+    pub(crate) fn queued_output_bytes(&self) -> usize {
+        serde_json::to_vec(&serde_json::json!({
+            "channel": &self.channel,
+            "payload": &self.payload,
+        }))
+        .map_or(0, |bytes| bytes.len())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServiceCallCompletion {
     pub status: String,

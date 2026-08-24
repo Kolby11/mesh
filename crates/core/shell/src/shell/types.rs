@@ -393,6 +393,7 @@ pub(super) enum ShellMessage {
         provider_id: String,
         name: String,
         payload: serde_json::Value,
+        generation: u64,
     },
     /// A supervised backend restart delay elapsed; respawn the interface's
     /// best available provider.

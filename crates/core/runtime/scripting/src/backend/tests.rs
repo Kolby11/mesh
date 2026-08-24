@@ -1,5 +1,10 @@
 use super::*;
+use mesh_core_service::{
+    ContractCapabilities, InterfaceArgument, InterfaceContract, InterfaceEvent,
+    parse_contract_version,
+};
 use mlua::{Function, Table};
+use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn temp_storage_root(name: &str) -> std::path::PathBuf {
@@ -27,6 +32,30 @@ fn bundled_backend_script(path: &str) -> String {
         script_path
     };
     std::fs::read_to_string(script_path).unwrap()
+}
+
+fn audio_event_registry() -> BackendEventRegistry {
+    BackendEventRegistry::from_contract(&InterfaceContract {
+        interface: "mesh.audio".into(),
+        version: parse_contract_version("1.0").unwrap(),
+        state_fields: Vec::new(),
+        methods: Vec::new(),
+        events: vec![InterfaceEvent {
+            name: "VolumeChanged".into(),
+            payload: vec![
+                InterfaceArgument {
+                    name: "device_id".into(),
+                    arg_type: "string".into(),
+                },
+                InterfaceArgument {
+                    name: "level".into(),
+                    arg_type: "int".into(),
+                },
+            ],
+        }],
+        types: HashMap::new(),
+        capabilities: ContractCapabilities::default(),
+    })
 }
 
 #[test]
@@ -369,6 +398,7 @@ fn emit_unavailable_stores_unavailable_payload() {
 #[test]
 fn mesh_service_emit_event_buffers_typed_interface_event() {
     let mut ctx = BackendScriptContext::new("@test/backend");
+    ctx.set_event_registry(audio_event_registry());
     ctx.load_script(
         "function start()\nend\nfunction on_poll()\nmesh.service.emit_event(\"VolumeChanged\", { device_id = \"default\", level = 67 })\nend",
     )
@@ -386,8 +416,30 @@ fn mesh_service_emit_event_buffers_typed_interface_event() {
 }
 
 #[test]
+fn backend_event_boundary_rejects_unknown_and_malformed_events_before_queueing() {
+    let mut ctx = BackendScriptContext::new("@test/backend");
+    ctx.set_event_registry(audio_event_registry());
+    ctx.load_script(
+        "function start()\nend\nfunction on_poll()\nmesh.service.emit_event(\"Unknown\", {})\nend",
+    )
+    .unwrap();
+    assert!(ctx.run_poll().is_err());
+    assert!(ctx.drain_events().is_empty());
+
+    let mut ctx = BackendScriptContext::new("@test/backend");
+    ctx.set_event_registry(audio_event_registry());
+    ctx.load_script(
+        "function start()\nend\nfunction on_poll()\nmesh.service.emit_event(\"VolumeChanged\", { level = \"loud\", device_id = \"default\" })\nend",
+    )
+    .unwrap();
+    assert!(ctx.run_poll().is_err());
+    assert!(ctx.drain_events().is_empty());
+}
+
+#[test]
 fn backend_self_named_event_channel_fires_typed_event() {
     let mut ctx = BackendScriptContext::new("@test/backend");
+    ctx.set_event_registry(audio_event_registry());
     ctx.load_script(
         r#"
 function start(self)

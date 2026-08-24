@@ -202,6 +202,11 @@ pub(in crate::shell) fn launch_candidate_for_provider_with_capabilities(
         .contract
         .as_deref()
         .map(mesh_core_scripting::BackendCommandRegistry::from_contract);
+    let event_registry = interfaces
+        .resolve(&interface, None)
+        .contract
+        .as_deref()
+        .map(mesh_core_scripting::BackendEventRegistry::from_contract);
     Ok(BackendLaunchCandidate {
         module_id: provider.module_id.clone(),
         service_name: service_name_from_interface(&interface),
@@ -211,6 +216,7 @@ pub(in crate::shell) fn launch_candidate_for_provider_with_capabilities(
         capabilities,
         settings,
         command_registry,
+        event_registry,
     })
 }
 

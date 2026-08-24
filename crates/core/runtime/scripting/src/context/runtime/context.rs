@@ -537,36 +537,62 @@ impl ScriptContext {
             self.interface_bindings_generation = shared_interface_bindings.generation;
         }
         let published_event_count = self.published_events.len();
+        let published_event_bytes = self
+            .published_events
+            .iter()
+            .map(PublishedEvent::queued_output_bytes)
+            .sum();
         self.published_events.clear();
-        self.realm_policy
-            .budget()
-            .release_queue(published_event_count);
+        crate::operation::release_side_effect(
+            &self.realm_policy.budget(),
+            published_event_count,
+            published_event_bytes,
+        );
         let element_action_count = self.element_actions.len();
+        let element_action_bytes = self
+            .element_actions
+            .iter()
+            .map(ElementAction::queued_output_bytes)
+            .sum();
         self.element_actions.clear();
-        self.realm_policy
-            .budget()
-            .release_queue(element_action_count);
-        let published_event_count = {
+        crate::operation::release_side_effect(
+            &self.realm_policy.budget(),
+            element_action_count,
+            element_action_bytes,
+        );
+        let (published_event_count, published_event_bytes) = {
             let mut published_events = self.shared_published_events.lock().unwrap();
             let count = published_events.len();
+            let bytes = published_events
+                .iter()
+                .map(PublishedEvent::queued_output_bytes)
+                .sum();
             published_events.clear();
-            count
+            (count, bytes)
         };
-        self.realm_policy
-            .budget()
-            .release_queue(published_event_count);
+        crate::operation::release_side_effect(
+            &self.realm_policy.budget(),
+            published_event_count,
+            published_event_bytes,
+        );
         self.service_call_completions.lock().unwrap().clear();
         self.shared_diagnostics.lock().unwrap().clear();
         self.localized_misses.lock().unwrap().clear();
-        let element_action_count = {
+        let (element_action_count, element_action_bytes) = {
             let mut element_actions = self.shared_element_actions.lock().unwrap();
             let count = element_actions.len();
+            let bytes = element_actions
+                .iter()
+                .map(ElementAction::queued_output_bytes)
+                .sum();
             element_actions.clear();
-            count
+            (count, bytes)
         };
-        self.realm_policy
-            .budget()
-            .release_queue(element_action_count);
+        crate::operation::release_side_effect(
+            &self.realm_policy.budget(),
+            element_action_count,
+            element_action_bytes,
+        );
         self.changed_storage_keys.lock().unwrap().clear();
         self.pending_side_channels.store(false, Ordering::Release);
         self.clear_tracked_service_fields();

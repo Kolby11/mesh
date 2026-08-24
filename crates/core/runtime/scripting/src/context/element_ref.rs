@@ -1,3 +1,4 @@
+use crate::operation::{OperationRegistry, reserve_side_effect};
 use crate::policy::ResourceBudget;
 use mlua::{Lua, LuaSerdeExt, Table, Value as LuaValue, Variadic};
 use serde_json::Value;
@@ -47,6 +48,18 @@ pub struct ElementAction {
     /// serialized as a JSON object, or `Null` when none was passed. Lets methods
     /// take DOM-style behavior options without colliding with positional args.
     pub options: Value,
+}
+
+impl ElementAction {
+    pub(crate) fn queued_output_bytes(&self) -> usize {
+        serde_json::to_vec(&serde_json::json!({
+            "target": &self.target,
+            "action": &self.action,
+            "args": &self.args,
+            "options": &self.options,
+        }))
+        .map_or(0, |bytes| bytes.len())
+    }
 }
 
 /// Imperative methods exposed on a live element-node proxy. Anything not in this
@@ -201,9 +214,23 @@ fn create_element_node_proxy(
                             }
                         }
                     }
-                    resources
-                        .reserve_queue()
+                    OperationRegistry::builtin()
+                        .authorize_element_action(
+                            &target,
+                            &action,
+                            &Value::Array(positional.clone()),
+                            &options,
+                        )
                         .map_err(|error| mlua::Error::external(error.to_string()))?;
+                    let queued = serde_json::to_vec(&serde_json::json!({
+                        "target": &target,
+                        "action": &action,
+                        "args": &positional,
+                        "options": &options,
+                    }))
+                    .map_err(mlua::Error::external)?
+                    .len();
+                    reserve_side_effect(&resources, queued).map_err(mlua::Error::external)?;
                     pending_side_channels.store(true, Ordering::Release);
                     actions.lock().unwrap().push(ElementAction {
                         target: target.clone(),
@@ -249,9 +276,20 @@ fn create_element_node_proxy(
             if key != "value" {
                 if let Some(attribute_name) = element_member_attribute_name(&key) {
                     let payload = lua.from_value::<Value>(value)?;
-                    resources
-                        .reserve_queue()
+                    let args =
+                        Value::Array(vec![Value::String(attribute_name.clone()), payload.clone()]);
+                    OperationRegistry::builtin()
+                        .authorize_element_action(&write_name, "set_attribute", &args, &Value::Null)
                         .map_err(|error| mlua::Error::external(error.to_string()))?;
+                    let queued = serde_json::to_vec(&serde_json::json!({
+                        "target": &write_name,
+                        "action": "set_attribute",
+                        "args": &args,
+                        "options": Value::Null,
+                    }))
+                    .map_err(mlua::Error::external)?
+                    .len();
+                    reserve_side_effect(&resources, queued).map_err(mlua::Error::external)?;
                     write_pending_side_channels.store(true, Ordering::Release);
                     write_actions.lock().unwrap().push(ElementAction {
                         target: write_name.clone(),
@@ -266,9 +304,19 @@ fn create_element_node_proxy(
                 )));
             }
             let payload = lua.from_value::<Value>(value)?;
-            resources
-                .reserve_queue()
+            let args = Value::Array(vec![payload.clone()]);
+            OperationRegistry::builtin()
+                .authorize_element_action(&write_name, "set_value", &args, &Value::Null)
                 .map_err(|error| mlua::Error::external(error.to_string()))?;
+            let queued = serde_json::to_vec(&serde_json::json!({
+                "target": &write_name,
+                "action": "set_value",
+                "args": &args,
+                "options": Value::Null,
+            }))
+            .map_err(mlua::Error::external)?
+            .len();
+            reserve_side_effect(&resources, queued).map_err(mlua::Error::external)?;
             write_pending_side_channels.store(true, Ordering::Release);
             write_actions.lock().unwrap().push(ElementAction {
                 target: write_name.clone(),

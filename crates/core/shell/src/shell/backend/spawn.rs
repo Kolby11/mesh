@@ -199,6 +199,7 @@ impl Shell {
                     BackendServiceEvent::InterfaceEvent(event) => {
                         let name = event.name;
                         let payload = event.payload;
+                        let generation = event.generation;
                         tracing::debug!(
                             interface = bridge_interface.as_str(),
                             provider_id = bridge_provider_id.as_str(),
@@ -211,6 +212,7 @@ impl Shell {
                             provider_id: current_event_provider_id.clone(),
                             name,
                             payload,
+                            generation,
                         });
                         let evfd = unsafe { BorrowedFd::borrow_raw(eventfd_fd) };
                         let _ = rustix::io::write(&evfd, &1u64.to_ne_bytes());
@@ -298,17 +300,20 @@ impl Shell {
                 }
             }
         });
-        let task = runtime.spawn(mesh_core_backend::spawn_backend_service_bounded(
-            candidate.module_id,
-            candidate.service_name,
-            candidate.capabilities,
-            candidate.settings,
-            candidate.script_source,
-            backend_tx,
-            cmd_rx,
-            candidate.command_registry,
-            generation,
-        ));
+        let task = runtime.spawn(
+            mesh_core_backend::spawn_backend_service_bounded_with_events(
+                candidate.module_id,
+                candidate.service_name,
+                candidate.capabilities,
+                candidate.settings,
+                candidate.script_source,
+                backend_tx,
+                cmd_rx,
+                candidate.command_registry,
+                candidate.event_registry,
+                generation,
+            ),
+        );
         BackendRuntimeSlot {
             interface,
             provider_id,

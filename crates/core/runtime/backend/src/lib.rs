@@ -260,6 +260,7 @@ pub struct BackendInterfaceEvent {
     pub source_module: Arc<str>,
     pub name: String,
     pub payload: serde_json::Value,
+    pub generation: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -316,6 +317,7 @@ pub async fn spawn_backend_service(
         tx,
         CommandReceiver::Unbounded(cmd_rx),
         None,
+        None,
         0,
     )
     .await;
@@ -335,6 +337,35 @@ pub async fn spawn_backend_service_bounded(
     command_registry: Option<mesh_core_scripting::BackendCommandRegistry>,
     generation: u64,
 ) {
+    spawn_backend_service_bounded_with_events(
+        module_id,
+        service_name,
+        capabilities,
+        settings,
+        script_source,
+        tx,
+        cmd_rx,
+        command_registry,
+        None,
+        generation,
+    )
+    .await;
+}
+
+/// Production backend entrypoint with the immutable provider-owned event
+/// registry installed before untrusted script code can run.
+pub async fn spawn_backend_service_bounded_with_events(
+    module_id: String,
+    service_name: String,
+    capabilities: Vec<String>,
+    settings: JsonValue,
+    script_source: String,
+    tx: mpsc::UnboundedSender<BackendServiceEvent>,
+    cmd_rx: mpsc::Receiver<BackendServiceCommand>,
+    command_registry: Option<mesh_core_scripting::BackendCommandRegistry>,
+    event_registry: Option<mesh_core_scripting::BackendEventRegistry>,
+    generation: u64,
+) {
     spawn_backend_service_inner(
         module_id,
         service_name,
@@ -344,6 +375,7 @@ pub async fn spawn_backend_service_bounded(
         tx,
         CommandReceiver::Bounded(cmd_rx),
         command_registry,
+        event_registry,
         generation,
     )
     .await;
@@ -379,6 +411,7 @@ async fn spawn_backend_service_inner(
     tx: mpsc::UnboundedSender<BackendServiceEvent>,
     cmd_rx: CommandReceiver,
     command_registry: Option<mesh_core_scripting::BackendCommandRegistry>,
+    event_registry: Option<mesh_core_scripting::BackendEventRegistry>,
     generation: u64,
 ) {
     let module_id: Arc<str> = Arc::from(module_id);
@@ -396,8 +429,12 @@ async fn spawn_backend_service_inner(
         settings,
         capabilities,
     );
+    ctx.set_generation(generation);
     if let Some(registry) = command_registry {
         ctx.set_command_registry(registry);
+    }
+    if let Some(registry) = event_registry {
+        ctx.set_event_registry(registry);
     }
     run_backend_service(
         &mut ctx,
@@ -927,6 +964,7 @@ fn publish_script_events(
                 source_module: Arc::clone(module_id),
                 name: event.name,
                 payload: event.payload,
+                generation: event.generation,
             }))
             .is_err()
         {

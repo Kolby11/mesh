@@ -111,8 +111,8 @@ source of truth.
 
 ## Next
 
-Gate event and side-effect queues through one typed authorization/resource
-boundary before acceptance (`docs/BACKLOG.md`).
+Represent locale as a host-owned per-context cell updated with the translation
+snapshot (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

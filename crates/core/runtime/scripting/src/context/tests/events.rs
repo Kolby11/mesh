@@ -30,6 +30,42 @@ end
 }
 
 #[test]
+fn raw_service_event_publication_uses_the_interface_contract_boundary() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("service.audio.control"));
+    let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+    ctx.set_interface_catalog(audio_catalog());
+    ctx.load_script(
+        r#"
+function publish()
+    mesh.events.publish("mesh.audio.set_volume", {
+        device_id = "default",
+        percent = 55
+    })
+end
+"#,
+    )
+    .unwrap();
+    ctx.call_handler("publish", &[]).unwrap();
+    let events = ctx.drain_published_events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].channel, "mesh.audio.set_volume");
+
+    let mut ctx = ScriptContext::new("@mesh/test", CapabilitySet::new()).unwrap();
+    ctx.set_interface_catalog(audio_catalog());
+    ctx.load_script(
+        r#"
+function publish()
+    mesh.events.publish("mesh.audio.not_declared", {})
+end
+"#,
+    )
+    .unwrap();
+    assert!(ctx.call_handler("publish", &[]).is_err());
+    assert!(ctx.drain_published_events().is_empty());
+}
+
+#[test]
 fn interface_event_proxy_receives_host_delivered_event() {
     let mut caps = CapabilitySet::new();
     caps.grant(Capability::new("service.audio.read"));

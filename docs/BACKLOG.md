@@ -77,7 +77,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md)
 
-- [ ] Gate event and side-effect queues through one typed authorization/resource boundary before acceptance.
 - [ ] Represent locale as a host-owned per-context cell updated with the translation snapshot.
 - [ ] Treat Luau `nil` writes as explicit deletions in Rust state and dependency invalidation.
 - [ ] Restrict provider event publication to provider-owned handles and isolate subscriber callback failures.

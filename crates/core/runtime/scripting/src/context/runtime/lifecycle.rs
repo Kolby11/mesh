@@ -301,7 +301,8 @@ impl ScriptContext {
     pub fn drain_published_events(&mut self) -> Vec<PublishedEvent> {
         self.sync_side_channels();
         let events = std::mem::take(&mut self.published_events);
-        self.realm_policy.budget().release_queue(events.len());
+        let bytes = events.iter().map(PublishedEvent::queued_output_bytes).sum();
+        crate::operation::release_side_effect(&self.realm_policy.budget(), events.len(), bytes);
         events
     }
 
@@ -340,7 +341,8 @@ impl ScriptContext {
     pub fn drain_element_actions(&mut self) -> Vec<ElementAction> {
         self.sync_side_channels();
         let actions = std::mem::take(&mut self.element_actions);
-        self.realm_policy.budget().release_queue(actions.len());
+        let bytes = actions.iter().map(ElementAction::queued_output_bytes).sum();
+        crate::operation::release_side_effect(&self.realm_policy.budget(), actions.len(), bytes);
         actions
     }
 

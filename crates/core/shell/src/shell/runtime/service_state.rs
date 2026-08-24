@@ -681,6 +681,38 @@ impl Shell {
         name: String,
         payload: serde_json::Value,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        self.broadcast_backend_interface_event_at_generation(
+            interface,
+            provider_id,
+            name,
+            payload,
+            0,
+        )
+    }
+
+    pub(in crate::shell) fn broadcast_backend_interface_event_at_generation(
+        &mut self,
+        interface: String,
+        provider_id: String,
+        name: String,
+        payload: serde_json::Value,
+        generation: u64,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        if generation != 0
+            && !self
+                .backend_runtimes
+                .get(&interface)
+                .is_some_and(|slot| slot.generation == generation)
+        {
+            tracing::debug!(
+                interface,
+                provider_id,
+                event = name,
+                generation,
+                "ignoring interface event from a stale backend generation"
+            );
+            return Ok(VecDeque::new());
+        }
         if !self.backend_provider_is_active(&interface, &provider_id) {
             tracing::debug!(
                 interface,

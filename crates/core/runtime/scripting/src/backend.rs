@@ -1,5 +1,6 @@
 mod command;
 mod errors;
+mod event;
 mod exec;
 mod exec_stream;
 mod logging;
@@ -11,6 +12,7 @@ pub use command::{
     BackendCommandArgument, BackendCommandOutcome, BackendCommandRegistry, BackendCommandSpec,
 };
 pub use errors::BackendScriptError;
+pub use event::{BackendEventRegistry, BackendEventSpec};
 pub use exec_stream::{
     StreamEvent, StreamEventKind, StreamExitStatus, StreamHandle, StreamId, StreamLine,
     StreamState, StreamStatus,

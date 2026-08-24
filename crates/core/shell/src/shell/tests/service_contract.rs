@@ -455,6 +455,42 @@ fn backend_interface_event_drops_invalid_payload_with_diagnostic() {
 }
 
 #[test]
+fn stale_backend_interface_event_generation_is_dropped_before_delivery() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    shell
+        .interfaces
+        .register_contract(test_contract("mesh.audio"));
+    let (mut slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    slot.generation = 7;
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+    let events = Arc::new(Mutex::new(Vec::new()));
+    shell.register_component(Box::new(RecordingComponent::new(events.clone())));
+
+    shell
+        .broadcast_backend_interface_event_at_generation(
+            "mesh.audio".to_string(),
+            "@mesh/pipewire-audio".to_string(),
+            "VolumeChanged".to_string(),
+            serde_json::json!({ "device_id": "default", "level": 42.0 }),
+            6,
+        )
+        .unwrap();
+    assert!(events.lock().unwrap().is_empty());
+
+    shell
+        .broadcast_backend_interface_event_at_generation(
+            "mesh.audio".to_string(),
+            "@mesh/pipewire-audio".to_string(),
+            "VolumeChanged".to_string(),
+            serde_json::json!({ "device_id": "default", "level": 42.0 }),
+            7,
+        )
+        .unwrap();
+    assert_eq!(events.lock().unwrap().len(), 1);
+}
+
+#[test]
 fn terminal_provider_interface_events_are_dropped_after_stop() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();

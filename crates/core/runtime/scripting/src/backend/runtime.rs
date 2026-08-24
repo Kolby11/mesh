@@ -1,6 +1,7 @@
 use super::command::{
     BackendCommandOutcome, BackendCommandRegistry, command_error_result, command_result_from_lua,
 };
+use super::event::BackendEventRegistry;
 use super::exec::{
     ExecService, ExecutableCapabilityPolicy, exec_denied_to_lua, missing_exec_capability,
     missing_exec_stream_capability, run_exec,
@@ -11,6 +12,7 @@ use super::exec_stream::{
 };
 use super::logging::log_message;
 use super::{BackendScriptError, MIN_POLL_INTERVAL_MS};
+use crate::operation::{release_side_effect, reserve_side_effect};
 use crate::policy::RuntimePolicy;
 use crate::storage::{ScopedStorage, StorageManager, StorageScope, create_lua_storage_table};
 use crate::util::{default_runtime_storage_root, is_named_event_channel};
@@ -56,12 +58,25 @@ pub struct BackendScriptContext {
     script_loaded: bool,
     stop_attempted: bool,
     command_registry: Option<BackendCommandRegistry>,
+    event_registry: Option<BackendEventRegistry>,
+    generation: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BackendScriptEvent {
     pub name: String,
     pub payload: JsonValue,
+    pub generation: u64,
+}
+
+impl BackendScriptEvent {
+    pub(crate) fn queued_output_bytes(&self) -> usize {
+        serde_json::to_vec(&serde_json::json!({
+            "name": &self.name,
+            "payload": &self.payload,
+        }))
+        .map_or(0, |bytes| bytes.len())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -166,6 +181,8 @@ impl BackendScriptContext {
             script_loaded: false,
             stop_attempted: false,
             command_registry: None,
+            event_registry: None,
+            generation: 0,
         }
     }
 
@@ -178,6 +195,21 @@ impl BackendScriptContext {
 
     pub fn command_registry(&self) -> Option<&BackendCommandRegistry> {
         self.command_registry.as_ref()
+    }
+
+    /// Install the provider-owned event registry before the Lua host is
+    /// initialized. It is immutable for the lifetime of this runtime
+    /// generation and is consulted by both `emit_event` and `self.Event:fire`.
+    pub fn set_event_registry(&mut self, registry: BackendEventRegistry) {
+        self.event_registry = Some(registry);
+    }
+
+    pub fn event_registry(&self) -> Option<&BackendEventRegistry> {
+        self.event_registry.as_ref()
+    }
+
+    pub fn set_generation(&mut self, generation: u64) {
+        self.generation = generation;
     }
 
     pub(super) fn ensure_lua(&mut self) -> &Lua {
@@ -646,7 +678,11 @@ impl BackendScriptContext {
 
     pub fn drain_events(&self) -> Vec<BackendScriptEvent> {
         let events = std::mem::take(&mut self.runtime.lock().unwrap().pending_events);
-        self.policy.budget().release_queue(events.len());
+        let bytes = events
+            .iter()
+            .map(BackendScriptEvent::queued_output_bytes)
+            .sum();
+        release_side_effect(&self.policy.budget(), events.len(), bytes);
         events
     }
 
@@ -800,28 +836,38 @@ impl BackendScriptContext {
 
         let runtime = Arc::clone(&self.runtime);
         let resources_for_event = resources.clone();
+        let event_registry = self.event_registry.clone();
+        let generation = self.generation;
         service.set(
             "emit_event",
             self.ensure_lua().create_function(
                 move |lua, (name, payload): (String, Option<LuaValue>)| {
                     let payload = match payload {
                         Some(value) => lua.from_value::<JsonValue>(value)?,
-                        None => JsonValue::Null,
+                        None => JsonValue::Object(serde_json::Map::new()),
                     };
-                    let output_bytes = serde_json::to_vec(&payload)
-                        .map_err(mlua::Error::external)?
-                        .len();
-                    resources_for_event
-                        .reserve_output(output_bytes)
-                        .map_err(|error| mlua::Error::external(error.to_string()))?;
-                    resources_for_event
-                        .reserve_queue()
-                        .map_err(|error| mlua::Error::external(error.to_string()))?;
+                    if let Some(registry) = &event_registry {
+                        registry
+                            .validate_payload(&name, &payload)
+                            .map_err(mlua::Error::runtime)?;
+                    }
+                    let output_bytes = serde_json::to_vec(&serde_json::json!({
+                        "name": &name,
+                        "payload": &payload,
+                    }))
+                    .map_err(mlua::Error::external)?
+                    .len();
+                    reserve_side_effect(&resources_for_event, output_bytes)
+                        .map_err(mlua::Error::external)?;
                     runtime
                         .lock()
                         .unwrap()
                         .pending_events
-                        .push(BackendScriptEvent { name, payload });
+                        .push(BackendScriptEvent {
+                            name,
+                            payload,
+                            generation,
+                        });
                     Ok(())
                 },
             )?,
@@ -1006,9 +1052,14 @@ impl BackendScriptContext {
         let mut runtime = self.runtime.lock().unwrap();
         runtime.pending_emit = None;
         let event_count = runtime.pending_events.len();
+        let event_bytes = runtime
+            .pending_events
+            .iter()
+            .map(BackendScriptEvent::queued_output_bytes)
+            .sum();
         runtime.pending_events.clear();
         drop(runtime);
-        self.policy.budget().release_queue(event_count);
+        release_side_effect(&self.policy.budget(), event_count, event_bytes);
         let mut runtime = self.runtime.lock().unwrap();
         runtime.current_payload = payload;
     }
@@ -1075,7 +1126,9 @@ impl BackendScriptContext {
         current_self.set("storage", storage)?;
         let runtime = Arc::clone(&self.runtime);
         let resources = self.policy.budget();
+        let generation = self.generation;
         let self_events_meta = self.ensure_lua().create_table()?;
+        let event_registry = self.event_registry.clone();
         self_events_meta.set(
             "__index",
             self.ensure_lua()
@@ -1091,6 +1144,8 @@ impl BackendScriptContext {
                         &key,
                         Arc::clone(&runtime),
                         resources.clone(),
+                        event_registry.clone(),
+                        generation,
                     )?;
                     table.set(key.as_str(), channel.clone())?;
                     Ok(LuaValue::Table(channel))
@@ -1175,6 +1230,8 @@ fn create_backend_event_channel(
     event_name: &str,
     runtime: Arc<Mutex<BackendRuntime>>,
     resources: crate::policy::ResourceBudget,
+    event_registry: Option<BackendEventRegistry>,
+    generation: u64,
 ) -> mlua::Result<Table> {
     let channel = lua.create_table()?;
     let subscribers = lua.create_table()?;
@@ -1192,22 +1249,26 @@ fn create_backend_event_channel(
     channel.set("on", channel.get::<Function>("subscribe")?)?;
 
     let fire_event_name = event_name.to_string();
+    let fire_registry = event_registry;
     channel.set(
         "fire",
         lua.create_function(move |lua, (table, payload): (Table, Option<LuaValue>)| {
             let payload = match payload {
                 Some(value) => lua.from_value::<JsonValue>(value)?,
-                None => JsonValue::Null,
+                None => JsonValue::Object(serde_json::Map::new()),
             };
-            let output_bytes = serde_json::to_vec(&payload)
-                .map_err(mlua::Error::external)?
-                .len();
-            resources
-                .reserve_output(output_bytes)
-                .map_err(|error| mlua::Error::external(error.to_string()))?;
-            resources
-                .reserve_queue()
-                .map_err(|error| mlua::Error::external(error.to_string()))?;
+            if let Some(registry) = &fire_registry {
+                registry
+                    .validate_payload(&fire_event_name, &payload)
+                    .map_err(mlua::Error::runtime)?;
+            }
+            let output_bytes = serde_json::to_vec(&serde_json::json!({
+                "name": &fire_event_name,
+                "payload": &payload,
+            }))
+            .map_err(mlua::Error::external)?
+            .len();
+            reserve_side_effect(&resources, output_bytes).map_err(mlua::Error::external)?;
             let subscribers: Table = table.get("__subscribers")?;
             dispatch_backend_event_subscribers(
                 &subscribers,
@@ -1221,6 +1282,7 @@ fn create_backend_event_channel(
                 .push(BackendScriptEvent {
                     name: fire_event_name.clone(),
                     payload,
+                    generation,
                 });
             Ok(())
         })?,

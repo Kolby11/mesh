@@ -531,12 +531,14 @@ impl Shell {
                 provider_id,
                 name,
                 payload,
+                generation,
             } => {
-                pending.extend(self.broadcast_backend_interface_event(
+                pending.extend(self.broadcast_backend_interface_event_at_generation(
                     interface,
                     provider_id,
                     name,
                     payload,
+                    generation,
                 )?);
             }
             ShellMessage::BackendRestartDue {
@@ -715,6 +717,7 @@ mod tests {
             provider_id: "@mesh/pipewire-audio".to_string(),
             name: "VolumeChanged".to_string(),
             payload: serde_json::json!({ "value": 1 }),
+            generation: 0,
         });
         coalesced.push(backend_update("mesh.audio", "@mesh/pipewire-audio", 2));
 

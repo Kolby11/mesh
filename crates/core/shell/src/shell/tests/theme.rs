@@ -236,6 +236,7 @@ fn shell_theme_backend_candidate_receives_resolved_active_theme_setting() {
         capabilities: Vec::new(),
         settings: serde_json::json!({}),
         command_registry: None,
+        event_registry: None,
     };
 
     shell.apply_shell_runtime_settings(&mut candidate);
@@ -269,6 +270,7 @@ fn shell_theme_fallback_backend_restart_keeps_latest_state_on_resolved_theme() {
         capabilities: Vec::new(),
         settings: serde_json::json!({}),
         command_registry: None,
+        event_registry: None,
     };
     shell.apply_shell_runtime_settings(&mut candidate);
     let current_theme = candidate

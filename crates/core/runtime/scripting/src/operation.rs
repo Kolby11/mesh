@@ -6,7 +6,9 @@
 //! dedicated helper and `mesh.events.publish` from acquiring different
 //! authorization rules.
 
+use crate::policy::ResourceBudget;
 use mesh_core_capability::{Capability, CapabilitySet};
+use mesh_core_service::{InterfaceCatalog, InterfaceContract, InterfaceMethod, TypeExpr};
 use serde_json::{Map, Value};
 use std::fmt;
 
@@ -134,6 +136,255 @@ impl OperationRegistry {
         validate_payload(channel, operation, payload)?;
         Ok(Some(operation))
     }
+
+    /// Authorize an event against the immutable interface catalog visible to a
+    /// frontend context. The legacy shell registry only knows about `shell.*`
+    /// operations; this companion decision keeps service commands on the same
+    /// typed boundary instead of allowing `mesh.events.publish` to forge an
+    /// arbitrary routable channel.
+    pub fn authorize_event_with_catalog(
+        &self,
+        channel: &str,
+        payload: &Value,
+        module_id: &str,
+        capabilities: &CapabilitySet,
+        catalog: &InterfaceCatalog,
+    ) -> Result<Option<ShellOperation>, OperationRejection> {
+        if channel.starts_with("shell.") {
+            return self.authorize_event(channel, payload, module_id, capabilities);
+        }
+
+        if channel == "mesh.service.cancel" {
+            let object = payload
+                .as_object()
+                .ok_or_else(|| malformed(channel, "payload must be an object"))?;
+            expect_keys(object, &["interface", "call_id"])
+                .map_err(|reason| malformed(channel, &reason))?;
+            let interface = require_string(object, "interface")
+                .map_err(|reason| malformed(channel, &reason))?;
+            object
+                .get("call_id")
+                .and_then(Value::as_u64)
+                .filter(|id| *id != 0)
+                .ok_or_else(|| malformed(channel, "field 'call_id' must be a positive integer"))?;
+            if !interface.starts_with("mesh.")
+                || catalog.resolve(interface, None).contract.is_none()
+            {
+                return Err(OperationRejection::UnknownChannel {
+                    channel: channel.to_string(),
+                });
+            }
+            let service_name = interface.strip_prefix("mesh.").unwrap_or(interface);
+            let capability = Capability::new(format!("service.{service_name}.control"));
+            if !capabilities.is_granted(&capability) {
+                return Err(OperationRejection::Unauthorized {
+                    channel: channel.to_string(),
+                    module_id: module_id.to_string(),
+                    capability: capability.id().to_string(),
+                });
+            }
+            return Ok(None);
+        }
+
+        let Some((interface, method)) = channel.rsplit_once('.') else {
+            return Err(OperationRejection::UnknownChannel {
+                channel: channel.to_string(),
+            });
+        };
+        if !interface.starts_with("mesh.") || interface == "mesh" || method.is_empty() {
+            return Err(OperationRejection::UnknownChannel {
+                channel: channel.to_string(),
+            });
+        }
+        let resolution = catalog.resolve(interface, None);
+        let Some(contract) = resolution.contract.as_deref() else {
+            return Err(OperationRejection::UnknownChannel {
+                channel: channel.to_string(),
+            });
+        };
+        let Some(method_spec) = contract
+            .methods
+            .iter()
+            .find(|candidate| candidate.name == method)
+        else {
+            return Err(OperationRejection::UnknownChannel {
+                channel: channel.to_string(),
+            });
+        };
+        self.authorize_service_call(
+            channel,
+            method_spec,
+            contract,
+            payload,
+            module_id,
+            capabilities,
+        )?;
+        Ok(None)
+    }
+
+    /// Apply the same contract capability and exact payload decision to a
+    /// service proxy call that already resolved its interface method. Keeping
+    /// this decision here means direct `mesh.events.publish` and a typed proxy
+    /// cannot diverge before either one reserves queue resources.
+    pub(crate) fn authorize_service_call(
+        &self,
+        channel: &str,
+        method: &InterfaceMethod,
+        contract: &InterfaceContract,
+        payload: &Value,
+        module_id: &str,
+        capabilities: &CapabilitySet,
+    ) -> Result<(), OperationRejection> {
+        authorize_contract_capabilities(channel, module_id, capabilities, contract, method)?;
+        validate_fields(channel, &method.args, contract, payload)
+    }
+
+    /// Validate an imperative element side effect before it enters the shell
+    /// queue. Element references are already scoped to a component, so this
+    /// boundary validates operation identity and payload shape rather than a
+    /// second capability name.
+    pub(crate) fn authorize_element_action(
+        &self,
+        target: &str,
+        action: &str,
+        args: &Value,
+        options: &Value,
+    ) -> Result<(), OperationRejection> {
+        if target.trim().is_empty() {
+            return Err(malformed("element.action", "target must not be empty"));
+        }
+        if !options.is_null() && !options.is_object() {
+            return Err(malformed("element.action", "options must be an object"));
+        }
+        let Some(arguments) = args.as_array() else {
+            return Err(malformed("element.action", "args must be an array"));
+        };
+        let valid = match action {
+            "focus" | "blur" | "scroll_into_view" | "click" => arguments.is_empty(),
+            "scroll_to" => {
+                (1..=2).contains(&arguments.len())
+                    && arguments.iter().all(|value| value.is_number())
+            }
+            "set_value" => arguments.len() == 1 && arguments[0].is_string(),
+            "set_attribute" => arguments.len() == 2 && arguments[0].is_string(),
+            _ => false,
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err(malformed(
+                "element.action",
+                &format!("invalid arguments for element operation '{action}'"),
+            ))
+        }
+    }
+}
+
+fn malformed(channel: &str, reason: &str) -> OperationRejection {
+    OperationRejection::MalformedPayload {
+        channel: channel.to_string(),
+        reason: reason.to_string(),
+    }
+}
+
+fn authorize_contract_capabilities(
+    channel: &str,
+    module_id: &str,
+    capabilities: &CapabilitySet,
+    contract: &InterfaceContract,
+    method: &InterfaceMethod,
+) -> Result<(), OperationRejection> {
+    let service_name = contract
+        .interface
+        .strip_prefix("mesh.")
+        .unwrap_or(&contract.interface);
+    let declared = contract
+        .capabilities
+        .methods
+        .get(&method.name)
+        .filter(|required| !required.is_empty());
+    if let Some(required) = declared {
+        for capability in required {
+            if !capabilities.is_granted(&Capability::new(capability)) {
+                return Err(OperationRejection::Unauthorized {
+                    channel: channel.to_string(),
+                    module_id: module_id.to_string(),
+                    capability: capability.clone(),
+                });
+            }
+        }
+    } else {
+        let capability = format!("service.{service_name}.control");
+        if !capabilities.is_granted(&Capability::new(&capability)) {
+            return Err(OperationRejection::Unauthorized {
+                channel: channel.to_string(),
+                module_id: module_id.to_string(),
+                capability,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_fields(
+    channel: &str,
+    fields: &[mesh_core_service::InterfaceArgument],
+    contract: &InterfaceContract,
+    payload: &Value,
+) -> Result<(), OperationRejection> {
+    let object = payload
+        .as_object()
+        .ok_or_else(|| malformed(channel, "payload must be an object"))?;
+    for field in fields {
+        let value = match object.get(&field.name) {
+            Some(value) => value,
+            None if field.arg_type.trim().ends_with('?') => continue,
+            None => {
+                return Err(malformed(
+                    channel,
+                    &format!("missing required field '{}'", field.name),
+                ));
+            }
+        };
+        let value_type = TypeExpr::parse(&field.arg_type).map_err(|error| {
+            malformed(
+                channel,
+                &format!("invalid type for '{}': {error}", field.name),
+            )
+        })?;
+        if !value_type.matches_with_types(value, &contract.types) {
+            return Err(malformed(
+                channel,
+                &format!("field '{}' expected {}", field.name, field.arg_type),
+            ));
+        }
+    }
+    if let Some(unknown) = object
+        .keys()
+        .find(|key| !fields.iter().any(|field| field.name == **key))
+    {
+        return Err(malformed(channel, &format!("unexpected field '{unknown}'")));
+    }
+    Ok(())
+}
+
+/// Reserve both the item and its retained serialized bytes as one operation.
+/// If the byte budget rejects the item, the queue reservation is rolled back so
+/// rejected work cannot permanently consume the realm's queue capacity.
+pub(crate) fn reserve_side_effect(resources: &ResourceBudget, bytes: usize) -> Result<(), String> {
+    resources
+        .reserve_queue()
+        .map_err(|error| error.to_string())?;
+    if let Err(error) = resources.reserve_queued_output(bytes) {
+        resources.release_queue(1);
+        return Err(error.to_string());
+    }
+    Ok(())
+}
+
+pub(crate) fn release_side_effect(resources: &ResourceBudget, count: usize, bytes: usize) {
+    resources.release_queue(count);
+    resources.release_queued_output(bytes);
 }
 
 fn definition(
@@ -540,5 +791,18 @@ mod tests {
                 )
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn rejected_side_effect_bytes_do_not_consume_queue_capacity() {
+        let mut config = mesh_core_runtime::SandboxConfig::default();
+        config.queue_budget = 1;
+        config.output_budget = 1;
+        let budget = ResourceBudget::new(config);
+        let _callback = budget.begin_callback();
+
+        assert!(reserve_side_effect(&budget, 2).is_err());
+        assert!(budget.reserve_queue().is_ok());
+        budget.release_queue(1);
     }
 }

@@ -84,6 +84,7 @@ impl ScriptContext {
         let resources = self.realm_policy.budget();
         let module_id = self.module_id.clone();
         let capabilities = self.capabilities.clone();
+        let interface_catalog = self.interface_catalog.clone();
         mesh_core_events
             .set(
                 "publish",
@@ -99,6 +100,7 @@ impl ScriptContext {
                             payload,
                             &module_id,
                             &capabilities,
+                            &interface_catalog,
                             &resources,
                         )
                     })
@@ -158,6 +160,7 @@ impl ScriptContext {
             let pending_side_channels_for_locale = Arc::clone(&self.pending_side_channels);
             let module_id_for_locale = self.module_id.clone();
             let capabilities_for_locale = self.capabilities.clone();
+            let interface_catalog_for_locale = self.interface_catalog.clone();
             let resources_for_locale = self.realm_policy.budget();
             mesh_locale
                 .set(
@@ -171,6 +174,7 @@ impl ScriptContext {
                                 serde_json::json!({ "locale": locale }),
                                 &module_id_for_locale,
                                 &capabilities_for_locale,
+                                &interface_catalog_for_locale,
                                 &resources_for_locale,
                             )
                         })
@@ -239,6 +243,7 @@ impl ScriptContext {
         let pending_side_channels_for_popover = Arc::clone(&self.pending_side_channels);
         let module_id_for_popover = self.module_id.clone();
         let capabilities_for_popover = self.capabilities.clone();
+        let interface_catalog_for_popover = self.interface_catalog.clone();
         let resources_for_popover = self.realm_policy.budget();
         mesh_popover
             .set(
@@ -305,6 +310,7 @@ impl ScriptContext {
                             payload,
                             &module_id_for_popover,
                             &capabilities_for_popover,
+                            &interface_catalog_for_popover,
                             &resources_for_popover,
                         )
                     })
@@ -316,6 +322,7 @@ impl ScriptContext {
         let pending_side_channels_for_popover = Arc::clone(&self.pending_side_channels);
         let module_id_for_popover = self.module_id.clone();
         let capabilities_for_popover = self.capabilities.clone();
+        let interface_catalog_for_popover = self.interface_catalog.clone();
         let resources_for_popover = self.realm_policy.budget();
         mesh_popover
             .set(
@@ -352,6 +359,7 @@ impl ScriptContext {
                             }),
                             &module_id_for_popover,
                             &capabilities_for_popover,
+                            &interface_catalog_for_popover,
                             &resources_for_popover,
                         )
                     })
@@ -367,22 +375,28 @@ impl ScriptContext {
         payload: Value,
         module_id: &str,
         capabilities: &mesh_core_capability::CapabilitySet,
+        interface_catalog: &mesh_core_service::InterfaceCatalog,
         resources: &crate::policy::ResourceBudget,
     ) -> Result<(), LuaError> {
         OperationRegistry::builtin()
-            .authorize_event(&channel, &payload, module_id, capabilities)
+            .authorize_event_with_catalog(
+                &channel,
+                &payload,
+                module_id,
+                capabilities,
+                interface_catalog,
+            )
             .map_err(|rejection| {
                 LuaError::external(ScriptError::OperationRejected(rejection.to_string()))
             })?;
-        let output_bytes = serde_json::to_vec(&payload)
-            .map_err(LuaError::external)?
-            .len();
-        resources
-            .reserve_output(output_bytes)
-            .map_err(|error| LuaError::external(error.to_string()))?;
-        resources
-            .reserve_queue()
-            .map_err(|error| LuaError::external(error.to_string()))?;
+        let output_bytes = serde_json::to_vec(&serde_json::json!({
+            "channel": &channel,
+            "payload": &payload,
+        }))
+        .map_err(LuaError::external)?
+        .len();
+        crate::operation::reserve_side_effect(resources, output_bytes)
+            .map_err(LuaError::external)?;
         pending_side_channels.store(true, Ordering::Release);
         published_events.lock().unwrap().push(PublishedEvent {
             channel,
