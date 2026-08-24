@@ -19,10 +19,28 @@ pub struct DebugSnapshot {
     pub backend_runtimes: Vec<BackendRuntimeEntry>,
     pub method_calls: Vec<MethodCallEntry>,
     pub health: Vec<HealthEntry>,
+    /// Structured diagnostics are omitted from the wire payload when empty so
+    /// existing consumers retain the compact health-only shape.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<DebugDiagnosticEntry>,
     pub keybinds: Vec<DebugKeybindEntry>,
     pub active_surfaces: Vec<String>,
     pub benchmarks: DebugBenchmarkSnapshot,
     pub profiling: Option<ProfilingSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DebugDiagnosticEntry {
+    pub module_id: String,
+    pub instance_id: Option<String>,
+    pub issue_code: String,
+    pub category: mesh_core_diagnostics::DiagnosticCategory,
+    pub severity: mesh_core_diagnostics::IssueSeverity,
+    pub message: String,
+    pub source_path: Option<String>,
+    pub source_span: Option<mesh_core_diagnostics::DiagnosticSourceSpan>,
+    pub count: u64,
+    pub active: bool,
 }
 
 pub const DEBUG_INTERFACE: &str = "mesh.debug";

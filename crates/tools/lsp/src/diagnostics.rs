@@ -1,6 +1,6 @@
 use mesh_core_component::parser::ParseError;
 use mesh_core_elements::{BASE_ELEMENT_FIELDS, element_contract_for_tag, element_type_for_tag};
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
 use crate::document::{Document, ElementRefAliasTarget, block_content_range, extract_block_text};
 
@@ -76,6 +76,10 @@ fn diagnostics_from_error(err: &ParseError, source: &str) -> Vec<Diagnostic> {
         severity: Some(severity),
         message,
         source: Some("mesh-tools-lsp".to_string()),
+        code: Some(NumberOrString::String(format!(
+            "mesh.parse.{}",
+            err.category().as_str()
+        ))),
         ..Default::default()
     }]
 }
@@ -112,6 +116,7 @@ fn diagnostics_from_script_refs(doc: &Document) -> Vec<Diagnostic> {
                     "Unknown element ref `refs.{ref_name}`. Add `ref=\"{ref_name}\"` to a template element."
                 ),
                 source: Some("mesh-tools-lsp".to_string()),
+                code: Some(NumberOrString::String("mesh.script.unknown_ref".to_string())),
                 ..Default::default()
             });
             offset = name_end;
@@ -134,6 +139,9 @@ fn diagnostics_from_script_refs(doc: &Document) -> Vec<Diagnostic> {
                             element_ref.element_type
                         ),
                         source: Some("mesh-tools-lsp".to_string()),
+                        code: Some(NumberOrString::String(
+                            "mesh.script.unknown_member".to_string(),
+                        )),
                         ..Default::default()
                     });
                 }
@@ -177,6 +185,9 @@ fn diagnostics_from_script_refs(doc: &Document) -> Vec<Diagnostic> {
                         element_ref.element_type
                     ),
                     source: Some("mesh-tools-lsp".to_string()),
+                    code: Some(NumberOrString::String(
+                        "mesh.script.unknown_member".to_string(),
+                    )),
                     ..Default::default()
                 });
             }
@@ -213,6 +224,9 @@ fn diagnostics_from_quoted_expression_attrs(doc: &Document) -> Vec<Diagnostic> {
                 severity: Some(DiagnosticSeverity::WARNING),
                 message: "Quoted expression attribute can be written as `attr={expr}` instead of `attr=\"{expr}\"`.".to_string(),
                 source: Some("mesh-tools-lsp".to_string()),
+                code: Some(NumberOrString::String(
+                    "mesh.template.quoted_expression".to_string(),
+                )),
                 ..Default::default()
             });
         }
@@ -436,5 +450,19 @@ function onTap() end
 
         assert_eq!(range.start, Position::new(0, 3));
         assert_eq!(range.end, Position::new(0, 4));
+    }
+
+    #[test]
+    fn parse_diagnostics_preserve_their_category_code() {
+        let source = "<template><text /></template>\n<style>oops</style>";
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source.into());
+        let diagnostics = from_document(&doc);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].code,
+            Some(NumberOrString::String("mesh.parse.style".to_string()))
+        );
+        assert!(diagnostics[0].range.start.line > 0);
     }
 }

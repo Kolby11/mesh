@@ -63,6 +63,44 @@ impl Shell {
             })
             .collect();
 
+        let mut diagnostics = self
+            .diagnostics
+            .snapshot()
+            .into_iter()
+            .flat_map(|module| module.instances)
+            .flat_map(|instance| instance.issues)
+            .map(debug_diagnostic_from_issue)
+            .collect::<Vec<_>>();
+        let catalog = self.frontend_catalog.snapshot().catalog;
+        diagnostics.extend(catalog.diagnostics.iter().map(|diagnostic| {
+            DebugDiagnosticEntry {
+                module_id: diagnostic.module_id.clone(),
+                instance_id: diagnostic.contribution_id.clone(),
+                issue_code: format!(
+                    "frontend-source:{}:{}",
+                    diagnostic.category.as_str(),
+                    diagnostic.source_path.display()
+                ),
+                category: diagnostic.category,
+                severity: mesh_core_diagnostics::IssueSeverity::Error,
+                message: diagnostic.message.clone(),
+                source_path: diagnostic
+                    .source_file
+                    .as_ref()
+                    .or(Some(&diagnostic.source_path))
+                    .map(|path| path.display().to_string()),
+                source_span: diagnostic.source_span,
+                count: 1,
+                active: true,
+            }
+        }));
+        diagnostics.sort_by(|left, right| {
+            left.module_id
+                .cmp(&right.module_id)
+                .then_with(|| left.issue_code.cmp(&right.issue_code))
+                .then_with(|| left.message.cmp(&right.message))
+        });
+
         let mut keybinds = self
             .components
             .iter()
@@ -128,6 +166,7 @@ impl Shell {
             backend_runtimes,
             method_calls: self.debug.recent_method_calls.clone(),
             health,
+            diagnostics,
             keybinds,
             active_surfaces,
             benchmarks,
@@ -152,6 +191,23 @@ impl Shell {
             ),
             payload: debug_service_payload(&self.debug, snapshot),
         }
+    }
+}
+
+fn debug_diagnostic_from_issue(
+    issue: mesh_core_diagnostics::DiagnosticIssue,
+) -> DebugDiagnosticEntry {
+    DebugDiagnosticEntry {
+        module_id: issue.module_id,
+        instance_id: (!issue.instance_id.is_empty()).then_some(issue.instance_id),
+        issue_code: issue.issue_code,
+        category: issue.category,
+        severity: issue.severity,
+        message: issue.message,
+        source_path: issue.source_path,
+        source_span: issue.source_span,
+        count: issue.count,
+        active: issue.active,
     }
 }
 

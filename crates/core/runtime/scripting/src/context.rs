@@ -7,7 +7,8 @@ mod state;
 
 pub use element_ref::ElementAction;
 pub use errors::{
-    PublishedEvent, ScriptDiagnostic, ScriptError, ScriptInterfaceImport, ServiceCallCompletion,
+    PublishedEvent, ScriptDiagnostic, ScriptDiagnosticCategory, ScriptError, ScriptInterfaceImport,
+    ServiceCallCompletion,
 };
 pub use runtime::{ScriptContext, SurfaceVm};
 pub use state::{LocaleBoundState, ScriptState};

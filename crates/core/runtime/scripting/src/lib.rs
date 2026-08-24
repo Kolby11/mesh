@@ -26,7 +26,7 @@ pub use backend::{
     BackendScriptContext, BackendScriptError, BackendScriptEvent, StreamLine, StreamState,
 };
 pub use context::{
-    ElementAction, LocaleBoundState, PublishedEvent, ScriptContext, ScriptError,
-    ScriptInterfaceImport, ScriptState, SurfaceVm,
+    ElementAction, LocaleBoundState, PublishedEvent, ScriptContext, ScriptDiagnostic,
+    ScriptDiagnosticCategory, ScriptError, ScriptInterfaceImport, ScriptState, SurfaceVm,
 };
 pub use operation::{OperationRegistry, OperationRejection, ShellOperation};

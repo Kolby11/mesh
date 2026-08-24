@@ -1,4 +1,4 @@
-use super::{ScriptDiagnostic, ScriptError};
+use super::{ScriptDiagnostic, ScriptDiagnosticCategory, ScriptError};
 use mesh_core_service::{InterfaceCatalog, InterfaceResolution};
 use mlua::Value as LuaValue;
 use std::sync::{
@@ -44,6 +44,7 @@ pub(super) fn record_lookup_diagnostic(
     pending_side_channels.store(true, Ordering::Release);
     diagnostics.lock().unwrap().push(ScriptDiagnostic {
         module_id: module_id.to_string(),
+        category: ScriptDiagnosticCategory::InterfaceUnavailable,
         interface: interface.to_string(),
         requested_version: requested_version.map(ToOwned::to_owned),
         reason: reason.to_string(),

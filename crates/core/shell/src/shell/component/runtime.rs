@@ -1,6 +1,6 @@
 use super::diagnostics::record_localized_miss as record_localized_miss_diagnostic;
 use super::*;
-use mesh_core_scripting::ScriptError;
+use mesh_core_scripting::{ScriptDiagnosticCategory, ScriptError};
 
 fn scheduled_handler_target(instance_key: &str, handler: &str) -> HandlerTarget {
     HandlerTarget::embedded(instance_key, handler)
@@ -260,10 +260,30 @@ impl FrontendSurfaceComponent {
             return;
         };
         for diagnostic in runtime.script_ctx.drain_diagnostics() {
-            diagnostics.error(format!(
-                "interface '{}' unavailable for '{}': {}",
-                diagnostic.interface, diagnostic.module_id, diagnostic.reason
-            ));
+            let (category, message) = match diagnostic.category {
+                ScriptDiagnosticCategory::InterfaceUnavailable => (
+                    mesh_core_diagnostics::DiagnosticCategory::Interface,
+                    format!(
+                        "interface '{}' unavailable for '{}': {}",
+                        diagnostic.interface, diagnostic.module_id, diagnostic.reason
+                    ),
+                ),
+                ScriptDiagnosticCategory::Storage => (
+                    mesh_core_diagnostics::DiagnosticCategory::Storage,
+                    format!(
+                        "storage diagnostic for '{}': {}",
+                        diagnostic.module_id, diagnostic.reason
+                    ),
+                ),
+            };
+            diagnostics.record_issue_with_source(
+                format!("script:{}:{}", category.as_str(), diagnostic.interface),
+                category,
+                mesh_core_diagnostics::IssueSeverity::Error,
+                message,
+                None,
+                None,
+            );
         }
     }
 

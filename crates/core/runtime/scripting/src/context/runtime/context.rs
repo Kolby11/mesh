@@ -2,8 +2,8 @@ use super::super::element_ref::{ElementAction, ElementMetricsStore};
 use super::super::lookup::{lua_err, map_lua_error};
 use super::super::state::ServiceContextState;
 use super::super::{
-    PublishedEvent, ScriptDiagnostic, ScriptError, ScriptInterfaceImport, ScriptState,
-    ServiceCallCompletion,
+    PublishedEvent, ScriptDiagnostic, ScriptDiagnosticCategory, ScriptError, ScriptInterfaceImport,
+    ScriptState, ServiceCallCompletion,
 };
 use super::*;
 use crate::pool;
@@ -269,6 +269,7 @@ impl ScriptContext {
             .iter()
             .map(|diagnostic| ScriptDiagnostic {
                 module_id: module_id.clone(),
+                category: ScriptDiagnosticCategory::Storage,
                 interface: "self.storage".to_string(),
                 requested_version: None,
                 reason: diagnostic.reason.clone(),

@@ -9,6 +9,7 @@ license.workspace = true
 allocation-profiling = []
 
 [dependencies]
+mesh-core-diagnostics = { workspace = true }
 mesh-core-resources = { workspace = true }
 serde = { workspace = true }
 serde_json.workspace = true

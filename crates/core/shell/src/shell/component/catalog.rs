@@ -4,8 +4,10 @@ use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
+use mesh_core_diagnostics::{DiagnosticCategory, DiagnosticSourceSpan};
 use mesh_core_frontend::{
-    CompiledFrontendModule, compile_frontend_entrypoint, compile_frontend_module,
+    CompiledFrontendModule, FrontendDiagnosticCategory, compile_frontend_entrypoint,
+    compile_frontend_module,
 };
 use mesh_core_module::Manifest;
 use mesh_core_module::ModuleType;
@@ -13,7 +15,7 @@ use mesh_core_module::lifecycle::ModuleInstance;
 use mesh_core_module::package::{InstalledModuleGraph, ModuleKind, NodeSlotOverride};
 use rayon::prelude::*;
 
-use super::memo;
+use super::{ComponentError, memo};
 use crate::shell::ShellRunError;
 
 #[derive(Debug, Clone, Default)]
@@ -44,15 +46,22 @@ pub(in crate::shell) struct FrontendCatalogDiagnostic {
     pub(in crate::shell) module_id: String,
     pub(in crate::shell) contribution_id: Option<String>,
     pub(in crate::shell) source_path: PathBuf,
+    pub(in crate::shell) source_file: Option<PathBuf>,
+    pub(in crate::shell) category: DiagnosticCategory,
+    pub(in crate::shell) source_span: Option<DiagnosticSourceSpan>,
     pub(in crate::shell) message: String,
 }
 
 impl FrontendCatalogDiagnostic {
     fn module(module_id: &str, source_path: PathBuf, error: &ShellRunError) -> Self {
+        let (category, source_file, source_span) = diagnostic_metadata(error);
         Self {
             module_id: module_id.to_string(),
             contribution_id: None,
             source_path,
+            source_file,
+            category,
+            source_span,
             message: error.to_string(),
         }
     }
@@ -63,12 +72,54 @@ impl FrontendCatalogDiagnostic {
         source_path: PathBuf,
         error: &ShellRunError,
     ) -> Self {
+        let (category, source_file, source_span) = diagnostic_metadata(error);
         Self {
             module_id: module_id.to_string(),
             contribution_id: Some(contribution_id.to_string()),
             source_path,
+            source_file,
+            category,
+            source_span,
             message: error.to_string(),
         }
+    }
+}
+
+fn diagnostic_metadata(
+    error: &ShellRunError,
+) -> (
+    DiagnosticCategory,
+    Option<PathBuf>,
+    Option<DiagnosticSourceSpan>,
+) {
+    match error {
+        ShellRunError::FrontendCompile { source, .. } => (
+            frontend_diagnostic_category(source.category()),
+            source.source_path().map(Path::to_path_buf),
+            source
+                .source_span()
+                .map(|span| DiagnosticSourceSpan::new(span.start, span.end)),
+        ),
+        ShellRunError::FrontendComposition { .. } => (DiagnosticCategory::Validation, None, None),
+        ShellRunError::Component(ComponentError::Script { .. }) => {
+            (DiagnosticCategory::Script, None, None)
+        }
+        _ => (DiagnosticCategory::Runtime, None, None),
+    }
+}
+
+fn frontend_diagnostic_category(category: FrontendDiagnosticCategory) -> DiagnosticCategory {
+    match category {
+        FrontendDiagnosticCategory::Module => DiagnosticCategory::Compilation,
+        FrontendDiagnosticCategory::Source => DiagnosticCategory::Source,
+        FrontendDiagnosticCategory::Syntax => DiagnosticCategory::Parse,
+        FrontendDiagnosticCategory::Template => DiagnosticCategory::Template,
+        FrontendDiagnosticCategory::Style => DiagnosticCategory::Style,
+        FrontendDiagnosticCategory::Props => DiagnosticCategory::Props,
+        FrontendDiagnosticCategory::Semantics => DiagnosticCategory::Semantics,
+        FrontendDiagnosticCategory::I18n => DiagnosticCategory::I18n,
+        FrontendDiagnosticCategory::Import => DiagnosticCategory::Import,
+        FrontendDiagnosticCategory::Validation => DiagnosticCategory::Validation,
     }
 }
 
@@ -1208,6 +1259,28 @@ mod performance_tests {
     use super::*;
     use mesh_core_module::lifecycle::ModuleInstance;
 
+    #[test]
+    fn compile_diagnostics_preserve_category_path_and_span() {
+        let source_path = PathBuf::from("/tmp/frontend/main.mesh");
+        let span = mesh_core_component::SourceSpan::new(8, 14);
+        let error = ShellRunError::FrontendCompile {
+            module_id: "@test/frontend".into(),
+            source: mesh_core_frontend::CompileFrontendError::ParseSource {
+                path: source_path.clone(),
+                span,
+                source: mesh_core_component::ParseError::InvalidStyle {
+                    message: "invalid style".into(),
+                    span,
+                },
+            },
+        };
+
+        let (category, path, diagnostic_span) = diagnostic_metadata(&error);
+        assert_eq!(category, DiagnosticCategory::Style);
+        assert_eq!(path, Some(source_path));
+        assert_eq!(diagnostic_span, Some(DiagnosticSourceSpan::new(8, 14)));
+    }
+
     fn shipped_frontend_modules() -> HashMap<String, ModuleInstance> {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
         std::fs::read_dir(root.join("modules/frontend"))
@@ -1468,6 +1541,11 @@ local audio = require("mesh.audio@>=2.0")
             diagnostic.module_id == module_id
                 && diagnostic.contribution_id.is_none()
                 && diagnostic.source_path == temp.path()
+                && diagnostic.category == mesh_core_diagnostics::DiagnosticCategory::Parse
+                && diagnostic.source_file == Some(temp.path().join("src/main.mesh"))
+                && diagnostic
+                    .source_span
+                    .is_some_and(|span| span.end > span.start)
                 && diagnostic
                     .message
                     .contains("failed to compile frontend module")

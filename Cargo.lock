@@ -1733,6 +1733,7 @@ dependencies = [
 name = "mesh-core-debug"
 version = "0.1.0"
 dependencies = [
+ "mesh-core-diagnostics",
  "mesh-core-resources",
  "serde",
  "serde_json",

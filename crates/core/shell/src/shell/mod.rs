@@ -4,8 +4,8 @@ use mesh_core_config::{
     load_config, resolve_discovery_paths,
 };
 use mesh_core_debug::{
-    BackendRuntimeEntry, DebugOverlayState, DebugSnapshot, HealthEntry, InterfaceEntry,
-    ModuleEntry, ProviderEntry,
+    BackendRuntimeEntry, DebugDiagnosticEntry, DebugOverlayState, DebugSnapshot, HealthEntry,
+    InterfaceEntry, ModuleEntry, ProviderEntry,
 };
 use mesh_core_diagnostics::DiagnosticsCollector;
 use mesh_core_locale::LocaleEngine;

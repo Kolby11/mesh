@@ -5,6 +5,71 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
+use serde::Serialize;
+
+/// Stable categories shared by runtime and debug diagnostics.
+///
+/// Parser/compiler crates intentionally keep their own low-level dependency
+/// boundary, so they convert their typed categories to these values at the
+/// shell boundary. The serialized names are part of the debug/service API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticCategory {
+    Runtime,
+    Script,
+    Interface,
+    Storage,
+    Parse,
+    Template,
+    Style,
+    Props,
+    Semantics,
+    I18n,
+    Import,
+    Compilation,
+    Validation,
+    Source,
+    Lifecycle,
+    Configuration,
+    Resource,
+}
+
+impl DiagnosticCategory {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Runtime => "runtime",
+            Self::Script => "script",
+            Self::Interface => "interface",
+            Self::Storage => "storage",
+            Self::Parse => "parse",
+            Self::Template => "template",
+            Self::Style => "style",
+            Self::Props => "props",
+            Self::Semantics => "semantics",
+            Self::I18n => "i18n",
+            Self::Import => "import",
+            Self::Compilation => "compilation",
+            Self::Validation => "validation",
+            Self::Source => "source",
+            Self::Lifecycle => "lifecycle",
+            Self::Configuration => "configuration",
+            Self::Resource => "resource",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+pub struct DiagnosticSourceSpan {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl DiagnosticSourceSpan {
+    pub const fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HealthStatus {
     Healthy,
@@ -32,7 +97,8 @@ pub struct ModuleMetrics {
     pub health: HealthStatus,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum IssueSeverity {
     Warning,
     Error,
@@ -43,8 +109,11 @@ pub struct DiagnosticIssue {
     pub module_id: String,
     pub instance_id: String,
     pub issue_code: String,
+    pub category: DiagnosticCategory,
     pub severity: IssueSeverity,
     pub message: String,
+    pub source_path: Option<String>,
+    pub source_span: Option<DiagnosticSourceSpan>,
     pub first_seen: SystemTime,
     pub last_seen: SystemTime,
     pub count: u64,
@@ -137,8 +206,47 @@ impl Diagnostics {
         severity: IssueSeverity,
         message: impl Into<String>,
     ) -> bool {
-        let issue_code = issue_code.into();
-        let message = message.into();
+        self.record_issue_inner(
+            issue_code.into(),
+            None,
+            severity,
+            message.into(),
+            None,
+            None,
+        )
+    }
+
+    /// Record an issue with typed category and source metadata. Existing issue
+    /// history remains deduplicated by `issue_code`, while the latest typed
+    /// metadata is refreshed with the message.
+    pub fn record_issue_with_source(
+        &self,
+        issue_code: impl Into<String>,
+        category: DiagnosticCategory,
+        severity: IssueSeverity,
+        message: impl Into<String>,
+        source_path: Option<String>,
+        source_span: Option<DiagnosticSourceSpan>,
+    ) -> bool {
+        self.record_issue_inner(
+            issue_code.into(),
+            Some(category),
+            severity,
+            message.into(),
+            source_path,
+            source_span,
+        )
+    }
+
+    fn record_issue_inner(
+        &self,
+        issue_code: String,
+        category: Option<DiagnosticCategory>,
+        severity: IssueSeverity,
+        message: String,
+        source_path: Option<String>,
+        source_span: Option<DiagnosticSourceSpan>,
+    ) -> bool {
         let now = SystemTime::now();
         let mut state = self.state.lock().unwrap();
         if let Some(issue) = state.issues.get_mut(&issue_code) {
@@ -150,6 +258,15 @@ impl Diagnostics {
                 issue.severity = issue.severity.max(severity);
             }
             issue.message = message;
+            if let Some(category) = category {
+                issue.category = category;
+            }
+            if source_path.is_some() {
+                issue.source_path = source_path;
+            }
+            if source_span.is_some() {
+                issue.source_span = source_span;
+            }
             issue.last_seen = now;
             issue.count = issue.count.saturating_add(1);
             issue.active = true;
@@ -170,8 +287,11 @@ impl Diagnostics {
                 module_id: self.module_id.clone(),
                 instance_id: self.instance_id.clone(),
                 issue_code,
+                category: category.unwrap_or(DiagnosticCategory::Runtime),
                 severity,
                 message,
+                source_path,
+                source_span,
                 first_seen: now,
                 last_seen: now,
                 count: 1,
@@ -202,13 +322,16 @@ impl Diagnostics {
     ) -> bool {
         let component_id = component_id.into();
         let handler_name = handler_name.into();
-        self.record_issue(
+        self.record_issue_with_source(
             format!("handler:{component_id}:{handler_name}"),
+            DiagnosticCategory::Script,
             IssueSeverity::Error,
             format!(
                 "handler '{handler_name}' failed in component '{component_id}': {}",
                 message.into()
             ),
+            None,
+            None,
         )
     }
 
@@ -483,6 +606,36 @@ mod tests {
         assert_eq!(diagnostics.error_count(), 2);
         assert_eq!(diagnostics.active_issues().len(), 2);
         assert!(matches!(diagnostics.health(), HealthStatus::Error(_)));
+        assert_eq!(diagnostics.issues()[0].category, DiagnosticCategory::Script);
+    }
+
+    #[test]
+    fn structured_issue_metadata_survives_deduplication_and_updates() {
+        let diagnostics = Diagnostics::new("@test/frontend");
+        let span = DiagnosticSourceSpan::new(12, 18);
+
+        assert!(diagnostics.record_issue_with_source(
+            "component-parse",
+            DiagnosticCategory::Template,
+            IssueSeverity::Error,
+            "first",
+            Some("/tmp/main.mesh".into()),
+            Some(span),
+        ));
+        assert!(!diagnostics.record_issue_with_source(
+            "component-parse",
+            DiagnosticCategory::Style,
+            IssueSeverity::Error,
+            "updated",
+            Some("/tmp/main.mesh".into()),
+            Some(DiagnosticSourceSpan::new(20, 24)),
+        ));
+
+        let issue = &diagnostics.issues()[0];
+        assert_eq!(issue.category, DiagnosticCategory::Style);
+        assert_eq!(issue.source_path.as_deref(), Some("/tmp/main.mesh"));
+        assert_eq!(issue.source_span, Some(DiagnosticSourceSpan::new(20, 24)));
+        assert_eq!(issue.message, "updated");
     }
 
     #[test]

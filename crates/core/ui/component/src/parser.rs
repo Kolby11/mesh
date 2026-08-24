@@ -8,7 +8,10 @@ mod script;
 mod semantic;
 mod styles;
 
-use crate::{BlockAttribute, ComponentBlock, ComponentFile, ComponentImportTarget, SourceSpan};
+use crate::{
+    BlockAttribute, ComponentBlock, ComponentFile, ComponentImportTarget, ParseDiagnosticCategory,
+    SourceSpan,
+};
 use props::parse_props_at;
 use script::parse_script;
 pub use script::referenced_identifiers;
@@ -68,6 +71,27 @@ pub enum ParseError {
 }
 
 impl ParseError {
+    /// Return the stable category retained by compiler and editor adapters.
+    pub const fn category(&self) -> ParseDiagnosticCategory {
+        match self {
+            Self::UnclosedBlock { .. }
+            | Self::UnexpectedClose { .. }
+            | Self::MissingRequiredBlock { .. }
+            | Self::DuplicateBlock { .. }
+            | Self::InvalidBlockAttributes { .. }
+            | Self::UnsupportedScriptLanguage { .. }
+            | Self::UnexpectedTopLevelContent { .. }
+            | Self::MalformedTopLevelBlock { .. }
+            | Self::UnknownBlock { .. } => ParseDiagnosticCategory::Syntax,
+            Self::InvalidTemplate { .. } => ParseDiagnosticCategory::Template,
+            Self::InvalidStyle { .. } => ParseDiagnosticCategory::Style,
+            Self::InvalidProps { .. } => ParseDiagnosticCategory::Props,
+            Self::InvalidSemantics { .. } => ParseDiagnosticCategory::Semantics,
+            Self::InvalidI18n { .. } => ParseDiagnosticCategory::I18n,
+            Self::InvalidImport { .. } => ParseDiagnosticCategory::Import,
+        }
+    }
+
     /// The source range owned by the diagnostic. A missing template has no
     /// offending token and is intentionally represented by an empty range.
     pub fn span(&self) -> SourceSpan {
@@ -1014,6 +1038,16 @@ mod tests {
         let style_start = source.find("\nbox { opacity").expect("style body");
         let style_end = source.find("\n</style>").expect("style close") + 1;
         assert_eq!(style.span, SourceSpan::new(style_start, style_end));
+    }
+
+    #[test]
+    fn parse_errors_retain_a_typed_category_with_their_source_span() {
+        let source = "<template><text /></template>\n<style>oops</style>";
+        let error = parse_component(source).expect_err("invalid style should be rejected");
+
+        assert_eq!(error.category(), ParseDiagnosticCategory::Style);
+        assert!(error.span().start > source.find("<style>").unwrap());
+        assert!(error.span().end > error.span().start);
     }
 
     #[test]

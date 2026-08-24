@@ -120,6 +120,10 @@ end
     let diagnostics = ctx.drain_diagnostics();
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].interface, "self.storage");
+    assert_eq!(
+        diagnostics[0].category,
+        super::super::ScriptDiagnosticCategory::Storage
+    );
     assert!(diagnostics[0].reason.contains("unsupported storage value"));
 }
 

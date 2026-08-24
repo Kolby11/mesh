@@ -1,8 +1,8 @@
 use crate::CompiledFrontendModule;
 
 use mesh_core_component::{
-    ComponentFile, ComponentImportTarget, PropDef, PropType, PropValue, SourceSpan,
-    parse_component, referenced_identifiers,
+    ComponentFile, ComponentImportTarget, ParseDiagnosticCategory, PropDef, PropType, PropValue,
+    SourceSpan, parse_component, referenced_identifiers,
     template::{Attribute, AttributeValue, TemplateNode},
 };
 use mesh_core_module::{Manifest, ModuleType};
@@ -64,7 +64,66 @@ pub enum CompileFrontendError {
     },
 }
 
+/// Stable categories emitted by frontend compilation. Parser categories are
+/// preserved instead of being flattened into a generic compiler failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FrontendDiagnosticCategory {
+    Module,
+    Source,
+    Syntax,
+    Template,
+    Style,
+    Props,
+    Semantics,
+    I18n,
+    Import,
+    Validation,
+}
+
+impl FrontendDiagnosticCategory {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Module => "module",
+            Self::Source => "source",
+            Self::Syntax => "syntax",
+            Self::Template => "template",
+            Self::Style => "style",
+            Self::Props => "props",
+            Self::Semantics => "semantics",
+            Self::I18n => "i18n",
+            Self::Import => "import",
+            Self::Validation => "validation",
+        }
+    }
+}
+
 impl CompileFrontendError {
+    pub fn category(&self) -> FrontendDiagnosticCategory {
+        match self {
+            Self::NotFrontendModule { .. } | Self::MissingFrontendEntrypoint { .. } => {
+                FrontendDiagnosticCategory::Module
+            }
+            Self::ReadSource { .. } | Self::InvalidSourcePath { .. } => {
+                FrontendDiagnosticCategory::Source
+            }
+            Self::ParseSource { source, .. } => match source.category() {
+                ParseDiagnosticCategory::Syntax => FrontendDiagnosticCategory::Syntax,
+                ParseDiagnosticCategory::Template => FrontendDiagnosticCategory::Template,
+                ParseDiagnosticCategory::Style => FrontendDiagnosticCategory::Style,
+                ParseDiagnosticCategory::Props => FrontendDiagnosticCategory::Props,
+                ParseDiagnosticCategory::Semantics => FrontendDiagnosticCategory::Semantics,
+                ParseDiagnosticCategory::I18n => FrontendDiagnosticCategory::I18n,
+                ParseDiagnosticCategory::Import => FrontendDiagnosticCategory::Import,
+            },
+            Self::ConflictingImportAlias { .. } | Self::ImportCycle { .. } => {
+                FrontendDiagnosticCategory::Import
+            }
+            Self::StandaloneComponentViolation { .. } | Self::UnsupportedPseudoState { .. } => {
+                FrontendDiagnosticCategory::Validation
+            }
+        }
+    }
+
     /// Return the source range associated with a component-level failure.
     /// Filesystem, module-graph, and import-cycle failures intentionally have
     /// no component source range.
@@ -78,6 +137,21 @@ impl CompileFrontendError {
             | Self::ReadSource { .. }
             | Self::InvalidSourcePath { .. }
             | Self::ConflictingImportAlias { .. }
+            | Self::ImportCycle { .. } => None,
+        }
+    }
+
+    /// Return the source file that owns this diagnostic when one is known.
+    pub fn source_path(&self) -> Option<&Path> {
+        match self {
+            Self::ReadSource { path, .. }
+            | Self::ParseSource { path, .. }
+            | Self::InvalidSourcePath { path, .. }
+            | Self::StandaloneComponentViolation { path, .. }
+            | Self::UnsupportedPseudoState { path, .. } => Some(path),
+            Self::ConflictingImportAlias { owner, .. } => Some(owner),
+            Self::NotFrontendModule { .. }
+            | Self::MissingFrontendEntrypoint { .. }
             | Self::ImportCycle { .. } => None,
         }
     }
@@ -1295,6 +1369,7 @@ title = "Default"
 
         assert!(error.to_string().contains("missing_root"));
         assert_eq!(error.source_span(), Some(expected_span));
+        assert_eq!(error.category(), FrontendDiagnosticCategory::Validation);
     }
 
     #[test]

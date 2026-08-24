@@ -4,6 +4,11 @@
 
 ## Now
 
+Typed diagnostic categories and byte source spans now survive component AST,
+frontend compiler, shell catalog/runtime, LSP, and debug serialization paths.
+Runtime interface and storage failures retain distinct categories, and
+compiler diagnostics retain their owning source file and span.
+
 Frontend local component aliases now remain scoped to their canonical owner
 source and target identity. Compiler output no longer publishes an unscoped
 alias index; same-owner collisions are rejected using typed canonical import
@@ -89,8 +94,8 @@ source of truth.
 
 ## Next
 
-Preserve typed diagnostic categories and source spans through AST, compiler,
-shell, LSP, and debug paths (`docs/BACKLOG.md`).
+Prevent stale catalog rollback from overwriting a newer generation using a
+coordinator or compare-and-swap (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

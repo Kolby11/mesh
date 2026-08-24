@@ -22,8 +22,8 @@ use std::path::PathBuf;
 
 pub use accessibility::root_accessibility_role;
 pub use compile::{
-    CompileFrontendError, ImportCyclePath, compile_frontend_entrypoint, compile_frontend_module,
-    is_frontend_module,
+    CompileFrontendError, FrontendDiagnosticCategory, ImportCyclePath, compile_frontend_entrypoint,
+    compile_frontend_module, is_frontend_module,
 };
 pub use render::{
     PreparedComponentStyleRules, build_embedded_widget_tree_from_component,

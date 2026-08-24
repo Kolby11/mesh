@@ -93,6 +93,37 @@ pub struct SourceSpan {
     pub end: usize,
 }
 
+/// The typed source category assigned to parser diagnostics.
+///
+/// This deliberately lives beside the AST rather than in the runtime
+/// diagnostics crate: component parsing is a low-level authoring operation and
+/// must remain usable by compiler and tooling consumers without runtime
+/// dependencies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ParseDiagnosticCategory {
+    Syntax,
+    Template,
+    Style,
+    Props,
+    Semantics,
+    I18n,
+    Import,
+}
+
+impl ParseDiagnosticCategory {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Syntax => "syntax",
+            Self::Template => "template",
+            Self::Style => "style",
+            Self::Props => "props",
+            Self::Semantics => "semantics",
+            Self::I18n => "i18n",
+            Self::Import => "import",
+        }
+    }
+}
+
 impl SourceSpan {
     pub const fn new(start: usize, end: usize) -> Self {
         Self { start, end }

@@ -21,9 +21,25 @@ pub struct ServiceCallCompletion {
     pub result: Value,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptDiagnosticCategory {
+    InterfaceUnavailable,
+    Storage,
+}
+
+impl ScriptDiagnosticCategory {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InterfaceUnavailable => "interface",
+            Self::Storage => "storage",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScriptDiagnostic {
     pub module_id: String,
+    pub category: ScriptDiagnosticCategory,
     pub interface: String,
     pub requested_version: Option<String>,
     pub reason: String,

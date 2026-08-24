@@ -1,6 +1,8 @@
 use super::super::element_ref::ElementAction;
 use super::super::lookup::{lua_err, map_lua_error};
-use super::super::{PublishedEvent, ScriptDiagnostic, ScriptError, ScriptState};
+use super::super::{
+    PublishedEvent, ScriptDiagnostic, ScriptDiagnosticCategory, ScriptError, ScriptState,
+};
 use super::*;
 use crate::storage::create_lua_storage_table;
 use crate::util::is_named_event_channel;
@@ -236,6 +238,7 @@ impl ScriptContext {
                 pending_storage_diagnostics.store(true, Ordering::Release);
                 storage_diagnostics.lock().unwrap().push(ScriptDiagnostic {
                     module_id: storage_module_id.clone(),
+                    category: ScriptDiagnosticCategory::Storage,
                     interface: "self.storage".to_string(),
                     requested_version: None,
                     reason,
@@ -340,6 +343,7 @@ impl ScriptContext {
         if let Err(error) = result {
             self.diagnostics.push(ScriptDiagnostic {
                 module_id: self.module_id.clone(),
+                category: ScriptDiagnosticCategory::Storage,
                 interface: "self.storage".to_string(),
                 requested_version: None,
                 reason: format!("storage persistence failed: {error}"),
