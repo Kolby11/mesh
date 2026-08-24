@@ -14,9 +14,9 @@ use mesh_core_interaction::{
     ScrollbarAxis, collect_focus_traversal, find_click_handler, find_event_handler,
     find_node_bounds_by_key, find_node_by_key, find_node_path_at, find_node_with_bounds_by_key,
     find_nodes_by_keys, find_scrollable_at_with_limits, find_scrollbar_at, is_input_key,
-    is_slider_key, measure_content_size, next_focus_target, node_is_source,
-    pointer_event_handler_hit, pointer_press_hit, scroll_into_view_offsets, scroll_limits,
-    source_element_tag,
+    is_slider_key, measure_content_size, next_focus_target,
+    node_can_receive_target as tree_target_is_eligible, node_is_source, pointer_event_handler_hit,
+    pointer_press_hit, scroll_into_view_offsets, scroll_limits, source_element_tag,
 };
 mod animation;
 mod catalog;
@@ -52,9 +52,9 @@ use mesh_core_component::template::{AttributeValue, TemplateNode};
 use mesh_core_config::TooltipSettings;
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::{
-    FramePhaseStamps, FrameSnapshot, HandlerTarget, IntrinsicLayoutCache, LayoutEngine, NodeId,
-    PerSurfaceLayoutState, PopoverPlacement, StyleContext, StyleResolver, VariableStore,
-    WidgetNode, WindowSurfaceState, element_snapshot_json,
+    FramePhaseStamps, FrameSnapshot, HandlerTarget, InteractionTarget, IntrinsicLayoutCache,
+    LayoutEngine, NodeId, PerSurfaceLayoutState, PopoverPlacement, StyleContext, StyleResolver,
+    VariableStore, WidgetNode, WindowSurfaceState, element_snapshot_json,
 };
 use mesh_core_frontend::{
     CompiledFrontendModule, FrontendRenderMode, compile_frontend_module, root_accessibility_role,
@@ -81,6 +81,19 @@ pub(super) fn find_node_by_id(node: &WidgetNode, node_id: NodeId) -> Option<&Wid
     node.children
         .iter()
         .find_map(|child| find_node_by_id(child, node_id))
+}
+
+pub(super) fn node_can_receive_interaction(
+    tree: &WidgetNode,
+    node_key: &str,
+    interaction: InteractionTarget,
+) -> bool {
+    find_node_by_key(tree, node_key)
+        .is_some_and(|node| tree_target_is_eligible(tree, node.id, interaction))
+}
+
+pub(super) fn node_can_receive_activation(tree: &WidgetNode, node_key: &str) -> bool {
+    node_can_receive_interaction(tree, node_key, InteractionTarget::Pointer)
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

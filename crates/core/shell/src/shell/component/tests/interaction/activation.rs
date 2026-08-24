@@ -76,6 +76,93 @@ end
 }
 
 #[test]
+fn disabled_and_inert_state_changes_cancel_captured_and_focused_activation() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+clicks = 0
+function onClick()
+    clicks = clicks + 1
+end
+</script>
+"#,
+    );
+    component.last_tree = Some(root_with(vec![event_node(
+        "button",
+        "root/0",
+        10.0,
+        10.0,
+        80.0,
+        28.0,
+        &[("click", "onClick")],
+    )]));
+    let theme = default_theme();
+
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::PointerButton {
+                x: 24.0,
+                y: 18.0,
+                button: mesh_core_presentation::PRIMARY_POINTER_BUTTON,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    component
+        .last_tree
+        .as_mut()
+        .expect("retained tree after pointer press")
+        .attributes
+        .insert("inert".into(), "true".into());
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::PointerButton {
+                x: 24.0,
+                y: 18.0,
+                button: mesh_core_presentation::PRIMARY_POINTER_BUTTON,
+                pressed: false,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        runtime_value(&component, "clicks"),
+        Some(serde_json::json!(0))
+    );
+
+    let tree = component
+        .last_tree
+        .as_mut()
+        .expect("retained tree after captured release");
+    tree.attributes.remove("inert");
+    tree.children[0]
+        .attributes
+        .insert("disabled".into(), "true".into());
+    component.focused_key = Some("root/0".into());
+    component
+        .handle_input(
+            &theme,
+            240,
+            160,
+            ComponentInput::KeyReleased {
+                key: "Enter".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        runtime_value(&component, "clicks"),
+        Some(serde_json::json!(0))
+    );
+}
+
+#[test]
 fn keyboard_activation_focused_input_backspace_edits_value() {
     let mut component = test_frontend_component(
         r#"

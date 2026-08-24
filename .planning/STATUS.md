@@ -4,10 +4,14 @@
 
 ## Now
 
-The shared interaction/rendering policy now carries visibility, disabled/inert
+Activation now revalidates live disabled/inert eligibility for descendants,
+captured pointer targets, focused keyboard targets, and synthesized activation
+routes before dispatching handlers.
+
+The shared interaction/rendering policy carries visibility, disabled/inert
 eligibility, target filtering, and one affine transform/clip contract through
-hit testing, focus, scrolling, tooltips, events, paint bounds, and the
-downstream consumers.
+hit testing, focus, scrolling, tooltips, events, paint bounds, and downstream
+consumers.
 
 CSS custom-property resolution, retained explicit/inherited style masks, and
 the canonical generated element schema landed 2026-08-23 — see
@@ -15,8 +19,8 @@ the canonical generated element schema landed 2026-08-23 — see
 
 ## Next
 
-Prevent disabled and inert nodes, including descendants and captured targets,
-from receiving activation (`docs/BACKLOG.md`).
+Preserve keyframe progress across pause/resume and iteration-boundary changes
+(`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

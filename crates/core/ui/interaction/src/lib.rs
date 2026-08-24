@@ -19,6 +19,7 @@ pub use hit_test::{
     is_slider_key, namespace_event_handlers, node_is_source, pointer_event_handler_hit,
     pointer_hit_test, pointer_press_hit, source_element_tag,
 };
+pub use mesh_core_elements::node_can_receive_target;
 pub use scroll::{
     ScrollableHit, ScrollbarAxis, ScrollbarHit, annotate_overflow_node, annotate_overflow_tree,
     find_scrollable_at, find_scrollable_at_with_limits, find_scrollbar_at, measure_content_size,

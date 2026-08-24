@@ -252,7 +252,7 @@ impl FrontendSurfaceComponent {
 
     pub(super) fn normalized_focused_key(&mut self, tree: &WidgetNode) -> Option<String> {
         let focused_key = self.focused_key.clone()?;
-        if find_node_by_key(tree, &focused_key).is_some() {
+        if node_can_receive_interaction(tree, &focused_key, InteractionTarget::Focus) {
             Some(focused_key)
         } else {
             self.input_preedits.clear();

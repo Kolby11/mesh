@@ -335,6 +335,37 @@ pub fn child_eligibility(parent: NodeEligibility, node: &WidgetNode) -> NodeElig
     parent.child(node)
 }
 
+/// Return whether a node can receive a target while retaining all ancestor
+/// eligibility.  Target lookups that already walk through the tree naturally
+/// inherit this policy; captured and key-addressed targets need this explicit
+/// check because they can outlive a state change on the node or one of its
+/// ancestors.
+pub fn node_can_receive_target(
+    root: &WidgetNode,
+    target: crate::tree::NodeId,
+    interaction: InteractionTarget,
+) -> bool {
+    fn visit(
+        node: &WidgetNode,
+        target: crate::tree::NodeId,
+        interaction: InteractionTarget,
+        parent: NodeEligibility,
+    ) -> bool {
+        let policy = parent.child(node);
+        if node.id == target {
+            return policy.allows(interaction);
+        }
+        if !policy.allows(interaction) {
+            return false;
+        }
+        node.children
+            .iter()
+            .any(|child| visit(child, target, interaction, policy))
+    }
+
+    visit(root, target, interaction, NodeEligibility::ROOT)
+}
+
 /// Apply the transform used by the retained painter to an incoming screen
 /// offset. The offset already includes ancestor transforms; this adds only
 /// this node's translation so descendants and interaction walks agree.
@@ -619,5 +650,42 @@ mod tests {
         node.layout.width = 0.0;
         assert!(!node_eligibility(&node).can_target());
         assert!(!node_eligibility(&node).allows(InteractionTarget::Paint));
+    }
+
+    #[test]
+    fn keyed_target_eligibility_rechecks_disabled_and_inert_ancestors() {
+        let mut root = WidgetNode::new("box");
+        root.layout.width = 100.0;
+        root.layout.height = 40.0;
+        let mut parent = WidgetNode::new("box");
+        parent.layout.width = 80.0;
+        parent.layout.height = 30.0;
+        let mut child = WidgetNode::new("button");
+        child.layout.width = 40.0;
+        child.layout.height = 20.0;
+        let child_id = child.id;
+        parent.children.push(child);
+        root.children.push(parent);
+
+        assert!(node_can_receive_target(
+            &root,
+            child_id,
+            InteractionTarget::Pointer
+        ));
+
+        attr(&mut root.children[0], "inert", "true");
+        assert!(!node_can_receive_target(
+            &root,
+            child_id,
+            InteractionTarget::Pointer
+        ));
+
+        attr(&mut root.children[0], "inert", "false");
+        attr(&mut root.children[0].children[0], "disabled", "true");
+        assert!(!node_can_receive_target(
+            &root,
+            child_id,
+            InteractionTarget::Pointer
+        ));
     }
 }

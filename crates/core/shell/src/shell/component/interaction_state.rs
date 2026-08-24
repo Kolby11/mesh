@@ -268,7 +268,7 @@ impl FrontendSurfaceComponent {
         tree: &WidgetNode,
         node_key: &str,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
-        if find_node_by_key(tree, node_key).is_none() {
+        if !node_can_receive_activation(tree, node_key) {
             return Ok(Vec::new());
         }
         let (cx, cy) = find_node_bounds_by_key(tree, node_key, 0.0, 0.0)

@@ -418,12 +418,12 @@ impl FrontendSurfaceComponent {
                                 &["menu-item", "command-item", "preference-row"],
                             ) || node_is_source(target, &["tab", "list-item"])
                             {
-                                requests.extend(
-                                    self.dispatch_resolved_activation_handlers(
-                                        target,
-                                        click_event,
-                                    )?,
-                                );
+                                requests.extend(self.dispatch_resolved_activation_handlers(
+                                    tree,
+                                    &node_key,
+                                    target,
+                                    click_event,
+                                )?);
                             } else if target.event_handlers.contains_key("click") {
                                 requests.extend(self.call_resolved_node_handler(
                                     target,

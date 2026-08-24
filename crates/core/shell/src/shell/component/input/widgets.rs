@@ -368,6 +368,9 @@ impl FrontendSurfaceComponent {
         key: &str,
         click_event: serde_json::Value,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
+        if !node_can_receive_activation(tree, key) {
+            return Ok(Vec::new());
+        }
         let mut requests = Vec::new();
         if find_click_handler(tree, key).is_some() {
             requests.extend(self.call_node_handler(tree, key, "click", &[click_event.clone()])?);
@@ -378,9 +381,14 @@ impl FrontendSurfaceComponent {
 
     pub(in crate::shell::component) fn dispatch_resolved_activation_handlers(
         &mut self,
+        tree: &WidgetNode,
+        node_key: &str,
         node: &WidgetNode,
         click_event: serde_json::Value,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
+        if !node_can_receive_activation(tree, node_key) {
+            return Ok(Vec::new());
+        }
         let mut requests = Vec::new();
         requests.extend(self.call_resolved_node_handler(node, "click", &[click_event.clone()])?);
         requests.extend(self.call_resolved_node_handler(node, "activate", &[click_event])?);
@@ -441,7 +449,7 @@ impl FrontendSurfaceComponent {
         option_key: &str,
         option: &WidgetNode,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
-        if node_disabled(option) {
+        if !node_can_receive_activation(tree, option_key) {
             return Ok(Vec::new());
         }
         let value = option
@@ -490,7 +498,7 @@ impl FrontendSurfaceComponent {
         radio_key: &str,
         radio: &WidgetNode,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
-        if node_disabled(radio) {
+        if !node_can_receive_activation(tree, radio_key) {
             return Ok(Vec::new());
         }
         let value = radio.attributes.get("value").cloned().unwrap_or_default();
@@ -1372,6 +1380,9 @@ impl FrontendSurfaceComponent {
         duration: Duration,
         tap_count: u8,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
+        if !node_can_receive_activation(tree, node_key) {
+            return Ok(Vec::new());
+        }
         let Some((node, bounds)) = find_node_with_bounds_by_key(tree, node_key) else {
             return Ok(Vec::new());
         };
@@ -1397,6 +1408,9 @@ impl FrontendSurfaceComponent {
         node_key: &str,
         point: (f32, f32),
     ) -> Result<Vec<CoreRequest>, ComponentError> {
+        if !node_can_receive_activation(tree, node_key) {
+            return Ok(Vec::new());
+        }
         let Some((node, bounds)) = find_node_with_bounds_by_key(tree, node_key) else {
             return Ok(Vec::new());
         };
@@ -1414,7 +1428,7 @@ impl FrontendSurfaceComponent {
                 "list-item",
             ],
         ) {
-            self.dispatch_resolved_activation_handlers(node, event)
+            self.dispatch_resolved_activation_handlers(tree, node_key, node, event)
         } else if node_has_handler(node, "click") {
             self.call_resolved_node_handler(node, "click", &[event])
         } else {
@@ -1676,6 +1690,9 @@ pub(in crate::shell::component) fn captured_release_key(
     y: f32,
 ) -> Option<String> {
     let down_key = pointer_down_key?;
+    if !node_can_receive_activation(tree, down_key) {
+        return None;
+    }
     if pointer_down_bounds.is_some_and(|bounds| super::point_in_bounds(x, y, bounds)) {
         return Some(down_key.to_owned());
     }
