@@ -20,6 +20,7 @@ pub mod host_api;
 pub mod operation;
 pub(crate) mod policy;
 pub mod pool;
+pub mod session;
 pub mod storage;
 mod util;
 
@@ -34,3 +35,10 @@ pub use context::{
     ScriptDiagnosticCategory, ScriptError, ScriptInterfaceImport, ScriptState, SurfaceVm,
 };
 pub use operation::{OperationRegistry, OperationRejection, ShellOperation};
+pub use session::{
+    ResourceBroker, ResourceKind, ResourceLease, ResourceLimit, RuntimeBackoff, RuntimeEvent,
+    RuntimeFailureDecision, RuntimeHealth, RuntimeHealthState, RuntimeHost, RuntimeLifecycle,
+    RuntimeLifecycleState, RuntimeQuarantine, RuntimeRealm, RuntimeSession, RuntimeSessionConfig,
+    RuntimeSessionError, RuntimeState, RuntimeStateCommit, RuntimeStateTransaction,
+    RuntimeSupervisor,
+};

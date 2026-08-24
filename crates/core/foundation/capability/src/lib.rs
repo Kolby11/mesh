@@ -362,7 +362,7 @@ impl CapabilitySet {
         }
     }
 
-    fn from_ids<I>(ids: I) -> Self
+    pub fn from_ids<I>(ids: I) -> Self
     where
         I: IntoIterator<Item = String>,
     {

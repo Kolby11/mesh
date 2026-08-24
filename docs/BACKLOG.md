@@ -77,8 +77,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md)
 
-- [ ] Introduce a per-module `RuntimeSession` combining realm, host, resource broker, lifecycle, state, supervisor, health, backoff, and quarantine.
-
 ### 12. Rendering and paint
 
 [Audit](../.planning/log/sections/12-rendering-and-paint/improvements.md)

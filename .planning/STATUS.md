@@ -139,8 +139,8 @@ source of truth.
 
 ## Next
 
-Introduce a per-module `RuntimeSession` combining realm, host, resource broker,
-lifecycle, state, supervisor, health, backoff, and quarantine (`docs/BACKLOG.md`).
+Lower asymmetric four-edge borders and four-corner radii correctly
+(`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

@@ -13,7 +13,7 @@ use std::time::Duration;
 const INSTRUCTION_CHECKPOINT: u64 = 1_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ResourceKind {
+pub enum ResourceKind {
     Instruction,
     Output,
     Queue,
@@ -23,7 +23,7 @@ pub(crate) enum ResourceKind {
 }
 
 impl ResourceKind {
-    pub(crate) const fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Instruction => "instruction",
             Self::Output => "output",
@@ -36,9 +36,9 @@ impl ResourceKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ResourceLimit {
-    pub(crate) kind: ResourceKind,
-    pub(crate) limit: u64,
+pub struct ResourceLimit {
+    pub kind: ResourceKind,
+    pub limit: u64,
 }
 
 impl std::fmt::Display for ResourceLimit {

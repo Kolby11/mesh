@@ -1,4 +1,5 @@
 use super::*;
+use crate::RuntimeLifecycleState;
 use mesh_core_service::{
     ContractCapabilities, InterfaceArgument, InterfaceContract, InterfaceEvent,
     parse_contract_version,
@@ -61,10 +62,27 @@ fn audio_event_registry() -> BackendEventRegistry {
 #[test]
 fn loads_poll_interval_from_script() {
     let mut ctx = BackendScriptContext::new("@test/backend");
+    assert_eq!(
+        ctx.session().lifecycle().state(),
+        RuntimeLifecycleState::Created
+    );
     ctx.load_script("function start()\nmesh.service.set_poll_interval(250)\nend")
         .unwrap();
+    assert_eq!(
+        ctx.session().lifecycle().state(),
+        RuntimeLifecycleState::Loaded
+    );
     ctx.call_init().unwrap();
+    assert_eq!(
+        ctx.session().lifecycle().state(),
+        RuntimeLifecycleState::Running
+    );
     assert_eq!(ctx.poll_interval_ms(), 250);
+    ctx.call_stop().unwrap();
+    assert_eq!(
+        ctx.session().lifecycle().state(),
+        RuntimeLifecycleState::Stopped
+    );
 }
 
 #[test]

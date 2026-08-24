@@ -14,11 +14,13 @@ use super::logging::log_message;
 use super::{BackendScriptError, MIN_POLL_INTERVAL_MS};
 use crate::operation::{release_side_effect, reserve_side_effect};
 use crate::policy::RuntimePolicy;
+use crate::session::RuntimeSession;
 use crate::storage::{
     ScopedStorage, StorageManager, StorageScope,
     create_lua_storage_table_with_write_guard_and_charge,
 };
 use crate::util::{default_runtime_storage_root, is_named_event_channel};
+use mesh_core_capability::CapabilitySet;
 use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value as JsonValue;
 use std::collections::HashSet;
@@ -68,6 +70,7 @@ pub struct BackendScriptContext {
     command_registry: Option<BackendCommandRegistry>,
     event_registry: Option<BackendEventRegistry>,
     generation: u64,
+    session: RuntimeSession,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -172,6 +175,11 @@ impl BackendScriptContext {
         let capabilities = capabilities.into_iter().collect::<HashSet<_>>();
         let exec_policy = ExecutableCapabilityPolicy::new(&capabilities);
         let policy = RuntimePolicy::default();
+        let session = RuntimeSession::from_policy(
+            module_id.clone(),
+            CapabilitySet::from_ids(capabilities.iter().cloned()),
+            policy.clone(),
+        );
         let storage =
             StorageManager::new_with_limit(storage_root.into(), policy.storage_budget()).open(
                 StorageScope::backend(module_id.clone(), module_id.clone(), module_id.clone()),
@@ -211,6 +219,7 @@ impl BackendScriptContext {
             command_registry: None,
             event_registry: None,
             generation: 0,
+            session,
         }
     }
 
@@ -238,19 +247,30 @@ impl BackendScriptContext {
 
     pub fn set_generation(&mut self, generation: u64) {
         self.generation = generation;
+        self.session.set_generation(generation);
+    }
+
+    /// The module-owned session that coordinates realm, host identity,
+    /// resource accounting, lifecycle, state, and failure supervision.
+    pub fn session(&self) -> &RuntimeSession {
+        &self.session
+    }
+
+    pub fn session_mut(&mut self) -> &mut RuntimeSession {
+        &mut self.session
     }
 
     pub(super) fn ensure_lua(&mut self) -> Result<&Lua, BackendScriptError> {
         if let Some(ref lua) = self.lua {
             return Ok(lua);
         }
-        let lua = Lua::new();
-        self.policy
-            .install(&lua)
-            .map_err(|error| BackendScriptError::HostSetup {
-                module_id: self.module_id.clone(),
-                message: format!("failed to install sandbox policy: {error}"),
-            })?;
+        let lua =
+            self.session
+                .initialize_realm()
+                .map_err(|error| BackendScriptError::HostSetup {
+                    module_id: self.module_id.clone(),
+                    message: error.to_string(),
+                })?;
         self.lua = Some(lua);
         #[cfg(test)]
         if let Some(message) = self.host_setup_failure.take() {
@@ -336,6 +356,12 @@ impl BackendScriptContext {
             .ok()
             .and_then(|function| function.environment());
         self.script_loaded = true;
+        self.session
+            .mark_loaded()
+            .map_err(|error| BackendScriptError::Runtime {
+                module_id: self.module_id.clone(),
+                message: error.to_string(),
+            })?;
         tracing::info!("loaded backend script for {}", self.module_id);
         Ok(())
     }
@@ -343,6 +369,12 @@ impl BackendScriptContext {
     /// Call the backend script's `start(self)` startup entrypoint once after load.
     pub fn call_init(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
         let _budget = self.policy.begin_callback();
+        self.session
+            .begin_start()
+            .map_err(|error| BackendScriptError::Runtime {
+                module_id: self.module_id.clone(),
+                message: error.to_string(),
+            })?;
         self.reset_for_call(JsonValue::Null);
         let globals = self.script_environment()?;
         let entrypoint = globals.get::<Function>("start").map_err(|_| {
@@ -359,13 +391,24 @@ impl BackendScriptContext {
                 })?;
         self.host_side_effects_enabled
             .store(true, Ordering::Release);
-        entrypoint
-            .call::<()>(current_self)
-            .map_err(|err| BackendScriptError::Runtime {
-                module_id: self.module_id.clone(),
-                message: err.to_string(),
-            })?;
-        self.take_service_state_snapshot()
+        match entrypoint.call::<()>(current_self) {
+            Ok(()) => {
+                self.session
+                    .mark_running()
+                    .map_err(|error| BackendScriptError::Runtime {
+                        module_id: self.module_id.clone(),
+                        message: error.to_string(),
+                    })?;
+                self.take_service_state_snapshot()
+            }
+            Err(error) => {
+                self.session.record_failure(error.to_string());
+                Err(BackendScriptError::Runtime {
+                    module_id: self.module_id.clone(),
+                    message: error.to_string(),
+                })
+            }
+        }
     }
 
     /// Call the backend script's optional `stop(self)` lifecycle hook.
@@ -374,6 +417,12 @@ impl BackendScriptContext {
             return Ok(());
         }
         self.stop_attempted = true;
+        self.session
+            .begin_stop()
+            .map_err(|error| BackendScriptError::Runtime {
+                module_id: self.module_id.clone(),
+                message: error.to_string(),
+            })?;
         self.host_side_effects_enabled
             .store(true, Ordering::Release);
         let _budget = self.policy.begin_callback();
@@ -401,6 +450,12 @@ impl BackendScriptContext {
             })()
         };
         self.flush_storage();
+        self.session
+            .finish_stop()
+            .map_err(|error| BackendScriptError::Runtime {
+                module_id: self.module_id.clone(),
+                message: error.to_string(),
+            })?;
         result
     }
 
