@@ -62,7 +62,9 @@ use surface_layout::{
 };
 pub use types::{
     ChildSurfaceDiagnostic, ComponentContext, ComponentError, ComponentInput, CoreEvent,
-    CoreRequest, KeyModifiers, PopoverSurfaceRelationship, PopoverTriggerReference, ServiceEvent,
+    CoreRequest, FrontendFrame, FrontendFrameEffects, FrontendFrameError, FrontendFrameRevision,
+    FrontendFrameRevisions, FrontendInvalidation, FrontendPaintMetadata, FrontendServiceSnapshot,
+    KeyModifiers, PopoverSurfaceRelationship, PopoverTriggerReference, ServiceEvent,
     ServiceInterfaceEventSubscription, ServiceObservationSummary, ShellComponent, SurfaceExtent,
     SurfaceId, TabFocusTarget,
 };

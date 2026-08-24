@@ -6,8 +6,10 @@ use super::service::{
 use super::surface_layout::{SurfaceLayoutSettings, resolve_frontend_module_settings_with_props};
 use super::types::{
     ChildSurfaceDiagnostic, ChildSurfaceKind, ChildSurfaceRequest, ComponentContext,
-    ComponentError, ComponentInput, ComponentProfilingRecord, CoreEvent, CoreRequest, KeyModifiers,
-    ServiceEvent, ShellComponent, SurfaceExtent, TabFocusTarget,
+    ComponentError, ComponentInput, ComponentProfilingRecord, CoreEvent, CoreRequest,
+    FrontendFrame, FrontendFrameEffects, FrontendFrameRevisions, FrontendInvalidation,
+    FrontendPaintMetadata, FrontendServiceSnapshot, KeyModifiers, ServiceEvent, ShellComponent,
+    SurfaceExtent, TabFocusTarget,
 };
 use mesh_core_config::SettingsStore;
 use mesh_core_interaction::{
@@ -766,6 +768,9 @@ pub(super) struct FrontendSurfaceComponent {
     /// Renderer-neutral phase contract shared by input, state, style,
     /// layout, animation, paint, and semantic publication.
     pub(super) interaction_frame: InteractionFrame,
+    /// Monotonic revision of service observations delivered to this surface.
+    /// Payloads themselves remain in capability-filtered runtime state.
+    service_revision: Cell<u64>,
     pointer_down_id: Option<NodeId>,
     pointer_down_bounds: Option<(f32, f32, f32, f32)>,
     pointer_down_target: Option<input::PressedTargetSnapshot>,
@@ -912,6 +917,11 @@ pub(super) struct FrontendSurfaceComponent {
     /// copy; consumers that need a coherent frame use this snapshot instead.
     last_frame_snapshot: Option<FrameSnapshot>,
     frame_revision: u64,
+    /// The last complete frontend-to-shell publication. It is replaced only
+    /// after tree, invalidation, diagnostics, service observations, and
+    /// effects have been assembled from one completed paint boundary.
+    last_frontend_frame: Option<FrontendFrame>,
+    pending_frontend_effects: FrontendFrameEffects,
     intrinsic_layout_cache: IntrinsicLayoutCache,
     layout_state: PerSurfaceLayoutState,
     pub(in crate::shell::component) retained_tree: RetainedWidgetTree,
@@ -1183,6 +1193,7 @@ impl FrontendSurfaceComponent {
             focus_visible_id: None,
             interaction_state: InteractionState::default(),
             interaction_frame: InteractionFrame::default(),
+            service_revision: Cell::new(0),
             pointer_down_id: None,
             pointer_down_bounds: None,
             pointer_down_target: None,
@@ -1252,6 +1263,8 @@ impl FrontendSurfaceComponent {
             last_tree: None,
             last_frame_snapshot: None,
             frame_revision: 0,
+            last_frontend_frame: None,
+            pending_frontend_effects: FrontendFrameEffects::default(),
             intrinsic_layout_cache: IntrinsicLayoutCache::default(),
             layout_state: PerSurfaceLayoutState::default(),
             retained_tree: RetainedWidgetTree::default(),
@@ -1354,6 +1367,62 @@ impl FrontendSurfaceComponent {
         self.frontend_catalog_handle = handle;
         self.frontend_catalog = snapshot.catalog;
         self.frontend_catalog_version = snapshot.version;
+        self.last_frontend_frame = None;
+    }
+
+    /// Retain requests produced between two completed frame publications. The
+    /// requests are copied into the next immutable frame and returned to the
+    /// existing shell request queue unchanged.
+    pub(super) fn record_frontend_host_effects(
+        &mut self,
+        requests: Vec<CoreRequest>,
+    ) -> Vec<CoreRequest> {
+        self.pending_frontend_effects
+            .extend_host_requests(requests.iter().cloned());
+        requests
+    }
+
+    /// Publish all frontend outputs at one boundary. The mutable widget tree
+    /// and runtime maps stay private; shell consumers receive only this
+    /// immutable snapshot and cannot accidentally combine revisions from
+    /// different phases.
+    pub(super) fn publish_frontend_frame(&mut self) {
+        let Some(tree) = self.last_frame_snapshot.clone() else {
+            return;
+        };
+        let catalog = self.frontend_catalog_handle.snapshot();
+        let observations = self.service_observation_summary().unwrap_or_default();
+        let child_surface_requests = self.child_surface_requests();
+        let diagnostics = self
+            .diagnostics
+            .as_ref()
+            .map(Diagnostics::issues)
+            .unwrap_or_default();
+        let revisions = FrontendFrameRevisions::new(
+            self.frame_revision,
+            catalog.version,
+            self.runtime_generations.borrow().revision(),
+            tree.revision(),
+            self.service_revision.get(),
+        );
+        let frame = FrontendFrame::new(
+            mesh_core_frontend_abi::EffectSource::new(
+                self.compiled.manifest.package.id.clone(),
+                Some(self.surface_id.clone()),
+            ),
+            revisions,
+            Some(tree),
+            FrontendServiceSnapshot::new(self.service_revision.get(), observations),
+            FrontendInvalidation::new(self.frame_revision, self.invalidation_snapshot.clone()),
+            diagnostics,
+            std::mem::take(&mut self.pending_frontend_effects),
+            child_surface_requests,
+            FrontendPaintMetadata::new(
+                self.retained_display_list.generation(),
+                self.last_present_damage_rects.clone(),
+            ),
+        );
+        self.last_frontend_frame = Some(frame);
     }
 
     pub(super) fn with_graph_i18n_catalogs(

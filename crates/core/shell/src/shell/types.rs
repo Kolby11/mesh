@@ -1,7 +1,9 @@
 pub use mesh_core_frontend_host::{
     ChildSurfaceDiagnostic, ChildSurfaceKind, ChildSurfaceRequest, ComponentContext,
-    ComponentError, ComponentInput, ComponentProfilingRecord, CoreEvent, CoreRequest, KeyModifiers,
-    PopoverSurfaceRelationship, PopoverTriggerReference, ServiceEvent,
+    ComponentError, ComponentInput, ComponentProfilingRecord, CoreEvent, CoreRequest,
+    FrontendFrame, FrontendFrameEffects, FrontendFrameError, FrontendFrameRevision,
+    FrontendFrameRevisions, FrontendInvalidation, FrontendPaintMetadata, FrontendServiceSnapshot,
+    KeyModifiers, PopoverSurfaceRelationship, PopoverTriggerReference, ServiceEvent,
     ServiceInterfaceEventSubscription, ServiceObservationSummary, ShellComponent, SurfaceExtent,
     SurfaceId, TabFocusTarget,
 };

@@ -3,9 +3,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mesh_core_capability::CapabilitySet;
-use mesh_core_debug::ProfilingStage;
-use mesh_core_diagnostics::Diagnostics;
-use mesh_core_elements::WidgetNode;
+use mesh_core_debug::{ProfilingInvalidationSnapshot, ProfilingStage};
+use mesh_core_diagnostics::{DiagnosticIssue, Diagnostics};
+use mesh_core_elements::{FrameSnapshot, WidgetNode};
 pub use mesh_core_elements::{
     PopoverPlacement, PopoverPlacementDiagnostic, PopoverPlacementDiagnosticKind,
     PopoverPlacementField,
@@ -30,6 +30,112 @@ pub struct ServiceObservationSummary {
     /// runtimes start from real state.
     pub cached_update_services: Vec<String>,
     pub interface_events: Vec<ServiceInterfaceEventSubscription>,
+}
+
+/// The revisions that must agree for one frontend frame to be consumed as a
+/// coherent snapshot. `frame` identifies the publication, while the other
+/// revisions identify the inputs that produced it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FrontendFrameRevisions {
+    pub frame: u64,
+    pub catalog: u64,
+    pub runtime: u64,
+    pub tree: u64,
+    pub services: u64,
+}
+
+/// Singular compatibility name for callers that treat the revision tuple as
+/// the frame's revision token.
+pub type FrontendFrameRevision = FrontendFrameRevisions;
+
+impl FrontendFrameRevisions {
+    pub const fn new(frame: u64, catalog: u64, runtime: u64, tree: u64, services: u64) -> Self {
+        Self {
+            frame,
+            catalog,
+            runtime,
+            tree,
+            services,
+        }
+    }
+}
+
+/// Service information that is safe to publish with a frontend frame.
+/// Payloads remain in capability-filtered runtime state; the frame carries
+/// only the observation/index data needed by the shell and diagnostics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontendServiceSnapshot {
+    revision: u64,
+    observations: ServiceObservationSummary,
+}
+
+impl FrontendServiceSnapshot {
+    pub fn new(revision: u64, observations: ServiceObservationSummary) -> Self {
+        Self {
+            revision,
+            observations,
+        }
+    }
+
+    pub const fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub fn observations(&self) -> &ServiceObservationSummary {
+        &self.observations
+    }
+}
+
+/// Invalidation output associated with the frame that was just published.
+/// The profiling detail is optional because a component may be invalidated
+/// before it has completed a paint pass.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FrontendInvalidation {
+    revision: u64,
+    profiling: Option<ProfilingInvalidationSnapshot>,
+}
+
+impl FrontendInvalidation {
+    pub fn new(revision: u64, profiling: Option<ProfilingInvalidationSnapshot>) -> Self {
+        Self {
+            revision,
+            profiling,
+        }
+    }
+
+    pub const fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub fn profiling(&self) -> Option<&ProfilingInvalidationSnapshot> {
+        self.profiling.as_ref()
+    }
+}
+
+/// Paint metadata that remains renderer-neutral while allowing a shell
+/// adapter to correlate damage and retained-display-list work with the same
+/// tree/catalog/runtime snapshot.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FrontendPaintMetadata {
+    display_list_generation: u64,
+    present_damage: Vec<DamageRect>,
+}
+
+impl FrontendPaintMetadata {
+    pub fn new(display_list_generation: u64, present_damage: Vec<DamageRect>) -> Self {
+        Self {
+            display_list_generation,
+            present_damage,
+        }
+    }
+
+    pub const fn display_list_generation(&self) -> u64 {
+        self.display_list_generation
+    }
+
+    pub fn present_damage(&self) -> &[DamageRect] {
+        &self.present_damage
+    }
 }
 
 /// UTF-8 byte-indexed text state projected by a focused component to the
@@ -542,6 +648,208 @@ pub enum CoreRequest {
     Shutdown,
 }
 
+/// Effects produced while preparing one frontend frame. Host requests are
+/// retained for the existing shell adapter, while typed effects provide the
+/// renderer-neutral ABI for callers that already use `mesh-core-frontend-abi`.
+#[derive(Debug, Clone, Default)]
+pub struct FrontendFrameEffects {
+    host_requests: Vec<CoreRequest>,
+    typed_effects: Vec<ScopedFrontendEffect>,
+}
+
+impl FrontendFrameEffects {
+    pub fn from_host_requests(requests: Vec<CoreRequest>) -> Self {
+        Self {
+            host_requests: requests,
+            typed_effects: Vec::new(),
+        }
+    }
+
+    pub fn from_typed_effects(batch: FrontendEffectBatch) -> Self {
+        Self {
+            host_requests: Vec::new(),
+            typed_effects: batch.into_scoped().collect(),
+        }
+    }
+
+    pub fn extend_host_requests<I>(&mut self, requests: I)
+    where
+        I: IntoIterator<Item = CoreRequest>,
+    {
+        self.host_requests.extend(requests);
+    }
+
+    pub fn extend_typed_effects<I>(&mut self, effects: I)
+    where
+        I: IntoIterator<Item = ScopedFrontendEffect>,
+    {
+        self.typed_effects.extend(effects);
+    }
+
+    pub fn host_requests(&self) -> &[CoreRequest] {
+        &self.host_requests
+    }
+
+    pub fn typed_effects(&self) -> &[ScopedFrontendEffect] {
+        &self.typed_effects
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.host_requests.is_empty() && self.typed_effects.is_empty()
+    }
+}
+
+/// The immutable frontend-to-shell publication boundary for one completed
+/// frontend evaluation. A frame owns one tree snapshot and the exact catalog,
+/// runtime, service, invalidation, diagnostic, paint, and effect metadata that
+/// was current when that tree was published.
+#[derive(Debug, Clone)]
+pub struct FrontendFrame {
+    source: EffectSource,
+    revisions: FrontendFrameRevisions,
+    tree: Option<FrameSnapshot>,
+    services: FrontendServiceSnapshot,
+    invalidation: FrontendInvalidation,
+    diagnostics: Vec<DiagnosticIssue>,
+    effects: FrontendFrameEffects,
+    child_surface_requests: Vec<ChildSurfaceRequest>,
+    paint: FrontendPaintMetadata,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum FrontendFrameError {
+    #[error("frontend tree revision {actual} does not match frame tree revision {expected}")]
+    TreeRevisionMismatch { expected: u64, actual: u64 },
+    #[error("frontend service revision {actual} does not match frame service revision {expected}")]
+    ServiceRevisionMismatch { expected: u64, actual: u64 },
+}
+
+impl FrontendFrame {
+    /// Construct a frame after all source, runtime, tree, and side-channel
+    /// work has completed. The fallible constructor keeps accidental mixing of
+    /// independently revised trees and service snapshots visible to callers.
+    pub fn try_new(
+        source: EffectSource,
+        revisions: FrontendFrameRevisions,
+        tree: Option<FrameSnapshot>,
+        services: FrontendServiceSnapshot,
+        invalidation: FrontendInvalidation,
+        diagnostics: Vec<DiagnosticIssue>,
+        effects: FrontendFrameEffects,
+        child_surface_requests: Vec<ChildSurfaceRequest>,
+        paint: FrontendPaintMetadata,
+    ) -> Result<Self, FrontendFrameError> {
+        if let Some(tree) = &tree
+            && tree.revision() != revisions.tree
+        {
+            return Err(FrontendFrameError::TreeRevisionMismatch {
+                expected: revisions.tree,
+                actual: tree.revision(),
+            });
+        }
+        if services.revision() != revisions.services {
+            return Err(FrontendFrameError::ServiceRevisionMismatch {
+                expected: revisions.services,
+                actual: services.revision(),
+            });
+        }
+        Ok(Self {
+            source,
+            revisions,
+            tree,
+            services,
+            invalidation,
+            diagnostics,
+            effects,
+            child_surface_requests,
+            paint,
+        })
+    }
+
+    /// Infallible convenience for trusted host publication code. Untrusted or
+    /// independently assembled snapshots should use [`Self::try_new`].
+    pub fn new(
+        source: EffectSource,
+        revisions: FrontendFrameRevisions,
+        tree: Option<FrameSnapshot>,
+        services: FrontendServiceSnapshot,
+        invalidation: FrontendInvalidation,
+        diagnostics: Vec<DiagnosticIssue>,
+        effects: FrontendFrameEffects,
+        child_surface_requests: Vec<ChildSurfaceRequest>,
+        paint: FrontendPaintMetadata,
+    ) -> Self {
+        Self::try_new(
+            source,
+            revisions,
+            tree,
+            services,
+            invalidation,
+            diagnostics,
+            effects,
+            child_surface_requests,
+            paint,
+        )
+        .expect("frontend frame revisions must agree")
+    }
+
+    pub fn source(&self) -> &EffectSource {
+        &self.source
+    }
+
+    pub const fn revisions(&self) -> FrontendFrameRevisions {
+        self.revisions
+    }
+
+    pub const fn revision(&self) -> u64 {
+        self.revisions.frame
+    }
+
+    pub const fn catalog_revision(&self) -> u64 {
+        self.revisions.catalog
+    }
+
+    pub const fn runtime_revision(&self) -> u64 {
+        self.revisions.runtime
+    }
+
+    pub const fn tree_revision(&self) -> u64 {
+        self.revisions.tree
+    }
+
+    pub const fn service_revision(&self) -> u64 {
+        self.revisions.services
+    }
+
+    pub fn tree(&self) -> Option<&FrameSnapshot> {
+        self.tree.as_ref()
+    }
+
+    pub fn services(&self) -> &FrontendServiceSnapshot {
+        &self.services
+    }
+
+    pub fn invalidation(&self) -> &FrontendInvalidation {
+        &self.invalidation
+    }
+
+    pub fn diagnostics(&self) -> &[DiagnosticIssue] {
+        &self.diagnostics
+    }
+
+    pub fn effects(&self) -> &FrontendFrameEffects {
+        &self.effects
+    }
+
+    pub fn child_surface_requests(&self) -> &[ChildSurfaceRequest] {
+        &self.child_surface_requests
+    }
+
+    pub fn paint(&self) -> &FrontendPaintMetadata {
+        &self.paint
+    }
+}
+
 /// Shell-side lowering for renderer-neutral frontend effects.
 ///
 /// Frontend components and runtime integrations can exchange
@@ -748,6 +1056,100 @@ mod effect_adapter_tests {
     }
 }
 
+#[cfg(test)]
+mod frontend_frame_tests {
+    use super::*;
+    use mesh_core_elements::WidgetNode;
+
+    fn frame_tree(revision: u64) -> FrameSnapshot {
+        let root = WidgetNode::new("box");
+        FrameSnapshot::complete(&root, revision, None).expect("valid frame tree")
+    }
+
+    #[test]
+    fn frontend_frame_keeps_all_publication_inputs_at_one_revision_boundary() {
+        let tree = frame_tree(7);
+        let observations = ServiceObservationSummary {
+            update_services: vec!["audio".into()],
+            cached_update_services: vec!["power".into()],
+            interface_events: vec![ServiceInterfaceEventSubscription {
+                service: "audio".into(),
+                event: "changed".into(),
+            }],
+        };
+        let frame = FrontendFrame::try_new(
+            EffectSource::new("@mesh/test", Some("surface".into())),
+            FrontendFrameRevisions::new(11, 4, 9, 7, 3),
+            Some(tree),
+            FrontendServiceSnapshot::new(3, observations.clone()),
+            FrontendInvalidation::default(),
+            Vec::new(),
+            FrontendFrameEffects::from_host_requests(vec![CoreRequest::ShowSurface {
+                surface_id: "@mesh/test".into(),
+            }]),
+            Vec::new(),
+            FrontendPaintMetadata::new(12, Vec::new()),
+        )
+        .expect("matching frame revisions");
+
+        assert_eq!(frame.revisions().frame, 11);
+        assert_eq!(frame.revisions().catalog, 4);
+        assert_eq!(frame.revisions().runtime, 9);
+        assert_eq!(frame.tree().map(FrameSnapshot::revision), Some(7));
+        assert_eq!(frame.services().revision(), 3);
+        assert_eq!(frame.services().observations(), &observations);
+        assert_eq!(frame.effects().host_requests().len(), 1);
+        assert_eq!(frame.paint().display_list_generation(), 12);
+    }
+
+    #[test]
+    fn frontend_frame_rejects_mixed_tree_and_service_revisions() {
+        let tree = frame_tree(7);
+        let error = FrontendFrame::try_new(
+            EffectSource::new("@mesh/test", None),
+            FrontendFrameRevisions::new(1, 2, 3, 8, 5),
+            Some(tree),
+            FrontendServiceSnapshot::new(5, ServiceObservationSummary::default()),
+            FrontendInvalidation::default(),
+            Vec::new(),
+            FrontendFrameEffects::default(),
+            Vec::new(),
+            FrontendPaintMetadata::default(),
+        )
+        .expect_err("tree revision mismatch must be rejected");
+
+        assert_eq!(
+            error,
+            FrontendFrameError::TreeRevisionMismatch {
+                expected: 8,
+                actual: 7,
+            }
+        );
+
+        let tree = frame_tree(7);
+        let error = FrontendFrame::try_new(
+            EffectSource::new("@mesh/test", None),
+            FrontendFrameRevisions::new(1, 2, 3, 7, 5),
+            Some(tree),
+            FrontendServiceSnapshot::new(4, ServiceObservationSummary::default()),
+            FrontendInvalidation::default(),
+            Vec::new(),
+            FrontendFrameEffects::default(),
+            Vec::new(),
+            FrontendPaintMetadata::default(),
+        )
+        .expect_err("service revision mismatch must be rejected");
+
+        assert_eq!(
+            error,
+            FrontendFrameError::ServiceRevisionMismatch {
+                expected: 5,
+                actual: 4,
+            }
+        );
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TabFocusTarget {
     /// First tabbable in the target surface's tree.
@@ -795,6 +1197,11 @@ pub enum ServiceEvent {
 pub trait ShellComponent: Send {
     fn id(&self) -> &str;
     fn surface_id(&self) -> &str;
+    /// Return the last atomically published frontend frame. The snapshot is
+    /// immutable and remains valid until the component publishes a newer one.
+    fn frontend_frame(&self) -> Option<FrontendFrame> {
+        None
+    }
     fn initial_visibility(&self) -> Option<bool> {
         None
     }

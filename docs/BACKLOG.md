@@ -73,7 +73,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/10-frontend-compiler-and-host/improvements.md)
 
-- [ ] Introduce a coherent revisioned `FrontendFrame` boundary for tree, catalog, runtime, services, invalidation, diagnostics, and effects.
 - [ ] Emit immutable compiled frontend revisions and authorize typed effects only when catalog/runtime revisions still match.
 
 ### 11. Luau runtime and sandbox

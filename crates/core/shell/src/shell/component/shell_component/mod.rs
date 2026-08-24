@@ -54,6 +54,7 @@ impl FrontendSurfaceComponent {
         self.clear_component_memo();
         self.last_tree = None;
         self.last_frame_snapshot = None;
+        self.last_frontend_frame = None;
         self.interaction_frame.reset();
         self.cached_restyle_rules = None;
         self.cached_restyle_state_dependencies = StyleStateDependencies::default();
@@ -105,6 +106,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         &self.surface_id
     }
 
+    fn frontend_frame(&self) -> Option<FrontendFrame> {
+        self.last_frontend_frame.clone()
+    }
+
     fn initial_visibility(&self) -> Option<bool> {
         Some(self.surface_layout.visible_on_start)
     }
@@ -126,18 +131,19 @@ impl ShellComponent for FrontendSurfaceComponent {
         }
         self.render_hooks_pending = true;
         self.invalidate_script_state();
-        Ok(vec![CoreRequest::PublishDiagnostics {
+        let requests = vec![CoreRequest::PublishDiagnostics {
             message: format!(
                 "mounted frontend component '{}' from {}",
                 self.id(),
                 self.compiled.source_path.display()
             ),
-        }])
+        }];
+        Ok(self.record_frontend_host_effects(requests))
     }
 
     fn unmount(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
         self.unmount_runtimes()?;
-        Ok(Vec::new())
+        Ok(self.record_frontend_host_effects(Vec::new()))
     }
 
     fn handle_core_event(&mut self, event: &CoreEvent) -> Result<Vec<CoreRequest>, ComponentError> {
@@ -259,20 +265,23 @@ impl ShellComponent for FrontendSurfaceComponent {
                 self.invalidate_surface_config();
             }
         }
-        Ok(Vec::new())
+        Ok(self.record_frontend_host_effects(Vec::new()))
     }
 
     fn handle_service_event(
         &mut self,
         event: &ServiceEvent,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
+        self.service_revision
+            .set(self.service_revision.get().wrapping_add(1));
         let ServiceEvent::Updated {
             service,
             source_module,
             payload,
         } = event
         else {
-            return self.handle_interface_event(event);
+            let requests = self.handle_interface_event(event)?;
+            return Ok(self.record_frontend_host_effects(requests));
         };
         update_last_service_trace(
             &mut self.last_service_update,
@@ -387,7 +396,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 self.invalidate_service_template_nodes(narrow_nodes);
             }
         }
-        Ok(Vec::new())
+        Ok(self.record_frontend_host_effects(Vec::new()))
     }
 
     fn deliver_service_call_result(
@@ -411,6 +420,8 @@ impl ShellComponent for FrontendSurfaceComponent {
         if !self.declared_service_names.contains(service_name.as_ref()) {
             return;
         }
+        self.service_revision
+            .set(self.service_revision.get().wrapping_add(1));
         let fingerprint = ScriptContext::service_payload_fingerprint(payload);
         update_cached_service_payload(
             &mut self.cached_service_payloads,
@@ -596,7 +607,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 }
             }
         }
-        Ok(requests)
+        Ok(self.record_frontend_host_effects(requests))
     }
 
     fn wants_render(&self) -> bool {
@@ -1146,6 +1157,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.last_tooltip_damage = current_tooltip_damage;
         self.surface_pixels_invalid = false;
         self.clear_runtime_dirty_states();
+        self.publish_frontend_frame();
         if self.surface_entering {
             self.surface_entering = false;
             // A top-level layer surface reopens with one controlled entering
@@ -1368,8 +1380,13 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.frontend_catalog = state.catalog;
         self.frontend_catalog_version = state.version;
         if !state.affected_modules.contains(self.id()) {
+            // The tree remains valid, but the catalog revision in the frame
+            // must advance with the shared handle even when this surface does
+            // not need a repaint.
+            self.publish_frontend_frame();
             return false;
         }
+        self.last_frontend_frame = None;
 
         let runtimes = std::mem::take(&mut *self.runtimes.lock().unwrap());
         let mut retained = HashMap::with_capacity(runtimes.len());
@@ -1423,7 +1440,8 @@ impl ShellComponent for FrontendSurfaceComponent {
         height: u32,
         input: ComponentInput,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
-        self.handle_component_input(theme, width, height, input)
+        let requests = self.handle_component_input(theme, width, height, input)?;
+        Ok(self.record_frontend_host_effects(requests))
     }
 
     fn handle_child_surface_input(
@@ -1475,7 +1493,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         let saved_tree = self.last_tree.replace(subtree);
         let result = self.handle_component_input(theme, width, height, input);
         self.last_tree = saved_tree;
-        result
+        result.map(|requests| self.record_frontend_host_effects(requests))
     }
 
     fn hovered_target_is_interactive(&self) -> bool {

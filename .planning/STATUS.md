@@ -4,6 +4,10 @@
 
 ## Now
 
+A revisioned `FrontendFrame` boundary now publishes immutable tree,
+catalog/runtime/service revisions, invalidation, diagnostics, paint metadata,
+and effects together after frontend paint.
+
 Typed diagnostic categories and byte source spans now survive component AST,
 frontend compiler, shell catalog/runtime, LSP, and debug serialization paths.
 Runtime interface and storage failures retain distinct categories, and
@@ -99,9 +103,8 @@ source of truth.
 
 ## Next
 
-Introduce a coherent revisioned `FrontendFrame` boundary for tree, catalog,
-runtime, services, invalidation, diagnostics, and effects
-(`docs/BACKLOG.md`).
+Emit immutable compiled frontend revisions and authorize typed effects only when
+catalog/runtime revisions still match (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

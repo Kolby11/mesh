@@ -167,6 +167,13 @@ impl RuntimeGenerationIndex {
             .map(|entry| entry.subtree_generation)
     }
 
+    /// Monotonic aggregate revision for all runtime generations represented in
+    /// this surface. A frontend frame uses this instead of exposing the
+    /// private per-instance generation index to shell consumers.
+    pub(super) fn revision(&self) -> u64 {
+        self.next_subtree_generation
+    }
+
     fn runtime_count(&self) -> usize {
         self.entries.values().filter(|entry| entry.runtime).count()
     }

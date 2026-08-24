@@ -32,6 +32,26 @@ fn paint_publishes_one_interaction_frame_across_all_phases() {
             Some(frame.revision())
         );
     }
+
+    let frontend_frame = component
+        .frontend_frame()
+        .expect("completed paint publishes a frontend frame");
+    assert_eq!(
+        frontend_frame.revisions().tree,
+        frontend_frame.tree().expect("frame tree").revision()
+    );
+    assert_eq!(
+        frontend_frame.revisions().services,
+        frontend_frame.services().revision()
+    );
+    assert!(frontend_frame.invalidation().profiling().is_some());
+    assert!(
+        frontend_frame
+            .effects()
+            .host_requests()
+            .iter()
+            .any(|request| matches!(request, CoreRequest::PublishDiagnostics { .. }))
+    );
 }
 
 #[test]
