@@ -11,11 +11,14 @@
         "@mesh/audio-interface": ">=1.0.0, <2.0.0"
       },
       "capabilities": [
-        "exec.wpctl"
+        "exec.argv:wpctl:[\"get-volume\",\"*\"]",
+        "exec.argv:wpctl:[\"set-mute\",\"*\",\"*\"]",
+        "exec.argv:wpctl:[\"set-volume\",\"*\",\"*\"]",
+        "exec.argv:wpctl:[\"status\"]"
       ],
       "optionalCapabilities": [
-        "exec.aplay",
-        "exec.pw-mon"
+        "exec.argv:aplay:[\"*\"]",
+        "exec.argv:pw-mon:[\"--hide-props\",\"--hide-params\",\"--print-separator\"]"
       ],
       "binaries": [
         {

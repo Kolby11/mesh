@@ -1,10 +1,11 @@
 use super::command::{BackendCommandOutcome, command_error_result, command_result_from_lua};
 use super::exec::{
-    ExecService, exec_denied_to_lua, missing_exec_capability, missing_exec_stream_capability,
-    run_exec,
+    ExecService, ExecutableCapabilityPolicy, exec_denied_to_lua, missing_exec_capability,
+    missing_exec_stream_capability, run_exec,
 };
 use super::exec_stream::{
-    StreamEvent, StreamEventKind, StreamHandle, StreamState, StreamStatus, spawn_stream,
+    StreamEvent, StreamEventKind, StreamHandle, StreamState, StreamStatus,
+    spawn_stream_with_launch_program,
 };
 use super::logging::log_message;
 use super::{BackendScriptError, MIN_POLL_INTERVAL_MS};
@@ -36,6 +37,7 @@ use std::sync::{
 /// - `mesh.service.emit_unavailable()` — emit unavailable state
 /// - `mesh.service.payload()` — get the current command payload as a Lua table
 /// - `mesh.service.has_capability(name)` — check whether the module was granted a capability
+/// - `mesh.service.can_exec(program, args)` — check the canonical executable policy
 /// - `mesh.log(level, msg)` / `mesh.log.debug(msg)` / `mesh.log.info(msg)` / `mesh.log.warn(msg)` / `mesh.log.error(msg)`
 pub struct BackendScriptContext {
     module_id: String,
@@ -46,6 +48,7 @@ pub struct BackendScriptContext {
     builtin_globals: HashSet<String>,
     storage: Arc<Mutex<ScopedStorage>>,
     exec: ExecService,
+    exec_policy: ExecutableCapabilityPolicy,
     streams: Arc<StreamState>,
     policy: RuntimePolicy,
     script_loaded: bool,
@@ -124,6 +127,8 @@ impl BackendScriptContext {
         storage_root: impl Into<PathBuf>,
     ) -> Self {
         let module_id = module_id.into();
+        let capabilities = capabilities.into_iter().collect::<HashSet<_>>();
+        let exec_policy = ExecutableCapabilityPolicy::new(&capabilities);
         let policy = RuntimePolicy::default();
         let storage =
             StorageManager::new_with_limit(storage_root.into(), policy.storage_budget()).open(
@@ -145,13 +150,14 @@ impl BackendScriptContext {
 
         Self {
             module_id,
-            capabilities: capabilities.into_iter().collect(),
+            capabilities,
             lua: None,
             script_environment: None,
             runtime,
             builtin_globals: HashSet::new(),
             storage: Arc::new(Mutex::new(storage)),
             exec: ExecService::new(policy.budget()),
+            exec_policy,
             streams: StreamState::new_with_budget(policy.budget()),
             policy,
             script_loaded: false,
@@ -771,12 +777,22 @@ impl BackendScriptContext {
                 })?,
         )?;
 
+        let executable_policy = self.exec_policy.clone();
+        service.set(
+            "can_exec",
+            self.ensure_lua().create_function(
+                move |_lua, (program, args): (String, Vec<String>)| {
+                    Ok(executable_policy.allows(&program, &args))
+                },
+            )?,
+        )?;
+
         mesh.set("service", service)?;
         Ok(())
     }
 
     fn install_exec_api(&mut self, mesh: &Table) -> mlua::Result<()> {
-        let capabilities = self.capabilities.clone();
+        let executable_policy = self.exec_policy.clone();
         let module_id = self.module_id.clone();
         let resources = self.policy.budget();
         let exec = self.exec.clone();
@@ -784,7 +800,8 @@ impl BackendScriptContext {
             "exec",
             self.ensure_lua().create_function(
                 move |lua, (program, args): (String, Vec<String>)| {
-                    if let Some(required) = missing_exec_capability(&capabilities, &program, &args)
+                    if let Some(required) =
+                        missing_exec_capability(&executable_policy, &program, &args)
                     {
                         tracing::warn!(
                             module_id = %module_id,
@@ -795,19 +812,28 @@ impl BackendScriptContext {
                         return exec_denied_to_lua(lua, &program, &required, &resources);
                     }
 
-                    run_exec(lua, &program, &args, &exec)
+                    let launch_program =
+                        executable_policy.canonical_launch_program(&program, &args);
+                    run_exec(
+                        lua,
+                        launch_program.as_deref().unwrap_or(&program),
+                        &program,
+                        &args,
+                        &exec,
+                    )
                 },
             )?,
         )?;
 
-        let capabilities = self.capabilities.clone();
+        let executable_policy = self.exec_policy.clone();
         let module_id = self.module_id.clone();
         let streams = Arc::clone(&self.streams);
         mesh.set(
             "exec_stream",
             self.ensure_lua().create_function(
                 move |_lua, (program, args): (String, Vec<String>)| {
-                    if let Some(required) = missing_exec_stream_capability(&capabilities, &program)
+                    if let Some(required) =
+                        missing_exec_stream_capability(&executable_policy, &program, &args)
                     {
                         tracing::warn!(
                             module_id = %module_id,
@@ -817,7 +843,16 @@ impl BackendScriptContext {
                         );
                         return Ok(LuaValue::Boolean(false));
                     }
-                    match spawn_stream(&streams, program.clone(), args) {
+                    let launch_program = executable_policy
+                        .canonical_launch_program(&program, &args)
+                        .unwrap_or_else(|| program.clone());
+                    match spawn_stream_with_launch_program(
+                        &streams,
+                        program.clone(),
+                        args,
+                        launch_program,
+                        program.clone(),
+                    ) {
                         Ok(handle) => Ok(LuaValue::Table(stream_handle_table(_lua, &handle)?)),
                         Err(err) => {
                             tracing::warn!(

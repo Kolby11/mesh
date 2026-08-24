@@ -18,7 +18,10 @@
     },
     "capabilityApprovals": {
       "@mesh/audio-popover": ["service.audio.control", "service.audio.read"],
-      "@mesh/backlight-brightness": ["exec.brightnessctl"],
+      "@mesh/backlight-brightness": [
+        "exec.argv:brightnessctl:[\"-m\"]",
+        "exec.argv:brightnessctl:[\"set\",\"*\"]"
+      ],
       "@mesh/blur-test": ["shell.surface", "theme.read"],
       "@mesh/composition-editor": [
         "service.composition.control",
@@ -31,11 +34,26 @@
         "shell.surface"
       ],
       "@mesh/device-info": [
-        "exec.cat",
-        "exec.hostname",
-        "exec.uname"
+        "exec.argv:cat:[\"/etc/os-release\"]",
+        "exec.argv:cat:[\"/proc/cpuinfo\"]",
+        "exec.argv:cat:[\"/proc/meminfo\"]",
+        "exec.argv:cat:[\"/proc/uptime\"]",
+        "exec.argv:hostname:[]",
+        "exec.argv:uname:[\"-m\"]",
+        "exec.argv:uname:[\"-r\"]",
+        "exec.argv:uname:[\"-s\"]"
       ],
-      "@mesh/hyprland-wm": ["exec.hyprctl", "exec.sh", "exec.shell"],
+      "@mesh/hyprland-wm": [
+        "exec.argv:hyprctl:[\"activeworkspace\",\"-j\"]",
+        "exec.argv:hyprctl:[\"activewindow\",\"-j\"]",
+        "exec.argv:hyprctl:[\"dispatch\",\"hl.dsp.focus({ workspace = \\\"*\\\" })\"]",
+        "exec.argv:hyprctl:[\"dispatch\",\"workspace\",\"*\"]",
+        "exec.argv:hyprctl:[\"instances\",\"-j\"]",
+        "exec.argv:hyprctl:[\"workspaces\",\"-j\"]",
+        "exec.argv:sh:[\"-c\",\"printf '%s' \\\"$HYPRLAND_INSTANCE_SIGNATURE\\\"\"]",
+        "exec.argv:sh:[\"-c\",\"printf '%s' \\\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\\\"\"]",
+        "exec.argv:sh:[\"-c\",\"test -S * && echo ok\"]"
+      ],
       "@mesh/language-popover": ["locale.read", "locale.write"],
       "@mesh/navigation-bar": [
         "locale.read",
@@ -53,8 +71,19 @@
         "theme.read"
       ],
       "@mesh/opacity-test": ["shell.surface", "theme.read"],
-      "@mesh/pipewire-audio": ["exec.wpctl"],
-      "@mesh/pulseaudio-audio": ["exec.pactl"],
+      "@mesh/pipewire-audio": [
+        "exec.argv:wpctl:[\"get-volume\",\"*\"]",
+        "exec.argv:wpctl:[\"set-mute\",\"*\",\"*\"]",
+        "exec.argv:wpctl:[\"set-volume\",\"*\",\"*\"]",
+        "exec.argv:wpctl:[\"status\"]"
+      ],
+      "@mesh/pulseaudio-audio": [
+        "exec.argv:pactl:[\"get-sink-mute\",\"@DEFAULT_SINK@\"]",
+        "exec.argv:pactl:[\"get-sink-volume\",\"@DEFAULT_SINK@\"]",
+        "exec.argv:pactl:[\"set-sink-mute\",\"@DEFAULT_SINK@\",\"*\"]",
+        "exec.argv:pactl:[\"set-sink-volume\",\"@DEFAULT_SINK@\",\"*\"]",
+        "exec.argv:pactl:[\"subscribe\"]"
+      ],
       "@mesh/quick-settings": [
         "locale.read",
         "locale.write",
@@ -89,7 +118,10 @@
       "@mesh/text-selection-proof": ["shell.surface", "theme.read"],
       "@mesh/theme-selector": ["service.theme.control", "theme.read"],
       "@mesh/touch-gesture-proof": ["shell.surface", "theme.read"],
-      "@mesh/upower-power": ["exec.upower"]
+      "@mesh/upower-power": [
+        "exec.argv:upower:[\"-e\"]",
+        "exec.argv:upower:[\"-i\",\"*\"]"
+      ]
     },
     "schemaVersion": 1
   },

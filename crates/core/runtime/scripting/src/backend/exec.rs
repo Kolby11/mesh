@@ -1,8 +1,9 @@
 use crate::policy::{ResourceBudget, ResourceLimit};
 use mlua::{Lua, Value as LuaValue};
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command as StdCommand, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -13,6 +14,189 @@ use std::time::{Duration, Instant};
 use std::os::unix::process::CommandExt;
 
 const CANCEL_REAP_GRACE: Duration = Duration::from_millis(250);
+const EXEC_ARGV_PREFIX: &str = "exec.argv:";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ArgumentPattern {
+    Exact(String),
+    Glob(String),
+    Any,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExecutableRule {
+    canonical_path: PathBuf,
+    arguments: Option<Vec<ArgumentPattern>>,
+}
+
+/// The executable policy attached to one backend generation.
+///
+/// Executable grants are deliberately not inferred from a file name. A grant
+/// has the form `exec.argv:<program>:<json-array>` where `<program>` is
+/// resolved once to its canonical path and each argument is matched exactly or
+/// by an explicit `*` glob. A bare `*` argument matches one value, while a JSON
+/// `*` in place of the array opts into any argument list. `exec.command` remains
+/// the explicit, high-risk unrestricted override.
+#[derive(Debug, Clone, Default)]
+pub(super) struct ExecutableCapabilityPolicy {
+    allow_all: bool,
+    rules: Vec<ExecutableRule>,
+}
+
+impl ExecutableCapabilityPolicy {
+    pub(super) fn new(capabilities: &HashSet<String>) -> Self {
+        let mut policy = Self {
+            allow_all: capabilities.contains("exec.command"),
+            rules: Vec::new(),
+        };
+        for capability in capabilities {
+            if let Some(rule) = parse_executable_rule(capability) {
+                policy.rules.push(rule);
+            }
+        }
+        policy
+    }
+
+    pub(super) fn allows(&self, program: &str, args: &[String]) -> bool {
+        self.allow_all || self.find_rule(program, args).is_some()
+    }
+
+    pub(super) fn canonical_launch_program(
+        &self,
+        program: &str,
+        args: &[String],
+    ) -> Option<String> {
+        self.find_rule(program, args)
+            .map(|rule| rule.canonical_path.to_string_lossy().into_owned())
+    }
+
+    fn missing_capability(&self, program: &str, args: &[String]) -> Option<String> {
+        (!self.allows(program, args)).then(|| required_exec_capability(program, args))
+    }
+
+    fn find_rule(&self, program: &str, args: &[String]) -> Option<&ExecutableRule> {
+        let canonical_path = canonical_program_path(program)?;
+        self.rules.iter().find(|rule| {
+            rule.canonical_path == canonical_path
+                && rule
+                    .arguments
+                    .as_ref()
+                    .is_none_or(|patterns| arguments_match(patterns, args))
+        })
+    }
+}
+
+fn parse_executable_rule(capability: &str) -> Option<ExecutableRule> {
+    let specification = capability.strip_prefix(EXEC_ARGV_PREFIX)?;
+    let (program, argument_specification) = specification.split_once(':')?;
+    if program.is_empty() || argument_specification.is_empty() {
+        return None;
+    }
+    let arguments = if argument_specification == "*" {
+        None
+    } else {
+        let arguments = serde_json::from_str::<Vec<String>>(argument_specification).ok()?;
+        Some(
+            arguments
+                .into_iter()
+                .map(|argument| {
+                    if argument == "*" {
+                        ArgumentPattern::Any
+                    } else if argument.contains('*') {
+                        ArgumentPattern::Glob(argument)
+                    } else {
+                        ArgumentPattern::Exact(argument)
+                    }
+                })
+                .collect(),
+        )
+    };
+    Some(ExecutableRule {
+        canonical_path: canonical_program_path(program)?,
+        arguments,
+    })
+}
+
+fn arguments_match(patterns: &[ArgumentPattern], args: &[String]) -> bool {
+    patterns.len() == args.len()
+        && patterns
+            .iter()
+            .zip(args)
+            .all(|(pattern, argument)| match pattern {
+                ArgumentPattern::Exact(expected) => expected == argument,
+                ArgumentPattern::Glob(pattern) => glob_match(pattern, argument),
+                ArgumentPattern::Any => true,
+            })
+}
+
+fn glob_match(pattern: &str, value: &str) -> bool {
+    let parts = pattern.split('*').collect::<Vec<_>>();
+    let mut cursor = 0;
+    if let Some(first) = parts.first().filter(|part| !part.is_empty()) {
+        if !value.starts_with(first) {
+            return false;
+        }
+        cursor = first.len();
+    }
+    for (index, part) in parts.iter().enumerate().skip(1) {
+        if part.is_empty() {
+            continue;
+        }
+        let is_last_literal = index == parts.len() - 1 && !pattern.ends_with('*');
+        let remainder = &value[cursor..];
+        if is_last_literal {
+            return remainder.ends_with(part);
+        }
+        let Some(found) = remainder.find(part) else {
+            return false;
+        };
+        cursor += found + part.len();
+    }
+    true
+}
+
+fn canonical_program_path(program: &str) -> Option<PathBuf> {
+    if program.is_empty() || program.contains('\0') {
+        return None;
+    }
+    let candidate = if Path::new(program).components().count() > 1 {
+        PathBuf::from(program)
+    } else {
+        let path = std::env::var_os("PATH")?;
+        std::env::split_paths(&path)
+            .map(|directory| directory.join(program))
+            .find(|candidate| {
+                fs::metadata(candidate)
+                    .is_ok_and(|metadata| metadata.is_file() && is_executable(&metadata))
+            })?
+    };
+    let canonical = fs::canonicalize(candidate).ok()?;
+    let metadata = fs::metadata(&canonical).ok()?;
+    if !metadata.is_file() || !is_executable(&metadata) {
+        return None;
+    }
+    Some(canonical)
+}
+
+#[cfg(unix)]
+fn is_executable(metadata: &fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    metadata.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn is_executable(_metadata: &fs::Metadata) -> bool {
+    true
+}
+
+fn required_exec_capability(program: &str, args: &[String]) -> String {
+    let canonical_program = canonical_program_path(program)
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| program.to_string());
+    let arguments = serde_json::to_string(args).unwrap_or_else(|_| "[]".to_string());
+    format!("{EXEC_ARGV_PREFIX}{canonical_program}:{arguments}")
+}
 
 #[derive(Debug, Clone)]
 struct ExecOutcome {
@@ -62,9 +246,25 @@ impl ExecService {
         }
     }
 
+    #[cfg(test)]
     fn run(
         &self,
         program: &str,
+        args: &[String],
+        output_limit: usize,
+        timeout: Duration,
+    ) -> Result<ExecOutcome, ExecRunError> {
+        let argv0 = Path::new(program)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(program);
+        self.run_with_argv0(program, argv0, args, output_limit, timeout)
+    }
+
+    fn run_with_argv0(
+        &self,
+        program: &str,
+        argv0: &str,
         args: &[String],
         output_limit: usize,
         timeout: Duration,
@@ -78,6 +278,7 @@ impl ExecService {
         let worker_cancel = Arc::clone(&cancel);
         let worker_resources = self.resources.clone();
         let program = program.to_string();
+        let argv0 = argv0.to_string();
         let args = args.to_vec();
 
         let mut state = self.state.lock().unwrap();
@@ -95,8 +296,14 @@ impl ExecService {
                 let _child_budget = ChildBudgetGuard {
                     resources: worker_resources,
                 };
-                let result =
-                    run_bounded_command(&program, &args, output_limit, timeout, worker_cancel);
+                let result = run_bounded_command(
+                    &program,
+                    &argv0,
+                    &args,
+                    output_limit,
+                    timeout,
+                    worker_cancel,
+                );
                 let _ = result_tx.send(result);
             }) {
             Ok(join) => join,
@@ -193,12 +400,14 @@ impl Drop for ChildBudgetGuard {
 pub(super) fn run_exec(
     lua: &Lua,
     program: &str,
+    argv0: &str,
     args: &[String],
     service: &ExecService,
 ) -> mlua::Result<LuaValue> {
     let resources = &service.resources;
-    let outcome = match service.run(
+    let outcome = match service.run_with_argv0(
         program,
+        argv0,
         args,
         resources.output_limit() as usize,
         resources.child_process_timeout(),
@@ -225,59 +434,19 @@ pub(super) fn run_exec(
 }
 
 pub(super) fn missing_exec_capability(
-    capabilities: &HashSet<String>,
+    policy: &ExecutableCapabilityPolicy,
     program: &str,
     args: &[String],
 ) -> Option<String> {
-    if shell_style_invocation(program, args) && !capabilities.contains("exec.shell") {
-        return Some("exec.shell".to_string());
-    }
-    if capabilities.contains("exec.command") {
-        return None;
-    }
-
-    let required = exec_program_capability(program);
-    if capabilities.contains(&required) {
-        None
-    } else {
-        Some(required)
-    }
+    policy.missing_capability(program, args)
 }
 
-/// `mesh.exec_stream` keeps its established executable grant semantics. The
-/// synchronous `mesh.exec` policy is stricter because its command arguments
-/// are interpreted as one-shot compatibility work; stream lifecycle and
-/// output limits are supervised separately by `StreamState`.
 pub(super) fn missing_exec_stream_capability(
-    capabilities: &HashSet<String>,
+    policy: &ExecutableCapabilityPolicy,
     program: &str,
+    args: &[String],
 ) -> Option<String> {
-    if capabilities.contains("exec.command") {
-        return None;
-    }
-    let required = exec_program_capability(program);
-    (!capabilities.contains(&required)).then_some(required)
-}
-
-fn shell_style_invocation(program: &str, args: &[String]) -> bool {
-    let is_shell = matches!(
-        Path::new(program)
-            .file_name()
-            .and_then(|name| name.to_str()),
-        Some("sh" | "bash" | "dash" | "zsh" | "fish" | "ksh")
-    );
-    is_shell
-        && args
-            .iter()
-            .any(|arg| matches!(arg.as_str(), "-c" | "--command"))
-}
-
-fn exec_program_capability(program: &str) -> String {
-    let binary = Path::new(program)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(program);
-    format!("exec.{binary}")
+    policy.missing_capability(program, args)
 }
 
 pub(super) fn exec_denied_to_lua(
@@ -286,11 +455,7 @@ pub(super) fn exec_denied_to_lua(
     required: &str,
     resources: &ResourceBudget,
 ) -> mlua::Result<LuaValue> {
-    let requirement = if required == "exec.shell" {
-        format!("without {required}")
-    } else {
-        format!("without {required} or exec.command")
-    };
+    let requirement = format!("without {required} or exec.command");
     let outcome = ExecOutcome {
         success: false,
         stdout: String::new(),
@@ -348,6 +513,7 @@ impl OutputCapture {
 
 fn run_bounded_command(
     program: &str,
+    argv0: &str,
     args: &[String],
     output_limit: usize,
     timeout: Duration,
@@ -359,6 +525,7 @@ fn run_bounded_command(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    configure_argv0(&mut command, argv0);
     configure_process_group(&mut command);
     let mut child = command.spawn()?;
     let stdout = child
@@ -436,6 +603,11 @@ fn run_bounded_command(
             .then(|| status.code())
             .flatten(),
     })
+}
+
+fn configure_argv0(command: &mut StdCommand, argv0: &str) {
+    #[cfg(unix)]
+    command.arg0(argv0);
 }
 
 fn read_limited(
@@ -573,13 +745,75 @@ mod tests {
 
     #[test]
     fn shell_style_execution_requires_high_risk_capability() {
-        let capabilities = HashSet::from(["exec.sh".to_string()]);
+        let capabilities = HashSet::from(["exec.argv:sh:[\"-c\",\"printf ok\"]".to_string()]);
+        let policy = ExecutableCapabilityPolicy::new(&capabilities);
         let args = vec!["-c".to_string(), "printf ok".to_string()];
-        assert_eq!(
-            missing_exec_capability(&capabilities, "sh", &args).as_deref(),
-            Some("exec.shell")
+        assert_eq!(missing_exec_capability(&policy, "sh", &args), None);
+        let denied = vec!["-c".to_string(), "rm -rf /".to_string()];
+        assert!(
+            missing_exec_capability(&policy, "sh", &denied)
+                .is_some_and(|capability| capability.starts_with("exec.argv:"))
         );
-        let capabilities = HashSet::from(["exec.sh".to_string(), "exec.shell".to_string()]);
-        assert_eq!(missing_exec_capability(&capabilities, "sh", &args), None);
     }
+
+    #[test]
+    fn canonical_path_and_arguments_prevent_basename_substitution() {
+        let root = std::env::temp_dir().join(format!(
+            "mesh-exec-policy-{}-{}",
+            std::process::id(),
+            NEXT_TEST_PATH.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).unwrap();
+        let first = root.join("first").join("tool");
+        let second = root.join("second").join("tool");
+        fs::create_dir_all(first.parent().unwrap()).unwrap();
+        fs::create_dir_all(second.parent().unwrap()).unwrap();
+        fs::write(&first, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::write(&second, "#!/bin/sh\nexit 0\n").unwrap();
+        make_executable(&first);
+        make_executable(&second);
+
+        let grant = format!("{EXEC_ARGV_PREFIX}{}:[\"allowed\"]", first.display());
+        let policy = ExecutableCapabilityPolicy::new(&HashSet::from([grant]));
+        assert!(policy.allows(first.to_str().unwrap(), &["allowed".into()]));
+        assert!(!policy.allows(second.to_str().unwrap(), &["allowed".into()]));
+        assert!(!policy.allows(first.to_str().unwrap(), &["other".into()]));
+
+        #[cfg(unix)]
+        {
+            let alias = root.join("alias");
+            std::os::unix::fs::symlink(&second, &alias).unwrap();
+            assert!(!policy.allows(alias.to_str().unwrap(), &["allowed".into()]));
+        }
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn command_name_policy_resolves_path_and_runs() {
+        let policy = ExecutableCapabilityPolicy::new(&HashSet::from([
+            "exec.argv:printf:[\"*\"]".to_string()
+        ]));
+        let args = vec!["hello".to_string()];
+        assert!(policy.allows("printf", &args));
+        let launch = policy.canonical_launch_program("printf", &args).unwrap();
+        let outcome = service(SandboxConfig::default())
+            .run_with_argv0(&launch, "printf", &args, 1024, Duration::from_secs(1))
+            .unwrap();
+        assert!(outcome.success, "{outcome:?}");
+    }
+
+    static NEXT_TEST_PATH: AtomicUsize = AtomicUsize::new(1);
+
+    #[cfg(unix)]
+    fn make_executable(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut permissions = fs::metadata(path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions).unwrap();
+    }
+
+    #[cfg(not(unix))]
+    fn make_executable(_path: &Path) {}
 }

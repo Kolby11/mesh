@@ -215,7 +215,7 @@ end
 -- or netcat-openbsd, and does not need a bidirectional link for read-only use).
 -- Returns the program name if a stream handle was started, or nil.
 local function try_start_stream(socket)
-    if mesh.service.has_capability("exec.socat") then
+    if mesh.service.can_exec("socat", { "-", "UNIX-CONNECT:" .. socket }) then
         local started = mesh.exec_stream("socat", { "-", "UNIX-CONNECT:" .. socket })
         if started then
             log_info("subscribed via socat: " .. socket)
@@ -224,7 +224,7 @@ local function try_start_stream(socket)
         log_warn("socat spawn failed for: " .. socket)
     end
 
-    if mesh.service.has_capability("exec.nc") then
+    if mesh.service.can_exec("nc", { "-U", socket }) then
         -- -q 1 tells nc to quit 1 second after EOF, which keeps the process
         -- alive while the socket streams. Ignored harmlessly by ncat/openbsd-nc.
         local started = mesh.exec_stream("nc", { "-U", socket })

@@ -887,9 +887,15 @@ without the grant.
   belong to frontends/automation consuming an interface; they are declared in
   the interface contract's `[capabilities]`.
 - **Provider capabilities** are the generic host powers an implementation
-  needs (`exec.wpctl`, `dbus.system`, `net.http`). A provider declaring a
+  needs (`exec.argv:wpctl:["status"]`, `dbus.system`, `net.http`). A provider declaring a
   consumer capability for an interface it implements gets
   `provider_declares_consumer_capability` with a removal action.
+- Executable provider access uses `exec.argv:<program>:<json-args>` grants.
+  The host resolves `<program>` through `PATH` or an explicit path, stores its
+  canonical target, and matches the complete argument vector. A `*` argument
+  is an explicit single-argument glob; a JSON `*` permits any argument vector.
+  Basename grants such as `exec.wpctl` are not executable policy. The explicit
+  high-risk `exec.command` capability remains the unrestricted override.
 - Capability names are opaque strings; contract packages may introduce new
   ones but must classify each with a privilege level. The core refuses
   contracts introducing unclassified capabilities.

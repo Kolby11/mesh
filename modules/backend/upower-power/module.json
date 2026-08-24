@@ -8,7 +8,8 @@
     "kind": "backend",
     "uses": {
       "capabilities": [
-        "exec.upower"
+        "exec.argv:upower:[\"-e\"]",
+        "exec.argv:upower:[\"-i\",\"*\"]"
       ],
       "binaries": [
         {

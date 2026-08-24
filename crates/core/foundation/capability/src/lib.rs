@@ -90,8 +90,9 @@ pub struct CapabilityDefinition {
 ///
 /// Service read/control capabilities are listed explicitly because interface
 /// contracts are data and their consumer capabilities must be reviewed before
-/// they become runnable. Provider host powers are also explicit; in
-/// particular, arbitrary `exec.<binary>` names are not accepted by default.
+/// they become runnable. Provider host powers are also explicit; executable
+/// access uses the structured `exec.argv:<program>:<json-args>` form rather
+/// than basename-derived grants.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CapabilityCatalog;
 
@@ -136,11 +137,12 @@ impl CapabilityCatalog {
             | "service.wm.control"
             | "service.notifications.post"
             | "service.notifications.manage" => PrivilegeLevel::Elevated,
-            "exec.command" | "shell.screenshot" | "dbus.system" | "net.socket" | "locale.write"
-            | "exec.aplay" | "exec.brightnessctl" | "exec.cat" | "exec.hostname"
-            | "exec.hyprctl" | "exec.lspci" | "exec.nc" | "exec.pactl" | "exec.printenv"
-            | "exec.pw-mon" | "exec.socat" | "exec.sh" | "exec.shell" | "exec.uname"
-            | "exec.upower" | "exec.wpctl" => PrivilegeLevel::High,
+            "exec.command" | "shell.screenshot" | "dbus.system" | "net.socket" | "locale.write" => {
+                PrivilegeLevel::High
+            }
+            value if value.starts_with("exec.argv:") && valid_exec_argv_capability(value) => {
+                PrivilegeLevel::High
+            }
             _ => return None,
         };
         Some(CapabilityDefinition {
@@ -160,6 +162,19 @@ impl CapabilityCatalog {
                 capability: id.to_string(),
             })
     }
+}
+
+fn valid_exec_argv_capability(value: &str) -> bool {
+    let Some(specification) = value.strip_prefix("exec.argv:") else {
+        return false;
+    };
+    let Some((program, arguments)) = specification.split_once(':') else {
+        return false;
+    };
+    if program.is_empty() || program.contains('\0') || arguments.is_empty() {
+        return false;
+    }
+    arguments == "*" || serde_json::from_str::<Vec<String>>(arguments).is_ok()
 }
 
 /// The immutable result of resolving a module's declarations against user
@@ -395,7 +410,7 @@ mod tests {
             PrivilegeLevel::High
         );
         assert_eq!(
-            Capability::new("exec.wpctl").privilege_level(),
+            Capability::new("exec.argv:wpctl:[\"get-volume\"]").privilege_level(),
             PrivilegeLevel::High
         );
         assert_eq!(
@@ -418,6 +433,17 @@ mod tests {
         assert_eq!(
             Capability::new("service.unknown.read").catalog_privilege_level(),
             None
+        );
+        assert_eq!(
+            CapabilityCatalog::builtin().validate("exec.wpctl"),
+            Err(CapabilityPolicyError::UnknownCapability {
+                module_id: String::new(),
+                capability: "exec.wpctl".into(),
+            })
+        );
+        assert_eq!(
+            CapabilityCatalog::builtin().validate("exec.argv:wpctl:[\"get-volume\"]"),
+            Ok(PrivilegeLevel::High)
         );
         assert_eq!(
             CapabilityCatalog::builtin().validate("service.unknown.read"),

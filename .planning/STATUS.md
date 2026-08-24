@@ -111,8 +111,8 @@ source of truth.
 
 ## Next
 
-Replace basename executable grants with canonical path/argument capability policy
-(`docs/BACKLOG.md`).
+Move default runtime storage to secure durable XDG state with permissions,
+quotas, atomic recovery, and revisioned writers (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

@@ -114,7 +114,7 @@ fn backend_lifecycle_accepts_valid_provider_with_contract() {
                   "mesh": {
                     "apiVersion": "0.1",
                     "kind": "backend",
-                    "capabilities": { "required": ["exec.example"] },
+                    "capabilities": { "required": ["exec.argv:example:*"] },
                     "entrypoints": { "main": "src/main.luau" },
                     "implements": [{ "interface": "mesh.example", "provider": "test" }]
                   }
@@ -122,7 +122,7 @@ fn backend_lifecycle_accepts_valid_provider_with_contract() {
         ],
     );
     let (_dir, mut module) = module_instance("@mesh/backend", Some("src/main.luau"));
-    module.manifest.capabilities.required = vec!["exec.example".to_string()];
+    module.manifest.capabilities.required = vec!["exec.argv:example:*".to_string()];
     let modules = HashMap::from([("@mesh/backend".to_string(), module)]);
     let interfaces = InterfaceRegistry::new();
     let mut contract = test_contract("mesh.example");
@@ -135,7 +135,10 @@ fn backend_lifecycle_accepts_valid_provider_with_contract() {
 
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0].interface, "mesh.example");
-    assert_eq!(candidates[0].capabilities, vec!["exec.example".to_string()]);
+    assert_eq!(
+        candidates[0].capabilities,
+        vec!["exec.argv:example:*".to_string()]
+    );
     assert!(
         statuses
             .iter()

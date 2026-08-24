@@ -89,7 +89,7 @@ fn module_manifest_parses_backend_module_json() {
     "apiVersion": "0.1",
     "kind": "backend",
     "uses": {
-      "capabilities": ["exec.wpctl"],
+      "capabilities": ["exec.argv:wpctl:[\"get-volume\"]"],
       "binaries": [{ "name": "wpctl", "reason": "PipeWire control" }]
     },
     "i18n": { "defaultLocale": "en", "supportedLocales": ["en", "sk"] },
@@ -111,7 +111,10 @@ fn module_manifest_parses_backend_module_json() {
         manifest.repository.unwrap().url,
         "git+https://example.invalid/pipewire-audio.git"
     );
-    assert_eq!(manifest.mesh.capabilities.required, vec!["exec.wpctl"]);
+    assert_eq!(
+        manifest.mesh.capabilities.required,
+        vec!["exec.argv:wpctl:[\"get-volume\"]"]
+    );
     assert_eq!(manifest.mesh.dependencies.binaries[0].name, "wpctl");
     assert_eq!(manifest.mesh.i18n.default_locale.as_deref(), Some("en"));
     assert_eq!(manifest.mesh.i18n.supported_locales, vec!["en", "sk"]);

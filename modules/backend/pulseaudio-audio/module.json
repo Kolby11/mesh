@@ -10,10 +10,14 @@
         "@mesh/audio-interface": ">=1.0.0, <2.0.0"
       },
       "capabilities": [
-        "exec.pactl"
+        "exec.argv:pactl:[\"get-sink-mute\",\"@DEFAULT_SINK@\"]",
+        "exec.argv:pactl:[\"get-sink-volume\",\"@DEFAULT_SINK@\"]",
+        "exec.argv:pactl:[\"set-sink-mute\",\"@DEFAULT_SINK@\",\"*\"]",
+        "exec.argv:pactl:[\"set-sink-volume\",\"@DEFAULT_SINK@\",\"*\"]",
+        "exec.argv:pactl:[\"subscribe\"]"
       ],
       "optionalCapabilities": [
-        "exec.aplay"
+        "exec.argv:aplay:[\"*\"]"
       ],
       "binaries": [
         {

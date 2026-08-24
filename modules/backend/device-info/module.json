@@ -11,13 +11,19 @@
         "@mesh/device-interface": ">=1.0.0, <2.0.0"
       },
       "capabilities": [
-        "exec.cat",
-        "exec.hostname",
-        "exec.uname"
+        "exec.argv:cat:[\"/etc/os-release\"]",
+        "exec.argv:cat:[\"/proc/cpuinfo\"]",
+        "exec.argv:cat:[\"/proc/meminfo\"]",
+        "exec.argv:cat:[\"/proc/uptime\"]",
+        "exec.argv:hostname:[]",
+        "exec.argv:uname:[\"-m\"]",
+        "exec.argv:uname:[\"-r\"]",
+        "exec.argv:uname:[\"-s\"]"
       ],
       "optionalCapabilities": [
-        "exec.lspci",
-        "exec.printenv"
+        "exec.argv:lspci:[]",
+        "exec.argv:printenv:[\"DESKTOP_SESSION\"]",
+        "exec.argv:printenv:[\"XDG_CURRENT_DESKTOP\"]"
       ],
       "binaries": [
         {

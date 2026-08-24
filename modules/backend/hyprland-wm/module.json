@@ -8,13 +8,19 @@
     "kind": "backend",
     "uses": {
       "capabilities": [
-        "exec.hyprctl",
-        "exec.sh",
-        "exec.shell"
+        "exec.argv:hyprctl:[\"activeworkspace\",\"-j\"]",
+        "exec.argv:hyprctl:[\"activewindow\",\"-j\"]",
+        "exec.argv:hyprctl:[\"dispatch\",\"hl.dsp.focus({ workspace = \\\"*\\\" })\"]",
+        "exec.argv:hyprctl:[\"dispatch\",\"workspace\",\"*\"]",
+        "exec.argv:hyprctl:[\"instances\",\"-j\"]",
+        "exec.argv:hyprctl:[\"workspaces\",\"-j\"]",
+        "exec.argv:sh:[\"-c\",\"printf '%s' \\\"$HYPRLAND_INSTANCE_SIGNATURE\\\"\"]",
+        "exec.argv:sh:[\"-c\",\"printf '%s' \\\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\\\"\"]",
+        "exec.argv:sh:[\"-c\",\"test -S * && echo ok\"]"
       ],
       "optionalCapabilities": [
-        "exec.socat",
-        "exec.nc"
+        "exec.argv:nc:[\"-U\",\"*\"]",
+        "exec.argv:socat:[\"-\",\"UNIX-CONNECT:*\"]"
       ],
       "binaries": [
         {

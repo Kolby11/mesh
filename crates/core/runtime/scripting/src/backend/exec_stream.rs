@@ -456,20 +456,34 @@ impl Drop for ChildBudgetGuard {
 }
 
 /// Spawn a subprocess and return its stable stream handle.
+#[allow(dead_code)]
 pub fn spawn_stream(
     state: &Arc<StreamState>,
     program: String,
     args: Vec<String>,
 ) -> std::io::Result<StreamHandle> {
+    spawn_stream_with_launch_program(state, program.clone(), args, program.clone(), program)
+}
+
+/// Spawn a stream while retaining the author-facing program in its handle but
+/// launching the already-authorized canonical path.
+pub(crate) fn spawn_stream_with_launch_program(
+    state: &Arc<StreamState>,
+    program: String,
+    args: Vec<String>,
+    launch_program: String,
+    argv0: String,
+) -> std::io::Result<StreamHandle> {
     let stream = state.register(program, args)?;
-    let mut child = match Command::new(stream.program())
+    let mut command = Command::new(&launch_program);
+    command
         .args(stream.args())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null())
-        .kill_on_drop(true)
-        .spawn()
-    {
+        .kill_on_drop(true);
+    configure_argv0(&mut command, &argv0);
+    let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
             state.resources.release_child();
@@ -511,6 +525,13 @@ pub fn spawn_stream(
         kind: StreamEventKind::Started,
     });
     Ok(stream)
+}
+
+fn configure_argv0(command: &mut Command, argv0: &str) {
+    #[cfg(unix)]
+    command.arg0(argv0);
+    #[cfg(not(unix))]
+    let _ = (command, argv0);
 }
 
 async fn run_stream(

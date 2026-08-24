@@ -12,7 +12,7 @@ fn library_module_with_required_capabilities_is_rejected() {
   "mesh": {
     "apiVersion": "0.1",
     "kind": "library",
-    "capabilities": { "required": ["exec.run"] }
+    "capabilities": { "required": ["exec.argv:run:*"] }
   }
 }
 "#;
@@ -501,7 +501,7 @@ fn graph_health_marks_active_provider_unavailable_when_required_binary_is_missin
         }],
         MeshContributes::default(),
     );
-    backend.manifest.mesh.capabilities.required = vec!["exec.test".into()];
+    backend.manifest.mesh.capabilities.required = vec!["exec.argv:test:*".into()];
 
     let graph = InstalledModuleGraph::from_parts(root, vec![backend]).unwrap();
 
@@ -622,9 +622,9 @@ fn graph_diagnostics_flag_backend_provider_restating_consumer_capability() {
         MeshContributes::default(),
     );
     // The provider restates the interface's consumer capabilities (read +
-    // control) on top of its legitimate host power (exec.example).
+    // control) on top of its legitimate host power (an executable argv rule).
     backend.manifest.mesh.capabilities.required =
-        vec!["exec.example".into(), "service.example.read".into()];
+        vec!["exec.argv:example:*".into(), "service.example.read".into()];
     backend.manifest.mesh.capabilities.optional = vec!["service.example.control".into()];
 
     let graph = InstalledModuleGraph::from_parts(root, vec![interface, backend]).unwrap();
@@ -654,7 +654,7 @@ fn graph_diagnostics_flag_backend_provider_restating_consumer_capability() {
     assert!(
         !flagged
             .iter()
-            .any(|message| message.contains("exec.example"))
+            .any(|message| message.contains("exec.argv:example"))
     );
 }
 

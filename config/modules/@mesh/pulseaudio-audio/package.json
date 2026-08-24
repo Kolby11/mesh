@@ -11,8 +11,8 @@
     "kind": "backend",
     "capabilities": {
       "required": [
-        "exec.pactl",
-        "exec.aplay"
+        "exec.argv:pactl:*",
+        "exec.argv:aplay:[\"*\"]"
       ]
     },
     "dependencies": {

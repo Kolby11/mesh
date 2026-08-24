@@ -1095,7 +1095,7 @@ mod tests {
     ) -> ModuleManifest {
         let capabilities = capabilities
             .iter()
-            .map(|capability| format!(r#""{capability}""#))
+            .map(|capability| serde_json::to_string(capability).unwrap())
             .collect::<Vec<_>>()
             .join(",");
         ModuleManifest::from_json_str(&format!(
@@ -1206,13 +1206,16 @@ mod tests {
                 manifest(
                     "@me/audio",
                     "1.1.0",
-                    &["exec.wpctl", "exec.command"],
+                    &["exec.argv:wpctl:[\"get-volume\"]", "exec.command"],
                     BASE_CONTRACT,
                 ),
             )],
             ..UpdatePlan::default()
         };
-        let approvals = BTreeMap::from([("@me/audio".to_string(), vec!["exec.wpctl".to_string()])]);
+        let approvals = BTreeMap::from([(
+            "@me/audio".to_string(),
+            vec!["exec.argv:wpctl:[\"get-volume\"]".to_string()],
+        )]);
         classify_capability_changes(&mut plan, &approvals).unwrap();
         assert!(plan.is_refused());
         assert_eq!(plan.capability_additions.len(), 1);

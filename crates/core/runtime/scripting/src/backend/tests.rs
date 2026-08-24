@@ -226,8 +226,10 @@ end
 
 #[tokio::test]
 async fn dropping_backend_context_kills_streams_started_before_load_failure() {
-    let mut ctx =
-        BackendScriptContext::new_with_capabilities("@test/load-failure", ["exec.sh".to_string()]);
+    let mut ctx = BackendScriptContext::new_with_capabilities(
+        "@test/load-failure",
+        ["exec.argv:sh:[\"-c\",\"sleep 60\"]".to_string()],
+    );
     let streams = ctx.stream_state();
     let error = ctx
         .load_script("mesh.exec_stream(\"sh\", { \"-c\", \"sleep 60\" })\nerror(\"load boom\")")
@@ -935,8 +937,8 @@ fn hyprland_stream_events_query_only_missing_fields_and_emit_selectively() {
         .load(
             r#"
 exec_calls = {}
-mesh.service.has_capability = function(capability)
-    return capability == "exec.nc"
+mesh.service.can_exec = function(program, _args)
+    return program == "nc"
 end
 mesh.exec_stream = function(_program, _args)
     return true
@@ -1230,8 +1232,10 @@ end
 
 #[test]
 fn emit_json_accepts_explicit_string() {
-    let mut ctx =
-        BackendScriptContext::new_with_capabilities("@test/backend", ["exec.printf".into()]);
+    let mut ctx = BackendScriptContext::new_with_capabilities(
+        "@test/backend",
+        ["exec.argv:printf:[\"*\"]".into()],
+    );
     ctx.load_script(
         "function start()\nend\nfunction on_poll()\nlocal r = mesh.exec(\"printf\", {\"{\\\"available\\\":true,\\\"percent\\\":65}\"})\nmesh.service.emit_json(r.stdout)\nend",
     )
@@ -1455,8 +1459,10 @@ fn backend_command_result_error_becomes_failed_result() {
 
 #[test]
 fn exec_returns_structured_result() {
-    let mut ctx =
-        BackendScriptContext::new_with_capabilities("@test/backend", ["exec.printf".into()]);
+    let mut ctx = BackendScriptContext::new_with_capabilities(
+        "@test/backend",
+        ["exec.argv:printf:[\"*\"]".into()],
+    );
     ctx.load_script(
         "function start()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"printf\", {\"hello\"})\nmesh.service.emit({ ok = result.success, stdout = result.stdout })\nend",
     )
@@ -1471,8 +1477,10 @@ fn exec_returns_structured_result() {
 
 #[test]
 fn exec_accepts_program_and_args() {
-    let mut ctx =
-        BackendScriptContext::new_with_capabilities("@test/backend", ["exec.printf".into()]);
+    let mut ctx = BackendScriptContext::new_with_capabilities(
+        "@test/backend",
+        ["exec.argv:printf:[\"*\"]".into()],
+    );
     ctx.load_script(
         "function start()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"printf\", {\"hello\"})\nmesh.service.emit({ success = result.success, stdout = result.stdout, code = result.code })\nend",
     )
@@ -1488,8 +1496,10 @@ fn exec_accepts_program_and_args() {
 
 #[test]
 fn exec_rejects_single_string_command_form() {
-    let mut ctx =
-        BackendScriptContext::new_with_capabilities("@test/backend", ["exec.printf hello".into()]);
+    let mut ctx = BackendScriptContext::new_with_capabilities(
+        "@test/backend",
+        ["exec.argv:printf:[\"*\"]".into()],
+    );
     ctx.load_script(
         "function start()\nend\nfunction on_poll()\nlocal ok = pcall(function()\nmesh.exec(\"printf hello\")\nend)\nmesh.service.emit({ rejected = not ok })\nend",
     )
@@ -1528,7 +1538,7 @@ fn exec_missing_program_returns_failure_table() {
 fn exec_nonzero_exit_returns_failure_table() {
     let mut ctx = BackendScriptContext::new_with_capabilities(
         "@test/backend",
-        ["exec.sh".into(), "exec.shell".into()],
+        ["exec.argv:sh:[\"-c\",\"printf err >&2; exit 7\"]".into()],
     );
     ctx.load_script(
         "function start()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"sh\", {\"-c\", \"printf err >&2; exit 7\"})\nmesh.service.emit({ success = result.success, stdout = result.stdout, stderr = result.stderr, code = result.code })\nend",
@@ -1560,7 +1570,7 @@ fn exec_without_program_capability_returns_denied_result() {
         payload
             .get("stderr")
             .and_then(|v| v.as_str())
-            .is_some_and(|stderr| stderr.contains("exec.printf"))
+            .is_some_and(|stderr| stderr.contains("exec.argv:"))
     );
     assert!(payload.get("code").is_none());
 }
@@ -1997,8 +2007,10 @@ fn run_stream_batch_without_any_hook_is_a_noop() {
 
 #[tokio::test]
 async fn typed_stream_events_expose_handle_identity_and_exit_status() {
-    let mut ctx =
-        BackendScriptContext::new_with_capabilities("@test/typed-stream", ["exec.sh".to_string()]);
+    let mut ctx = BackendScriptContext::new_with_capabilities(
+        "@test/typed-stream",
+        ["exec.argv:sh:*".to_string()],
+    );
     ctx.load_script(
         "state = {}\n\
          function start()\n\

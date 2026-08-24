@@ -566,7 +566,7 @@ fn parses_canonical_module_json_module_manifest() {
   "mesh": {
     "apiVersion": "0.1",
     "kind": "backend",
-    "capabilities": { "required": ["exec.wpctl"] },
+    "capabilities": { "required": ["exec.argv:wpctl:[\"get-volume\"]"] },
     "i18n": { "defaultLocale": "en", "supportedLocales": ["en", "sk"] },
     "dependencies": {
       "binaries": [{ "name": "wpctl", "reason": "PipeWire control" }]
@@ -596,7 +596,10 @@ fn parses_canonical_module_json_module_manifest() {
         loaded.manifest.entrypoints.main.as_deref(),
         Some("src/main.luau")
     );
-    assert_eq!(loaded.manifest.capabilities.required, vec!["exec.wpctl"]);
+    assert_eq!(
+        loaded.manifest.capabilities.required,
+        vec!["exec.argv:wpctl:[\"get-volume\"]"]
+    );
     assert_eq!(loaded.manifest.dependencies.binaries[0].name, "wpctl");
     assert_eq!(
         loaded.manifest.declared_provides()[0]

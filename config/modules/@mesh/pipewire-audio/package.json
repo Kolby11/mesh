@@ -11,8 +11,8 @@
     "kind": "backend",
     "capabilities": {
       "required": [
-        "exec.wpctl",
-        "exec.aplay"
+        "exec.argv:wpctl:*",
+        "exec.argv:aplay:[\"*\"]"
       ]
     },
     "i18n": {

@@ -8,7 +8,8 @@
     "kind": "backend",
     "uses": {
       "capabilities": [
-        "exec.brightnessctl"
+        "exec.argv:brightnessctl:[\"-m\"]",
+        "exec.argv:brightnessctl:[\"set\",\"*\"]"
       ],
       "binaries": [
         {
