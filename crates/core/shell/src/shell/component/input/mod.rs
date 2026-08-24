@@ -694,32 +694,34 @@ impl FrontendSurfaceComponent {
                         let old_velocity =
                             previous.map(|inertia| inertia.velocity).unwrap_or_default();
                         self.scroll_offsets.insert(scroll_hit.node_id, next);
-                        self.scroll_inertia.insert(
-                            scroll_hit.node_id,
-                            ScrollInertia {
-                                velocity: ScrollOffsetState {
-                                    x: if moved.x.abs() <= f32::EPSILON {
-                                        0.0
-                                    } else {
-                                        blend_axis(old_velocity.x, sample.x)
+                        if !self.motion_policy.reduced_motion {
+                            self.scroll_inertia.insert(
+                                scroll_hit.node_id,
+                                ScrollInertia {
+                                    velocity: ScrollOffsetState {
+                                        x: if moved.x.abs() <= f32::EPSILON {
+                                            0.0
+                                        } else {
+                                            blend_axis(old_velocity.x, sample.x)
+                                        },
+                                        y: if moved.y.abs() <= f32::EPSILON {
+                                            0.0
+                                        } else {
+                                            blend_axis(old_velocity.y, sample.y)
+                                        },
                                     },
-                                    y: if moved.y.abs() <= f32::EPSILON {
-                                        0.0
-                                    } else {
-                                        blend_axis(old_velocity.y, sample.y)
-                                    },
+                                    samples: previous
+                                        .map(|inertia| inertia.samples.saturating_add(1))
+                                        .unwrap_or(1),
+                                    travel: previous.map(|inertia| inertia.travel).unwrap_or(0.0)
+                                        + moved.x.hypot(moved.y),
+                                    last_input: now,
+                                    last_tick: now,
+                                    max_x: scroll_hit.max_x,
+                                    max_y: scroll_hit.max_y,
                                 },
-                                samples: previous
-                                    .map(|inertia| inertia.samples.saturating_add(1))
-                                    .unwrap_or(1),
-                                travel: previous.map(|inertia| inertia.travel).unwrap_or(0.0)
-                                    + moved.x.hypot(moved.y),
-                                last_input: now,
-                                last_tick: now,
-                                max_x: scroll_hit.max_x,
-                                max_y: scroll_hit.max_y,
-                            },
-                        );
+                            );
+                        }
                         self.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
                     }
                 }

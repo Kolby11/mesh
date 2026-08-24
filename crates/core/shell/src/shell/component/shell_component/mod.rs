@@ -16,6 +16,35 @@ use crate::shell::component::runtime::{
 use crate::shell::{ServiceInterfaceEventSubscription, ServiceObservationSummary};
 
 impl FrontendSurfaceComponent {
+    /// Refresh the immutable motion snapshot at a settings/frame boundary.
+    /// Existing non-essential work is resolved immediately when reduced motion
+    /// becomes active so no stale animation or momentum invalidation survives
+    /// the preference change.
+    pub(super) fn refresh_motion_policy(&mut self, now: Instant) {
+        let next = mesh_core_animation::MotionPolicy::new(self.settings.shell().motion.reduced);
+        if next == self.motion_policy {
+            return;
+        }
+
+        if next.reduced_motion {
+            for (key, animation) in self.scroll_animations.drain() {
+                self.scroll_offsets.insert(key, animation.target);
+            }
+            self.scroll_inertia.clear();
+        } else if self.tooltip_visible {
+            // A tooltip that was already visible should begin its authored
+            // enter animation from the preference-change boundary.
+            self.tooltip_appeared_at = Some(now);
+        }
+
+        self.motion_policy = next;
+        self.transitions.clear();
+        self.keyframe_animations.clear();
+        self.keyframe_rules.clear();
+        self.has_active_keyframe_animation = false;
+        self.invalidate_style_path(ComponentDirtyFlags::STYLE_RELAYOUT);
+    }
+
     /// Drop every retained render/layout cache so the next paint rebuilds the
     /// tree from scratch. Shared by `theme_changed` and `locale_changed`, which
     /// both invalidate the entire retained pipeline.
@@ -1172,6 +1201,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         settings: &Arc<mesh_core_config::SettingsStore>,
     ) -> Result<bool, ComponentError> {
         self.settings = settings.clone();
+        self.refresh_motion_policy(Instant::now());
         let settings_state = resolve_frontend_module_settings_with_props(
             &self.settings_namespace,
             self.settings.namespace(&self.settings_namespace),
@@ -1555,6 +1585,9 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn child_hide_transition_ms(&self, node_key: &str) -> u64 {
+        if self.motion_policy.reduced_motion {
+            return 0;
+        }
         let Some(tree) = self.last_tree.as_ref() else {
             return 0;
         };
@@ -1607,6 +1640,9 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn hide_transition_ms(&self) -> u64 {
+        if self.motion_policy.reduced_motion {
+            return 0;
+        }
         // The show/hide transition is a CSS `transition` on the surface root
         // (replacing the old manifest `display_transition`). Read the resolved
         // opacity transition duration from the last painted root style; the

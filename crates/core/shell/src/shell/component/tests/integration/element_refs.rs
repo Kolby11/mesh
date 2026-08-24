@@ -354,6 +354,38 @@ end
     );
 }
 
+#[test]
+fn reduced_motion_snaps_smooth_scroll_without_starting_inertia() {
+    let mut component = scroll_interaction_component();
+    component.motion_policy = mesh_core_animation::MotionPolicy::new(true);
+    let viewport_id = runtime_node_id_for_key("root/0");
+
+    assert!(component.apply_scroll_target(
+        viewport_id,
+        ScrollOffsetState::default(),
+        ScrollOffsetState { x: 0.0, y: 100.0 },
+        &serde_json::json!({ "smooth": true, "duration": 250 }),
+    ));
+    assert!(component.scroll_animations.is_empty());
+    assert_eq!(component.scroll_offsets.get(&viewport_id).unwrap().y, 100.0);
+
+    let now = Instant::now();
+    component.scroll_inertia.insert(
+        viewport_id,
+        ScrollInertia {
+            velocity: ScrollOffsetState { x: 0.0, y: 120.0 },
+            samples: 2,
+            travel: 24.0,
+            last_input: now,
+            last_tick: now,
+            max_x: 0.0,
+            max_y: 200.0,
+        },
+    );
+    component.advance_scroll_inertia(now + Duration::from_millis(100));
+    assert!(component.scroll_inertia.is_empty());
+}
+
 fn scroll_interaction_component() -> FrontendSurfaceComponent {
     test_frontend_component(
         r#"

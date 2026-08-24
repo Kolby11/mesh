@@ -69,7 +69,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/09-interaction-and-motion/improvements.md)
 
-- [ ] Add a `MotionPolicy` snapshot for reduced motion across transitions, keyframes, scrolling, inertia, tooltips, and surfaces.
 - [ ] Consolidate focus, pointer capture, press origin, gesture ownership, and scroll ownership into one transaction.
 - [ ] Preserve the previous discrete value during visibility transitions until the transition completes.
 - [ ] Propagate validated per-keyframe easing through component parsing, shell state, and animation sampling.

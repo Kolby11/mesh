@@ -96,7 +96,7 @@ fn interface_namespace_doc(id: &str) -> String {
 
 fn shell_namespace(found: &Discovered) -> Node {
     let doc = "Core shell preferences: theme, locale, icon packs, keyboard, \
-               tooltip, sounds, and render quality.";
+               reduced motion, tooltip, sounds, and render quality.";
     node_from_fields(doc, SHELL_SETTINGS_FIELDS, SHELL_NAMESPACE, found)
 }
 
@@ -250,6 +250,12 @@ fn doc_for(path: &str) -> &'static str {
         "shell.icons.default_pack" => {
             "Icon-pack module id prepended to every frontend's pack chain, unless \
              the frontend sets `icons.ignore_shell_default`."
+        }
+
+        // shell.motion
+        "shell.motion" => "Accessibility preferences for visual motion.",
+        "shell.motion.reduced" => {
+            "Clamp non-essential transitions, keyframes, scrolling, inertia, tooltips, and surface motion to an immediate state."
         }
 
         // shell.render

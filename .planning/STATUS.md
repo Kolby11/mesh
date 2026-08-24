@@ -16,14 +16,18 @@ eligibility, target filtering, and one affine transform/clip contract through
 hit testing, focus, scrolling, tooltips, events, paint bounds, and downstream
 consumers.
 
+Reduced-motion preferences now flow through one `MotionPolicy` snapshot that
+clamps non-essential transitions, keyframes, scrolling, inertia, tooltips, and
+surface motion at settings and frame boundaries.
+
 CSS custom-property resolution, retained explicit/inherited style masks, and
 the canonical generated element schema landed 2026-08-23 — see
 [`.planning/log/2026-08.md`](log/2026-08.md) for the dated entries.
 
 ## Next
 
-Add a `MotionPolicy` snapshot for reduced motion across transitions, keyframes,
-scrolling, inertia, tooltips, and surfaces (`docs/BACKLOG.md`).
+Consolidate focus, pointer capture, press origin, gesture ownership, and scroll
+ownership into one transaction (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

@@ -37,7 +37,7 @@ pub(in crate::shell) use catalog::{
 #[cfg(test)]
 pub(crate) use input::KeybindResolutionSource;
 use input::ResolvedSurfaceShortcut;
-use mesh_core_animation::transition::TransitionAnimator;
+use mesh_core_animation::{MotionPolicy, transition::TransitionAnimator};
 pub(in crate::shell) use mesh_core_interaction::ScrollOffsetState;
 #[cfg(test)]
 use runtime_tree::stable_runtime_node_id;
@@ -692,6 +692,9 @@ pub(super) struct FrontendSurfaceComponent {
     /// This component's resolved overrides: `settings.namespace(&namespace)`.
     /// Cached because it is handed to Luau on every runtime creation.
     settings_json: serde_json::Value,
+    /// Reduced-motion preference captured as an immutable decision for the
+    /// current animation/scroll scheduling pass.
+    motion_policy: MotionPolicy,
     /// What the last resolution of this namespace rejected. Kept so a live
     /// reload can report only what is new: the file is re-validated on every
     /// save, and a user fixing one of five mistakes should hear about four.
@@ -1097,6 +1100,7 @@ impl FrontendSurfaceComponent {
     ) -> Self {
         let compiled = compiled.into();
         let settings = settings.into();
+        let motion_policy = MotionPolicy::new(settings.shell().motion.reduced);
         let settings_namespace = compiled.manifest.package.id.clone();
         let settings_state = resolve_frontend_module_settings_with_props(
             &settings_namespace,
@@ -1121,6 +1125,7 @@ impl FrontendSurfaceComponent {
             settings,
             settings_namespace,
             settings_json: settings_state.effective,
+            motion_policy,
             settings_diagnostics: settings_state.diagnostics,
             surface_layout: settings_state.layout.clone(),
             keyboard_mode_override: None,

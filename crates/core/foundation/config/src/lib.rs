@@ -41,6 +41,8 @@ pub struct ShellSettings {
     #[serde(default)]
     pub fonts: FontSettings,
     #[serde(default)]
+    pub motion: MotionSettings,
+    #[serde(default)]
     pub tooltip: TooltipSettings,
     #[serde(default)]
     pub render: RenderSettings,
@@ -112,6 +114,10 @@ pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
             FieldSpec::new("ui_family", FieldKind::Str),
             FieldSpec::new("packs", FieldKind::StrArray),
         ]),
+    ),
+    FieldSpec::new(
+        "motion",
+        FieldKind::Section(&[FieldSpec::new("reduced", FieldKind::Bool)]),
     ),
     FieldSpec::new(
         "render",
@@ -375,6 +381,15 @@ fn resolve_shell_locale_settings_with_host_locale(
 pub struct RenderSettings {
     #[serde(default)]
     pub blur: BlurSettings,
+}
+
+/// Shell-wide accessibility preference consumed by the motion policy
+/// snapshot. The setting is intentionally a preference, not a component
+/// concern: animation, scrolling, and surface scheduling own its effect.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct MotionSettings {
+    #[serde(default)]
+    pub reduced: bool,
 }
 
 /// Blur cost is the one part of painting worth a user-facing dial: it scales

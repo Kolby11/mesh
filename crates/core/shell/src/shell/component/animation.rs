@@ -159,6 +159,10 @@ impl FrontendSurfaceComponent {
             .retain(|key, _| live_keyframe_keys.contains(key));
         self.keyframe_rules
             .retain(|key, _| live_keyframe_keys.contains(key));
+        if self.motion_policy.reduced_motion {
+            self.keyframe_animations.clear();
+            self.keyframe_rules.clear();
+        }
         self.has_active_keyframe_animation = has_active_keyframe_animation;
         self.animation_live_keys_scratch = live_keys;
         self.animation_live_keyframe_keys_scratch = live_keyframe_keys;
@@ -293,10 +297,13 @@ impl FrontendSurfaceComponent {
             .or_else(|| previous_styles.get(&key).copied())
             .unwrap_or(desired);
 
-        if self
-            .transitions
-            .step_node(key, node, previous_displayed, now)
-        {
+        if self.transitions.step_node_with_policy(
+            key,
+            node,
+            previous_displayed,
+            now,
+            self.motion_policy,
+        ) {
             *has_active_animation = true;
         }
         Some(previous_displayed)
@@ -366,8 +373,14 @@ impl FrontendSurfaceComponent {
                 paused_at: None,
             });
             active.rule_name = animation_key.clone();
-            active.duration = Duration::from_millis(u64::from(animation_style.duration_ms));
-            active.delay = Duration::from_millis(u64::from(animation_style.delay_ms));
+            active.duration = self.motion_policy.duration(
+                Duration::from_millis(u64::from(animation_style.duration_ms)),
+                false,
+            );
+            active.delay = self.motion_policy.duration(
+                Duration::from_millis(u64::from(animation_style.delay_ms)),
+                false,
+            );
             active.easing = animation_style.easing.into();
             active.iteration_count = animation_style.iteration_count;
             active.direction = animation_style.direction;
@@ -383,7 +396,10 @@ impl FrontendSurfaceComponent {
                 current.apply_to_node(node);
             }
 
-            if active.play_state == AnimationPlayState::Running && !active.finished(now) {
+            if !self.motion_policy.reduced_motion
+                && active.play_state == AnimationPlayState::Running
+                && !active.finished(now)
+            {
                 *has_active_keyframe_animation = true;
                 *active_keyframe_bucket =
                     merge_animation_bucket(*active_keyframe_bucket, keyframe_bucket);

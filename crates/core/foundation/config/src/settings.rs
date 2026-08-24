@@ -32,7 +32,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub const SETTINGS_SCHEMA_VERSION: u64 = 1;
 
 /// Namespace holding core shell preferences (theme, locale, icons, keyboard,
-/// tooltip, sounds). Every other top-level key is a module id
+/// motion, tooltip, sounds). Every other top-level key is a module id
 /// (`@scope/name`, optionally `#instance`) or an interface id (`mesh.audio`).
 pub const SHELL_NAMESPACE: &str = "shell";
 
@@ -852,6 +852,15 @@ mod tests {
         assert_eq!(store.shell().tooltip.position, "bottom");
         assert_eq!(store.shell().tooltip.gap, 6.0);
         assert_eq!(store.shell().theme.active, "tokyo-night");
+    }
+
+    #[test]
+    fn reduced_motion_is_loaded_from_the_shell_namespace() {
+        let store = store(json!({
+            "shell": { "motion": { "reduced": true } }
+        }));
+
+        assert!(store.shell().motion.reduced);
     }
 
     #[test]

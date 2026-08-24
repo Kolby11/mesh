@@ -11,6 +11,7 @@ use mesh_core_elements::{
 
 use super::easing::{Easing, apply_easing};
 use super::interpolate::Interpolate;
+use super::policy::MotionPolicy;
 
 /// Bundle of every property that can be transitioned or keyframed.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -424,6 +425,19 @@ impl TransitionAnimator {
         previous_displayed: AnimatableStyle,
         now: Instant,
     ) -> bool {
+        self.step_node_with_policy(key, node, previous_displayed, now, MotionPolicy::default())
+    }
+
+    /// Step a node with the caller's immutable motion snapshot. Non-essential
+    /// transitions are completed immediately when reduced motion is enabled.
+    pub fn step_node_with_policy(
+        &mut self,
+        key: NodeId,
+        node: &mut WidgetNode,
+        previous_displayed: AnimatableStyle,
+        now: Instant,
+        policy: MotionPolicy,
+    ) -> bool {
         let desired = AnimatableStyle::from_node(node);
         let transition = node
             .computed_style
@@ -439,8 +453,11 @@ impl TransitionAnimator {
             node.computed_style.border_radius = desired.border_radius;
         }
 
-        let should_animate =
-            transition.duration_ms > 0 && previous_displayed.differs(&desired, props);
+        let duration = policy.duration(
+            Duration::from_millis(u64::from(transition.duration_ms)),
+            false,
+        );
+        let should_animate = !duration.is_zero() && previous_displayed.differs(&desired, props);
 
         if should_animate {
             let restart = self.active.get(&key).is_none_or(|transition_in_flight| {
@@ -457,7 +474,7 @@ impl TransitionAnimator {
                         from,
                         to: desired,
                         started_at: now,
-                        duration: Duration::from_millis(u64::from(transition.duration_ms)),
+                        duration,
                         delay: Duration::from_millis(u64::from(transition.delay_ms)),
                         easing: transition.easing.into(),
                         source: transition,
@@ -607,6 +624,39 @@ mod tests {
         let still_active = animator.step_node(key, &mut node, displayed, done);
         assert!(!still_active);
         assert!((node.computed_style.opacity - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn reduced_motion_completes_nonessential_transition_immediately() {
+        let transition = TransitionStyle {
+            duration_ms: 100,
+            properties: mesh_core_elements::TransitionProperties {
+                opacity: true,
+                ..mesh_core_elements::TransitionProperties::none()
+            },
+            ..TransitionStyle::default()
+        };
+
+        let mut animator = TransitionAnimator::new();
+        let mut node = WidgetNode::new("box");
+        node.computed_style.transitions = vec![transition];
+        node.computed_style.opacity = 1.0;
+        let previous = AnimatableStyle {
+            opacity: 0.0,
+            ..AnimatableStyle::from_node(&node)
+        };
+
+        let active = animator.step_node_with_policy(
+            node.id,
+            &mut node,
+            previous,
+            Instant::now(),
+            MotionPolicy::new(true),
+        );
+
+        assert!(!active);
+        assert_eq!(node.computed_style.opacity, 1.0);
+        assert!(!animator.contains_key(node.id));
     }
 
     #[test]

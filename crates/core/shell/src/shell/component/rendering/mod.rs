@@ -485,6 +485,7 @@ impl FrontendSurfaceComponent {
         // Advance smooth-scroll animations before annotation reads scroll_offsets,
         // so the eased offset lands in this frame's `_mesh_scroll_*` attributes.
         let now = std::time::Instant::now();
+        self.refresh_motion_policy(now);
         self.advance_scroll_animations(now);
         self.advance_scroll_inertia(now);
         let mut annotation_context = RuntimeAnnotationContext::new(

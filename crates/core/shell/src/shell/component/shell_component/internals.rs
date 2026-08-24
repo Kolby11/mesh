@@ -103,7 +103,10 @@ impl FrontendSurfaceComponent {
     pub(super) fn tooltip_fade_duration(&self) -> Duration {
         self.tooltip_animation
             .as_ref()
-            .map(tooltip::TooltipAnimation::total_duration)
+            .map(|animation| {
+                self.motion_policy
+                    .duration(animation.total_duration(), false)
+            })
             .unwrap_or(Duration::ZERO)
     }
 
@@ -135,7 +138,9 @@ impl FrontendSurfaceComponent {
         // Sample the theme-CSS enter animation at the current elapsed time.
         // No animation in the theme (or no appear timestamp) → resting state.
         let sample = match (&self.tooltip_animation, self.tooltip_appeared_at) {
-            (Some(animation), Some(appeared)) => animation.sample(appeared.elapsed()),
+            (Some(animation), Some(appeared)) if !self.motion_policy.reduced_motion => {
+                animation.sample(appeared.elapsed())
+            }
             _ => tooltip::TooltipAnimationSample::FINISHED,
         };
 

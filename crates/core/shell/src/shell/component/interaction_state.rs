@@ -314,20 +314,23 @@ impl FrontendSurfaceComponent {
             .get("smooth")
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
-        if smooth {
+        let duration = options
+            .get("duration")
+            .and_then(serde_json::Value::as_f64)
+            .filter(|value| *value > 0.0)
+            .unwrap_or(250.0);
+        let duration = self
+            .motion_policy
+            .duration(std::time::Duration::from_secs_f64(duration / 1000.0), false);
+        if smooth && !duration.is_zero() {
             self.scroll_inertia.remove(&node_id);
-            let duration_ms = options
-                .get("duration")
-                .and_then(serde_json::Value::as_f64)
-                .filter(|value| *value > 0.0)
-                .unwrap_or(250.0);
             self.scroll_animations.insert(
                 node_id,
                 ScrollAnimation {
                     start: current,
                     target,
                     start_time: std::time::Instant::now(),
-                    duration: std::time::Duration::from_secs_f64(duration_ms / 1000.0),
+                    duration,
                 },
             );
         } else {
@@ -345,6 +348,13 @@ impl FrontendSurfaceComponent {
     /// repaints via `wants_render` while any animation is live.
     pub(super) fn advance_scroll_animations(&mut self, now: std::time::Instant) {
         if self.scroll_animations.is_empty() {
+            return;
+        }
+
+        if self.motion_policy.reduced_motion {
+            for (key, animation) in self.scroll_animations.drain() {
+                self.scroll_offsets.insert(key, animation.target);
+            }
             return;
         }
 
@@ -392,6 +402,11 @@ impl FrontendSurfaceComponent {
         const STOP_VELOCITY: f32 = 12.0;
 
         if self.scroll_inertia.is_empty() {
+            return;
+        }
+
+        if self.motion_policy.reduced_motion {
+            self.scroll_inertia.clear();
             return;
         }
 
