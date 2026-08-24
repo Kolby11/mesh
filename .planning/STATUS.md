@@ -119,8 +119,8 @@ source of truth.
 
 ## Next
 
-Publish validated initial provider state before atomically marking the provider
-ready (`docs/BACKLOG.md`).
+Compile and swap a fresh Luau environment on reload, preserving only explicit
+durable storage (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

@@ -540,16 +540,6 @@ async fn run_backend_service(
         }
     };
 
-    if tx
-        .send(BackendServiceEvent::Started {
-            service: service_name.clone(),
-            source_module: module_id.clone(),
-        })
-        .is_err()
-    {
-        return;
-    }
-
     let mut interval_ms = bounded_poll_interval_ms(&ctx);
     let mut tick = make_interval(interval_ms, true);
     let mut last_payload: Option<serde_json::Value> = None;
@@ -558,9 +548,22 @@ async fn run_backend_service(
     let mut coalesced_command_index = HashMap::new();
 
     if let Some(payload) = init_payload {
+        // The shell validates and stages this snapshot before treating the
+        // following lifecycle record as provider readiness. Keep the update
+        // and readiness records ordered on the backend channel so consumers
+        // cannot observe a provider as ready before its initial state.
         if !publish_changed_update(&tx, &service_name, &module_id, &mut last_payload, payload) {
             return;
         }
+    }
+    if tx
+        .send(BackendServiceEvent::Started {
+            service: service_name.clone(),
+            source_module: module_id.clone(),
+        })
+        .is_err()
+    {
+        return;
     }
     if !publish_script_events(&tx, &service_name, &module_id, ctx.drain_events()) {
         return;
@@ -1296,6 +1299,54 @@ mod tests {
 
         drop(cmd_tx);
         drop(update_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
+            .expect("backend task should not panic");
+    }
+
+    #[tokio::test]
+    async fn spawn_backend_service_publishes_initial_state_before_started() {
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/ordered-startup".to_string(),
+            "audio".to_string(),
+            Vec::new(),
+            serde_json::json!({}),
+            concat!(
+                "state = { available = false }\n",
+                "function start()\n",
+                "  state = { available = true, percent = 65 }\n",
+                "end"
+            )
+            .to_string(),
+            event_tx,
+            cmd_rx,
+        ));
+
+        let first = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+            .await
+            .expect("initial state should be published before readiness")
+            .expect("backend event channel should stay open");
+        match first {
+            BackendServiceEvent::Update(update) => {
+                assert_eq!(update.service.as_ref(), "audio");
+                assert_eq!(update.source_module.as_ref(), "@test/ordered-startup");
+                assert_eq!(update.payload["percent"], serde_json::json!(65));
+            }
+            other => panic!("expected initial state before readiness, got {other:?}"),
+        }
+
+        let second = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+            .await
+            .expect("readiness should follow the initial state")
+            .expect("backend event channel should stay open");
+        assert!(matches!(second, BackendServiceEvent::Started { .. }));
+
+        drop(cmd_tx);
+        drop(event_rx);
         tokio::time::timeout(Duration::from_secs(1), task)
             .await
             .expect("backend task should exit after command channel closes")

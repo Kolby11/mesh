@@ -77,7 +77,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md)
 
-- [ ] Publish validated initial provider state before atomically marking the provider ready.
 - [ ] Compile and swap a fresh Luau environment on reload, preserving only explicit durable storage.
 - [ ] Stage backend top-level execution so host side effects cannot escape a failed `start(self)`.
 - [ ] Bound command/event ingress, JSON depth/bytes, event counts, and aggregate runtime resource budgets.
