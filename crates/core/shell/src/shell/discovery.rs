@@ -2180,7 +2180,16 @@ impl Shell {
                 if let Some(module) = self.modules.get_mut(module_id) {
                     let _ = module.mark_failed(error.to_string());
                 }
-                self.frontend_catalog.restore(previous_catalog);
+                let candidate_version = previous_catalog.version.wrapping_add(1);
+                if !self
+                    .frontend_catalog
+                    .restore_if_current(candidate_version, previous_catalog)
+                {
+                    tracing::warn!(
+                        module_id,
+                        "skipping frontend catalog rollback because a newer generation is active"
+                    );
+                }
                 return Err(error);
             }
         };

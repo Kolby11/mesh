@@ -387,8 +387,21 @@ impl FrontendCatalogHandle {
         previous
     }
 
-    pub(in crate::shell) fn restore(&self, state: FrontendCatalogState) {
-        *self.state.write().unwrap() = state;
+    /// Restore a previously published catalog only while the generation that
+    /// was published from it is still current. A reload can fail after the
+    /// candidate has been published, so an unconditional restore could erase
+    /// a newer replacement that completed in the meantime.
+    pub(in crate::shell) fn restore_if_current(
+        &self,
+        expected_version: u64,
+        state: FrontendCatalogState,
+    ) -> bool {
+        let mut current = self.state.write().unwrap();
+        if current.version != expected_version {
+            return false;
+        }
+        *current = state;
+        true
     }
 
     /// Compile every active root owned by one module before publishing the
@@ -1504,6 +1517,35 @@ local audio = require("mesh.audio@>=2.0")
                 &*rebuilt_entry.compiled,
             ));
         }
+    }
+
+    #[test]
+    fn stale_catalog_rollback_cannot_replace_a_newer_generation() {
+        use std::sync::{Arc, Barrier};
+
+        let handle = FrontendCatalogHandle::default();
+        let stale_state = handle.replace(FrontendCatalog::default(), Some("@test/stale"));
+        let candidate_version = stale_state.version.wrapping_add(1);
+        let ready = Arc::new(Barrier::new(2));
+        let continue_rollback = Arc::new(Barrier::new(2));
+        let rollback_handle = handle.clone();
+        let rollback_ready = ready.clone();
+        let rollback_continue = continue_rollback.clone();
+        let rollback = std::thread::spawn(move || {
+            rollback_ready.wait();
+            rollback_continue.wait();
+            rollback_handle.restore_if_current(candidate_version, stale_state)
+        });
+
+        ready.wait();
+        let newer_state = handle.replace(FrontendCatalog::default(), Some("@test/newer"));
+        continue_rollback.wait();
+        assert!(!rollback.join().unwrap());
+
+        let current = handle.snapshot();
+        assert_eq!(current.version, newer_state.version.wrapping_add(1));
+        assert!(current.changed_modules.contains("@test/newer"));
+        assert!(!current.changed_modules.contains("@test/stale"));
     }
 
     #[test]

@@ -94,8 +94,8 @@ source of truth.
 
 ## Next
 
-Prevent stale catalog rollback from overwriting a newer generation using a
-coordinator or compare-and-swap (`docs/BACKLOG.md`).
+Enforce distinct popover and overflow child-surface lifecycle, focus,
+dismissal, placement, and ownership semantics (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 
