@@ -65,8 +65,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/08-ui-element-core/improvements.md)
 
-- [ ] Introduce an immutable frame snapshot with phase stamps, semantic diffs, stable identities, and property-based invariant tests.
-
 ### 9. Interaction and motion
 
 [Audit](../.planning/log/sections/09-interaction-and-motion/improvements.md)

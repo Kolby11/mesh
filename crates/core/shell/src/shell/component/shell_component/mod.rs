@@ -22,6 +22,7 @@ impl FrontendSurfaceComponent {
     fn reset_render_caches(&mut self) {
         self.clear_component_memo();
         self.last_tree = None;
+        self.last_frame_snapshot = None;
         self.cached_restyle_rules = None;
         self.cached_restyle_state_dependencies = StyleStateDependencies::default();
         self.cached_style_rule_index = None;
@@ -1086,6 +1087,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             // pose into place.
             if !self.popup_promoted {
                 self.last_tree = None;
+                self.last_frame_snapshot = None;
             }
             self.invalidate_script_state();
         }

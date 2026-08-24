@@ -52,9 +52,9 @@ use mesh_core_component::template::{AttributeValue, TemplateNode};
 use mesh_core_config::TooltipSettings;
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::{
-    HandlerTarget, IntrinsicLayoutCache, LayoutEngine, NodeId, PerSurfaceLayoutState,
-    PopoverPlacement, StyleContext, StyleResolver, VariableStore, WidgetNode, WindowSurfaceState,
-    element_snapshot_json,
+    FramePhaseStamps, FrameSnapshot, HandlerTarget, IntrinsicLayoutCache, LayoutEngine, NodeId,
+    PerSurfaceLayoutState, PopoverPlacement, StyleContext, StyleResolver, VariableStore,
+    WidgetNode, WindowSurfaceState, element_snapshot_json,
 };
 use mesh_core_frontend::{
     CompiledFrontendModule, FrontendRenderMode, compile_frontend_module, root_accessibility_role,
@@ -885,6 +885,11 @@ pub(super) struct FrontendSurfaceComponent {
     locale_catalog_is_shared: bool,
     interface_catalog: Arc<mesh_core_service::InterfaceCatalog>,
     last_tree: Option<WidgetNode>,
+    /// Immutable cross-phase hand-off produced after layout and semantic
+    /// normalization. The mutable `last_tree` remains the input-side working
+    /// copy; consumers that need a coherent frame use this snapshot instead.
+    last_frame_snapshot: Option<FrameSnapshot>,
+    frame_revision: u64,
     intrinsic_layout_cache: IntrinsicLayoutCache,
     layout_state: PerSurfaceLayoutState,
     pub(in crate::shell::component) retained_tree: RetainedWidgetTree,
@@ -1197,6 +1202,8 @@ impl FrontendSurfaceComponent {
             locale_catalog_is_shared: false,
             interface_catalog: interface_catalog.into(),
             last_tree: None,
+            last_frame_snapshot: None,
+            frame_revision: 0,
             intrinsic_layout_cache: IntrinsicLayoutCache::default(),
             layout_state: PerSurfaceLayoutState::default(),
             retained_tree: RetainedWidgetTree::default(),

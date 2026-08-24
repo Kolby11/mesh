@@ -3,6 +3,7 @@ pub mod attributes;
 pub mod composition;
 pub mod element;
 pub mod events;
+pub mod frame;
 pub mod layout;
 pub mod lru;
 pub mod popover;
@@ -40,6 +41,11 @@ pub use element::{
 };
 pub use events::{
     EventDispatcher, InputDispatchResult, InputState, Modifiers, RawInputEvent, UiEvent,
+};
+pub use frame::{
+    FrameNode, FramePhase, FramePhaseStamps, FrameSemanticNode, FrameSemanticRelationships,
+    FrameSnapshot, FrameSnapshotError, PhaseStamp, SemanticChange, SemanticChangeKind,
+    SemanticDiff, SemanticField, StableNodeIdentity,
 };
 pub use layout::{
     IntrinsicLayoutCache, LayoutEngine, LayoutRect, PerSurfaceLayoutState, TextMeasureContext,

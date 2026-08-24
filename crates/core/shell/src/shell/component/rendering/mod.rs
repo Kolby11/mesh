@@ -813,6 +813,22 @@ impl FrontendSurfaceComponent {
         // snapshots cannot retain stale focus, names, or hidden descendants.
         mesh_core_elements::normalize_accessibility(tree);
         self.annotate_selection_tree(tree, theme);
+        self.frame_revision = self.frame_revision.saturating_add(1);
+        match FrameSnapshot::capture(
+            tree,
+            self.frame_revision,
+            FramePhaseStamps::complete(self.frame_revision),
+            self.last_frame_snapshot.as_ref(),
+        ) {
+            Ok(frame) => self.last_frame_snapshot = Some(frame),
+            Err(error) => {
+                self.last_frame_snapshot = None;
+                tracing::error!(
+                    component = %self.id(),
+                    "frame snapshot construction failed: {error}"
+                );
+            }
+        }
 
         // Store current interaction state for next frame's targeted restyle diff.
         // Preserve the prior frame's allocation while replacing its contents.

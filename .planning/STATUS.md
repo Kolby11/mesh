@@ -4,11 +4,10 @@
 
 ## Now
 
-Text measurement passes a complete shaping/wrapping context (font style,
-tracking, direction, whitespace, language/features, resource/measurer
-revisions) through core layout and the renderer. Intrinsic and retained caches
-key every input, and retained layout remeasures when a measurer/resource
-revision changes without an ordinary dirty flag.
+The immutable frame boundary now captures one validated tree after state,
+style, layout, and semantic phases. It carries phase stamps, stable identities,
+and semantic diffs for downstream consumers; the shell retains it alongside the
+mutable working tree.
 
 CSS custom-property resolution, retained explicit/inherited style masks, and
 the canonical generated element schema landed 2026-08-23 — see
@@ -16,8 +15,9 @@ the canonical generated element schema landed 2026-08-23 — see
 
 ## Next
 
-Introduce an immutable frame snapshot with phase stamps, semantic diffs, stable
-identities, and property-based invariant tests (`docs/BACKLOG.md`).
+Share visibility, transformed geometry, disabled/inert eligibility, and target
+filtering across interaction, rendering, focus, scrolling, tooltips, and
+accessibility (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 
