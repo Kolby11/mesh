@@ -3,11 +3,21 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 impl FrontendSurfaceComponent {
+    pub(super) fn prepare_interaction_frame(&mut self) {
+        self.interaction_frame.prepare_for_paint(
+            self.frame_revision.saturating_add(1),
+            mesh_core_interaction::InteractionStateSnapshot::from_state(&self.interaction_state),
+            Instant::now(),
+        );
+    }
+
     pub(super) fn commit_interaction_delta(
         &mut self,
         transaction: mesh_core_interaction::InteractionTransaction,
     ) -> InteractionDelta {
         let delta = transaction.commit(&mut self.interaction_state);
+        self.interaction_frame
+            .record_interaction_delta(&delta, &self.interaction_state);
         if delta
             .dirty
             .contains(mesh_core_interaction::InteractionDirtyFlags::STYLE)
@@ -21,6 +31,61 @@ impl FrontendSurfaceComponent {
             self.invalidate_paint();
         }
         delta
+    }
+
+    pub(super) fn record_interaction_frame_dirty(
+        &mut self,
+        nodes: impl IntoIterator<Item = NodeId>,
+        flags: mesh_core_interaction::InteractionDirtyFlags,
+    ) {
+        self.interaction_frame.record_dirty(nodes, flags);
+    }
+
+    pub(super) fn record_component_frame_dirty(&mut self, dirty_types: ComponentDirtyFlags) {
+        let mut flags = mesh_core_interaction::InteractionDirtyFlags::empty();
+        if dirty_types.intersects(ComponentDirtyFlags::STATE | ComponentDirtyFlags::STYLE) {
+            flags = flags | mesh_core_interaction::InteractionDirtyFlags::STYLE;
+        }
+        if dirty_types.contains(ComponentDirtyFlags::LAYOUT) {
+            flags = flags | mesh_core_interaction::InteractionDirtyFlags::LAYOUT;
+        }
+        if dirty_types.intersects(
+            ComponentDirtyFlags::PAINT
+                | ComponentDirtyFlags::METRICS
+                | ComponentDirtyFlags::SURFACE_CONFIG,
+        ) {
+            flags = flags | mesh_core_interaction::InteractionDirtyFlags::PAINT;
+        }
+        if dirty_types.contains(ComponentDirtyFlags::ACCESSIBILITY) {
+            flags = flags | mesh_core_interaction::InteractionDirtyFlags::ACCESSIBILITY;
+        }
+        self.record_interaction_frame_dirty([], flags);
+    }
+
+    pub(super) fn advance_interaction_frame(
+        &mut self,
+        phase: mesh_core_interaction::InteractionFramePhase,
+    ) {
+        if let Err(error) = self.interaction_frame.advance(phase) {
+            tracing::warn!(
+                surface = %self.id(),
+                ?error,
+                "interaction frame phase order recovered"
+            );
+        }
+    }
+
+    pub(super) fn publish_interaction_tree_snapshot(
+        &mut self,
+        snapshot: mesh_core_elements::FrameSnapshot,
+    ) {
+        if let Err(error) = self.interaction_frame.publish_tree_snapshot(snapshot) {
+            tracing::warn!(
+                surface = %self.id(),
+                ?error,
+                "interaction frame rejected tree snapshot"
+            );
+        }
     }
 
     pub(super) fn reconcile_interaction_state(&mut self, tree: &WidgetNode) -> InteractionDelta {

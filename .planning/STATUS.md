@@ -44,10 +44,15 @@ and declaration generation for stable identity. The shell and core expose
 explicit started, continued, replaced, cancelled, completed, and reversed
 decisions so style changes do not inherit stale timelines.
 
+`InteractionFrame` now carries the renderer-neutral interaction state,
+revision, typed decisions, dirty outputs, immutable tree snapshot, and ordered
+phase stamps from input/state through style invalidation, layout, animation,
+paint, and semantics.
+
 ## Next
 
-Introduce an `InteractionFrame` shared by input, state, style invalidation,
-layout, animation, paint, and semantics (`docs/BACKLOG.md`).
+Reject absolute, traversal, and symlinked frontend entrypoint/import paths
+outside the module root (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

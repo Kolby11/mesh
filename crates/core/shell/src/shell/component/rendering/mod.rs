@@ -547,6 +547,9 @@ impl FrontendSurfaceComponent {
         // Populate the rule cache once, then run restyle while borrowing it.
         // The cache survives across paints — we only pay the clone cost on
         // source reload (when `cached_restyle_rules` is reset).
+        self.advance_interaction_frame(
+            mesh_core_interaction::InteractionFramePhase::StyleInvalidated,
+        );
         self.module_restyle_rules();
         let resolver = StyleResolver::new(theme).with_borrowed_props(surface_css_props);
         let context = StyleContext {
@@ -802,6 +805,7 @@ impl FrontendSurfaceComponent {
             &mut self.intrinsic_layout_cache,
             Some(&measurer),
         );
+        self.advance_interaction_frame(mesh_core_interaction::InteractionFramePhase::LayoutReady);
         if layout_work_required {
             self.record_profiling_stage(
                 mesh_core_debug::ProfilingStage::Layout,
@@ -821,7 +825,10 @@ impl FrontendSurfaceComponent {
             FramePhaseStamps::complete(self.frame_revision),
             self.last_frame_snapshot.as_ref(),
         ) {
-            Ok(frame) => self.last_frame_snapshot = Some(frame),
+            Ok(frame) => {
+                self.publish_interaction_tree_snapshot(frame.clone());
+                self.last_frame_snapshot = Some(frame);
+            }
             Err(error) => {
                 self.last_frame_snapshot = None;
                 tracing::error!(

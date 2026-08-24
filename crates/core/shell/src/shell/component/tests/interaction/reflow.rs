@@ -1,6 +1,40 @@
 use super::*;
 
 #[test]
+fn paint_publishes_one_interaction_frame_across_all_phases() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 80);
+
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 80), &mut buffer, 1.0)
+        .unwrap();
+
+    let frame = &component.interaction_frame;
+    assert!(frame.is_publishable());
+    assert_eq!(
+        frame.phase(),
+        Some(mesh_core_interaction::InteractionFramePhase::SemanticsReady)
+    );
+    assert_eq!(frame.tree_revision(), component.frame_revision);
+    assert!(frame.tree_snapshot().is_some());
+    for phase in [
+        mesh_core_interaction::InteractionFramePhase::InputResolved,
+        mesh_core_interaction::InteractionFramePhase::StateUpdated,
+        mesh_core_interaction::InteractionFramePhase::StyleInvalidated,
+        mesh_core_interaction::InteractionFramePhase::LayoutReady,
+        mesh_core_interaction::InteractionFramePhase::AnimationSampled,
+        mesh_core_interaction::InteractionFramePhase::PaintReady,
+        mesh_core_interaction::InteractionFramePhase::SemanticsReady,
+    ] {
+        assert_eq!(
+            frame.phase_stamp(phase).map(|stamp| stamp.revision()),
+            Some(frame.revision())
+        );
+    }
+}
+
+#[test]
 fn keyboard_regression_buttons_sliders_inputs_and_pointer_modality() {
     let mut component = test_frontend_component(
         r#"

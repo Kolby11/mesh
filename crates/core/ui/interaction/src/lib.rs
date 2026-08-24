@@ -5,11 +5,16 @@ use mesh_core_elements::{
 };
 
 mod focus;
+mod frame;
 mod hit_test;
 mod scroll;
 mod transaction;
 
 pub use focus::{collect_focus_traversal, find_focusable_at, next_focus_target};
+pub use frame::{
+    InteractionFrame, InteractionFrameError, InteractionFramePhase, InteractionPhaseStamp,
+    InteractionStateSnapshot,
+};
 pub use hit_test::find_click_handler;
 pub use hit_test::{
     InspectHit, PointerEventHandlerHit, PointerHit, PointerPressHit, PointerPressNode,

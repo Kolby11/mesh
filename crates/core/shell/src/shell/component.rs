@@ -11,9 +11,9 @@ use super::types::{
 };
 use mesh_core_config::SettingsStore;
 use mesh_core_interaction::{
-    GestureKind, InteractionDelta, InteractionState, ScrollbarAxis, collect_focus_traversal,
-    find_click_handler, find_event_handler, find_node_bounds_by_key, find_node_by_key,
-    find_node_path_at, find_node_with_bounds_by_key, find_nodes_by_keys,
+    GestureKind, InteractionDelta, InteractionFrame, InteractionState, ScrollbarAxis,
+    collect_focus_traversal, find_click_handler, find_event_handler, find_node_bounds_by_key,
+    find_node_by_key, find_node_path_at, find_node_with_bounds_by_key, find_nodes_by_keys,
     find_scrollable_at_with_limits, find_scrollbar_at, is_input_key, is_slider_key,
     measure_content_size, next_focus_target, node_can_receive_target as tree_target_is_eligible,
     node_is_source, pointer_event_handler_hit, pointer_press_hit, scroll_into_view_offsets,
@@ -765,6 +765,9 @@ pub(super) struct FrontendSurfaceComponent {
     /// gestures, scrolling, and their typed invalidation output. The legacy
     /// key/id fields beside it are lookup caches for script and render paths.
     pub(super) interaction_state: InteractionState,
+    /// Renderer-neutral phase contract shared by input, state, style,
+    /// layout, animation, paint, and semantic publication.
+    pub(super) interaction_frame: InteractionFrame,
     pointer_down_id: Option<NodeId>,
     pointer_down_bounds: Option<(f32, f32, f32, f32)>,
     pointer_down_target: Option<input::PressedTargetSnapshot>,
@@ -1168,6 +1171,7 @@ impl FrontendSurfaceComponent {
             focused_id: None,
             focus_visible_id: None,
             interaction_state: InteractionState::default(),
+            interaction_frame: InteractionFrame::default(),
             pointer_down_id: None,
             pointer_down_bounds: None,
             pointer_down_target: None,

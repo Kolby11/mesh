@@ -54,6 +54,7 @@ impl FrontendSurfaceComponent {
         self.clear_component_memo();
         self.last_tree = None;
         self.last_frame_snapshot = None;
+        self.interaction_frame.reset();
         self.cached_restyle_rules = None;
         self.cached_restyle_state_dependencies = StyleStateDependencies::default();
         self.cached_style_rule_index = None;
@@ -676,6 +677,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         scale: f32,
     ) -> Result<(), ComponentError> {
         let _span = tracing::debug_span!("paint", surface = %self.id()).entered();
+        self.prepare_interaction_frame();
         // Capture and clear dirty flags up front. paint is the work-doer; if
         // anything during paint (measured_size change, active animation) needs
         // another frame, it sets a flag again and wants_render picks it up.
@@ -719,6 +721,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         let animation_only_frame = std::mem::take(&mut self.animation_only_dirty);
         let (requires_tree_rebuild, can_use_retained_path, dirty_types, _) =
             self.take_dirty_for_paint();
+        self.record_component_frame_dirty(dirty_types);
         let paint_width = extent.padded_width().max(content_width).max(1);
         let paint_height = extent.padded_height().max(content_height).max(1);
         // The paint buffer's physical size tracks `paint_width`/`paint_height`
@@ -793,6 +796,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         if run_style_animation_pass {
             self.restore_previous_visual_styles(previous_visual_styles);
         }
+        self.record_interaction_frame_dirty(
+            animation_dirty_roots.iter().copied(),
+            mesh_core_interaction::InteractionDirtyFlags::ANIMATION,
+        );
         let mut retained_update_dirty_roots = self.retained_update_dirty_roots.take();
         #[cfg(test)]
         if self.force_full_retained_update {
@@ -802,6 +809,9 @@ impl ShellComponent for FrontendSurfaceComponent {
             dirty_roots.extend(animation_dirty_roots.drain());
         }
         self.animation_dirty_node_ids_scratch = animation_dirty_roots;
+        self.advance_interaction_frame(
+            mesh_core_interaction::InteractionFramePhase::AnimationSampled,
+        );
         // Render fingerprints are synchronized inside the authoritative
         // retained-tree pass, so this stage now covers that consolidated work.
         let render_object_started = std::time::Instant::now();
@@ -1023,6 +1033,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             tooltip.as_ref(),
             current_tooltip_damage,
         );
+        self.advance_interaction_frame(mesh_core_interaction::InteractionFramePhase::PaintReady);
         if effective_damage.full_surface {
             self.last_present_damage_rects.clear();
             self.last_present_damage_rects.push(surface_damage);
@@ -1102,6 +1113,9 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.visual_damage_scratch = visual_damage_rects;
         self.effective_damage_scratch = std::mem::take(&mut effective_damage.rects);
         self.last_tree = Some(tree);
+        self.advance_interaction_frame(
+            mesh_core_interaction::InteractionFramePhase::SemanticsReady,
+        );
         self.last_tooltip_damage = current_tooltip_damage;
         self.surface_pixels_invalid = false;
         self.clear_runtime_dirty_states();

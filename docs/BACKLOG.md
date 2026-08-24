@@ -69,8 +69,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/09-interaction-and-motion/improvements.md)
 
-- [ ] Introduce an `InteractionFrame` shared by input, state, style invalidation, layout, animation, paint, and semantics.
-
 ### 10. Frontend compiler and host
 
 [Audit](../.planning/log/sections/10-frontend-compiler-and-host/improvements.md)

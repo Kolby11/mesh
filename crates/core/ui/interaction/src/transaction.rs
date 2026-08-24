@@ -40,6 +40,10 @@ impl InteractionDirtyFlags {
     pub const PAINT: Self = Self(1 << 1);
     /// The semantic focus projection or exposed interaction state changed.
     pub const ACCESSIBILITY: Self = Self(1 << 2);
+    /// Layout geometry must be refreshed before downstream paint consumers.
+    pub const LAYOUT: Self = Self(1 << 3);
+    /// Animation sampling changed a visual or layout value.
+    pub const ANIMATION: Self = Self(1 << 4);
 
     pub const fn empty() -> Self {
         Self(0)
