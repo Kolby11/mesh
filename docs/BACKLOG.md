@@ -73,7 +73,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/10-frontend-compiler-and-host/improvements.md)
 
-- [ ] Split the frontend host into a renderer-neutral ABI and shell adapters with typed capability-scoped effects.
 - [ ] Build one reverse dependency graph over primary and contribution roots for invalidation.
 - [ ] Scope local component aliases by owner and canonical source, rejecting collisions.
 - [ ] Replace line-oriented Luau symbol discovery with parser/compiler metadata or remove it as a source of truth.

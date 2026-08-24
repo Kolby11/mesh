@@ -11,7 +11,10 @@ This workspace keeps browser-like concerns split by crate:
 - `mesh-core-surface-config` resolves manifest/settings surface layout policy and
   validates stored `surface` blocks and component prop overrides against their
   owning declarations.
-- `mesh-core-frontend-host` owns frontend component host contract types.
+- `mesh-core-frontend-abi` owns renderer-neutral frontend effects, caller
+  identity, and capability-scoped host contracts.
+- `mesh-core-frontend-host` owns the component host lifecycle and shell-side
+  adapters that lower the neutral ABI into renderer and surface operations.
 - `mesh-core-shell` glues these crates to modules, services, theme, locale, diagnostics, and the event loop.
 
 Normal dependency direction should remain:
@@ -20,7 +23,8 @@ Normal dependency direction should remain:
 presentation -> render
 render -> elements + icon
 frontend -> component + elements + module + theme
-frontend-host -> capability + elements + locale + render + theme + wayland
+frontend-abi -> capability
+frontend-host -> frontend-abi + capability + elements + locale + render + theme + wayland
 animation -> elements
 interaction -> elements + module
 surface-config -> component + module + wayland + config

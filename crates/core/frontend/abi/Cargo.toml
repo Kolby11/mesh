@@ -1,0 +1,11 @@
+[package]
+name = "mesh-core-frontend-abi"
+description = "Renderer-neutral frontend effects and capability-scoped host ABI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mesh-core-capability = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

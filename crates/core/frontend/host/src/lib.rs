@@ -16,6 +16,11 @@ use mesh_core_scripting::ScriptError;
 use mesh_core_theme::Theme;
 use mesh_core_wayland::{KeyboardMode, ShellSurface, WindowStates};
 
+pub use mesh_core_frontend_abi::{
+    DebugEffect, EffectRejection, EffectScope, EffectSource, FrontendEffect, FrontendEffectBatch,
+    ScopedFrontendEffect, ServiceEffect, SurfaceEffect, SurfaceRole,
+};
+
 pub type SurfaceId = String;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -531,6 +536,212 @@ pub enum CoreRequest {
     },
     CycleDebugTab,
     Shutdown,
+}
+
+/// Shell-side lowering for renderer-neutral frontend effects.
+///
+/// Frontend components and runtime integrations can exchange
+/// [`ScopedFrontendEffect`] without importing Wayland, render buffers, or
+/// shell storage. This adapter is the only place where those effects become
+/// the legacy shell request vocabulary.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ShellEffectAdapter;
+
+#[derive(Debug, thiserror::Error)]
+pub enum ShellEffectError {
+    #[error("frontend effect rejected: {0}")]
+    Rejected(#[from] EffectRejection),
+}
+
+impl ShellEffectAdapter {
+    pub fn lower(effect: ScopedFrontendEffect) -> Result<CoreRequest, ShellEffectError> {
+        effect.authorize()?;
+        let ScopedFrontendEffect { scope, effect } = effect;
+        let source_module_id = scope.source().module_id.clone();
+        let source_capabilities = scope.capabilities().clone();
+        Ok(match effect {
+            FrontendEffect::Surface(effect) => match effect {
+                SurfaceEffect::Toggle { surface_id } => CoreRequest::ToggleSurface { surface_id },
+                SurfaceEffect::Show { surface_id } => CoreRequest::ShowSurface { surface_id },
+                SurfaceEffect::Hide { surface_id } => CoreRequest::HideSurface { surface_id },
+                SurfaceEffect::HidePopover {
+                    surface_id,
+                    defer_for_hover_bridge,
+                } => CoreRequest::HidePopover {
+                    surface_id,
+                    defer_for_hover_bridge,
+                },
+                SurfaceEffect::SetRole { surface_id, role } => CoreRequest::SetSurfaceRole {
+                    surface_id,
+                    role: match role {
+                        SurfaceRole::Layer => mesh_core_wayland::SurfaceRole::Layer,
+                        SurfaceRole::Window => mesh_core_wayland::SurfaceRole::Window,
+                    },
+                },
+                SurfaceEffect::ToggleRole { surface_id } => {
+                    CoreRequest::ToggleSurfaceRole { surface_id }
+                }
+                SurfaceEffect::SetChildRole {
+                    surface_id,
+                    node_key,
+                    role,
+                } => CoreRequest::SetChildSurfaceRole {
+                    surface_id,
+                    node_key,
+                    role: match role {
+                        SurfaceRole::Layer => mesh_core_wayland::SurfaceRole::Layer,
+                        SurfaceRole::Window => mesh_core_wayland::SurfaceRole::Window,
+                    },
+                },
+                SurfaceEffect::Position {
+                    surface_id,
+                    margin_top,
+                    margin_left,
+                } => CoreRequest::PositionSurface {
+                    surface_id,
+                    margin_top,
+                    margin_left,
+                },
+                SurfaceEffect::ActivatePopover {
+                    surface_id,
+                    trigger_surface,
+                    trigger_key,
+                    focus,
+                } => CoreRequest::ActivatePopover {
+                    surface_id,
+                    trigger_surface,
+                    trigger_key,
+                    focus,
+                },
+            },
+            FrontendEffect::Service(effect) => match effect {
+                ServiceEffect::Command {
+                    interface,
+                    command,
+                    payload,
+                } => CoreRequest::ServiceCommand {
+                    interface,
+                    command,
+                    payload,
+                    source_module_id,
+                    source_capabilities,
+                },
+                ServiceEffect::Call {
+                    interface,
+                    command,
+                    payload,
+                    call_id,
+                    instance_id,
+                } => CoreRequest::ServiceCall {
+                    interface,
+                    command,
+                    payload,
+                    call_id,
+                    source_instance_id: instance_id,
+                    source_module_id,
+                    source_capabilities,
+                },
+                ServiceEffect::Cancel {
+                    interface,
+                    call_id,
+                    instance_id,
+                } => CoreRequest::CancelServiceCall {
+                    interface,
+                    call_id,
+                    source_instance_id: instance_id,
+                    source_module_id,
+                    source_capabilities,
+                },
+            },
+            FrontendEffect::SetLocale { locale } => CoreRequest::SetLocale { locale },
+            FrontendEffect::WriteClipboard { text } => CoreRequest::WriteClipboard { text },
+            FrontendEffect::Debug(effect) => match effect {
+                DebugEffect::ToggleOverlay => CoreRequest::ToggleDebugOverlay,
+                DebugEffect::ToggleLayoutBounds => CoreRequest::ToggleDebugLayoutBounds,
+                DebugEffect::ToggleElementPicker => CoreRequest::ToggleDebugElementPicker,
+                DebugEffect::OpenSource { path, line } => {
+                    CoreRequest::OpenDebugSource { path, line }
+                }
+                DebugEffect::ToggleProfiling => CoreRequest::ToggleDebugProfiling,
+                DebugEffect::RunBenchmark { scenario_id } => {
+                    CoreRequest::RunDebugBenchmark { scenario_id }
+                }
+            },
+        })
+    }
+
+    pub fn lower_batch(batch: FrontendEffectBatch) -> Result<Vec<CoreRequest>, ShellEffectError> {
+        batch.into_scoped().map(Self::lower).collect()
+    }
+}
+
+#[cfg(test)]
+mod effect_adapter_tests {
+    use super::*;
+    use mesh_core_capability::Capability;
+    use serde_json::json;
+
+    fn scope(capability: &str) -> EffectScope {
+        let mut capabilities = mesh_core_capability::CapabilitySet::new();
+        capabilities.grant(Capability::new(capability));
+        EffectScope::new(
+            EffectSource::new("@mesh/test", Some("instance".into())),
+            capabilities,
+        )
+    }
+
+    #[test]
+    fn adapter_rejects_effects_without_their_capability_scope() {
+        let effect = ScopedFrontendEffect::new(
+            EffectScope::new(
+                EffectSource::new("@mesh/test", Some("instance".into())),
+                mesh_core_capability::CapabilitySet::new(),
+            ),
+            FrontendEffect::Service(ServiceEffect::Command {
+                interface: "mesh.audio".into(),
+                command: "set_volume".into(),
+                payload: json!({ "percent": 50 }),
+            }),
+        );
+
+        assert!(matches!(
+            ShellEffectAdapter::lower(effect),
+            Err(ShellEffectError::Rejected(
+                EffectRejection::MissingCapability { .. }
+            ))
+        ));
+    }
+
+    #[test]
+    fn adapter_lowers_service_effects_with_source_identity() {
+        let effect = ScopedFrontendEffect::new(
+            scope("service.audio.control"),
+            FrontendEffect::Service(ServiceEffect::Call {
+                interface: "mesh.audio".into(),
+                command: "set_volume".into(),
+                payload: json!({ "percent": 50 }),
+                call_id: 7,
+                instance_id: "instance".into(),
+            }),
+        );
+
+        assert!(matches!(
+            ShellEffectAdapter::lower(effect),
+            Ok(CoreRequest::ServiceCall {
+                interface,
+                command,
+                call_id: 7,
+                source_instance_id,
+                source_module_id,
+                source_capabilities,
+                ..
+            }) if interface == "mesh.audio"
+                && command == "set_volume"
+                && source_instance_id == "instance"
+                && source_module_id == "@mesh/test"
+                && source_capabilities.is_granted(&Capability::new("service.audio.control"))
+        ));
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

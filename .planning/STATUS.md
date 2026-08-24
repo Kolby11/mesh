@@ -75,8 +75,8 @@ compilation leaves the last-known-good catalog in place.
 
 ## Next
 
-Split the frontend host into a renderer-neutral ABI and shell adapters with typed
-capability-scoped effects (`docs/BACKLOG.md`).
+Build one reverse dependency graph over primary and contribution roots for
+invalidation (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

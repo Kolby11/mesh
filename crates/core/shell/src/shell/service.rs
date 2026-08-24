@@ -1,5 +1,10 @@
 use super::types::CoreRequest;
 use mesh_core_capability::Capability;
+use mesh_core_frontend_abi::{
+    DebugEffect, EffectScope, EffectSource, FrontendEffect, ScopedFrontendEffect, ServiceEffect,
+    SurfaceEffect, SurfaceRole,
+};
+use mesh_core_frontend_host::ShellEffectAdapter;
 use mesh_core_scripting::{OperationRegistry, OperationRejection, PublishedEvent, ScriptState};
 pub(super) use mesh_core_service::service_name_from_interface;
 pub(super) use mesh_core_service::service_name_from_interface_cow;
@@ -172,6 +177,21 @@ pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<Core
         .collect()
 }
 
+fn lower_frontend_effect(event: &PublishedEvent, effect: FrontendEffect) -> CoreRequest {
+    let scope = EffectScope::new(
+        EffectSource::new(
+            event.source_module_id.clone(),
+            event.source_instance_id.clone(),
+        ),
+        event.source_capabilities.clone(),
+    );
+    ShellEffectAdapter::lower(ScopedFrontendEffect::new(scope, effect)).unwrap_or_else(|error| {
+        CoreRequest::PublishDiagnostics {
+            message: error.to_string(),
+        }
+    })
+}
+
 fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
     if event.channel.starts_with("shell.")
         && let Err(rejection) = OperationRegistry::builtin().authorize_event(
@@ -214,27 +234,38 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                     ),
                 });
             }
-            Some(CoreRequest::CancelServiceCall {
-                interface: interface.to_string(),
-                call_id,
-                source_instance_id: event.source_instance_id?,
-                source_module_id: event.source_module_id,
-                source_capabilities: event.source_capabilities,
-            })
+            Some(lower_frontend_effect(
+                &event,
+                FrontendEffect::Service(ServiceEffect::Cancel {
+                    interface: interface.to_string(),
+                    call_id,
+                    instance_id: event.source_instance_id.clone()?,
+                }),
+            ))
         }
         "shell.show-surface" => event
             .payload
             .get("surface_id")
             .and_then(|v| v.as_str())
-            .map(|id| CoreRequest::ShowSurface {
-                surface_id: id.to_string(),
+            .map(|id| {
+                lower_frontend_effect(
+                    &event,
+                    FrontendEffect::Surface(SurfaceEffect::Show {
+                        surface_id: id.to_string(),
+                    }),
+                )
             }),
         "shell.hide-surface" => event
             .payload
             .get("surface_id")
             .and_then(|v| v.as_str())
-            .map(|id| CoreRequest::HideSurface {
-                surface_id: id.to_string(),
+            .map(|id| {
+                lower_frontend_effect(
+                    &event,
+                    FrontendEffect::Surface(SurfaceEffect::Hide {
+                        surface_id: id.to_string(),
+                    }),
+                )
             }),
         "shell.hide-popover" => {
             let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
@@ -243,10 +274,13 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                 .get("defer_for_hover_bridge")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            Some(CoreRequest::HidePopover {
-                surface_id: surface_id.to_string(),
-                defer_for_hover_bridge,
-            })
+            Some(lower_frontend_effect(
+                &event,
+                FrontendEffect::Surface(SurfaceEffect::HidePopover {
+                    surface_id: surface_id.to_string(),
+                    defer_for_hover_bridge,
+                }),
+            ))
         }
         "shell.set-surface-role" => {
             let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
@@ -254,53 +288,80 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                 .payload
                 .get("role")
                 .and_then(|v| v.as_str())
-                .and_then(mesh_core_surface_config::parse_surface_role)?;
-            Some(CoreRequest::SetSurfaceRole {
-                surface_id: surface_id.to_string(),
-                role,
-            })
+                .and_then(mesh_core_surface_config::parse_surface_role)
+                .map(|role| match role {
+                    mesh_core_wayland::SurfaceRole::Layer => SurfaceRole::Layer,
+                    mesh_core_wayland::SurfaceRole::Window => SurfaceRole::Window,
+                })?;
+            Some(lower_frontend_effect(
+                &event,
+                FrontendEffect::Surface(SurfaceEffect::SetRole {
+                    surface_id: surface_id.to_string(),
+                    role,
+                }),
+            ))
         }
         "shell.toggle-surface-role" => event
             .payload
             .get("surface_id")
             .and_then(|v| v.as_str())
-            .map(|id| CoreRequest::ToggleSurfaceRole {
-                surface_id: id.to_string(),
+            .map(|id| {
+                lower_frontend_effect(
+                    &event,
+                    FrontendEffect::Surface(SurfaceEffect::ToggleRole {
+                        surface_id: id.to_string(),
+                    }),
+                )
             }),
         "shell.promote-widget" | "shell.demote-widget" | "shell.set-widget-role" => {
             let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
             let node_key = event.payload.get("node_key").and_then(|v| v.as_str())?;
             let role = match event.channel.as_str() {
-                "shell.promote-widget" => mesh_core_wayland::SurfaceRole::Window,
-                "shell.demote-widget" => mesh_core_wayland::SurfaceRole::Layer,
+                "shell.promote-widget" => SurfaceRole::Window,
+                "shell.demote-widget" => SurfaceRole::Layer,
                 _ => event
                     .payload
                     .get("role")
                     .and_then(|v| v.as_str())
-                    .and_then(mesh_core_surface_config::parse_surface_role)?,
+                    .and_then(mesh_core_surface_config::parse_surface_role)
+                    .map(|role| match role {
+                        mesh_core_wayland::SurfaceRole::Layer => SurfaceRole::Layer,
+                        mesh_core_wayland::SurfaceRole::Window => SurfaceRole::Window,
+                    })?,
             };
-            Some(CoreRequest::SetChildSurfaceRole {
-                surface_id: surface_id.to_string(),
-                node_key: node_key.to_string(),
-                role,
-            })
+            Some(lower_frontend_effect(
+                &event,
+                FrontendEffect::Surface(SurfaceEffect::SetChildRole {
+                    surface_id: surface_id.to_string(),
+                    node_key: node_key.to_string(),
+                    role,
+                }),
+            ))
         }
         "shell.toggle-surface" => event
             .payload
             .get("surface_id")
             .and_then(|v| v.as_str())
-            .map(|id| CoreRequest::ToggleSurface {
-                surface_id: id.to_string(),
+            .map(|id| {
+                lower_frontend_effect(
+                    &event,
+                    FrontendEffect::Surface(SurfaceEffect::Toggle {
+                        surface_id: id.to_string(),
+                    }),
+                )
             }),
         "shell.position-surface" => {
             let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
             let margin_top = payload_i32(&event.payload, "margin_top")?;
             let margin_left = payload_i32(&event.payload, "margin_left")?;
-            Some(CoreRequest::PositionSurface {
-                surface_id: surface_id.to_string(),
-                margin_top,
-                margin_left,
-            })
+            Some(lower_frontend_effect(
+                &event,
+                FrontendEffect::Surface(SurfaceEffect::Position {
+                    surface_id: surface_id.to_string(),
+                    margin_top,
+                    margin_left,
+                }),
+            ))
         }
         "shell.activate-popover" => {
             let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
@@ -314,12 +375,15 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                 .get("focus")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
-            Some(CoreRequest::ActivatePopover {
-                surface_id: surface_id.to_string(),
-                trigger_surface: trigger_surface.to_string(),
-                trigger_key: trigger_key.to_string(),
-                focus,
-            })
+            Some(lower_frontend_effect(
+                &event,
+                FrontendEffect::Surface(SurfaceEffect::ActivatePopover {
+                    surface_id: surface_id.to_string(),
+                    trigger_surface: trigger_surface.to_string(),
+                    trigger_key: trigger_key.to_string(),
+                    focus,
+                }),
+            ))
         }
         // Emitted by the `mesh.locale.set` host API, which enforces
         // `locale.write` before it publishes. The gate is at that boundary, so
@@ -329,12 +393,26 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
             .payload
             .get("locale")
             .and_then(|v| v.as_str())
-            .map(|locale| CoreRequest::SetLocale {
-                locale: locale.to_string(),
+            .map(|locale| {
+                lower_frontend_effect(
+                    &event,
+                    FrontendEffect::SetLocale {
+                        locale: locale.to_string(),
+                    },
+                )
             }),
-        "shell.toggle-debug-overlay" => Some(CoreRequest::ToggleDebugOverlay),
-        "shell.toggle-debug-layout-bounds" => Some(CoreRequest::ToggleDebugLayoutBounds),
-        "shell.toggle-debug-element-picker" => Some(CoreRequest::ToggleDebugElementPicker),
+        "shell.toggle-debug-overlay" => Some(lower_frontend_effect(
+            &event,
+            FrontendEffect::Debug(DebugEffect::ToggleOverlay),
+        )),
+        "shell.toggle-debug-layout-bounds" => Some(lower_frontend_effect(
+            &event,
+            FrontendEffect::Debug(DebugEffect::ToggleLayoutBounds),
+        )),
+        "shell.toggle-debug-element-picker" => Some(lower_frontend_effect(
+            &event,
+            FrontendEffect::Debug(DebugEffect::ToggleElementPicker),
+        )),
         "shell.open-debug-source" if event.source_module_id == "@mesh/debug-inspector" => {
             let path = event.payload.get("path").and_then(|value| value.as_str())?;
             let line = event
@@ -343,19 +421,26 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                 .and_then(|value| value.as_u64())
                 .unwrap_or(1)
                 .clamp(1, u64::from(u32::MAX)) as u32;
-            Some(CoreRequest::OpenDebugSource {
-                path: path.to_string(),
-                line,
-            })
+            Some(lower_frontend_effect(
+                &event,
+                FrontendEffect::Debug(DebugEffect::OpenSource {
+                    path: path.to_string(),
+                    line,
+                }),
+            ))
         }
-        "shell.toggle-debug-profiling" => Some(CoreRequest::ToggleDebugProfiling),
+        "shell.toggle-debug-profiling" => Some(lower_frontend_effect(
+            &event,
+            FrontendEffect::Debug(DebugEffect::ToggleProfiling),
+        )),
         "shell.run-debug-benchmark" => {
             match event.payload.get("scenario_id").and_then(|v| v.as_str()) {
-                Some(scenario_id) if !scenario_id.is_empty() => {
-                    Some(CoreRequest::RunDebugBenchmark {
+                Some(scenario_id) if !scenario_id.is_empty() => Some(lower_frontend_effect(
+                    &event,
+                    FrontendEffect::Debug(DebugEffect::RunBenchmark {
                         scenario_id: scenario_id.to_string(),
-                    })
-                }
+                    }),
+                )),
                 _ => Some(CoreRequest::PublishDiagnostics {
                     message: "debug benchmark request missing scenario_id".to_string(),
                 }),
@@ -377,25 +462,27 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                 let required = &capabilities.control;
                 if event.source_capabilities.is_granted(required) {
                     if let (Some(call_id), Some(source_instance_id)) =
-                        (event.call_id, event.source_instance_id)
+                        (event.call_id, event.source_instance_id.clone())
                     {
-                        CoreRequest::ServiceCall {
-                            interface: interface_name.to_string(),
-                            command: other[pos + 1..].to_string(),
-                            payload: event.payload,
-                            call_id,
-                            source_instance_id,
-                            source_module_id: event.source_module_id,
-                            source_capabilities: event.source_capabilities,
-                        }
+                        lower_frontend_effect(
+                            &event,
+                            FrontendEffect::Service(ServiceEffect::Call {
+                                interface: interface_name.to_string(),
+                                command: other[pos + 1..].to_string(),
+                                payload: event.payload.clone(),
+                                call_id,
+                                instance_id: source_instance_id,
+                            }),
+                        )
                     } else {
-                        CoreRequest::ServiceCommand {
-                            interface: interface_name.to_string(),
-                            command: other[pos + 1..].to_string(),
-                            payload: event.payload,
-                            source_module_id: event.source_module_id,
-                            source_capabilities: event.source_capabilities,
-                        }
+                        lower_frontend_effect(
+                            &event,
+                            FrontendEffect::Service(ServiceEffect::Command {
+                                interface: interface_name.to_string(),
+                                command: other[pos + 1..].to_string(),
+                                payload: event.payload.clone(),
+                            }),
+                        )
                     }
                 } else {
                     tracing::warn!(

@@ -20,6 +20,7 @@ mesh-core-diagnostics = { workspace = true }
 mesh-core-wayland = { workspace = true }
 mesh-core-service = { workspace = true }
 mesh-core-frontend-host = { workspace = true }
+mesh-core-frontend-abi = { workspace = true }
 mesh-core-frontend = { workspace = true }
 mesh-core-expression = { workspace = true }
 mesh-core-surface-config = { workspace = true }
