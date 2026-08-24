@@ -1,12 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use mesh_core_frontend::{
     CompiledFrontendModule, compile_frontend_entrypoint, compile_frontend_module,
 };
+use mesh_core_module::Manifest;
 use mesh_core_module::ModuleType;
 use mesh_core_module::lifecycle::ModuleInstance;
 use mesh_core_module::package::{InstalledModuleGraph, ModuleKind, NodeSlotOverride};
@@ -159,25 +160,25 @@ fn source_fingerprint(paths: &[PathBuf]) -> Option<u64> {
     Some(hasher.finish())
 }
 
-fn compile_catalog_entry(
+fn compile_catalog_entry_from_parts(
     module_id: &str,
-    module: &ModuleInstance,
+    manifest: &Manifest,
+    module_dir: &Path,
 ) -> Result<FrontendCatalogEntry, ShellRunError> {
-    let mut compiled =
-        compile_frontend_module(&module.manifest, &module.path).map_err(|source| {
-            ShellRunError::FrontendCompile {
-                module_id: module_id.to_string(),
-                source,
-            }
-        })?;
+    let mut compiled = compile_frontend_module(manifest, module_dir).map_err(|source| {
+        ShellRunError::FrontendCompile {
+            module_id: module_id.to_string(),
+            source,
+        }
+    })?;
     // Contributions are indexed independently below, but their entry files
     // still belong to the host's watch set. This lets a later source edit
     // retry a contribution that was previously rejected without reparsing the
     // whole graph or silently losing hot reload coverage.
-    for contributions in module.manifest.extension_point_contributions.values() {
+    for contributions in manifest.extension_point_contributions.values() {
         for contribution in contributions {
             if let Ok(path) = mesh_core_module::package::resolve_contained_module_file(
-                &module.path,
+                module_dir,
                 &contribution.entry,
                 "frontend contribution entry",
             ) {
@@ -188,9 +189,16 @@ fn compile_catalog_entry(
         }
     }
     Ok(FrontendCatalogEntry {
-        module_dir: module.path.clone(),
+        module_dir: module_dir.to_path_buf(),
         compiled: compiled.into(),
     })
+}
+
+fn compile_catalog_entry(
+    module_id: &str,
+    module: &ModuleInstance,
+) -> Result<FrontendCatalogEntry, ShellRunError> {
+    compile_catalog_entry_from_parts(module_id, &module.manifest, &module.path)
 }
 
 /// Compile one extension point contribution as an alternate root of its
@@ -200,13 +208,21 @@ fn compile_contribution_entry(
     module: &ModuleInstance,
     entry: &str,
 ) -> Result<SharedCompiledFrontendModule, ShellRunError> {
-    let compiled =
-        compile_frontend_entrypoint(&module.manifest, &module.path, entry).map_err(|source| {
-            ShellRunError::FrontendCompile {
-                module_id: module_id.to_string(),
-                source,
-            }
-        })?;
+    compile_contribution_entry_from_parts(module_id, &module.manifest, &module.path, entry)
+}
+
+fn compile_contribution_entry_from_parts(
+    module_id: &str,
+    manifest: &Manifest,
+    module_dir: &Path,
+    entry: &str,
+) -> Result<SharedCompiledFrontendModule, ShellRunError> {
+    let compiled = compile_frontend_entrypoint(manifest, module_dir, entry).map_err(|source| {
+        ShellRunError::FrontendCompile {
+            module_id: module_id.to_string(),
+            source,
+        }
+    })?;
     Ok(compiled.into())
 }
 
@@ -324,16 +340,21 @@ impl FrontendCatalogHandle {
         *self.state.write().unwrap() = state;
     }
 
-    pub(in crate::shell) fn update_compiled_module(
+    /// Compile every active root owned by one module before publishing the
+    /// replacement generation. Primary and contribution entries therefore
+    /// cannot be observed from different source revisions.
+    pub(in crate::shell) fn reload_module(
         &self,
         module_id: &str,
-        compiled: SharedCompiledFrontendModule,
-    ) {
-        let mut catalog = (*self.snapshot().catalog).clone();
-        if let Some(entry) = catalog.modules.get_mut(module_id) {
-            entry.compiled = compiled;
-        }
+        manifest: &Manifest,
+        module_dir: &Path,
+    ) -> Result<(), ShellRunError> {
+        let previous = self.snapshot();
+        let catalog = previous
+            .catalog
+            .reload_module(module_id, manifest, module_dir)?;
         self.replace(catalog, Some(module_id));
+        Ok(())
     }
 }
 
@@ -377,6 +398,20 @@ fn catalog_changes(
     // an affected component, or when one of the extension points it hosts
     // changed.
     let mut affected = changed.clone();
+    // Recompiling a contribution changes the host's rendered tree even when
+    // the resolved contribution metadata is unchanged. Include every host
+    // that currently consumes a changed module's contribution roots.
+    for catalog in [previous, next] {
+        for (key, contributions) in &catalog.extension_point_contributions {
+            if contributions
+                .iter()
+                .any(|contribution| changed.contains(&contribution.source_module_id))
+                && let Some((host_module_id, _)) = key.split_once('\u{1}')
+            {
+                affected.insert(host_module_id.to_string());
+            }
+        }
+    }
     loop {
         let mut discovered = Vec::new();
         for catalog in [previous, next] {
@@ -412,6 +447,53 @@ fn catalog_changes(
 }
 
 impl FrontendCatalog {
+    fn reload_module(
+        &self,
+        module_id: &str,
+        manifest: &Manifest,
+        module_dir: &Path,
+    ) -> Result<Self, ShellRunError> {
+        let mut next = self.clone();
+        let primary = compile_catalog_entry_from_parts(module_id, manifest, module_dir)?;
+        next.modules.insert(module_id.to_string(), primary);
+
+        let contribution_keys = next
+            .extension_point_entries
+            .keys()
+            .filter(|key| key.starts_with(&format!("{module_id}\u{1}")))
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in contribution_keys {
+            let contribution_id = key
+                .split_once('\u{1}')
+                .map(|(_, contribution_id)| contribution_id)
+                .ok_or_else(|| ShellRunError::FrontendComposition {
+                    message: format!(
+                        "invalid contribution catalog key '{key}' while reloading module '{module_id}'"
+                    ),
+                })?;
+            let contribution = manifest
+                .extension_point_contributions
+                .values()
+                .flat_map(Vec::as_slice)
+                .find(|contribution| contribution.id == contribution_id)
+                .ok_or_else(|| ShellRunError::FrontendComposition {
+                    message: format!(
+                        "contribution '{module_id}:{contribution_id}' is missing from the module manifest"
+                    ),
+                })?;
+            let compiled = compile_contribution_entry_from_parts(
+                module_id,
+                manifest,
+                module_dir,
+                &contribution.entry,
+            )?;
+            next.extension_point_entries.insert(key, compiled);
+        }
+
+        Ok(next)
+    }
+
     pub(in crate::shell) fn module(&self, module_id: &str) -> Option<&FrontendCatalogEntry> {
         self.modules.get(module_id)
     }

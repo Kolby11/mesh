@@ -57,9 +57,7 @@ use mesh_core_elements::{
     LayoutEngine, NodeId, PerSurfaceLayoutState, PopoverPlacement, StyleContext, StyleResolver,
     VariableStore, WidgetNode, WindowSurfaceState, element_snapshot_json,
 };
-use mesh_core_frontend::{
-    CompiledFrontendModule, FrontendRenderMode, compile_frontend_module, root_accessibility_role,
-};
+use mesh_core_frontend::{CompiledFrontendModule, FrontendRenderMode, root_accessibility_role};
 use mesh_core_locale::LocaleEngine;
 use mesh_core_scripting::{
     LocaleBoundState, OperationRegistry, PublishedEvent, ScriptContext, ScriptInterfaceImport,

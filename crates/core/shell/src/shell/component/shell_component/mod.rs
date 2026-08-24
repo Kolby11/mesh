@@ -1286,19 +1286,27 @@ impl ShellComponent for FrontendSurfaceComponent {
 
     fn reload_source(&mut self) -> Result<bool, ComponentError> {
         let manifest = self.compiled.manifest.clone();
-        let recompiled = compile_frontend_module(&manifest, &self.module_dir).map_err(|err| {
-            ComponentError::Failed {
-                component_id: self.id().to_string(),
-                message: format!("frontend recompile failed: {err}"),
-            }
-        })?;
-
         let component_id = self.id().to_string();
-        self.compiled = recompiled.into();
+        self.frontend_catalog_handle
+            .reload_module(&component_id, &manifest, &self.module_dir)
+            .map_err(|err| ComponentError::Failed {
+                component_id: component_id.clone(),
+                message: format!("frontend recompile failed: {err}"),
+            })?;
+        let recompiled = self
+            .frontend_catalog_handle
+            .snapshot()
+            .catalog
+            .module(&component_id)
+            .map(|entry| entry.compiled.clone())
+            .ok_or_else(|| ComponentError::Failed {
+                component_id: component_id.clone(),
+                message: "frontend recompile omitted the primary catalog entry".into(),
+            })?;
+
+        self.compiled = recompiled;
         self.selective_service_build_supported = self.compiled.supports_selective_service_build();
         self.element_metric_usage = element_metric_usage(&self.compiled);
-        self.frontend_catalog_handle
-            .update_compiled_module(&component_id, self.compiled.clone());
         self.frontend_catalog_changed();
         self.runtimes.lock().unwrap().clear();
         self.clear_runtime_generation_index();

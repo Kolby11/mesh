@@ -1581,6 +1581,142 @@ fn source_reload_drops_stale_retained_tree_before_next_paint() {
 }
 
 #[test]
+fn source_reload_recompiles_primary_and_contribution_roots_atomically() {
+    use crate::shell::component::catalog::{
+        FrontendCatalog, FrontendCatalogEntry, ResolvedExtensionPointContribution,
+        contribution_entry_key, extension_point_key,
+    };
+    use mesh_core_component::template::{AttributeValue, TemplateNode};
+    use mesh_core_frontend::{compile_frontend_entrypoint, compile_frontend_module};
+
+    fn static_content(compiled: &CompiledFrontendModule) -> Option<String> {
+        let root = compiled.component.template.as_ref()?.root.first()?;
+        let TemplateNode::Element(root) = root else {
+            return None;
+        };
+        let attribute = root
+            .attributes
+            .iter()
+            .find(|attribute| attribute.name == "content")?;
+        match &attribute.value {
+            AttributeValue::Static(value) => Some(value.clone()),
+            _ => None,
+        }
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let module_dir = temp.path();
+    std::fs::create_dir_all(module_dir.join("src")).unwrap();
+    std::fs::write(
+        module_dir.join("src/main.mesh"),
+        "<template><slot extension-point=\"test.reload.slot\" /></template>",
+    )
+    .unwrap();
+    let contribution_path = module_dir.join("src/contribution.mesh");
+    std::fs::write(
+        &contribution_path,
+        "<template><text content=\"before\" /></template>",
+    )
+    .unwrap();
+
+    let module_id = "@test/atomic-reload";
+    let mut manifest = minimal_test_manifest(module_id);
+    manifest.extension_point_contributions.insert(
+        "test.reload.slot".into(),
+        vec![mesh_core_module::manifest::ExtensionPointContribution {
+            id: "contribution".into(),
+            entry: "src/contribution.mesh".into(),
+            order: Some(0),
+            props: Default::default(),
+        }],
+    );
+    let compiled = compile_frontend_module(&manifest, module_dir).unwrap();
+    let contribution =
+        compile_frontend_entrypoint(&manifest, module_dir, "src/contribution.mesh").unwrap();
+    let catalog = FrontendCatalog {
+        modules: HashMap::from([(
+            module_id.into(),
+            FrontendCatalogEntry {
+                module_dir: module_dir.to_path_buf(),
+                compiled: compiled.clone().into(),
+            },
+        )]),
+        diagnostics: Default::default(),
+        extension_point_contributions: HashMap::from([(
+            extension_point_key(module_id, "test.reload.slot"),
+            vec![ResolvedExtensionPointContribution {
+                source_module_id: module_id.into(),
+                contribution_id: "contribution".into(),
+                order: 0,
+                props_fingerprint: 0,
+                props: Default::default(),
+            }],
+        )]),
+        extension_point_entries: HashMap::from([(
+            contribution_entry_key(module_id, "contribution"),
+            contribution.clone().into(),
+        )]),
+        node_slot_placements: Default::default(),
+    };
+    let mut component = FrontendSurfaceComponent::new(
+        compiled,
+        module_dir.to_path_buf(),
+        catalog,
+        mesh_core_service::InterfaceCatalog::default(),
+        test_settings_store(),
+    );
+    component
+        .mount(ComponentContext {
+            component_id: module_id.into(),
+            surface_id: module_id.into(),
+            diagnostics: Diagnostics::new(module_id),
+        })
+        .unwrap();
+
+    let before_version = component.frontend_catalog_handle.snapshot().version;
+    assert_eq!(static_content(&contribution), Some("before".into()));
+
+    std::fs::write(
+        &contribution_path,
+        "<template><text content=\"after\" /></template>",
+    )
+    .unwrap();
+    assert!(component.reload_source().unwrap());
+
+    let state = component.frontend_catalog_handle.snapshot();
+    assert_eq!(state.version, before_version + 1);
+    assert!(state.affected_modules.contains(module_id));
+    assert!(
+        state
+            .catalog
+            .module(module_id)
+            .unwrap()
+            .compiled
+            .watched_paths
+            .contains(&contribution_path)
+    );
+    let reloaded_contribution = state
+        .catalog
+        .contribution_entry(module_id, "contribution")
+        .unwrap();
+    assert_eq!(static_content(reloaded_contribution), Some("after".into()));
+
+    std::fs::write(&contribution_path, "<template><text").unwrap();
+    assert!(component.reload_source().is_err());
+    let failed_state = component.frontend_catalog_handle.snapshot();
+    assert_eq!(failed_state.version, state.version);
+    assert_eq!(
+        static_content(
+            failed_state
+                .catalog
+                .contribution_entry(module_id, "contribution")
+                .unwrap()
+        ),
+        Some("after".into())
+    );
+}
+
+#[test]
 fn source_reload_rebuilds_imported_component_style_cache() {
     use crate::shell::component::catalog::FrontendCatalog;
     use mesh_core_frontend::compile_frontend_module;

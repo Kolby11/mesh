@@ -59,9 +59,15 @@ snapshots. Interface proxies may resolve event-only contracts, but the shell
 applies state payloads only with the resolved read policy and delivers event
 payloads through the separate event policy.
 
+Frontend source reloads now compile each module's primary root and active
+contribution roots into one candidate catalog generation. The candidate is
+published atomically, contribution paths remain watched, and a failed root
+compilation leaves the last-known-good catalog in place.
+
 ## Next
 
-Reload primary and contribution roots together as one atomic catalog generation
+Validate contribution roots against interface requirements, availability, and
+version ranges
 (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
