@@ -4,6 +4,10 @@
 
 ## Now
 
+Backend source loading now runs in a startup-staged host phase: mutating
+service, process, event, logging, and durable-storage handles reject calls
+until the explicit `start(self)` lifecycle entrypoint begins.
+
 Each backend runtime generation now preserves one Lua `self` table together
 with its storage proxy and provider-owned event handles across lifecycle
 callbacks. Provider interface event channels remain subscription-only for
@@ -119,8 +123,8 @@ source of truth.
 
 ## Next
 
-Stage backend top-level execution so host side effects cannot escape a failed
-`start(self)` (`docs/BACKLOG.md`).
+Bound command/event ingress, JSON depth/bytes, event counts, and aggregate
+runtime resource budgets (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

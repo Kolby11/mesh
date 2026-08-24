@@ -291,20 +291,97 @@ end
     );
 }
 
-#[tokio::test]
-async fn dropping_backend_context_kills_streams_started_before_load_failure() {
+#[test]
+fn top_level_exec_stream_is_rejected_before_start() {
     let mut ctx = BackendScriptContext::new_with_capabilities(
         "@test/load-failure",
         ["exec.argv:sh:[\"-c\",\"sleep 60\"]".to_string()],
     );
     let streams = ctx.stream_state();
     let error = ctx
-        .load_script("mesh.exec_stream(\"sh\", { \"-c\", \"sleep 60\" })\nerror(\"load boom\")")
+        .load_script(
+            "mesh.exec_stream(\"sh\", { \"-c\", \"sleep 60\" })\n\
+             function start()\n\
+             end",
+        )
         .unwrap_err();
-    assert!(error.to_string().contains("load boom"));
-    assert_eq!(streams.active_stream_count(), 1);
-    drop(ctx);
+    assert!(
+        error
+            .to_string()
+            .contains("backend host side effects are unavailable before start(self)")
+    );
     assert_eq!(streams.active_stream_count(), 0);
+}
+
+#[test]
+fn top_level_service_emit_is_rejected_before_start() {
+    let mut ctx = BackendScriptContext::new("@test/load-failure");
+    let error = ctx
+        .load_script(
+            "mesh.service.emit({ available = true })\n\
+             function start()\n\
+             end",
+        )
+        .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("backend host side effects are unavailable before start(self)")
+    );
+    assert!(ctx.take_service_state_snapshot().unwrap().is_none());
+}
+
+#[test]
+fn top_level_provider_event_is_rejected_before_start() {
+    let mut ctx = BackendScriptContext::new("@test/load-failure");
+    ctx.set_event_registry(audio_event_registry());
+    let error = ctx
+        .load_script(
+            "self.VolumeChanged:fire({ device_id = \"default\", level = 67 })\n\
+             function start()\n\
+             end",
+        )
+        .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("backend host side effects are unavailable before start(self)")
+    );
+    assert!(ctx.drain_events().is_empty());
+}
+
+#[test]
+fn top_level_storage_write_is_rejected_before_start() {
+    let root = temp_storage_root("top-level-write");
+    let mut ctx = BackendScriptContext::new_with_storage_root("@test/load-failure", &root);
+    let error = ctx
+        .load_script(
+            "self.storage.ready = true\n\
+             function start(self)\n\
+               state = { ready = self.storage.ready }\n\
+             end",
+        )
+        .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("backend host side effects are unavailable before start(self)")
+    );
+    drop(ctx);
+
+    let mut reader = BackendScriptContext::new_with_storage_root("@test/load-failure", &root);
+    reader
+        .load_script(
+            "function start(self)\n\
+               state = { ready = self.storage.ready }\n\
+             end",
+        )
+        .unwrap();
+    let state = reader.call_init().unwrap().unwrap();
+    assert!(state.get("ready").is_none());
 }
 
 #[test]
@@ -1383,6 +1460,7 @@ fn emit_json_nil_uses_current_command_payload() {
 fn emit_json_rejects_invalid_json_string() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script("function start()\nend").unwrap();
+    ctx.call_init().unwrap();
 
     let globals = ctx.ensure_lua().globals();
     let mesh = globals.get::<mlua::Table>("mesh").unwrap();

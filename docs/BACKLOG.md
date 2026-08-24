@@ -77,7 +77,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md)
 
-- [ ] Stage backend top-level execution so host side effects cannot escape a failed `start(self)`.
 - [ ] Bound command/event ingress, JSON depth/bytes, event counts, and aggregate runtime resource budgets.
 - [ ] Separate effective read and control grants and enforce them through both proxy and shell paths.
 - [ ] Reconcile changed poll intervals after every stream callback.

@@ -812,6 +812,7 @@ fn corrupt_path(path: &Path) -> PathBuf {
 
 pub type StorageDiagnosticSink = Arc<dyn Fn(String) + Send + Sync>;
 pub type StorageKeySink = Arc<dyn Fn(&str) + Send + Sync>;
+pub type StorageWriteGuard = Arc<dyn Fn() -> mlua::Result<()> + Send + Sync>;
 
 pub fn create_lua_storage_table(
     lua: &Lua,
@@ -819,6 +820,24 @@ pub fn create_lua_storage_table(
     diagnostic_sink: StorageDiagnosticSink,
     read_sink: StorageKeySink,
     write_sink: StorageKeySink,
+) -> mlua::Result<Table> {
+    create_lua_storage_table_with_write_guard(
+        lua,
+        storage,
+        diagnostic_sink,
+        read_sink,
+        write_sink,
+        Arc::new(|| Ok(())),
+    )
+}
+
+pub fn create_lua_storage_table_with_write_guard(
+    lua: &Lua,
+    storage: Arc<Mutex<ScopedStorage>>,
+    diagnostic_sink: StorageDiagnosticSink,
+    read_sink: StorageKeySink,
+    write_sink: StorageKeySink,
+    write_guard: StorageWriteGuard,
 ) -> mlua::Result<Table> {
     let table = lua.create_table()?;
     let metatable = lua.create_table()?;
@@ -854,6 +873,7 @@ pub fn create_lua_storage_table(
         "__newindex",
         lua.create_function(
             move |lua, (_table, key, value): (Table, LuaValue, LuaValue)| {
+                write_guard()?;
                 with_storage_key_from_lua(&key, &diagnostic_sink, |key| {
                     if matches!(value, LuaValue::Nil) {
                         newindex_storage.lock().unwrap().remove(key);

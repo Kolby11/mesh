@@ -14,7 +14,9 @@ use super::logging::log_message;
 use super::{BackendScriptError, MIN_POLL_INTERVAL_MS};
 use crate::operation::{release_side_effect, reserve_side_effect};
 use crate::policy::RuntimePolicy;
-use crate::storage::{ScopedStorage, StorageManager, StorageScope, create_lua_storage_table};
+use crate::storage::{
+    ScopedStorage, StorageManager, StorageScope, create_lua_storage_table_with_write_guard,
+};
 use crate::util::{default_runtime_storage_root, is_named_event_channel};
 use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value as JsonValue;
@@ -22,7 +24,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
 /// Executes a backend module's Luau script.
@@ -57,6 +59,7 @@ pub struct BackendScriptContext {
     exec_policy: ExecutableCapabilityPolicy,
     streams: Arc<StreamState>,
     policy: RuntimePolicy,
+    host_side_effects_enabled: Arc<AtomicBool>,
     script_loaded: bool,
     stop_attempted: bool,
     command_registry: Option<BackendCommandRegistry>,
@@ -89,6 +92,17 @@ struct BackendRuntime {
     current_payload: JsonValue,
     settings: JsonValue,
     storage_diagnostics: Vec<String>,
+}
+
+const BACKEND_STARTUP_HOST_ERROR: &str =
+    "backend host side effects are unavailable before start(self)";
+
+fn require_started(host_side_effects_enabled: &AtomicBool) -> mlua::Result<()> {
+    if host_side_effects_enabled.load(Ordering::Acquire) {
+        Ok(())
+    } else {
+        Err(mlua::Error::runtime(BACKEND_STARTUP_HOST_ERROR))
+    }
 }
 
 impl BackendScriptContext {
@@ -181,6 +195,7 @@ impl BackendScriptContext {
             exec_policy,
             streams: StreamState::new_with_budget(policy.budget()),
             policy,
+            host_side_effects_enabled: Arc::new(AtomicBool::new(false)),
             script_loaded: false,
             stop_attempted: false,
             command_registry: None,
@@ -242,8 +257,15 @@ impl BackendScriptContext {
         self.runtime.lock().unwrap().poll_interval_ms
     }
 
-    /// Load and execute a backend Luau script.
+    /// Load and execute a backend Luau script in the startup staging phase.
+    ///
+    /// Top-level declarations are installed normally, but every mutating host
+    /// handle checks the startup phase and rejects calls until `start(self)` is
+    /// entered. This keeps source-load failures from spawning processes,
+    /// publishing events, changing polling, or mutating durable storage.
     pub fn load_script(&mut self, source: &str) -> Result<(), BackendScriptError> {
+        self.host_side_effects_enabled
+            .store(false, Ordering::Release);
         let _budget = self.policy.begin_callback();
         self.ensure_lua()
             .load(source)
@@ -286,6 +308,8 @@ impl BackendScriptContext {
                     module_id: self.module_id.clone(),
                     message: err.to_string(),
                 })?;
+        self.host_side_effects_enabled
+            .store(true, Ordering::Release);
         entrypoint
             .call::<()>(current_self)
             .map_err(|err| BackendScriptError::Runtime {
@@ -301,6 +325,8 @@ impl BackendScriptContext {
             return Ok(());
         }
         self.stop_attempted = true;
+        self.host_side_effects_enabled
+            .store(true, Ordering::Release);
         let _budget = self.policy.begin_callback();
         let result = if !self.script_loaded {
             Ok(())
@@ -384,6 +410,8 @@ impl BackendScriptContext {
             return Ok(None);
         }
         let _budget = self.policy.begin_callback();
+        self.host_side_effects_enabled
+            .store(true, Ordering::Release);
         self.reset_for_call(JsonValue::Null);
         let globals = self.script_environment();
         if let Ok(batch_handler) = globals.get::<Function>("on_stream_batch") {
@@ -442,6 +470,8 @@ impl BackendScriptContext {
         event: &StreamEvent,
     ) -> Result<Option<JsonValue>, BackendScriptError> {
         let _budget = self.policy.begin_callback();
+        self.host_side_effects_enabled
+            .store(true, Ordering::Release);
         self.reset_for_call(JsonValue::Null);
         let globals = self.script_environment();
         let handler = match globals.get::<Function>("on_stream_event") {
@@ -478,6 +508,8 @@ impl BackendScriptContext {
     /// Call `on_poll()` if it exists. Returns any exported service state.
     pub fn run_poll(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
         let _budget = self.policy.begin_callback();
+        self.host_side_effects_enabled
+            .store(true, Ordering::Release);
         self.reset_for_call(JsonValue::Null);
         let globals = self.script_environment();
         let handler = match globals.get::<Function>("on_poll") {
@@ -506,6 +538,8 @@ impl BackendScriptContext {
         payload: &JsonValue,
     ) -> Result<Option<JsonValue>, BackendScriptError> {
         let _budget = self.policy.begin_callback();
+        self.host_side_effects_enabled
+            .store(true, Ordering::Release);
         self.reset_for_call(payload.clone());
         if let Some(registry) = &self.command_registry {
             if registry.validate_payload(command, payload).is_err() {
@@ -541,6 +575,8 @@ impl BackendScriptContext {
         payload: &JsonValue,
     ) -> Result<BackendCommandOutcome, BackendScriptError> {
         let _budget = self.policy.begin_callback();
+        self.host_side_effects_enabled
+            .store(true, Ordering::Release);
         self.reset_for_call(payload.clone());
         let normalized = command.replace('-', "_");
 
@@ -758,9 +794,11 @@ impl BackendScriptContext {
         let resources = self.policy.budget();
         let module_id = self.module_id.clone();
         let runtime = Arc::clone(&self.runtime);
+        let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
         service.set(
             "set_poll_interval",
             self.ensure_lua().create_function(move |_lua, ms: u64| {
+                require_started(&host_side_effects_enabled)?;
                 let poll_interval_ms = ms.max(MIN_POLL_INTERVAL_MS);
                 if poll_interval_ms != ms {
                     tracing::warn!(
@@ -778,10 +816,12 @@ impl BackendScriptContext {
         let module_id = self.module_id.clone();
         let runtime = Arc::clone(&self.runtime);
         let resources_for_emit = resources.clone();
+        let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
         service.set(
             "emit",
             self.ensure_lua()
                 .create_function(move |lua, value: LuaValue| {
+                    require_started(&host_side_effects_enabled)?;
                     let payload = lua.from_value::<JsonValue>(value)?;
                     let output_bytes = serde_json::to_vec(&payload)
                         .map_err(mlua::Error::external)?
@@ -796,10 +836,12 @@ impl BackendScriptContext {
 
         let runtime = Arc::clone(&self.runtime);
         let resources_for_json = resources.clone();
+        let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
         service.set(
             "emit_json",
             self.ensure_lua()
                 .create_function(move |lua, value: Option<LuaValue>| {
+                    require_started(&host_side_effects_enabled)?;
                     let payload = match value {
                         None | Some(LuaValue::Nil) => {
                             runtime.lock().unwrap().current_payload.clone()
@@ -823,9 +865,11 @@ impl BackendScriptContext {
 
         let runtime = Arc::clone(&self.runtime);
         let resources_for_unavailable = resources.clone();
+        let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
         service.set(
             "emit_unavailable",
             self.ensure_lua().create_function(move |_lua, ()| {
+                require_started(&host_side_effects_enabled)?;
                 resources_for_unavailable
                     .reserve_output(64)
                     .map_err(|error| mlua::Error::external(error.to_string()))?;
@@ -874,10 +918,12 @@ impl BackendScriptContext {
         let module_id = self.module_id.clone();
         let resources = self.policy.budget();
         let exec = self.exec.clone();
+        let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
         mesh.set(
             "exec",
             self.ensure_lua().create_function(
                 move |lua, (program, args): (String, Vec<String>)| {
+                    require_started(&host_side_effects_enabled)?;
                     if let Some(required) =
                         missing_exec_capability(&executable_policy, &program, &args)
                     {
@@ -906,10 +952,12 @@ impl BackendScriptContext {
         let executable_policy = self.exec_policy.clone();
         let module_id = self.module_id.clone();
         let streams = Arc::clone(&self.streams);
+        let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
         mesh.set(
             "exec_stream",
             self.ensure_lua().create_function(
                 move |_lua, (program, args): (String, Vec<String>)| {
+                    require_started(&host_side_effects_enabled)?;
                     if let Some(required) =
                         missing_exec_stream_capability(&executable_policy, &program, &args)
                     {
@@ -972,8 +1020,10 @@ impl BackendScriptContext {
         let module_id = self.module_id.clone();
         let resources = self.policy.budget();
         let resources_for_call = resources.clone();
+        let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
         let call_log = self.ensure_lua().create_function(
             move |_lua, (_self, level, message): (mlua::Table, String, String)| {
+                require_started(&host_side_effects_enabled)?;
                 resources_for_call
                     .reserve_output(message.len())
                     .map_err(|error| mlua::Error::external(error.to_string()))?;
@@ -995,10 +1045,12 @@ impl BackendScriptContext {
         ] {
             let module_id = module_id.clone();
             let resources_for_level = resources.clone();
+            let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
             log.set(
                 name,
                 self.ensure_lua()
                     .create_function(move |_lua, message: String| {
+                        require_started(&host_side_effects_enabled)?;
                         resources_for_level
                             .reserve_output(message.len())
                             .map_err(|error| mlua::Error::external(error.to_string()))?;
@@ -1077,7 +1129,8 @@ impl BackendScriptContext {
         current_self.set("meta", meta)?;
         let runtime_for_storage_diagnostics = Arc::clone(&self.runtime);
         let storage_arc = Arc::clone(&self.storage);
-        let storage = create_lua_storage_table(
+        let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
+        let storage = create_lua_storage_table_with_write_guard(
             self.ensure_lua(),
             storage_arc,
             Arc::new(move |reason| {
@@ -1089,6 +1142,7 @@ impl BackendScriptContext {
             }),
             Arc::new(|_key| {}),
             Arc::new(|_key| {}),
+            Arc::new(move || require_started(&host_side_effects_enabled)),
         )?;
         current_self.set("storage", storage)?;
         let runtime = Arc::clone(&self.runtime);
@@ -1096,6 +1150,7 @@ impl BackendScriptContext {
         let generation = self.generation;
         let self_events_meta = self.ensure_lua().create_table()?;
         let event_registry = self.event_registry.clone();
+        let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
         self_events_meta.set(
             "__index",
             self.ensure_lua()
@@ -1113,6 +1168,7 @@ impl BackendScriptContext {
                         resources.clone(),
                         event_registry.clone(),
                         generation,
+                        Arc::clone(&host_side_effects_enabled),
                     )?;
                     table.set(key.as_str(), channel.clone())?;
                     Ok(LuaValue::Table(channel))
@@ -1200,14 +1256,17 @@ fn create_backend_event_channel(
     resources: crate::policy::ResourceBudget,
     event_registry: Option<BackendEventRegistry>,
     generation: u64,
+    host_side_effects_enabled: Arc<AtomicBool>,
 ) -> mlua::Result<Table> {
     let channel = lua.create_table()?;
     let subscribers = lua.create_table()?;
     let next_subscription_id = Arc::new(AtomicU64::new(1));
+    let subscribe_host_side_effects_enabled = Arc::clone(&host_side_effects_enabled);
     channel.set("__subscribers", subscribers.clone())?;
     channel.set(
         "subscribe",
         lua.create_function(move |lua, (table, callback): (Table, Function)| {
+            require_started(&subscribe_host_side_effects_enabled)?;
             let subscribers: Table = table.get("__subscribers")?;
             let id = next_subscription_id.fetch_add(1, Ordering::Relaxed);
             subscribers.raw_set(id, callback)?;
@@ -1218,9 +1277,11 @@ fn create_backend_event_channel(
 
     let fire_event_name = event_name.to_string();
     let fire_registry = event_registry;
+    let host_side_effects_enabled = Arc::clone(&host_side_effects_enabled);
     channel.set(
         "fire",
         lua.create_function(move |lua, (table, payload): (Table, Option<LuaValue>)| {
+            require_started(&host_side_effects_enabled)?;
             let payload = match payload {
                 Some(value) => lua.from_value::<JsonValue>(value)?,
                 None => JsonValue::Object(serde_json::Map::new()),
