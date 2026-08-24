@@ -36,10 +36,13 @@ discrete value and applies the visibility endpoint at the end of an exit.
 Validated per-keyframe easing now flows from component and theme keyframes
 through shell animation state into the core and tooltip samplers.
 
+The public animation `box-shadow` parser now returns structured errors for
+malformed values and rejects comma-separated shadow lists before construction.
+
 ## Next
 
-Implement `box-shadow` parsing with structured errors or reject it before the
-public animation API (`docs/BACKLOG.md`).
+Give animation instances stable identity, explicit replacement, cancellation,
+and reversal semantics (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

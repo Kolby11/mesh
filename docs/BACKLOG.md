@@ -69,7 +69,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/09-interaction-and-motion/improvements.md)
 
-- [ ] Implement `box-shadow` parsing with structured errors or reject it before the public animation API.
 - [ ] Give animation instances stable identity and explicit replacement, cancellation, and reversal semantics.
 - [ ] Introduce an `InteractionFrame` shared by input, state, style invalidation, layout, animation, paint, and semantics.
 
