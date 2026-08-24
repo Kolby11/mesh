@@ -170,6 +170,194 @@ fn child_surface_reconcile_creates_popup_and_paints_subtree() {
 }
 
 #[test]
+fn overflow_child_surface_uses_geometry_placement_without_popover_ownership() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState {
+        kind: super::types::ChildSurfaceKind::Overflow,
+        content_padding: (4, 6, 8, 10),
+        popover_trigger: Some(super::types::PopoverTriggerReference {
+            reference: "should-not-own-overflow".into(),
+        }),
+        placement: mesh_core_elements::PopoverPlacement {
+            anchor: mesh_core_elements::PopoverAnchor::Bottom,
+            gravity: mesh_core_elements::PopoverGravity::Right,
+            offset_x: 17,
+            offset_y: 19,
+            constraint_adjustment: Default::default(),
+            grab: mesh_core_elements::PopoverGrab::Click,
+        },
+        ..PopoverHarnessState::default()
+    }));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state)));
+
+    render_components_until_child_popup(&mut shell);
+
+    let child = &shell.components[0].children[0];
+    let child_id = child.target.surface_id.clone();
+    assert_eq!(child.kind, super::types::ChildSurfaceKind::Overflow);
+    assert!(child.popover_relationship.is_none());
+    assert!(child.target.popover_relationship.is_none());
+
+    let config = shell
+        .presentation_engine
+        .testing_popup_config(&child_id)
+        .expect("overflow child should be configured as a popup");
+    assert_eq!(
+        config.placement.anchor,
+        mesh_core_presentation::PopupAnchor::TopLeft
+    );
+    assert_eq!(
+        config.placement.gravity,
+        mesh_core_presentation::PopupGravity::TopLeft
+    );
+    assert_eq!(
+        config.placement.offset,
+        (8, 10),
+        "top-left gravity compensates for the trailing shadow reserve"
+    );
+    assert!(!config.grab);
+    assert!(config.grab_identity.is_none());
+}
+
+#[test]
+fn overflow_child_surface_has_no_popover_hover_bridge_or_focus_owner() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState {
+        kind: super::types::ChildSurfaceKind::Overflow,
+        ..PopoverHarnessState::default()
+    }));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
+
+    render_components_until_child_popup(&mut shell);
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+
+    shell.presentation_engine.testing_push_event(
+        mesh_core_presentation::WindowEvent::PointerLeave {
+            surface_id: "@test/popover-host".into(),
+        },
+    );
+    shell.presentation_engine.testing_push_event(
+        mesh_core_presentation::WindowEvent::PointerLeave {
+            surface_id: child_id.clone().into(),
+        },
+    );
+    shell.presentation_engine.testing_push_event(
+        mesh_core_presentation::WindowEvent::PointerButton {
+            surface_id: child_id.clone().into(),
+            x: 10.0,
+            y: 12.0,
+            button: mesh_core_presentation::PRIMARY_POINTER_BUTTON,
+            pressed: true,
+        },
+    );
+    shell.dispatch_wayland().unwrap();
+
+    assert!(shell.pending_popover_hides.is_empty());
+    assert_eq!(
+        shell.keyboard_focus_surface.as_deref(),
+        Some("@test/popover-host"),
+        "overflow input keeps focus ownership on the parent surface"
+    );
+    assert!(state.lock().unwrap().child_inputs.iter().any(|(_, input)| {
+        matches!(input, ComponentInput::PointerButton { pressed: true, .. })
+    }));
+}
+
+#[test]
+fn overflow_child_surface_tears_down_without_popover_exit_transition() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState {
+        kind: super::types::ChildSurfaceKind::Overflow,
+        hide_transition_ms: 120,
+        ..PopoverHarnessState::default()
+    }));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
+
+    render_components_until_child_popup(&mut shell);
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+    state.lock().unwrap().open = false;
+    shell.render_components().unwrap();
+
+    assert!(shell.components[0].children.is_empty());
+    assert!(
+        shell
+            .presentation_engine
+            .testing_destroyed_popups()
+            .contains(&child_id)
+    );
+    assert!(
+        state
+            .lock()
+            .unwrap()
+            .exiting_paints
+            .iter()
+            .all(|exiting| !exiting),
+        "geometry-owned overflow must not retain a detached exit surface"
+    );
+}
+
+#[test]
+fn dismissed_overflow_child_is_retried_while_geometry_still_escapes() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState {
+        kind: super::types::ChildSurfaceKind::Overflow,
+        ..PopoverHarnessState::default()
+    }));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state)));
+
+    render_components_until_child_popup(&mut shell);
+    let first_child_id = shell.components[0].children[0].target.surface_id.clone();
+    shell
+        .presentation_engine
+        .testing_push_dismissed_popup(first_child_id.clone());
+    shell.render_components().unwrap();
+    assert!(shell.components[0].children.is_empty());
+
+    shell.render_components().unwrap();
+    assert_eq!(shell.components[0].children.len(), 1);
+    assert_eq!(
+        shell.components[0].children[0].target.surface_id, first_child_id,
+        "overflow keeps the parent/node owner identity when the popup is retried"
+    );
+}
+
+#[test]
+fn dismissed_focused_popover_restores_focus_to_its_trigger() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState {
+        popover_trigger: Some(super::types::PopoverTriggerReference {
+            reference: "trigger-button".into(),
+        }),
+        ..PopoverHarnessState::default()
+    }));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state)));
+
+    render_components_until_child_popup(&mut shell);
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+    shell.keyboard_focus_surface = Some(child_id.clone());
+    shell
+        .presentation_engine
+        .testing_push_dismissed_popup(child_id);
+    shell.render_components().unwrap();
+
+    assert_eq!(
+        shell.keyboard_focus_surface.as_deref(),
+        Some("@test/popover-host"),
+        "popover dismissal returns focus to the relationship's parent surface"
+    );
+}
+
+#[test]
 fn child_popup_recreates_after_presentation_reports_missing_surface() {
     let mut shell = Shell::new();
     shell.presentation_engine =

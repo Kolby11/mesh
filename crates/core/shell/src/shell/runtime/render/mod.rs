@@ -794,12 +794,50 @@ impl Shell {
                 SurfaceLifecycleEvent::Dismissed { surface_id } => {
                     match self.component_target_for_surface(&surface_id) {
                         Some((index, TargetRef::Child(child_index))) => {
-                            let node_key = self.components[index].children[child_index]
-                                .node_key
-                                .clone();
+                            let child = &self.components[index].children[child_index];
+                            let kind = child.kind;
+                            let node_key = child.node_key.clone();
+                            let relationship = child.popover_relationship.clone();
+                            let restore_focus = kind == ChildSurfaceKind::Popover
+                                && self.keyboard_focus_surface.as_deref()
+                                    == Some(surface_id.as_str());
                             self.destroy_child_surface_at(index, child_index);
                             if let Some(runtime) = self.components.get_mut(index) {
-                                runtime.dismissed_child_node_keys.insert(node_key);
+                                if kind == ChildSurfaceKind::Popover {
+                                    runtime.dismissed_child_surfaces.insert((kind, node_key));
+                                } else {
+                                    // Overflow is derived from current escape
+                                    // geometry. A compositor dismissal means
+                                    // only that this object disappeared; it
+                                    // must be retried while the node still
+                                    // escapes the parent.
+                                    runtime.component.request_paint();
+                                }
+                            }
+                            if restore_focus
+                                && let Some(relationship) = relationship
+                                && self.surface_is_effectively_visible(
+                                    &relationship.trigger_surface_id,
+                                )
+                                && matches!(
+                                    self.component_target_for_surface(
+                                        &relationship.trigger_surface_id,
+                                    ),
+                                    Some((_, TargetRef::Parent))
+                                )
+                            {
+                                let mut requests =
+                                    self.apply_request(CoreRequest::TransferTabFocus {
+                                        from_surface: surface_id.clone(),
+                                        to_surface: relationship.trigger_surface_id,
+                                        target: TabFocusTarget::AtKey(
+                                            relationship.trigger_reference.reference,
+                                        ),
+                                        return_target: None,
+                                        target_closes_on_leave: false,
+                                        close_source: None,
+                                    })?;
+                                self.drain_requests(&mut requests)?;
                             }
                         }
                         Some((index, TargetRef::Parent))
@@ -865,6 +903,7 @@ impl Shell {
             .surface_id
             .clone();
         let kind = self.components[index].children[child_index].kind;
+        self.pending_popover_hides.remove(&surface_id);
         self.components[index].children.remove(child_index);
         if kind == ChildSurfaceKind::Window {
             self.presentation_engine.destroy_surface(&surface_id);

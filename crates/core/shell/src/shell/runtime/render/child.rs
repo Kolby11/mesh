@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_elements::PopoverPlacement;
 
 impl Shell {
     pub(super) fn reconcile_child_surface_requests(
@@ -12,25 +13,29 @@ impl Shell {
         let requests = self.components[index].component.child_surface_requests();
         if requests.is_empty() && self.components[index].children.is_empty() {
             // Common no-popup frame: avoid allocating key sets and running
-            // reconciliation bookkeeping. A dismissed key only suppresses
+            // reconciliation bookkeeping. A dismissed popover only suppresses
             // recreation until its authored request disappears for one frame.
-            self.components[index].dismissed_child_node_keys.clear();
+            self.components[index].dismissed_child_surfaces.clear();
             self.components[index].entering_child_node_keys.clear();
             self.components[index]
                 .component
                 .set_entering_child_keys_from_slice(&[]);
             return Ok(false);
         }
-        let requested_keys: SmallVec<[&str; 4]> = requests
+        let requested_keys: SmallVec<[(ChildSurfaceKind, &str); 4]> = requests
+            .iter()
+            .map(|request| (request.kind, request.node_key.as_str()))
+            .collect();
+        let requested_node_keys: SmallVec<[&str; 4]> = requests
             .iter()
             .map(|request| request.node_key.as_str())
             .collect();
         self.components[index]
             .entering_child_node_keys
-            .retain(|node_key| requested_keys.contains(&node_key.as_str()));
+            .retain(|node_key| requested_node_keys.contains(&node_key.as_str()));
         self.components[index]
-            .dismissed_child_node_keys
-            .retain(|node_key| requested_keys.contains(&node_key.as_str()));
+            .dismissed_child_surfaces
+            .retain(|(kind, node_key)| requested_keys.contains(&(*kind, node_key.as_str())));
         let popup_supported = self.presentation_engine.popup_supported();
         let window_supported = self.presentation_engine.window_role_supported();
 
@@ -60,13 +65,21 @@ impl Shell {
                     self.destroy_child_surface_at(index, child_index);
                 }
                 None => {
-                    let duration = {
-                        let node_key = self.components[index].children[child_index]
-                            .node_key
-                            .as_str();
-                        self.components[index]
-                            .component
-                            .child_hide_transition_ms(node_key)
+                    let duration = match self.components[index].children[child_index].kind {
+                        // A popover has an authored open/close lifecycle and
+                        // may keep its last pixels alive for the CSS exit.
+                        ChildSurfaceKind::Popover => {
+                            let node_key = self.components[index].children[child_index]
+                                .node_key
+                                .as_str();
+                            self.components[index]
+                                .component
+                                .child_hide_transition_ms(node_key)
+                        }
+                        // Overflow is a geometry projection. Once the node no
+                        // longer escapes the parent, keeping a detached copy
+                        // alive would make stale content receive input.
+                        ChildSurfaceKind::Overflow | ChildSurfaceKind::Window => 0,
                     };
                     if duration == 0 {
                         self.destroy_child_surface_at(index, child_index);
@@ -98,8 +111,8 @@ impl Shell {
                 continue;
             }
             if self.components[index]
-                .dismissed_child_node_keys
-                .contains(&request.node_key)
+                .dismissed_child_surfaces
+                .contains(&(request.kind, request.node_key.clone()))
             {
                 continue;
             }
@@ -297,19 +310,24 @@ impl Shell {
                     .window_configured_size(&child_surface_id)
                     .unwrap_or((padded_size.0.max(1), padded_size.1.max(1)))
             } else {
-                let offset_x = request.placement.offset_x
+                // Explicit popovers use their authored placement. Overflow is
+                // different: its anchor is the escaped node's own bounds, so
+                // it must remain top-left anchored and cannot inherit a
+                // popover offset or click grab from a generic request.
+                let placement = child_popup_placement(request.kind, request.placement);
+                let offset_x = placement.offset_x
                     + axis_padding_compensation(
-                        popover_gravity_horizontal_alignment(request.placement.gravity),
+                        popover_gravity_horizontal_alignment(placement.gravity),
                         pad_left,
                         pad_right,
                     );
-                let offset_y = request.placement.offset_y
+                let offset_y = placement.offset_y
                     + axis_padding_compensation(
-                        popover_gravity_vertical_alignment(request.placement.gravity),
+                        popover_gravity_vertical_alignment(placement.gravity),
                         pad_top,
                         pad_bottom,
                     );
-                let grab = request.placement.grab == PopoverGrab::Click;
+                let grab = placement.grab == PopoverGrab::Click;
                 let grab_identity = if grab
                     && self.components[index].children[child_index]
                         .target
@@ -335,9 +353,9 @@ impl Shell {
                     placement: PopupPlacement {
                         anchor_rect: request.anchor_rect,
                         size: padded_size,
-                        anchor: map_popover_anchor(request.placement.anchor),
-                        gravity: map_popover_gravity(request.placement.gravity),
-                        constraint: map_popover_constraint(request.placement.constraint_adjustment),
+                        anchor: map_popover_anchor(placement.anchor),
+                        gravity: map_popover_gravity(placement.gravity),
+                        constraint: map_popover_constraint(placement.constraint_adjustment),
                         offset: (offset_x, offset_y),
                     },
                     grab,
@@ -417,7 +435,9 @@ impl Shell {
             .iter()
             .enumerate()
             .filter(|(_, child)| {
-                child.closing_until.is_some() && !requested_keys.contains(&child.node_key.as_str())
+                child.kind == ChildSurfaceKind::Popover
+                    && child.closing_until.is_some()
+                    && !requested_keys.contains(&(child.kind, child.node_key.as_str()))
             })
             .map(|(child_index, _)| child_index)
             .collect();
@@ -630,6 +650,26 @@ fn child_kind_supported(
     match kind {
         ChildSurfaceKind::Popover | ChildSurfaceKind::Overflow => popup_supported,
         ChildSurfaceKind::Window => window_supported,
+    }
+}
+
+fn child_popup_placement(kind: ChildSurfaceKind, authored: PopoverPlacement) -> PopoverPlacement {
+    match kind {
+        ChildSurfaceKind::Popover => authored,
+        ChildSurfaceKind::Overflow => PopoverPlacement {
+            // An overflow child is a second view of the node's escaped
+            // geometry, not an authored anchored menu. Its request already
+            // carries the complete node bounds as the anchor rectangle.
+            anchor: PopoverAnchor::TopLeft,
+            gravity: PopoverGravity::TopLeft,
+            offset_x: 0,
+            offset_y: 0,
+            // Keep the compositor's safety adjustments for an escaped node,
+            // but do not allow menu-only click grabs or authored offsets.
+            constraint_adjustment: authored.constraint_adjustment,
+            grab: PopoverGrab::Hover,
+        },
+        ChildSurfaceKind::Window => authored,
     }
 }
 

@@ -98,9 +98,13 @@ pub enum ChildSurfaceDiagnostic {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ChildSurfaceKind {
+    /// Authored `<popover>` state: placement, focus transfer, and dismissal
+    /// follow the popover controller and its trigger relationship.
     Popover,
+    /// Geometry-derived escape-bounds content: owned by the parent node,
+    /// non-grabbing, non-focus-owning, and retried while it still escapes.
     Overflow,
     /// An embedded widget promoted into its own `xdg_toplevel` window.
     Window,

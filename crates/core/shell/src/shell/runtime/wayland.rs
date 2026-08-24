@@ -132,6 +132,13 @@ impl Shell {
             };
 
             let target_surface_id = route_surface_id;
+            let target_is_popover = match target {
+                TargetRef::Parent => self.components[index].parent.popup_parent_surface.is_some(),
+                TargetRef::Child(child_index) => {
+                    self.components[index].children[child_index].kind
+                        == crate::shell::types::ChildSurfaceKind::Popover
+                }
+            };
             if let RoutedWindowEvent::PointerButtonWithIdentity {
                 button,
                 identity,
@@ -166,12 +173,7 @@ impl Shell {
                 if let RoutedWindowEvent::PointerMove { x, y } = &event {
                     self.cancel_pending_child_popover_hides_at(target_surface_id, *x, *y);
                 }
-            } else if matches!(event, RoutedWindowEvent::PointerLeave)
-                && self.components[index]
-                    .target(target)
-                    .popup_parent_surface
-                    .is_some()
-            {
+            } else if matches!(event, RoutedWindowEvent::PointerLeave) && target_is_popover {
                 self.drain_request(CoreRequest::HidePopover {
                     surface_id: target_surface_id.to_string(),
                     defer_for_hover_bridge: true,
@@ -326,7 +328,9 @@ impl Shell {
                     pressed: true,
                     ..
                 } if button == mesh_core_presentation::PRIMARY_POINTER_BUTTON => {
-                    self.claim_keyboard_focus_for_surface(target_surface_id);
+                    let focus_surface_id =
+                        child_focus_owner_surface(self, index, target, target_surface_id);
+                    self.claim_keyboard_focus_for_surface(&focus_surface_id);
                     ComponentInput::PointerButton {
                         x,
                         y,
@@ -340,7 +344,9 @@ impl Shell {
                     button,
                     pressed: true,
                 } if button == mesh_core_presentation::PRIMARY_POINTER_BUTTON => {
-                    self.claim_keyboard_focus_for_surface(target_surface_id);
+                    let focus_surface_id =
+                        child_focus_owner_surface(self, index, target, target_surface_id);
+                    self.claim_keyboard_focus_for_surface(&focus_surface_id);
                     ComponentInput::PointerButton {
                         x,
                         y,
@@ -539,6 +545,27 @@ impl Shell {
             );
         }
         Ok(())
+    }
+}
+
+fn child_focus_owner_surface(
+    shell: &Shell,
+    index: usize,
+    target: TargetRef,
+    target_surface_id: &str,
+) -> String {
+    match target {
+        TargetRef::Child(child_index)
+            if shell.components[index].children[child_index].kind
+                == crate::shell::types::ChildSurfaceKind::Overflow =>
+        {
+            // Overflow is a geometry-owned view of the parent, not an
+            // independent focus surface. Keep keyboard delivery on the
+            // parent after a click while the child handler still receives the
+            // pointer event that established the component's focused node.
+            shell.components[index].surface_id.clone()
+        }
+        TargetRef::Parent | TargetRef::Child(_) => target_surface_id.to_string(),
     }
 }
 

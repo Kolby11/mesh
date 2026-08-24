@@ -94,8 +94,8 @@ source of truth.
 
 ## Next
 
-Enforce distinct popover and overflow child-surface lifecycle, focus,
-dismissal, placement, and ownership semantics (`docs/BACKLOG.md`).
+Dispatch frontend `mount` and `unmount` hooks in every initialization, reload,
+deactivation, and replacement path (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

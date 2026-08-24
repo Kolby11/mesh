@@ -786,6 +786,7 @@ pub(super) struct PopoverHarnessState {
     /// Reserve around the popover content for descendant shadow/filter
     /// overshoot: (left, top, right, bottom).
     pub(super) content_padding: (u32, u32, u32, u32),
+    pub(super) placement: mesh_core_elements::PopoverPlacement,
     pub(super) popover_trigger: Option<super::types::PopoverTriggerReference>,
     pub(super) painted_nodes: Vec<String>,
     pub(super) exiting_paints: Vec<bool>,
@@ -806,6 +807,7 @@ impl Default for PopoverHarnessState {
             anchor_rect: (8, 10, 40, 16),
             content_size: (72, 32),
             content_padding: (0, 0, 0, 0),
+            placement: mesh_core_elements::PopoverPlacement::default(),
             popover_trigger: None,
             painted_nodes: Vec::new(),
             exiting_paints: Vec::new(),
@@ -918,7 +920,7 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
             anchor_rect: state.anchor_rect,
             content_size: state.content_size,
             content_padding: state.content_padding,
-            placement: mesh_core_elements::PopoverPlacement::default(),
+            placement: state.placement,
             popover_trigger: state.popover_trigger.clone(),
         }]
     }

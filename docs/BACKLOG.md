@@ -73,7 +73,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/10-frontend-compiler-and-host/improvements.md)
 
-- [ ] Enforce distinct popover and overflow child-surface lifecycle, focus, dismissal, placement, and ownership semantics.
 - [ ] Dispatch frontend `mount` and `unmount` hooks in every initialization, reload, deactivation, and replacement path.
 - [ ] Contain expression/runtime failures with last-known-good trees or bounded error placeholders and actionable diagnostics.
 - [ ] Publish normalized public-prop schemas and validate imported/contribution props at the import boundary.

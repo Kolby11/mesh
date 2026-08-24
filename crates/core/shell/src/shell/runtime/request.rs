@@ -1993,6 +1993,16 @@ impl Shell {
         surface_id: SurfaceId,
         defer_for_hover_bridge: bool,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        if let Some((index, crate::shell::types::TargetRef::Child(child_index))) =
+            self.component_target_for_surface(&surface_id)
+            && self.components[index].children[child_index].kind
+                == crate::shell::types::ChildSurfaceKind::Overflow
+        {
+            // Overflow is derived from current geometry and has no authored
+            // open state for HidePopover to mutate.
+            self.pending_popover_hides.remove(&surface_id);
+            return Ok(VecDeque::new());
+        }
         if defer_for_hover_bridge && self.surface_is_promoted_popover(&surface_id) {
             self.pending_popover_hides.insert(
                 surface_id.clone(),
@@ -2041,7 +2051,10 @@ impl Shell {
         let child_surface_ids: Vec<_> = self.components[index]
             .children
             .iter()
-            .filter(|child| child.target.popup_parent_surface.as_deref() == Some(parent_surface_id))
+            .filter(|child| {
+                child.kind == crate::shell::types::ChildSurfaceKind::Popover
+                    && child.target.popup_parent_surface.as_deref() == Some(parent_surface_id)
+            })
             .map(|child| child.target.surface_id.clone())
             .collect();
         for surface_id in child_surface_ids {
@@ -2062,7 +2075,8 @@ impl Shell {
             .children
             .iter()
             .filter(|child| {
-                child.target.popup_parent_surface.as_deref() == Some(parent_surface_id)
+                child.kind == crate::shell::types::ChildSurfaceKind::Popover
+                    && child.target.popup_parent_surface.as_deref() == Some(parent_surface_id)
                     && point_in_rect(x, y, child.anchor_rect)
             })
             .map(|child| child.target.surface_id.clone())
@@ -2081,10 +2095,12 @@ impl Shell {
         else {
             return Ok(None);
         };
-        if self.components[index].children[child_index]
-            .target
-            .popup_parent_surface
-            .is_none()
+        if self.components[index].children[child_index].kind
+            != crate::shell::types::ChildSurfaceKind::Popover
+            || self.components[index].children[child_index]
+                .target
+                .popup_parent_surface
+                .is_none()
         {
             return Ok(None);
         }
@@ -2140,11 +2156,14 @@ impl Shell {
             crate::shell::types::TargetRef::Parent => {
                 self.components[index].parent.popup_parent_surface.is_some()
             }
-            crate::shell::types::TargetRef::Child(child_index) => self.components[index].children
-                [child_index]
-                .target
-                .popup_parent_surface
-                .is_some(),
+            crate::shell::types::TargetRef::Child(child_index) => {
+                self.components[index].children[child_index].kind
+                    == crate::shell::types::ChildSurfaceKind::Popover
+                    && self.components[index].children[child_index]
+                        .target
+                        .popup_parent_surface
+                        .is_some()
+            }
         }
     }
 

@@ -136,10 +136,11 @@ pub(super) struct ComponentRuntime {
     /// Auto-derived child surfaces (xdg_popups), reconciled from the painted
     /// tree each frame. Empty for components with no open escape-bounds nodes.
     pub(super) children: Vec<ChildSurface>,
-    /// Child node keys that the compositor dismissed while the component still
-    /// reported them open. Suppress immediate recreation until the request is
-    /// absent for a frame, then allow a future open to create a fresh popup.
-    pub(super) dismissed_child_node_keys: HashSet<String>,
+    /// Child surfaces that the compositor dismissed while the component still
+    /// reported them open. Popovers suppress immediate recreation until their
+    /// request is absent for a frame; overflow surfaces are retried because
+    /// their geometry, rather than an outside-click state, owns their life.
+    pub(super) dismissed_child_surfaces: HashSet<(ChildSurfaceKind, String)>,
     /// Newly requested child nodes waiting for one parent repaint with the
     /// scoped entrance class before their popup surface is mapped.
     pub(super) entering_child_node_keys: HashSet<String>,
@@ -241,7 +242,7 @@ impl ComponentRuntime {
         Self {
             parent: SurfaceTarget::new(surface_id.clone(), surface_size_policy),
             children: Vec::new(),
-            dismissed_child_node_keys: HashSet::new(),
+            dismissed_child_surfaces: HashSet::new(),
             entering_child_node_keys: HashSet::new(),
             surface_id,
             component,
