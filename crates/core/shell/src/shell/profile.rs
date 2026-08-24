@@ -714,14 +714,22 @@ impl Shell {
             .filter(|(_, root)| root.active)
             .map(|(instance_id, _)| instance_id.clone())
             .collect::<HashSet<_>>();
-        let existing_surfaces = self
+        let existing_surface_modules = self
             .components
             .iter()
-            .map(|runtime| runtime.surface_id.clone())
-            .collect::<HashSet<_>>();
+            .map(|runtime| {
+                (
+                    runtime.surface_id.clone(),
+                    runtime.component.id().to_string(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
         let mut prepared_frontends = Vec::new();
         for (instance_id, root) in profile.roots.iter().filter(|(_, root)| root.active) {
-            if existing_surfaces.contains(instance_id) {
+            if existing_surface_modules
+                .get(instance_id)
+                .is_some_and(|module_id| module_id == &root.module)
+            {
                 continue;
             }
             let Some(entry) = entries.get(&root.module) else {
@@ -1053,10 +1061,16 @@ impl Shell {
                 .component
                 .adopt_frontend_catalog(self.frontend_catalog.clone());
         }
+        let prepared_surfaces = pending
+            .prepared_frontends
+            .iter()
+            .map(|prepared| prepared.component.surface_id().to_string())
+            .collect::<HashSet<_>>();
         for index in (0..self.components.len()).rev() {
             if !pending
                 .desired_surfaces
                 .contains(&self.components[index].surface_id)
+                || prepared_surfaces.contains(&self.components[index].surface_id)
             {
                 self.remove_profile_component(index);
             }
@@ -1189,6 +1203,13 @@ impl Shell {
     fn remove_profile_component(&mut self, index: usize) {
         let surface_id = self.components[index].surface_id.clone();
         let module_id = self.components[index].component.id().to_string();
+        if let Err(error) = self.components[index].component.unmount() {
+            tracing::warn!(
+                module_id,
+                error = %error,
+                "profile replacement unmount failed"
+            );
+        }
         self.destroy_all_child_surfaces(index);
         self.presentation_engine.destroy_surface(&surface_id);
         self.components.remove(index);

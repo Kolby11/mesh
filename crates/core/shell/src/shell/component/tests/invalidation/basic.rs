@@ -1581,6 +1581,89 @@ fn source_reload_drops_stale_retained_tree_before_next_paint() {
 }
 
 #[test]
+fn frontend_lifecycle_hooks_run_around_source_reload() {
+    use crate::shell::component::catalog::FrontendCatalog;
+    use mesh_core_frontend::compile_frontend_module;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let temp = tempfile::tempdir().unwrap();
+    let module_dir = temp.path();
+    let module_id = format!(
+        "@test/lifecycle-hooks-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let manifest = minimal_test_manifest(&module_id);
+    let source = r#"<template><text content="lifecycle" /></template>
+<script lang="luau">
+function init(self)
+    loaded_after_unmount = self.storage.unmounted == true
+end
+
+function mount(self)
+    self.storage.mounts = (self.storage.mounts or 0) + 1
+    mount_count = self.storage.mounts
+end
+
+function unmount(self)
+    self.storage.unmounted = true
+end
+</script>
+"#;
+    std::fs::create_dir_all(module_dir.join("src")).unwrap();
+    std::fs::write(module_dir.join("src/main.mesh"), source).unwrap();
+
+    let compiled = compile_frontend_module(&manifest, module_dir).unwrap();
+    let catalog = FrontendCatalog {
+        modules: Default::default(),
+        diagnostics: Default::default(),
+        extension_point_contributions: Default::default(),
+        extension_point_entries: Default::default(),
+        node_slot_placements: Default::default(),
+    };
+    let mut component = FrontendSurfaceComponent::new(
+        compiled,
+        module_dir.to_path_buf(),
+        catalog,
+        mesh_core_service::InterfaceCatalog::default(),
+        test_settings_store(),
+    );
+    component
+        .mount(ComponentContext {
+            component_id: module_id.clone(),
+            surface_id: module_id.clone(),
+            diagnostics: Diagnostics::new(module_id.clone()),
+        })
+        .unwrap();
+
+    let root = component.runtimes.lock().unwrap();
+    let runtime = root.get(component.root_instance_key()).unwrap();
+    assert_eq!(
+        runtime.script_ctx.state().get("mount_count"),
+        Some(serde_json::json!(1))
+    );
+    assert_eq!(
+        runtime.script_ctx.state().get("loaded_after_unmount"),
+        Some(serde_json::json!(false))
+    );
+    drop(root);
+
+    assert!(component.reload_source().unwrap());
+    let root = component.runtimes.lock().unwrap();
+    let runtime = root.get(component.root_instance_key()).unwrap();
+    assert_eq!(
+        runtime.script_ctx.state().get("mount_count"),
+        Some(serde_json::json!(2))
+    );
+    assert_eq!(
+        runtime.script_ctx.state().get("loaded_after_unmount"),
+        Some(serde_json::json!(true))
+    );
+}
+
+#[test]
 fn source_reload_recompiles_primary_and_contribution_roots_atomically() {
     use crate::shell::component::catalog::{
         FrontendCatalog, FrontendCatalogEntry, ResolvedExtensionPointContribution,

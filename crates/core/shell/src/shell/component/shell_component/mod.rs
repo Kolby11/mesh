@@ -110,6 +110,9 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn mount(&mut self, ctx: ComponentContext) -> Result<Vec<CoreRequest>, ComponentError> {
+        if !self.runtimes.lock().unwrap().is_empty() {
+            self.unmount_runtimes()?;
+        }
         self.diagnostics = Some(ctx.diagnostics);
         self.load_graph_i18n_catalogs();
         self.record_declared_missing_icon_diagnostics();
@@ -123,6 +126,11 @@ impl ShellComponent for FrontendSurfaceComponent {
                 self.compiled.source_path.display()
             ),
         }])
+    }
+
+    fn unmount(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
+        self.unmount_runtimes()?;
+        Ok(Vec::new())
     }
 
     fn handle_core_event(&mut self, event: &CoreEvent) -> Result<Vec<CoreRequest>, ComponentError> {
@@ -1307,8 +1315,8 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.compiled = recompiled;
         self.selective_service_build_supported = self.compiled.supports_selective_service_build();
         self.element_metric_usage = element_metric_usage(&self.compiled);
+        self.unmount_runtimes()?;
         self.frontend_catalog_changed();
-        self.runtimes.lock().unwrap().clear();
         self.clear_runtime_generation_index();
         self.init_root_runtime()?;
         self.render_hooks_pending = true;
@@ -1337,11 +1345,29 @@ impl ShellComponent for FrontendSurfaceComponent {
             return false;
         }
 
-        self.runtimes.lock().unwrap().retain(|_, runtime| {
-            !state
+        let runtimes = std::mem::take(&mut *self.runtimes.lock().unwrap());
+        let mut retained = HashMap::with_capacity(runtimes.len());
+        for (instance_key, mut runtime) in runtimes {
+            if state
                 .changed_modules
                 .contains(&runtime.script_ctx.module_id)
-        });
+            {
+                if let Err(error) =
+                    Self::dispatch_runtime_hook(&self.diagnostics, &mut runtime, "unmount")
+                {
+                    tracing::warn!(
+                        component_id = %runtime.module_id,
+                        error = %error,
+                        "frontend catalog replacement unmount failed"
+                    );
+                }
+                runtime.script_ctx.drain_published_events();
+                runtime.script_ctx.drain_element_actions();
+            } else {
+                retained.insert(instance_key, runtime);
+            }
+        }
+        *self.runtimes.lock().unwrap() = retained;
         self.rebuild_runtime_generation_index();
         self.prepared_component_styles
             .get_mut()

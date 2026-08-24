@@ -799,6 +799,14 @@ pub trait ShellComponent: Send {
         None
     }
     fn mount(&mut self, ctx: ComponentContext) -> Result<Vec<CoreRequest>, ComponentError>;
+    /// Tear down this component and run authored frontend lifecycle cleanup.
+    ///
+    /// Implementations should make this idempotent: the shell may call it
+    /// before a reload, deactivation, replacement, or shutdown, and a drop
+    /// guard may subsequently release the component.
+    fn unmount(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
+        Ok(Vec::new())
+    }
     fn handle_core_event(&mut self, event: &CoreEvent) -> Result<Vec<CoreRequest>, ComponentError>;
     fn handle_service_event(
         &mut self,

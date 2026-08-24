@@ -94,8 +94,8 @@ source of truth.
 
 ## Next
 
-Dispatch frontend `mount` and `unmount` hooks in every initialization, reload,
-deactivation, and replacement path (`docs/BACKLOG.md`).
+Contain expression/runtime failures with last-known-good trees or bounded error
+placeholders and actionable diagnostics (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

@@ -377,6 +377,8 @@ impl Shell {
 
         let mut shutdown_requests = self.broadcast_core_event(CoreEvent::ShuttingDown)?;
         self.drain_requests(&mut shutdown_requests)?;
+        let mut unmount_requests = self.unmount_components();
+        self.drain_requests(&mut unmount_requests)?;
         let _ = std::fs::remove_file(&ipc_socket_path);
         tracing::info!("shell event loop stopped");
         Ok(())

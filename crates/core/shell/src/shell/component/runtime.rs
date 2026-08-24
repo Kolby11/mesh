@@ -49,7 +49,97 @@ fn apply_runtime_props(
     Ok(())
 }
 
+impl Drop for FrontendSurfaceComponent {
+    fn drop(&mut self) {
+        if let Err(error) = self.unmount_runtimes() {
+            tracing::warn!(
+                component_id = %self.compiled.manifest.package.id,
+                error = %error,
+                "frontend component drop could not complete authored unmount"
+            );
+        }
+    }
+}
+
 impl FrontendSurfaceComponent {
+    /// Dispatch one authored frontend lifecycle hook for a runtime.
+    ///
+    /// Runtime creation calls `mount` after `init` has completed. Teardown
+    /// calls `unmount` before the runtime is removed, and flushes storage even
+    /// when the hook is absent or returns an error.
+    pub(super) fn dispatch_runtime_hook(
+        diagnostics: &Option<Diagnostics>,
+        runtime: &mut EmbeddedFrontendRuntime,
+        hook: &str,
+    ) -> Result<(), ComponentError> {
+        let result = if runtime.has_script && runtime.script_ctx.has_handler(hook) {
+            runtime.script_ctx.call_handler(hook, &[])
+        } else {
+            Ok(())
+        };
+        if hook == "unmount" {
+            runtime.script_ctx.flush_storage();
+        }
+        Self::normalize_script_props(diagnostics, runtime);
+        Self::drain_script_diagnostics(diagnostics, runtime);
+        if let Err(source) = result {
+            let component_id = runtime.module_id.clone();
+            let error_message = source.to_string();
+            tracing::warn!(
+                component_id = %component_id,
+                handler = hook,
+                error = %error_message,
+                "frontend lifecycle hook failed"
+            );
+            if let Some(diagnostics) = diagnostics {
+                diagnostics.record_handler_error(
+                    component_id.clone(),
+                    hook.to_string(),
+                    error_message,
+                );
+            }
+            return Err(ComponentError::Script {
+                component_id,
+                source,
+            });
+        }
+        Ok(())
+    }
+
+    /// Run authored `unmount` hooks for every live runtime, then remove the
+    /// runtime map. Taking the map first makes this safe for replacement and
+    /// teardown paths and guarantees that one failing hook cannot skip later
+    /// runtimes.
+    pub(super) fn unmount_runtimes(&mut self) -> Result<(), ComponentError> {
+        let runtimes = std::mem::take(&mut *self.runtimes.lock().unwrap());
+        let mut runtimes = runtimes.into_iter().collect::<Vec<_>>();
+        // Embedded children are torn down before their parents, while the
+        // secondary key ordering keeps the result deterministic for equal
+        // depths.
+        runtimes.sort_by(|(left, _), (right, _)| {
+            right.len().cmp(&left.len()).then_with(|| left.cmp(right))
+        });
+
+        let mut first_error = None;
+        for (_, mut runtime) in runtimes {
+            if let Err(error) =
+                Self::dispatch_runtime_hook(&self.diagnostics, &mut runtime, "unmount")
+            {
+                first_error.get_or_insert(error);
+            }
+            // Lifecycle side channels cannot be applied after the surface is
+            // removed. Drain them before the shared VM/runtime is dropped.
+            runtime.script_ctx.drain_published_events();
+            runtime.script_ctx.drain_element_actions();
+        }
+        self.clear_runtime_generation_index();
+        if let Some(error) = first_error {
+            Err(error)
+        } else {
+            Ok(())
+        }
+    }
+
     pub(super) fn deliver_service_call_result_to_instance(
         &mut self,
         instance_id: &str,
@@ -648,6 +738,7 @@ impl FrontendSurfaceComponent {
         let mut runtime = EmbeddedFrontendRuntime {
             module_id: component_id,
             script_ctx,
+            has_script: component.script.is_some(),
             prop_definitions: component
                 .props
                 .as_ref()
@@ -656,6 +747,7 @@ impl FrontendSurfaceComponent {
             host_props,
             cached_state_clone: None,
         };
+        Self::dispatch_runtime_hook(&self.diagnostics, &mut runtime, "mount")?;
         Self::normalize_script_props(&self.diagnostics, &mut runtime);
         Ok(runtime)
     }

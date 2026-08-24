@@ -2244,6 +2244,13 @@ impl Shell {
         for index in indices.into_iter().rev() {
             let surface_id = self.components[index].surface_id.clone();
             let module_id = self.components[index].component.id().to_string();
+            if let Err(error) = self.components[index].component.unmount() {
+                tracing::warn!(
+                    module_id,
+                    error = %error,
+                    "frontend deactivation unmount failed"
+                );
+            }
             if let Some(module) = self.modules.get_mut(&module_id)
                 && let Err(error) = module.mark_unloaded()
             {
@@ -2283,6 +2290,21 @@ impl Shell {
             }
         }
         Ok(requests)
+    }
+
+    pub(super) fn unmount_components(&mut self) -> VecDeque<CoreRequest> {
+        let mut requests = VecDeque::new();
+        for runtime in &mut self.components {
+            match runtime.component.unmount() {
+                Ok(component_requests) => requests.extend(component_requests),
+                Err(error) => tracing::warn!(
+                    component_id = runtime.component.id(),
+                    error = %error,
+                    "frontend shutdown unmount failed"
+                ),
+            }
+        }
+        requests
     }
 
     pub(in crate::shell) fn sync_frontend_catalog_components(&mut self) -> bool {

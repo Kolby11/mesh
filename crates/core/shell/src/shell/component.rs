@@ -1087,6 +1087,10 @@ impl ElementMetricUsage {
 struct EmbeddedFrontendRuntime {
     module_id: String,
     script_ctx: ScriptContext,
+    /// Whether the authored component has a script in which lifecycle hooks
+    /// can exist. Template-only components should not initialize a Luau VM
+    /// merely to discover that they have no hooks during teardown.
+    has_script: bool,
     /// The declarations used to validate script writes to the reactive props
     /// table. Host layers have already been resolved into `host_props`.
     prop_definitions: Vec<mesh_core_component::PropDef>,
