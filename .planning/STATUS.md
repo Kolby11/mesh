@@ -13,6 +13,9 @@ Effective service read and control grants are now separate: control-only
 proxies can issue contract methods without receiving provider state, and shell
 service fan-out applies the same read boundary.
 
+Backend stream callbacks now reconcile changed poll intervals immediately after
+each typed or legacy stream callback, before the next event or poll wait.
+
 Backend source loading now runs in a startup-staged host phase: mutating
 service, process, event, logging, and durable-storage handles reject calls
 until the explicit `start(self)` lifecycle entrypoint begins.
@@ -132,7 +135,8 @@ source of truth.
 
 ## Next
 
-Reconcile changed poll intervals after every stream callback (`docs/BACKLOG.md`).
+Return recoverable host-installation errors instead of panicking during backend
+setup (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

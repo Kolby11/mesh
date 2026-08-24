@@ -600,6 +600,8 @@ async fn run_backend_service(
                     &service_name,
                     &module_id,
                     &mut last_payload,
+                    &mut interval_ms,
+                    &mut tick,
                 ) {
                     break;
                 }
@@ -865,6 +867,8 @@ fn dispatch_stream_events(
     service_name: &Arc<str>,
     module_id: &Arc<str>,
     last_payload: &mut Option<serde_json::Value>,
+    active_interval_ms: &mut u64,
+    tick: &mut tokio::time::Interval,
 ) -> bool {
     if events.is_empty() {
         return true;
@@ -879,6 +883,8 @@ fn dispatch_stream_events(
                 module_id,
                 last_payload,
                 ctx,
+                active_interval_ms,
+                tick,
             ) {
                 return false;
             }
@@ -906,6 +912,8 @@ fn dispatch_stream_events(
                             module_id,
                             last_payload,
                             ctx,
+                            active_interval_ms,
+                            tick,
                         ) {
                             return false;
                         }
@@ -926,6 +934,8 @@ fn dispatch_stream_events(
                         module_id,
                         last_payload,
                         ctx,
+                        active_interval_ms,
+                        tick,
                     ) {
                         return false;
                     }
@@ -941,6 +951,8 @@ fn dispatch_stream_events(
             module_id,
             last_payload,
             ctx,
+            active_interval_ms,
+            tick,
         ) {
             return false;
         }
@@ -955,8 +967,10 @@ fn publish_stream_callback_result(
     module_id: &Arc<str>,
     last_payload: &mut Option<serde_json::Value>,
     ctx: &mut BackendScriptContext,
+    active_interval_ms: &mut u64,
+    tick: &mut tokio::time::Interval,
 ) -> bool {
-    match result {
+    let keep_running = match result {
         Ok(Some(payload)) => {
             publish_changed_update(tx, service_name, module_id, last_payload, payload)
                 && publish_script_events(tx, service_name, module_id, ctx.drain_events())
@@ -971,7 +985,12 @@ fn publish_stream_callback_result(
             });
             true
         }
-    }
+    };
+    // Stream callbacks can change the schedule just like poll and command
+    // callbacks. Reconcile before processing the next event so a provider
+    // does not remain on the previous interval until a stale poll tick fires.
+    refresh_interval(ctx, active_interval_ms, tick);
+    keep_running
 }
 
 fn publish_script_events(
@@ -1668,6 +1687,70 @@ mod tests {
             Some("poll")
         );
         assert_eq!(second.payload.get("tick").and_then(|v| v.as_u64()), Some(2));
+
+        drop(cmd_tx);
+        drop(update_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
+            .expect("backend task should not panic");
+    }
+
+    #[tokio::test]
+    async fn spawn_backend_service_applies_stream_interval_change_after_handler() {
+        let (update_tx, mut update_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/stream-polling".to_string(),
+            "polling".to_string(),
+            vec!["exec.argv:sh:*".to_string()],
+            serde_json::json!({}),
+            "function start()\n\
+               mesh.service.set_poll_interval(1000)\n\
+               mesh.exec_stream(\"sh\", { \"-c\", \"printf 'changed\\\\n'\" })\n\
+             end\n\
+             function on_stream_batch(self, _program, _lines)\n\
+               mesh.service.set_poll_interval(60)\n\
+               mesh.service.emit({ source = \"stream\" })\n\
+             end\n\
+             function on_poll()\n\
+               mesh.service.emit({ source = \"poll\" })\n\
+             end"
+            .to_string(),
+            update_tx,
+            cmd_rx,
+        ));
+
+        let stream_update = loop {
+            let event = tokio::time::timeout(Duration::from_secs(1), update_rx.recv())
+                .await
+                .expect("stream callback should publish its state update")
+                .expect("update channel should stay open");
+            if let BackendServiceEvent::Update(update) = event
+                && update.payload.get("source").and_then(|v| v.as_str()) == Some("stream")
+            {
+                break update;
+            }
+        };
+        assert_eq!(
+            stream_update.payload.get("source").and_then(|v| v.as_str()),
+            Some("stream")
+        );
+
+        let poll_update = loop {
+            let event = tokio::time::timeout(Duration::from_millis(300), update_rx.recv())
+                .await
+                .expect("stream callback interval change should affect the next poll")
+                .expect("update channel should stay open");
+            if let BackendServiceEvent::Update(update) = event {
+                break update;
+            }
+        };
+        assert_eq!(
+            poll_update.payload.get("source").and_then(|v| v.as_str()),
+            Some("poll")
+        );
 
         drop(cmd_tx);
         drop(update_rx);

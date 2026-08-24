@@ -77,7 +77,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md)
 
-- [ ] Reconcile changed poll intervals after every stream callback.
 - [ ] Return recoverable host-installation errors instead of panicking during backend setup.
 - [ ] Introduce a per-module `RuntimeSession` combining realm, host, resource broker, lifecycle, state, supervisor, health, backoff, and quarantine.
 
