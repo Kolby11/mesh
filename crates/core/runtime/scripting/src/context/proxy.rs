@@ -413,6 +413,11 @@ fn create_event_channel_with_policy(
 ) -> mlua::Result<Table> {
     let channel = lua.create_table()?;
     let subscribers = lua.create_table()?;
+    let next_subscription_id = Arc::new(AtomicU64::new(1));
+    let event_name = subscription_key
+        .as_ref()
+        .map(|(service, event)| format!("{service}.{event}"))
+        .unwrap_or_else(|| "unnamed".to_string());
     channel.set("__subscribers", subscribers.clone())?;
     channel.set(
         "subscribe",
@@ -425,7 +430,7 @@ fn create_event_channel_with_policy(
                 ));
             }
             let subscribers: Table = table.get("__subscribers")?;
-            let id = subscribers.raw_len() + 1;
+            let id = next_subscription_id.fetch_add(1, Ordering::Relaxed);
             subscribers.raw_set(id, callback)?;
             if let (Some(registry), Some((service_name, event_name))) =
                 (&subscribed_interface_events, &subscription_key)
@@ -465,18 +470,48 @@ fn create_event_channel_with_policy(
         })?,
     )?;
     channel.set("on", channel.get::<Function>("subscribe")?)?;
+    let event_name_for_emit = event_name.clone();
     channel.set(
         "emit",
         lua.create_function(move |_lua, (table, payload): (Table, LuaValue)| {
             let subscribers: Table = table.get("__subscribers")?;
-            for callback in subscribers.sequence_values::<Function>().flatten() {
-                callback.call::<()>(payload.clone())?;
-            }
-            Ok(())
+            dispatch_event_subscribers(&subscribers, payload, &event_name_for_emit)
         })?,
     )?;
     channel.set("fire", channel.get::<Function>("emit")?)?;
     Ok(channel)
+}
+
+/// Dispatch a stable snapshot of subscription IDs. Looking up each callback
+/// again before invocation makes an unsubscribe during an earlier callback
+/// safe: removed subscribers are skipped, while newly added subscribers wait
+/// for the next emission. Every callback is attempted and reported separately.
+fn dispatch_event_subscribers(
+    subscribers: &Table,
+    payload: LuaValue,
+    event_name: &str,
+) -> mlua::Result<()> {
+    let mut subscription_ids = subscribers
+        .pairs::<u64, Function>()
+        .map(|pair| pair.map(|(id, _)| id))
+        .collect::<mlua::Result<Vec<_>>>()?;
+    subscription_ids.sort_unstable();
+
+    for subscription_id in subscription_ids {
+        let callback = match subscribers.raw_get::<LuaValue>(subscription_id)? {
+            LuaValue::Function(callback) => callback,
+            _ => continue,
+        };
+        if let Err(error) = callback.call::<()>(payload.clone()) {
+            tracing::warn!(
+                event = event_name,
+                subscription_id,
+                error = %error,
+                "event subscriber callback failed; continuing dispatch"
+            );
+        }
+    }
+    Ok(())
 }
 
 fn create_service_state_proxy(

@@ -111,8 +111,8 @@ source of truth.
 
 ## Next
 
-Make unsubscribe-safe event iteration and independent subscriber failure
-reporting explicit (`docs/BACKLOG.md`).
+Give stream subprocesses stable identities, bounded queues, exit events,
+awaited reaping, and shutdown semantics (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

@@ -410,6 +410,68 @@ end
 }
 
 #[test]
+fn backend_self_event_unsubscribing_first_keeps_later_subscriber() {
+    let mut ctx = BackendScriptContext::new("@test/backend");
+    ctx.load_script(
+        r#"
+state = { first = 0, second = 0 }
+
+function start()
+end
+
+function on_poll(self)
+    local unsubscribe = self.Changed:on(function()
+        state.first = state.first + 1
+    end)
+    self.Changed:on(function()
+        state.second = state.second + 1
+    end)
+    unsubscribe()
+    self.Changed:fire({})
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+    let state = ctx.run_poll().unwrap().unwrap();
+
+    assert_eq!(state["first"], serde_json::json!(0));
+    assert_eq!(state["second"], serde_json::json!(1));
+}
+
+#[test]
+fn backend_self_event_callback_failure_does_not_suppress_later_subscriber() {
+    let mut ctx = BackendScriptContext::new("@test/backend");
+    ctx.load_script(
+        r#"
+state = { second = 0 }
+
+function start()
+end
+
+function on_poll(self)
+    self.Changed:on(function()
+        error("first subscriber failed")
+    end)
+    self.Changed:on(function()
+        state.second = state.second + 1
+    end)
+    self.Changed:fire({})
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+    let state = ctx.run_poll().unwrap().unwrap();
+    let events = ctx.drain_events();
+
+    assert_eq!(state["second"], serde_json::json!(1));
+    assert_eq!(events.len(), 1);
+}
+
+#[test]
 fn command_handler_reads_payload_via_api() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(

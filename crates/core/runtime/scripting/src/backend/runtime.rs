@@ -10,7 +10,10 @@ use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value as JsonValue;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicU64, Ordering},
+};
 
 /// Executes a backend module's Luau script.
 ///
@@ -901,12 +904,13 @@ fn create_backend_event_channel(
 ) -> mlua::Result<Table> {
     let channel = lua.create_table()?;
     let subscribers = lua.create_table()?;
+    let next_subscription_id = Arc::new(AtomicU64::new(1));
     channel.set("__subscribers", subscribers.clone())?;
     channel.set(
         "subscribe",
         lua.create_function(move |lua, (table, callback): (Table, Function)| {
             let subscribers: Table = table.get("__subscribers")?;
-            let id = subscribers.raw_len() + 1;
+            let id = next_subscription_id.fetch_add(1, Ordering::Relaxed);
             subscribers.raw_set(id, callback)?;
             Ok(lua.create_function(move |_lua, ()| subscribers.raw_set(id, LuaValue::Nil))?)
         })?,
@@ -931,9 +935,11 @@ fn create_backend_event_channel(
                 .reserve_queue()
                 .map_err(|error| mlua::Error::external(error.to_string()))?;
             let subscribers: Table = table.get("__subscribers")?;
-            for callback in subscribers.sequence_values::<Function>().flatten() {
-                callback.call::<()>(lua.to_value(&payload)?)?;
-            }
+            dispatch_backend_event_subscribers(
+                &subscribers,
+                lua.to_value(&payload)?,
+                &fire_event_name,
+            );
             runtime
                 .lock()
                 .unwrap()
@@ -947,4 +953,51 @@ fn create_backend_event_channel(
     )?;
     channel.set("emit", channel.get::<Function>("fire")?)?;
     Ok(channel)
+}
+
+/// Dispatch a stable snapshot of subscription IDs. A callback can close its
+/// own or another subscription without creating a sequence hole that skips
+/// later subscribers. Failures are reported one at a time and never prevent
+/// the provider event from being queued below.
+fn dispatch_backend_event_subscribers(subscribers: &Table, payload: LuaValue, event_name: &str) {
+    let mut subscription_ids = match subscribers
+        .pairs::<u64, Function>()
+        .map(|pair| pair.map(|(id, _)| id))
+        .collect::<mlua::Result<Vec<_>>>()
+    {
+        Ok(subscription_ids) => subscription_ids,
+        Err(error) => {
+            tracing::warn!(
+                event = event_name,
+                error = %error,
+                "event subscriber iteration failed"
+            );
+            return;
+        }
+    };
+    subscription_ids.sort_unstable();
+
+    for subscription_id in subscription_ids {
+        let callback = match subscribers.raw_get::<LuaValue>(subscription_id) {
+            Ok(LuaValue::Function(callback)) => callback,
+            Ok(_) => continue,
+            Err(error) => {
+                tracing::warn!(
+                    event = event_name,
+                    subscription_id,
+                    error = %error,
+                    "event subscriber lookup failed; continuing dispatch"
+                );
+                continue;
+            }
+        };
+        if let Err(error) = callback.call::<()>(payload.clone()) {
+            tracing::warn!(
+                event = event_name,
+                subscription_id,
+                error = %error,
+                "event subscriber callback failed; continuing dispatch"
+            );
+        }
+    }
 }

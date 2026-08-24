@@ -234,3 +234,98 @@ end
         Some(serde_json::json!(1))
     );
 }
+
+#[test]
+fn module_event_unsubscribing_first_keeps_later_subscriber() {
+    let mut ctx = ScriptContext::new("@mesh/test", CapabilitySet::new()).unwrap();
+    ctx.load_script(
+        r#"
+first_count = 0
+second_count = 0
+
+function init()
+    local unsubscribe = module.events.ItemActivated:subscribe(function()
+        first_count = first_count + 1
+    end)
+    module.events.ItemActivated:subscribe(function()
+        second_count = second_count + 1
+    end)
+    unsubscribe()
+    module.events.ItemActivated:emit({})
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+
+    assert_eq!(ctx.state.get("first_count"), Some(serde_json::json!(0)));
+    assert_eq!(ctx.state.get("second_count"), Some(serde_json::json!(1)));
+}
+
+#[test]
+fn interface_event_unsubscribing_first_keeps_later_subscriber() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("service.audio.read"));
+    let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+    ctx.set_interface_catalog(audio_catalog());
+    ctx.load_script(
+        r#"
+seen_level = 0
+
+function init()
+    local audio = require("mesh.audio@>=1.0")
+    unsubscribe = audio.events.VolumeChanged:subscribe(function() end)
+    audio.events.VolumeChanged:subscribe(function(event)
+        seen_level = event.level
+    end)
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+    ctx.call_handler("unsubscribe", &[]).unwrap();
+    ctx.emit_interface_event(
+        "audio",
+        "VolumeChanged",
+        &serde_json::json!({ "level": 42 }),
+    )
+    .unwrap();
+
+    assert_eq!(ctx.state.get("seen_level"), Some(serde_json::json!(42)));
+}
+
+#[test]
+fn interface_event_callback_failure_does_not_suppress_later_subscriber() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("service.audio.read"));
+    let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+    ctx.set_interface_catalog(audio_catalog());
+    ctx.load_script(
+        r#"
+seen_level = 0
+
+function init()
+    local audio = require("mesh.audio@>=1.0")
+    audio.events.VolumeChanged:subscribe(function()
+        error("first subscriber failed")
+    end)
+    audio.events.VolumeChanged:subscribe(function(event)
+        seen_level = event.level
+    end)
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+    ctx.emit_interface_event(
+        "audio",
+        "VolumeChanged",
+        &serde_json::json!({ "level": 42 }),
+    )
+    .unwrap();
+
+    assert_eq!(ctx.state.get("seen_level"), Some(serde_json::json!(42)));
+}
