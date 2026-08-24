@@ -40,11 +40,23 @@ const SCROLLBAR_MIN_THUMB: f32 = 18.0;
 const SCROLLBAR_HIT_SLOP: f32 = 4.0;
 
 pub fn find_scrollbar_at(node: &WidgetNode, x: f32, y: f32) -> Option<ScrollbarHit> {
-    find_scrollbar_at_with_offset(node, x, y, 0.0, 0.0)
+    find_scrollbar_at_affine(
+        node,
+        x,
+        y,
+        root_transform(0.0, 0.0),
+        &AffineClipStack::default(),
+    )
 }
 
 pub fn find_scrollable_at_with_limits(node: &WidgetNode, x: f32, y: f32) -> Option<ScrollableHit> {
-    find_scrollable_at_with_offset(node, x, y, 0.0, 0.0)
+    find_scrollable_at_affine(
+        node,
+        x,
+        y,
+        root_transform(0.0, 0.0),
+        &AffineClipStack::default(),
+    )
 }
 
 pub fn scroll_limits(node: &WidgetNode) -> (f32, f32) {
@@ -73,17 +85,17 @@ fn node_path_by_key<'a>(node: &'a WidgetNode, target_key: &str) -> Option<Vec<&'
 /// Accumulated on-screen offset per node along `path`, mirroring the painter:
 /// `transform.translate` shifts the node's own box, scroll offset shifts its
 /// children. `offsets` carries live scroll state, since tree attributes lag.
-fn path_screen_offsets(
+fn path_screen_transforms(
     path: &[&WidgetNode],
     offsets: &HashMap<NodeId, ScrollOffsetState>,
-) -> Vec<(f32, f32)> {
-    let mut incoming = (0.0_f32, 0.0_f32);
+) -> Vec<AffineTransform> {
+    let mut incoming = root_transform(0.0, 0.0);
     let mut result = Vec::with_capacity(path.len());
     for node in path {
-        let screen = transformed_offset(node, incoming.0, incoming.1);
+        let screen = node_world_transform(incoming, node);
         result.push(screen);
         let scroll = offsets.get(&node.id).copied().unwrap_or_default();
-        incoming = (screen.0 - scroll.x, screen.1 - scroll.y);
+        incoming = child_transform(screen, node, scroll.x, scroll.y);
     }
     result
 }
@@ -124,15 +136,15 @@ pub fn scroll_into_view_offsets(
         let container = path[i];
         let node_id = container.id;
 
-        let screens = path_screen_offsets(&path, &offsets);
-        let (cox, coy) = screens[i];
-        let (tox, toy) = screens[target_idx];
+        let screens = path_screen_transforms(&path, &offsets);
+        let container_transform = screens[i];
+        let target_transform = screens[target_idx];
         let target = path[target_idx];
         let pad = &container.computed_style.padding;
 
         // Container content viewport and target box, both on screen.
-        let container_rect = node_rect_with_offset(container, cox, coy);
-        let target_rect = node_rect_with_offset(target, tox, toy);
+        let container_rect = node_rect_with_transform(container, container_transform);
+        let target_rect = node_rect_with_transform(target, target_transform);
         let view_left = container_rect.0 + pad.left;
         let view_top = container_rect.1 + pad.top;
         let view_w = (container_rect.2 - container_rect.0 - pad.horizontal()).max(0.0);
@@ -236,7 +248,10 @@ fn find_scrollbar_at_with_offset(
 
     // Scrollbars paint after their contents, so the container's own bar wins
     // over a descendant that happens to reach the same edge.
-    if inside_self && let Some(hit) = scrollbar_hit_for_node(node, x, y, offset_x, offset_y) {
+    if inside_self
+        && let Some(hit) =
+            scrollbar_hit_for_node(node, x, y, node_rect_with_offset(node, offset_x, offset_y))
+    {
         return Some(hit);
     }
 
@@ -255,8 +270,7 @@ fn scrollbar_hit_for_node(
     node: &WidgetNode,
     x: f32,
     y: f32,
-    offset_x: f32,
-    offset_y: f32,
+    bounds: ContentBounds,
 ) -> Option<ScrollbarHit> {
     let scroll = node.resolved_scroll_metrics();
     let show_vertical = node.computed_style.overflow_y.always_shows_scrollbar()
@@ -275,7 +289,6 @@ fn scrollbar_hit_for_node(
         return None;
     }
 
-    let bounds = node_rect_with_offset(node, offset_x, offset_y);
     let left = bounds.0;
     let top = bounds.1;
     let width = (bounds.2 - bounds.0).max(1.0);
@@ -493,6 +506,87 @@ pub fn annotate_overflow_node(
     } else {
         union_bounds(Some(own_bounds), children_bounds.unwrap_or(own_bounds))
     }
+}
+
+fn find_scrollable_at_affine(
+    node: &WidgetNode,
+    x: f32,
+    y: f32,
+    parent_transform: AffineTransform,
+    clips: &AffineClipStack,
+) -> Option<ScrollableHit> {
+    if !node_allows(node, InteractionTarget::Scroll) || !clips.contains(x, y) {
+        return None;
+    }
+    let world = node_world_transform(parent_transform, node);
+    let inside = node_contains_with_transform(node, world, x, y);
+    if !inside && node_clips_children(node) {
+        return None;
+    }
+    let child_world = child_world_transform(world, node);
+    let child_clips = push_node_clip(clips, node, world);
+    for child in node.children.iter().rev() {
+        if let Some(found) = find_scrollable_at_affine(child, x, y, child_world, &child_clips) {
+            return Some(found);
+        }
+    }
+    if inside && node_is_scrollable(node) {
+        let (max_x, max_y) = scroll_limits(node);
+        return Some(ScrollableHit {
+            node_id: node.id,
+            max_x,
+            max_y,
+        });
+    }
+    None
+}
+
+fn find_scrollbar_at_affine(
+    node: &WidgetNode,
+    x: f32,
+    y: f32,
+    parent_transform: AffineTransform,
+    clips: &AffineClipStack,
+) -> Option<ScrollbarHit> {
+    if !node_allows(node, InteractionTarget::Scroll) || !clips.contains(x, y) {
+        return None;
+    }
+    let world = node_world_transform(parent_transform, node);
+    let inside = node_contains_with_transform(node, world, x, y);
+    if !inside && node_clips_children(node) {
+        return None;
+    }
+    if inside
+        && let Some(bounds) = clipped_node_bounds(node, world, clips)
+        && let Some(hit) = scrollbar_hit_for_node(node, x, y, bounds)
+    {
+        return Some(hit);
+    }
+    let child_world = child_world_transform(world, node);
+    let child_clips = push_node_clip(clips, node, world);
+    node.children
+        .iter()
+        .rev()
+        .find_map(|child| find_scrollbar_at_affine(child, x, y, child_world, &child_clips))
+}
+
+fn clipped_node_bounds(
+    node: &WidgetNode,
+    world: AffineTransform,
+    clips: &AffineClipStack,
+) -> Option<ContentBounds> {
+    let rect = node_rect_with_transform(node, world);
+    if clips.is_empty() {
+        Some(rect)
+    } else {
+        clips
+            .bounds()
+            .and_then(|clip| intersect_bounds(rect, content_bounds_from_rect(clip)))
+    }
+}
+
+fn content_bounds_from_rect(rect: mesh_core_elements::LayoutRect) -> ContentBounds {
+    (rect.x, rect.y, rect.x + rect.width, rect.y + rect.height)
 }
 
 #[cfg(test)]

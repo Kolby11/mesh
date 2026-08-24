@@ -306,13 +306,11 @@ pub(super) fn node_visual_bounds(node: &WidgetNode) -> Option<(f32, f32, f32, f3
     if node.layout.width <= 0.0 || node.layout.height <= 0.0 {
         return None;
     }
-    let transform = node.computed_style.transform;
-    let scale_x = transform.scale_x.max(0.0);
-    let scale_y = transform.scale_y.max(0.0);
-    let width = node.layout.width * scale_x;
-    let height = node.layout.height * scale_y;
-    let left = node.layout.x + transform.translate_x;
-    let top = node.layout.y + transform.translate_y;
+    let layout = mesh_core_elements::transformed_layout_at(node, 0.0, 0.0);
+    let width = layout.width;
+    let height = layout.height;
+    let left = layout.x;
+    let top = layout.y;
 
     let (left, top, right, bottom) =
         shadow_filter_extended_bounds(left, top, width, height, &node.computed_style);

@@ -38,7 +38,13 @@ pub struct InspectHit<'a> {
 }
 
 pub fn inspect_hit_test(node: &WidgetNode, x: f32, y: f32) -> Option<InspectHit<'_>> {
-    inspect_hit_test_inner(node, x, y, 0.0, 0.0)
+    inspect_hit_test_affine(
+        node,
+        x,
+        y,
+        root_transform(0.0, 0.0),
+        &AffineClipStack::default(),
+    )
 }
 
 fn inspect_hit_test_inner(
@@ -165,7 +171,14 @@ impl TooltipRef<'_> {
 
 /// Resolve all pointer-motion metadata in the same tree traversal.
 pub fn pointer_hit_test(node: &WidgetNode, x: f32, y: f32) -> Option<PointerHit> {
-    let mut hit = pointer_hit_test_reversed(node, x, y, 0.0, 0.0, None)?;
+    let mut hit = pointer_hit_test_reversed_affine(
+        node,
+        x,
+        y,
+        root_transform(0.0, 0.0),
+        &AffineClipStack::default(),
+        None,
+    )?;
     hit.path.reverse();
     Some(hit)
 }
@@ -173,7 +186,14 @@ pub fn pointer_hit_test(node: &WidgetNode, x: f32, y: f32) -> Option<PointerHit>
 /// Press targeting in one traversal: the deepest pointer-focusable node, or
 /// failing that the deepest ancestor with a click handler, plus its bounds.
 pub fn pointer_press_hit(node: &WidgetNode, x: f32, y: f32) -> PointerPressHit<'_> {
-    let mut hit = pointer_press_hit_inner(node, x, y, 0.0, 0.0).unwrap_or_default();
+    let mut hit = pointer_press_hit_affine(
+        node,
+        x,
+        y,
+        root_transform(0.0, 0.0),
+        &AffineClipStack::default(),
+    )
+    .unwrap_or_default();
     hit.target = hit.focusable.or(hit.target);
     hit
 }
@@ -186,7 +206,14 @@ pub fn pointer_event_handler_hit<'a>(
     y: f32,
     event_name: &str,
 ) -> Option<PointerEventHandlerHit<'a>> {
-    pointer_event_handler_hit_inner(node, x, y, event_name, 0.0, 0.0)
+    pointer_event_handler_hit_affine(
+        node,
+        x,
+        y,
+        event_name,
+        root_transform(0.0, 0.0),
+        &AffineClipStack::default(),
+    )
 }
 
 fn pointer_event_handler_hit_inner<'a>(
@@ -350,7 +377,13 @@ pub fn find_nodes_by_keys<'a>(
     keys: &std::collections::HashSet<&str>,
 ) -> std::collections::HashMap<&'a str, (&'a WidgetNode, ContentBounds)> {
     let mut found = std::collections::HashMap::with_capacity(keys.len());
-    collect_nodes_by_keys(node, keys, 0.0, 0.0, &mut found);
+    collect_nodes_by_keys_affine(
+        node,
+        keys,
+        root_transform(0.0, 0.0),
+        &AffineClipStack::default(),
+        &mut found,
+    );
     found
 }
 
@@ -385,22 +418,12 @@ pub fn find_node_bounds_by_key(
     offset_x: f32,
     offset_y: f32,
 ) -> Option<ContentBounds> {
-    if !node_allows(node, InteractionTarget::Pointer) {
-        return None;
-    }
-    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
-    if node.mesh_key().is_some_and(|value| value == key) {
-        return Some(node_rect_with_offset(node, offset_x, offset_y));
-    }
-
-    let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
-    for child in &node.children {
-        if let Some(bounds) = find_node_bounds_by_key(child, key, child_offset_x, child_offset_y) {
-            return Some(bounds);
-        }
-    }
-
-    None
+    find_node_bounds_by_key_affine(
+        node,
+        key,
+        root_transform(offset_x, offset_y),
+        &AffineClipStack::default(),
+    )
 }
 
 /// Allocation-free counterpart to [`find_nodes_by_keys`] for callers needing
@@ -409,7 +432,13 @@ pub fn find_node_with_bounds_by_key<'a>(
     node: &'a WidgetNode,
     key: &str,
 ) -> Option<(&'a WidgetNode, ContentBounds)> {
-    find_node_with_bounds_by_key_at(node, key, 0.0, 0.0)
+    find_node_with_bounds_by_key_affine(
+        node,
+        key,
+        root_transform(0.0, 0.0),
+        &AffineClipStack::default(),
+    )
+    .map(|(node, bounds)| (node, bounds))
 }
 
 fn find_node_with_bounds_by_key_at<'a>(
@@ -439,7 +468,15 @@ fn find_node_with_bounds_by_key_at<'a>(
 
 /// Return the root-to-deepest key path under the cursor, regardless of type.
 pub fn find_node_path_at(node: &WidgetNode, x: f32, y: f32) -> Option<Vec<String>> {
-    find_node_path_at_offset(node, x, y, 0.0, 0.0)
+    let mut path = find_node_path_reversed_affine(
+        node,
+        x,
+        y,
+        root_transform(0.0, 0.0),
+        &AffineClipStack::default(),
+    )?;
+    path.reverse();
+    Some(path)
 }
 
 fn find_node_path_at_offset(
@@ -546,7 +583,14 @@ fn non_empty_tooltip_text(value: Option<&str>) -> Option<&str> {
 /// the region the user perceives the element to live in. `None` when the key is
 /// absent or nothing clips; the node is never its own container.
 pub fn find_tooltip_container_bounds(node: &WidgetNode, key: &str) -> Option<ContentBounds> {
-    find_container_bounds_inner(node, key, 0.0, 0.0, None).flatten()
+    find_container_bounds_affine(
+        node,
+        key,
+        root_transform(0.0, 0.0),
+        &AffineClipStack::default(),
+        None,
+    )
+    .flatten()
 }
 
 /// Outer `Option` = keyed node found; inner = nearest clipping ancestor bounds.
@@ -623,7 +667,14 @@ pub fn find_tooltip_target_by_key<'a>(
     node: &'a WidgetNode,
     key: &str,
 ) -> Option<TooltipTarget<'a>> {
-    find_tooltip_target_by_key_inner(node, key, 0.0, 0.0, None).flatten()
+    find_tooltip_target_by_key_affine(
+        node,
+        key,
+        root_transform(0.0, 0.0),
+        &AffineClipStack::default(),
+        None,
+    )
+    .flatten()
 }
 
 /// Outer `Option` = keyed node found; inner = its nearest tooltip owner.
@@ -711,6 +762,335 @@ pub fn namespace_event_handlers(node: &mut WidgetNode, instance_key: &str) {
     for child in &mut node.children {
         namespace_event_handlers(child, instance_key);
     }
+}
+
+fn clipped_node_bounds(
+    node: &WidgetNode,
+    world: AffineTransform,
+    clips: &AffineClipStack,
+) -> Option<ContentBounds> {
+    let bounds = node_rect_with_transform(node, world);
+    if clips.is_empty() {
+        Some(bounds)
+    } else {
+        clips
+            .bounds()
+            .and_then(|clip| intersect_bounds(bounds, content_bounds_from_rect(clip)))
+    }
+}
+
+fn content_bounds_from_rect(rect: mesh_core_elements::LayoutRect) -> ContentBounds {
+    (rect.x, rect.y, rect.x + rect.width, rect.y + rect.height)
+}
+
+fn inspect_hit_test_affine<'a>(
+    node: &'a WidgetNode,
+    x: f32,
+    y: f32,
+    parent_transform: AffineTransform,
+    clips: &AffineClipStack,
+) -> Option<InspectHit<'a>> {
+    if !node_allows(node, InteractionTarget::Paint) || !clips.contains(x, y) {
+        return None;
+    }
+    let world = node_world_transform(parent_transform, node);
+    let inside = node_contains_with_transform(node, world, x, y);
+    if !inside && node_clips_children(node) {
+        return None;
+    }
+    let child_world = child_world_transform(world, node);
+    let child_clips = push_node_clip(clips, node, world);
+    for child in node.children.iter().rev() {
+        if let Some(hit) = inspect_hit_test_affine(child, x, y, child_world, &child_clips) {
+            return Some(hit);
+        }
+    }
+    inside.then(|| InspectHit {
+        node,
+        bounds: clipped_node_bounds(node, world, clips)
+            .map(content_bounds)
+            .unwrap_or_default(),
+    })
+}
+
+fn content_bounds(bounds: ContentBounds) -> ContentBounds {
+    bounds
+}
+
+fn pointer_event_handler_hit_affine<'a>(
+    node: &'a WidgetNode,
+    x: f32,
+    y: f32,
+    event_name: &str,
+    parent_transform: AffineTransform,
+    clips: &AffineClipStack,
+) -> Option<PointerEventHandlerHit<'a>> {
+    if !node_allows(node, InteractionTarget::Pointer) || !clips.contains(x, y) {
+        return None;
+    }
+    let world = node_world_transform(parent_transform, node);
+    let inside = node_contains_with_transform(node, world, x, y);
+    if !inside && node_clips_children(node) {
+        return None;
+    }
+    let child_world = child_world_transform(world, node);
+    let child_clips = push_node_clip(clips, node, world);
+    for child in node.children.iter().rev() {
+        if let Some(hit) =
+            pointer_event_handler_hit_affine(child, x, y, event_name, child_world, &child_clips)
+        {
+            return Some(hit);
+        }
+    }
+    if inside && node.event_handlers.contains_key(event_name) {
+        return node
+            .mesh_key()
+            .zip(clipped_node_bounds(node, world, clips))
+            .map(|(key, bounds)| PointerEventHandlerHit { key, node, bounds });
+    }
+    None
+}
+
+fn pointer_press_hit_affine<'a>(
+    node: &'a WidgetNode,
+    x: f32,
+    y: f32,
+    parent_transform: AffineTransform,
+    clips: &AffineClipStack,
+) -> Option<PointerPressHit<'a>> {
+    if !node_allows(node, InteractionTarget::Pointer) || !clips.contains(x, y) {
+        return None;
+    }
+    let world = node_world_transform(parent_transform, node);
+    let inside = node_contains_with_transform(node, world, x, y);
+    if !inside && node_clips_children(node) {
+        return None;
+    }
+    let child_world = child_world_transform(world, node);
+    let child_clips = push_node_clip(clips, node, world);
+    let mut hit = PointerPressHit::default();
+    for child in node.children.iter().rev() {
+        if let Some(child_hit) = pointer_press_hit_affine(child, x, y, child_world, &child_clips) {
+            hit = child_hit;
+            break;
+        }
+    }
+    if inside
+        && let Some((key, bounds)) = node.mesh_key().zip(clipped_node_bounds(node, world, clips))
+    {
+        let node_hit = PointerPressNode { key, node, bounds };
+        if hit.focusable.is_none() && crate::focus::node_is_pointer_focusable(node) {
+            hit.focusable = Some(node_hit);
+        }
+        if hit.target.is_none() && node.event_handlers.contains_key("click") {
+            hit.target = Some(node_hit);
+        }
+    }
+    (hit.focusable.is_some() || hit.target.is_some()).then_some(hit)
+}
+
+fn pointer_hit_test_reversed_affine<'a>(
+    node: &'a WidgetNode,
+    x: f32,
+    y: f32,
+    parent_transform: AffineTransform,
+    clips: &AffineClipStack,
+    inherited_tooltip: Option<TooltipTarget<'a>>,
+) -> Option<PointerHit> {
+    if !node_allows(node, InteractionTarget::Pointer) || !clips.contains(x, y) {
+        return None;
+    }
+    let world = node_world_transform(parent_transform, node);
+    let inside = node_contains_with_transform(node, world, x, y);
+    if !inside && node_clips_children(node) {
+        return None;
+    }
+    let owner_tooltip = node_allows(node, InteractionTarget::Tooltip)
+        .then(|| node_tooltip_text_ref(node))
+        .flatten()
+        .and_then(|text| {
+            clipped_node_bounds(node, world, clips).map(|bounds| TooltipTarget {
+                owner: node,
+                text,
+                bounds,
+            })
+        });
+    let tooltip = owner_tooltip.or(inherited_tooltip);
+    let child_world = child_world_transform(world, node);
+    let child_clips = push_node_clip(clips, node, world);
+    for child in node.children.iter().rev() {
+        if let Some(mut hit) =
+            pointer_hit_test_reversed_affine(child, x, y, child_world, &child_clips, tooltip)
+        {
+            if let Some(key) = node.mesh_key() {
+                hit.path.push(key.to_owned());
+            }
+            return Some(hit);
+        }
+    }
+    let key = node.mesh_key()?;
+    inside.then(|| PointerHit {
+        path: vec![key.to_owned()],
+        tooltip: tooltip.map(TooltipTarget::into_owned),
+        bounds: tooltip
+            .map(|tooltip| tooltip.bounds)
+            .or_else(|| clipped_node_bounds(node, world, clips))
+            .unwrap_or_default(),
+    })
+}
+
+fn collect_nodes_by_keys_affine<'a>(
+    node: &'a WidgetNode,
+    keys: &std::collections::HashSet<&str>,
+    parent_transform: AffineTransform,
+    clips: &AffineClipStack,
+    found: &mut std::collections::HashMap<&'a str, (&'a WidgetNode, ContentBounds)>,
+) {
+    if found.len() == keys.len() || !node_allows(node, InteractionTarget::Pointer) {
+        return;
+    }
+    let world = node_world_transform(parent_transform, node);
+    if let Some(key) = node.mesh_key()
+        && keys.contains(key)
+        && let Some(bounds) = clipped_node_bounds(node, world, clips)
+    {
+        found.insert(key, (node, bounds));
+    }
+    let child_world = child_world_transform(world, node);
+    let child_clips = push_node_clip(clips, node, world);
+    for child in &node.children {
+        collect_nodes_by_keys_affine(child, keys, child_world, &child_clips, found);
+        if found.len() == keys.len() {
+            break;
+        }
+    }
+}
+
+fn find_node_bounds_by_key_affine<'a>(
+    node: &'a WidgetNode,
+    key: &str,
+    parent_transform: AffineTransform,
+    clips: &AffineClipStack,
+) -> Option<ContentBounds> {
+    if !node_allows(node, InteractionTarget::Pointer) {
+        return None;
+    }
+    let world = node_world_transform(parent_transform, node);
+    if node.mesh_key().is_some_and(|value| value == key) {
+        return clipped_node_bounds(node, world, clips);
+    }
+    let child_world = child_world_transform(world, node);
+    let child_clips = push_node_clip(clips, node, world);
+    node.children
+        .iter()
+        .find_map(|child| find_node_bounds_by_key_affine(child, key, child_world, &child_clips))
+}
+
+fn find_node_with_bounds_by_key_affine<'a>(
+    node: &'a WidgetNode,
+    key: &str,
+    parent_transform: AffineTransform,
+    clips: &AffineClipStack,
+) -> Option<(&'a WidgetNode, ContentBounds)> {
+    if !node_allows(node, InteractionTarget::Pointer) {
+        return None;
+    }
+    let world = node_world_transform(parent_transform, node);
+    if node.mesh_key().is_some_and(|value| value == key) {
+        return clipped_node_bounds(node, world, clips).map(|bounds| (node, bounds));
+    }
+    let child_world = child_world_transform(world, node);
+    let child_clips = push_node_clip(clips, node, world);
+    node.children.iter().find_map(|child| {
+        find_node_with_bounds_by_key_affine(child, key, child_world, &child_clips)
+    })
+}
+
+fn find_node_path_reversed_affine(
+    node: &WidgetNode,
+    x: f32,
+    y: f32,
+    parent_transform: AffineTransform,
+    clips: &AffineClipStack,
+) -> Option<Vec<String>> {
+    if !node_allows(node, InteractionTarget::Pointer) || !clips.contains(x, y) {
+        return None;
+    }
+    let world = node_world_transform(parent_transform, node);
+    let inside = node_contains_with_transform(node, world, x, y);
+    if !inside && node_clips_children(node) {
+        return None;
+    }
+    let child_world = child_world_transform(world, node);
+    let child_clips = push_node_clip(clips, node, world);
+    for child in node.children.iter().rev() {
+        if let Some(mut path) =
+            find_node_path_reversed_affine(child, x, y, child_world, &child_clips)
+        {
+            if let Some(key) = node.mesh_key() {
+                path.push(key.to_owned());
+            }
+            return Some(path);
+        }
+    }
+    inside
+        .then(|| node.mesh_key().map(|key| vec![key.to_owned()]))
+        .flatten()
+}
+
+fn find_container_bounds_affine(
+    node: &WidgetNode,
+    key: &str,
+    parent_transform: AffineTransform,
+    clips: &AffineClipStack,
+    nearest_clip: Option<ContentBounds>,
+) -> Option<Option<ContentBounds>> {
+    if !node_allows(node, InteractionTarget::Tooltip) {
+        return None;
+    }
+    let world = node_world_transform(parent_transform, node);
+    if node.mesh_key().is_some_and(|value| value == key) {
+        return Some(nearest_clip);
+    }
+    let nearest_clip = if node_clips_children(node) {
+        clipped_node_bounds(node, world, clips).or(nearest_clip)
+    } else {
+        nearest_clip
+    };
+    let child_world = child_world_transform(world, node);
+    let child_clips = push_node_clip(clips, node, world);
+    node.children.iter().find_map(|child| {
+        find_container_bounds_affine(child, key, child_world, &child_clips, nearest_clip)
+    })
+}
+
+fn find_tooltip_target_by_key_affine<'a>(
+    node: &'a WidgetNode,
+    key: &str,
+    parent_transform: AffineTransform,
+    clips: &AffineClipStack,
+    inherited: Option<TooltipTarget<'a>>,
+) -> Option<Option<TooltipTarget<'a>>> {
+    if !node_allows(node, InteractionTarget::Tooltip) {
+        return None;
+    }
+    let world = node_world_transform(parent_transform, node);
+    let owner_tooltip = node_tooltip_text_ref(node).and_then(|text| {
+        clipped_node_bounds(node, world, clips).map(|bounds| TooltipTarget {
+            owner: node,
+            text,
+            bounds,
+        })
+    });
+    let inherited = owner_tooltip.or(inherited);
+    if node.mesh_key().is_some_and(|value| value == key) {
+        return Some(inherited);
+    }
+    let child_world = child_world_transform(world, node);
+    let child_clips = push_node_clip(clips, node, world);
+    node.children.iter().find_map(|child| {
+        find_tooltip_target_by_key_affine(child, key, child_world, &child_clips, inherited)
+    })
 }
 
 #[cfg(test)]
@@ -1148,6 +1528,53 @@ mod tests {
         assert_eq!(
             find_focusable_at(&root, 75.0, 30.0).as_deref(),
             Some("button")
+        );
+    }
+
+    #[test]
+    fn nested_rotation_uses_one_transform_for_hit_focus_and_clip_geometry() {
+        let mut root = WidgetNode::new("surface");
+        root.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 240.0,
+            height: 200.0,
+        };
+        let mut parent = WidgetNode::new("box");
+        parent.layout = LayoutRect {
+            x: 50.0,
+            y: 50.0,
+            width: 100.0,
+            height: 100.0,
+        };
+        parent.computed_style.transform.rotation = std::f32::consts::FRAC_PI_2;
+        parent.computed_style.overflow_x = mesh_core_elements::style::Overflow::Hidden;
+        parent.computed_style.overflow_y = mesh_core_elements::style::Overflow::Hidden;
+
+        let mut child = WidgetNode::new("button");
+        child.attributes.insert("_mesh_key".into(), "child".into());
+        child.layout = LayoutRect {
+            x: 80.0,
+            y: 80.0,
+            width: 20.0,
+            height: 20.0,
+        };
+        let parent_world = node_world_transform(root_transform(0.0, 0.0), &parent);
+        let child_parent = child_world_transform(parent_world, &parent);
+        let child_world = node_world_transform(child_parent, &child);
+        let point = child_world.transform_point(10.0, 10.0);
+        parent.children.push(child);
+        root.children.push(parent);
+
+        let hit = pointer_press_hit(&root, point.0, point.1);
+        assert_eq!(hit.target.map(|target| target.key), Some("child"));
+        assert_eq!(
+            find_focusable_at(&root, point.0, point.1).as_deref(),
+            Some("child")
+        );
+        assert_eq!(
+            find_node_path_at(&root, point.0, point.1),
+            Some(vec!["child".into()])
         );
     }
 

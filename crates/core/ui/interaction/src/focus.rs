@@ -11,12 +11,24 @@ struct FocusTraversalTarget {
 }
 
 pub fn find_focusable_at(node: &WidgetNode, x: f32, y: f32) -> Option<String> {
-    find_focusable_at_with_offset(node, x, y, 0.0, 0.0)
+    find_focusable_at_with_transform(
+        node,
+        x,
+        y,
+        root_transform(0.0, 0.0),
+        &AffineClipStack::default(),
+    )
 }
 
 pub fn collect_focus_traversal(node: &WidgetNode) -> Vec<String> {
     let mut targets = Vec::new();
-    collect_focus_traversal_with_offset(node, 0.0, 0.0, None, NodeEligibility::ROOT, &mut targets);
+    collect_focus_traversal_with_transform(
+        node,
+        root_transform(0.0, 0.0),
+        &AffineClipStack::default(),
+        NodeEligibility::ROOT,
+        &mut targets,
+    );
 
     targets.sort_by(|left, right| compare_focus_targets(left, right));
     targets.into_iter().map(|target| target.key).collect()
@@ -50,27 +62,31 @@ pub fn next_focus_target(
     traversal.get(next_index).cloned()
 }
 
-fn find_focusable_at_with_offset(
+fn find_focusable_at_with_transform(
     node: &WidgetNode,
     x: f32,
     y: f32,
-    offset_x: f32,
-    offset_y: f32,
+    parent_transform: AffineTransform,
+    clips: &AffineClipStack,
 ) -> Option<String> {
     if !node_allows(node, InteractionTarget::Focus) {
         return None;
     }
-    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
-    let inside_self = layout_contains_with_offset(node, x, y, offset_x, offset_y);
+    let world = node_world_transform(parent_transform, node);
+    if !clips.contains(x, y) {
+        return None;
+    }
+    let inside_self = node_contains_with_transform(node, world, x, y);
     if !inside_self && node_clips_children(node) {
         return None;
     }
 
-    let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
+    let child_transform = child_world_transform(world, node);
+    let child_clips = push_node_clip(clips, node, world);
 
     for child in node.children.iter().rev() {
         if let Some(found) =
-            find_focusable_at_with_offset(child, x, y, child_offset_x, child_offset_y)
+            find_focusable_at_with_transform(child, x, y, child_transform, &child_clips)
         {
             return Some(found);
         }
@@ -83,11 +99,10 @@ fn find_focusable_at_with_offset(
     None
 }
 
-fn collect_focus_traversal_with_offset(
+fn collect_focus_traversal_with_transform(
     node: &WidgetNode,
-    offset_x: f32,
-    offset_y: f32,
-    clip: Option<ContentBounds>,
+    parent_transform: AffineTransform,
+    clips: &AffineClipStack,
     parent_policy: NodeEligibility,
     targets: &mut Vec<FocusTraversalTarget>,
 ) {
@@ -96,13 +111,16 @@ fn collect_focus_traversal_with_offset(
         return;
     }
 
-    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
-    let rect = node_rect_with_offset(node, offset_x, offset_y);
-    let visible_rect = match clip {
-        Some(clip_bounds) => intersect_bounds(rect, clip_bounds),
-        None => Some(rect),
+    let world = node_world_transform(parent_transform, node);
+    let rect = node_rect_with_transform(node, world);
+    let visible_rect = if clips.is_empty() {
+        Some(rect)
+    } else {
+        clips
+            .bounds()
+            .and_then(|clip| intersect_bounds(rect, content_bounds_from_rect(clip)))
     };
-    if clip.is_some() && visible_rect.is_none() {
+    if visible_rect.is_none() {
         return;
     }
 
@@ -120,26 +138,22 @@ fn collect_focus_traversal_with_offset(
         });
     }
 
-    let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
-    let child_clip = if node_clips_children(node) {
-        match clip {
-            Some(clip_bounds) => intersect_bounds(rect, clip_bounds),
-            None => Some(rect),
-        }
-    } else {
-        clip
-    };
+    let child_transform = child_world_transform(world, node);
+    let child_clips = push_node_clip(clips, node, world);
 
     for child in &node.children {
-        collect_focus_traversal_with_offset(
+        collect_focus_traversal_with_transform(
             child,
-            child_offset_x,
-            child_offset_y,
-            child_clip,
+            child_transform,
+            &child_clips,
             policy,
             targets,
         );
     }
+}
+
+fn content_bounds_from_rect(rect: mesh_core_elements::LayoutRect) -> ContentBounds {
+    (rect.x, rect.y, rect.x + rect.width, rect.y + rect.height)
 }
 
 fn compare_focus_targets(

@@ -1,6 +1,7 @@
 use mesh_core_elements::{
-    InteractionTarget, NodeEligibility, WidgetNode, node_eligibility, transformed_layout_at,
-    transformed_offset,
+    AffineClipStack, AffineTransform, InteractionTarget, NodeEligibility, WidgetNode,
+    child_transform, node_clip, node_eligibility, node_layout_bounds, node_transform,
+    root_transform, transformed_layout_at, transformed_offset,
 };
 
 mod focus;
@@ -56,6 +57,7 @@ pub(crate) fn intersect_bounds(a: ContentBounds, b: ContentBounds) -> Option<Con
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn node_rect_with_offset(
     node: &WidgetNode,
     offset_x: f32,
@@ -68,6 +70,56 @@ pub(crate) fn node_rect_with_offset(
         rect.x + rect.width.max(0.0),
         rect.y + rect.height.max(0.0),
     )
+}
+
+pub(crate) fn node_rect_with_transform(
+    node: &WidgetNode,
+    transform: AffineTransform,
+) -> ContentBounds {
+    let rect = node_layout_bounds(node, transform);
+    (
+        rect.x,
+        rect.y,
+        rect.x + rect.width.max(0.0),
+        rect.y + rect.height.max(0.0),
+    )
+}
+
+pub(crate) fn node_contains_with_transform(
+    node: &WidgetNode,
+    transform: AffineTransform,
+    x: f32,
+    y: f32,
+) -> bool {
+    let Some(inverse) = transform.inverse() else {
+        return false;
+    };
+    let (local_x, local_y) = inverse.transform_point(x, y);
+    local_x >= 0.0 && local_x < node.layout.width && local_y >= 0.0 && local_y < node.layout.height
+}
+
+pub(crate) fn node_world_transform(parent: AffineTransform, node: &WidgetNode) -> AffineTransform {
+    node_transform(parent, node)
+}
+
+pub(crate) fn child_world_transform(
+    node_world: AffineTransform,
+    node: &WidgetNode,
+) -> AffineTransform {
+    let scroll = node_scroll_offset(node);
+    child_transform(node_world, node, scroll.x, scroll.y)
+}
+
+pub(crate) fn push_node_clip(
+    clips: &AffineClipStack,
+    node: &WidgetNode,
+    node_world: AffineTransform,
+) -> AffineClipStack {
+    if node_clips_children(node) {
+        clips.push(node_clip(node, node_world))
+    } else {
+        clips.clone()
+    }
 }
 
 fn node_scroll_offset(node: &WidgetNode) -> ScrollOffsetState {
@@ -83,6 +135,7 @@ pub(crate) fn node_clips_children(node: &WidgetNode) -> bool {
         || node.computed_style.overflow_y.clips_contents()
 }
 
+#[allow(dead_code)]
 pub(crate) fn child_offsets_with_scroll(
     node: &WidgetNode,
     offset_x: f32,
@@ -92,12 +145,7 @@ pub(crate) fn child_offsets_with_scroll(
     (offset_x - scroll.x, offset_y - scroll.y)
 }
 
-/// Translate the incoming offset by this node's CSS `transform.translate_*`,
-/// mirroring what the painter does. Hit-testing must apply the same shift so
-/// pointer coordinates resolve to the visually displaced bounds, not the
-/// untransformed layout box. The shared geometry helper also applies the
-/// renderer's current axis-aligned scale; rotation and clipping remain a
-/// separate contract.
+#[allow(dead_code)]
 pub(crate) fn apply_transform_offset(
     node: &WidgetNode,
     offset_x: f32,
@@ -106,6 +154,7 @@ pub(crate) fn apply_transform_offset(
     transformed_offset(node, offset_x, offset_y)
 }
 
+#[allow(dead_code)]
 pub(crate) fn layout_contains_with_offset(
     node: &WidgetNode,
     x: f32,

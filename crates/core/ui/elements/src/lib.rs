@@ -49,7 +49,9 @@ pub use frame::{
     SemanticDiff, SemanticField, StableNodeIdentity,
 };
 pub use interaction_contract::{
-    InteractionTarget, NodeEligibility, child_eligibility, node_eligibility, transformed_layout_at,
+    AffineClip, AffineClipStack, AffineTransform, InteractionTarget, NodeEligibility,
+    child_eligibility, child_transform, local_transform, node_clip, node_eligibility,
+    node_layout_bounds, node_transform, root_transform, transformed_layout_at,
     transformed_layout_for, transformed_offset,
 };
 pub use layout::{

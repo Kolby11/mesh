@@ -2,11 +2,10 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 
 use mesh_core_elements::BoxShadow;
-use mesh_core_elements::WidgetNode;
 use mesh_core_elements::style::{BackgroundPaint, Color};
+use mesh_core_elements::{AffineTransform, WidgetNode, node_layout_bounds};
 
 use super::build::*;
-use super::paint_node::*;
 use super::types::*;
 
 pub(super) fn compute_batch_metrics(
@@ -106,10 +105,23 @@ pub(super) fn damage_rect_for_node_at(
     offset_x: f32,
     offset_y: f32,
 ) -> Option<DamageRect> {
+    damage_rect_for_node_with_transform(
+        node,
+        mesh_core_elements::node_transform(
+            mesh_core_elements::root_transform(offset_x, offset_y),
+            node,
+        ),
+    )
+}
+
+pub(super) fn damage_rect_for_node_with_transform(
+    node: &WidgetNode,
+    world_transform: AffineTransform,
+) -> Option<DamageRect> {
     if node.layout.width <= 0.0 || node.layout.height <= 0.0 {
         return None;
     }
-    let layout = transformed_layout_at(node, offset_x, offset_y);
+    let layout = node_layout_bounds(node, world_transform);
     let left = layout.x;
     let top = layout.y;
     let mut left = left;

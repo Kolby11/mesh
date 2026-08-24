@@ -8,6 +8,201 @@ use crate::layout::LayoutRect;
 use crate::style::{Display, Transform2D, Visibility};
 use crate::tree::WidgetNode;
 
+/// A two-dimensional affine transform in surface coordinates.
+///
+/// Points are represented as column vectors: `x' = m11*x + m21*y + tx` and
+/// `y' = m12*x + m22*y + ty`. Keeping the matrix here lets every consumer use
+/// the same composition and inverse instead of approximating transforms with
+/// independent offsets.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AffineTransform {
+    pub m11: f32,
+    pub m12: f32,
+    pub m21: f32,
+    pub m22: f32,
+    pub tx: f32,
+    pub ty: f32,
+}
+
+impl AffineTransform {
+    pub const IDENTITY: Self = Self {
+        m11: 1.0,
+        m12: 0.0,
+        m21: 0.0,
+        m22: 1.0,
+        tx: 0.0,
+        ty: 0.0,
+    };
+
+    pub const fn translation(tx: f32, ty: f32) -> Self {
+        Self {
+            tx,
+            ty,
+            ..Self::IDENTITY
+        }
+    }
+
+    pub const fn scale(sx: f32, sy: f32) -> Self {
+        Self {
+            m11: sx,
+            m22: sy,
+            ..Self::IDENTITY
+        }
+    }
+
+    pub fn rotation(radians: f32) -> Self {
+        let (sin, cos) = radians.sin_cos();
+        Self {
+            m11: cos,
+            m12: sin,
+            m21: -sin,
+            m22: cos,
+            ..Self::IDENTITY
+        }
+    }
+
+    /// Compose `local` after this transform.
+    pub fn then(self, local: Self) -> Self {
+        Self {
+            m11: self.m11 * local.m11 + self.m21 * local.m12,
+            m12: self.m12 * local.m11 + self.m22 * local.m12,
+            m21: self.m11 * local.m21 + self.m21 * local.m22,
+            m22: self.m12 * local.m21 + self.m22 * local.m22,
+            tx: self.m11 * local.tx + self.m21 * local.ty + self.tx,
+            ty: self.m12 * local.tx + self.m22 * local.ty + self.ty,
+        }
+    }
+
+    pub fn transform_point(self, x: f32, y: f32) -> (f32, f32) {
+        (
+            self.m11 * x + self.m21 * y + self.tx,
+            self.m12 * x + self.m22 * y + self.ty,
+        )
+    }
+
+    pub fn inverse(self) -> Option<Self> {
+        let determinant = self.m11 * self.m22 - self.m21 * self.m12;
+        if !determinant.is_finite() || determinant.abs() <= f32::EPSILON {
+            return None;
+        }
+        let inverse = 1.0 / determinant;
+        Some(Self {
+            m11: self.m22 * inverse,
+            m12: -self.m12 * inverse,
+            m21: -self.m21 * inverse,
+            m22: self.m11 * inverse,
+            tx: (self.m21 * self.ty - self.m22 * self.tx) * inverse,
+            ty: (self.m12 * self.tx - self.m11 * self.ty) * inverse,
+        })
+    }
+
+    /// Transform an axis-aligned local rectangle and return its surface AABB.
+    pub fn transform_rect(self, rect: LayoutRect) -> LayoutRect {
+        let points = [
+            self.transform_point(rect.x, rect.y),
+            self.transform_point(rect.x + rect.width, rect.y),
+            self.transform_point(rect.x, rect.y + rect.height),
+            self.transform_point(rect.x + rect.width, rect.y + rect.height),
+        ];
+        let (mut min_x, mut max_x) = (points[0].0, points[0].0);
+        let (mut min_y, mut max_y) = (points[0].1, points[0].1);
+        for (x, y) in points.into_iter().skip(1) {
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+            min_y = min_y.min(y);
+            max_y = max_y.max(y);
+        }
+        LayoutRect {
+            x: min_x,
+            y: min_y,
+            width: (max_x - min_x).max(0.0),
+            height: (max_y - min_y).max(0.0),
+        }
+    }
+}
+
+impl Default for AffineTransform {
+    fn default() -> Self {
+        Self::IDENTITY
+    }
+}
+
+/// One transformed overflow clip. Bounds are used by paint culling while
+/// point membership uses the inverse matrix, so rotated clips do not become
+/// larger hit regions merely because their AABB is larger.
+#[derive(Debug, Clone, Copy)]
+pub struct AffineClip {
+    pub transform: AffineTransform,
+    pub rect: LayoutRect,
+}
+
+impl AffineClip {
+    pub fn bounds(self) -> LayoutRect {
+        self.transform.transform_rect(self.rect)
+    }
+
+    pub fn contains(self, x: f32, y: f32) -> bool {
+        self.transform
+            .inverse()
+            .map(|inverse| {
+                let (local_x, local_y) = inverse.transform_point(x, y);
+                local_x >= self.rect.x
+                    && local_x < self.rect.x + self.rect.width
+                    && local_y >= self.rect.y
+                    && local_y < self.rect.y + self.rect.height
+            })
+            .unwrap_or(false)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AffineClipStack {
+    clips: Vec<AffineClip>,
+}
+
+impl AffineClipStack {
+    pub fn is_empty(&self) -> bool {
+        self.clips.is_empty()
+    }
+
+    pub fn push(&self, clip: AffineClip) -> Self {
+        let mut next = self.clone();
+        next.clips.push(clip);
+        next
+    }
+
+    pub fn contains(&self, x: f32, y: f32) -> bool {
+        self.clips.iter().all(|clip| clip.contains(x, y))
+    }
+
+    pub fn bounds(&self) -> Option<LayoutRect> {
+        let mut bounds = None;
+        for clip in &self.clips {
+            bounds = intersect_layout_rect(bounds, clip.bounds());
+            if bounds.is_none() {
+                return None;
+            }
+        }
+        bounds
+    }
+}
+
+fn intersect_layout_rect(current: Option<LayoutRect>, next: LayoutRect) -> Option<LayoutRect> {
+    let Some(current) = current else {
+        return Some(next);
+    };
+    let left = current.x.max(next.x);
+    let top = current.y.max(next.y);
+    let right = (current.x + current.width).min(next.x + next.width);
+    let bottom = (current.y + current.height).min(next.y + next.height);
+    (right > left && bottom > top).then_some(LayoutRect {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+    })
+}
+
 /// A consumer-specific target policy derived from one node state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InteractionTarget {
@@ -151,15 +346,86 @@ pub fn transformed_offset(node: &WidgetNode, offset_x: f32, offset_y: f32) -> (f
     )
 }
 
-/// Return the node's painted, transformed layout box in surface coordinates.
-///
-/// MESH's current retained paint path represents scale as an axis-aligned box
-/// around the layout center. Rotation and clipping remain separate renderer
-/// contracts; keeping this operation shared still ensures the currently
-/// supported translation/scale behavior is identical for paint and queries.
-pub fn transformed_layout_at(node: &WidgetNode, offset_x: f32, offset_y: f32) -> LayoutRect {
+/// Build the transform from a node's local border-box coordinates into its
+/// parent's coordinate space. Translation is applied in the parent space;
+/// scale and rotation use the resolved CSS transform origin in local space.
+pub fn local_transform(node: &WidgetNode) -> AffineTransform {
+    AffineTransform::translation(node.layout.x, node.layout.y).then(node_transform_effect(node))
+}
+
+fn node_transform_effect(node: &WidgetNode) -> AffineTransform {
     let transform = node.computed_style.transform;
-    transformed_layout_for(node.layout, transform, offset_x, offset_y)
+    let origin = node.computed_style.transform_origin;
+    let origin_x = origin.x.resolve(node.layout.width);
+    let origin_y = origin.y.resolve(node.layout.height);
+    let geometric = AffineTransform::translation(origin_x, origin_y)
+        .then(AffineTransform::rotation(transform.rotation))
+        .then(AffineTransform::scale(
+            transform.scale_x.max(0.0),
+            transform.scale_y.max(0.0),
+        ))
+        .then(AffineTransform::translation(-origin_x, -origin_y));
+    AffineTransform::translation(transform.translate_x, transform.translate_y).then(geometric)
+}
+
+/// Compose a node's local transform into a cumulative surface transform.
+pub fn node_transform(parent: AffineTransform, node: &WidgetNode) -> AffineTransform {
+    parent.then(local_transform(node))
+}
+
+/// Transform used for a tree root before visiting its local layout box.
+pub const fn root_transform(offset_x: f32, offset_y: f32) -> AffineTransform {
+    AffineTransform::translation(offset_x, offset_y)
+}
+
+/// Transform child layout coordinates through a scroll container's content
+/// space. The scroll offset is expressed in the container's local space.
+pub fn child_transform(
+    node_world: AffineTransform,
+    node: &WidgetNode,
+    scroll_x: f32,
+    scroll_y: f32,
+) -> AffineTransform {
+    let parent = local_transform(node)
+        .inverse()
+        .map(|inverse| node_world.then(inverse))
+        .unwrap_or_default();
+    parent
+        .then(AffineTransform::translation(node.layout.x, node.layout.y))
+        .then(node_transform_effect(node))
+        .then(AffineTransform::translation(-node.layout.x, -node.layout.y))
+        .then(AffineTransform::translation(-scroll_x, -scroll_y))
+}
+
+/// The transformed border-box AABB for a node in surface coordinates.
+pub fn node_layout_bounds(node: &WidgetNode, transform: AffineTransform) -> LayoutRect {
+    transform.transform_rect(LayoutRect {
+        x: 0.0,
+        y: 0.0,
+        width: node.layout.width.max(0.0),
+        height: node.layout.height.max(0.0),
+    })
+}
+
+/// A clip matching a node's overflow content box in surface coordinates.
+pub fn node_clip(node: &WidgetNode, transform: AffineTransform) -> AffineClip {
+    AffineClip {
+        transform,
+        rect: LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: node.layout.width.max(0.0),
+            height: node.layout.height.max(0.0),
+        },
+    }
+}
+
+/// Return the node's transformed border-box AABB in surface coordinates.
+pub fn transformed_layout_at(node: &WidgetNode, offset_x: f32, offset_y: f32) -> LayoutRect {
+    node_layout_bounds(
+        node,
+        node_transform(root_transform(offset_x, offset_y), node),
+    )
 }
 
 pub fn transformed_layout_for(
@@ -168,18 +434,28 @@ pub fn transformed_layout_for(
     offset_x: f32,
     offset_y: f32,
 ) -> LayoutRect {
-    let scale_x = transform.scale_x.max(0.0);
-    let scale_y = transform.scale_y.max(0.0);
-    let base_x = layout.x + offset_x;
-    let base_y = layout.y + offset_y;
-    let width = layout.width * scale_x;
-    let height = layout.height * scale_y;
-    LayoutRect {
-        x: base_x - (width - layout.width) * 0.5,
-        y: base_y - (height - layout.height) * 0.5,
-        width,
-        height,
-    }
+    let style_transform = transform;
+    let origin_x = layout.width * 0.5;
+    let origin_y = layout.height * 0.5;
+    let geometric = AffineTransform::translation(origin_x, origin_y)
+        .then(AffineTransform::rotation(style_transform.rotation))
+        .then(AffineTransform::scale(
+            style_transform.scale_x.max(0.0),
+            style_transform.scale_y.max(0.0),
+        ))
+        .then(AffineTransform::translation(-origin_x, -origin_y));
+    let transform = AffineTransform::translation(offset_x + layout.x, offset_y + layout.y)
+        .then(AffineTransform::translation(
+            style_transform.translate_x,
+            style_transform.translate_y,
+        ))
+        .then(geometric);
+    transform.transform_rect(LayoutRect {
+        x: 0.0,
+        y: 0.0,
+        width: layout.width.max(0.0),
+        height: layout.height.max(0.0),
+    })
 }
 
 fn locally_visual_visible(node: &WidgetNode) -> bool {
@@ -281,11 +557,52 @@ mod tests {
         node.computed_style.transform.scale_y = 3.0;
         let translated = transformed_offset(&node, 7.0, 11.0);
         assert_eq!(translated, (12.0, 11.0));
-        let rect = transformed_layout_at(&node, translated.0, translated.1);
+        let rect = transformed_layout_at(&node, 7.0, 11.0);
         assert!((rect.x - 12.0).abs() < f32::EPSILON);
         assert!((rect.y - 21.0).abs() < f32::EPSILON);
         assert!((rect.width - 40.0).abs() < f32::EPSILON);
         assert!((rect.height - 30.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn affine_transform_uses_origin_and_inverse_for_rotated_geometry() {
+        let mut node = WidgetNode::new("box");
+        node.layout = LayoutRect {
+            x: 10.0,
+            y: 20.0,
+            width: 20.0,
+            height: 10.0,
+        };
+        node.computed_style.transform.rotation = std::f32::consts::FRAC_PI_2;
+        let world = node_transform(root_transform(0.0, 0.0), &node);
+        let bounds = node_layout_bounds(&node, world);
+        assert!((bounds.x - 15.0).abs() < 0.001);
+        assert!((bounds.y - 15.0).abs() < 0.001);
+        assert!((bounds.width - 10.0).abs() < 0.001);
+        assert!((bounds.height - 20.0).abs() < 0.001);
+
+        let (center_x, center_y) = world.transform_point(10.0, 5.0);
+        let (local_x, local_y) = world.inverse().unwrap().transform_point(center_x, center_y);
+        assert!((local_x - 10.0).abs() < 0.001);
+        assert!((local_y - 5.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn affine_clip_contains_rotated_shape_without_using_its_aabb() {
+        let transform = AffineTransform::translation(50.0, 50.0)
+            .then(AffineTransform::rotation(std::f32::consts::FRAC_PI_4));
+        let clip = AffineClip {
+            transform,
+            rect: LayoutRect {
+                x: 0.0,
+                y: 0.0,
+                width: 20.0,
+                height: 20.0,
+            },
+        };
+        assert!(clip.contains(50.0, 50.0));
+        assert!(!clip.contains(50.0 - 14.0, 50.0 + 14.0));
+        assert!(clip.bounds().width > 20.0);
     }
 
     #[test]

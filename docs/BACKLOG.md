@@ -69,7 +69,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/09-interaction-and-motion/improvements.md)
 
-- [ ] Use one affine transform/clip contract for hit testing, paint bounds, scrolling, and focus geometry.
 - [ ] Prevent disabled and inert nodes, including descendants and captured targets, from receiving activation.
 - [ ] Preserve keyframe progress across pause/resume and iteration-boundary changes.
 - [ ] Add a `MotionPolicy` snapshot for reduced motion across transitions, keyframes, scrolling, inertia, tooltips, and surfaces.

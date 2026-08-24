@@ -3,7 +3,8 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use mesh_core_elements::style::{
-    BackgroundPaint, Color, ComputedStyle, Display, Edges, Transform2D,
+    BackgroundPaint, Color, ComputedStyle, Display, Edges, Transform2D, TransformOrigin,
+    TransformOriginValue,
 };
 use mesh_core_elements::{AccessibilityRole, NodeId, WidgetNode, live_accessibility_focus};
 
@@ -358,7 +359,7 @@ struct RenderObjectPaintData {
     fingerprint: RenderObjectFingerprint,
 }
 
-type TransformSlot = (u32, u32, u32, u32, u32);
+type TransformSlot = (u32, u32, u32, u32, u32, u32, u32, u32, u32);
 type GeometrySlot = (u32, u32, u32, u32, u32, u32, u32, u32, u32, u32);
 type ClipSlot = (bool, u32, u32, u32, u32);
 type AccessibilitySlot = (AccessibilityRoleSlot, Option<Arc<str>>, bool, bool);
@@ -510,7 +511,10 @@ fn render_object_fingerprint(
 ) -> RenderObjectFingerprint {
     let geometry = geometry_slot(node);
     RenderObjectFingerprint {
-        transform: transform_slot(node.computed_style.transform),
+        transform: transform_slot(
+            node.computed_style.transform,
+            node.computed_style.transform_origin,
+        ),
         clip: clip_slot(node, geometry),
         opacity: node.computed_style.opacity.to_bits(),
         geometry,
@@ -545,14 +549,27 @@ fn refill_child_id_slot(node: &WidgetNode, mut child_ids: Vec<NodeId>) -> Vec<No
     child_ids
 }
 
-fn transform_slot(transform: Transform2D) -> TransformSlot {
+fn transform_slot(transform: Transform2D, origin: TransformOrigin) -> TransformSlot {
+    let (origin_x_kind, origin_x_value) = origin_value_slot(origin.x);
+    let (origin_y_kind, origin_y_value) = origin_value_slot(origin.y);
     (
         transform.translate_x.to_bits(),
         transform.translate_y.to_bits(),
         transform.scale_x.to_bits(),
         transform.scale_y.to_bits(),
         transform.rotation.to_bits(),
+        origin_x_kind,
+        origin_x_value,
+        origin_y_kind,
+        origin_y_value,
     )
+}
+
+fn origin_value_slot(value: TransformOriginValue) -> (u32, u32) {
+    match value {
+        TransformOriginValue::Percent(value) => (0, value.to_bits()),
+        TransformOriginValue::Px(value) => (1, value.to_bits()),
+    }
 }
 
 fn clip_slot(node: &WidgetNode, geometry: GeometrySlot) -> ClipSlot {

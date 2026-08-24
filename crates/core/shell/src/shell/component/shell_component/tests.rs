@@ -468,8 +468,8 @@ fn animation_damage_includes_transform_visual_bounds() {
     assert_eq!(
         damage,
         Some(DamageRect {
-            x: 25,
-            y: 15,
+            x: 15,
+            y: 10,
             width: 40,
             height: 20,
         })

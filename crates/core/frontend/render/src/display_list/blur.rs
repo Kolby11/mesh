@@ -1,8 +1,10 @@
 use mesh_core_elements::style::BackgroundPaint;
-use mesh_core_elements::{LayoutRect, WidgetNode};
+use mesh_core_elements::{
+    AffineTransform, LayoutRect, WidgetNode, child_transform, node_layout_bounds, node_transform,
+    root_transform,
+};
 
 use super::build::*;
-use super::paint_node::*;
 use super::signature::*;
 use super::types::*;
 use crate::RenderObjectDirtySummary;
@@ -30,16 +32,30 @@ pub(super) fn collect_backdrop_blur_regions(
     surface: DamageRect,
     regions: &mut Vec<DamageRect>,
 ) {
+    collect_backdrop_blur_regions_with_transform(
+        node,
+        root_transform(offset_x, offset_y),
+        surface,
+        regions,
+    );
+}
+
+fn collect_backdrop_blur_regions_with_transform(
+    node: &WidgetNode,
+    parent_transform: AffineTransform,
+    surface: DamageRect,
+    regions: &mut Vec<DamageRect>,
+) {
     if node_is_explicitly_hidden(node) {
         return;
     }
-    let (offset_x, offset_y) = mesh_core_elements::transformed_offset(node, offset_x, offset_y);
+    let world_transform = node_transform(parent_transform, node);
 
     if node.computed_style.backdrop_filter.blur_radius > 0.0
         && node.layout.width > 0.0
         && node.layout.height > 0.0
     {
-        let layout = transformed_layout_at(node, offset_x, offset_y);
+        let layout = node_layout_bounds(node, world_transform);
         if let Some(bounds) = blur_bounds_from_layout(layout) {
             for rect in
                 rounded_region_bands(bounds, node.computed_style.border_radius.top_left, surface)
@@ -52,10 +68,9 @@ pub(super) fn collect_backdrop_blur_regions(
     }
 
     let scroll = node.resolved_scroll_metrics();
-    let child_offset_x = offset_x - scroll.x;
-    let child_offset_y = offset_y - scroll.y;
+    let child_transform = child_transform(world_transform, node, scroll.x, scroll.y);
     for child in &node.children {
-        collect_backdrop_blur_regions(child, child_offset_x, child_offset_y, surface, regions);
+        collect_backdrop_blur_regions_with_transform(child, child_transform, surface, regions);
     }
 }
 

@@ -1,7 +1,8 @@
 /// UI event types and dispatch.
 use crate::element::element_contract_for_tag;
 use crate::interaction_contract::{
-    InteractionTarget, NodeEligibility, node_eligibility, transformed_layout_at, transformed_offset,
+    AffineClipStack, AffineTransform, InteractionTarget, NodeEligibility, child_transform,
+    node_clip, node_eligibility, node_transform, root_transform,
 };
 use crate::tree::{ElementState, NodeId, WidgetNode};
 
@@ -537,31 +538,51 @@ fn node_is_focusable_target_with_ancestors(
 }
 
 fn focusable_at_point(root: &WidgetNode, x: f32, y: f32) -> Option<NodeId> {
-    focusable_at_point_with_offset(root, x, y, 0.0, 0.0, NodeEligibility::ROOT)
+    focusable_at_point_with_transform(
+        root,
+        x,
+        y,
+        root_transform(0.0, 0.0),
+        &AffineClipStack::default(),
+        NodeEligibility::ROOT,
+    )
 }
 
-fn focusable_at_point_with_offset(
+fn focusable_at_point_with_transform(
     node: &WidgetNode,
     x: f32,
     y: f32,
-    offset_x: f32,
-    offset_y: f32,
+    parent_transform: AffineTransform,
+    clips: &AffineClipStack,
     parent_policy: NodeEligibility,
 ) -> Option<NodeId> {
     let policy = parent_policy.child(node);
     if !policy.allows(InteractionTarget::Focus) {
         return None;
     }
-    let (offset_x, offset_y) = transformed_offset(node, offset_x, offset_y);
-    let inside_self = layout_contains_with_offset(node, x, y, offset_x, offset_y);
+    let world = node_transform(parent_transform, node);
+    if !clips.contains(x, y) {
+        return None;
+    }
+    let inside_self = contains_point(node, world, x, y);
     if !inside_self && node_clips_children(node) {
         return None;
     }
 
-    let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
+    let child_world = child_transform(
+        world,
+        node,
+        node.resolved_scroll_metrics().x,
+        node.resolved_scroll_metrics().y,
+    );
+    let child_clips = if node_clips_children(node) {
+        clips.push(node_clip(node, world))
+    } else {
+        clips.clone()
+    };
     for child in node.children.iter().rev() {
         if let Some(id) =
-            focusable_at_point_with_offset(child, x, y, child_offset_x, child_offset_y, policy)
+            focusable_at_point_with_transform(child, x, y, child_world, &child_clips, policy)
         {
             return Some(id);
         }
@@ -570,33 +591,54 @@ fn focusable_at_point_with_offset(
 }
 
 fn node_contains_point(root: &WidgetNode, target: NodeId, x: f32, y: f32) -> bool {
-    node_contains_point_with_offset(root, target, x, y, 0.0, 0.0, NodeEligibility::ROOT)
+    node_contains_point_with_transform(
+        root,
+        target,
+        x,
+        y,
+        root_transform(0.0, 0.0),
+        &AffineClipStack::default(),
+        NodeEligibility::ROOT,
+    )
 }
 
-fn node_contains_point_with_offset(
+fn node_contains_point_with_transform(
     node: &WidgetNode,
     target: NodeId,
     x: f32,
     y: f32,
-    offset_x: f32,
-    offset_y: f32,
+    parent_transform: AffineTransform,
+    clips: &AffineClipStack,
     parent_policy: NodeEligibility,
 ) -> bool {
     let policy = parent_policy.child(node);
     if !policy.allows(InteractionTarget::Pointer) {
         return false;
     }
-    let (offset_x, offset_y) = transformed_offset(node, offset_x, offset_y);
-    let inside = layout_contains_with_offset(node, x, y, offset_x, offset_y);
+    let world = node_transform(parent_transform, node);
+    if !clips.contains(x, y) {
+        return false;
+    }
+    let inside = contains_point(node, world, x, y);
     if node.id == target {
         return inside;
     }
     if !inside && node_clips_children(node) {
         return false;
     }
-    let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
+    let child_world = child_transform(
+        world,
+        node,
+        node.resolved_scroll_metrics().x,
+        node.resolved_scroll_metrics().y,
+    );
+    let child_clips = if node_clips_children(node) {
+        clips.push(node_clip(node, world))
+    } else {
+        clips.clone()
+    };
     node.children.iter().any(|child| {
-        node_contains_point_with_offset(child, target, x, y, child_offset_x, child_offset_y, policy)
+        node_contains_point_with_transform(child, target, x, y, child_world, &child_clips, policy)
     })
 }
 
@@ -610,34 +652,54 @@ fn hit_test_node(
     if !policy.allows(InteractionTarget::Paint) {
         return None;
     }
-    hit_test_node_with_offset(node, x, y, 0.0, 0.0, policy)
+    hit_test_node_with_transform(
+        node,
+        x,
+        y,
+        root_transform(0.0, 0.0),
+        &AffineClipStack::default(),
+        policy,
+    )
 }
 
-fn hit_test_node_with_offset(
+fn hit_test_node_with_transform(
     node: &WidgetNode,
     x: f32,
     y: f32,
-    offset_x: f32,
-    offset_y: f32,
+    parent_transform: AffineTransform,
+    clips: &AffineClipStack,
     policy: NodeEligibility,
 ) -> Option<NodeId> {
     if !policy.allows(InteractionTarget::Paint) {
         return None;
     }
-    let (offset_x, offset_y) = transformed_offset(node, offset_x, offset_y);
-    let inside_self = layout_contains_with_offset(node, x, y, offset_x, offset_y);
+    let world = node_transform(parent_transform, node);
+    if !clips.contains(x, y) {
+        return None;
+    }
+    let inside_self = contains_point(node, world, x, y);
     if !inside_self && node_clips_children(node) {
         return None;
     }
 
-    let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
+    let child_world = child_transform(
+        world,
+        node,
+        node.resolved_scroll_metrics().x,
+        node.resolved_scroll_metrics().y,
+    );
+    let child_clips = if node_clips_children(node) {
+        clips.push(node_clip(node, world))
+    } else {
+        clips.clone()
+    };
     for child in node.children.iter().rev() {
-        if let Some(id) = hit_test_node_with_offset(
+        if let Some(id) = hit_test_node_with_transform(
             child,
             x,
             y,
-            child_offset_x,
-            child_offset_y,
+            child_world,
+            &child_clips,
             policy.child(child),
         ) {
             return Some(id);
@@ -651,20 +713,12 @@ fn hit_test_node_with_offset(
     }
 }
 
-fn layout_contains_with_offset(
-    node: &WidgetNode,
-    x: f32,
-    y: f32,
-    offset_x: f32,
-    offset_y: f32,
-) -> bool {
-    let rect = transformed_layout_at(node, offset_x, offset_y);
-    x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height
-}
-
-fn child_offsets_with_scroll(node: &WidgetNode, offset_x: f32, offset_y: f32) -> (f32, f32) {
-    let scroll = node.resolved_scroll_metrics();
-    (offset_x - scroll.x, offset_y - scroll.y)
+fn contains_point(node: &WidgetNode, transform: AffineTransform, x: f32, y: f32) -> bool {
+    let Some(inverse) = transform.inverse() else {
+        return false;
+    };
+    let (local_x, local_y) = inverse.transform_point(x, y);
+    local_x >= 0.0 && local_x < node.layout.width && local_y >= 0.0 && local_y < node.layout.height
 }
 
 fn node_clips_children(node: &WidgetNode) -> bool {

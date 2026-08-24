@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use mesh_core_elements::style::Position;
 use mesh_core_elements::{
-    InteractionTarget, NodeId, WidgetNode, node_eligibility, transformed_offset,
+    AffineTransform, InteractionTarget, NodeId, WidgetNode, child_transform, node_eligibility,
+    node_transform, root_transform,
 };
 
 use super::paint_node::*;
@@ -154,13 +155,29 @@ pub(super) fn collect_display_entries(
     selected_node_ids: Option<&HashSet<NodeId>>,
     next: &mut HashMap<DisplayListKey, DisplayListEntry>,
 ) {
+    collect_display_entries_with_transform(
+        node,
+        root_transform(offset_x, offset_y),
+        ordered_entries,
+        selected_node_ids,
+        next,
+    );
+}
+
+fn collect_display_entries_with_transform(
+    node: &WidgetNode,
+    parent_transform: AffineTransform,
+    mut ordered_entries: Option<&mut Vec<(DisplayListKey, DisplayListEntry)>>,
+    selected_node_ids: Option<&HashSet<NodeId>>,
+    next: &mut HashMap<DisplayListKey, DisplayListEntry>,
+) {
     if node_is_explicitly_hidden(node) {
         return;
     }
 
-    let (offset_x, offset_y) = transformed_offset(node, offset_x, offset_y);
+    let world_transform = node_transform(parent_transform, node);
 
-    if let Some(bounds) = damage_rect_for_node_at(node, offset_x, offset_y) {
+    if let Some(bounds) = damage_rect_for_node_with_transform(node, world_transform) {
         let selected = selected_node_ids.is_none_or(|node_ids| node_ids.contains(&node.id));
         for_each_primitive_slot(node, |slot| {
             // Debug batch metrics still need the full ordered stream. Release
@@ -189,16 +206,12 @@ pub(super) fn collect_display_entries(
     }
 
     let scroll = node.resolved_scroll_metrics();
-    let scroll_x = scroll.x;
-    let scroll_y = scroll.y;
-    let child_offset_x = offset_x - scroll_x;
-    let child_offset_y = offset_y - scroll_y;
+    let child_transform = child_transform(world_transform, node, scroll.x, scroll.y);
 
     for child in &node.children {
-        collect_display_entries(
+        collect_display_entries_with_transform(
             child,
-            child_offset_x,
-            child_offset_y,
+            child_transform,
             ordered_entries.as_deref_mut(),
             selected_node_ids,
             next,
@@ -282,6 +295,35 @@ pub(super) fn build_paint_subtree(
     next_subtrees: &mut HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     metrics: &mut LocalReuseMetrics,
 ) -> Arc<RetainedPaintSubtree> {
+    build_paint_subtree_with_transform(
+        node,
+        root_transform(offset_x, offset_y),
+        clip,
+        viewport_clip,
+        force_rebuild,
+        allow_clean_descendant_reuse,
+        dirty_node_ids,
+        dirty_ancestors,
+        previous_subtrees,
+        next_subtrees,
+        metrics,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_paint_subtree_with_transform(
+    node: &WidgetNode,
+    parent_transform: AffineTransform,
+    clip: DisplayListClip,
+    viewport_clip: DisplayListClip,
+    force_rebuild: bool,
+    allow_clean_descendant_reuse: bool,
+    dirty_node_ids: &HashSet<NodeId>,
+    dirty_ancestors: &HashSet<NodeId>,
+    previous_subtrees: &HashMap<NodeId, Arc<RetainedPaintSubtree>>,
+    next_subtrees: &mut HashMap<NodeId, Arc<RetainedPaintSubtree>>,
+    metrics: &mut LocalReuseMetrics,
+) -> Arc<RetainedPaintSubtree> {
     let node_is_dirty = dirty_node_ids.contains(&node.id);
     let node_is_ancestor = dirty_ancestors.contains(&node.id);
     if !force_rebuild
@@ -303,24 +345,24 @@ pub(super) fn build_paint_subtree(
     if node_is_explicitly_hidden(node) {
         let mut subtree = RetainedPaintSubtree::default();
         subtree.generation = generation;
-        subtree
-            .pruning
-            .record_omitted_subtree(count_pruned_subtree(node, offset_x, offset_y, true), false);
+        subtree.pruning.record_omitted_subtree(
+            count_pruned_subtree_with_transform(node, parent_transform, true),
+            false,
+        );
         let subtree = Arc::new(subtree);
         next_subtrees.insert(node.id, Arc::clone(&subtree));
         return subtree;
     }
 
-    let (offset_x, offset_y) = transformed_offset(node, offset_x, offset_y);
+    let world_transform = node_transform(parent_transform, node);
     let previous_paint_node = previous_subtrees
         .get(&node.id)
         .and_then(|subtree| subtree.commands.first())
         .filter(|command| command.node.id == node.id)
         .map(|command| command.node.as_ref());
-    let paint_node = Arc::new(build_paint_node_with_previous(
+    let paint_node = Arc::new(build_paint_node_with_previous_transform(
         node,
-        offset_x,
-        offset_y,
+        world_transform,
         previous_paint_node,
     ));
     let bounds = node_clip_for(&paint_node);
@@ -329,9 +371,10 @@ pub(super) fn build_paint_subtree(
     if node_clip.width <= 0 || node_clip.height <= 0 {
         let mut subtree = RetainedPaintSubtree::default();
         subtree.generation = generation;
-        subtree
-            .pruning
-            .record_omitted_subtree(count_pruned_subtree(node, offset_x, offset_y, false), true);
+        subtree.pruning.record_omitted_subtree(
+            count_pruned_subtree_with_transform(node, parent_transform, false),
+            true,
+        );
         let subtree = Arc::new(subtree);
         next_subtrees.insert(node.id, Arc::clone(&subtree));
         return subtree;
@@ -361,8 +404,7 @@ pub(super) fn build_paint_subtree(
     let scroll = node.resolved_scroll_metrics();
     let scroll_x = scroll.x;
     let scroll_y = scroll.y;
-    let child_offset_x = offset_x - scroll_x;
-    let child_offset_y = offset_y - scroll_y;
+    let child_transform = child_transform(world_transform, node, scroll_x, scroll_y);
     let child_clip = if node.computed_style.overflow_x.clips_contents()
         || node.computed_style.overflow_y.clips_contents()
     {
@@ -372,16 +414,15 @@ pub(super) fn build_paint_subtree(
     };
     let child_order = compute_child_order(node);
     for_children_in_order(node, child_order.as_deref(), |child| {
-        let (cox, coy, cc) = if child.computed_style.position == Position::Fixed {
-            (0.0, 0.0, viewport_clip)
+        let (child_parent_transform, cc) = if child.computed_style.position == Position::Fixed {
+            (root_transform(0.0, 0.0), viewport_clip)
         } else {
-            (child_offset_x, child_offset_y, child_clip)
+            (child_transform, child_clip)
         };
         append_child_paint_subtree(
             &mut subtree,
             child,
-            cox,
-            coy,
+            child_parent_transform,
             cc,
             viewport_clip,
             force_rebuild || (node_is_dirty && !allow_clean_descendant_reuse),
@@ -485,8 +526,7 @@ pub(super) fn push_sparse_damage_rect(
 pub(super) fn append_child_paint_subtree(
     subtree: &mut PaintSubtreeBuilder,
     child: &WidgetNode,
-    child_offset_x: f32,
-    child_offset_y: f32,
+    child_parent_transform: AffineTransform,
     child_clip: DisplayListClip,
     viewport_clip: DisplayListClip,
     force_rebuild: bool,
@@ -497,17 +537,16 @@ pub(super) fn append_child_paint_subtree(
     next_subtrees: &mut HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     metrics: &mut LocalReuseMetrics,
 ) {
-    if should_preclip_child_subtree(child, child_offset_x, child_offset_y, child_clip) {
+    if should_preclip_child_subtree_with_transform(child, child_parent_transform, child_clip) {
         subtree.pruning.record_omitted_subtree(
-            count_pruned_subtree(child, child_offset_x, child_offset_y, false),
+            count_pruned_subtree_with_transform(child, child_parent_transform, false),
             true,
         );
         return;
     }
-    let child_subtree = build_paint_subtree(
+    let child_subtree = build_paint_subtree_with_transform(
         child,
-        child_offset_x,
-        child_offset_y,
+        child_parent_transform,
         child_clip,
         viewport_clip,
         force_rebuild,
@@ -573,7 +612,16 @@ pub(super) fn should_preclip_child_subtree(
     offset_y: f32,
     clip: DisplayListClip,
 ) -> bool {
-    subtree_bounds_at(child, offset_x, offset_y).is_some_and(|bounds| !bounds.intersects_clip(clip))
+    should_preclip_child_subtree_with_transform(child, root_transform(offset_x, offset_y), clip)
+}
+
+fn should_preclip_child_subtree_with_transform(
+    child: &WidgetNode,
+    parent_transform: AffineTransform,
+    clip: DisplayListClip,
+) -> bool {
+    subtree_bounds_at_with_transform(child, parent_transform)
+        .is_some_and(|bounds| !bounds.intersects_clip(clip))
 }
 
 pub(super) fn subtree_bounds_at(
@@ -581,19 +629,23 @@ pub(super) fn subtree_bounds_at(
     offset_x: f32,
     offset_y: f32,
 ) -> Option<FloatBounds> {
+    subtree_bounds_at_with_transform(node, root_transform(offset_x, offset_y))
+}
+
+fn subtree_bounds_at_with_transform(
+    node: &WidgetNode,
+    parent_transform: AffineTransform,
+) -> Option<FloatBounds> {
     if node_is_explicitly_hidden(node) {
         return None;
     }
 
-    let (offset_x, offset_y) = transformed_offset(node, offset_x, offset_y);
-    let mut bounds = node_visual_bounds_at(node, offset_x, offset_y);
+    let world_transform = node_transform(parent_transform, node);
+    let mut bounds = node_visual_bounds_at_with_transform(node, world_transform);
     let scroll = node.resolved_scroll_metrics();
-    let scroll_x = scroll.x;
-    let scroll_y = scroll.y;
-    let child_offset_x = offset_x - scroll_x;
-    let child_offset_y = offset_y - scroll_y;
+    let child_transform = child_transform(world_transform, node, scroll.x, scroll.y);
     for child in &node.children {
-        if let Some(child_bounds) = subtree_bounds_at(child, child_offset_x, child_offset_y) {
+        if let Some(child_bounds) = subtree_bounds_at_with_transform(child, child_transform) {
             bounds = Some(match bounds {
                 Some(existing) => existing.union(child_bounds),
                 None => child_bounds,
@@ -608,8 +660,18 @@ pub(super) fn node_visual_bounds_at(
     offset_x: f32,
     offset_y: f32,
 ) -> Option<FloatBounds> {
+    node_visual_bounds_at_with_transform(
+        node,
+        node_transform(root_transform(offset_x, offset_y), node),
+    )
+}
+
+fn node_visual_bounds_at_with_transform(
+    node: &WidgetNode,
+    world_transform: AffineTransform,
+) -> Option<FloatBounds> {
     (node.layout.width > 0.0 && node.layout.height > 0.0).then(|| {
-        let paint_node = build_paint_node(node, offset_x, offset_y);
+        let paint_node = build_paint_node_with_previous_transform(node, world_transform, None);
         let visual = visual_clip_for(&paint_node);
         FloatBounds {
             left: visual.x as f32,
@@ -626,23 +688,32 @@ pub(super) fn count_pruned_subtree(
     offset_y: f32,
     include_hidden_root: bool,
 ) -> PrunedSubtreeCounts {
+    count_pruned_subtree_with_transform(
+        node,
+        root_transform(offset_x, offset_y),
+        include_hidden_root,
+    )
+}
+
+fn count_pruned_subtree_with_transform(
+    node: &WidgetNode,
+    parent_transform: AffineTransform,
+    include_hidden_root: bool,
+) -> PrunedSubtreeCounts {
     if node_is_explicitly_hidden(node) && !include_hidden_root {
         return PrunedSubtreeCounts::default();
     }
 
-    let (offset_x, offset_y) = transformed_offset(node, offset_x, offset_y);
     let mut counts = PrunedSubtreeCounts::default();
     if node.layout.width > 0.0 && node.layout.height > 0.0 {
         counts.nodes = 1;
         counts.commands = 2;
     }
     let scroll = node.resolved_scroll_metrics();
-    let scroll_x = scroll.x;
-    let scroll_y = scroll.y;
-    let child_offset_x = offset_x - scroll_x;
-    let child_offset_y = offset_y - scroll_y;
+    let world_transform = node_transform(parent_transform, node);
+    let child_transform = child_transform(world_transform, node, scroll.x, scroll.y);
     for child in &node.children {
-        let child_counts = count_pruned_subtree(child, child_offset_x, child_offset_y, false);
+        let child_counts = count_pruned_subtree_with_transform(child, child_transform, false);
         counts.nodes = counts.nodes.saturating_add(child_counts.nodes);
         counts.commands = counts.commands.saturating_add(child_counts.commands);
     }

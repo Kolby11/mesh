@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use mesh_core_elements::style::Color;
-use mesh_core_elements::{LayoutRect, WidgetNode};
+use mesh_core_elements::{
+    AffineTransform, LayoutRect, WidgetNode, node_layout_bounds, node_transform, root_transform,
+};
 
 use super::types::*;
 
@@ -19,10 +21,22 @@ pub(super) fn build_paint_node_with_previous(
     offset_y: f32,
     previous: Option<&DisplayPaintNode>,
 ) -> DisplayPaintNode {
+    build_paint_node_with_previous_transform(
+        node,
+        node_transform(root_transform(offset_x, offset_y), node),
+        previous,
+    )
+}
+
+pub(super) fn build_paint_node_with_previous_transform(
+    node: &WidgetNode,
+    world_transform: AffineTransform,
+    previous: Option<&DisplayPaintNode>,
+) -> DisplayPaintNode {
     let opacity = node.computed_style.opacity;
     DisplayPaintNode {
         id: node.id,
-        layout: transformed_layout_at(node, offset_x, offset_y),
+        layout: node_layout_bounds(node, world_transform),
         style: DisplayPaintStyle {
             background_color: opacity_color(node.computed_style.background_color, opacity),
             background_paint: node.computed_style.background_paint.clone(),
