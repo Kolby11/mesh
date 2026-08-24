@@ -30,10 +30,13 @@ CSS custom-property resolution, retained explicit/inherited style masks, and
 the canonical generated element schema landed 2026-08-23 — see
 [`.planning/log/2026-08.md`](log/2026-08.md) for the dated entries.
 
+Visibility transition playback now starts from the previously displayed
+discrete value and applies the visibility endpoint at the end of an exit.
+
 ## Next
 
-Preserve the previous discrete value during visibility transitions until the
-transition completes (`docs/BACKLOG.md`).
+Propagate validated per-keyframe easing through component parsing, shell state,
+and animation sampling (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

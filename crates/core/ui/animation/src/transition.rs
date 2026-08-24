@@ -221,8 +221,10 @@ impl AnimatableStyle {
                 previous.inset_left,
                 desired.inset_left,
             ),
-            // visibility is always taken from desired — CSS discrete interpolation handles it in lerp
-            visibility: desired.visibility,
+            // Visibility is discrete, so the transition must start from the
+            // value that was actually displayed. `lerp_visibility` keeps this
+            // snapshot visible during an exit until the transition endpoint.
+            visibility: previous.visibility,
         }
     }
 
@@ -311,15 +313,27 @@ impl Interpolate for AnimatableStyle {
             inset_right: lerp_option_f32(self.inset_right, other.inset_right, progress),
             inset_bottom: lerp_option_f32(self.inset_bottom, other.inset_bottom, progress),
             inset_left: lerp_option_f32(self.inset_left, other.inset_left, progress),
-            // CSS: visibility is discrete — if either endpoint is Visible, stay Visible
-            visibility: if self.visibility == Visibility::Visible
-                || other.visibility == Visibility::Visible
-            {
-                Visibility::Visible
-            } else {
-                Visibility::Hidden
-            },
+            visibility: lerp_visibility(self.visibility, other.visibility, progress),
         }
+    }
+}
+
+/// Interpolate CSS's discrete visibility value at its transition edges.
+///
+/// Visibility becomes visible at the beginning of an entrance, but remains
+/// visible until the end of an exit. Other discrete visibility values use the
+/// ordinary midpoint switch.
+fn lerp_visibility(from: Visibility, to: Visibility, progress: f32) -> Visibility {
+    if from == to {
+        return from;
+    }
+
+    let progress = progress.clamp(0.0, 1.0);
+    match (from, to) {
+        (_, Visibility::Visible) => Visibility::Visible,
+        (Visibility::Visible, _) if progress < 1.0 => Visibility::Visible,
+        _ if progress < 0.5 => from,
+        _ => to,
     }
 }
 
@@ -624,6 +638,64 @@ mod tests {
         let still_active = animator.step_node(key, &mut node, displayed, done);
         assert!(!still_active);
         assert!((node.computed_style.opacity - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn visibility_transition_preserves_previous_value_until_completion() {
+        let transition = TransitionStyle {
+            duration_ms: 100,
+            properties: mesh_core_elements::TransitionProperties {
+                opacity: true,
+                ..mesh_core_elements::TransitionProperties::none()
+            },
+            ..TransitionStyle::default()
+        };
+        let mut animator = TransitionAnimator::new();
+        let mut node = WidgetNode::new("box");
+        node.computed_style.transitions = vec![transition];
+        node.computed_style.opacity = 1.0;
+        node.computed_style.visibility = Visibility::Hidden;
+
+        let previous = AnimatableStyle {
+            opacity: 0.0,
+            visibility: Visibility::Visible,
+            ..AnimatableStyle::from_node(&node)
+        };
+        let start = Instant::now();
+        let key = node.id;
+
+        assert!(animator.step_node(key, &mut node, previous, start));
+        assert_eq!(node.computed_style.visibility, Visibility::Visible);
+
+        node.computed_style.opacity = 1.0;
+        node.computed_style.visibility = Visibility::Hidden;
+        let halfway = start + Duration::from_millis(50);
+        let displayed = animator
+            .displayed_style(key, halfway)
+            .expect("active transition");
+        assert!(animator.step_node(key, &mut node, displayed, halfway));
+        assert_eq!(node.computed_style.visibility, Visibility::Visible);
+
+        node.computed_style.opacity = 1.0;
+        node.computed_style.visibility = Visibility::Hidden;
+        let done = start + Duration::from_millis(100);
+        let displayed = animator
+            .displayed_style(key, done)
+            .expect("active transition");
+        assert!(!animator.step_node(key, &mut node, displayed, done));
+        assert_eq!(node.computed_style.visibility, Visibility::Hidden);
+    }
+
+    #[test]
+    fn visibility_interpolation_enters_at_start_and_exits_at_end() {
+        let mut visible = AnimatableStyle::from_node(&WidgetNode::new("box"));
+        visible.visibility = Visibility::Visible;
+        let mut hidden = visible;
+        hidden.visibility = Visibility::Hidden;
+
+        assert_eq!(hidden.lerp(visible, 0.0).visibility, Visibility::Visible);
+        assert_eq!(visible.lerp(hidden, 0.5).visibility, Visibility::Visible);
+        assert_eq!(visible.lerp(hidden, 1.0).visibility, Visibility::Hidden);
     }
 
     #[test]
