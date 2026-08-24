@@ -141,8 +141,12 @@ pub struct CompiledFrontendModule {
     pub manifest: Manifest,
     pub source_path: PathBuf,
     pub component: ComponentFile,
-    /// Compatibility alias index for direct imports, plus private
-    /// owner-scoped records keyed by canonical owner/alias/target identities.
+    /// Owner-scoped records keyed by canonical owner/alias/target identities.
+    ///
+    /// Compiler-produced entries use only these scoped keys. The public map
+    /// remains a compatibility surface for hand-built test fixtures, whose
+    /// legacy alias-only entries are resolved only when no scoped record is
+    /// available.
     pub local_components: std::collections::HashMap<String, mesh_core_component::ComponentFile>,
     /// Explicit component module imports. Direct imports use their alias;
     /// recursive imports use a canonical owner-scoped key.
@@ -196,25 +200,29 @@ impl CompiledFrontendModule {
         owner_source_path: Option<&std::path::Path>,
         alias: &str,
     ) -> Option<ResolvedLocalComponent> {
-        if let Some(owner) = owner_source_path {
-            let owner_prefix = format!(
-                "{SCOPED_LOCAL_COMPONENT_PREFIX}{}\0{alias}\0",
-                owner.display()
-            );
-            if let Some((key, component)) = self
-                .local_components
-                .iter()
-                .find(|(key, _)| key.starts_with(&owner_prefix))
-            {
-                let target = key.split('\0').nth(4).map(PathBuf::from)?;
-                return Some(ResolvedLocalComponent {
-                    source_path: target,
-                    component: component.clone(),
-                });
+        let owner = owner_source_path.unwrap_or(&self.source_path);
+        let mut scoped = self.local_components.iter().filter(|(key, _)| {
+            scoped_local_component_parts(key).is_some_and(|(key_owner, key_alias, _)| {
+                key_owner == owner.to_string_lossy().as_ref() && key_alias == alias
+            })
+        });
+        if let Some((key, component)) = scoped.next() {
+            // A compiler-produced catalog cannot contain this state because
+            // insertion rejects a second target for one owner/alias. Treat a
+            // malformed hand-built catalog as unresolved instead of choosing
+            // an arbitrary HashMap entry.
+            if scoped.next().is_some() {
+                return None;
             }
+            let target =
+                scoped_local_component_parts(key).map(|(_, _, target)| PathBuf::from(target))?;
+            return Some(ResolvedLocalComponent {
+                source_path: target,
+                component: component.clone(),
+            });
         }
 
-        if owner_source_path.is_some_and(|owner| owner != self.source_path) {
+        if owner != self.source_path {
             return None;
         }
         self.local_components
@@ -252,13 +260,23 @@ impl CompiledFrontendModule {
     /// Whether this compiled root owns the component source path. This lets a
     /// contribution root and a primary root use the same local alias safely.
     pub fn owns_component_path(&self, source_path: &std::path::Path) -> bool {
-        let source_path = source_path.display().to_string();
-        self.source_path.display().to_string() == source_path
+        self.source_path == source_path
             || self.local_components.keys().any(|key| {
-                key.strip_prefix(SCOPED_LOCAL_COMPONENT_PREFIX)
-                    .and_then(|value| value.split('\0').next())
+                scoped_local_component_parts(key)
+                    .map(|(owner, _, _)| PathBuf::from(owner))
                     .is_some_and(|owner| owner == source_path)
             })
+    }
+
+    /// Whether `alias` is a local component in the requested owner scope.
+    /// Compiler-produced records are always checked through the canonical
+    /// owner key; alias-only fixtures are accepted only for the root scope.
+    pub fn has_local_component(
+        &self,
+        owner_source_path: Option<&std::path::Path>,
+        alias: &str,
+    ) -> bool {
+        self.local_component_for(owner_source_path, alias).is_some()
     }
 
     /// Iterate the recursive local-component records, falling back to the
@@ -267,7 +285,7 @@ impl CompiledFrontendModule {
         let mut scoped = self
             .local_components
             .iter()
-            .filter(|(key, _)| key.starts_with(SCOPED_LOCAL_COMPONENT_PREFIX))
+            .filter(|(key, _)| scoped_local_component_parts(key).is_some())
             .collect::<Vec<_>>();
         scoped.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
         let scoped = scoped
@@ -280,6 +298,15 @@ impl CompiledFrontendModule {
             scoped
         }
     }
+}
+
+fn scoped_local_component_parts(key: &str) -> Option<(&str, &str, &str)> {
+    let value = key.strip_prefix(SCOPED_LOCAL_COMPONENT_PREFIX)?;
+    let mut parts = value.split('\0');
+    let owner = parts.next()?;
+    let alias = parts.next()?;
+    let target = parts.next()?;
+    parts.next().is_none().then_some((owner, alias, target))
 }
 
 impl CompiledFrontendModule {
@@ -550,7 +577,7 @@ mod tests {
             "WifiPage",
         ] {
             assert!(
-                compiled.local_components.contains_key(page),
+                compiled.has_local_component(None, page),
                 "settings should register {page}"
             );
         }
@@ -1730,6 +1757,49 @@ mod tests {
             module_component_imports: Default::default(),
             watched_paths: Vec::new(),
         }
+    }
+
+    #[test]
+    fn local_component_lookup_rejects_ambiguous_owner_alias_records() {
+        let mut compiled = make_test_module("<template><box /></template>");
+        let owner = std::path::PathBuf::from("/module/src/owner.mesh");
+        let other_owner = std::path::PathBuf::from("/module/src/other.mesh");
+        compiled.source_path = owner.clone();
+
+        let first =
+            mesh_core_component::parse_component("<template><text>A</text></template>").unwrap();
+        let second =
+            mesh_core_component::parse_component("<template><text>B</text></template>").unwrap();
+        let other =
+            mesh_core_component::parse_component("<template><text>C</text></template>").unwrap();
+        compiled.local_components.insert(
+            scoped_local_component_key(&owner, "Item", std::path::Path::new("/module/src/a.mesh")),
+            first,
+        );
+        compiled.local_components.insert(
+            scoped_local_component_key(&owner, "Item", std::path::Path::new("/module/src/b.mesh")),
+            second,
+        );
+        compiled.local_components.insert(
+            scoped_local_component_key(
+                &other_owner,
+                "Item",
+                std::path::Path::new("/module/src/c.mesh"),
+            ),
+            other,
+        );
+
+        assert!(
+            compiled.local_component_for(Some(&owner), "Item").is_none(),
+            "an ambiguous owner/alias record must not select a HashMap entry"
+        );
+        let resolved = compiled
+            .local_component_for(Some(&other_owner), "Item")
+            .expect("a distinct owner may reuse the alias");
+        assert_eq!(
+            resolved.source_path,
+            std::path::Path::new("/module/src/c.mesh")
+        );
     }
 
     /// Computed styles must differ across a declared breakpoint.

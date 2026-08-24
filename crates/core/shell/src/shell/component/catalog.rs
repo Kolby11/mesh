@@ -820,7 +820,7 @@ impl FrontendCatalog {
                     })?;
             }
             for component_tag in entry.compiled.referenced_component_tags() {
-                if entry.compiled.local_components.contains_key(&component_tag) {
+                if entry.compiled.has_local_component(None, &component_tag) {
                     continue;
                 }
                 if entry

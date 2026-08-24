@@ -140,11 +140,11 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 })
         } else {
             primary_compiled
-                .filter(|compiled| compiled.local_components.contains_key(alias))
+                .filter(|compiled| compiled.has_local_component(None, alias))
                 .or_else(|| {
                     self.frontend_catalog
                         .contribution_entries_for(&host.package.id)
-                        .find(|compiled| compiled.local_components.contains_key(alias))
+                        .find(|compiled| compiled.has_local_component(None, alias))
                 })
                 .or(primary_compiled)
         };

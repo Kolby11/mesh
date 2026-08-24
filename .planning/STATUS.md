@@ -4,6 +4,11 @@
 
 ## Now
 
+Frontend local component aliases now remain scoped to their canonical owner
+source and target identity. Compiler output no longer publishes an unscoped
+alias index; same-owner collisions are rejected using typed canonical import
+targets, while shell/catalog lookup paths use the scoped records.
+
 Root and nested template expressions now share parser-derived scope validation.
 Root expressions, keyed-loop keys, runtime props, and expression-body source
 spans are checked before compilation.
@@ -79,8 +84,8 @@ host surface that renders it.
 
 ## Next
 
-Scope local component aliases by owner and canonical source, rejecting
-collisions (`docs/BACKLOG.md`).
+Replace line-oriented Luau symbol discovery with parser/compiler metadata or
+remove it as a source of truth (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

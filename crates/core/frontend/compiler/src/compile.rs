@@ -328,15 +328,19 @@ fn collect_imports(
     module_component_imports: &mut HashMap<String, String>,
     seen_local_paths: &mut HashSet<PathBuf>,
     parsed_components: &mut HashMap<PathBuf, ComponentFile>,
-    import_bindings: &mut HashMap<(PathBuf, String), String>,
+    import_bindings: &mut HashMap<(PathBuf, String), ImportBindingTarget>,
     ancestry: &mut Vec<PathBuf>,
 ) -> Result<(), CompileFrontendError> {
     for import in &component.imports {
         match &import.target {
             ComponentImportTarget::ComponentLocal(source) => {
                 let target_path = resolve_local_component_file(source, component_path, module_dir)?;
-                let incoming = format!("local target {}", target_path.display());
-                insert_import_binding(component_path, &import.alias, incoming, import_bindings)?;
+                insert_import_binding(
+                    component_path,
+                    &import.alias,
+                    ImportBindingTarget::Local(target_path.clone()),
+                    import_bindings,
+                )?;
                 let parsed = if let Some(parsed) = parsed_components.get(&target_path) {
                     parsed.clone()
                 } else {
@@ -344,12 +348,13 @@ fn collect_imports(
                     parsed_components.insert(target_path.clone(), parsed.clone());
                     parsed
                 };
-                let scoped_key =
-                    crate::scoped_local_component_key(component_path, &import.alias, &target_path);
-                local_components.insert(scoped_key, parsed.clone());
-                if ancestry.len() == 1 {
-                    local_components.insert(import.alias.clone(), parsed.clone());
-                }
+                insert_local_component(
+                    component_path,
+                    &import.alias,
+                    &target_path,
+                    parsed.clone(),
+                    local_components,
+                );
                 if ancestry.iter().any(|path| path == &target_path) {
                     let start = ancestry
                         .iter()
@@ -381,7 +386,7 @@ fn collect_imports(
                 insert_import_binding(
                     component_path,
                     &import.alias,
-                    format!("module target {module_id}"),
+                    ImportBindingTarget::Module(module_id.clone()),
                     import_bindings,
                 )?;
                 insert_module_component_import(
@@ -396,14 +401,10 @@ fn collect_imports(
                 insert_import_binding(
                     component_path,
                     &import.alias,
-                    format!(
-                        "interface target {}{}",
-                        interface,
-                        version
-                            .as_deref()
-                            .map(|version| format!("@{version}"))
-                            .unwrap_or_default()
-                    ),
+                    ImportBindingTarget::Interface {
+                        interface: interface.clone(),
+                        version: version.clone(),
+                    },
                     import_bindings,
                 )?;
             }
@@ -415,8 +416,8 @@ fn collect_imports(
 fn insert_import_binding(
     owner: &Path,
     alias: &str,
-    incoming: String,
-    import_bindings: &mut HashMap<(PathBuf, String), String>,
+    incoming: ImportBindingTarget,
+    import_bindings: &mut HashMap<(PathBuf, String), ImportBindingTarget>,
 ) -> Result<(), CompileFrontendError> {
     let key = (owner.to_path_buf(), alias.to_string());
     if let Some(existing) = import_bindings.get(&key)
@@ -425,12 +426,50 @@ fn insert_import_binding(
         return Err(CompileFrontendError::ConflictingImportAlias {
             alias: alias.to_string(),
             owner: owner.to_path_buf(),
-            existing: existing.clone(),
-            incoming,
+            existing: existing.describe(),
+            incoming: incoming.describe(),
         });
     }
     import_bindings.insert(key, incoming);
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ImportBindingTarget {
+    Local(PathBuf),
+    Module(String),
+    Interface {
+        interface: String,
+        version: Option<String>,
+    },
+}
+
+impl ImportBindingTarget {
+    fn describe(&self) -> String {
+        match self {
+            Self::Local(path) => format!("local target {}", path.display()),
+            Self::Module(module_id) => format!("module target {module_id}"),
+            Self::Interface { interface, version } => format!(
+                "interface target {}{}",
+                interface,
+                version
+                    .as_deref()
+                    .map(|version| format!("@{version}"))
+                    .unwrap_or_default()
+            ),
+        }
+    }
+}
+
+fn insert_local_component(
+    owner: &Path,
+    alias: &str,
+    target: &Path,
+    component: ComponentFile,
+    local_components: &mut HashMap<String, ComponentFile>,
+) {
+    let key = crate::scoped_local_component_key(owner, alias, target);
+    local_components.entry(key).or_insert(component);
 }
 
 fn insert_module_component_import(
@@ -1559,6 +1598,10 @@ import BranchB from "./branch-b.mesh"
                 &branch_b, "Item", &item_b,
             ))
         );
+        assert!(
+            !local_components.contains_key("Item"),
+            "recursive aliases must not leak into an unscoped index"
+        );
         assert_eq!(seen_local_paths.len(), 4);
 
         validate_standalone_imports(&root, &root_path, directory.path(), &local_components)
@@ -1622,14 +1665,14 @@ import BranchB from "./branch-b.mesh"
         insert_import_binding(
             &owner,
             "Item",
-            "local target /module/src/one.mesh".into(),
+            ImportBindingTarget::Local(PathBuf::from("/module/src/one.mesh")),
             &mut bindings,
         )
         .unwrap();
         let error = insert_import_binding(
             &owner,
             "Item",
-            "module target @mesh/item".into(),
+            ImportBindingTarget::Module("@mesh/item".into()),
             &mut bindings,
         )
         .unwrap_err();
