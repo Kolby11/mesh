@@ -10,6 +10,7 @@
 
 pub mod box_shadow;
 pub mod easing;
+pub mod instance;
 pub mod interpolate;
 pub mod keyframes;
 pub mod policy;
@@ -17,6 +18,7 @@ pub mod transform;
 pub mod transition;
 
 pub use easing::{Easing, apply_easing};
+pub use instance::{AnimationInstanceId, AnimationLifecycle, AnimationStep};
 pub use interpolate::Interpolate;
 pub use policy::MotionPolicy;
 pub use transform::Transform2D;

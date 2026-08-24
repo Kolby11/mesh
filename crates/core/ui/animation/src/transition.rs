@@ -10,6 +10,7 @@ use mesh_core_elements::{
 };
 
 use super::easing::{Easing, apply_easing};
+use super::instance::{AnimationLifecycle, AnimationStep};
 use super::interpolate::Interpolate;
 use super::policy::MotionPolicy;
 
@@ -439,7 +440,14 @@ impl TransitionAnimator {
         previous_displayed: AnimatableStyle,
         now: Instant,
     ) -> bool {
-        self.step_node_with_policy(key, node, previous_displayed, now, MotionPolicy::default())
+        self.step_node_with_policy_state(
+            key,
+            node,
+            previous_displayed,
+            now,
+            MotionPolicy::default(),
+        )
+        .active
     }
 
     /// Step a node with the caller's immutable motion snapshot. Non-essential
@@ -452,6 +460,25 @@ impl TransitionAnimator {
         now: Instant,
         policy: MotionPolicy,
     ) -> bool {
+        self.step_node_with_policy_state(key, node, previous_displayed, now, policy)
+            .active
+    }
+
+    /// Step a node and report the lifecycle decision made for its instance.
+    ///
+    /// A target that changes while a transition is running starts from the
+    /// currently displayed value. If the new target is the previous source,
+    /// the transition is explicitly classified as a reversal; unrelated
+    /// targets are replacements. Removing a transition before completion is a
+    /// cancellation, while reaching its endpoint is completion.
+    pub fn step_node_with_policy_state(
+        &mut self,
+        key: NodeId,
+        node: &mut WidgetNode,
+        previous_displayed: AnimatableStyle,
+        now: Instant,
+        policy: MotionPolicy,
+    ) -> AnimationStep {
         let desired = AnimatableStyle::from_node(node);
         let transition = node
             .computed_style
@@ -472,40 +499,64 @@ impl TransitionAnimator {
             false,
         );
         let should_animate = !duration.is_zero() && previous_displayed.differs(&desired, props);
+        let existing = self.active.get(&key).cloned();
 
-        if should_animate {
-            let restart = self.active.get(&key).is_none_or(|transition_in_flight| {
-                transition_in_flight.to != desired
-                    || transition_in_flight.source != transition
-                    || transition_in_flight.finished(now)
-            });
-
-            if restart {
-                let from = AnimatableStyle::selective_from(previous_displayed, desired, props);
-                self.active.insert(
-                    key,
-                    ActiveTransition {
-                        from,
-                        to: desired,
-                        started_at: now,
-                        duration,
-                        delay: Duration::from_millis(u64::from(transition.delay_ms)),
-                        easing: transition.easing.into(),
-                        source: transition,
-                    },
-                );
-            }
-        } else {
+        if !should_animate {
+            let lifecycle = match existing.as_ref() {
+                Some(active) if active.finished(now) => AnimationLifecycle::Completed,
+                Some(_) => AnimationLifecycle::Cancelled,
+                None => AnimationLifecycle::Idle,
+            };
             self.active.remove(&key);
+            return AnimationStep {
+                lifecycle,
+                active: false,
+            };
         }
 
-        if let Some(transition_in_flight) = self.active.get(&key) {
-            transition_in_flight.current(now).apply_to_node(node);
-            if !transition_in_flight.finished(now) {
-                return true;
+        let lifecycle = match existing.as_ref() {
+            Some(active)
+                if !active.finished(now) && active.to == desired && active.source == transition =>
+            {
+                AnimationLifecycle::Continued
             }
+            Some(active) if active.from == desired => AnimationLifecycle::Reversed,
+            Some(_) => AnimationLifecycle::Replaced,
+            None => AnimationLifecycle::Started,
+        };
+
+        if lifecycle != AnimationLifecycle::Continued {
+            let from = AnimatableStyle::selective_from(previous_displayed, desired, props);
+            self.active.insert(
+                key,
+                ActiveTransition {
+                    from,
+                    to: desired,
+                    started_at: now,
+                    duration,
+                    delay: Duration::from_millis(u64::from(transition.delay_ms)),
+                    easing: transition.easing.into(),
+                    source: transition,
+                },
+            );
         }
-        false
+
+        let transition_in_flight = self
+            .active
+            .get(&key)
+            .expect("animation lifecycle inserted or continued");
+        transition_in_flight.current(now).apply_to_node(node);
+        if transition_in_flight.finished(now) {
+            self.active.remove(&key);
+            return AnimationStep {
+                lifecycle: AnimationLifecycle::Completed,
+                active: false,
+            };
+        }
+        AnimationStep {
+            lifecycle,
+            active: true,
+        }
     }
 
     /// Walk a widget tree and step the transition for every runtime-keyed node
@@ -638,6 +689,119 @@ mod tests {
         let still_active = animator.step_node(key, &mut node, displayed, done);
         assert!(!still_active);
         assert!((node.computed_style.opacity - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn transition_reversal_starts_from_the_current_displayed_value() {
+        let transition = TransitionStyle {
+            duration_ms: 100,
+            properties: mesh_core_elements::TransitionProperties {
+                opacity: true,
+                ..mesh_core_elements::TransitionProperties::none()
+            },
+            ..TransitionStyle::default()
+        };
+        let mut animator = TransitionAnimator::new();
+        let mut node = WidgetNode::new("box");
+        node.computed_style.transitions = vec![transition];
+        node.computed_style.opacity = 1.0;
+        let previous = AnimatableStyle {
+            opacity: 0.0,
+            ..AnimatableStyle::from_node(&node)
+        };
+        let start = Instant::now();
+        let key = node.id;
+
+        assert_eq!(
+            animator
+                .step_node_with_policy_state(
+                    key,
+                    &mut node,
+                    previous,
+                    start,
+                    MotionPolicy::default(),
+                )
+                .lifecycle,
+            AnimationLifecycle::Started
+        );
+
+        let halfway = start + Duration::from_millis(50);
+        let displayed = animator
+            .displayed_style(key, halfway)
+            .expect("active transition");
+        node.computed_style.opacity = 0.0;
+        let step = animator.step_node_with_policy_state(
+            key,
+            &mut node,
+            displayed,
+            halfway,
+            MotionPolicy::default(),
+        );
+
+        assert_eq!(step.lifecycle, AnimationLifecycle::Reversed);
+        assert!(step.active);
+        assert!((node.computed_style.opacity - displayed.opacity).abs() < 0.01);
+    }
+
+    #[test]
+    fn transition_replacement_and_cancellation_are_explicit() {
+        let transition = TransitionStyle {
+            duration_ms: 100,
+            properties: mesh_core_elements::TransitionProperties {
+                opacity: true,
+                ..mesh_core_elements::TransitionProperties::none()
+            },
+            ..TransitionStyle::default()
+        };
+        let mut animator = TransitionAnimator::new();
+        let mut node = WidgetNode::new("box");
+        node.computed_style.transitions = vec![transition];
+        node.computed_style.opacity = 1.0;
+        let previous = AnimatableStyle {
+            opacity: 0.0,
+            ..AnimatableStyle::from_node(&node)
+        };
+        let start = Instant::now();
+        let key = node.id;
+        assert_eq!(
+            animator
+                .step_node_with_policy_state(
+                    key,
+                    &mut node,
+                    previous,
+                    start,
+                    MotionPolicy::default(),
+                )
+                .lifecycle,
+            AnimationLifecycle::Started
+        );
+
+        let replacement_time = start + Duration::from_millis(20);
+        let displayed = animator
+            .displayed_style(key, replacement_time)
+            .expect("active transition");
+        node.computed_style.opacity = 0.5;
+        let replaced = animator.step_node_with_policy_state(
+            key,
+            &mut node,
+            displayed,
+            replacement_time,
+            MotionPolicy::default(),
+        );
+        assert_eq!(replaced.lifecycle, AnimationLifecycle::Replaced);
+        assert!(replaced.active);
+
+        node.computed_style.transitions.clear();
+        let cancelled = animator.step_node_with_policy_state(
+            key,
+            &mut node,
+            displayed,
+            replacement_time + Duration::from_millis(10),
+            MotionPolicy::default(),
+        );
+        assert_eq!(cancelled.lifecycle, AnimationLifecycle::Cancelled);
+        assert!(!cancelled.active);
+        assert!(!animator.contains_key(key));
     }
 
     #[test]

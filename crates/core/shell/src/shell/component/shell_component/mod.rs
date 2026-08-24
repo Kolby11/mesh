@@ -41,6 +41,8 @@ impl FrontendSurfaceComponent {
         self.transitions.clear();
         self.keyframe_animations.clear();
         self.keyframe_rules.clear();
+        self.keyframe_animation_slots.clear();
+        self.keyframe_animation_lifecycles.clear();
         self.has_active_keyframe_animation = false;
         self.invalidate_style_path(ComponentDirtyFlags::STYLE_RELAYOUT);
     }
@@ -1675,6 +1677,8 @@ impl ShellComponent for FrontendSurfaceComponent {
             self.transitions.clear();
             self.keyframe_animations.clear();
             self.keyframe_rules.clear();
+            self.keyframe_animation_slots.clear();
+            self.keyframe_animation_lifecycles.clear();
             self.surface_entering = true;
         }
         if self.surface_exiting == exiting {

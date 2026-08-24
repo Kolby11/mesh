@@ -39,10 +39,15 @@ through shell animation state into the core and tooltip samplers.
 The public animation `box-shadow` parser now returns structured errors for
 malformed values and rejects comma-separated shadow lists before construction.
 
+Animation instances now use retained node identity, animation-list position,
+and declaration generation for stable identity. The shell and core expose
+explicit started, continued, replaced, cancelled, completed, and reversed
+decisions so style changes do not inherit stale timelines.
+
 ## Next
 
-Give animation instances stable identity, explicit replacement, cancellation,
-and reversal semantics (`docs/BACKLOG.md`).
+Introduce an `InteractionFrame` shared by input, state, style invalidation,
+layout, animation, paint, and semantics (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

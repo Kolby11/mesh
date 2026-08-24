@@ -38,7 +38,7 @@ pub(in crate::shell) use catalog::{
 #[cfg(test)]
 pub(crate) use input::KeybindResolutionSource;
 use input::ResolvedSurfaceShortcut;
-use mesh_core_animation::{MotionPolicy, transition::TransitionAnimator};
+use mesh_core_animation::{AnimationInstanceId, MotionPolicy, transition::TransitionAnimator};
 pub(in crate::shell) use mesh_core_interaction::ScrollOffsetState;
 #[cfg(test)]
 use runtime_tree::stable_runtime_node_id;
@@ -964,14 +964,23 @@ pub(super) struct FrontendSurfaceComponent {
     /// retained node it targets.
     ref_node_keys: RefCell<HashMap<String, String>>,
     transitions: TransitionAnimator,
-    keyframe_animations: HashMap<String, mesh_core_animation::keyframes::ActiveKeyframeAnimation>,
-    keyframe_rules: HashMap<String, mesh_core_animation::keyframes::KeyframeRule>,
+    keyframe_animations:
+        HashMap<AnimationInstanceId, mesh_core_animation::keyframes::ActiveKeyframeAnimation>,
+    keyframe_rules: HashMap<AnimationInstanceId, mesh_core_animation::keyframes::KeyframeRule>,
+    /// The currently active instance in each node/list slot. Keeping the slot
+    /// separate from the declaration fingerprint makes replacement and
+    /// cancellation explicit when a rule changes or disappears.
+    keyframe_animation_slots: HashMap<(NodeId, u32), AnimationInstanceId>,
+    /// Last reconciliation decision for each live declaration slot. This keeps
+    /// replacement and cancellation observable at the shell boundary without
+    /// making renderers infer lifecycle from map mutations.
+    keyframe_animation_lifecycles: HashMap<(NodeId, u32), mesh_core_animation::AnimationLifecycle>,
     previous_visual_styles_scratch:
         HashMap<NodeId, mesh_core_animation::transition::AnimatableStyle>,
     /// Per-animation-pass key sets. Retain their hash-table allocations across
     /// ticks because the same surface is usually traversed every frame.
     animation_live_keys_scratch: HashSet<NodeId>,
-    animation_live_keyframe_keys_scratch: HashSet<String>,
+    animation_live_keyframe_keys_scratch: HashSet<AnimationInstanceId>,
     animation_dirty_node_ids_scratch: HashSet<NodeId>,
     has_animatable_style_rules: bool,
     has_active_keyframe_animation: bool,
@@ -1253,6 +1262,8 @@ impl FrontendSurfaceComponent {
             transitions: TransitionAnimator::new(),
             keyframe_animations: HashMap::new(),
             keyframe_rules: HashMap::new(),
+            keyframe_animation_slots: HashMap::new(),
+            keyframe_animation_lifecycles: HashMap::new(),
             previous_visual_styles_scratch: HashMap::new(),
             animation_live_keys_scratch: HashSet::new(),
             animation_live_keyframe_keys_scratch: HashSet::new(),

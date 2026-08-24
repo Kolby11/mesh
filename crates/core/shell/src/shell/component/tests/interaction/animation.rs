@@ -161,7 +161,8 @@ fn component_keyframe_easing_reaches_shell_animation_state() {
 
     let rule = component
         .keyframe_rules
-        .get("root/0::pulse")
+        .values()
+        .next()
         .expect("lowered shell keyframe rule");
     assert!(matches!(
         rule.stops[0].easing,
@@ -339,7 +340,11 @@ end
         .paint(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
         .unwrap();
 
-    let key = "root/0::pulse".to_string();
+    let key = *component
+        .keyframe_animations
+        .keys()
+        .next()
+        .expect("active keyframe animation");
     let preserved_start = Instant::now()
         .checked_sub(Duration::from_millis(400))
         .expect("monotonic instant subtraction");
@@ -386,7 +391,11 @@ fn keyframe_pause_resume_keeps_progress_across_an_iteration_boundary() {
         .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
-    let key = "root/0::pulse".to_string();
+    let key = *component
+        .keyframe_animations
+        .keys()
+        .next()
+        .expect("active keyframe animation");
     let timeline_start = Instant::now()
         .checked_sub(Duration::from_millis(1250))
         .expect("monotonic instant subtraction");
@@ -468,7 +477,11 @@ fn keyframe_animation_finite_completion_stops_render_requests() {
         .unwrap();
     assert!(component.wants_render());
 
-    let key = "root/0::pulse".to_string();
+    let key = *component
+        .keyframe_animations
+        .keys()
+        .next()
+        .expect("active keyframe animation");
     component
         .keyframe_animations
         .get_mut(&key)
@@ -483,6 +496,12 @@ fn keyframe_animation_finite_completion_stops_render_requests() {
     component.dirty = false;
 
     assert!(!component.wants_render());
+    assert_eq!(
+        component
+            .keyframe_animation_lifecycles
+            .get(&(key.node_id, key.list_index)),
+        Some(&mesh_core_animation::AnimationLifecycle::Completed)
+    );
 }
 
 #[test]
@@ -520,9 +539,14 @@ fn keyframe_animation_name_change_restarts_timeline() {
     let original_start = Instant::now()
         .checked_sub(Duration::from_millis(400))
         .expect("monotonic instant subtraction");
+    let original_id = *component
+        .keyframe_animations
+        .keys()
+        .next()
+        .expect("initial keyframe animation");
     component
         .keyframe_animations
-        .get_mut("root/0::pulse-a")
+        .get_mut(&original_id)
         .expect("initial keyframe animation")
         .started_at = original_start;
 
@@ -531,23 +555,146 @@ fn keyframe_animation_name_change_restarts_timeline() {
     component.apply_style_animations(&mut tree);
     component.last_tree = Some(tree);
 
-    assert!(
-        !component
-            .keyframe_animations
-            .contains_key("root/0::pulse-a")
-    );
-    assert!(
+    assert_eq!(
         component
-            .keyframe_animations
-            .contains_key("root/0::pulse-b")
+            .keyframe_animation_lifecycles
+            .get(&(original_id.node_id, original_id.list_index)),
+        Some(&mesh_core_animation::AnimationLifecycle::Replaced)
+    );
+    assert!(!component.keyframe_animations.contains_key(&original_id));
+    let replacement_id = *component
+        .keyframe_animations
+        .keys()
+        .next()
+        .expect("replacement keyframe animation");
+    assert_ne!(replacement_id, original_id);
+    assert_eq!(replacement_id.node_id, original_id.node_id);
+    assert_eq!(replacement_id.list_index, original_id.list_index);
+    assert_ne!(
+        replacement_id.declaration_generation,
+        original_id.declaration_generation
     );
     assert_ne!(
         component
             .keyframe_animations
-            .get("root/0::pulse-b")
+            .get(&replacement_id)
             .expect("replacement keyframe animation")
             .started_at,
         original_start
+    );
+}
+
+#[test]
+fn duplicate_keyframe_names_use_distinct_slots_and_replace_only_changed_declarations() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box class="panel" /></template>
+<style>
+.panel { animation: pulse 1000ms linear infinite, pulse 2000ms linear infinite; }
+@keyframes pulse {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 40);
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
+
+    assert_eq!(component.keyframe_animations.len(), 2);
+    let mut initial = component
+        .keyframe_animations
+        .keys()
+        .copied()
+        .collect::<Vec<_>>();
+    initial.sort_by_key(|id| id.list_index);
+    assert_eq!(initial[0].list_index, 0);
+    assert_eq!(initial[1].list_index, 1);
+    let first_start = Instant::now()
+        .checked_sub(Duration::from_millis(300))
+        .expect("monotonic instant subtraction");
+    for id in &initial {
+        component
+            .keyframe_animations
+            .get_mut(id)
+            .expect("initial animation")
+            .started_at = first_start;
+    }
+
+    let mut tree = component.build_tree(&theme, 120, 40);
+    tree.children[0].computed_style.animations[1].duration_ms = 3000;
+    component.apply_style_animations(&mut tree);
+
+    assert_eq!(component.keyframe_animations.len(), 2);
+    let replacement = component
+        .keyframe_animations
+        .keys()
+        .find(|id| id.list_index == 1)
+        .copied()
+        .expect("replacement animation");
+    assert_ne!(
+        replacement.declaration_generation,
+        initial[1].declaration_generation
+    );
+    assert_eq!(
+        component
+            .keyframe_animation_lifecycles
+            .get(&(replacement.node_id, replacement.list_index)),
+        Some(&mesh_core_animation::AnimationLifecycle::Replaced)
+    );
+    let first = component
+        .keyframe_animations
+        .keys()
+        .find(|id| id.list_index == 0)
+        .copied()
+        .expect("unchanged animation");
+    assert_eq!(first, initial[0]);
+    assert_eq!(
+        component
+            .keyframe_animations
+            .get(&first)
+            .expect("unchanged timeline")
+            .started_at,
+        first_start
+    );
+}
+
+#[test]
+fn keyframe_disappearance_cancels_the_instance_and_timeline() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box class="panel" /></template>
+<style>
+.panel { animation: pulse 1000ms linear infinite; }
+@keyframes pulse { 0% { opacity: 0; } 100% { opacity: 1; } }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 40);
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
+    let id = *component
+        .keyframe_animations
+        .keys()
+        .next()
+        .expect("active animation");
+
+    let mut tree = component.build_tree(&theme, 120, 40);
+    tree.children[0].computed_style.animations.clear();
+    component.apply_style_animations(&mut tree);
+
+    assert!(component.keyframe_animations.is_empty());
+    assert!(component.keyframe_rules.is_empty());
+    assert_eq!(
+        component
+            .keyframe_animation_lifecycles
+            .get(&(id.node_id, id.list_index)),
+        Some(&mesh_core_animation::AnimationLifecycle::Cancelled)
     );
 }
 
@@ -577,9 +724,14 @@ fn keyframe_animation_infinite_keeps_render_requests_active() {
         .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
+    let key = *component
+        .keyframe_animations
+        .keys()
+        .next()
+        .expect("active keyframe animation");
     component
         .keyframe_animations
-        .get_mut("root/0::pulse")
+        .get_mut(&key)
         .expect("active infinite keyframe animation")
         .started_at = Instant::now()
         .checked_sub(Duration::from_millis(200))

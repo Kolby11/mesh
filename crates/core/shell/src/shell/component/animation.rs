@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
 use crate::shell::component::{ComponentDirtyFlags, SurfaceCssProps};
 use mesh_core_animation::{
+    AnimationInstanceId, AnimationLifecycle,
     keyframes::{
         ActiveKeyframeAnimation, KeyframeRegistry, KeyframeRule as RenderKeyframeRule,
         KeyframeStop as RenderKeyframeStop,
@@ -131,6 +133,7 @@ impl FrontendSurfaceComponent {
         live_keyframe_keys.clear();
         let mut dirty_node_ids = std::mem::take(&mut self.animation_dirty_node_ids_scratch);
         dirty_node_ids.clear();
+        self.keyframe_animation_lifecycles.clear();
         let mut has_active_animation = false;
         let mut active_animation_bucket = AnimationPropertyBucket::None;
         let mut has_active_keyframe_animation = false;
@@ -155,13 +158,26 @@ impl FrontendSurfaceComponent {
         );
 
         self.transitions.retain_live(&live_keys, now);
+        // Any instance absent from this frame's declarations is cancelled.
+        // Replacement removes the prior slot occupant while the new instance
+        // is installed below; retaining by typed identity prevents a stale
+        // name-only entry from surviving a style update.
+        for (slot, instance_id) in &self.keyframe_animation_slots {
+            if !live_keyframe_keys.contains(instance_id) {
+                self.keyframe_animation_lifecycles
+                    .insert(*slot, AnimationLifecycle::Cancelled);
+            }
+        }
         self.keyframe_animations
             .retain(|key, _| live_keyframe_keys.contains(key));
         self.keyframe_rules
             .retain(|key, _| live_keyframe_keys.contains(key));
+        self.keyframe_animation_slots
+            .retain(|_, key| live_keyframe_keys.contains(key));
         if self.motion_policy.reduced_motion {
             self.keyframe_animations.clear();
             self.keyframe_rules.clear();
+            self.keyframe_animation_slots.clear();
         }
         self.has_active_keyframe_animation = has_active_keyframe_animation;
         self.animation_live_keys_scratch = live_keys;
@@ -197,7 +213,7 @@ impl FrontendSurfaceComponent {
         now: Instant,
         ancestor_entering: bool,
         live_keys: &mut HashSet<NodeId>,
-        live_keyframe_keys: &mut HashSet<String>,
+        live_keyframe_keys: &mut HashSet<AnimationInstanceId>,
         has_active_animation: &mut bool,
         active_animation_bucket: &mut AnimationPropertyBucket,
         has_active_keyframe_animation: &mut bool,
@@ -315,7 +331,7 @@ impl FrontendSurfaceComponent {
         resolver: &StyleResolver,
         theme: &Theme,
         now: Instant,
-        live_keyframe_keys: &mut HashSet<String>,
+        live_keyframe_keys: &mut HashSet<AnimationInstanceId>,
         has_active_keyframe_animation: &mut bool,
         active_keyframe_bucket: &mut AnimationPropertyBucket,
     ) {
@@ -332,15 +348,12 @@ impl FrontendSurfaceComponent {
             return;
         }
 
-        let Some(key) = node.mesh_key().map(str::to_owned) else {
+        let Some(_) = node.mesh_key() else {
             return;
         };
 
-        for animation_style in animations {
+        for (list_index, animation_style) in animations.into_iter().enumerate() {
             let animation_name = animation_style.name.clone().unwrap();
-
-            let animation_key = format!("{key}::{animation_name}");
-            live_keyframe_keys.insert(animation_key.clone());
 
             let stops = self
                 .find_component_keyframe_rule(&animation_name)
@@ -353,13 +366,39 @@ impl FrontendSurfaceComponent {
                 continue;
             };
 
+            let list_index = u32::try_from(list_index).unwrap_or(u32::MAX);
+            let declaration_generation =
+                Self::animation_declaration_generation(&animation_style, &stops);
+            let instance_id = AnimationInstanceId::new(node.id, list_index, declaration_generation);
+            live_keyframe_keys.insert(instance_id);
+
+            let animation_key = instance_id.registry_key(&animation_name);
+            let slot = (node.id, list_index);
+            let previous_id = self.keyframe_animation_slots.insert(slot, instance_id);
+            let lifecycle = match previous_id {
+                Some(previous_id) if previous_id == instance_id => AnimationLifecycle::Continued,
+                Some(previous_id) => {
+                    // A changed timing declaration or keyframe definition is a
+                    // replacement in the same slot. Never inherit the old
+                    // timeline under a new fingerprint.
+                    self.keyframe_animations.remove(&previous_id);
+                    self.keyframe_rules.remove(&previous_id);
+                    AnimationLifecycle::Replaced
+                }
+                None => AnimationLifecycle::Started,
+            };
+            self.keyframe_animation_lifecycles.insert(slot, lifecycle);
+
             let render_rule =
                 self.build_render_keyframe_rule(&animation_key, &stops, node, resolver);
             let keyframe_bucket = keyframe_rule_animation_bucket(&render_rule);
-            self.keyframe_rules
-                .insert(animation_key.clone(), render_rule.clone());
+            self.keyframe_rules.insert(instance_id, render_rule.clone());
 
-            let existing = self.keyframe_animations.get(&animation_key).cloned();
+            let existing = if lifecycle == AnimationLifecycle::Continued {
+                self.keyframe_animations.get(&instance_id).cloned()
+            } else {
+                None
+            };
             let mut active = existing.unwrap_or(ActiveKeyframeAnimation {
                 rule_name: animation_key.clone(),
                 started_at: now,
@@ -386,14 +425,18 @@ impl FrontendSurfaceComponent {
             active.direction = animation_style.direction;
             active.fill_mode = animation_style.fill_mode;
             active.set_play_state(animation_style.play_state, now);
-            self.keyframe_animations
-                .insert(animation_key.clone(), active.clone());
+            self.keyframe_animations.insert(instance_id, active.clone());
 
             let mut registry = KeyframeRegistry::new();
             registry.insert(render_rule);
             if let Some(current) = active.current(&registry, AnimatableStyle::from_node(node), now)
             {
                 current.apply_to_node(node);
+            }
+
+            if active.finished(now) {
+                self.keyframe_animation_lifecycles
+                    .insert(slot, AnimationLifecycle::Completed);
             }
 
             if !self.motion_policy.reduced_motion
@@ -405,6 +448,33 @@ impl FrontendSurfaceComponent {
                     merge_animation_bucket(*active_keyframe_bucket, keyframe_bucket);
             }
         } // end for animation_style in animations
+    }
+
+    fn animation_declaration_generation(
+        animation_style: &mesh_core_elements::style::AnimationStyle,
+        stops: &[component_style::KeyframeStop],
+    ) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        // Play state is a control operation on the same instance, not a new
+        // declaration. Keep it out of the fingerprint so pause/resume can
+        // preserve the timeline while timing, direction, and fill changes
+        // still replace the instance explicitly.
+        animation_style.name.hash(&mut hasher);
+        animation_style.duration_ms.hash(&mut hasher);
+        animation_style.delay_ms.hash(&mut hasher);
+        animation_style.easing.hash(&mut hasher);
+        animation_style.iteration_count.hash(&mut hasher);
+        animation_style.direction.hash(&mut hasher);
+        animation_style.fill_mode.hash(&mut hasher);
+        for stop in stops {
+            stop.offset.to_bits().hash(&mut hasher);
+            stop.easing.hash(&mut hasher);
+            for declaration in &stop.declarations {
+                declaration.property.hash(&mut hasher);
+                declaration.value.hash(&mut hasher);
+            }
+        }
+        hasher.finish()
     }
 
     fn find_component_keyframe_rule(&self, name: &str) -> Option<&component_style::KeyframeRule> {
