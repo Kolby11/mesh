@@ -18,12 +18,16 @@ use mesh_core_theme::Theme;
 
 use std::collections::BTreeMap;
 use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
+use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 pub use accessibility::root_accessibility_role;
 pub use compile::{
     CompileFrontendError, FrontendDiagnosticCategory, ImportCyclePath, compile_frontend_entrypoint,
-    compile_frontend_module, is_frontend_module, validate_component_import_props,
+    compile_frontend_entrypoint_revision, compile_frontend_module,
+    compile_frontend_module_revision, is_frontend_module, validate_component_import_props,
 };
 pub use render::{
     PreparedComponentStyleRules, build_embedded_widget_tree_from_component,
@@ -169,6 +173,79 @@ impl CompiledFrontendModule {
             mesh_core_component::normalized_public_prop_schema(self.component.props.as_ref())
         }
     }
+}
+
+/// An immutable, content-addressed compilation result.
+///
+/// The compiler still exposes [`CompiledFrontendModule`] for tree-building and
+/// compatibility with hand-built fixtures. Production catalog publication
+/// uses this wrapper so a compiled root can be shared across catalog snapshots
+/// without exposing a mutable compilation to readers. The revision changes
+/// whenever the normalized manifest or one of the watched source files
+/// changes.
+#[derive(Debug, Clone)]
+pub struct CompiledFrontendRevision {
+    revision: u64,
+    compiled: Arc<CompiledFrontendModule>,
+}
+
+impl CompiledFrontendRevision {
+    pub fn new(revision: u64, compiled: CompiledFrontendModule) -> Self {
+        Self {
+            revision,
+            compiled: Arc::new(compiled),
+        }
+    }
+
+    pub fn from_module(compiled: CompiledFrontendModule) -> Self {
+        let revision = compiled_revision(&compiled);
+        Self::new(revision, compiled)
+    }
+
+    pub const fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub fn as_module(&self) -> &CompiledFrontendModule {
+        &self.compiled
+    }
+
+    /// Copy-on-write access is retained for older fixture builders. Runtime
+    /// and catalog consumers only receive the shared immutable reference.
+    pub fn make_mut(&mut self) -> &mut CompiledFrontendModule {
+        Arc::make_mut(&mut self.compiled)
+    }
+}
+
+impl Deref for CompiledFrontendRevision {
+    type Target = CompiledFrontendModule;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_module()
+    }
+}
+
+impl DerefMut for CompiledFrontendRevision {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.make_mut()
+    }
+}
+
+fn compiled_revision(compiled: &CompiledFrontendModule) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    serde_json::to_vec(&compiled.manifest)
+        .expect("normalized module manifests serialize")
+        .hash(&mut hasher);
+    let mut paths = compiled.watched_paths.clone();
+    paths.sort();
+    for path in paths {
+        path.hash(&mut hasher);
+        match std::fs::read(&path) {
+            Ok(source) => source.hash(&mut hasher),
+            Err(error) => error.kind().hash(&mut hasher),
+        }
+    }
+    hasher.finish()
 }
 
 /// The resolved local component selected by an owner-scoped import binding.
@@ -654,6 +731,20 @@ mod tests {
                 .ends_with("src/components/advanced-page.mesh")
         );
         assert_eq!(compiled.watched_paths, vec![compiled.source_path.clone()]);
+    }
+
+    #[test]
+    fn compiled_frontend_revision_is_shared_and_content_addressed() {
+        let module_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../modules/frontend/settings");
+        let loaded = mesh_core_module::manifest::load_canonical_manifest(&module_dir)
+            .expect("settings manifest should load");
+        let revision = compile_frontend_module_revision(&loaded.manifest, &module_dir)
+            .expect("settings module should compile as an immutable revision");
+
+        assert_ne!(revision.revision(), 0);
+        assert_eq!(revision.as_module().manifest.package.id, "@mesh/settings");
+        assert!(std::ptr::eq(revision.as_module(), &*revision));
     }
 
     #[test]

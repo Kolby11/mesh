@@ -62,11 +62,11 @@ use surface_layout::{
 };
 pub use types::{
     ChildSurfaceDiagnostic, ComponentContext, ComponentError, ComponentInput, CoreEvent,
-    CoreRequest, FrontendFrame, FrontendFrameEffects, FrontendFrameError, FrontendFrameRevision,
-    FrontendFrameRevisions, FrontendInvalidation, FrontendPaintMetadata, FrontendServiceSnapshot,
-    KeyModifiers, PopoverSurfaceRelationship, PopoverTriggerReference, ServiceEvent,
-    ServiceInterfaceEventSubscription, ServiceObservationSummary, ShellComponent, SurfaceExtent,
-    SurfaceId, TabFocusTarget,
+    CoreRequest, FrontendEffectRevision, FrontendFrame, FrontendFrameEffects, FrontendFrameError,
+    FrontendFrameRevision, FrontendFrameRevisions, FrontendInvalidation, FrontendPaintMetadata,
+    FrontendServiceSnapshot, KeyModifiers, PopoverSurfaceRelationship, PopoverTriggerReference,
+    ServiceEvent, ServiceInterfaceEventSubscription, ServiceObservationSummary, ShellComponent,
+    SurfaceExtent, SurfaceId, TabFocusTarget,
 };
 use types::{
     CommandThrottleState, CompiledContractField, ComponentRuntime, ContractValidationCache,

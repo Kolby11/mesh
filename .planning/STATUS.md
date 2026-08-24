@@ -8,6 +8,11 @@ A revisioned `FrontendFrame` boundary now publishes immutable tree,
 catalog/runtime/service revisions, invalidation, diagnostics, paint metadata,
 and effects together after frontend paint.
 
+Compiled frontend roots now publish immutable content revisions, and the normal
+typed-effect adapter path rejects effects whose catalog/runtime revisions are
+missing or stale. Live script event dispatch supplies the current pair before
+lowering effects into shell requests.
+
 Typed diagnostic categories and byte source spans now survive component AST,
 frontend compiler, shell catalog/runtime, LSP, and debug serialization paths.
 Runtime interface and storage failures retain distinct categories, and
@@ -103,8 +108,7 @@ source of truth.
 
 ## Next
 
-Emit immutable compiled frontend revisions and authorize typed effects only when
-catalog/runtime revisions still match (`docs/BACKLOG.md`).
+Enforce one sandbox/resource policy for every Luau realm (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

@@ -1,8 +1,8 @@
 use super::types::CoreRequest;
 use mesh_core_capability::Capability;
 use mesh_core_frontend_abi::{
-    DebugEffect, EffectScope, EffectSource, FrontendEffect, ScopedFrontendEffect, ServiceEffect,
-    SurfaceEffect, SurfaceRole,
+    DebugEffect, EffectScope, EffectSource, FrontendEffect, FrontendEffectRevision,
+    ScopedFrontendEffect, ServiceEffect, SurfaceEffect, SurfaceRole,
 };
 use mesh_core_frontend_host::ShellEffectAdapter;
 use mesh_core_scripting::{OperationRegistry, OperationRejection, PublishedEvent, ScriptState};
@@ -177,7 +177,24 @@ pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<Core
         .collect()
 }
 
-fn lower_frontend_effect(event: &PublishedEvent, effect: FrontendEffect) -> CoreRequest {
+/// Route script effects through the current catalog/runtime revision. The
+/// unversioned helper above remains for standalone compatibility fixtures;
+/// live component dispatch uses this boundary.
+pub(super) fn script_events_to_requests_at(
+    events: Vec<PublishedEvent>,
+    revision: FrontendEffectRevision,
+) -> Vec<CoreRequest> {
+    events
+        .into_iter()
+        .filter_map(|event| script_event_to_request_at(event, Some(revision)))
+        .collect()
+}
+
+fn lower_frontend_effect(
+    event: &PublishedEvent,
+    effect: FrontendEffect,
+    revision: Option<FrontendEffectRevision>,
+) -> CoreRequest {
     let scope = EffectScope::new(
         EffectSource::new(
             event.source_module_id.clone(),
@@ -185,14 +202,24 @@ fn lower_frontend_effect(event: &PublishedEvent, effect: FrontendEffect) -> Core
         ),
         event.source_capabilities.clone(),
     );
-    ShellEffectAdapter::lower(ScopedFrontendEffect::new(scope, effect)).unwrap_or_else(|error| {
-        CoreRequest::PublishDiagnostics {
-            message: error.to_string(),
-        }
+    let effect = ScopedFrontendEffect::new(scope, effect);
+    let lowered = match revision {
+        Some(revision) => ShellEffectAdapter::lower_at(effect, revision),
+        None => ShellEffectAdapter::lower_unchecked(effect),
+    };
+    lowered.unwrap_or_else(|error| CoreRequest::PublishDiagnostics {
+        message: error.to_string(),
     })
 }
 
 fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
+    script_event_to_request_at(event, None)
+}
+
+fn script_event_to_request_at(
+    event: PublishedEvent,
+    revision: Option<FrontendEffectRevision>,
+) -> Option<CoreRequest> {
     if event.channel.starts_with("shell.")
         && let Err(rejection) = OperationRegistry::builtin().authorize_event(
             &event.channel,
@@ -241,6 +268,7 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                     call_id,
                     instance_id: event.source_instance_id.clone()?,
                 }),
+                revision,
             ))
         }
         "shell.show-surface" => event
@@ -253,6 +281,7 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                     FrontendEffect::Surface(SurfaceEffect::Show {
                         surface_id: id.to_string(),
                     }),
+                    revision,
                 )
             }),
         "shell.hide-surface" => event
@@ -265,6 +294,7 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                     FrontendEffect::Surface(SurfaceEffect::Hide {
                         surface_id: id.to_string(),
                     }),
+                    revision,
                 )
             }),
         "shell.hide-popover" => {
@@ -280,6 +310,7 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                     surface_id: surface_id.to_string(),
                     defer_for_hover_bridge,
                 }),
+                revision,
             ))
         }
         "shell.set-surface-role" => {
@@ -299,6 +330,7 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                     surface_id: surface_id.to_string(),
                     role,
                 }),
+                revision,
             ))
         }
         "shell.toggle-surface-role" => event
@@ -311,6 +343,7 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                     FrontendEffect::Surface(SurfaceEffect::ToggleRole {
                         surface_id: id.to_string(),
                     }),
+                    revision,
                 )
             }),
         "shell.promote-widget" | "shell.demote-widget" | "shell.set-widget-role" => {
@@ -336,6 +369,7 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                     node_key: node_key.to_string(),
                     role,
                 }),
+                revision,
             ))
         }
         "shell.toggle-surface" => event
@@ -348,6 +382,7 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                     FrontendEffect::Surface(SurfaceEffect::Toggle {
                         surface_id: id.to_string(),
                     }),
+                    revision,
                 )
             }),
         "shell.position-surface" => {
@@ -361,6 +396,7 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                     margin_top,
                     margin_left,
                 }),
+                revision,
             ))
         }
         "shell.activate-popover" => {
@@ -383,6 +419,7 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                     trigger_key: trigger_key.to_string(),
                     focus,
                 }),
+                revision,
             ))
         }
         // Emitted by the `mesh.locale.set` host API, which enforces
@@ -399,19 +436,23 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                     FrontendEffect::SetLocale {
                         locale: locale.to_string(),
                     },
+                    revision,
                 )
             }),
         "shell.toggle-debug-overlay" => Some(lower_frontend_effect(
             &event,
             FrontendEffect::Debug(DebugEffect::ToggleOverlay),
+            revision,
         )),
         "shell.toggle-debug-layout-bounds" => Some(lower_frontend_effect(
             &event,
             FrontendEffect::Debug(DebugEffect::ToggleLayoutBounds),
+            revision,
         )),
         "shell.toggle-debug-element-picker" => Some(lower_frontend_effect(
             &event,
             FrontendEffect::Debug(DebugEffect::ToggleElementPicker),
+            revision,
         )),
         "shell.open-debug-source" if event.source_module_id == "@mesh/debug-inspector" => {
             let path = event.payload.get("path").and_then(|value| value.as_str())?;
@@ -427,11 +468,13 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                     path: path.to_string(),
                     line,
                 }),
+                revision,
             ))
         }
         "shell.toggle-debug-profiling" => Some(lower_frontend_effect(
             &event,
             FrontendEffect::Debug(DebugEffect::ToggleProfiling),
+            revision,
         )),
         "shell.run-debug-benchmark" => {
             match event.payload.get("scenario_id").and_then(|v| v.as_str()) {
@@ -440,6 +483,7 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                     FrontendEffect::Debug(DebugEffect::RunBenchmark {
                         scenario_id: scenario_id.to_string(),
                     }),
+                    revision,
                 )),
                 _ => Some(CoreRequest::PublishDiagnostics {
                     message: "debug benchmark request missing scenario_id".to_string(),
@@ -473,6 +517,7 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                                 call_id,
                                 instance_id: source_instance_id,
                             }),
+                            revision,
                         )
                     } else {
                         lower_frontend_effect(
@@ -482,6 +527,7 @@ fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
                                 command: other[pos + 1..].to_string(),
                                 payload: event.payload.clone(),
                             }),
+                            revision,
                         )
                     }
                 } else {

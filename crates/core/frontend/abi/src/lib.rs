@@ -23,6 +23,29 @@ impl EffectSource {
     }
 }
 
+/// The catalog/runtime inputs against which one frontend effect was produced.
+/// Effects may only be lowered while the host is still at this exact pair of
+/// revisions; a later catalog or runtime publication makes the effect stale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FrontendEffectRevision {
+    catalog: u64,
+    runtime: u64,
+}
+
+impl FrontendEffectRevision {
+    pub const fn new(catalog: u64, runtime: u64) -> Self {
+        Self { catalog, runtime }
+    }
+
+    pub const fn catalog(&self) -> u64 {
+        self.catalog
+    }
+
+    pub const fn runtime(&self) -> u64 {
+        self.runtime
+    }
+}
+
 /// The immutable authority attached to all effects from one frontend caller.
 /// Capabilities are retained here rather than copied into individual effect
 /// variants, so adapters cannot accidentally authorize an unscoped payload.
@@ -30,6 +53,7 @@ impl EffectSource {
 pub struct EffectScope {
     source: EffectSource,
     capabilities: CapabilitySet,
+    revision: Option<FrontendEffectRevision>,
 }
 
 impl EffectScope {
@@ -37,7 +61,13 @@ impl EffectScope {
         Self {
             source,
             capabilities,
+            revision: None,
         }
+    }
+
+    pub fn with_revision(mut self, revision: FrontendEffectRevision) -> Self {
+        self.revision = Some(revision);
+        self
     }
 
     pub fn source(&self) -> &EffectSource {
@@ -46,6 +76,10 @@ impl EffectScope {
 
     pub fn capabilities(&self) -> &CapabilitySet {
         &self.capabilities
+    }
+
+    pub const fn revision(&self) -> Option<FrontendEffectRevision> {
+        self.revision
     }
 
     pub fn authorize(&self, effect: &FrontendEffect) -> Result<(), EffectRejection> {
@@ -81,6 +115,33 @@ impl ScopedFrontendEffect {
 
     pub fn authorize(&self) -> Result<(), EffectRejection> {
         self.scope.authorize(&self.effect)
+    }
+
+    pub fn with_revision(mut self, revision: FrontendEffectRevision) -> Self {
+        self.scope = self.scope.with_revision(revision);
+        self
+    }
+
+    pub const fn revision(&self) -> Option<FrontendEffectRevision> {
+        self.scope.revision()
+    }
+
+    pub fn authorize_at(&self, expected: FrontendEffectRevision) -> Result<(), EffectRejection> {
+        let Some(actual) = self.revision() else {
+            return Err(EffectRejection::MissingRevision {
+                effect: self.effect.kind().to_owned(),
+            });
+        };
+        if actual != expected {
+            return Err(EffectRejection::StaleRevision {
+                effect: self.effect.kind().to_owned(),
+                expected_catalog: expected.catalog(),
+                expected_runtime: expected.runtime(),
+                actual_catalog: actual.catalog(),
+                actual_runtime: actual.runtime(),
+            });
+        }
+        self.authorize()
     }
 }
 
@@ -269,6 +330,18 @@ pub enum EffectRejection {
         effect: String,
         required: Vec<String>,
     },
+    #[error("frontend effect '{effect}' has no catalog/runtime revision")]
+    MissingRevision { effect: String },
+    #[error(
+        "frontend effect '{effect}' is stale: expected catalog/runtime {expected_catalog}/{expected_runtime}, got {actual_catalog}/{actual_runtime}"
+    )]
+    StaleRevision {
+        effect: String,
+        expected_catalog: u64,
+        expected_runtime: u64,
+        actual_catalog: u64,
+        actual_runtime: u64,
+    },
 }
 
 fn service_name(interface: &str) -> String {
@@ -314,6 +387,35 @@ mod tests {
                 effect: "service-command".into(),
                 required: vec!["service.audio.control".into()],
             })
+        );
+    }
+
+    #[test]
+    fn revisioned_effects_reject_obsolete_catalog_or_runtime_inputs() {
+        let mut capabilities = CapabilitySet::new();
+        capabilities.grant(Capability::new("shell.surface"));
+        let effect = ScopedFrontendEffect::new(
+            EffectScope::new(EffectSource::new("@mesh/panel", None), capabilities)
+                .with_revision(FrontendEffectRevision::new(4, 9)),
+            FrontendEffect::Surface(SurfaceEffect::Show {
+                surface_id: "@mesh/panel".into(),
+            }),
+        );
+
+        assert_eq!(
+            effect.authorize_at(FrontendEffectRevision::new(5, 9)),
+            Err(EffectRejection::StaleRevision {
+                effect: "show-surface".into(),
+                expected_catalog: 5,
+                expected_runtime: 9,
+                actual_catalog: 4,
+                actual_runtime: 9,
+            })
+        );
+        assert!(
+            effect
+                .authorize_at(FrontendEffectRevision::new(4, 9))
+                .is_ok()
         );
     }
 }

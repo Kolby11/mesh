@@ -1,4 +1,4 @@
-use crate::CompiledFrontendModule;
+use crate::{CompiledFrontendModule, CompiledFrontendRevision};
 
 use mesh_core_component::{
     ComponentFile, ComponentImportTarget, ParseDiagnosticCategory, PropDef, PropType, PropValue,
@@ -186,6 +186,14 @@ pub fn compile_frontend_module(
     compile_frontend_entrypoint(manifest, module_dir, entrypoint)
 }
 
+/// Compile a frontend module and publish it as an immutable content revision.
+pub fn compile_frontend_module_revision(
+    manifest: &Manifest,
+    module_dir: &Path,
+) -> Result<CompiledFrontendRevision, CompileFrontendError> {
+    compile_frontend_module(manifest, module_dir).map(CompiledFrontendRevision::from_module)
+}
+
 /// Compile a declared frontend `.mesh` entrypoint using the owning module's
 /// manifest and import rules.  Besides a module's primary surface entrypoint,
 /// the shell uses this for optional module-owned UI such as `settings_ui`.
@@ -254,6 +262,17 @@ pub fn compile_frontend_entrypoint(
         module_component_imports,
         watched_paths,
     })
+}
+
+/// Compile a declared frontend root and publish it as an immutable content
+/// revision. Primary and contribution roots use the same compiler path.
+pub fn compile_frontend_entrypoint_revision(
+    manifest: &Manifest,
+    module_dir: &Path,
+    entrypoint: &str,
+) -> Result<CompiledFrontendRevision, CompileFrontendError> {
+    compile_frontend_entrypoint(manifest, module_dir, entrypoint)
+        .map(CompiledFrontendRevision::from_module)
 }
 
 #[derive(Debug, Clone)]

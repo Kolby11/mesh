@@ -18,7 +18,7 @@ use mesh_core_wayland::{KeyboardMode, ShellSurface, WindowStates};
 
 pub use mesh_core_frontend_abi::{
     DebugEffect, EffectRejection, EffectScope, EffectSource, FrontendEffect, FrontendEffectBatch,
-    ScopedFrontendEffect, ServiceEffect, SurfaceEffect, SurfaceRole,
+    FrontendEffectRevision, ScopedFrontendEffect, ServiceEffect, SurfaceEffect, SurfaceRole,
 };
 
 pub type SurfaceId = String;
@@ -57,6 +57,10 @@ impl FrontendFrameRevisions {
             tree,
             services,
         }
+    }
+
+    pub const fn effect_revision(&self) -> FrontendEffectRevision {
+        FrontendEffectRevision::new(self.catalog, self.runtime)
     }
 }
 
@@ -686,6 +690,34 @@ impl FrontendFrameEffects {
         self.typed_effects.extend(effects);
     }
 
+    /// Stamp typed effects with the catalog/runtime revision that produced the
+    /// frame. An already stamped effect must agree; silently retagging it would
+    /// turn an obsolete capability-bearing request into a current one.
+    pub fn bind_revision(
+        &mut self,
+        revision: FrontendEffectRevision,
+    ) -> Result<(), EffectRejection> {
+        for effect in &self.typed_effects {
+            if let Some(actual) = effect.revision()
+                && actual != revision
+            {
+                return Err(EffectRejection::StaleRevision {
+                    effect: effect.effect.kind().to_owned(),
+                    expected_catalog: revision.catalog(),
+                    expected_runtime: revision.runtime(),
+                    actual_catalog: actual.catalog(),
+                    actual_runtime: actual.runtime(),
+                });
+            }
+        }
+        self.typed_effects = self
+            .typed_effects
+            .drain(..)
+            .map(|effect| effect.with_revision(revision))
+            .collect();
+        Ok(())
+    }
+
     pub fn host_requests(&self) -> &[CoreRequest] {
         &self.host_requests
     }
@@ -716,12 +748,14 @@ pub struct FrontendFrame {
     paint: FrontendPaintMetadata,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum FrontendFrameError {
     #[error("frontend tree revision {actual} does not match frame tree revision {expected}")]
     TreeRevisionMismatch { expected: u64, actual: u64 },
     #[error("frontend service revision {actual} does not match frame service revision {expected}")]
     ServiceRevisionMismatch { expected: u64, actual: u64 },
+    #[error("frontend effect revision does not match frame revision: {message}")]
+    EffectRevisionMismatch { message: String },
 }
 
 impl FrontendFrame {
@@ -735,7 +769,7 @@ impl FrontendFrame {
         services: FrontendServiceSnapshot,
         invalidation: FrontendInvalidation,
         diagnostics: Vec<DiagnosticIssue>,
-        effects: FrontendFrameEffects,
+        mut effects: FrontendFrameEffects,
         child_surface_requests: Vec<ChildSurfaceRequest>,
         paint: FrontendPaintMetadata,
     ) -> Result<Self, FrontendFrameError> {
@@ -753,6 +787,11 @@ impl FrontendFrame {
                 actual: services.revision(),
             });
         }
+        effects
+            .bind_revision(revisions.effect_revision())
+            .map_err(|error| FrontendFrameError::EffectRevisionMismatch {
+                message: error.to_string(),
+            })?;
         Ok(Self {
             source,
             revisions,
@@ -867,7 +906,59 @@ pub enum ShellEffectError {
 
 impl ShellEffectAdapter {
     pub fn lower(effect: ScopedFrontendEffect) -> Result<CoreRequest, ShellEffectError> {
+        let revision = effect.revision().ok_or_else(|| {
+            ShellEffectError::Rejected(EffectRejection::MissingRevision {
+                effect: effect.effect.kind().to_owned(),
+            })
+        })?;
+        Self::lower_at(effect, revision)
+    }
+
+    /// Compatibility escape hatch for legacy event fixtures that are not tied
+    /// to a live frontend frame. Runtime/frontend publication must use
+    /// [`Self::lower_at`] or [`Self::lower_frame`].
+    pub fn lower_unchecked(effect: ScopedFrontendEffect) -> Result<CoreRequest, ShellEffectError> {
         effect.authorize()?;
+        Self::lower_authorized(effect)
+    }
+
+    /// Lower an effect only when it was produced against the current catalog
+    /// and runtime revisions. This is the required path for frame effects.
+    pub fn lower_at(
+        effect: ScopedFrontendEffect,
+        revision: FrontendEffectRevision,
+    ) -> Result<CoreRequest, ShellEffectError> {
+        effect.authorize_at(revision)?;
+        Self::lower_authorized(effect)
+    }
+
+    /// Lower all typed effects from a frame after checking the frame itself and
+    /// every effect against the adapter's current revisions.
+    pub fn lower_frame(
+        frame: &FrontendFrame,
+        revision: FrontendEffectRevision,
+    ) -> Result<Vec<CoreRequest>, ShellEffectError> {
+        let frame_revision =
+            FrontendEffectRevision::new(frame.catalog_revision(), frame.runtime_revision());
+        if frame_revision != revision {
+            return Err(ShellEffectError::Rejected(EffectRejection::StaleRevision {
+                effect: "frontend-frame".to_owned(),
+                expected_catalog: revision.catalog(),
+                expected_runtime: revision.runtime(),
+                actual_catalog: frame_revision.catalog(),
+                actual_runtime: frame_revision.runtime(),
+            }));
+        }
+        frame
+            .effects()
+            .typed_effects()
+            .iter()
+            .cloned()
+            .map(|effect| Self::lower_at(effect, revision))
+            .collect()
+    }
+
+    fn lower_authorized(effect: ScopedFrontendEffect) -> Result<CoreRequest, ShellEffectError> {
         let ScopedFrontendEffect { scope, effect } = effect;
         let source_module_id = scope.source().module_id.clone();
         let source_capabilities = scope.capabilities().clone();
@@ -1000,6 +1091,7 @@ mod effect_adapter_tests {
             EffectSource::new("@mesh/test", Some("instance".into())),
             capabilities,
         )
+        .with_revision(FrontendEffectRevision::new(4, 9))
     }
 
     #[test]
@@ -1008,7 +1100,8 @@ mod effect_adapter_tests {
             EffectScope::new(
                 EffectSource::new("@mesh/test", Some("instance".into())),
                 mesh_core_capability::CapabilitySet::new(),
-            ),
+            )
+            .with_revision(FrontendEffectRevision::new(4, 9)),
             FrontendEffect::Service(ServiceEffect::Command {
                 interface: "mesh.audio".into(),
                 command: "set_volume".into(),
@@ -1059,7 +1152,17 @@ mod effect_adapter_tests {
 #[cfg(test)]
 mod frontend_frame_tests {
     use super::*;
+    use mesh_core_capability::Capability;
     use mesh_core_elements::WidgetNode;
+
+    fn effect_scope(capability: &str) -> EffectScope {
+        let mut capabilities = mesh_core_capability::CapabilitySet::new();
+        capabilities.grant(Capability::new(capability));
+        EffectScope::new(
+            EffectSource::new("@mesh/test", Some("surface".into())),
+            capabilities,
+        )
+    }
 
     fn frame_tree(revision: u64) -> FrameSnapshot {
         let root = WidgetNode::new("box");
@@ -1147,6 +1250,41 @@ mod frontend_frame_tests {
                 actual: 4,
             }
         );
+    }
+
+    #[test]
+    fn shell_adapter_rejects_typed_effects_from_obsolete_frame_revisions() {
+        let frame = FrontendFrame::try_new(
+            EffectSource::new("@mesh/test", Some("surface".into())),
+            FrontendFrameRevisions::new(1, 4, 9, 0, 0),
+            None,
+            FrontendServiceSnapshot::new(0, ServiceObservationSummary::default()),
+            FrontendInvalidation::default(),
+            Vec::new(),
+            FrontendFrameEffects::from_typed_effects(FrontendEffectBatch::new(
+                effect_scope("shell.surface"),
+                vec![FrontendEffect::Surface(SurfaceEffect::Show {
+                    surface_id: "@mesh/test".into(),
+                })],
+            )),
+            Vec::new(),
+            FrontendPaintMetadata::default(),
+        )
+        .expect("frame effects should be bound to the frame revisions");
+
+        assert!(matches!(
+            ShellEffectAdapter::lower_frame(&frame, FrontendEffectRevision::new(5, 9)),
+            Err(ShellEffectError::Rejected(
+                EffectRejection::StaleRevision { .. }
+            ))
+        ));
+        assert!(matches!(
+            ShellEffectAdapter::lower_frame(
+                &frame,
+                FrontendEffectRevision::new(4, 9)
+            ),
+            Ok(requests) if matches!(requests.as_slice(), [CoreRequest::ShowSurface { .. }])
+        ));
     }
 }
 

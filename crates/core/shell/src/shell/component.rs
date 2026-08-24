@@ -1,15 +1,15 @@
 use super::service::{
     ServiceCapabilities, apply_service_update_with_name,
-    apply_service_update_with_name_and_fingerprint, script_events_to_requests,
+    apply_service_update_with_name_and_fingerprint, script_events_to_requests_at,
     seed_service_context, service_capabilities,
 };
 use super::surface_layout::{SurfaceLayoutSettings, resolve_frontend_module_settings_with_props};
 use super::types::{
     ChildSurfaceDiagnostic, ChildSurfaceKind, ChildSurfaceRequest, ComponentContext,
     ComponentError, ComponentInput, ComponentProfilingRecord, CoreEvent, CoreRequest,
-    FrontendFrame, FrontendFrameEffects, FrontendFrameRevisions, FrontendInvalidation,
-    FrontendPaintMetadata, FrontendServiceSnapshot, KeyModifiers, ServiceEvent, ShellComponent,
-    SurfaceExtent, TabFocusTarget,
+    FrontendEffectRevision, FrontendFrame, FrontendFrameEffects, FrontendFrameRevisions,
+    FrontendInvalidation, FrontendPaintMetadata, FrontendServiceSnapshot, KeyModifiers,
+    ServiceEvent, ShellComponent, SurfaceExtent, TabFocusTarget,
 };
 use mesh_core_config::SettingsStore;
 use mesh_core_interaction::{
@@ -1380,6 +1380,14 @@ impl FrontendSurfaceComponent {
         self.pending_frontend_effects
             .extend_host_requests(requests.iter().cloned());
         requests
+    }
+
+    pub(super) fn current_frontend_effect_revision(&self) -> FrontendEffectRevision {
+        let catalog = self.frontend_catalog_handle.snapshot();
+        FrontendEffectRevision::new(
+            catalog.version,
+            self.runtime_generations.borrow().revision(),
+        )
     }
 
     /// Publish all frontend outputs at one boundary. The mutable widget tree

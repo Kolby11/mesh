@@ -73,8 +73,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/10-frontend-compiler-and-host/improvements.md)
 
-- [ ] Emit immutable compiled frontend revisions and authorize typed effects only when catalog/runtime revisions still match.
-
 ### 11. Luau runtime and sandbox
 
 [Audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md)

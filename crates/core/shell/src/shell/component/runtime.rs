@@ -214,7 +214,7 @@ impl FrontendSurfaceComponent {
                 _ => shell_events.push(event),
             }
         }
-        script_events_to_requests(shell_events)
+        script_events_to_requests_at(shell_events, self.current_frontend_effect_revision())
     }
 
     pub(super) fn call_node_handler(

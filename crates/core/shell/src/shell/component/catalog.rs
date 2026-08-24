@@ -6,8 +6,8 @@ use std::sync::{Arc, RwLock};
 
 use mesh_core_diagnostics::{DiagnosticCategory, DiagnosticSourceSpan};
 use mesh_core_frontend::{
-    CompiledFrontendModule, FrontendDiagnosticCategory, compile_frontend_entrypoint,
-    compile_frontend_module,
+    CompiledFrontendModule, CompiledFrontendRevision, FrontendDiagnosticCategory,
+    compile_frontend_entrypoint, compile_frontend_module,
 };
 use mesh_core_module::Manifest;
 use mesh_core_module::ModuleType;
@@ -300,7 +300,7 @@ fn compile_contribution_entry_from_parts(
 /// retain the concise fixture setup used by component tests.
 #[derive(Debug, Clone)]
 pub(in crate::shell) struct SharedCompiledFrontendModule {
-    compiled: Arc<CompiledFrontendModule>,
+    compiled: CompiledFrontendRevision,
     /// Captured when the immutable compilation was created. A graph rebuild
     /// compares it with the current files before retaining this snapshot.
     source_fingerprint: Option<u64>,
@@ -310,7 +310,7 @@ impl From<CompiledFrontendModule> for SharedCompiledFrontendModule {
     fn from(compiled: CompiledFrontendModule) -> Self {
         let source_fingerprint = source_fingerprint(&compiled.watched_paths);
         Self {
-            compiled: Arc::new(compiled),
+            compiled: CompiledFrontendRevision::from_module(compiled),
             source_fingerprint,
         }
     }
@@ -320,13 +320,13 @@ impl Deref for SharedCompiledFrontendModule {
     type Target = CompiledFrontendModule;
 
     fn deref(&self) -> &Self::Target {
-        &self.compiled
+        self.compiled.as_module()
     }
 }
 
 impl DerefMut for SharedCompiledFrontendModule {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        Arc::make_mut(&mut self.compiled)
+        self.compiled.make_mut()
     }
 }
 
