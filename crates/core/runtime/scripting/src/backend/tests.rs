@@ -1526,7 +1526,10 @@ fn exec_missing_program_returns_failure_table() {
 
 #[test]
 fn exec_nonzero_exit_returns_failure_table() {
-    let mut ctx = BackendScriptContext::new_with_capabilities("@test/backend", ["exec.sh".into()]);
+    let mut ctx = BackendScriptContext::new_with_capabilities(
+        "@test/backend",
+        ["exec.sh".into(), "exec.shell".into()],
+    );
     ctx.load_script(
         "function start()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"sh\", {\"-c\", \"printf err >&2; exit 7\"})\nmesh.service.emit({ success = result.success, stdout = result.stdout, stderr = result.stderr, code = result.code })\nend",
     )

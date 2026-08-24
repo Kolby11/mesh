@@ -900,7 +900,7 @@ Privilege levels (fixed set, part of install UX):
 | ----- | ------- | -------- |
 | `standard` | Safe read access | `theme.read`, `service.audio.read`, `locale.read` |
 | `elevated` | Meaningful system interaction; confirm at install | `service.network.control`, `exec.launch-app`, `net.http` |
-| `high` | Powerful/sensitive; explicit opt-in with warning | `exec.command`, `shell.screenshot`, `dbus.system`, `automation.act` |
+| `high` | Powerful/sensitive; explicit opt-in with warning | `exec.command`, `exec.shell`, `shell.screenshot`, `dbus.system`, `automation.act` |
 
 Trust tiers: `core` (shipped, reviewed), `verified` (reviewed + signed),
 `community` (unreviewed, user accepts risk), `local` (developer path, no

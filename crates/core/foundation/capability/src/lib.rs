@@ -139,8 +139,8 @@ impl CapabilityCatalog {
             "exec.command" | "shell.screenshot" | "dbus.system" | "net.socket" | "locale.write"
             | "exec.aplay" | "exec.brightnessctl" | "exec.cat" | "exec.hostname"
             | "exec.hyprctl" | "exec.lspci" | "exec.nc" | "exec.pactl" | "exec.printenv"
-            | "exec.pw-mon" | "exec.socat" | "exec.sh" | "exec.uname" | "exec.upower"
-            | "exec.wpctl" => PrivilegeLevel::High,
+            | "exec.pw-mon" | "exec.socat" | "exec.sh" | "exec.shell" | "exec.uname"
+            | "exec.upower" | "exec.wpctl" => PrivilegeLevel::High,
             _ => return None,
         };
         Some(CapabilityDefinition {

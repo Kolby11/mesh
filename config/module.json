@@ -35,7 +35,7 @@
         "exec.hostname",
         "exec.uname"
       ],
-      "@mesh/hyprland-wm": ["exec.hyprctl", "exec.sh"],
+      "@mesh/hyprland-wm": ["exec.hyprctl", "exec.sh", "exec.shell"],
       "@mesh/language-popover": ["locale.read", "locale.write"],
       "@mesh/navigation-bar": [
         "locale.read",

@@ -77,7 +77,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md)
 
-- [ ] Move `mesh.exec` off the async backend loop and enforce cancellation, deadlines, executable policy, and output limits.
 - [ ] Replace basename executable grants with canonical path/argument capability policy.
 - [ ] Move default runtime storage to secure durable XDG state with permissions, quotas, atomic recovery, and revisioned writers.
 - [ ] Make backend command dispatch typed, correlated, transactional, coalescable, generation-aware, and bounded.

@@ -111,8 +111,8 @@ source of truth.
 
 ## Next
 
-Move `mesh.exec` off the async backend loop and enforce cancellation, deadlines,
-executable policy, and output limits (`docs/BACKLOG.md`).
+Replace basename executable grants with canonical path/argument capability policy
+(`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

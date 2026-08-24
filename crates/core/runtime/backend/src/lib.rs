@@ -269,6 +269,7 @@ impl BackendLifecycleGuard {
                 message: err.to_string(),
             });
         }
+        ctx.shutdown_exec();
         ctx.shutdown_streams().await;
         self.send_terminal();
     }

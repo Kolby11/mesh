@@ -9,7 +9,8 @@
     "uses": {
       "capabilities": [
         "exec.hyprctl",
-        "exec.sh"
+        "exec.sh",
+        "exec.shell"
       ],
       "optionalCapabilities": [
         "exec.socat",

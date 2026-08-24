@@ -1,5 +1,8 @@
 use super::command::{BackendCommandOutcome, command_error_result, command_result_from_lua};
-use super::exec::{exec_denied_to_lua, missing_exec_capability, run_exec};
+use super::exec::{
+    ExecService, exec_denied_to_lua, missing_exec_capability, missing_exec_stream_capability,
+    run_exec,
+};
 use super::exec_stream::{
     StreamEvent, StreamEventKind, StreamHandle, StreamState, StreamStatus, spawn_stream,
 };
@@ -42,6 +45,7 @@ pub struct BackendScriptContext {
     runtime: Arc<Mutex<BackendRuntime>>,
     builtin_globals: HashSet<String>,
     storage: Arc<Mutex<ScopedStorage>>,
+    exec: ExecService,
     streams: Arc<StreamState>,
     policy: RuntimePolicy,
     script_loaded: bool,
@@ -147,6 +151,7 @@ impl BackendScriptContext {
             runtime,
             builtin_globals: HashSet::new(),
             storage: Arc::new(Mutex::new(storage)),
+            exec: ExecService::new(policy.budget()),
             streams: StreamState::new_with_budget(policy.budget()),
             policy,
             script_loaded: false,
@@ -273,6 +278,12 @@ impl BackendScriptContext {
     /// synchronous abort fallback for cancellation and panic paths.
     pub async fn shutdown_streams(&self) {
         self.streams.shutdown().await;
+    }
+
+    /// Cancel and reap synchronous `mesh.exec` workers before the async
+    /// stream supervisor is torn down.
+    pub fn shutdown_exec(&self) {
+        self.exec.shutdown();
     }
 
     /// Shared subprocess-stream state. The backend service loop awaits on
@@ -768,11 +779,13 @@ impl BackendScriptContext {
         let capabilities = self.capabilities.clone();
         let module_id = self.module_id.clone();
         let resources = self.policy.budget();
+        let exec = self.exec.clone();
         mesh.set(
             "exec",
             self.ensure_lua().create_function(
                 move |lua, (program, args): (String, Vec<String>)| {
-                    if let Some(required) = missing_exec_capability(&capabilities, &program) {
+                    if let Some(required) = missing_exec_capability(&capabilities, &program, &args)
+                    {
                         tracing::warn!(
                             module_id = %module_id,
                             program = %program,
@@ -782,7 +795,7 @@ impl BackendScriptContext {
                         return exec_denied_to_lua(lua, &program, &required, &resources);
                     }
 
-                    run_exec(lua, &program, &args, &resources)
+                    run_exec(lua, &program, &args, &exec)
                 },
             )?,
         )?;
@@ -794,7 +807,8 @@ impl BackendScriptContext {
             "exec_stream",
             self.ensure_lua().create_function(
                 move |_lua, (program, args): (String, Vec<String>)| {
-                    if let Some(required) = missing_exec_capability(&capabilities, &program) {
+                    if let Some(required) = missing_exec_stream_capability(&capabilities, &program)
+                    {
                         tracing::warn!(
                             module_id = %module_id,
                             program = %program,
@@ -960,6 +974,7 @@ impl Drop for BackendScriptContext {
         // normal lifecycle guard calls call_stop() first; both operations are
         // intentionally idempotent.
         self.kill_streams();
+        self.shutdown_exec();
         self.flush_storage();
     }
 }
