@@ -4,10 +4,13 @@
 
 ## Now
 
-Provider interface event channels are subscription-only for consumers, while
-backend event publication is available through declared provider-owned
-`self.EventName:fire(...)` handles. Subscriber callback failures are isolated
-per callback, and host delivery continues through the same failure boundary.
+Each backend runtime generation now preserves one Lua `self` table together
+with its storage proxy and provider-owned event handles across lifecycle
+callbacks. Provider interface event channels remain subscription-only for
+consumers, while backend event publication is available through declared
+provider-owned `self.EventName:fire(...)` handles. Subscriber callback failures
+are isolated per callback, and host delivery continues through the same
+failure boundary.
 
 A revisioned `FrontendFrame` boundary now publishes immutable tree,
 catalog/runtime/service revisions, invalidation, diagnostics, paint metadata,
@@ -116,8 +119,8 @@ source of truth.
 
 ## Next
 
-Preserve one stable backend `self` and event/storage handles for each runtime
-generation (`docs/BACKLOG.md`).
+Publish validated initial provider state before atomically marking the provider
+ready (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

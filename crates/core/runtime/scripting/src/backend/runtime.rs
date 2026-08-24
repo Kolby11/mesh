@@ -49,6 +49,7 @@ pub struct BackendScriptContext {
     capabilities: HashSet<String>,
     pub(super) lua: Option<Lua>,
     script_environment: Option<Table>,
+    cached_self_table: Option<Table>,
     runtime: Arc<Mutex<BackendRuntime>>,
     builtin_globals: HashSet<String>,
     storage: Arc<Mutex<ScopedStorage>>,
@@ -172,6 +173,7 @@ impl BackendScriptContext {
             capabilities,
             lua: None,
             script_environment: None,
+            cached_self_table: None,
             runtime,
             builtin_globals: HashSet::new(),
             storage: Arc::new(Mutex::new(storage)),
@@ -1062,6 +1064,9 @@ impl BackendScriptContext {
     }
 
     fn current_self_table(&mut self) -> mlua::Result<mlua::Table> {
+        if let Some(table) = &self.cached_self_table {
+            return Ok(table.clone());
+        }
         let current_self = self.ensure_lua().create_table()?;
         let meta = self.ensure_lua().create_table()?;
         meta.set("module_id", self.module_id.as_str())?;
@@ -1114,6 +1119,7 @@ impl BackendScriptContext {
                 })?,
         )?;
         current_self.set_metatable(Some(self_events_meta))?;
+        self.cached_self_table = Some(current_self.clone());
         Ok(current_self)
     }
 }

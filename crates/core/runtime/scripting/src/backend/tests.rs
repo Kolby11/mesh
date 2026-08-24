@@ -130,6 +130,44 @@ fn start_receives_backend_self_storage() {
 }
 
 #[test]
+fn backend_lifecycle_reuses_self_storage_and_event_handles() {
+    let mut ctx = BackendScriptContext::new_with_storage_root(
+        "@test/stable-backend-self",
+        temp_storage_root("stable-self"),
+    );
+    ctx.load_script(
+        r#"
+state = { events = 0 }
+
+function start(self)
+    state.self_id = tostring(self)
+    state.storage_id = tostring(self.storage)
+    self.storage.value = "persisted"
+    self.Changed:on(function()
+        state.events = state.events + 1
+    end)
+end
+
+function on_poll(self)
+    state.same_self = state.self_id == tostring(self)
+    state.same_storage = state.storage_id == tostring(self.storage)
+    state.storage_value = self.storage.value
+    self.Changed:fire({})
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+    let payload = ctx.run_poll().unwrap().unwrap();
+
+    assert_eq!(payload["same_self"], serde_json::json!(true));
+    assert_eq!(payload["same_storage"], serde_json::json!(true));
+    assert_eq!(payload["storage_value"], serde_json::json!("persisted"));
+    assert_eq!(payload["events"], serde_json::json!(1));
+}
+
+#[test]
 fn backend_storage_flushes_on_stop_and_loads_before_start() {
     let root = temp_storage_root("backend-flush");
     let mut writer = BackendScriptContext::new_with_storage_root("@test/storage-lifecycle", &root);
