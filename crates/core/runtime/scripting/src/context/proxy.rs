@@ -388,6 +388,7 @@ pub(super) fn interface_event_channel(
                 Some(format!(
                     "capability denied for service event '{service_name}.{event_name}'"
                 )),
+                false,
             )?;
             service_table.raw_set(event_name, channel.clone())?;
             Ok(channel)
@@ -406,6 +407,7 @@ pub(super) fn create_event_channel(
         subscription_key,
         true,
         None,
+        true,
     )
 }
 
@@ -415,6 +417,7 @@ fn create_event_channel_with_policy(
     subscription_key: Option<(String, String)>,
     subscription_allowed: bool,
     denial_message: Option<String>,
+    publisher_allowed: bool,
 ) -> mlua::Result<Table> {
     let channel = lua.create_table()?;
     let subscribers = lua.create_table()?;
@@ -423,10 +426,14 @@ fn create_event_channel_with_policy(
         .as_ref()
         .map(|(service, event)| format!("{service}.{event}"))
         .unwrap_or_else(|| "unnamed".to_string());
+    // Rust host delivery uses this private-by-convention slot to reach the
+    // subscriber set without exposing a provider publication method. The
+    // interface channel deliberately has no `emit` or `fire` member.
     channel.set("__subscribers", subscribers.clone())?;
+    let subscribers_for_subscription = subscribers.clone();
     channel.set(
         "subscribe",
-        lua.create_function(move |lua, (table, callback): (Table, Function)| {
+        lua.create_function(move |lua, (_table, callback): (Table, Function)| {
             if !subscription_allowed {
                 return Err(mlua::Error::runtime(
                     denial_message
@@ -434,7 +441,7 @@ fn create_event_channel_with_policy(
                         .unwrap_or_else(|| "capability denied".to_string()),
                 ));
             }
-            let subscribers: Table = table.get("__subscribers")?;
+            let subscribers = subscribers_for_subscription.clone();
             let id = next_subscription_id.fetch_add(1, Ordering::Relaxed);
             subscribers.raw_set(id, callback)?;
             if let (Some(registry), Some((service_name, event_name))) =
@@ -475,15 +482,16 @@ fn create_event_channel_with_policy(
         })?,
     )?;
     channel.set("on", channel.get::<Function>("subscribe")?)?;
-    let event_name_for_emit = event_name.clone();
-    channel.set(
-        "emit",
-        lua.create_function(move |_lua, (table, payload): (Table, LuaValue)| {
-            let subscribers: Table = table.get("__subscribers")?;
-            dispatch_event_subscribers(&subscribers, payload, &event_name_for_emit)
-        })?,
-    )?;
-    channel.set("fire", channel.get::<Function>("emit")?)?;
+    if publisher_allowed {
+        let event_name_for_emit = event_name.clone();
+        channel.set(
+            "emit",
+            lua.create_function(move |_lua, (_table, payload): (Table, LuaValue)| {
+                dispatch_event_subscribers(&subscribers, payload, &event_name_for_emit)
+            })?,
+        )?;
+        channel.set("fire", channel.get::<Function>("emit")?)?;
+    }
     Ok(channel)
 }
 
@@ -491,7 +499,7 @@ fn create_event_channel_with_policy(
 /// again before invocation makes an unsubscribe during an earlier callback
 /// safe: removed subscribers are skipped, while newly added subscribers wait
 /// for the next emission. Every callback is attempted and reported separately.
-fn dispatch_event_subscribers(
+pub(super) fn dispatch_event_subscribers(
     subscribers: &Table,
     payload: LuaValue,
     event_name: &str,

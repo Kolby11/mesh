@@ -305,7 +305,7 @@ fn diagnose_backend_providers(
             };
             for (path, content) in scan_files_recursive(scan_root, "luau") {
                 let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
-                for event in extract_backend_emit_event_names(&content) {
+                for event in extract_backend_event_names(&content) {
                     if !events.contains(&event) {
                         diagnostics.push(ModuleGraphDiagnostic {
                             module_id: provider.module_id.clone(),

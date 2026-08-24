@@ -4,7 +4,7 @@ use mesh_core_capability::{Capability, CapabilitySet};
 use mesh_core_elements::VariableStore;
 
 #[test]
-fn interface_event_proxy_subscribes_and_emits() {
+fn interface_event_proxy_is_subscription_only() {
     let mut caps = CapabilitySet::new();
     caps.grant(Capability::new("service.audio.read"));
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
@@ -15,16 +15,23 @@ seen_level = 0
 
 function init()
     local audio = require("mesh.audio@>=1.0")
+    assert(audio.events.VolumeChanged.emit == nil)
+    assert(audio.events.VolumeChanged.fire == nil)
     audio.events.VolumeChanged:subscribe(function(event)
         seen_level = event.level
     end)
-    audio.events.VolumeChanged:emit({ level = 88 })
 end
 "#,
     )
     .unwrap();
 
     ctx.call_init().unwrap();
+    ctx.emit_interface_event(
+        "audio",
+        "VolumeChanged",
+        &serde_json::json!({ "level": 88 }),
+    )
+    .unwrap();
 
     assert_eq!(ctx.state.get("seen_level"), Some(serde_json::json!(88)));
 }

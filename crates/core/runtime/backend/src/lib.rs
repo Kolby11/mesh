@@ -1314,9 +1314,9 @@ mod tests {
             serde_json::json!({}),
             "state = { available = true, percent = 40 }\n\
              function start()\nmesh.service.set_poll_interval(1000)\nend\n\
-             function on_command_set_volume()\n\
+             function on_command_set_volume(self)\n\
                local payload = mesh.service.payload()\n\
-               mesh.service.emit_event(\"VolumeChanged\", { device_id = payload.device_id, level = payload.percent })\n\
+               self.VolumeChanged:fire({ device_id = payload.device_id, level = payload.percent })\n\
              end"
             .to_string(),
             update_tx,

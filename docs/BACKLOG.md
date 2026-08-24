@@ -77,7 +77,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md)
 
-- [ ] Restrict provider event publication to provider-owned handles and isolate subscriber callback failures.
 - [ ] Preserve one stable backend `self` and event/storage handles for each runtime generation.
 - [ ] Publish validated initial provider state before atomically marking the provider ready.
 - [ ] Compile and swap a fresh Luau environment on reload, preserving only explicit durable storage.

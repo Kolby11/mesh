@@ -39,6 +39,7 @@ use std::sync::{
 /// - `mesh.service.emit(table)` — emit service state
 /// - `mesh.service.emit_json(value?)` — parse JSON text or emit a Lua table directly
 /// - `mesh.service.emit_unavailable()` — emit unavailable state
+/// - `self.EventName:fire(payload)` — publish a declared provider event
 /// - `mesh.service.payload()` — get the current command payload as a Lua table
 /// - `mesh.service.has_capability(name)` — check whether the module was granted a capability
 /// - `mesh.service.can_exec(program, args)` — check the canonical executable policy
@@ -199,7 +200,7 @@ impl BackendScriptContext {
 
     /// Install the provider-owned event registry before the Lua host is
     /// initialized. It is immutable for the lifetime of this runtime
-    /// generation and is consulted by both `emit_event` and `self.Event:fire`.
+    /// generation and is consulted by provider-owned `self.Event:fire` handles.
     pub fn set_event_registry(&mut self, registry: BackendEventRegistry) {
         self.event_registry = Some(registry);
     }
@@ -832,45 +833,6 @@ impl BackendScriptContext {
                 }));
                 Ok(())
             })?,
-        )?;
-
-        let runtime = Arc::clone(&self.runtime);
-        let resources_for_event = resources.clone();
-        let event_registry = self.event_registry.clone();
-        let generation = self.generation;
-        service.set(
-            "emit_event",
-            self.ensure_lua().create_function(
-                move |lua, (name, payload): (String, Option<LuaValue>)| {
-                    let payload = match payload {
-                        Some(value) => lua.from_value::<JsonValue>(value)?,
-                        None => JsonValue::Object(serde_json::Map::new()),
-                    };
-                    if let Some(registry) = &event_registry {
-                        registry
-                            .validate_payload(&name, &payload)
-                            .map_err(mlua::Error::runtime)?;
-                    }
-                    let output_bytes = serde_json::to_vec(&serde_json::json!({
-                        "name": &name,
-                        "payload": &payload,
-                    }))
-                    .map_err(mlua::Error::external)?
-                    .len();
-                    reserve_side_effect(&resources_for_event, output_bytes)
-                        .map_err(mlua::Error::external)?;
-                    runtime
-                        .lock()
-                        .unwrap()
-                        .pending_events
-                        .push(BackendScriptEvent {
-                            name,
-                            payload,
-                            generation,
-                        });
-                    Ok(())
-                },
-            )?,
         )?;
 
         let runtime = Arc::clone(&self.runtime);

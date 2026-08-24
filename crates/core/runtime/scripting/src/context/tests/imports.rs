@@ -468,13 +468,18 @@ function init()
     local VolumeChanged = import("mesh.audio@>=1.0", "VolumeChanged")
     seen_level = 0
     VolumeChanged:on(function(event) seen_level = event.level end)
-    VolumeChanged:emit({ level = 71 })
 end
 "#,
     )
     .unwrap();
 
     ctx.call_init().unwrap();
+    ctx.emit_interface_event(
+        "audio",
+        "VolumeChanged",
+        &serde_json::json!({ "level": 71 }),
+    )
+    .unwrap();
 
     assert_eq!(ctx.state.get("seen_level"), Some(serde_json::json!(71)));
 }

@@ -104,10 +104,11 @@ pub(crate) fn extract_mesh_event_publish_channels(content: &str) -> Vec<String> 
     scan_mesh_source(content).static_calls.publish_channels
 }
 
-/// Interface events a backend `.luau` file emits with a static name. Backend
-/// entrypoints are plain Luau chunks, with no template half.
-pub(crate) fn extract_backend_emit_event_names(content: &str) -> Vec<String> {
-    luau_scan::static_call_string_arguments_in_chunk(content, "mesh.service.emit_event")
+/// Interface events a backend `.luau` file emits through a provider-owned
+/// `self.EventName:fire(...)` handle with a static name. Backend entrypoints are
+/// plain Luau chunks, with no template half.
+pub(crate) fn extract_backend_event_names(content: &str) -> Vec<String> {
+    luau_scan::static_self_event_names_in_chunk(content)
 }
 
 fn collect_luau_expressions_from_template_node<'a>(

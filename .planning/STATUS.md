@@ -4,6 +4,11 @@
 
 ## Now
 
+Provider interface event channels are subscription-only for consumers, while
+backend event publication is available through declared provider-owned
+`self.EventName:fire(...)` handles. Subscriber callback failures are isolated
+per callback, and host delivery continues through the same failure boundary.
+
 A revisioned `FrontendFrame` boundary now publishes immutable tree,
 catalog/runtime/service revisions, invalidation, diagnostics, paint metadata,
 and effects together after frontend paint.
@@ -111,8 +116,8 @@ source of truth.
 
 ## Next
 
-Restrict provider event publication to provider-owned handles and isolate
-subscriber callback failures (`docs/BACKLOG.md`).
+Preserve one stable backend `self` and event/storage handles for each runtime
+generation (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

@@ -1,4 +1,4 @@
-use crate::package::installed_graph::extract_backend_emit_event_names;
+use crate::package::installed_graph::extract_backend_event_names;
 use crate::package::installed_graph::extract_frontend_interface_event_subscriptions;
 use crate::package::installed_graph::extract_mesh_event_publish_channels;
 use crate::package::installed_graph::extract_t_keys_from_mesh_source;
@@ -119,14 +119,14 @@ mesh.events.publish(channel, {})
 }
 
 #[test]
-fn extract_backend_emit_event_names_finds_static_events() {
+fn extract_backend_event_names_finds_static_provider_handles() {
     let src = r#"
-function on_poll()
-    mesh.service.emit_event("VolumeChanged", { level = 67 })
-    mesh.service.emit_event('DeviceChanged', { id = "default" })
+function on_poll(self)
+    self.VolumeChanged:fire({ level = 67 })
+    self.DeviceChanged:fire({ id = "default" })
 end
 "#;
-    let names = extract_backend_emit_event_names(src);
+    let names = extract_backend_event_names(src);
     assert_eq!(names, vec!["DeviceChanged", "VolumeChanged"]);
 }
 

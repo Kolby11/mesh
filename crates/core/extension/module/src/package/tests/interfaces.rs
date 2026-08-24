@@ -339,7 +339,7 @@ fn graph_diagnostics_report_backend_undeclared_interface_event_emit() {
         backend_src.join("main.luau"),
         r#"
 function on_poll()
-    mesh.service.emit_event("MissingChanged", { value = 1 })
+    self.MissingChanged:fire({ value = 1 })
 end
 "#,
     )

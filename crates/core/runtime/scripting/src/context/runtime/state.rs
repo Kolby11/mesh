@@ -1,12 +1,11 @@
 use super::super::ScriptError;
 use super::super::element_ref::install_bound_element_proxies;
 use super::super::lookup::{lua_err, map_lua_error};
-use super::super::proxy::interface_event_channel;
+use super::super::proxy::{dispatch_event_subscribers, interface_event_channel};
 use super::*;
 use mesh_core_elements::VariableStore;
-#[cfg(test)]
 use mlua::Table;
-use mlua::{Function, LuaSerdeExt, Value as LuaValue};
+use mlua::{LuaSerdeExt, Value as LuaValue};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -129,10 +128,14 @@ impl ScriptContext {
         let scope = self.env().clone();
         let channel = interface_event_channel(self.lua(), &scope, service, event_name, None, true)
             .map_err(lua_err)?;
-        let emit = channel.get::<Function>("emit").map_err(lua_err)?;
+        let subscribers = channel.get::<Table>("__subscribers").map_err(lua_err)?;
         let lua_payload = self.lua().to_value(payload).map_err(lua_err)?;
-        emit.call::<()>((channel, lua_payload))
-            .map_err(map_lua_error)?;
+        dispatch_event_subscribers(
+            &subscribers,
+            lua_payload,
+            &format!("{service}.{event_name}"),
+        )
+        .map_err(map_lua_error)?;
         self.sync_state_from_lua();
         self.sync_side_channels();
         Ok(())

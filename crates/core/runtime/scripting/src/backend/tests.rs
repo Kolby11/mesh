@@ -396,11 +396,11 @@ fn emit_unavailable_stores_unavailable_payload() {
 }
 
 #[test]
-fn mesh_service_emit_event_buffers_typed_interface_event() {
+fn provider_self_event_handle_buffers_typed_interface_event() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.set_event_registry(audio_event_registry());
     ctx.load_script(
-        "function start()\nend\nfunction on_poll()\nmesh.service.emit_event(\"VolumeChanged\", { device_id = \"default\", level = 67 })\nend",
+        "function start()\nend\nfunction on_poll(self)\nself.VolumeChanged:fire({ device_id = \"default\", level = 67 })\nend",
     )
     .unwrap();
 
@@ -419,19 +419,29 @@ fn mesh_service_emit_event_buffers_typed_interface_event() {
 fn backend_event_boundary_rejects_unknown_and_malformed_events_before_queueing() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.set_event_registry(audio_event_registry());
-    ctx.load_script(
-        "function start()\nend\nfunction on_poll()\nmesh.service.emit_event(\"Unknown\", {})\nend",
-    )
-    .unwrap();
+    ctx.load_script("function start()\nend\nfunction on_poll(self)\nself.Unknown:fire({})\nend")
+        .unwrap();
     assert!(ctx.run_poll().is_err());
     assert!(ctx.drain_events().is_empty());
 
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.set_event_registry(audio_event_registry());
     ctx.load_script(
-        "function start()\nend\nfunction on_poll()\nmesh.service.emit_event(\"VolumeChanged\", { level = \"loud\", device_id = \"default\" })\nend",
+        "function start()\nend\nfunction on_poll(self)\nself.VolumeChanged:fire({ level = \"loud\", device_id = \"default\" })\nend",
     )
     .unwrap();
+    assert!(ctx.run_poll().is_err());
+    assert!(ctx.drain_events().is_empty());
+}
+
+#[test]
+fn string_based_provider_event_publication_is_not_exposed() {
+    let mut ctx = BackendScriptContext::new("@test/backend");
+    ctx.load_script(
+        "function start()\nend\nfunction on_poll()\nmesh.service.emit_event(\"Changed\", {})\nend",
+    )
+    .unwrap();
+
     assert!(ctx.run_poll().is_err());
     assert!(ctx.drain_events().is_empty());
 }

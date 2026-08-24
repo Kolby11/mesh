@@ -2,7 +2,8 @@
 //!
 //! Graph scanning cross-checks module scripts against module declarations:
 //! translation keys against the default catalog, published channels against the
-//! shell-owned event namespace, backend events against the interface contract.
+//! shell-owned event namespace, backend provider handles against the interface
+//! contract.
 //! Everything goes through a real Luau parser, so a call is a call and a string
 //! is a string — never a substring match over comments or `<style>` blocks.
 //!
@@ -33,8 +34,8 @@ pub(crate) struct LuauSources<'a> {
 /// to it across `sources`. Results are sorted and deduplicated, positionally
 /// matching `callees`.
 ///
-/// A callee is the dotted path as written at the call site — `t`,
-/// `mesh.events.publish`, `mesh.service.emit_event`. Only a plain name followed
+/// A callee is the dotted path as written at the call site — `t` or
+/// `mesh.events.publish`. Only a plain name followed
 /// by `.` field accesses matches; a call reached through a local alias or a
 /// bracket index is not statically resolvable and is skipped.
 ///
@@ -79,6 +80,21 @@ pub(crate) fn static_call_string_arguments_in_chunk(chunk: &str, callee: &str) -
         .unwrap_or_default()
 }
 
+/// Find statically named provider events published through the provider-owned
+/// `self.EventName:fire(...)` handle.
+pub(crate) fn static_self_event_names_in_chunk(chunk: &str) -> Vec<String> {
+    on_parser_stack(|| {
+        let Ok(ast) = full_moon::parse(chunk) else {
+            return Vec::new();
+        };
+        let mut collector = SelfEventNames::default();
+        collector.visit_ast(&ast);
+        collector.names.sort();
+        collector.names.dedup();
+        collector.names
+    })
+}
+
 fn collect_from_chunk(chunk: &str, callees: &[&str], found: &mut [Vec<String>]) {
     let Ok(ast) = full_moon::parse(chunk) else {
         return;
@@ -107,6 +123,36 @@ fn on_parser_stack<T: Send>(work: impl FnOnce() -> T + Send) -> T {
 struct StaticCallArguments<'a, 'f> {
     callees: &'a [&'a str],
     found: &'f mut [Vec<String>],
+}
+
+#[derive(Default)]
+struct SelfEventNames {
+    names: Vec<String>,
+}
+
+impl Visitor for SelfEventNames {
+    fn visit_function_call(&mut self, call: &FunctionCall) {
+        let Prefix::Name(name) = call.prefix() else {
+            return;
+        };
+        if identifier_name(name).as_deref() != Some("self") {
+            return;
+        }
+        let mut suffixes = call.suffixes();
+        let Some(Suffix::Index(Index::Dot { name, .. })) = suffixes.next() else {
+            return;
+        };
+        let Some(event_name) = identifier_name(name) else {
+            return;
+        };
+        let Some(Suffix::Call(Call::MethodCall(method))) = suffixes.next() else {
+            return;
+        };
+        if identifier_name(method.name()).as_deref() != Some("fire") || suffixes.next().is_some() {
+            return;
+        }
+        self.names.push(event_name);
+    }
 }
 
 impl Visitor for StaticCallArguments<'_, '_> {
