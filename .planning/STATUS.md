@@ -89,8 +89,8 @@ source of truth.
 
 ## Next
 
-Publish runtime props transactionally so Rust and Luau cannot diverge after a
-failed update (`docs/BACKLOG.md`).
+Preserve typed diagnostic categories and source spans through AST, compiler,
+shell, LSP, and debug paths (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

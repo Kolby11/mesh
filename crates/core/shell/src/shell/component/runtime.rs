@@ -1,5 +1,6 @@
 use super::diagnostics::record_localized_miss as record_localized_miss_diagnostic;
 use super::*;
+use mesh_core_scripting::ScriptError;
 
 fn scheduled_handler_target(instance_key: &str, handler: &str) -> HandlerTarget {
     HandlerTarget::embedded(instance_key, handler)
@@ -25,7 +26,7 @@ fn apply_runtime_props(
     runtime: &mut EmbeddedFrontendRuntime,
     props: &HashMap<String, serde_json::Value>,
     skip_unchanged: bool,
-) {
+) -> Result<(), ScriptError> {
     for (key, value) in props {
         let result = if skip_unchanged {
             runtime
@@ -42,12 +43,10 @@ fn apply_runtime_props(
                 error = %err,
                 "failed to apply embedded component prop to script member"
             );
-            runtime
-                .script_ctx
-                .state_mut()
-                .set(key.clone(), value.clone());
+            return Err(err);
         }
     }
+    Ok(())
 }
 
 impl FrontendSurfaceComponent {
@@ -559,7 +558,11 @@ impl FrontendSurfaceComponent {
             props,
             settings_json,
             instance_key,
-        );
+        )
+        .map_err(|source| ComponentError::Script {
+            component_id: component_id.clone(),
+            source,
+        })?;
         for (service_name, payload) in &self.cached_service_payloads {
             let interface = format!("mesh.{service_name}");
             if script_has_service_read(&script_ctx, &interface, service_name) {
@@ -675,7 +678,12 @@ impl FrontendSurfaceComponent {
         let existing_generation = {
             let mut runtimes = self.runtimes.lock().unwrap();
             if let Some(runtime) = runtimes.get_mut(instance_key) {
-                apply_runtime_props(runtime, props, true);
+                apply_runtime_props(runtime, props, true).map_err(|source| {
+                    ComponentError::Script {
+                        component_id: runtime.module_id.clone(),
+                        source,
+                    }
+                })?;
                 Some(runtime.script_ctx.state().mutation_generation())
             } else {
                 None
@@ -688,7 +696,12 @@ impl FrontendSurfaceComponent {
 
         let mut runtime = self.create_runtime(instance_key, compiled, props)?;
         Self::call_runtime_render_hook(&self.diagnostics, &mut runtime);
-        apply_runtime_props(&mut runtime, props, false);
+        apply_runtime_props(&mut runtime, props, false).map_err(|source| {
+            ComponentError::Script {
+                component_id: runtime.module_id.clone(),
+                source,
+            }
+        })?;
         let generation = runtime.script_ctx.state().mutation_generation();
         self.runtimes.lock().unwrap().insert(
             self.instance_keys.borrow_mut().intern(instance_key),
@@ -718,7 +731,12 @@ impl FrontendSurfaceComponent {
         let existing_generation = {
             let mut runtimes = self.runtimes.lock().unwrap();
             if let Some(runtime) = runtimes.get_mut(instance_key) {
-                apply_runtime_props(runtime, props, true);
+                apply_runtime_props(runtime, props, true).map_err(|source| {
+                    ComponentError::Script {
+                        component_id: runtime.module_id.clone(),
+                        source,
+                    }
+                })?;
                 Some(runtime.script_ctx.state().mutation_generation())
             } else {
                 None
@@ -737,7 +755,12 @@ impl FrontendSurfaceComponent {
             props,
         )?;
         Self::call_runtime_render_hook(&self.diagnostics, &mut runtime);
-        apply_runtime_props(&mut runtime, props, false);
+        apply_runtime_props(&mut runtime, props, false).map_err(|source| {
+            ComponentError::Script {
+                component_id: runtime.module_id.clone(),
+                source,
+            }
+        })?;
         let generation = runtime.script_ctx.state().mutation_generation();
         self.runtimes.lock().unwrap().insert(
             self.instance_keys.borrow_mut().intern(instance_key),
@@ -1582,12 +1605,10 @@ pub(super) fn publish_resolved_props(
     instance_props: &HashMap<String, serde_json::Value>,
     settings_json: &serde_json::Value,
     instance_key: &str,
-) -> serde_json::Value {
+) -> Result<serde_json::Value, ScriptError> {
     let value = resolved_props_json(component, instance_props, settings_json, instance_key);
-    if let Err(err) = script_ctx.set_member_state("props", value.clone()) {
-        tracing::warn!("failed to publish component props: {err}");
-    }
-    value
+    script_ctx.set_member_state("props", value.clone())?;
+    Ok(value)
 }
 
 pub(super) fn resolved_props_json(

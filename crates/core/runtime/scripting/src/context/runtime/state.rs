@@ -4,6 +4,8 @@ use super::super::lookup::{lua_err, map_lua_error};
 use super::super::proxy::interface_event_channel;
 use super::*;
 use mesh_core_elements::VariableStore;
+#[cfg(test)]
+use mlua::Table;
 use mlua::{Function, LuaSerdeExt, Value as LuaValue};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -137,6 +139,10 @@ impl ScriptContext {
     /// participates in reactive synchronization — for pushing a value into a
     /// member the component declared, such as syncing a portal `hidden={...}`
     /// binding after the shell showed the surface itself.
+    ///
+    /// The Luau environment is updated before the Rust snapshot. If the Luau
+    /// write fails, the Rust snapshot is left untouched, so callers can return
+    /// the error without exposing a value to only one side of the runtime.
     pub fn set_member_state(&mut self, name: &str, value: Value) -> Result<(), ScriptError> {
         self.ensure_initialized()?;
         let lua_value = self.lua().to_value(&value).map_err(lua_err)?;
@@ -299,5 +305,85 @@ impl ScriptContext {
             .collect::<Vec<_>>();
         names.sort();
         names
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mesh_core_capability::CapabilitySet;
+
+    #[test]
+    fn failed_member_state_write_preserves_luau_and_rust_snapshots() {
+        let mut context = ScriptContext::new("@mesh/transactional-props", CapabilitySet::new())
+            .expect("script context");
+        context
+            .ensure_initialized()
+            .expect("initialize script context");
+
+        let old_value = serde_json::json!("old");
+        let old_lua_value = context
+            .lua()
+            .to_value(&old_value)
+            .expect("convert old value");
+        context
+            .reactive_scalar_globals
+            .as_ref()
+            .expect("reactive globals")
+            .raw_set("label", old_lua_value)
+            .expect("seed reactive value");
+        context.state.set("label", old_value.clone());
+
+        let metatable = context.lua().create_table().expect("environment metatable");
+        let reactive_scalar_reads = context
+            .reactive_scalar_globals
+            .as_ref()
+            .expect("reactive globals")
+            .clone();
+        metatable
+            .set(
+                "__index",
+                context
+                    .lua()
+                    .create_function(move |_, (_, key): (Table, String)| {
+                        reactive_scalar_reads.raw_get::<LuaValue>(key)
+                    })
+                    .expect("reactive read function"),
+            )
+            .expect("install reactive read");
+        context
+            .env()
+            .set_metatable(Some(metatable.clone()))
+            .expect("set environment metatable");
+        let blocked_write = context
+            .lua()
+            .create_function(|_, _: (Table, String, LuaValue)| -> mlua::Result<()> {
+                Err(mlua::Error::RuntimeError(
+                    "blocked member write".to_string(),
+                ))
+            })
+            .expect("blocked write function");
+        metatable
+            .set("__newindex", blocked_write)
+            .expect("install blocked write");
+
+        assert!(
+            context
+                .set_member_state("label", serde_json::json!("new"))
+                .is_err()
+        );
+        assert_eq!(context.state.get("label"), Some(old_value.clone()));
+
+        let luau_value = context
+            .env()
+            .get::<LuaValue>("label")
+            .expect("read Luau member");
+        assert_eq!(
+            context
+                .lua()
+                .from_value::<Value>(luau_value)
+                .expect("decode Luau member"),
+            old_value
+        );
     }
 }
