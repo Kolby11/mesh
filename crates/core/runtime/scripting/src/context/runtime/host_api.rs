@@ -135,20 +135,13 @@ impl ScriptContext {
         has_locale_write: bool,
     ) -> Result<(), ScriptError> {
         if has_locale_read {
-            let service_context_state = Arc::clone(&self.service_context_state);
+            let locale_cell = Arc::clone(&self.locale_cell);
             mesh_locale
                 .set(
                     "current",
                     self.lua()
                         .create_function(move |_lua, ()| {
-                            let locale = {
-                                let state = service_context_state.lock().unwrap();
-                                state
-                                    .field("locale", "locale")
-                                    .or_else(|| state.field("locale", "current"))
-                            }
-                            .and_then(|value| value.as_str().map(str::to_owned));
-                            Ok(locale.unwrap_or_else(|| "en".to_string()))
+                            Ok(locale_cell.lock().unwrap().locale.clone())
                         })
                         .map_err(lua_err)?,
                 )
@@ -433,9 +426,7 @@ impl ScriptContext {
         let diagnostics_for_require = Arc::clone(&self.shared_diagnostics);
         let pending_diagnostics_for_require = Arc::clone(&self.pending_side_channels);
         let optional_interfaces_for_require = Arc::clone(&self.optional_interfaces);
-        let i18n_translations = Arc::clone(&self.i18n_translations);
-        let i18n_locale = Arc::clone(&self.i18n_locale);
-        let i18n_snapshot_revision = Arc::clone(&self.i18n_snapshot_revision);
+        let locale_cell = Arc::clone(&self.locale_cell);
         let localized_misses = Arc::clone(&self.localized_misses);
         let i18n_owner_module_id = self.module_id.clone();
         // The per-instance _ENV is the channel-registry scope so interface event
@@ -459,9 +450,7 @@ impl ScriptContext {
                     }
                     return create_i18n_library(
                         lua,
-                        Arc::clone(&i18n_translations),
-                        Arc::clone(&i18n_locale),
-                        Arc::clone(&i18n_snapshot_revision),
+                        Arc::clone(&locale_cell),
                         i18n_owner_module_id.clone(),
                         Arc::clone(&localized_misses),
                     )

@@ -21,6 +21,27 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+/// The immutable-at-read boundary shared by `mesh.locale.current()` and the
+/// module-scoped `mesh.i18n` library. The shell replaces this cell with one
+/// translation snapshot so a script cannot observe a new locale alongside an
+/// older catalog (or the reverse) between host calls.
+#[derive(Debug, Clone)]
+pub(super) struct LocaleCell {
+    pub(super) locale: String,
+    pub(super) translations: HashMap<String, CatalogEntry>,
+    pub(super) snapshot_revision: u64,
+}
+
+impl Default for LocaleCell {
+    fn default() -> Self {
+        Self {
+            locale: "en".into(),
+            translations: HashMap::new(),
+            snapshot_revision: 0,
+        }
+    }
+}
+
 /// A script execution context for one component instance.
 ///
 /// Scripts run as-written, with no source preprocessing. Reactive state follows
@@ -101,13 +122,9 @@ pub struct ScriptContext {
     /// context. The shell writes completions through the owning component;
     /// Luau ticket handles read this store without crossing the VM boundary.
     pub(super) service_call_completions: Arc<Mutex<HashMap<u64, ServiceCallCompletion>>>,
-    /// The module-scoped catalog currently visible to `mesh.i18n.t()`.
-    /// The shell replaces this snapshot when its locale changes.
-    pub(super) i18n_translations: Arc<Mutex<HashMap<String, CatalogEntry>>>,
-    pub(super) i18n_locale: Arc<Mutex<String>>,
-    /// Revision associated with `i18n_translations`; retained so a runtime
-    /// miss can be diagnosed against the exact catalog snapshot it observed.
-    pub(super) i18n_snapshot_revision: Arc<Mutex<u64>>,
+    /// The module-scoped locale and catalog snapshot currently visible to
+    /// `mesh.locale.current()` and `mesh.i18n.t()`.
+    pub(super) locale_cell: Arc<Mutex<LocaleCell>>,
     /// Structured missing-key observations from Luau and template consumers.
     /// The shell drains these into stable per-key diagnostics.
     pub(super) localized_misses: Arc<Mutex<Vec<LocalizedTextResolution>>>,
@@ -327,9 +344,7 @@ impl ScriptContext {
             cached_self_table: None,
             service_context_state: Arc::new(Mutex::new(ServiceContextState::default())),
             service_call_completions: Arc::new(Mutex::new(HashMap::new())),
-            i18n_translations: Arc::new(Mutex::new(HashMap::new())),
-            i18n_locale: Arc::new(Mutex::new("en".into())),
-            i18n_snapshot_revision: Arc::new(Mutex::new(0)),
+            locale_cell: Arc::new(Mutex::new(LocaleCell::default())),
             localized_misses: Arc::new(Mutex::new(Vec::new())),
         })
     }
@@ -342,23 +357,26 @@ impl ScriptContext {
         self.optional_interfaces = Arc::new(interfaces);
     }
 
-    /// Replace the catalog behind `mesh.i18n.t()`. Existing Luau handles share
-    /// the map, so a locale switch takes effect immediately.
+    /// Replace the compatibility catalog behind `mesh.i18n.t()`. Existing
+    /// Luau handles share the cell, so a locale switch takes effect immediately.
     pub fn set_i18n_translations(&mut self, translations: HashMap<String, String>) {
-        *self.i18n_translations.lock().unwrap() = translations
+        let mut cell = self.locale_cell.lock().unwrap();
+        cell.translations = translations
             .into_iter()
             .map(|(key, value)| (key, CatalogEntry::Text(value)))
             .collect();
-        *self.i18n_locale.lock().unwrap() = "en".into();
-        *self.i18n_snapshot_revision.lock().unwrap() = 0;
+        cell.locale = "en".into();
+        cell.snapshot_revision = 0;
     }
 
     /// Replace the catalog behind `mesh.i18n.t()` with the owning module's
     /// scoped translator snapshot.
     pub fn set_i18n_translator(&mut self, translator: &ModuleTranslator<'_>) {
-        *self.i18n_translations.lock().unwrap() = translator.entries();
-        *self.i18n_locale.lock().unwrap() = translator.locale().to_string();
-        *self.i18n_snapshot_revision.lock().unwrap() = translator.snapshot_revision();
+        *self.locale_cell.lock().unwrap() = LocaleCell {
+            locale: translator.locale().to_string(),
+            translations: translator.entries(),
+            snapshot_revision: translator.snapshot_revision(),
+        };
     }
 
     /// Shared sink used by template evaluation while the Rust state snapshot
@@ -451,6 +469,7 @@ impl ScriptContext {
         self.cached_self_table = None;
         self.service_context_state.lock().unwrap().clear();
         self.service_call_completions.lock().unwrap().clear();
+        *self.locale_cell.lock().unwrap() = LocaleCell::default();
         self.localized_misses.lock().unwrap().clear();
         if let Some(env) = self.env_table.take() {
             // One realm per thread, so sever the _ENV graph explicitly to make

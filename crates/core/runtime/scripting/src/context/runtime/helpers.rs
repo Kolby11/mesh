@@ -1,6 +1,7 @@
 use super::super::lookup::lua_value_to_string;
 use super::super::proxy::create_event_channel;
-use mesh_core_locale::{CatalogEntry, LocalizedTextResolution};
+use super::LocaleCell;
+use mesh_core_locale::LocalizedTextResolution;
 use mlua::{Function, Lua, MultiValue, Table, Value as LuaValue, Variadic};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -125,9 +126,7 @@ pub(super) fn parent_subscription_channel(
 
 pub(super) fn create_i18n_library(
     lua: &Lua,
-    translations: Arc<Mutex<HashMap<String, CatalogEntry>>>,
-    locale: Arc<Mutex<String>>,
-    snapshot_revision: Arc<Mutex<u64>>,
+    locale_cell: Arc<Mutex<LocaleCell>>,
     owner_module_id: String,
     localized_misses: Arc<Mutex<Vec<LocalizedTextResolution>>>,
 ) -> mlua::Result<Table> {
@@ -146,22 +145,25 @@ pub(super) fn create_i18n_library(
                     args.insert(name, lua_value_to_string(value));
                 }
             }
-            let locale = locale.lock().unwrap().clone();
-            let translated = translations
-                .lock()
-                .unwrap()
-                .get(&key)
-                .and_then(|entry| entry.render(&locale, &args))
-                .unwrap_or_else(|| {
-                    let resolution = LocalizedTextResolution::missing(
-                        owner_module_id.clone(),
-                        key.clone(),
-                        None,
-                        *snapshot_revision.lock().unwrap(),
-                    );
-                    localized_misses.lock().unwrap().push(resolution.clone());
-                    resolution.text
-                });
+            let (translated, snapshot_revision) = {
+                let cell = locale_cell.lock().unwrap();
+                (
+                    cell.translations
+                        .get(&key)
+                        .and_then(|entry| entry.render(&cell.locale, &args)),
+                    cell.snapshot_revision,
+                )
+            };
+            let translated = translated.unwrap_or_else(|| {
+                let resolution = LocalizedTextResolution::missing(
+                    owner_module_id.clone(),
+                    key.clone(),
+                    None,
+                    snapshot_revision,
+                );
+                localized_misses.lock().unwrap().push(resolution.clone());
+                resolution.text
+            });
             Ok(translated)
         })?,
     )?;

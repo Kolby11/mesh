@@ -2,6 +2,7 @@ use super::super::*;
 use super::common::*;
 use mesh_core_capability::{Capability, CapabilitySet};
 use mesh_core_elements::VariableStore;
+use mesh_core_locale::{LocaleEngine, TranslationSet};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -110,26 +111,66 @@ end
 }
 
 #[test]
-fn locale_current_reads_the_rust_owned_service_snapshot() {
+fn locale_current_reads_the_host_owned_translation_snapshot() {
     let mut caps = CapabilitySet::new();
     caps.grant(Capability::new("locale.read"));
     let mut ctx = ScriptContext::new("@mesh/locale-test", caps).unwrap();
+    let mut locale = LocaleEngine::with_fallback_locale("sk-SK", "en");
+    locale.load_module_translations(
+        "@mesh/locale-test",
+        TranslationSet {
+            locale: "en".into(),
+            messages: HashMap::from([(String::from("fallback"), String::from("Fallback"))]),
+        },
+    );
+    locale.load_module_translations(
+        "@mesh/locale-test",
+        TranslationSet {
+            locale: "sk-SK".into(),
+            messages: HashMap::from([(String::from("greeting"), String::from("Ahoj"))]),
+        },
+    );
+    let translator = locale.module_translator("@mesh/locale-test");
+    let snapshot_revision = translator.snapshot_revision();
+    ctx.set_i18n_translator(&translator);
     ctx.load_script(
         r#"
 current_locale = ""
+greeting = ""
+fallback = ""
+missing = ""
 function read_locale()
+    local i18n = require("mesh.i18n")
     current_locale = mesh.locale.current()
+    greeting = i18n.t("greeting")
+    fallback = i18n.t("fallback")
+    missing = i18n.t("missing")
 end
 "#,
     )
     .unwrap();
 
-    ctx.apply_service_payload("locale", &serde_json::json!({ "current": "sk-SK" }));
+    // The service payload is a projection for ordinary service consumers; it
+    // must not be able to replace the locale/catalog snapshot used by host
+    // locale and i18n APIs.
+    ctx.apply_service_payload("locale", &serde_json::json!({ "current": "en" }));
     ctx.call_handler("read_locale", &[]).unwrap();
     assert_eq!(
         ctx.state.get("current_locale"),
         Some(serde_json::json!("sk-SK"))
     );
+    assert_eq!(ctx.state.get("greeting"), Some(serde_json::json!("Ahoj")));
+    assert_eq!(
+        ctx.state.get("fallback"),
+        Some(serde_json::json!("Fallback"))
+    );
+    assert_eq!(
+        ctx.state.get("missing"),
+        Some(serde_json::json!("!!missing"))
+    );
+    let misses = ctx.drain_localized_misses();
+    assert_eq!(misses.len(), 1);
+    assert_eq!(misses[0].snapshot_revision, snapshot_revision);
 }
 
 #[test]

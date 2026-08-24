@@ -111,8 +111,8 @@ source of truth.
 
 ## Next
 
-Represent locale as a host-owned per-context cell updated with the translation
-snapshot (`docs/BACKLOG.md`).
+Treat Luau `nil` writes as explicit deletions in Rust state and dependency
+invalidation (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 
