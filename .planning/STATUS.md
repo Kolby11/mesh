@@ -4,6 +4,10 @@
 
 ## Now
 
+Root and nested template expressions now share parser-derived scope validation.
+Root expressions, keyed-loop keys, runtime props, and expression-body source
+spans are checked before compilation.
+
 Contribution roots now share primary-root interface validation: imports must be
 declared by the contributing module, explicit ranges are checked against the
 resolved graph contract/provider, and invalid contribution entries receive
@@ -71,8 +75,8 @@ compilation leaves the last-known-good catalog in place.
 
 ## Next
 
-Validate root and nested expression scopes uniformly using parser/runtime symbol
-tables and source spans (`docs/BACKLOG.md`).
+Compile expressions once into shared semantics so preview, live, translation, and
+composition paths behave identically (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

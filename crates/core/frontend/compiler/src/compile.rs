@@ -512,7 +512,7 @@ fn validate_standalone_imports(
         root_path,
         module_dir,
         local_components,
-        false,
+        true,
         &HashSet::new(),
         &mut ancestry,
     )
@@ -597,7 +597,7 @@ fn validate_template_nodes(
                         path,
                         allowed_symbols,
                         loop_locals,
-                        expr.span,
+                        expr.expression_span,
                     )?;
                 }
             }
@@ -646,6 +646,15 @@ fn validate_template_nodes(
                 }
                 let mut child_loop_locals = loop_locals.clone();
                 child_loop_locals.insert(for_node.item_name.clone());
+                if strict_scope && let Some(key) = &for_node.key {
+                    validate_expression(
+                        key,
+                        path,
+                        allowed_symbols,
+                        &child_loop_locals,
+                        for_node.key_span.unwrap_or(for_node.span),
+                    )?;
+                }
                 validate_template_nodes(
                     &for_node.children,
                     path,
@@ -934,6 +943,7 @@ fn component_allowed_symbols(
     let mut allowed = HashSet::from([
         "t".to_string(),
         "this".to_string(),
+        "props".to_string(),
         "refs".to_string(),
         "settings".to_string(),
         "elements".to_string(),
@@ -1223,6 +1233,92 @@ title = "Default"
             &HashMap::from([("Child".to_string(), child)]),
         )
         .expect("public script field rejected as child input");
+    }
+
+    #[test]
+    fn root_unknown_expression_reports_its_expression_span() {
+        let root = component(r#"<template><text>{missing_root}</text></template>"#);
+        let expected_span = match &root.template.as_ref().unwrap().root[0] {
+            TemplateNode::Element(element) => match &element.children[0] {
+                TemplateNode::Expr(expression) => expression.expression_span,
+                other => panic!("expected expression child, got {other:?}"),
+            },
+            other => panic!("expected element root, got {other:?}"),
+        };
+
+        let error = validate_standalone_imports(
+            &root,
+            &path("main.mesh"),
+            Path::new("/tmp"),
+            &HashMap::new(),
+        )
+        .expect_err("unknown root expression symbol accepted");
+
+        assert!(error.to_string().contains("missing_root"));
+        assert_eq!(error.source_span(), Some(expected_span));
+    }
+
+    #[test]
+    fn root_expression_scope_allows_props_and_keyed_loop_locals() {
+        let root = component(
+            r#"
+<props>
+title: { type: "string", default: "Items" }
+</props>
+<template>
+  <text>{props.title}</text>
+  {#for item in items key={item.id}}<text>{item.name}</text>{/for}
+</template>
+<script lang="luau">
+items = {}
+</script>
+"#,
+        );
+
+        validate_standalone_imports(
+            &root,
+            &path("main.mesh"),
+            Path::new("/tmp"),
+            &HashMap::new(),
+        )
+        .expect("root props and keyed loop locals should be in scope");
+    }
+
+    #[test]
+    fn nested_keyed_loop_expression_uses_the_component_scope() {
+        let root = component(
+            r#"
+<template><Child /></template>
+<script lang="luau">
+import Child from "./child.mesh"
+</script>
+"#,
+        );
+        let child = component(
+            r#"
+<template>
+  {#for item in items key={missing_key}}<text>{item.name}</text>{/for}
+</template>
+<script lang="luau">
+items = {}
+</script>
+"#,
+        );
+        let expected_span = match &child.template.as_ref().unwrap().root[0] {
+            TemplateNode::For(for_node) => for_node.key_span.unwrap(),
+            other => panic!("expected keyed loop root, got {other:?}"),
+        };
+
+        let error = validate_standalone_imports(
+            &root,
+            &path("main.mesh"),
+            Path::new("/tmp"),
+            &HashMap::from([("Child".to_string(), child)]),
+        )
+        .expect_err("unknown nested keyed-loop symbol accepted");
+
+        assert!(error.to_string().contains("missing_key"));
+        assert_eq!(error.source_span(), Some(expected_span));
     }
 
     #[test]
