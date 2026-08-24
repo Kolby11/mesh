@@ -197,6 +197,11 @@ pub struct ThemeKeyframeStop {
     pub offset: f32,
     #[serde(default)]
     pub declarations: ComponentDefaults,
+    /// Optional segment-local timing function, kept raw so the shell can
+    /// resolve theme token references before lowering it to the animation
+    /// engine's validated easing type.
+    #[serde(default)]
+    pub easing: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1952,7 +1957,12 @@ fn parse_keyframes_body(name: &str, mut rest: &str) -> Result<Vec<ThemeKeyframeS
             })?;
             stops.push(ThemeKeyframeStop {
                 offset,
-                declarations: declarations.clone(),
+                declarations: declarations
+                    .iter()
+                    .filter(|(property, _)| *property != "animation-timing-function")
+                    .map(|(property, value)| (property.clone(), value.clone()))
+                    .collect(),
+                easing: declarations.get("animation-timing-function").cloned(),
             });
         }
         rest = &rest[close + 1..];
@@ -2229,7 +2239,7 @@ mod tests {
               animation: tooltip-enter 150ms ease-out;
             }
             @keyframes tooltip-enter {
-              to { opacity: 1; transform: scale(1); }
+              to { opacity: 1; transform: scale(1); animation-timing-function: ease-out; }
               from { opacity: 0; transform: scale(0.85); }
               25%, 75% { opacity: 0.5; }
             }
@@ -2248,6 +2258,7 @@ mod tests {
             stops[0].declarations.get("transform").map(String::as_str),
             Some("scale(0.85)")
         );
+        assert_eq!(stops[3].easing.as_deref(), Some("ease-out"));
         assert_eq!(
             stops[1].declarations.get("opacity").map(String::as_str),
             Some("0.5")

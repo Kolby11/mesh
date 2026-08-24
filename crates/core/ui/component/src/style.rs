@@ -117,6 +117,118 @@ pub struct Declaration {
     pub value: StyleValue,
 }
 
+/// Where the jumps land in a CSS `steps()` timing function. The legacy `start`
+/// / `end` keywords map onto `JumpStart` / `JumpEnd`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum StepPosition {
+    /// Jump at the start of each interval (`jump-start` / `start`).
+    JumpStart,
+    /// Jump at the end of each interval (`jump-end` / `end`). CSS default.
+    #[default]
+    JumpEnd,
+    /// No jump at either end — `n` stops including both 0 and 1 (`jump-none`).
+    JumpNone,
+    /// Jump at both ends — neither 0 nor 1 is held (`jump-both`).
+    JumpBoth,
+}
+
+/// A validated CSS timing function shared by component parsing and computed
+/// element animation styles.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum TransitionEasing {
+    Linear,
+    Ease,
+    EaseIn,
+    #[default]
+    EaseOut,
+    EaseInOut,
+    CubicBezier(f32, f32, f32, f32),
+    Steps(u32, StepPosition),
+}
+
+impl std::hash::Hash for TransitionEasing {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Self::CubicBezier(a, b, c, d) => {
+                a.to_bits().hash(state);
+                b.to_bits().hash(state);
+                c.to_bits().hash(state);
+                d.to_bits().hash(state);
+            }
+            Self::Steps(count, position) => {
+                count.hash(state);
+                position.hash(state);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Parse one of the timing functions supported by MESH's animation sampler.
+///
+/// Component parsing uses this strict form so a keyframe-local timing
+/// function can never enter the runtime as an unvalidated string. The element
+/// style resolver may still choose its historical defaulting behavior for
+/// unsupported authored declarations.
+pub fn parse_easing(value: &str) -> Option<TransitionEasing> {
+    let trimmed = value.trim();
+    match trimmed {
+        "linear" => Some(TransitionEasing::Linear),
+        "ease" => Some(TransitionEasing::Ease),
+        "ease-in" => Some(TransitionEasing::EaseIn),
+        "ease-out" => Some(TransitionEasing::EaseOut),
+        "ease-in-out" => Some(TransitionEasing::EaseInOut),
+        "step-start" => Some(TransitionEasing::Steps(1, StepPosition::JumpStart)),
+        "step-end" => Some(TransitionEasing::Steps(1, StepPosition::JumpEnd)),
+        _ if trimmed.starts_with("steps(") => parse_steps(trimmed),
+        _ => parse_cubic_bezier(trimmed),
+    }
+}
+
+fn parse_steps(value: &str) -> Option<TransitionEasing> {
+    let inner = value
+        .strip_prefix("steps(")
+        .and_then(|rest| rest.strip_suffix(')'))?;
+    let mut parts = inner.split(',');
+    let count = parts.next()?.trim().parse::<u32>().ok()?;
+    if count == 0 {
+        return None;
+    }
+    let position = match parts.next().map(str::trim) {
+        None => StepPosition::JumpEnd,
+        Some("jump-start") | Some("start") => StepPosition::JumpStart,
+        Some("jump-end") | Some("end") => StepPosition::JumpEnd,
+        Some("jump-none") => StepPosition::JumpNone,
+        Some("jump-both") => StepPosition::JumpBoth,
+        Some(_) => return None,
+    };
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(TransitionEasing::Steps(count, position))
+}
+
+fn parse_cubic_bezier(value: &str) -> Option<TransitionEasing> {
+    let inner = value
+        .strip_prefix("cubic-bezier(")
+        .and_then(|rest| rest.strip_suffix(')'))?;
+    let parts: Vec<f32> = inner
+        .split(',')
+        .map(|part| part.trim().parse::<f32>())
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    if parts.len() != 4 {
+        return None;
+    }
+    Some(TransitionEasing::CubicBezier(
+        parts[0].clamp(0.0, 1.0),
+        parts[1],
+        parts[2].clamp(0.0, 1.0),
+        parts[3],
+    ))
+}
+
 /// A named `@keyframes` rule parsed from a style block.
 #[derive(Debug, Clone)]
 pub struct KeyframeRule {
@@ -129,6 +241,8 @@ pub struct KeyframeRule {
 pub struct KeyframeStop {
     pub offset: f32,
     pub declarations: Vec<Declaration>,
+    /// Segment-local timing function starting at this stop.
+    pub easing: Option<TransitionEasing>,
 }
 
 /// Reserved variable-store key prefix under which resolved component-prop values

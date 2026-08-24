@@ -33,10 +33,13 @@ the canonical generated element schema landed 2026-08-23 — see
 Visibility transition playback now starts from the previously displayed
 discrete value and applies the visibility endpoint at the end of an exit.
 
+Validated per-keyframe easing now flows from component and theme keyframes
+through shell animation state into the core and tooltip samplers.
+
 ## Next
 
-Propagate validated per-keyframe easing through component parsing, shell state,
-and animation sampling (`docs/BACKLOG.md`).
+Keep interaction policy in a renderer-neutral frame/state-machine contract with
+typed decisions and dirty outputs (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

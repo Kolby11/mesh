@@ -446,7 +446,7 @@ impl FrontendSurfaceComponent {
             stops.push(RenderKeyframeStop {
                 offset: stop.offset,
                 style: AnimatableStyle::from_node(&styled_node),
-                easing: None,
+                easing: stop.easing.map(Into::into),
             });
         }
 
@@ -468,14 +468,19 @@ fn theme_keyframe_stops(theme: &Theme, name: &str) -> Option<Vec<component_style
         theme
             .keyframe_stops(name)?
             .iter()
-            .map(theme_keyframe_stop)
+            .map(|stop| theme_keyframe_stop(theme, stop))
             .collect(),
     )
 }
 
-fn theme_keyframe_stop(stop: &ThemeKeyframeStop) -> component_style::KeyframeStop {
+fn theme_keyframe_stop(theme: &Theme, stop: &ThemeKeyframeStop) -> component_style::KeyframeStop {
     component_style::KeyframeStop {
         offset: stop.offset,
+        easing: stop
+            .easing
+            .as_deref()
+            .and_then(|value| theme.resolve_token_references(value).ok())
+            .and_then(|value| component_style::parse_easing(&value)),
         declarations: stop
             .declarations
             .iter()

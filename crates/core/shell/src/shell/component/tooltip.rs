@@ -23,6 +23,7 @@ pub(super) struct TooltipAnimation {
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct TooltipAnimationStop {
     offset: f32,
+    easing: Option<Easing>,
     opacity: Option<f32>,
     scale: Option<f32>,
     translate_x: Option<f32>,
@@ -75,6 +76,12 @@ pub(super) fn tooltip_animation_from_theme(theme: &Theme) -> Option<TooltipAnima
                 .map(|v| parse_transform(&v));
             TooltipAnimationStop {
                 offset: stop.offset.clamp(0.0, 1.0),
+                easing: stop
+                    .easing
+                    .as_deref()
+                    .map(|value| resolve_theme_value_tokens(theme, value))
+                    .and_then(|value| mesh_core_component::style::parse_easing(&value))
+                    .map(Easing::from),
                 opacity,
                 scale: transform.map(|t| t.scale_x),
                 translate_x: transform.map(|t| t.translate_x),
@@ -127,24 +134,24 @@ impl TooltipAnimation {
         get: impl Fn(&TooltipAnimationStop) -> Option<f32>,
         default: f32,
     ) -> f32 {
-        let mut prev: Option<(f32, f32)> = None;
-        let mut next: Option<(f32, f32)> = None;
+        let mut prev: Option<(f32, f32, Option<Easing>)> = None;
+        let mut next: Option<(f32, f32, Option<Easing>)> = None;
         for stop in &self.stops {
             let Some(value) = get(stop) else { continue };
             if stop.offset <= progress {
-                prev = Some((stop.offset, value));
+                prev = Some((stop.offset, value, stop.easing));
             } else {
-                next = Some((stop.offset, value));
+                next = Some((stop.offset, value, stop.easing));
                 break;
             }
         }
         match (prev, next) {
-            (Some((from_offset, from)), Some((to_offset, to))) => {
+            (Some((from_offset, from, easing)), Some((to_offset, to, _))) => {
                 let span = (to_offset - from_offset).max(f32::EPSILON);
                 let local = ((progress - from_offset) / span).clamp(0.0, 1.0);
-                from + (to - from) * apply_easing(self.easing, local)
+                from + (to - from) * apply_easing(easing.unwrap_or(self.easing), local)
             }
-            (Some((_, value)), None) | (None, Some((_, value))) => value,
+            (Some((_, value, _)), None) | (None, Some((_, value, _))) => value,
             (None, None) => default,
         }
     }
@@ -592,6 +599,7 @@ mod tests {
             vec![
                 ThemeKeyframeStop {
                     offset: 0.0,
+                    easing: None,
                     declarations: [
                         ("opacity".to_string(), "0".to_string()),
                         (
@@ -604,6 +612,7 @@ mod tests {
                 },
                 ThemeKeyframeStop {
                     offset: 1.0,
+                    easing: None,
                     declarations: [
                         ("opacity".to_string(), "1".to_string()),
                         ("transform".to_string(), "scale(1)".to_string()),
@@ -652,6 +661,24 @@ mod tests {
         let animation = tooltip_animation_from_theme(&theme).expect("animation lowered");
         assert_eq!(animation.duration, Duration::from_millis(150));
         assert_eq!(animation.easing, Easing::EaseOut);
+    }
+
+    #[test]
+    fn theme_animation_honors_per_keyframe_easing() {
+        let mut theme = theme_with_tooltip_animation("tooltip-enter 200ms linear");
+        theme
+            .keyframes
+            .get_mut("tooltip-enter")
+            .expect("tooltip keyframes")
+            .first_mut()
+            .expect("first tooltip stop")
+            .easing = Some("ease-in".into());
+
+        let animation = tooltip_animation_from_theme(&theme).expect("animation lowered");
+        let mid = animation.sample(Duration::from_millis(100));
+        assert!((mid.opacity - 0.125).abs() < 1e-3);
+        assert!((mid.scale - 0.5625).abs() < 1e-3);
+        assert!((mid.translate_y - 8.75).abs() < 1e-3);
     }
 
     #[test]

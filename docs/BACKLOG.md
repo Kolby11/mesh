@@ -69,7 +69,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/09-interaction-and-motion/improvements.md)
 
-- [ ] Propagate validated per-keyframe easing through component parsing, shell state, and animation sampling.
 - [ ] Keep interaction policy in a renderer-neutral frame/state-machine contract with typed decisions and dirty outputs.
 - [ ] Implement `box-shadow` parsing with structured errors or reject it before the public animation API.
 - [ ] Give animation instances stable identity and explicit replacement, cancellation, and reversal semantics.

@@ -2,6 +2,7 @@ mod parse;
 mod resolve;
 mod types;
 
+pub use mesh_core_component::style::{StepPosition, TransitionEasing};
 pub use parse::{parse_animation_shorthand, parse_transform};
 pub use resolve::*;
 pub use types::*;

@@ -1,6 +1,6 @@
 use crate::style::{
     ContainerQuery, Declaration, KeyframeRule, KeyframeStop, Selector, StyleBlock, StyleRule,
-    StyleValue, is_transition_safe_keyframe_property,
+    StyleValue, TransitionEasing, is_transition_safe_keyframe_property,
 };
 use lightningcss::{
     media_query::{
@@ -94,7 +94,7 @@ fn lower_keyframes_rule(
     let mut stops = Vec::new();
 
     for keyframe in &source_rule.keyframes {
-        let declarations = lower_keyframe_declarations(&name, &keyframe.declarations)?;
+        let (declarations, easing) = lower_keyframe_declarations(&name, &keyframe.declarations)?;
         if declarations.is_empty() {
             continue;
         }
@@ -104,6 +104,7 @@ fn lower_keyframes_rule(
             stops.push(KeyframeStop {
                 offset,
                 declarations: declarations.clone(),
+                easing,
             });
         }
     }
@@ -143,21 +144,50 @@ fn lower_keyframe_selector(selector: &KeyframeSelector) -> Result<f32, ParseErro
 fn lower_keyframe_declarations(
     rule_name: &str,
     source_block: &lightningcss::declaration::DeclarationBlock<'_>,
-) -> Result<Vec<Declaration>, ParseError> {
+) -> Result<(Vec<Declaration>, Option<TransitionEasing>), ParseError> {
     let mut declarations = Vec::new();
+    let mut easing = None;
 
     for property in &source_block.declarations {
         let declaration = lower_property(property)?;
+        if declaration.property == "animation-timing-function" {
+            easing = Some(parse_keyframe_easing(rule_name, &declaration)?);
+            continue;
+        }
         validate_keyframe_declaration(rule_name, &declaration)?;
         declarations.push(declaration);
     }
     for property in &source_block.important_declarations {
         let declaration = lower_property(property)?;
+        if declaration.property == "animation-timing-function" {
+            easing = Some(parse_keyframe_easing(rule_name, &declaration)?);
+            continue;
+        }
         validate_keyframe_declaration(rule_name, &declaration)?;
         declarations.push(declaration);
     }
 
-    Ok(declarations)
+    Ok((declarations, easing))
+}
+
+fn parse_keyframe_easing(
+    rule_name: &str,
+    declaration: &Declaration,
+) -> Result<TransitionEasing, ParseError> {
+    let StyleValue::Literal(value) = &declaration.value else {
+        return Err(ParseError::InvalidStyle {
+            message: format!("keyframes '{rule_name}' require a literal animation-timing-function"),
+            span: SourceSpan::default(),
+        });
+    };
+
+    crate::style::parse_easing(value).ok_or_else(|| ParseError::InvalidStyle {
+        message: format!(
+            "unsupported keyframe easing '{}' in '{rule_name}'",
+            value.trim()
+        ),
+        span: SourceSpan::default(),
+    })
 }
 
 fn validate_keyframe_declaration(

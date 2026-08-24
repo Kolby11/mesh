@@ -139,6 +139,44 @@ fn keyframe_animation_paint_only_rule_uses_visual_repaint() {
 }
 
 #[test]
+fn component_keyframe_easing_reaches_shell_animation_state() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box class="panel" /></template>
+<style>
+.panel { animation: pulse 1000ms linear infinite; }
+@keyframes pulse {
+  0% { opacity: 0; animation-timing-function: ease-in; }
+  50% { opacity: 0.5; animation-timing-function: steps(4, jump-start); }
+  100% { opacity: 1; }
+}
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 40);
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
+
+    let rule = component
+        .keyframe_rules
+        .get("root/0::pulse")
+        .expect("lowered shell keyframe rule");
+    assert!(matches!(
+        rule.stops[0].easing,
+        Some(mesh_core_animation::Easing::EaseIn)
+    ));
+    assert!(matches!(
+        rule.stops[1].easing,
+        Some(mesh_core_animation::Easing::Steps(
+            4,
+            mesh_core_elements::StepPosition::JumpStart
+        ))
+    ));
+}
+
+#[test]
 fn keyframe_animation_layout_rule_uses_relayout() {
     let mut component = test_frontend_component(
         r#"

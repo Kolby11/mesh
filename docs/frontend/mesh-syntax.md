@@ -799,6 +799,8 @@ Keyframes are percentage-only:
 values must stay literal rather than using `var(...)`. Theme variables belong
 on the animation shorthand itself, for example
 `animation: pulse var(--animation-duration-fast) var(--animation-curves-bezier-standard)`.
+Each percentage stop may also declare `animation-timing-function`; the
+validated timing function is used for interpolation until the next stop.
 
 ---
 

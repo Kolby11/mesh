@@ -826,7 +826,10 @@ mod tests {
     use super::*;
     use crate::{
         ComponentImportTarget, ScriptLang,
-        style::{ContainerQuery, Selector, StyleValue, is_transition_safe_keyframe_property},
+        style::{
+            ContainerQuery, Selector, StyleValue, TransitionEasing,
+            is_transition_safe_keyframe_property,
+        },
         template::{AttributeValue, TemplateNode},
     };
 
@@ -1451,6 +1454,38 @@ box {
         assert_eq!(style.keyframes[0].stops[0].offset, 0.0);
         assert_eq!(style.keyframes[0].stops[1].offset, 0.5);
         assert_eq!(style.keyframes[0].stops[2].offset, 1.0);
+    }
+
+    #[test]
+    fn parse_validated_per_keyframe_easing() {
+        let source = r#"
+<template><box /></template>
+<style>
+@keyframes pulse {
+    0% { opacity: 0; animation-timing-function: ease-in; }
+    50% { opacity: 0.5; animation-timing-function: steps(4, jump-start); }
+    100% { opacity: 1; }
+}
+</style>
+"#;
+        let file = parse_component(source).expect("per-keyframe easing parses");
+        let stops = &file.style.expect("style").keyframes[0].stops;
+
+        assert_eq!(stops[0].easing, Some(TransitionEasing::EaseIn));
+        assert_eq!(
+            stops[1].easing,
+            Some(TransitionEasing::Steps(
+                4,
+                crate::style::StepPosition::JumpStart
+            ))
+        );
+        assert_eq!(stops[2].easing, None);
+        assert!(
+            stops[0]
+                .declarations
+                .iter()
+                .all(|declaration| declaration.property != "animation-timing-function")
+        );
     }
 
     #[test]

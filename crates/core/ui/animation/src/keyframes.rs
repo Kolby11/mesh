@@ -356,6 +356,31 @@ mod tests {
     }
 
     #[test]
+    fn keyframe_uses_easing_declared_at_the_start_of_each_segment() {
+        let mut registry = registry();
+        registry
+            .rules
+            .get_mut("pulse")
+            .expect("test keyframe rule")
+            .stops[1]
+            .easing = Some(Easing::EaseIn);
+        let animation = animation();
+        let current = animation
+            .current(
+                &registry,
+                style(0.0, 0.0),
+                animation.started_at + Duration::from_millis(750),
+            )
+            .expect("eased segment frame");
+
+        // The second half is sampled at local progress .5. Ease-in maps that
+        // to .125, so the midpoint stop (.5) advances only 1/16 of the full
+        // style range instead of the linear 1/4.
+        assert!((current.opacity - 0.5625).abs() < 0.001);
+        assert!((current.transform.translate_x - 56.25).abs() < 0.001);
+    }
+
+    #[test]
     fn backwards_fill_applies_first_frame_before_delay() {
         let registry = registry();
         let mut animation = animation();

@@ -80,7 +80,7 @@ The current shell animator interpolates this practical visual set:
 - `margin`
 - `transform`
 
-`@keyframes` supports numeric percentage stops over the same transition-safe visual set. `from` and `to` aliases are rejected. Unsupported keyframe properties reject the keyframes rule. Keyframe stop values do not support `var(...)` in this release.
+`@keyframes` supports numeric percentage stops over the same transition-safe visual set. `from` and `to` aliases are rejected. Unsupported keyframe properties reject the keyframes rule. Keyframe stop values do not support `var(...)` in this release. A stop may also declare `animation-timing-function`; its validated easing applies to the segment starting at that stop.
 
 ## Tokens And Custom Properties
 

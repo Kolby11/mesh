@@ -324,20 +324,7 @@ pub(super) fn split_paren_aware(value: &str, delim: char) -> Vec<String> {
 }
 
 pub(super) fn parse_easing_keyword(value: &str) -> TransitionEasing {
-    let trimmed = value.trim();
-    match trimmed {
-        "linear" => TransitionEasing::Linear,
-        "ease" => TransitionEasing::Ease,
-        "ease-in" => TransitionEasing::EaseIn,
-        "ease-out" => TransitionEasing::EaseOut,
-        "ease-in-out" => TransitionEasing::EaseInOut,
-        "step-start" => TransitionEasing::Steps(1, StepPosition::JumpStart),
-        "step-end" => TransitionEasing::Steps(1, StepPosition::JumpEnd),
-        _ if trimmed.starts_with("steps(") => {
-            parse_steps(trimmed).unwrap_or(TransitionEasing::EaseOut)
-        }
-        _ => parse_cubic_bezier(trimmed).unwrap_or(TransitionEasing::EaseOut),
-    }
+    mesh_core_component::style::parse_easing(value).unwrap_or(TransitionEasing::EaseOut)
 }
 
 /// True for any token that names an easing function — keyword, `cubic-bezier()`,
@@ -348,49 +335,6 @@ fn is_easing_token(token: &str) -> bool {
         "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out" | "step-start" | "step-end"
     ) || token.starts_with("cubic-bezier(")
         || token.starts_with("steps(")
-}
-
-pub(super) fn parse_steps(value: &str) -> Option<TransitionEasing> {
-    let inner = value
-        .strip_prefix("steps(")
-        .and_then(|rest| rest.strip_suffix(')'))?;
-    let mut parts = inner.split(',');
-    let count = parts.next()?.trim().parse::<u32>().ok()?;
-    if count == 0 {
-        return None;
-    }
-    let position = match parts.next().map(str::trim) {
-        None => StepPosition::JumpEnd,
-        Some("jump-start") | Some("start") => StepPosition::JumpStart,
-        Some("jump-end") | Some("end") => StepPosition::JumpEnd,
-        Some("jump-none") => StepPosition::JumpNone,
-        Some("jump-both") => StepPosition::JumpBoth,
-        Some(_) => return None,
-    };
-    if parts.next().is_some() {
-        return None;
-    }
-    Some(TransitionEasing::Steps(count, position))
-}
-
-pub(super) fn parse_cubic_bezier(value: &str) -> Option<TransitionEasing> {
-    let inner = value
-        .strip_prefix("cubic-bezier(")
-        .and_then(|rest| rest.strip_suffix(')'))?;
-    let parts: Vec<f32> = inner
-        .split(',')
-        .map(|part| part.trim().parse::<f32>())
-        .collect::<Result<Vec<_>, _>>()
-        .ok()?;
-    if parts.len() != 4 {
-        return None;
-    }
-    Some(TransitionEasing::CubicBezier(
-        parts[0].clamp(0.0, 1.0),
-        parts[1],
-        parts[2].clamp(0.0, 1.0),
-        parts[3],
-    ))
 }
 
 pub(super) fn looks_like_time(token: &str) -> bool {
