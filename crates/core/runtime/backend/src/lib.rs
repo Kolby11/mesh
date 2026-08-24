@@ -1,4 +1,6 @@
-use mesh_core_scripting::{BackendScriptContext, BackendScriptError};
+use mesh_core_scripting::{
+    BackendScriptContext, BackendScriptError, StreamEvent, StreamEventKind, StreamHandle,
+};
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -234,7 +236,7 @@ pub async fn spawn_backend_service(
         capabilities,
     );
     run_backend_service(&mut ctx, module_id, service_name, script_source, tx, cmd_rx).await;
-    lifecycle.finish(&mut ctx);
+    lifecycle.finish(&mut ctx).await;
 }
 
 struct BackendLifecycleGuard {
@@ -258,7 +260,7 @@ impl BackendLifecycleGuard {
         }
     }
 
-    fn finish(&mut self, ctx: &mut BackendScriptContext) {
+    async fn finish(&mut self, ctx: &mut BackendScriptContext) {
         if let Err(err) = ctx.call_stop() {
             let _ = self.tx.send(BackendServiceEvent::Failed {
                 service: Arc::clone(&self.service),
@@ -267,6 +269,7 @@ impl BackendLifecycleGuard {
                 message: err.to_string(),
             });
         }
+        ctx.shutdown_streams().await;
         self.send_terminal();
     }
 
@@ -354,75 +357,17 @@ async fn run_backend_service(
     loop {
         tokio::select! {
             _ = stream_state.wait_for_event() => {
-                // Group lines by program in arrival order, one dispatch per
-                // group. Multi-line formats like pw-mon emit a header plus
-                // property continuations per change, so collapsing a batch to
-                // one line drops the headers scripts filter on.
-                let lines = stream_state.drain_lines();
-                if lines.is_empty() {
-                    continue;
+                let events = stream_state.drain_events();
+                if !dispatch_stream_events(
+                    ctx,
+                    events,
+                    &tx,
+                    &service_name,
+                    &module_id,
+                    &mut last_payload,
+                ) {
+                    break;
                 }
-                let mut lines_per_program: std::collections::HashMap<String, Vec<String>> =
-                    std::collections::HashMap::new();
-                let mut program_order: Vec<String> = Vec::new();
-                for entry in lines {
-                    let bucket = lines_per_program
-                        .entry(entry.program.clone())
-                        .or_insert_with(|| {
-                            program_order.push(entry.program.clone());
-                            Vec::new()
-                        });
-                    bucket.push(entry.line);
-                }
-                let mut stop = false;
-                for program in program_order {
-                    let Some(batch) = lines_per_program.remove(&program) else {
-                        continue;
-                    };
-                    match ctx.run_stream_batch(&program, &batch) {
-                        Ok(Some(payload)) => {
-                            if !publish_changed_update(
-                                &tx,
-                                &service_name,
-                                &module_id,
-                                &mut last_payload,
-                                payload,
-                            ) {
-                                stop = true;
-                                break;
-                            }
-                            if !publish_script_events(
-                                &tx,
-                                &service_name,
-                                &module_id,
-                                ctx.drain_events(),
-                            ) {
-                                stop = true;
-                                break;
-                            }
-                        }
-                        Ok(None) => {
-                            if !publish_script_events(
-                                &tx,
-                                &service_name,
-                                &module_id,
-                                ctx.drain_events(),
-                            ) {
-                                stop = true;
-                                break;
-                            }
-                        }
-                        Err(err) => {
-                            let _ = tx.send(BackendServiceEvent::Failed {
-                                service: service_name.clone(),
-                                source_module: module_id.clone(),
-                                stage: "stream".to_string(),
-                                message: err.to_string(),
-                            });
-                        }
-                    }
-                }
-                if stop { break; }
             }
             _ = tick.tick() => {
                 let payload = match ctx.run_poll() {
@@ -616,6 +561,122 @@ async fn run_backend_service(
                 }
                 if stop { break; }
             }
+        }
+    }
+}
+
+fn dispatch_stream_events(
+    ctx: &mut BackendScriptContext,
+    events: Vec<StreamEvent>,
+    tx: &mpsc::UnboundedSender<BackendServiceEvent>,
+    service_name: &Arc<str>,
+    module_id: &Arc<str>,
+    last_payload: &mut Option<serde_json::Value>,
+) -> bool {
+    if events.is_empty() {
+        return true;
+    }
+    if ctx.has_stream_event_handler() {
+        for event in events {
+            let result = ctx.run_stream_event(&event);
+            if !publish_stream_callback_result(
+                result,
+                tx,
+                service_name,
+                module_id,
+                last_payload,
+                ctx,
+            ) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Preserve the old Lua hook ABI, but batch only adjacent lines from the
+    // same stream identity. Two identical programs can never be merged.
+    let mut current: Option<(StreamHandle, Vec<String>)> = None;
+    for event in events {
+        match event.kind {
+            StreamEventKind::Line(line) => {
+                if current
+                    .as_ref()
+                    .is_some_and(|(stream, _)| stream.id() == event.stream.id())
+                {
+                    current.as_mut().unwrap().1.push(line);
+                } else {
+                    if let Some((stream, lines)) = current.take() {
+                        if !publish_stream_callback_result(
+                            ctx.run_stream_batch_for_stream(&stream, &lines),
+                            tx,
+                            service_name,
+                            module_id,
+                            last_payload,
+                            ctx,
+                        ) {
+                            return false;
+                        }
+                    }
+                    current = Some((event.stream, vec![line]));
+                }
+            }
+            StreamEventKind::Started
+            | StreamEventKind::Eof
+            | StreamEventKind::Failed(_)
+            | StreamEventKind::Exited(_)
+            | StreamEventKind::Overflow { .. } => {
+                if let Some((stream, lines)) = current.take() {
+                    if !publish_stream_callback_result(
+                        ctx.run_stream_batch_for_stream(&stream, &lines),
+                        tx,
+                        service_name,
+                        module_id,
+                        last_payload,
+                        ctx,
+                    ) {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    if let Some((stream, lines)) = current {
+        if !publish_stream_callback_result(
+            ctx.run_stream_batch_for_stream(&stream, &lines),
+            tx,
+            service_name,
+            module_id,
+            last_payload,
+            ctx,
+        ) {
+            return false;
+        }
+    }
+    true
+}
+
+fn publish_stream_callback_result(
+    result: Result<Option<serde_json::Value>, BackendScriptError>,
+    tx: &mpsc::UnboundedSender<BackendServiceEvent>,
+    service_name: &Arc<str>,
+    module_id: &Arc<str>,
+    last_payload: &mut Option<serde_json::Value>,
+    ctx: &mut BackendScriptContext,
+) -> bool {
+    match result {
+        Ok(Some(payload)) => {
+            publish_changed_update(tx, service_name, module_id, last_payload, payload)
+                && publish_script_events(tx, service_name, module_id, ctx.drain_events())
+        }
+        Ok(None) => publish_script_events(tx, service_name, module_id, ctx.drain_events()),
+        Err(err) => {
+            let _ = tx.send(BackendServiceEvent::Failed {
+                service: service_name.clone(),
+                source_module: module_id.clone(),
+                stage: "stream".to_string(),
+                message: err.to_string(),
+            });
+            true
         }
     }
 }

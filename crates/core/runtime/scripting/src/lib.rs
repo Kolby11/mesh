@@ -24,7 +24,8 @@ pub mod storage;
 mod util;
 
 pub use backend::{
-    BackendScriptContext, BackendScriptError, BackendScriptEvent, StreamLine, StreamState,
+    BackendScriptContext, BackendScriptError, BackendScriptEvent, StreamEvent, StreamEventKind,
+    StreamExitStatus, StreamHandle, StreamId, StreamLine, StreamState, StreamStatus,
 };
 pub use context::{
     ElementAction, LocaleBoundState, PublishedEvent, ScriptContext, ScriptDiagnostic,

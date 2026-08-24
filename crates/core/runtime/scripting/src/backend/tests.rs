@@ -1991,3 +1991,58 @@ fn run_stream_batch_without_any_hook_is_a_noop() {
         "missing batch and line hooks should produce no snapshot"
     );
 }
+
+#[tokio::test]
+async fn typed_stream_events_expose_handle_identity_and_exit_status() {
+    let mut ctx =
+        BackendScriptContext::new_with_capabilities("@test/typed-stream", ["exec.sh".to_string()]);
+    ctx.load_script(
+        "state = {}\n\
+         function start()\n\
+           local stream = mesh.exec_stream(\"sh\", { \"-c\", \"printf 'hello\\\\n'\" })\n\
+           state = { id = stream.id, generation = stream.generation, program = stream.program }\n\
+         end\n\
+         function on_stream_event(self, event)\n\
+           state = { event = event.type, id = event.stream.id, status = event.stream.status, line = event.line }\n\
+         end",
+    )
+    .unwrap();
+    let initial = ctx.call_init().unwrap().unwrap();
+    let stream_id = initial.get("id").and_then(|value| value.as_u64()).unwrap();
+    assert_eq!(
+        initial.get("program").and_then(|value| value.as_str()),
+        Some("sh")
+    );
+    assert!(
+        initial
+            .get("generation")
+            .and_then(|value| value.as_u64())
+            .unwrap_or_default()
+            > 0
+    );
+
+    let streams = ctx.stream_state();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+    let mut exited = false;
+    while tokio::time::Instant::now() < deadline && !exited {
+        streams.wait_for_event().await;
+        for event in streams.drain_events() {
+            let snapshot = ctx.run_stream_event(&event).unwrap();
+            assert_eq!(event.stream.id().raw(), stream_id);
+            if matches!(event.kind, StreamEventKind::Exited(_)) {
+                let snapshot = snapshot.expect("exit callback should publish state");
+                assert_eq!(
+                    snapshot.get("event").and_then(|value| value.as_str()),
+                    Some("exited")
+                );
+                assert_eq!(
+                    snapshot.get("id").and_then(|value| value.as_u64()),
+                    Some(stream_id)
+                );
+                exited = true;
+            }
+        }
+    }
+    assert!(exited, "typed stream exit event should arrive");
+    ctx.shutdown_streams().await;
+}

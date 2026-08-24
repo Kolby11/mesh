@@ -1,6 +1,8 @@
 use super::command::{BackendCommandOutcome, command_error_result, command_result_from_lua};
 use super::exec::{exec_denied_to_lua, missing_exec_capability, run_exec};
-use super::exec_stream::{StreamState, spawn_stream};
+use super::exec_stream::{
+    StreamEvent, StreamEventKind, StreamHandle, StreamState, StreamStatus, spawn_stream,
+};
 use super::logging::log_message;
 use super::{BackendScriptError, MIN_POLL_INTERVAL_MS};
 use crate::policy::RuntimePolicy;
@@ -21,6 +23,10 @@ use std::sync::{
 /// - `start(self)` — required backend entrypoint called once after script load
 /// - `mesh.service.set_poll_interval(ms)` — set polling interval
 /// - `mesh.exec("program", {"arg1", "arg2"})` — run a system command
+/// - `mesh.exec_stream("program", {"arg1", "arg2"})` — return a typed
+///   stream handle with stable identity and lifecycle status
+/// - `on_stream_event(self, event)` — receive typed started/line/eof/failed/
+///   exited/overflow records for stream handles
 /// - `mesh.config()` — return the full module settings Lua table
 /// - `mesh.service.emit(table)` — emit service state
 /// - `mesh.service.emit_json(value?)` — parse JSON text or emit a Lua table directly
@@ -235,7 +241,6 @@ impl BackendScriptContext {
         }
         self.stop_attempted = true;
         let _budget = self.policy.begin_callback();
-        self.kill_streams();
         let result = if !self.script_loaded {
             Ok(())
         } else {
@@ -263,6 +268,13 @@ impl BackendScriptContext {
         result
     }
 
+    /// Await termination and child reaping for every stream owned by this
+    /// backend generation. This is the normal shutdown path; `Drop` keeps a
+    /// synchronous abort fallback for cancellation and panic paths.
+    pub async fn shutdown_streams(&self) {
+        self.streams.shutdown().await;
+    }
+
     /// Shared subprocess-stream state. The backend service loop awaits on
     /// `stream_state().wait_for_event()` to react to lines from
     /// `mesh.exec_stream` subprocesses.
@@ -277,6 +289,26 @@ impl BackendScriptContext {
     /// Otherwise `on_stream_line(self, program, line)` runs once per line.
     /// Returns the state snapshot taken after the whole batch.
     pub fn run_stream_batch(
+        &mut self,
+        program: &str,
+        lines: &[String],
+    ) -> Result<Option<JsonValue>, BackendScriptError> {
+        self.run_stream_batch_with_program(program, lines)
+    }
+
+    /// Dispatch a legacy line batch while retaining the stream identity at
+    /// the Rust boundary. The Lua compatibility hook still receives the
+    /// program string; new scripts can use `on_stream_event` for the typed
+    /// handle and lifecycle records.
+    pub fn run_stream_batch_for_stream(
+        &mut self,
+        stream: &StreamHandle,
+        lines: &[String],
+    ) -> Result<Option<JsonValue>, BackendScriptError> {
+        self.run_stream_batch_with_program(stream.program(), lines)
+    }
+
+    fn run_stream_batch_with_program(
         &mut self,
         program: &str,
         lines: &[String],
@@ -327,6 +359,46 @@ impl BackendScriptContext {
                     message: err.to_string(),
                 })?;
         }
+        self.take_service_state_snapshot()
+    }
+
+    /// Whether this script opted into typed stream lifecycle records.
+    pub fn has_stream_event_handler(&mut self) -> bool {
+        self.script_environment()
+            .get::<Function>("on_stream_event")
+            .is_ok()
+    }
+
+    /// Dispatch one typed stream record to `on_stream_event(self, event)`.
+    pub fn run_stream_event(
+        &mut self,
+        event: &StreamEvent,
+    ) -> Result<Option<JsonValue>, BackendScriptError> {
+        let _budget = self.policy.begin_callback();
+        self.reset_for_call(JsonValue::Null);
+        let globals = self.script_environment();
+        let handler = match globals.get::<Function>("on_stream_event") {
+            Ok(handler) => handler,
+            Err(_) => return Ok(None),
+        };
+        let current_self =
+            self.current_self_table()
+                .map_err(|err| BackendScriptError::Runtime {
+                    module_id: self.module_id.clone(),
+                    message: err.to_string(),
+                })?;
+        let event_table = stream_event_table(self.ensure_lua(), event).map_err(|err| {
+            BackendScriptError::Runtime {
+                module_id: self.module_id.clone(),
+                message: err.to_string(),
+            }
+        })?;
+        handler
+            .call::<()>((current_self, event_table))
+            .map_err(|err| BackendScriptError::Runtime {
+                module_id: self.module_id.clone(),
+                message: err.to_string(),
+            })?;
         self.take_service_state_snapshot()
     }
 
@@ -729,17 +801,17 @@ impl BackendScriptContext {
                             required_capability = %required,
                             "denied backend exec_stream"
                         );
-                        return Ok(false);
+                        return Ok(LuaValue::Boolean(false));
                     }
                     match spawn_stream(&streams, program.clone(), args) {
-                        Ok(()) => Ok(true),
+                        Ok(handle) => Ok(LuaValue::Table(stream_handle_table(_lua, &handle)?)),
                         Err(err) => {
                             tracing::warn!(
                                 module_id = %module_id,
                                 program = %program,
                                 "exec_stream failed to spawn: {err}"
                             );
-                            Ok(false)
+                            Ok(LuaValue::Boolean(false))
                         }
                     }
                 },
@@ -894,6 +966,59 @@ impl Drop for BackendScriptContext {
 
 fn is_reserved_backend_hook(name: &str) -> bool {
     matches!(name, "init" | "start" | "stop")
+}
+
+fn stream_status_name(status: &StreamStatus) -> &'static str {
+    match status {
+        StreamStatus::Starting => "starting",
+        StreamStatus::Running => "running",
+        StreamStatus::Eof => "eof",
+        StreamStatus::Stopping => "stopping",
+        StreamStatus::Failed { .. } => "failed",
+        StreamStatus::Exited(_) => "exited",
+    }
+}
+
+fn stream_handle_table(lua: &Lua, stream: &StreamHandle) -> mlua::Result<Table> {
+    let table = lua.create_table()?;
+    table.set("id", stream.id().raw())?;
+    table.set("generation", stream.generation())?;
+    table.set("program", stream.program())?;
+    table.set(
+        "args",
+        lua.create_sequence_from(stream.args().iter().cloned())?,
+    )?;
+    table.set("status", stream_status_name(&stream.status()))?;
+    Ok(table)
+}
+
+fn stream_event_table(lua: &Lua, event: &StreamEvent) -> mlua::Result<Table> {
+    let table = lua.create_table()?;
+    let stream = stream_handle_table(lua, &event.stream)?;
+    table.set("stream", stream)?;
+    match &event.kind {
+        StreamEventKind::Started => table.set("type", "started")?,
+        StreamEventKind::Line(line) => {
+            table.set("type", "line")?;
+            table.set("line", line.as_str())?;
+        }
+        StreamEventKind::Eof => table.set("type", "eof")?,
+        StreamEventKind::Failed(message) => {
+            table.set("type", "failed")?;
+            table.set("error", message.as_str())?;
+        }
+        StreamEventKind::Exited(status) => {
+            table.set("type", "exited")?;
+            table.set("success", status.success)?;
+            table.set("code", status.code)?;
+            table.set("signal", status.signal)?;
+        }
+        StreamEventKind::Overflow { dropped } => {
+            table.set("type", "overflow")?;
+            table.set("dropped", *dropped)?;
+        }
+    }
+    Ok(table)
 }
 
 fn create_backend_event_channel(

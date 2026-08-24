@@ -111,8 +111,8 @@ source of truth.
 
 ## Next
 
-Give stream subprocesses stable identities, bounded queues, exit events,
-awaited reaping, and shutdown semantics (`docs/BACKLOG.md`).
+Move `mesh.exec` off the async backend loop and enforce cancellation, deadlines,
+executable policy, and output limits (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

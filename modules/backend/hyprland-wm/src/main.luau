@@ -213,13 +213,13 @@ end
 -- socat is tried first because it handles bidirectional UNIX sockets cleanly.
 -- nc -U is tried as a fallback (available on most distros as part of nmap
 -- or netcat-openbsd, and does not need a bidirectional link for read-only use).
--- Returns the program name if a stream was started, or nil.
+-- Returns the program name if a stream handle was started, or nil.
 local function try_start_stream(socket)
     if mesh.service.has_capability("exec.socat") then
         local started = mesh.exec_stream("socat", { "-", "UNIX-CONNECT:" .. socket })
         if started then
             log_info("subscribed via socat: " .. socket)
-            return "socat"
+            return type(started) == "table" and started.program or "socat"
         end
         log_warn("socat spawn failed for: " .. socket)
     end
@@ -230,7 +230,7 @@ local function try_start_stream(socket)
         local started = mesh.exec_stream("nc", { "-U", socket })
         if started then
             log_info("subscribed via nc: " .. socket)
-            return "nc"
+            return type(started) == "table" and started.program or "nc"
         end
         log_warn("nc spawn failed for: " .. socket)
     end
