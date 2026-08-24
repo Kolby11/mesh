@@ -635,7 +635,10 @@ pub(super) fn compute_child_order(node: &WidgetNode) -> Option<Arc<[usize]>> {
     }
 
     let mut child_order: Vec<usize> = (0..child_count).collect();
-    child_order.sort_unstable_by_key(|&index| node.children[index].computed_style.z_index);
+    // Keep authored order for equal z-index values. Paint order is observable
+    // when siblings overlap, so an unstable tie break would make a retained
+    // display list depend on the sort implementation rather than the tree.
+    child_order.sort_by_key(|&index| node.children[index].computed_style.z_index);
     Some(child_order.into_boxed_slice().into())
 }
 

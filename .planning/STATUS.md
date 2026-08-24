@@ -9,6 +9,11 @@ around the complete retained node subtree, including gradients, images, text,
 shadows, and descendants. Primitive colors remain unmodified until the group
 is composited, and retained sparse selection keeps each group atomic.
 
+Retained display-list generations now include ordered paint command node/kind
+topology, and child z-index sorting keeps authored order for equal-z siblings.
+Pure paint-order changes therefore advance the display-list generation even
+when primitive entry signatures are unchanged.
+
 Frontend paint lowering now carries all four border edges and corner radii
 through retained display commands, including asymmetric rounded border rings.
 
@@ -151,8 +156,8 @@ source of truth.
 
 ## Next
 
-Include paint-order/topology changes in display-list generations and stable
-equal-z ordering (`docs/BACKLOG.md`).
+Unify dirty contracts and paint signatures for all content/style fields,
+including controls, text, icons, and variables (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

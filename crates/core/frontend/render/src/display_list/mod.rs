@@ -378,6 +378,9 @@ impl RetainedDisplayList {
             }
         };
 
+        let topology_changed =
+            paint_topology_changed(self.paint_commands.as_ref(), paint_commands.as_ref());
+
         let (damage, mut damage_rects, reused, rebuilt, removed) =
             self.reconcile_entries(&mut next, patch_sparse_entries, dirty_node_ids, surface);
 
@@ -419,7 +422,7 @@ impl RetainedDisplayList {
         #[cfg(not(debug_assertions))]
         let batch_metrics = DisplayListMetrics::default();
 
-        if rebuilt > 0 || removed > 0 || force_full_damage {
+        if rebuilt > 0 || removed > 0 || force_full_damage || topology_changed {
             self.generation = self.generation.saturating_add(1);
         }
         if patch_sparse_entries {
@@ -1006,6 +1009,14 @@ impl RetainedDisplayList {
             && dirty_summary.opacity == 0
             && dirty_summary.geometry == 0
     }
+}
+
+fn paint_topology_changed(previous: &[DisplayPaintCommand], next: &[DisplayPaintCommand]) -> bool {
+    previous.len() != next.len()
+        || previous
+            .iter()
+            .zip(next)
+            .any(|(previous, next)| previous.node.id != next.node.id || previous.kind != next.kind)
 }
 
 #[cfg(test)]

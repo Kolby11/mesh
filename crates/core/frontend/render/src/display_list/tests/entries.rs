@@ -295,6 +295,53 @@ fn display_list_orders_commands_by_z_index_before_replay() {
 }
 
 #[test]
+fn display_list_keeps_equal_z_order_stable_and_generates_on_reorder() {
+    let mut root = node(1, "stack", 0.0, 0.0, 100.0, 100.0);
+    let mut first = node(2, "box", 0.0, 0.0, 40.0, 40.0);
+    first.computed_style.z_index = 1;
+    let mut lower = node(3, "box", 0.0, 0.0, 40.0, 40.0);
+    lower.computed_style.z_index = 0;
+    let mut second = node(4, "box", 0.0, 0.0, 40.0, 40.0);
+    second.computed_style.z_index = 1;
+    root.children.extend([first, lower, second]);
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 100, 100, false, false);
+    let initial_generation = list.generation();
+    let initial_order: Vec<_> = list
+        .paint_commands()
+        .iter()
+        .filter(|command| command.kind == DisplayPaintCommandKind::Node)
+        .map(|command| command.node.id)
+        .collect();
+    assert_eq!(initial_order, vec![1, 3, 2, 4]);
+
+    root.children.swap(0, 2);
+    let metrics = list.update_with_dirty_nodes(
+        &root,
+        RenderObjectDirtySummary {
+            reordered: 1,
+            ..Default::default()
+        },
+        &HashSet::from([1]),
+        100,
+        100,
+        false,
+        false,
+    );
+    let reordered: Vec<_> = list
+        .paint_commands()
+        .iter()
+        .filter(|command| command.kind == DisplayPaintCommandKind::Node)
+        .map(|command| command.node.id)
+        .collect();
+
+    assert_eq!(reordered, vec![1, 3, 4, 2]);
+    assert!(list.generation() > initial_generation);
+    assert_eq!(metrics.retained_generation, list.generation());
+}
+
+#[test]
 fn display_list_preclip_uses_visual_bounds_for_effect_overflow() {
     let mut root = node(1, "box", 0.0, 0.0, 40.0, 40.0);
     root.computed_style.overflow_x = Overflow::Hidden;
