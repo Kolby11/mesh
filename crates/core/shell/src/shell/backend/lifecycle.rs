@@ -301,6 +301,7 @@ impl Shell {
     fn stop_backend_runtime_with_health(&mut self, interface: &str, publish_health: bool) {
         self.service_handlers.remove(interface);
         if let Some(slot) = self.backend_runtimes.remove(interface) {
+            self.settle_stopped_backend_generation(&slot);
             slot.task.abort();
             self.rollback_bound_service_states_for_provider(&slot.interface, &slot.provider_id);
             let terminal_failure_already_recorded = self
@@ -321,6 +322,40 @@ impl Shell {
                     publish_health,
                 );
             }
+        }
+    }
+
+    fn settle_stopped_backend_generation(&mut self, slot: &BackendRuntimeSlot) {
+        let stale_calls = self
+            .pending_service_call_routes
+            .iter()
+            .filter(|(_, route)| {
+                route.interface == slot.interface && route.generation == slot.generation
+            })
+            .map(|(call_id, _)| *call_id)
+            .collect::<Vec<_>>();
+
+        for call_id in stale_calls {
+            for state in self.command_throttle.values_mut() {
+                if state
+                    .pending
+                    .as_ref()
+                    .is_some_and(|pending| pending.call_id.raw() == call_id)
+                {
+                    state.pending = None;
+                }
+            }
+            let call = mesh_core_backend::CallId::from_raw(call_id);
+            mesh_core_backend::finish_call(call);
+            self.complete_service_call_route(
+                call,
+                "stale_generation",
+                &serde_json::json!({
+                    "ok": false,
+                    "status": "stale_generation",
+                    "error": "backend runtime stopped before command settlement",
+                }),
+            );
         }
     }
 

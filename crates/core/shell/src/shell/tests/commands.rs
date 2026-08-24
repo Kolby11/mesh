@@ -292,6 +292,7 @@ fn failed_bound_write_rolls_back_and_older_failure_cannot_override_newer_write()
             super::types::ShellMessage::BackendCommandResult {
                 interface: "mesh.audio".to_string(),
                 provider_id: "@mesh/pipewire-audio".to_string(),
+                generation: 0,
                 call_id: first_command.call_id,
                 command: "set_volume".to_string(),
                 result: serde_json::json!({
@@ -315,6 +316,7 @@ fn failed_bound_write_rolls_back_and_older_failure_cannot_override_newer_write()
             super::types::ShellMessage::BackendCommandResult {
                 interface: "mesh.audio".to_string(),
                 provider_id: "@mesh/pipewire-audio".to_string(),
+                generation: 0,
                 call_id: second_command.call_id,
                 command: "set_volume".to_string(),
                 result: serde_json::json!({

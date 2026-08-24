@@ -325,11 +325,8 @@ pub(super) fn backend_runtime_slot(
     runtime: &Runtime,
     interface: &str,
     provider_id: &str,
-) -> (
-    BackendRuntimeSlot,
-    mpsc::UnboundedReceiver<ServiceCommandMsg>,
-) {
-    let (command_tx, command_rx) = mpsc::unbounded_channel();
+) -> (BackendRuntimeSlot, mpsc::Receiver<ServiceCommandMsg>) {
+    let (command_tx, command_rx) = mpsc::channel(mesh_core_backend::BACKEND_COMMAND_QUEUE_CAPACITY);
     let task = runtime.spawn(async {
         std::future::pending::<()>().await;
     });
@@ -338,6 +335,7 @@ pub(super) fn backend_runtime_slot(
             interface: interface.to_string(),
             provider_id: provider_id.to_string(),
             event_provider_id: Arc::new(std::sync::RwLock::new(provider_id.to_string())),
+            generation: 0,
             command_tx,
             task: task.abort_handle(),
         },

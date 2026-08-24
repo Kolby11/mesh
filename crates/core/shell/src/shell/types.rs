@@ -313,6 +313,7 @@ pub(super) struct ServiceCallRoute {
     pub(super) interface: String,
     pub(super) instance_id: String,
     pub(super) module_id: String,
+    pub(super) generation: u64,
 }
 
 /// Per-(interface, command) leading+trailing throttle state for coalescable
@@ -381,6 +382,7 @@ pub(super) enum ShellMessage {
     BackendCommandResult {
         interface: String,
         provider_id: String,
+        generation: u64,
         call_id: mesh_core_backend::CallId,
         command: String,
         result: serde_json::Value,

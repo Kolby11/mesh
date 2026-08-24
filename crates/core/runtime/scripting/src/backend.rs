@@ -7,7 +7,9 @@ mod runtime;
 
 pub const MIN_POLL_INTERVAL_MS: u64 = 50;
 
-pub use command::BackendCommandOutcome;
+pub use command::{
+    BackendCommandArgument, BackendCommandOutcome, BackendCommandRegistry, BackendCommandSpec,
+};
 pub use errors::BackendScriptError;
 pub use exec_stream::{
     StreamEvent, StreamEventKind, StreamExitStatus, StreamHandle, StreamId, StreamLine,

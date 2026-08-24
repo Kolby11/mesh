@@ -111,8 +111,8 @@ source of truth.
 
 ## Next
 
-Make backend command dispatch typed, correlated, transactional, coalescable,
-generation-aware, and bounded (`docs/BACKLOG.md`).
+Gate event and side-effect queues through one typed authorization/resource
+boundary before acceptance (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

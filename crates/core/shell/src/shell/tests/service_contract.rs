@@ -320,6 +320,7 @@ fn backend_command_result_records_debug_method_result() {
             super::types::ShellMessage::BackendCommandResult {
                 interface: "mesh.audio".to_string(),
                 provider_id: "@mesh/pipewire-audio".to_string(),
+                generation: 0,
                 call_id: mesh_core_backend::CallId::from_raw(0),
                 command: "set_volume".to_string(),
                 result: serde_json::json!({ "ok": true, "percent": 40 }),
@@ -356,6 +357,7 @@ fn backend_command_result_rejects_invalid_contract_output() {
             super::types::ShellMessage::BackendCommandResult {
                 interface: "mesh.audio".to_string(),
                 provider_id: "@mesh/pipewire-audio".to_string(),
+                generation: 0,
                 call_id: mesh_core_backend::CallId::from_raw(0),
                 command: "set_volume".to_string(),
                 result: serde_json::json!({ "ok": "yes" }),
@@ -378,7 +380,7 @@ fn backend_command_result_rejects_invalid_contract_output() {
             && entry
                 .error
                 .as_deref()
-                .is_some_and(|error| error.contains("expected Result"))
+                .is_some_and(|error| error.contains("Result"))
     }));
 }
 

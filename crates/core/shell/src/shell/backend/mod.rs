@@ -107,6 +107,7 @@ pub(in crate::shell) struct BackendLaunchCandidate {
     pub(in crate::shell) script_source: String,
     pub(in crate::shell) capabilities: Vec<String>,
     pub(in crate::shell) settings: serde_json::Value,
+    pub(in crate::shell) command_registry: Option<mesh_core_scripting::BackendCommandRegistry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -10,8 +10,17 @@ use tokio::sync::mpsc;
 
 const MAX_CONSECUTIVE_POLL_FAILURES: u32 = 3;
 const MIN_POLL_INTERVAL_MS: u64 = 50;
+const MAX_COMMAND_BATCH: usize = 64;
+pub const BACKEND_COMMAND_QUEUE_CAPACITY: usize = 128;
+pub const MAX_COMMAND_PAYLOAD_BYTES: usize = 64 * 1024;
+pub const MAX_COMMAND_JSON_DEPTH: usize = 32;
 
 static NEXT_CALL_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_RUNTIME_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+pub fn next_runtime_generation() -> u64 {
+    NEXT_RUNTIME_GENERATION.fetch_add(1, Ordering::Relaxed)
+}
 
 /// Correlates one service invocation with every transport hop and its terminal
 /// result. Zero is reserved for test-created commands that do not originate
@@ -40,6 +49,8 @@ pub enum BackendCommandOutcome {
     Superseded,
     TimedOut,
     Cancelled,
+    StaleGeneration,
+    QueueFull,
 }
 
 impl BackendCommandOutcome {
@@ -50,6 +61,8 @@ impl BackendCommandOutcome {
             Self::Superseded => "superseded",
             Self::TimedOut => "timed_out",
             Self::Cancelled => "cancelled",
+            Self::StaleGeneration => "stale_generation",
+            Self::QueueFull => "queue_full",
         }
     }
 }
@@ -58,6 +71,7 @@ impl BackendCommandOutcome {
 struct CallControl {
     deadline: Instant,
     cancelled: bool,
+    generation: u64,
 }
 
 fn call_controls() -> &'static Mutex<HashMap<CallId, CallControl>> {
@@ -67,13 +81,28 @@ fn call_controls() -> &'static Mutex<HashMap<CallId, CallControl>> {
 
 /// Register a bounded execution window for a shell-admitted call.
 pub fn register_call(call_id: CallId, timeout: Duration) {
+    register_call_for_generation(call_id, timeout, 0);
+}
+
+pub fn register_call_for_generation(call_id: CallId, timeout: Duration, generation: u64) {
     call_controls().lock().unwrap().insert(
         call_id,
         CallControl {
             deadline: Instant::now() + timeout,
             cancelled: false,
+            generation,
         },
     );
+}
+
+fn call_generation(call_id: CallId, fallback: u64) -> u64 {
+    call_controls()
+        .lock()
+        .unwrap()
+        .get(&call_id)
+        .map(|control| control.generation)
+        .filter(|generation| *generation != 0)
+        .unwrap_or(fallback)
 }
 
 /// Cancel a queued call. A backend that has already started the synchronous
@@ -115,13 +144,70 @@ pub struct BackendServiceCommand {
     pub command: String,
     pub payload: serde_json::Value,
     /// When true, this command is an idempotent setter — if the receiver
-    /// finds queued duplicates of the same name, only the latest payload is
-    /// executed. The dispatcher sets this from the interface contract.
+    /// finds queued duplicates for the same command target, only the latest
+    /// payload for that target is executed. The dispatcher sets this from the
+    /// interface contract.
     pub coalesce: bool,
 }
 
+pub fn validate_command_payload(payload: &serde_json::Value) -> Result<(), String> {
+    let bytes = serde_json::to_vec(payload)
+        .map_err(|error| format!("failed to encode command payload: {error}"))?;
+    if bytes.len() > MAX_COMMAND_PAYLOAD_BYTES {
+        return Err(format!(
+            "command payload exceeds {} bytes",
+            MAX_COMMAND_PAYLOAD_BYTES
+        ));
+    }
+    fn within_depth(value: &serde_json::Value, current: usize) -> bool {
+        if current > MAX_COMMAND_JSON_DEPTH {
+            return false;
+        }
+        match value {
+            serde_json::Value::Array(values) => {
+                values.iter().all(|value| within_depth(value, current + 1))
+            }
+            serde_json::Value::Object(values) => values
+                .values()
+                .all(|value| within_depth(value, current + 1)),
+            _ => true,
+        }
+    }
+    if !within_depth(payload, 0) {
+        return Err(format!(
+            "command payload exceeds JSON depth {}",
+            MAX_COMMAND_JSON_DEPTH
+        ));
+    }
+    Ok(())
+}
+
+fn coalescing_key(msg: &BackendServiceCommand) -> String {
+    let identity = msg.payload.as_object().map(|object| {
+        object
+            .iter()
+            .filter(|(name, _)| {
+                name == &"id"
+                    || name.ends_with("_id")
+                    || name.contains("target")
+                    || name.contains("device")
+                    || name.contains("player")
+                    || name.contains("output")
+                    || name.contains("sink")
+            })
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    });
+    format!(
+        "{}:{}",
+        msg.command,
+        serde_json::to_string(&identity.unwrap_or_default()).unwrap_or_default()
+    )
+}
+
 /// Drain pending commands from the queue, then drop earlier instances of any
-/// command marked `coalesce` when a later same-named instance is also present.
+/// command marked `coalesce` when a later command with the same target key is
+/// also present.
 /// Non-coalescable commands and commands that appear only once pass through
 /// unchanged, preserving original order.
 fn coalesce_command_batch(
@@ -134,7 +220,7 @@ fn coalesce_command_batch(
     latest_index.clear();
     for (index, msg) in batch.iter().enumerate() {
         if msg.coalesce {
-            latest_index.insert(msg.command.clone(), index);
+            latest_index.insert(coalescing_key(msg), index);
         }
     }
     if latest_index.is_empty() {
@@ -144,7 +230,7 @@ fn coalesce_command_batch(
         .into_iter()
         .enumerate()
         .filter(|(index, msg)| {
-            !msg.coalesce || latest_index.get(&msg.command).copied() == Some(*index)
+            !msg.coalesce || latest_index.get(&coalescing_key(msg)).copied() == Some(*index)
         })
         .map(|(_, msg)| msg)
         .collect()
@@ -165,6 +251,7 @@ pub struct BackendCommandResult {
     pub command: String,
     pub result: serde_json::Value,
     pub outcome: BackendCommandOutcome,
+    pub generation: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -220,6 +307,80 @@ pub async fn spawn_backend_service(
     tx: mpsc::UnboundedSender<BackendServiceEvent>,
     cmd_rx: mpsc::UnboundedReceiver<BackendServiceCommand>,
 ) {
+    spawn_backend_service_inner(
+        module_id,
+        service_name,
+        capabilities,
+        settings,
+        script_source,
+        tx,
+        CommandReceiver::Unbounded(cmd_rx),
+        None,
+        0,
+    )
+    .await;
+}
+
+/// Production backend entrypoint. Command ingress is bounded and the
+/// interface contract is installed before untrusted script code can receive
+/// a command.
+pub async fn spawn_backend_service_bounded(
+    module_id: String,
+    service_name: String,
+    capabilities: Vec<String>,
+    settings: JsonValue,
+    script_source: String,
+    tx: mpsc::UnboundedSender<BackendServiceEvent>,
+    cmd_rx: mpsc::Receiver<BackendServiceCommand>,
+    command_registry: Option<mesh_core_scripting::BackendCommandRegistry>,
+    generation: u64,
+) {
+    spawn_backend_service_inner(
+        module_id,
+        service_name,
+        capabilities,
+        settings,
+        script_source,
+        tx,
+        CommandReceiver::Bounded(cmd_rx),
+        command_registry,
+        generation,
+    )
+    .await;
+}
+
+enum CommandReceiver {
+    Bounded(mpsc::Receiver<BackendServiceCommand>),
+    Unbounded(mpsc::UnboundedReceiver<BackendServiceCommand>),
+}
+
+impl CommandReceiver {
+    async fn recv(&mut self) -> Option<BackendServiceCommand> {
+        match self {
+            Self::Bounded(receiver) => receiver.recv().await,
+            Self::Unbounded(receiver) => receiver.recv().await,
+        }
+    }
+
+    fn try_recv(&mut self) -> Option<BackendServiceCommand> {
+        match self {
+            Self::Bounded(receiver) => receiver.try_recv().ok(),
+            Self::Unbounded(receiver) => receiver.try_recv().ok(),
+        }
+    }
+}
+
+async fn spawn_backend_service_inner(
+    module_id: String,
+    service_name: String,
+    capabilities: Vec<String>,
+    settings: JsonValue,
+    script_source: String,
+    tx: mpsc::UnboundedSender<BackendServiceEvent>,
+    cmd_rx: CommandReceiver,
+    command_registry: Option<mesh_core_scripting::BackendCommandRegistry>,
+    generation: u64,
+) {
     let module_id: Arc<str> = Arc::from(module_id);
     let service_name: Arc<str> = Arc::from(service_name);
     // Declare the guard before the context so a cancellation or panic drops
@@ -235,7 +396,19 @@ pub async fn spawn_backend_service(
         settings,
         capabilities,
     );
-    run_backend_service(&mut ctx, module_id, service_name, script_source, tx, cmd_rx).await;
+    if let Some(registry) = command_registry {
+        ctx.set_command_registry(registry);
+    }
+    run_backend_service(
+        &mut ctx,
+        module_id,
+        service_name,
+        script_source,
+        tx,
+        cmd_rx,
+        generation,
+    )
+    .await;
     lifecycle.finish(&mut ctx).await;
 }
 
@@ -301,7 +474,8 @@ async fn run_backend_service(
     service_name: Arc<str>,
     script_source: String,
     tx: mpsc::UnboundedSender<BackendServiceEvent>,
-    mut cmd_rx: mpsc::UnboundedReceiver<BackendServiceCommand>,
+    mut cmd_rx: CommandReceiver,
+    generation: u64,
 ) {
     if let Err(e) = ctx.load_script(&script_source) {
         tracing::error!("{} failed to load backend script: {e}", module_id.as_ref());
@@ -421,8 +595,16 @@ async fn run_backend_service(
             cmd = cmd_rx.recv() => {
                 let Some(first) = cmd else { break };
                 let mut batch = vec![first];
-                while let Ok(next) = cmd_rx.try_recv() {
+                while batch.len() < MAX_COMMAND_BATCH {
+                    let Some(next) = cmd_rx.try_recv() else {
+                        break;
+                    };
                     batch.push(next);
+                }
+                if let Some(registry) = ctx.command_registry() {
+                    for command in &mut batch {
+                        command.coalesce = registry.coalesces(&command.command);
+                    }
                 }
                 let original_batch = batch.clone();
                 let batch = coalesce_command_batch(batch, &mut coalesced_command_index);
@@ -444,6 +626,7 @@ async fn run_backend_service(
                             "error": "coalesced by a newer invocation",
                         }),
                         outcome: BackendCommandOutcome::Superseded,
+                        generation,
                     })).is_err() {
                         return;
                     }
@@ -452,6 +635,56 @@ async fn run_backend_service(
                 for msg in batch {
                     let call_id = msg.call_id;
                     let command = msg.command.clone();
+                    let command_generation = call_generation(call_id, generation);
+                    if generation != 0
+                        && command_generation != 0
+                        && command_generation != generation
+                    {
+                        finish_call(call_id);
+                        if tx
+                            .send(BackendServiceEvent::CommandResult(BackendCommandResult {
+                                call_id,
+                                service: service_name.clone(),
+                                source_module: module_id.clone(),
+                                command,
+                                result: serde_json::json!({
+                                    "ok": false,
+                                    "status": "stale_generation",
+                                    "error": "backend generation is no longer active",
+                                }),
+                                outcome: BackendCommandOutcome::StaleGeneration,
+                                generation: command_generation,
+                            }))
+                            .is_err()
+                        {
+                            stop = true;
+                            break;
+                        }
+                        continue;
+                    }
+                    if let Err(message) = validate_command_payload(&msg.payload) {
+                        finish_call(call_id);
+                        if tx
+                            .send(BackendServiceEvent::CommandResult(BackendCommandResult {
+                                call_id,
+                                service: service_name.clone(),
+                                source_module: module_id.clone(),
+                                command,
+                                result: serde_json::json!({
+                                    "ok": false,
+                                    "status": "invalid_arguments",
+                                    "error": message,
+                                }),
+                                outcome: BackendCommandOutcome::Failed,
+                                generation,
+                            }))
+                            .is_err()
+                        {
+                            stop = true;
+                            break;
+                        }
+                        continue;
+                    }
                     if let Some(outcome) = take_pre_execution_outcome(call_id) {
                         let status = outcome.as_str();
                         if tx
@@ -466,6 +699,7 @@ async fn run_backend_service(
                                     "error": status,
                                 }),
                                 outcome,
+                                generation,
                             }))
                             .is_err()
                         {
@@ -496,17 +730,10 @@ async fn run_backend_service(
                                 command,
                                 result: outcome.result,
                                 outcome: terminal_outcome,
+                                generation,
                             })).is_err() {
                                 stop = true;
                                 break;
-                            }
-                            if let Some(message) = outcome.error {
-                                let _ = tx.send(BackendServiceEvent::Failed {
-                                    service: service_name.clone(),
-                                    source_module: module_id.clone(),
-                                    stage: "command".to_string(),
-                                    message,
-                                });
                             }
                             if let Some(payload) = outcome.state {
                                 if !publish_changed_update(
@@ -530,13 +757,6 @@ async fn run_backend_service(
                             }
                         }
                         Err(err) => {
-                            let stage = match &err {
-                                BackendScriptError::SnapshotFailed { .. } => "snapshot",
-                                BackendScriptError::CommandResultConversionFailed { .. } => {
-                                    "command-result"
-                                }
-                                _ => "command",
-                            };
                             finish_call(call_id);
                             let _ = tx.send(BackendServiceEvent::CommandResult(BackendCommandResult {
                                 call_id,
@@ -549,13 +769,8 @@ async fn run_backend_service(
                                     "error": err.to_string(),
                                 }),
                                 outcome: BackendCommandOutcome::Failed,
+                                generation,
                             }));
-                            let _ = tx.send(BackendServiceEvent::Failed {
-                                service: service_name.clone(),
-                                source_module: module_id.clone(),
-                                stage: stage.to_string(),
-                                message: err.to_string(),
-                            });
                             refresh_interval(&ctx, &mut interval_ms, &mut tick);
                         }
                     }
@@ -563,6 +778,23 @@ async fn run_backend_service(
                 if stop { break; }
             }
         }
+    }
+    while let Some(pending) = cmd_rx.try_recv() {
+        let pending_generation = call_generation(pending.call_id, generation);
+        finish_call(pending.call_id);
+        let _ = tx.send(BackendServiceEvent::CommandResult(BackendCommandResult {
+            call_id: pending.call_id,
+            service: service_name.clone(),
+            source_module: module_id.clone(),
+            command: pending.command,
+            result: serde_json::json!({
+                "ok": false,
+                "status": "stale_generation",
+                "error": "backend runtime stopped before dispatch",
+            }),
+            outcome: BackendCommandOutcome::StaleGeneration,
+            generation: pending_generation,
+        }));
     }
 }
 
@@ -815,6 +1047,34 @@ mod tests {
     }
 
     #[test]
+    fn coalesce_keeps_distinct_targets_and_drops_stale_updates_per_target() {
+        let batch = vec![
+            BackendServiceCommand {
+                call_id: CallId::next(),
+                command: "set_volume".to_string(),
+                payload: serde_json::json!({ "device_id": "a", "value": 10 }),
+                coalesce: true,
+            },
+            BackendServiceCommand {
+                call_id: CallId::next(),
+                command: "set_volume".to_string(),
+                payload: serde_json::json!({ "device_id": "b", "value": 20 }),
+                coalesce: true,
+            },
+            BackendServiceCommand {
+                call_id: CallId::next(),
+                command: "set_volume".to_string(),
+                payload: serde_json::json!({ "device_id": "a", "value": 30 }),
+                coalesce: true,
+            },
+        ];
+        let out = coalesce_for_test(batch);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].payload["device_id"], "b");
+        assert_eq!(out[1].payload["value"], 30);
+    }
+
+    #[test]
     fn call_control_produces_terminal_timeout_and_cancel_outcomes() {
         let timed_out = CallId::next();
         register_call(timed_out, Duration::ZERO);
@@ -830,6 +1090,48 @@ mod tests {
             take_pre_execution_outcome(cancelled),
             Some(BackendCommandOutcome::Cancelled)
         );
+    }
+
+    #[tokio::test]
+    async fn bounded_backend_rejects_a_command_from_an_old_generation() {
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::channel(BACKEND_COMMAND_QUEUE_CAPACITY);
+        let task = tokio::spawn(spawn_backend_service_bounded(
+            "@test/stale-generation".to_string(),
+            "audio".to_string(),
+            Vec::new(),
+            serde_json::json!({}),
+            "function start()\nend\nfunction on_command_ping()\nreturn { ok = true }\nend"
+                .to_string(),
+            event_tx,
+            cmd_rx,
+            None,
+            9,
+        ));
+        let call_id = CallId::next();
+        register_call_for_generation(call_id, Duration::from_secs(1), 8);
+        cmd_tx
+            .send(BackendServiceCommand {
+                call_id,
+                command: "ping".to_string(),
+                payload: serde_json::json!({}),
+                coalesce: false,
+            })
+            .await
+            .unwrap();
+        let result = next_command_result(
+            &mut event_rx,
+            "stale generation must produce a terminal result",
+        )
+        .await;
+        assert_eq!(result.outcome, BackendCommandOutcome::StaleGeneration);
+        assert_eq!(result.generation, 8);
+        drop(cmd_tx);
+        drop(event_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("bounded backend task should exit")
+            .expect("bounded backend task should not panic");
     }
 
     fn bundled_backend_script_path(module_slug: &str) -> PathBuf {
@@ -1370,17 +1672,20 @@ mod tests {
                 .is_some_and(|message| message.contains("command boom"))
         );
 
-        let failed = loop {
-            let event = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
-                .await
-                .expect("command failure should remain lifecycle-visible")
-                .expect("event channel should stay open");
-            if let BackendServiceEvent::Failed { stage, message, .. } = event {
-                break (stage, message);
+        let no_lifecycle_failure = tokio::time::timeout(Duration::from_millis(150), async {
+            loop {
+                match event_rx.recv().await {
+                    Some(BackendServiceEvent::Failed { .. }) => return false,
+                    Some(_) => continue,
+                    None => return true,
+                }
             }
-        };
-        assert_eq!(failed.0, "command");
-        assert!(failed.1.contains("command boom"));
+        })
+        .await;
+        assert!(
+            no_lifecycle_failure.is_err() || no_lifecycle_failure.unwrap(),
+            "ordinary command failures settle through CommandResult only"
+        );
 
         drop(cmd_tx);
         drop(event_rx);
@@ -1750,23 +2055,15 @@ mod tests {
             })
             .unwrap();
 
-        let failed = loop {
-            let event = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
-                .await
-                .expect("snapshot failure should emit a Failed lifecycle event")
-                .expect("event channel should stay open");
-            if let BackendServiceEvent::Failed { stage, message, .. } = event {
-                break (stage, message);
-            }
-        };
+        let result = next_command_result(
+            &mut event_rx,
+            "snapshot failure should emit a terminal command result",
+        )
+        .await;
+        assert_eq!(result.outcome, BackendCommandOutcome::Failed);
         assert_eq!(
-            failed.0, "snapshot",
-            "snapshot serialization failures must use stage='snapshot'"
-        );
-        assert!(
-            failed.1.contains("failed to export state snapshot"),
-            "Failed message should describe the snapshot stage: {}",
-            failed.1
+            result.result.get("ok").and_then(|value| value.as_bool()),
+            Some(false)
         );
 
         drop(cmd_tx);
@@ -1778,7 +2075,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn spawn_backend_service_command_error_emits_result_and_failed_event() {
+    async fn spawn_backend_service_command_error_emits_result_without_failed_event() {
         // A command handler that raises a Lua error must:
         // 1. Emit a CommandResult with ok=false (caller-visible error result)
         // 2. Emit a Failed event with stage="command" (lifecycle visibility)
@@ -1826,23 +2123,19 @@ mod tests {
             "CommandResult.error should carry the handler message"
         );
 
-        let failed = loop {
-            let event = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
-                .await
-                .expect("command failure should also emit a Failed lifecycle event")
-                .expect("event channel should stay open");
-            if let BackendServiceEvent::Failed { stage, message, .. } = event {
-                break (stage, message);
+        let no_lifecycle_failure = tokio::time::timeout(Duration::from_millis(150), async {
+            loop {
+                match event_rx.recv().await {
+                    Some(BackendServiceEvent::Failed { .. }) => return false,
+                    Some(_) => continue,
+                    None => return true,
+                }
             }
-        };
-        assert_eq!(
-            failed.0, "command",
-            "handler runtime errors must use stage='command'"
-        );
+        })
+        .await;
         assert!(
-            failed.1.contains("handler boom"),
-            "Failed message should carry the handler error: {}",
-            failed.1
+            no_lifecycle_failure.is_err() || no_lifecycle_failure.unwrap(),
+            "ordinary command failures settle through CommandResult only"
         );
 
         drop(cmd_tx);

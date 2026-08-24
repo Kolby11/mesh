@@ -1341,20 +1341,54 @@ fn command_handler_can_read_payload_table() {
 }
 
 #[test]
-fn command_handler_can_use_direct_function_name() {
+fn command_helper_name_is_not_a_public_command() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
         "function start()\nend\nfunction set_volume()\nmesh.service.emit({ ok = true })\nend",
     )
     .unwrap();
     let payload = ctx.run_command("set-volume", &serde_json::json!({}));
+    assert!(payload.unwrap().is_none());
+}
+
+#[test]
+fn command_registry_validates_arguments_and_blocks_implicit_helpers() {
+    let registry = BackendCommandRegistry::from_specs(
+        vec![BackendCommandSpec {
+            name: "set-volume".to_string(),
+            arguments: vec![BackendCommandArgument {
+                name: "percent".to_string(),
+                type_expr: "int".to_string(),
+            }],
+            returns: None,
+            coalesce: true,
+        }],
+        std::collections::HashMap::new(),
+    );
+    let mut ctx = BackendScriptContext::new("@test/backend");
+    ctx.set_command_registry(registry);
+    ctx.load_script(
+        "function start()\nend\nfunction set_volume()\nerror('helper must remain private')\nend",
+    )
+    .unwrap();
+
+    let invalid = ctx
+        .run_command_with_result("set-volume", &serde_json::json!({ "percent": "loud" }))
+        .unwrap();
     assert_eq!(
-        payload
+        invalid
+            .result
+            .get("status")
+            .and_then(|value| value.as_str()),
+        Some("invalid_arguments")
+    );
+    assert!(
+        ctx.run_command_with_result("set-volume", &serde_json::json!({ "percent": 20 }))
             .unwrap()
-            .unwrap()
+            .result
             .get("ok")
-            .and_then(|v| v.as_bool()),
-        Some(true)
+            .and_then(|value| value.as_bool())
+            .is_some_and(|ok| !ok)
     );
 }
 
@@ -1743,8 +1777,9 @@ fn backend_command_result_conversion_failure_is_reported() {
     // CommandResultConversionFailed so the shell can distinguish it from handler errors.
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
-        "function start()\nend\n\
+        "function start()\nstate = { value = 'old' }\nend\n\
          function on_command_bad_result()\n\
+           state = { value = 'new' }\n\
            return function() end\n\
          end",
     )
@@ -1763,6 +1798,11 @@ fn backend_command_result_conversion_failure_is_reported() {
     assert!(
         err.to_string().contains("failed to convert command result"),
         "error message should identify command-result conversion stage: {err}"
+    );
+    assert_eq!(
+        ctx.take_service_state_snapshot().unwrap(),
+        Some(serde_json::json!({ "value": "old" })),
+        "failed result conversion must roll back state"
     );
 }
 

@@ -18,6 +18,7 @@ use mesh_core_presentation::{
 pub(in crate::shell) const COMMAND_THROTTLE_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(100);
 const SERVICE_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
+const MAX_COALESCED_COMMAND_KEYS: usize = 256;
 const POPOVER_HOVER_BRIDGE_DELAY: std::time::Duration = std::time::Duration::from_millis(180);
 const DEBUG_INSPECTOR_SURFACE_ID: &str = "@mesh/debug-inspector";
 
@@ -29,6 +30,43 @@ fn service_unavailable_response() -> serde_json::Value {
         "error": "service_unavailable",
         "status": "service_unavailable",
     })
+}
+
+fn service_queue_full_response() -> serde_json::Value {
+    serde_json::json!({
+        "ok": false,
+        "error": "command_queue_full",
+        "status": "queue_full",
+    })
+}
+
+fn command_coalescing_key(command: &str, payload: &serde_json::Value) -> String {
+    let identity = payload.as_object().map(|object| {
+        object
+            .iter()
+            .filter(|(name, _)| {
+                *name == "id"
+                    || name.ends_with("_id")
+                    || name.contains("target")
+                    || name.contains("device")
+                    || name.contains("player")
+                    || name.contains("output")
+                    || name.contains("sink")
+            })
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    });
+    format!(
+        "{}:{}",
+        command,
+        serde_json::to_string(&identity.unwrap_or_default()).unwrap_or_default()
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ServiceCommandSendError {
+    Closed,
+    Full,
 }
 
 impl Shell {
@@ -724,10 +762,17 @@ impl Shell {
                 source_module_id,
                 source_capabilities,
             } => {
+                let interface_canonical = canonical_interface_name_cow(&interface);
+                let generation = self
+                    .backend_runtimes
+                    .get(interface_canonical.as_ref())
+                    .map(|slot| slot.generation)
+                    .unwrap_or(0);
                 let route = ServiceCallRoute {
-                    interface: interface.clone(),
+                    interface: interface_canonical.into_owned(),
                     instance_id: source_instance_id,
                     module_id: source_module_id.clone(),
+                    generation,
                 };
                 self.pending_service_call_routes.insert(call_id, route);
                 let result = self.dispatch_service_command_with_call_id(
@@ -1163,6 +1208,30 @@ impl Shell {
             });
         }
 
+        if let Err(message) = mesh_core_backend::validate_command_payload(payload) {
+            let result = serde_json::json!({
+                "ok": false,
+                "error": message,
+                "status": "invalid_arguments",
+                "call_id": call_id.raw(),
+            });
+            self.record_method_call(mesh_core_debug::MethodCallEntry {
+                call_id: call_id.raw(),
+                interface: interface_canonical.to_string(),
+                provider_id: None,
+                source_module_id: source_module_id.to_string(),
+                command: command.to_string(),
+                status: "invalid_arguments".to_string(),
+                queued: false,
+                result: Some(result.clone()),
+                error: result
+                    .get("error")
+                    .and_then(|value| value.as_str())
+                    .map(ToOwned::to_owned),
+            });
+            return result;
+        }
+
         if let Some(contract) = contract.as_ref() {
             let warnings =
                 service_state::service_method_input_contract_warnings(contract, command, payload);
@@ -1237,13 +1306,22 @@ impl Shell {
         } else if self.service_handlers.contains_key(interface) {
             let coalesce = self.service_command_is_coalescable(interface, command);
             if coalesce {
-                let key = (interface.to_string(), command.to_string());
+                let coalesce_key = command_coalescing_key(command, payload);
+                let key = (
+                    interface.to_string(),
+                    command.to_string(),
+                    coalesce_key.clone(),
+                );
                 let now = std::time::Instant::now();
                 let entry = self.command_throttle.get(&key);
                 let allow_send = entry
                     .map(|state| now.duration_since(state.last_send) >= COMMAND_THROTTLE_INTERVAL)
                     .unwrap_or(true);
-                if allow_send {
+                if !self.command_throttle.contains_key(&key)
+                    && self.command_throttle.len() >= MAX_COALESCED_COMMAND_KEYS
+                {
+                    service_queue_full_response()
+                } else if allow_send {
                     self.command_throttle.insert(
                         key,
                         CommandThrottleState {
@@ -1255,7 +1333,10 @@ impl Shell {
                         interface, command, payload, coalesce, call_id,
                     ) {
                         Some(Ok(())) => serde_json::json!({ "ok": true, "queued": true }),
-                        Some(Err(())) | None => service_unavailable_response(),
+                        Some(Err(ServiceCommandSendError::Full)) => service_queue_full_response(),
+                        Some(Err(ServiceCommandSendError::Closed)) | None => {
+                            service_unavailable_response()
+                        }
                     }
                 } else {
                     let state =
@@ -1287,7 +1368,10 @@ impl Shell {
                     .send_service_command_message(interface, command, payload, coalesce, call_id)
                 {
                     Some(Ok(())) => serde_json::json!({ "ok": true, "queued": true }),
-                    Some(Err(())) | None => service_unavailable_response(),
+                    Some(Err(ServiceCommandSendError::Full)) => service_queue_full_response(),
+                    Some(Err(ServiceCommandSendError::Closed)) | None => {
+                        service_unavailable_response()
+                    }
                 }
             }
         } else {
@@ -1370,7 +1454,7 @@ impl Shell {
         dispatch_result
     }
 
-    pub(super) fn complete_service_call_route(
+    pub(in crate::shell) fn complete_service_call_route(
         &mut self,
         call_id: mesh_core_backend::CallId,
         status: &str,
@@ -1479,23 +1563,33 @@ impl Shell {
         payload: &serde_json::Value,
         coalesce: bool,
         call_id: mesh_core_backend::CallId,
-    ) -> Option<Result<(), ()>> {
+    ) -> Option<Result<(), ServiceCommandSendError>> {
         let tx = self.service_handlers.get(interface).cloned()?;
-        mesh_core_backend::register_call(call_id, SERVICE_CALL_TIMEOUT);
-        let active_provider_id = self
+        let active_provider = self
             .backend_runtimes
             .get(interface)
-            .map(|slot| slot.provider_id.clone());
+            .map(|slot| (slot.provider_id.clone(), slot.generation));
+        let generation = active_provider
+            .as_ref()
+            .map(|(_, generation)| *generation)
+            .unwrap_or(0);
+        mesh_core_backend::register_call_for_generation(call_id, SERVICE_CALL_TIMEOUT, generation);
+        let active_provider_id = active_provider.map(|(provider_id, _)| provider_id);
         let profiling_started = (self.profiling_enabled() && active_provider_id.is_some())
             .then(std::time::Instant::now);
         let result = tx
-            .send(ServiceCommandMsg {
+            .try_send(ServiceCommandMsg {
                 call_id,
                 command: command.to_string(),
                 payload: payload.clone(),
                 coalesce,
             })
-            .map_err(|_| ());
+            .map_err(|error| match error {
+                tokio::sync::mpsc::error::TrySendError::Full(_) => ServiceCommandSendError::Full,
+                tokio::sync::mpsc::error::TrySendError::Closed(_) => {
+                    ServiceCommandSendError::Closed
+                }
+            });
         if result.is_err() {
             mesh_core_backend::finish_call(call_id);
         }
@@ -1662,14 +1756,14 @@ impl Shell {
             return;
         }
         let now = std::time::Instant::now();
-        let mut to_send: Vec<(String, String, PendingServiceCommand)> = Vec::new();
-        let mut to_remove: Vec<(String, String)> = Vec::new();
+        let mut to_send: Vec<(String, String, String, PendingServiceCommand)> = Vec::new();
+        let mut to_remove: Vec<(String, String, String)> = Vec::new();
         for (key, state) in self.command_throttle.iter_mut() {
             if now.duration_since(state.last_send) < COMMAND_THROTTLE_INTERVAL {
                 continue;
             }
             if let Some(command) = state.pending.take() {
-                to_send.push((key.0.clone(), key.1.clone(), command));
+                to_send.push((key.0.clone(), key.1.clone(), key.2.clone(), command));
                 state.last_send = now;
             } else if now.duration_since(state.last_send)
                 >= COMMAND_THROTTLE_INTERVAL.saturating_mul(8)
@@ -1677,7 +1771,7 @@ impl Shell {
                 to_remove.push(key.clone());
             }
         }
-        for (interface, command, pending) in to_send {
+        for (interface, command, _coalesce_key, pending) in to_send {
             let sent = self.send_service_command_message(
                 &interface,
                 &command,
@@ -1686,10 +1780,17 @@ impl Shell {
                 pending.call_id,
             );
             if !matches!(sent, Some(Ok(()))) {
+                let failure = match sent {
+                    Some(Err(ServiceCommandSendError::Full)) => service_queue_full_response(),
+                    _ => service_unavailable_response(),
+                };
                 self.complete_service_call_route(
                     pending.call_id,
-                    "service_unavailable",
-                    &service_unavailable_response(),
+                    failure
+                        .get("status")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("service_unavailable"),
+                    &failure,
                 );
             }
         }

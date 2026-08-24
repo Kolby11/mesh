@@ -50,7 +50,7 @@ mod types;
 use backend::{BackendLaunchCandidate, backend_launch_candidates_from_graph};
 use backend::{BackendRuntimeStatus, BackendRuntimeStatusEntry};
 use ipc::spawn_ipc_server;
-use mesh_core_backend::{BackendServiceEvent, spawn_backend_service};
+use mesh_core_backend::BackendServiceEvent;
 use mesh_core_presentation::{
     PresentationEngine, SurfaceConfig, WindowEvent, WindowKeyEvent, coalesce_input_events,
 };
@@ -477,7 +477,7 @@ pub struct Shell {
     pending_popup_grabs: HashMap<String, PendingPopupGrab>,
     popup_grab_generation: u64,
     transfer_owned_keyboard_modes: HashMap<SurfaceId, mesh_core_wayland::KeyboardMode>,
-    service_handlers: HashMap<String, mpsc::UnboundedSender<ServiceCommandMsg>>,
+    service_handlers: HashMap<String, mpsc::Sender<ServiceCommandMsg>>,
     backend_runtimes: HashMap<String, BackendRuntimeSlot>,
     pending_backend_runtimes: HashMap<String, PendingBackendRuntime>,
     pending_resource_preparation: Option<profile::PendingResourcePreparation>,
@@ -498,7 +498,7 @@ pub struct Shell {
     /// Historical owners let a newer failed write reveal an older still-live
     /// write, or skip over older writes that already failed.
     bound_service_state_transactions: HashMap<mesh_core_backend::CallId, PendingBoundServiceState>,
-    command_throttle: HashMap<(String, String), CommandThrottleState>,
+    command_throttle: HashMap<(String, String, String), CommandThrottleState>,
     pending_service_call_routes: HashMap<u64, ServiceCallRoute>,
     pending_popover_hides: HashMap<SurfaceId, std::time::Instant>,
     profiling: runtime::profiling::ProfilingRuntimeState,
@@ -539,7 +539,8 @@ struct BackendRuntimeSlot {
     /// Identity carried by events from this particular runtime generation.
     /// Candidate generations use a private value until they are committed.
     event_provider_id: Arc<std::sync::RwLock<String>>,
-    command_tx: mpsc::UnboundedSender<ServiceCommandMsg>,
+    generation: u64,
+    command_tx: mpsc::Sender<ServiceCommandMsg>,
     task: AbortHandle,
 }
 

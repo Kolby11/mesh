@@ -444,12 +444,17 @@ impl Shell {
             ShellMessage::BackendCommandResult {
                 interface,
                 provider_id,
+                generation,
                 call_id,
                 command,
                 result,
                 outcome,
             } => {
-                let provider_is_active = self.backend_provider_is_active(&interface, &provider_id);
+                let provider_is_active = self.backend_provider_is_active(&interface, &provider_id)
+                    && self
+                        .backend_runtimes
+                        .get(&interface)
+                        .is_some_and(|slot| slot.generation == generation);
                 if provider_is_active {
                     let contract = self.interfaces.resolve(&interface, None).contract;
                     let warnings = contract.as_ref().map_or_else(Vec::new, |contract| {
@@ -501,12 +506,21 @@ impl Shell {
                         );
                     }
                 } else {
+                    let stale_status = if self
+                        .backend_runtimes
+                        .get(&interface)
+                        .is_some_and(|slot| slot.generation != generation)
+                    {
+                        "stale_generation"
+                    } else {
+                        "stale_provider"
+                    };
                     self.complete_service_call_route(
                         call_id,
-                        "stale_provider",
+                        stale_status,
                         &serde_json::json!({
                             "ok": false,
-                            "status": "stale_provider",
+                            "status": stale_status,
                             "error": "provider generation is no longer active",
                         }),
                     );

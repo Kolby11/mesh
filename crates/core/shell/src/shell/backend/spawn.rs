@@ -135,7 +135,8 @@ impl Shell {
                 );
             }
         }
-        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        let generation = mesh_core_backend::next_runtime_generation();
+        let (cmd_tx, cmd_rx) = mpsc::channel(mesh_core_backend::BACKEND_COMMAND_QUEUE_CAPACITY);
 
         let shell_tx = tx.clone();
         let interface = candidate.interface.clone();
@@ -175,6 +176,7 @@ impl Shell {
                         let command = result.command;
                         let payload = result.result;
                         let outcome = result.outcome;
+                        let generation = result.generation;
                         tracing::debug!(
                             interface = bridge_interface.as_str(),
                             provider_id = bridge_provider_id.as_str(),
@@ -185,6 +187,7 @@ impl Shell {
                         let _ = shell_tx.send(ShellMessage::BackendCommandResult {
                             interface: bridge_interface.clone(),
                             provider_id: current_event_provider_id.clone(),
+                            generation,
                             call_id,
                             command,
                             result: payload,
@@ -295,7 +298,7 @@ impl Shell {
                 }
             }
         });
-        let task = runtime.spawn(spawn_backend_service(
+        let task = runtime.spawn(mesh_core_backend::spawn_backend_service_bounded(
             candidate.module_id,
             candidate.service_name,
             candidate.capabilities,
@@ -303,11 +306,14 @@ impl Shell {
             candidate.script_source,
             backend_tx,
             cmd_rx,
+            candidate.command_registry,
+            generation,
         ));
         BackendRuntimeSlot {
             interface,
             provider_id,
             event_provider_id,
+            generation,
             command_tx: cmd_tx,
             task: task.abort_handle(),
         }

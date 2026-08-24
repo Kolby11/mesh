@@ -1,4 +1,6 @@
-use super::command::{BackendCommandOutcome, command_error_result, command_result_from_lua};
+use super::command::{
+    BackendCommandOutcome, BackendCommandRegistry, command_error_result, command_result_from_lua,
+};
 use super::exec::{
     ExecService, ExecutableCapabilityPolicy, exec_denied_to_lua, missing_exec_capability,
     missing_exec_stream_capability, run_exec,
@@ -53,6 +55,7 @@ pub struct BackendScriptContext {
     policy: RuntimePolicy,
     script_loaded: bool,
     stop_attempted: bool,
+    command_registry: Option<BackendCommandRegistry>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -162,7 +165,19 @@ impl BackendScriptContext {
             policy,
             script_loaded: false,
             stop_attempted: false,
+            command_registry: None,
         }
+    }
+
+    /// Install the interface-owned command registry before loading provider
+    /// code. The registry is immutable for the lifetime of this runtime
+    /// generation.
+    pub fn set_command_registry(&mut self, registry: BackendCommandRegistry) {
+        self.command_registry = Some(registry);
+    }
+
+    pub fn command_registry(&self) -> Option<&BackendCommandRegistry> {
+        self.command_registry.as_ref()
     }
 
     pub(super) fn ensure_lua(&mut self) -> &Lua {
@@ -457,14 +472,16 @@ impl BackendScriptContext {
     ) -> Result<Option<JsonValue>, BackendScriptError> {
         let _budget = self.policy.begin_callback();
         self.reset_for_call(payload.clone());
+        if let Some(registry) = &self.command_registry {
+            if registry.validate_payload(command, payload).is_err() {
+                return Ok(None);
+            }
+        }
         let normalized = command.replace('-', "_");
 
         let globals = self.script_environment();
         let handler_name = format!("on_command_{normalized}");
-        let handler = match globals
-            .get::<Function>(handler_name.as_str())
-            .or_else(|_| globals.get::<Function>(normalized.as_str()))
-        {
+        let handler = match globals.get::<Function>(handler_name.as_str()) {
             Ok(handler) => handler,
             Err(_) => return Ok(None),
         };
@@ -494,10 +511,22 @@ impl BackendScriptContext {
 
         let globals = self.script_environment();
         let handler_name = format!("on_command_{normalized}");
-        let handler = match globals
-            .get::<Function>(handler_name.as_str())
-            .or_else(|_| globals.get::<Function>(normalized.as_str()))
-        {
+        if let Some(registry) = &self.command_registry {
+            if let Err(message) = registry.validate_payload(command, payload) {
+                return Ok(BackendCommandOutcome {
+                    state: None,
+                    result: serde_json::json!({
+                        "ok": false,
+                        "status": "invalid_arguments",
+                        "error": message,
+                    }),
+                    error: None,
+                });
+            }
+        }
+
+        let previous_state = self.capture_state_for_rollback()?;
+        let handler = match globals.get::<Function>(handler_name.as_str()) {
             Ok(handler) => handler,
             Err(_) => {
                 return Ok(BackendCommandOutcome {
@@ -518,6 +547,7 @@ impl BackendScriptContext {
             Ok(returned) => returned,
             Err(err) => {
                 let message = err.to_string();
+                self.rollback_command_state(previous_state);
                 return Ok(BackendCommandOutcome {
                     state: None,
                     result: command_error_result(message.clone()),
@@ -525,10 +555,48 @@ impl BackendScriptContext {
                 });
             }
         };
-        let state = self.take_service_state_snapshot()?;
+        let state = match self.take_service_state_snapshot() {
+            Ok(state) => state,
+            Err(error) => {
+                self.rollback_command_state(previous_state);
+                return Err(error);
+            }
+        };
         let module_id = self.module_id.clone();
         let lua = self.ensure_lua();
-        let result = command_result_from_lua(lua, &module_id, returned)?;
+        let result = match command_result_from_lua(lua, &module_id, returned) {
+            Ok(result) => result,
+            Err(error) => {
+                self.rollback_command_state(previous_state);
+                return Err(error);
+            }
+        };
+        let result_bytes = match serde_json::to_vec(&result) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                self.rollback_command_state(previous_state);
+                return Err(BackendScriptError::CommandResultConversionFailed {
+                    module_id: self.module_id.clone(),
+                    message: format!("failed to size command result: {error}"),
+                });
+            }
+        };
+        if let Err(error) = self.policy.budget().reserve_output(result_bytes.len()) {
+            self.rollback_command_state(previous_state);
+            return Err(BackendScriptError::CommandResultConversionFailed {
+                module_id: self.module_id.clone(),
+                message: error.to_string(),
+            });
+        }
+        if let Some(registry) = &self.command_registry {
+            if let Err(message) = registry.validate_result(command, &result) {
+                self.rollback_command_state(previous_state);
+                return Err(BackendScriptError::CommandResultConversionFailed {
+                    module_id: self.module_id.clone(),
+                    message,
+                });
+            }
+        }
         Ok(BackendCommandOutcome {
             state,
             result,
@@ -943,6 +1011,37 @@ impl BackendScriptContext {
         self.policy.budget().release_queue(event_count);
         let mut runtime = self.runtime.lock().unwrap();
         runtime.current_payload = payload;
+    }
+
+    fn capture_state_for_rollback(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
+        let state = self
+            .script_environment()
+            .get::<LuaValue>("state")
+            .map_err(|err| BackendScriptError::SnapshotFailed {
+                module_id: self.module_id.clone(),
+                message: format!("failed to read state before command: {err}"),
+            })?;
+        if matches!(state, LuaValue::Nil) {
+            return Ok(None);
+        }
+        self.ensure_lua()
+            .from_value::<JsonValue>(state)
+            .map(Some)
+            .map_err(|err| BackendScriptError::SnapshotFailed {
+                module_id: self.module_id.clone(),
+                message: format!("failed to convert state before command: {err}"),
+            })
+    }
+
+    fn rollback_command_state(&mut self, previous: Option<JsonValue>) {
+        let _ = self.script_environment().set(
+            "state",
+            match previous {
+                Some(value) => self.ensure_lua().to_value(&value).unwrap_or(LuaValue::Nil),
+                None => LuaValue::Nil,
+            },
+        );
+        self.reset_for_call(JsonValue::Null);
     }
 
     fn take_pending_emit(&self) -> Option<JsonValue> {

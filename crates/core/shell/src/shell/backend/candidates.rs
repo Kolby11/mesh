@@ -197,6 +197,11 @@ pub(in crate::shell) fn launch_candidate_for_provider_with_capabilities(
             .collect::<Vec<_>>(),
     };
     let settings = settings.namespace(&provider.module_id);
+    let command_registry = interfaces
+        .resolve(&interface, None)
+        .contract
+        .as_deref()
+        .map(mesh_core_scripting::BackendCommandRegistry::from_contract);
     Ok(BackendLaunchCandidate {
         module_id: provider.module_id.clone(),
         service_name: service_name_from_interface(&interface),
@@ -205,6 +210,7 @@ pub(in crate::shell) fn launch_candidate_for_provider_with_capabilities(
         script_source,
         capabilities,
         settings,
+        command_registry,
     })
 }
 
