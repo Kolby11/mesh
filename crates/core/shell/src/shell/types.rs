@@ -329,14 +329,21 @@ pub(super) struct CommandThrottleState {
 pub(super) struct LatestServiceState {
     pub(super) interface: String,
     pub(super) provider_id: String,
+    pub(super) generation: u64,
     pub(super) state: serde_json::Value,
 }
 
 impl LatestServiceState {
-    pub(super) fn new(interface: String, provider_id: String, state: serde_json::Value) -> Self {
+    pub(super) fn new(
+        interface: String,
+        provider_id: String,
+        generation: u64,
+        state: serde_json::Value,
+    ) -> Self {
         Self {
             interface,
             provider_id,
+            generation,
             state,
         }
     }

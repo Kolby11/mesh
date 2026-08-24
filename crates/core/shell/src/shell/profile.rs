@@ -774,7 +774,7 @@ impl Shell {
                     payload: state.state.clone(),
                 };
                 if component.observes_service_event(&event) {
-                    match component.handle_service_event(&event) {
+                    match component.handle_service_event_with_generation(&event, state.generation) {
                         Ok(next) => requests.extend(next),
                         Err(error) => {
                             self.reject_profile_switch(&profile_id, error.to_string());

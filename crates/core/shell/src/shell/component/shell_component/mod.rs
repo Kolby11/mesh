@@ -272,6 +272,14 @@ impl ShellComponent for FrontendSurfaceComponent {
         &mut self,
         event: &ServiceEvent,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
+        self.handle_service_event_with_generation(event, 0)
+    }
+
+    fn handle_service_event_with_generation(
+        &mut self,
+        event: &ServiceEvent,
+        generation: u64,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
         self.service_revision
             .set(self.service_revision.get().wrapping_add(1));
         let ServiceEvent::Updated {
@@ -292,11 +300,13 @@ impl ShellComponent for FrontendSurfaceComponent {
         let caps = cached_service_capabilities(&mut self.cached_service_capabilities, service);
         let service_name = &caps.service_name;
         let payload_fingerprint = ScriptContext::service_payload_fingerprint(payload);
-        let previous_payload = update_cached_service_payload(
+        let previous_payload = update_cached_service_payload_with_generation(
             &mut self.cached_service_payloads,
             service_name,
             payload,
             payload_fingerprint,
+            source_module,
+            generation,
         );
         let mut needs_rebuild = false;
         let mut runtimes = {
@@ -320,11 +330,19 @@ impl ShellComponent for FrontendSurfaceComponent {
                 );
                 continue;
             }
-            runtime.script_ctx.apply_service_payload_with_fingerprint(
+            if !runtime.script_ctx.apply_service_payload_with_generation(
                 service_name,
                 payload,
                 payload_fingerprint,
-            );
+                Some(source_module),
+                generation,
+            ) {
+                self.sync_runtime_generation(
+                    instance_key,
+                    runtime.script_ctx.state().mutation_generation(),
+                );
+                continue;
+            }
             // Capability is module-wide, so every component instance of a
             // module that declares `service.x.read` is handed the payload —
             // including the five settings pages that never mention it. Once a
@@ -410,8 +428,14 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn cache_service_payload(&mut self, event: &ServiceEvent) {
+        self.cache_service_payload_with_generation(event, 0);
+    }
+
+    fn cache_service_payload_with_generation(&mut self, event: &ServiceEvent, generation: u64) {
         let ServiceEvent::Updated {
-            service, payload, ..
+            service,
+            source_module,
+            payload,
         } = event
         else {
             return;
@@ -423,11 +447,13 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.service_revision
             .set(self.service_revision.get().wrapping_add(1));
         let fingerprint = ScriptContext::service_payload_fingerprint(payload);
-        update_cached_service_payload(
+        update_cached_service_payload_with_generation(
             &mut self.cached_service_payloads,
             service_name.as_ref(),
             payload,
             fingerprint,
+            source_module,
+            generation,
         );
     }
 

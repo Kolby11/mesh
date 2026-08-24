@@ -88,9 +88,12 @@ rejected, symlinked source files and directories are rejected, and accepted
 sources retain canonical identities for compilation and dependency tracking.
 
 Service payloads remain in capability-filtered, per-context Rust-owned
-snapshots. Interface proxies may resolve event-only contracts, but the shell
-applies state payloads only with the resolved read policy and delivers event
-payloads through the separate event policy.
+snapshots. Each accepted shell snapshot carries provider identity and a
+monotonic generation into frontend contexts, where stale snapshots are
+discarded before proxy reads or reactive state updates. Interface proxies may
+resolve event-only contracts, but the shell applies state payloads only with
+the resolved read policy and delivers event payloads through the separate
+event policy.
 
 Frontend source reloads now compile each module's primary root and active
 contribution roots into one candidate catalog generation. The candidate is
@@ -108,7 +111,8 @@ source of truth.
 
 ## Next
 
-Keep service state Rust-owned, generation-aware, and capability-filtered (`docs/BACKLOG.md`).
+Route every backend early return, callback failure, stop, and crash through
+idempotent cleanup and one terminal lifecycle record (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

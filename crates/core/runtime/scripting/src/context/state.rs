@@ -20,12 +20,42 @@ pub struct ServiceContextState {
 #[derive(Debug)]
 struct ServicePayload {
     generation: u64,
+    source_module: Option<String>,
+    source_generation: u64,
     fingerprint: u64,
     value: Arc<Value>,
 }
 
 impl ServiceContextState {
-    pub fn update(&mut self, service: &str, payload: &Value, fingerprint: u64) -> bool {
+    /// Publish a snapshot, rejecting an older source generation before it can
+    /// replace the value visible to the script. A zero source generation is
+    /// reserved for local/synthetic callers that do not have a provider
+    /// epoch; once a versioned snapshot is present, those callers cannot
+    /// overwrite it.
+    pub fn update(
+        &mut self,
+        service: &str,
+        payload: &Value,
+        fingerprint: u64,
+        source_module: Option<&str>,
+        source_generation: u64,
+    ) -> bool {
+        if let Some(current) = self.payloads.get(service) {
+            if source_generation == 0 && current.source_generation != 0 {
+                return false;
+            }
+            if source_generation != 0 && current.source_generation != 0 {
+                if source_generation < current.source_generation {
+                    return false;
+                }
+                if source_generation == current.source_generation
+                    && current.source_module.as_deref() != source_module
+                {
+                    return false;
+                }
+            }
+        }
+
         if self.payloads.get(service).is_some_and(|current| {
             current.fingerprint == fingerprint && current.value.as_ref() == payload
         }) {
@@ -37,6 +67,8 @@ impl ServiceContextState {
             service.to_string(),
             ServicePayload {
                 generation: self.generation,
+                source_module: source_module.map(str::to_owned),
+                source_generation,
                 fingerprint,
                 value: Arc::new(payload.clone()),
             },

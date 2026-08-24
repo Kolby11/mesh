@@ -2165,7 +2165,7 @@ impl Shell {
                     if component.observes_service_event(&event) {
                         requests.extend(
                             component
-                                .handle_service_event(&event)
+                                .handle_service_event_with_generation(&event, state.generation)
                                 .map_err(ShellRunError::Component)?,
                         );
                     }

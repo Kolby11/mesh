@@ -243,9 +243,18 @@ impl Shell {
                 source_module: provider_id.to_string(),
                 payload: payload.clone(),
             };
+            let generation = self
+                .latest_service_state
+                .get(interface)
+                .map_or(1, |latest| latest.generation.saturating_add(1));
             self.latest_service_state.insert(
                 interface.to_string(),
-                LatestServiceState::new(interface.to_string(), provider_id.to_string(), payload),
+                LatestServiceState::new(
+                    interface.to_string(),
+                    provider_id.to_string(),
+                    generation,
+                    payload,
+                ),
             );
             if deliver && state_changed {
                 match self.deliver_service_event(&event) {

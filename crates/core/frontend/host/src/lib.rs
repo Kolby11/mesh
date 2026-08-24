@@ -1357,6 +1357,16 @@ pub trait ShellComponent: Send {
         &mut self,
         event: &ServiceEvent,
     ) -> Result<Vec<CoreRequest>, ComponentError>;
+    /// Deliver a service update with the Rust-owned shell snapshot generation
+    /// that admitted it. Implementations may use this to reject an older
+    /// snapshot that was queued behind a newer provider state.
+    fn handle_service_event_with_generation(
+        &mut self,
+        event: &ServiceEvent,
+        _generation: u64,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        self.handle_service_event(event)
+    }
     /// Deliver a terminal correlated service result to the matching frontend
     /// instance. Returns true when this component owns the instance.
     fn deliver_service_call_result(
@@ -1375,6 +1385,11 @@ pub trait ShellComponent: Send {
     /// update path. A surface with no tree yet reads no field, so it is not a
     /// delivery target, but the payload must still seed its runtime later.
     fn cache_service_payload(&mut self, _event: &ServiceEvent) {}
+    /// Cache a service update together with its authoritative Rust snapshot
+    /// generation. Components without a cache can use the legacy hook.
+    fn cache_service_payload_with_generation(&mut self, event: &ServiceEvent, _generation: u64) {
+        self.cache_service_payload(event);
+    }
     fn service_observation_summary(&self) -> Option<ServiceObservationSummary> {
         None
     }

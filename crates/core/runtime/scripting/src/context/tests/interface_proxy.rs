@@ -467,6 +467,47 @@ fn equal_service_payloads_do_not_advance_context_generation() {
 }
 
 #[test]
+fn stale_versioned_service_snapshots_cannot_replace_context_state() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("service.audio.read"));
+    let mut ctx = ScriptContext::new("@test/audio-stale-generation", caps).unwrap();
+    ctx.set_interface_catalog(audio_catalog());
+    ctx.load_script(
+        r#"
+observed = 0
+function read_audio()
+    local audio = require("mesh.audio@>=1.0")
+    observed = audio.percent
+end
+"#,
+    )
+    .unwrap();
+
+    let first = serde_json::json!({ "percent": 20 });
+    let stale = serde_json::json!({ "percent": 99 });
+    let first_fingerprint = ScriptContext::service_payload_fingerprint(&first);
+    let stale_fingerprint = ScriptContext::service_payload_fingerprint(&stale);
+    assert!(ctx.apply_service_payload_with_generation(
+        "audio",
+        &first,
+        first_fingerprint,
+        Some("@mesh/pipewire-audio"),
+        7,
+    ));
+    assert!(!ctx.apply_service_payload_with_generation(
+        "audio",
+        &stale,
+        stale_fingerprint,
+        Some("@mesh/pipewire-audio"),
+        6,
+    ));
+    assert_eq!(ctx.service_context_generation(), 1);
+
+    ctx.call_handler("read_audio", &[]).unwrap();
+    assert_eq!(ctx.state.get("observed"), Some(serde_json::json!(20)));
+}
+
+#[test]
 fn interface_proxy_reads_state_fields_without_callbacks() {
     let mut caps = CapabilitySet::new();
     caps.grant(Capability::new("service.audio.read"));

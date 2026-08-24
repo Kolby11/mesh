@@ -427,6 +427,8 @@ fn unchanged_service_payload_cache_beats_replacement() {
         CachedServicePayload {
             value: Arc::new(payload.clone()),
             fingerprint,
+            generation: 0,
+            source_module: "<cached>".into(),
         },
     )]);
     let replaced_started = std::time::Instant::now();
@@ -438,6 +440,8 @@ fn unchanged_service_payload_cache_beats_replacement() {
             CachedServicePayload {
                 value: Arc::new(std::hint::black_box(&payload).clone()),
                 fingerprint,
+                generation: 0,
+                source_module: "<cached>".into(),
             },
         );
         replaced_total += std::hint::black_box(previous.is_some()) as usize;
@@ -449,6 +453,8 @@ fn unchanged_service_payload_cache_beats_replacement() {
         CachedServicePayload {
             value: Arc::new(payload.clone()),
             fingerprint,
+            generation: 0,
+            source_module: "<cached>".into(),
         },
     )]);
     let reused_started = std::time::Instant::now();

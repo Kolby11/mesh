@@ -175,9 +175,18 @@ impl Shell {
             return false;
         }
         let interface = interface.into_owned();
+        let generation = self
+            .latest_service_state
+            .get(&interface)
+            .map_or(1, |latest| latest.generation.saturating_add(1));
         self.latest_service_state.insert(
             interface.clone(),
-            LatestServiceState::new(interface, source_module.clone(), payload.clone()),
+            LatestServiceState::new(
+                interface,
+                source_module.clone(),
+                generation,
+                payload.clone(),
+            ),
         );
         true
     }
@@ -240,9 +249,18 @@ impl Shell {
         provider_id: String,
         payload: serde_json::Value,
     ) {
+        let generation = self
+            .latest_service_state
+            .get(&interface)
+            .map_or(1, |latest| latest.generation.saturating_add(1));
         self.latest_service_state.insert(
             interface.clone(),
-            LatestServiceState::new(interface.clone(), provider_id.clone(), payload.clone()),
+            LatestServiceState::new(
+                interface.clone(),
+                provider_id.clone(),
+                generation,
+                payload.clone(),
+            ),
         );
         let _ = self.deliver_service_event(&ServiceEvent::Updated {
             service: interface,
@@ -460,6 +478,11 @@ impl Shell {
         match event {
             ServiceEvent::Updated { service, .. } => {
                 let service_name = crate::shell::service::service_name_from_interface_cow(service);
+                let interface = canonical_interface_name_cow(service);
+                let generation = self
+                    .latest_service_state
+                    .get(interface.as_ref())
+                    .map_or(0, |latest| latest.generation);
                 let epoch = self
                     .service_delivery_index
                     .begin_delivery_epoch(self.components.len());
@@ -491,11 +514,13 @@ impl Shell {
                         requests.extend(
                             runtime
                                 .component
-                                .handle_service_event(event)
+                                .handle_service_event_with_generation(event, generation)
                                 .map_err(ShellRunError::Component)?,
                         );
                     } else {
-                        runtime.component.cache_service_payload(event);
+                        runtime
+                            .component
+                            .cache_service_payload_with_generation(event, generation);
                     }
                 }
                 if let Some(subscribers) = update_services.get(service_name.as_ref()) {
@@ -508,7 +533,7 @@ impl Shell {
                             requests.extend(
                                 runtime
                                     .component
-                                    .handle_service_event(event)
+                                    .handle_service_event_with_generation(event, generation)
                                     .map_err(ShellRunError::Component)?,
                             );
                         }
@@ -524,7 +549,9 @@ impl Shell {
                         };
                         if component_epochs[component_index] != epoch {
                             component_epochs[component_index] = epoch;
-                            runtime.component.cache_service_payload(event);
+                            runtime
+                                .component
+                                .cache_service_payload_with_generation(event, generation);
                         }
                     }
                 }
@@ -748,7 +775,7 @@ impl Shell {
         &mut self,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let mut requests = VecDeque::new();
-        let latest_service_state = std::mem::take(&mut self.latest_service_state);
+        let latest_service_state = self.latest_service_state.clone();
         let replay_result: Result<(), ShellRunError> = (|| {
             for latest in latest_service_state.values() {
                 let event = ServiceEvent::Updated {
@@ -768,7 +795,6 @@ impl Shell {
             }
             Ok(())
         })();
-        self.latest_service_state = latest_service_state;
         replay_result?;
         Ok(requests)
     }

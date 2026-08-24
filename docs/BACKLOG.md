@@ -77,7 +77,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md)
 
-- [ ] Keep service state Rust-owned, generation-aware, and capability-filtered instead of exposing shared globals.
 - [ ] Route every backend early return, callback failure, stop, and crash through idempotent cleanup and one terminal lifecycle record.
 - [ ] Make unsubscribe-safe event iteration and independent subscriber failure reporting explicit.
 - [ ] Give stream subprocesses stable identities, bounded queues, exit events, awaited reaping, and shutdown semantics.

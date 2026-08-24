@@ -116,6 +116,8 @@ impl StyleStateDependencies {
 struct CachedServicePayload {
     value: Arc<serde_json::Value>,
     fingerprint: u64,
+    generation: u64,
+    source_module: String,
 }
 
 fn update_cached_service_payload(
@@ -124,11 +126,36 @@ fn update_cached_service_payload(
     payload: &serde_json::Value,
     fingerprint: u64,
 ) -> Option<Arc<serde_json::Value>> {
+    update_cached_service_payload_with_generation(
+        cache,
+        service_name,
+        payload,
+        fingerprint,
+        "<cached>",
+        0,
+    )
+}
+
+fn update_cached_service_payload_with_generation(
+    cache: &mut HashMap<String, CachedServicePayload>,
+    service_name: &str,
+    payload: &serde_json::Value,
+    fingerprint: u64,
+    source_module: &str,
+    generation: u64,
+) -> Option<Arc<serde_json::Value>> {
     if let Some(cached) = cache.get_mut(service_name) {
         let previous = Arc::clone(&cached.value);
+        if generation != 0 && cached.generation != 0 && generation < cached.generation {
+            return Some(previous);
+        }
         if cached.fingerprint != fingerprint {
             cached.value = Arc::new(payload.clone());
             cached.fingerprint = fingerprint;
+        }
+        if generation != 0 {
+            cached.generation = generation;
+            cached.source_module = source_module.to_owned();
         }
         return Some(previous);
     }
@@ -138,6 +165,8 @@ fn update_cached_service_payload(
         CachedServicePayload {
             value: Arc::new(payload.clone()),
             fingerprint,
+            generation,
+            source_module: source_module.to_owned(),
         },
     );
     None

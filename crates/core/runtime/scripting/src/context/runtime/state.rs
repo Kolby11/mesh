@@ -14,9 +14,9 @@ use std::sync::Arc;
 impl ScriptContext {
     /// Copy a capability-authorized service payload into this context's
     /// Rust-owned snapshot store. Interface proxies read that store lazily.
-    pub fn apply_service_payload(&mut self, service: &str, payload: &Value) {
+    pub fn apply_service_payload(&mut self, service: &str, payload: &Value) -> bool {
         let fingerprint = Self::service_payload_fingerprint(payload);
-        self.apply_service_payload_with_fingerprint(service, payload, fingerprint);
+        self.apply_service_payload_with_fingerprint(service, payload, fingerprint)
     }
 
     /// Hash a service payload once for reuse across a multi-context fan-out.
@@ -31,14 +31,31 @@ impl ScriptContext {
         service: &str,
         payload: &Value,
         payload_fingerprint: u64,
-    ) {
+    ) -> bool {
+        self.apply_service_payload_with_generation(service, payload, payload_fingerprint, None, 0)
+    }
+
+    /// Apply a snapshot carrying the provider identity and the shell's
+    /// monotonic service-state generation. Stale snapshots are discarded in
+    /// the Rust-owned store before they can affect proxy reads or reactivity.
+    pub fn apply_service_payload_with_generation(
+        &mut self,
+        service: &str,
+        payload: &Value,
+        payload_fingerprint: u64,
+        source_module: Option<&str>,
+        source_generation: u64,
+    ) -> bool {
         if !self.can_read_service_interface(service) {
-            return;
+            return false;
         }
-        self.service_context_state
-            .lock()
-            .unwrap()
-            .update(service, payload, payload_fingerprint);
+        self.service_context_state.lock().unwrap().update(
+            service,
+            payload,
+            payload_fingerprint,
+            source_module,
+            source_generation,
+        )
     }
 
     /// Generation of the last capability-authorized service snapshot in this

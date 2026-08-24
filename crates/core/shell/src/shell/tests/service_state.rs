@@ -15,6 +15,7 @@ fn latest_service_state_tracks_provider_metadata_separately() {
 
     let latest = shell.latest_service_state.get("mesh.audio").unwrap();
     assert_eq!(latest.provider_id, "@mesh/pipewire-audio");
+    assert_eq!(latest.generation, 1);
     assert_eq!(latest.state["available"], serde_json::json!(true));
     assert!(latest.state.get("source_module").is_none());
 }
@@ -70,6 +71,7 @@ fn provider_swap_replaces_interface_latest_state() {
     let latest = shell.latest_service_state.get("mesh.audio").unwrap();
     assert_eq!(latest.interface, "mesh.audio");
     assert_eq!(latest.provider_id, "@mesh/pulseaudio-audio");
+    assert!(latest.generation >= 2);
     assert_eq!(latest.state["percent"], serde_json::json!(55.0));
     assert!(
         !shell
