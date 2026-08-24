@@ -89,8 +89,8 @@ source of truth.
 
 ## Next
 
-Make expression scanning UTF-8 safe and diagnose non-ASCII input instead of
-panicking (`docs/BACKLOG.md`).
+Publish runtime props transactionally so Rust and Luau cannot diverge after a
+failed update (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

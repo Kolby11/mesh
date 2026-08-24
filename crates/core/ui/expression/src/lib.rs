@@ -21,6 +21,10 @@ pub enum ExpressionCompileError {
     Empty,
     #[error("malformed Luau expression")]
     Malformed,
+    #[error(
+        "expression contains unsupported non-ASCII character {character:?} at byte offset {byte_offset}"
+    )]
+    NonAscii { character: char, byte_offset: usize },
     #[error("expression parser panicked")]
     ParserPanicked,
     #[error("could not start expression parser: {0}")]
@@ -61,6 +65,7 @@ pub fn compile_expression(
     if source.is_empty() {
         return Err(ExpressionCompileError::Empty);
     }
+    let non_ascii = first_non_ascii(source);
 
     let cache = EXPRESSION_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let mut cache = cache.lock().expect("expression cache poisoned");
@@ -74,9 +79,23 @@ pub fn compile_expression(
         .spawn(move || full_moon::parse(&candidate).is_ok())
         .map_err(|error| ExpressionCompileError::ParserThread(error.to_string()))?
         .join()
-        .map_err(|_| ExpressionCompileError::ParserPanicked)?;
+        .map_err(|_| {
+            non_ascii.map_or(
+                ExpressionCompileError::ParserPanicked,
+                |(byte_offset, character)| ExpressionCompileError::NonAscii {
+                    character,
+                    byte_offset,
+                },
+            )
+        })?;
     if !parsed {
-        return Err(ExpressionCompileError::Malformed);
+        return Err(non_ascii.map_or(
+            ExpressionCompileError::Malformed,
+            |(byte_offset, character)| ExpressionCompileError::NonAscii {
+                character,
+                byte_offset,
+            },
+        ));
     }
 
     let compiled = Arc::new(CompiledExpression {
@@ -84,6 +103,12 @@ pub fn compile_expression(
     });
     cache.insert(source.to_owned(), Arc::clone(&compiled));
     Ok(compiled)
+}
+
+fn first_non_ascii(source: &str) -> Option<(usize, char)> {
+    source
+        .char_indices()
+        .find(|(_, character)| !character.is_ascii())
 }
 
 /// Evaluate a compiled expression in a renderer-owned host environment.
@@ -212,6 +237,49 @@ mod tests {
         assert_eq!(
             compile_expression("value +").unwrap_err(),
             ExpressionCompileError::Malformed
+        );
+    }
+
+    #[test]
+    fn non_ascii_expression_syntax_is_diagnosed_without_panicking() {
+        for source in [
+            "é + 1",
+            "value .. é",
+            "é == value",
+            "é ~= value",
+            "é < value",
+            "é <= value",
+            "é > value",
+            "é >= value",
+            "é and value",
+            "é or value",
+            "not é",
+            "#é",
+        ] {
+            let byte_offset = source
+                .char_indices()
+                .find(|(_, character)| !character.is_ascii())
+                .map(|(byte_offset, _)| byte_offset)
+                .expect("test expression contains non-ASCII input");
+            let result = std::panic::catch_unwind(|| compile_expression(source));
+            let result = result.expect("non-ASCII expression scanning must not panic");
+            assert_eq!(
+                result,
+                Err(ExpressionCompileError::NonAscii {
+                    character: 'é',
+                    byte_offset,
+                }),
+                "unexpected result for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unicode_string_literals_remain_valid_luau_expressions() {
+        let expression = compile_expression("'café'").unwrap();
+        assert_eq!(
+            evaluate_preview(&expression, &Map::new(), &Map::new(), |_| None).unwrap(),
+            Value::String("café".into())
         );
     }
 }
