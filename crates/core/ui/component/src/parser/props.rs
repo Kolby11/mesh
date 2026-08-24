@@ -762,4 +762,22 @@ mod tests {
             "{err}"
         );
     }
+
+    #[test]
+    fn public_prop_schema_is_normalized_and_excludes_private_declarations() {
+        let block = parse_props(
+            r#"
+            visible: { type: "number", unit: " PX ", min: 1, default: 2 }
+            internal: { type: "string", expose: false }
+            "#,
+        )
+        .unwrap();
+
+        let public = crate::normalized_public_prop_schema(Some(&block));
+        assert_eq!(public.len(), 1);
+        assert_eq!(public[0].name, "visible");
+        assert_eq!(public[0].unit.as_deref(), Some("px"));
+        assert_eq!(public[0].min, Some(1.0));
+        assert_eq!(public[0].default, Some(PropValue::Number(2.0)));
+    }
 }

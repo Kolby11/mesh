@@ -2,7 +2,7 @@ use crate::CompiledFrontendModule;
 
 use mesh_core_component::{
     ComponentFile, ComponentImportTarget, ParseDiagnosticCategory, PropDef, PropType, PropValue,
-    SourceSpan, parse_component, referenced_identifiers,
+    SourceSpan, normalized_public_prop_schema, parse_component, referenced_identifiers,
     template::{Attribute, AttributeValue, TemplateNode},
 };
 use mesh_core_module::{Manifest, ModuleType};
@@ -244,10 +244,12 @@ pub fn compile_frontend_entrypoint(
         }
     }
 
+    let public_props = normalized_public_prop_schema(component.props.as_ref());
     Ok(CompiledFrontendModule {
         manifest: manifest.clone(),
         source_path,
         component,
+        public_props,
         local_components,
         module_component_imports,
         watched_paths,
@@ -808,7 +810,14 @@ fn validate_template_nodes(
                     let Some(child_component) = child_component else {
                         continue;
                     };
-                    validate_child_component_props(component_ref, child_component, path)?;
+                    let public_props =
+                        normalized_public_prop_schema(child_component.props.as_ref());
+                    validate_component_import_props(
+                        component_ref,
+                        child_component,
+                        &public_props,
+                        path,
+                    )?;
                     let explicit_props = component_ref
                         .props
                         .iter()
@@ -830,9 +839,13 @@ fn validate_template_nodes(
     Ok(())
 }
 
-fn validate_child_component_props(
+/// Validate one authored component reference against the imported component's
+/// public prop boundary. Dynamic expressions are checked by the runtime once
+/// their value exists; static literals are fully typed here.
+pub fn validate_component_import_props(
     reference: &mesh_core_component::template::ComponentRef,
     child: &ComponentFile,
+    public_props: &[PropDef],
     parent_path: &Path,
 ) -> Result<(), CompileFrontendError> {
     let declarations = child
@@ -846,6 +859,10 @@ fn validate_child_component_props(
                 .collect::<HashMap<_, _>>()
         })
         .unwrap_or_default();
+    let public_props = public_props
+        .iter()
+        .map(|definition| (definition.name.as_str(), definition))
+        .collect::<HashMap<_, _>>();
     let public_fields = public_component_fields(child);
 
     for attribute in &reference.props {
@@ -853,7 +870,7 @@ fn validate_child_component_props(
             continue;
         }
 
-        let Some(definition) = declarations.get(attribute.name.as_str()) else {
+        let Some(_definition) = declarations.get(attribute.name.as_str()) else {
             if public_fields.contains(&attribute.name) {
                 continue;
             }
@@ -869,7 +886,7 @@ fn validate_child_component_props(
             ));
         };
 
-        if !definition.expose {
+        let Some(definition) = public_props.get(attribute.name.as_str()) else {
             return Err(component_prop_error(
                 parent_path,
                 &reference.name,
@@ -880,7 +897,7 @@ fn validate_child_component_props(
                     reference.name, attribute.name
                 ),
             ));
-        }
+        };
 
         if let AttributeValue::Static(value) = &attribute.value {
             let parsed = static_prop_value(definition, value).map_err(|message| {

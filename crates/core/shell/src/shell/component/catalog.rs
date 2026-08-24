@@ -138,39 +138,55 @@ fn validate_placement_props(
     props: &serde_json::Map<String, serde_json::Value>,
     compiled: &CompiledFrontendModule,
 ) -> Result<(), ShellRunError> {
-    let declared = compiled.component.props.as_ref();
+    validate_compiled_props(reference, props, compiled, "invalid_node_props")
+        .map_err(|message| ShellRunError::FrontendComposition { message })
+}
+
+fn validate_contribution_props(
+    reference: &str,
+    props: &serde_json::Map<String, serde_json::Value>,
+    compiled: &CompiledFrontendModule,
+) -> Result<(), String> {
+    validate_compiled_props(reference, props, compiled, "invalid_contribution_props")
+}
+
+fn validate_compiled_props(
+    reference: &str,
+    props: &serde_json::Map<String, serde_json::Value>,
+    compiled: &CompiledFrontendModule,
+    diagnostic: &str,
+) -> Result<(), String> {
+    let public_props = compiled.public_prop_schema();
+    let raw_props = compiled
+        .component
+        .props
+        .as_ref()
+        .map(|block| block.props.as_slice())
+        .unwrap_or_default();
     for (name, value) in props {
-        let Some(definition) = declared.and_then(|block| {
-            block
-                .props
-                .iter()
-                .find(|definition| definition.name == *name)
-        }) else {
-            return Err(ShellRunError::FrontendComposition {
-                message: format!(
-                    "invalid_node_props: contribution '{reference}' has no public prop '{name}'"
-                ),
-            });
-        };
-        if !definition.expose {
-            return Err(ShellRunError::FrontendComposition {
-                message: format!(
-                    "invalid_node_props: contribution '{reference}' prop '{name}' is private"
-                ),
-            });
+        let definition = public_props
+            .iter()
+            .find(|definition| definition.name == *name);
+        if let Some(definition) = definition {
+            let value = mesh_core_component::json_to_prop_value_ref(value).map_err(|_| {
+                format!("{diagnostic}: contribution '{reference}' prop '{name}' must be scalar")
+            })?;
+            mesh_core_component::validate_prop_value(definition, &value)
+                .map_err(|error| format!("{diagnostic}: {error}"))?;
+            continue;
         }
-        let value = mesh_core_component::json_to_prop_value_ref(value).map_err(|_| {
-            ShellRunError::FrontendComposition {
-                message: format!(
-                    "invalid_node_props: contribution '{reference}' prop '{name}' must be scalar"
-                ),
-            }
-        })?;
-        mesh_core_component::validate_prop_value(definition, &value).map_err(|error| {
-            ShellRunError::FrontendComposition {
-                message: format!("invalid_node_props: {error}"),
-            }
-        })?;
+
+        if raw_props
+            .iter()
+            .any(|definition| definition.name == *name && !definition.expose)
+        {
+            return Err(format!(
+                "{diagnostic}: contribution '{reference}' prop '{name}' is private"
+            ));
+        }
+        return Err(format!(
+            "{diagnostic}: contribution '{reference}' has no public prop '{name}'"
+        ));
     }
     Ok(())
 }
@@ -852,6 +868,43 @@ impl FrontendCatalog {
                                 ));
                             continue;
                         }
+                        if let Err(message) = validate_contribution_props(
+                            &format!(
+                                "{}:{}",
+                                contribution.source_module_id, contribution.contribution_id
+                            ),
+                            &contribution.props,
+                            &compiled,
+                        ) {
+                            let error = ShellRunError::FrontendComposition { message };
+                            catalog
+                                .diagnostics
+                                .push(FrontendCatalogDiagnostic::contribution(
+                                    &contribution.source_module_id,
+                                    &contribution.contribution_id,
+                                    entry_path
+                                        .clone()
+                                        .unwrap_or_else(|| module.path.join(&contribution.entry)),
+                                    &error,
+                                ));
+                            continue;
+                        }
+                        if let Err(error) = catalog.validate_imported_component_props(
+                            &contribution.source_module_id,
+                            &compiled,
+                        ) {
+                            catalog
+                                .diagnostics
+                                .push(FrontendCatalogDiagnostic::contribution(
+                                    &contribution.source_module_id,
+                                    &contribution.contribution_id,
+                                    entry_path
+                                        .clone()
+                                        .unwrap_or_else(|| module.path.join(&contribution.entry)),
+                                    &error,
+                                ));
+                            continue;
+                        }
                         catalog
                             .extension_point_entries
                             .insert(entry_key.clone(), compiled);
@@ -883,6 +936,7 @@ impl FrontendCatalog {
                         ),
                     })?;
             }
+            catalog.validate_imported_component_props(module_id, &entry.compiled)?;
             for component_tag in entry.compiled.referenced_component_tags() {
                 if entry.compiled.has_local_component(None, &component_tag) {
                     continue;
@@ -1168,6 +1222,50 @@ impl FrontendCatalog {
         }
     }
 
+    fn validate_imported_component_props(
+        &self,
+        module_id: &str,
+        compiled: &CompiledFrontendModule,
+    ) -> Result<(), ShellRunError> {
+        let mut owners = Vec::with_capacity(compiled.local_component_sources().len() + 1);
+        owners.push((compiled.source_path.clone(), &compiled.component));
+        owners.extend(compiled.local_component_sources());
+
+        for (owner_path, component) in owners {
+            for import in &component.imports {
+                if !matches!(
+                    import.target,
+                    mesh_core_component::ComponentImportTarget::ComponentModule(_)
+                ) {
+                    continue;
+                }
+                let Some(target_module_id) =
+                    compiled.component_module_for(Some(&owner_path), &import.alias)
+                else {
+                    continue;
+                };
+                let Some(target) = self.modules.get(&target_module_id) else {
+                    continue;
+                };
+                let public_props = target.compiled.public_prop_schema();
+                if let Some(template) = &component.template {
+                    validate_imported_component_nodes(
+                        &template.root,
+                        &import.alias,
+                        &target.compiled.component,
+                        &public_props,
+                        &owner_path,
+                    )
+                    .map_err(|source| ShellRunError::FrontendCompile {
+                        module_id: module_id.to_string(),
+                        source,
+                    })?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn validate_interface_imports(
         &self,
         module_id: &str,
@@ -1362,6 +1460,33 @@ mod performance_tests {
         ));
     }
 
+    #[test]
+    fn compiled_public_prop_schema_validates_contribution_values() {
+        let modules = shipped_frontend_modules();
+        let module = modules
+            .get("@mesh/navigation-bar")
+            .expect("shipped navigation module");
+        let compiled = compile_catalog_entry("@mesh/navigation-bar", module)
+            .expect("navigation module compiles")
+            .compiled;
+
+        assert!(
+            compiled
+                .public_prop_schema()
+                .iter()
+                .any(|definition| definition.name == "blur_enabled")
+        );
+
+        let invalid = serde_json::Map::from_iter([(
+            "blur_enabled".to_string(),
+            serde_json::Value::String("not-a-bool".into()),
+        )]);
+        let error =
+            validate_contribution_props("@mesh/navigation-bar:settings", &invalid, &compiled)
+                .expect_err("invalid contribution prop accepted");
+        assert!(error.contains("expects boolean"), "{error}");
+    }
+
     #[cfg(unix)]
     #[test]
     fn watched_source_fingerprint_does_not_follow_symlinks() {
@@ -1402,8 +1527,41 @@ mod performance_tests {
             .expect("the contribution compiles as its own root");
         assert_eq!(
             compiled.source_path,
-            workspace_root.join("modules/frontend/navigation-bar/src/settings.mesh")
+            workspace_root
+                .join("modules/frontend/navigation-bar/src/settings.mesh")
+                .canonicalize()
+                .expect("shipped contribution source path canonicalizes")
         );
+    }
+
+    #[test]
+    fn contribution_import_props_are_validated_at_the_catalog_boundary() {
+        let (_temp, catalog) = catalog_with_navigation_contribution_source(
+            r#"
+<props>
+namespace: { type: "string" }
+title: { type: "string" }
+</props>
+<template><Settings invalid="true" /></template>
+<script lang="luau">
+local Settings = require("@mesh/settings")
+</script>
+"#,
+        );
+
+        assert!(
+            catalog
+                .contribution_entry("@mesh/navigation-bar", "navigation-bar")
+                .is_none(),
+            "invalid imported contribution props should prevent publication"
+        );
+        assert!(catalog.diagnostics().iter().any(|diagnostic| {
+            diagnostic.module_id == "@mesh/navigation-bar"
+                && diagnostic.contribution_id.as_deref() == Some("navigation-bar")
+                && diagnostic
+                    .message
+                    .contains("has no public prop or field named `invalid`")
+        }));
     }
 
     fn catalog_with_navigation_contribution_source(
@@ -1653,6 +1811,70 @@ local audio = require("mesh.audio@>=2.0")
             "frontend compilation over {iterations} shipped-catalog builds: sequential {sequential:?}, parallel {parallel:?}"
         );
     }
+}
+
+fn validate_imported_component_nodes(
+    nodes: &[mesh_core_component::template::TemplateNode],
+    alias: &str,
+    target: &mesh_core_component::ComponentFile,
+    public_props: &[mesh_core_component::PropDef],
+    owner_path: &Path,
+) -> Result<(), mesh_core_frontend::CompileFrontendError> {
+    use mesh_core_component::template::TemplateNode;
+
+    for node in nodes {
+        match node {
+            TemplateNode::Component(reference) => {
+                if reference.name == alias {
+                    mesh_core_frontend::validate_component_import_props(
+                        reference,
+                        target,
+                        public_props,
+                        owner_path,
+                    )?;
+                }
+                validate_imported_component_nodes(
+                    &reference.children,
+                    alias,
+                    target,
+                    public_props,
+                    owner_path,
+                )?;
+            }
+            TemplateNode::Element(element) => validate_imported_component_nodes(
+                &element.children,
+                alias,
+                target,
+                public_props,
+                owner_path,
+            )?,
+            TemplateNode::If(if_node) => {
+                validate_imported_component_nodes(
+                    &if_node.then_children,
+                    alias,
+                    target,
+                    public_props,
+                    owner_path,
+                )?;
+                validate_imported_component_nodes(
+                    &if_node.else_children,
+                    alias,
+                    target,
+                    public_props,
+                    owner_path,
+                )?;
+            }
+            TemplateNode::For(for_node) => validate_imported_component_nodes(
+                &for_node.children,
+                alias,
+                target,
+                public_props,
+                owner_path,
+            )?,
+            TemplateNode::Text(_) | TemplateNode::Expr(_) | TemplateNode::Slot(_) => {}
+        }
+    }
+    Ok(())
 }
 
 fn compiled_interface_imports(compiled: &CompiledFrontendModule) -> Vec<(String, Option<String>)> {

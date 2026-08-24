@@ -1136,6 +1136,7 @@ surface { width: 200px; height: 80px; }
 "#,
                     )
                     .unwrap(),
+                    public_props: Default::default(),
                     local_components: HashMap::new(),
                     module_component_imports: HashMap::new(),
                     watched_paths: Vec::new(),
@@ -1191,6 +1192,7 @@ surface { width: 200px; height: 80px; }
 "#,
         )
         .unwrap(),
+        public_props: Default::default(),
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
@@ -1818,6 +1820,7 @@ fn contribution_only_import_dependency_invalidates_its_host() {
             manifest: minimal_test_manifest(module_id),
             source_path: format!("{module_id}/src/main.mesh").into(),
             component: parse_component("<template><text /></template>").unwrap(),
+            public_props: Default::default(),
             local_components: HashMap::new(),
             module_component_imports,
             watched_paths: Vec::new(),

@@ -538,6 +538,25 @@ pub fn props_settings_schema(block: Option<&PropsBlock>) -> Option<serde_json::V
         .then(|| serde_json::json!({ "type": "object", "properties": properties }))
 }
 
+/// Return the normalized public prop declarations exposed by a component.
+///
+/// The parser has already applied defaults and validated the complete
+/// declaration by the time this projection is requested. Keeping the public
+/// projection as typed `PropDef` values lets compiler and host import
+/// boundaries share the same value grammar without reparsing settings JSON.
+pub fn normalized_public_prop_schema(block: Option<&PropsBlock>) -> Vec<PropDef> {
+    block
+        .map(|block| {
+            block
+                .props
+                .iter()
+                .filter(|definition| definition.expose)
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn localized_label_to_json(label: &LocalizedLabel) -> serde_json::Value {
     match label {
         LocalizedLabel::Literal(text) => serde_json::Value::String(text.clone()),

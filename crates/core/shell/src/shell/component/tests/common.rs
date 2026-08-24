@@ -545,6 +545,7 @@ pub(super) fn test_frontend_component_with_local_components(
         manifest,
         source_path: PathBuf::from("src/main.mesh"),
         component: parse_component(source).unwrap(),
+        public_props: Default::default(),
         local_components: local_components
             .iter()
             .map(|(name, source)| ((*name).to_string(), parse_component(source).unwrap()))
@@ -594,6 +595,7 @@ pub(super) fn test_frontend_component_with_manifest(
         manifest,
         source_path: PathBuf::from("src/main.mesh"),
         component: parse_component(source).unwrap(),
+        public_props: Default::default(),
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
@@ -662,6 +664,7 @@ pub(super) fn test_frontend_component_with_required_icons(
         manifest,
         source_path: PathBuf::from("src/main.mesh"),
         component: parse_component(source).unwrap(),
+        public_props: Default::default(),
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
@@ -706,6 +709,7 @@ pub(super) fn test_frontend_component_with_catalog(
         manifest,
         source_path: PathBuf::from("src/main.mesh"),
         component: parse_component(source).unwrap(),
+        public_props: Default::default(),
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
@@ -786,6 +790,7 @@ pub(super) fn real_frontend_module_component(
             "/../../../modules/frontend/navigation-bar/src/main.mesh"
         )))
         .unwrap(),
+        public_props: Default::default(),
         local_components: HashMap::from([
             (
                 "BatteryButton".into(),
@@ -901,6 +906,7 @@ pub(super) fn real_frontend_module_component(
             "/../../../modules/frontend/audio-popover/src/main.mesh"
         )))
         .unwrap(),
+        public_props: Default::default(),
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
@@ -913,6 +919,7 @@ pub(super) fn real_frontend_module_component(
             "/../../../modules/frontend/language-popover/src/main.mesh"
         )))
         .unwrap(),
+        public_props: Default::default(),
         local_components: HashMap::from([(
             "BubbleOptions".into(),
             parse_component(include_str!(concat!(
@@ -932,6 +939,7 @@ pub(super) fn real_frontend_module_component(
             "/../../../modules/frontend/theme-selector/src/main.mesh"
         )))
         .unwrap(),
+        public_props: Default::default(),
         local_components: HashMap::from([(
             "BubbleOptions".into(),
             parse_component(include_str!(concat!(
@@ -951,6 +959,7 @@ pub(super) fn real_frontend_module_component(
             "/../../../modules/frontend/quick-settings/src/main.mesh"
         )))
         .unwrap(),
+        public_props: Default::default(),
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
@@ -963,6 +972,7 @@ pub(super) fn real_frontend_module_component(
             "/../../../modules/frontend/debug-inspector/src/main.mesh"
         )))
         .unwrap(),
+        public_props: Default::default(),
         local_components: HashMap::from([
             (
                 "ViewTabs".into(),

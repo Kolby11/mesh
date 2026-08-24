@@ -94,8 +94,8 @@ source of truth.
 
 ## Next
 
-Publish normalized public-prop schemas and validate imported/contribution props
-at the import boundary (`docs/BACKLOG.md`).
+Reject local/module import alias collisions or resolve them through one typed
+import namespace (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

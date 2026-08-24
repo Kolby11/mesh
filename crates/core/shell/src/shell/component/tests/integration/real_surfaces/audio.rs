@@ -212,6 +212,7 @@ end
         manifest: root_manifest,
         source_path: PathBuf::from("src/main.mesh"),
         component: root_component,
+        public_props: Default::default(),
         local_components: HashMap::from([("VolumeButton".into(), button_component)]),
         module_component_imports: HashMap::from([(
             "AudioPopover".into(),
@@ -223,6 +224,7 @@ end
         manifest: popover_manifest,
         source_path: PathBuf::from("src/main.mesh"),
         component: popover_component,
+        public_props: Default::default(),
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),

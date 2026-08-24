@@ -18,6 +18,7 @@ fn memo_surface(parent_src: &str, locals: &[(&str, &str)]) -> FrontendSurfaceCom
         manifest: minimal_test_manifest(PARENT_ID),
         source_path: PathBuf::from("src/main.mesh"),
         component: parse_component(parent_src).unwrap(),
+        public_props: Default::default(),
         local_components: locals
             .iter()
             .map(|(alias, src)| ((*alias).to_string(), parse_component(src).unwrap()))
@@ -471,6 +472,7 @@ fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
             "<template><slot extension-point=\"{POINT}\"/></template>"
         ))
         .unwrap(),
+        public_props: Default::default(),
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
@@ -482,6 +484,7 @@ fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
         manifest: widget_manifest,
         source_path: PathBuf::from("src/main.mesh"),
         component: parse_component("<template><text content=\"{label}\"/></template>").unwrap(),
+        public_props: Default::default(),
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
@@ -852,6 +855,7 @@ import MenuPopover from "@mesh/menu-popover"
 "#,
         )
         .unwrap(),
+        public_props: Default::default(),
         local_components: HashMap::new(),
         module_component_imports: HashMap::from([(
             "MenuPopover".into(),
@@ -863,6 +867,7 @@ import MenuPopover from "@mesh/menu-popover"
         manifest: popover_manifest,
         source_path: PathBuf::from("src/main.mesh"),
         component: parse_component(popover_src).unwrap(),
+        public_props: Default::default(),
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),

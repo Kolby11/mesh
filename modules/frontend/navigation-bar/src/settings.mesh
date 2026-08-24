@@ -1,3 +1,8 @@
+<props>
+    namespace: { type: "string" }
+    title: { type: "string" }
+</props>
+
 <template>
     <column class="settings-section">
         <text class="settings-section-title">Navigation bar</text>

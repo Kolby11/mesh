@@ -23,7 +23,7 @@ use std::path::PathBuf;
 pub use accessibility::root_accessibility_role;
 pub use compile::{
     CompileFrontendError, FrontendDiagnosticCategory, ImportCyclePath, compile_frontend_entrypoint,
-    compile_frontend_module, is_frontend_module,
+    compile_frontend_module, is_frontend_module, validate_component_import_props,
 };
 pub use render::{
     PreparedComponentStyleRules, build_embedded_widget_tree_from_component,
@@ -141,6 +141,9 @@ pub struct CompiledFrontendModule {
     pub manifest: Manifest,
     pub source_path: PathBuf,
     pub component: ComponentFile,
+    /// The normalized public `<props>` declarations published at the compiled
+    /// component boundary. Private declarations never cross an import.
+    pub public_props: Vec<mesh_core_component::PropDef>,
     /// Owner-scoped records keyed by canonical owner/alias/target identities.
     ///
     /// Compiler-produced entries use only these scoped keys. The public map
@@ -154,6 +157,18 @@ pub struct CompiledFrontendModule {
     /// Every `.mesh` file that contributed, entrypoint and imports alike. The
     /// hot-reload watcher mtimes each, so editing any one triggers a recompile.
     pub watched_paths: Vec<PathBuf>,
+}
+
+impl CompiledFrontendModule {
+    /// Return the published public prop schema, with a compatibility fallback
+    /// for hand-built compiled fixtures from older callers.
+    pub fn public_prop_schema(&self) -> Vec<mesh_core_component::PropDef> {
+        if !self.public_props.is_empty() || self.component.props.is_none() {
+            self.public_props.clone()
+        } else {
+            mesh_core_component::normalized_public_prop_schema(self.component.props.as_ref())
+        }
+    }
 }
 
 /// The resolved local component selected by an owner-scoped import binding.
@@ -297,6 +312,28 @@ impl CompiledFrontendModule {
         } else {
             scoped
         }
+    }
+
+    /// Return each recursively imported component together with the canonical
+    /// source path of the component that owns its import namespace.
+    pub fn local_component_sources(&self) -> Vec<(PathBuf, &ComponentFile)> {
+        let mut records = self
+            .local_components
+            .iter()
+            .filter_map(|(key, component)| {
+                scoped_local_component_parts(key)
+                    .map(|(owner, _, _)| (PathBuf::from(owner), component))
+            })
+            .collect::<Vec<_>>();
+        records.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        if records.is_empty() {
+            records.extend(
+                self.local_components
+                    .values()
+                    .map(|component| (self.source_path.clone(), component)),
+            );
+        }
+        records
     }
 }
 
@@ -1094,6 +1131,7 @@ mod tests {
             manifest,
             source_path: std::path::PathBuf::from("test.mesh"),
             component: module,
+            public_props: Default::default(),
             local_components: Default::default(),
             module_component_imports: Default::default(),
             watched_paths: Vec::new(),
@@ -1171,6 +1209,7 @@ mod tests {
             manifest,
             source_path: std::path::PathBuf::from("test.mesh"),
             component: module,
+            public_props: Default::default(),
             local_components: Default::default(),
             module_component_imports: Default::default(),
             watched_paths: Vec::new(),
@@ -1753,6 +1792,7 @@ mod tests {
             manifest,
             source_path: std::path::PathBuf::from("test.mesh"),
             component,
+            public_props: Default::default(),
             local_components: Default::default(),
             module_component_imports: Default::default(),
             watched_paths: Vec::new(),

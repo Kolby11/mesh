@@ -16,6 +16,7 @@ fn bind_live_surface(parent_src: &str, child_src: &str) -> FrontendSurfaceCompon
         manifest: minimal_test_manifest(PARENT_ID),
         source_path: PathBuf::from("src/main.mesh"),
         component: parse_component(parent_src).unwrap(),
+        public_props: Default::default(),
         local_components: HashMap::from([("Child".into(), parse_component(child_src).unwrap())]),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
