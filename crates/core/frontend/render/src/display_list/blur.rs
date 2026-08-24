@@ -1,4 +1,4 @@
-use mesh_core_elements::style::BackgroundPaint;
+use mesh_core_elements::style::{BackgroundPaint, Corners};
 use mesh_core_elements::{
     AffineTransform, LayoutRect, WidgetNode, child_transform, node_layout_bounds, node_transform,
     root_transform,
@@ -57,9 +57,7 @@ fn collect_backdrop_blur_regions_with_transform(
     {
         let layout = node_layout_bounds(node, world_transform);
         if let Some(bounds) = blur_bounds_from_layout(layout) {
-            for rect in
-                rounded_region_bands(bounds, node.computed_style.border_radius.top_left, surface)
-            {
+            for rect in rounded_region_bands(bounds, node.computed_style.border_radius, surface) {
                 if !regions.contains(&rect) {
                     regions.push(rect);
                 }
@@ -129,33 +127,42 @@ pub(super) fn rounded_blur_regions(command: &DisplayPaintCommand) -> Vec<DamageR
 /// Decompose a rounded rectangle into `clip`-bounded horizontal bands.
 pub(super) fn rounded_region_bands(
     bounds: DamageRect,
-    radius: f32,
+    corners: Corners,
     clip: DamageRect,
 ) -> Vec<DamageRect> {
-    let radius = radius
-        .max(0.0)
-        .min(bounds.width.min(bounds.height) as f32 * 0.5);
-    if radius < 0.5 {
+    let corners = normalize_corners(bounds.width as f32, bounds.height as f32, corners);
+    if corners == Corners::zero() {
         return intersect_damage_rect(bounds, clip).into_iter().collect();
     }
 
     let mut bands: Vec<DamageRect> = Vec::new();
     for row in 0..bounds.height {
         let center_y = row as f32 + 0.5;
-        let edge_y = center_y.min(bounds.height as f32 - center_y);
-        let inset = if edge_y >= radius {
-            0
+        let top_distance = center_y;
+        let bottom_distance = bounds.height as f32 - center_y;
+        let left_radius = if top_distance < corners.top_left {
+            corner_inset(corners.top_left, top_distance)
+        } else if bottom_distance < corners.bottom_left {
+            corner_inset(corners.bottom_left, bottom_distance)
         } else {
-            let circle_y = radius - edge_y;
-            (radius - (radius * radius - circle_y * circle_y).max(0.0).sqrt()).ceil() as u32
+            0.0
         };
-        if inset.saturating_mul(2) >= bounds.width {
+        let right_radius = if top_distance < corners.top_right {
+            corner_inset(corners.top_right, top_distance)
+        } else if bottom_distance < corners.bottom_right {
+            corner_inset(corners.bottom_right, bottom_distance)
+        } else {
+            0.0
+        };
+        let left_inset = left_radius.ceil() as u32;
+        let right_inset = right_radius.ceil() as u32;
+        if left_inset.saturating_add(right_inset) >= bounds.width {
             continue;
         }
         let row_rect = DamageRect {
-            x: bounds.x + inset,
+            x: bounds.x + left_inset,
             y: bounds.y + row,
-            width: bounds.width - inset * 2,
+            width: bounds.width - left_inset - right_inset,
             height: 1,
         };
         let Some(row_rect) = intersect_damage_rect(row_rect, clip) else {
@@ -172,6 +179,38 @@ pub(super) fn rounded_region_bands(
         }
     }
     bands
+}
+
+fn corner_inset(radius: f32, distance: f32) -> f32 {
+    let radius = radius.max(0.0);
+    if radius <= 0.0 || distance >= radius {
+        return 0.0;
+    }
+    let offset = radius - distance;
+    radius - (radius * radius - offset * offset).max(0.0).sqrt()
+}
+
+fn normalize_corners(width: f32, height: f32, corners: Corners) -> Corners {
+    let mut corners = Corners {
+        top_left: corners.top_left.max(0.0),
+        top_right: corners.top_right.max(0.0),
+        bottom_right: corners.bottom_right.max(0.0),
+        bottom_left: corners.bottom_left.max(0.0),
+    };
+    let scale = [
+        width / (corners.top_left + corners.top_right).max(1.0),
+        width / (corners.bottom_left + corners.bottom_right).max(1.0),
+        height / (corners.top_left + corners.bottom_left).max(1.0),
+        height / (corners.top_right + corners.bottom_right).max(1.0),
+    ]
+    .into_iter()
+    .fold(1.0, f32::min)
+    .min(1.0);
+    corners.top_left *= scale;
+    corners.top_right *= scale;
+    corners.bottom_right *= scale;
+    corners.bottom_left *= scale;
+    corners
 }
 
 pub(super) fn intersect_damage_rect(left: DamageRect, right: DamageRect) -> Option<DamageRect> {
@@ -239,7 +278,15 @@ pub(super) fn display_command_paints_pixels(command: &DisplayPaintCommand) -> bo
     !matches!(command.node.content, DisplayPaintContent::None)
         || style.background_color.a > 0
         || !matches!(style.background_paint, BackgroundPaint::None)
-        || (style.border_width.top > 0.0 && style.border_color.a > 0)
+        || (style.border_color.a > 0
+            && [
+                style.border_width.top,
+                style.border_width.right,
+                style.border_width.bottom,
+                style.border_width.left,
+            ]
+            .into_iter()
+            .any(|width| width > 0.0))
         || (!style.box_shadow.is_none() && !style.box_shadow.inset)
         || style.backdrop_filter.blur_radius > 0.0
 }

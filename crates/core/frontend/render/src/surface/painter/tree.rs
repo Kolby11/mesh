@@ -5,7 +5,7 @@ use crate::display_list::{
     DisplayPaintCommandKind, DisplayPaintContent, DisplayPaintNode, RetainedDisplayList,
     SelectedDisplayListPaint,
 };
-use mesh_core_elements::style::Edges;
+use mesh_core_elements::style::{Corners, Edges};
 use smallvec::SmallVec;
 
 use super::*;
@@ -741,7 +741,7 @@ impl FrontendRenderEngine {
         push_box_shadow_command(
             node_commands,
             bounds,
-            style.border_radius * scale,
+            scale_corners(style.border_radius, scale),
             style.box_shadow,
             clip,
         );
@@ -749,7 +749,7 @@ impl FrontendRenderEngine {
             push_fill_shape_command(
                 node_commands,
                 bounds,
-                style.border_radius * scale,
+                scale_corners(style.border_radius, scale),
                 style.background_color,
                 node_clip,
                 PainterBlendMode::from_style(style.mix_blend_mode),
@@ -759,7 +759,7 @@ impl FrontendRenderEngine {
             node_commands,
             &style.background_paint,
             bounds,
-            style.border_radius * scale,
+            scale_corners(style.border_radius, scale),
             node_clip,
         );
 
@@ -767,7 +767,7 @@ impl FrontendRenderEngine {
             node_commands,
             bounds,
             &style.border_width,
-            style.border_radius * scale,
+            scale_corners(style.border_radius, scale),
             style.border_color,
             scale,
             node_clip,
@@ -886,7 +886,7 @@ fn append_display_node_self_paint_commands(
     push_box_shadow_command(
         commands,
         bounds,
-        style.border_radius * scale,
+        scale_corners(style.border_radius, scale),
         style.box_shadow,
         clip,
     );
@@ -894,7 +894,7 @@ fn append_display_node_self_paint_commands(
         push_fill_shape_command(
             commands,
             bounds,
-            style.border_radius * scale,
+            scale_corners(style.border_radius, scale),
             style.background_color,
             node_clip,
             PainterBlendMode::from_style(style.mix_blend_mode),
@@ -904,7 +904,7 @@ fn append_display_node_self_paint_commands(
         commands,
         &style.background_paint,
         bounds,
-        style.border_radius * scale,
+        scale_corners(style.border_radius, scale),
         node_clip,
     );
 
@@ -912,7 +912,7 @@ fn append_display_node_self_paint_commands(
         commands,
         bounds,
         &style.border_width,
-        style.border_radius * scale,
+        scale_corners(style.border_radius, scale),
         style.border_color,
         scale,
         node_clip,
@@ -923,7 +923,7 @@ fn append_display_node_self_paint_commands(
 fn push_box_shadow_command(
     commands: &mut Vec<PainterCommand>,
     rect: ClipRect,
-    radius: f32,
+    radii: Corners,
     shadow: BoxShadow,
     clip: ClipRect,
 ) {
@@ -932,7 +932,7 @@ fn push_box_shadow_command(
     }
     commands.push(PainterCommand::DrawShadow {
         rect,
-        radius,
+        radii,
         shadow,
         clip,
     });
@@ -994,16 +994,16 @@ fn circle_path(cx: f32, cy: f32, r: f32) -> PainterPath {
 fn push_fill_shape_command(
     commands: &mut Vec<PainterCommand>,
     rect: ClipRect,
-    radius: f32,
+    radii: Corners,
     color: Color,
     clip: ClipRect,
     blend: PainterBlendMode,
 ) {
     let paint = PainterPaint::fill(color).with_blend_mode(blend);
-    if radius > 0.5 {
+    if corners_have_radius(radii) {
         commands.push(PainterCommand::DrawRoundedRect {
             rect,
-            radius,
+            radii,
             paint,
             clip,
         });
@@ -1016,7 +1016,7 @@ fn push_background_paint_command(
     commands: &mut Vec<PainterCommand>,
     paint: &BackgroundPaint,
     rect: ClipRect,
-    radius: f32,
+    radii: Corners,
     clip: ClipRect,
 ) {
     match paint {
@@ -1036,7 +1036,7 @@ fn push_background_paint_command(
                     to: gradient.to,
                 },
                 rect,
-                radius,
+                radii,
                 clip,
             });
         }
@@ -1047,21 +1047,52 @@ fn push_border_commands(
     commands: &mut Vec<PainterCommand>,
     bounds: ClipRect,
     border_widths: &Edges,
-    radius: f32,
+    radii: Corners,
     color: Color,
     scale: f32,
     clip: ClipRect,
 ) {
-    if border_widths.top <= 0.0 || color.a == 0 {
+    if color.a == 0
+        || [
+            border_widths.top,
+            border_widths.right,
+            border_widths.bottom,
+            border_widths.left,
+        ]
+        .iter()
+        .all(|width| *width <= 0.0)
+    {
         return;
     }
-    let border_width = (border_widths.top * scale).max(1.0);
-    commands.push(PainterCommand::DrawRoundedRect {
+    let widths = Edges {
+        top: (border_widths.top * scale).max(0.0),
+        right: (border_widths.right * scale).max(0.0),
+        bottom: (border_widths.bottom * scale).max(0.0),
+        left: (border_widths.left * scale).max(0.0),
+    };
+    commands.push(PainterCommand::DrawBorder {
         rect: bounds,
-        radius,
-        paint: PainterPaint::stroke(color, border_width),
+        radii,
+        widths,
+        paint: PainterPaint::fill(color),
         clip,
     });
+}
+
+fn scale_corners(corners: Corners, scale: f32) -> Corners {
+    Corners {
+        top_left: corners.top_left * scale,
+        top_right: corners.top_right * scale,
+        bottom_right: corners.bottom_right * scale,
+        bottom_left: corners.bottom_left * scale,
+    }
+}
+
+fn corners_have_radius(corners: Corners) -> bool {
+    corners.top_left > 0.5
+        || corners.top_right > 0.5
+        || corners.bottom_right > 0.5
+        || corners.bottom_left > 0.5
 }
 
 fn scaled_visual_filter(filter: VisualFilter, scale: f32) -> VisualFilter {

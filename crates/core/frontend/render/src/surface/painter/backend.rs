@@ -1,10 +1,11 @@
 use super::*;
 use crate::surface::icon;
+use mesh_core_elements::style::{Color, Corners, Edges};
 use mesh_core_elements::{BoxShadow, VisualFilter};
 use skia_safe::{
     BlurStyle, Canvas, Color4f, Data, ImageInfo, MaskFilter, PaintStyle, Path as SkiaPath,
-    PathBuilder, Point, RRect, Rect, TileMode, canvas::SaveLayerRec, gradient as skia_gradient,
-    image_filters, images,
+    PathBuilder, Point, RRect, Rect, TileMode, Vector, canvas::SaveLayerRec,
+    gradient as skia_gradient, image_filters, images,
 };
 use smallvec::SmallVec;
 
@@ -170,7 +171,7 @@ pub(crate) trait PaintBackend: Send + Sync {
             buffer,
             &[PainterCommand::DrawRoundedRect {
                 rect,
-                radius,
+                radii: Corners::all(radius),
                 paint: PainterPaint::fill(color),
                 clip,
             }],
@@ -192,7 +193,7 @@ pub(crate) trait PaintBackend: Send + Sync {
             buffer,
             &[PainterCommand::DrawRoundedRect {
                 rect,
-                radius,
+                radii: Corners::all(radius),
                 paint: PainterPaint::stroke(color, stroke_width as f32),
                 clip,
             }],
@@ -214,7 +215,7 @@ pub(crate) trait PaintBackend: Send + Sync {
             buffer,
             &[PainterCommand::DrawShadow {
                 rect,
-                radius,
+                radii: Corners::all(radius),
                 shadow,
                 clip,
             }],
@@ -235,7 +236,7 @@ pub(crate) trait PaintBackend: Send + Sync {
             buffer,
             &[PainterCommand::ApplyFilter {
                 rect,
-                radius,
+                radii: Corners::all(radius),
                 filter: PainterFilter::Backdrop(filter),
                 clip,
             }],
@@ -258,7 +259,14 @@ pub(crate) enum PainterCommand {
     },
     DrawRoundedRect {
         rect: ClipRect,
-        radius: f32,
+        radii: Corners,
+        paint: PainterPaint,
+        clip: ClipRect,
+    },
+    DrawBorder {
+        rect: ClipRect,
+        radii: Corners,
+        widths: Edges,
         paint: PainterPaint,
         clip: ClipRect,
     },
@@ -276,18 +284,18 @@ pub(crate) enum PainterCommand {
     DrawLinearGradient {
         gradient: PainterLinearGradient,
         rect: ClipRect,
-        radius: f32,
+        radii: Corners,
         clip: ClipRect,
     },
     DrawShadow {
         rect: ClipRect,
-        radius: f32,
+        radii: Corners,
         shadow: BoxShadow,
         clip: ClipRect,
     },
     ApplyFilter {
         rect: ClipRect,
-        radius: f32,
+        radii: Corners,
         filter: PainterFilter,
         clip: ClipRect,
     },
@@ -296,7 +304,7 @@ pub(crate) enum PainterCommand {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PainterClip {
     pub rect: ClipRect,
-    pub radius: f32,
+    pub radii: Corners,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -732,7 +740,7 @@ impl SkiaPaintBackend {
                 }
                 PainterCommand::DrawRoundedRect {
                     rect,
-                    radius,
+                    radii,
                     paint,
                     clip,
                 } => {
@@ -740,8 +748,24 @@ impl SkiaPaintBackend {
                     self.draw_rounded_rect_command(
                         canvas,
                         *rect,
-                        *radius,
+                        *radii,
                         paint,
+                        effective_clip(*clip, &clip_stack),
+                    );
+                }
+                PainterCommand::DrawBorder {
+                    rect,
+                    radii,
+                    widths,
+                    paint,
+                    clip,
+                } => {
+                    self.draw_border_command(
+                        canvas,
+                        *rect,
+                        *radii,
+                        *widths,
+                        *paint,
                         effective_clip(*clip, &clip_stack),
                     );
                 }
@@ -768,20 +792,20 @@ impl SkiaPaintBackend {
                 PainterCommand::DrawLinearGradient {
                     gradient,
                     rect,
-                    radius,
+                    radii,
                     clip,
                 } => {
                     self.draw_linear_gradient_command(
                         canvas,
                         *gradient,
                         *rect,
-                        *radius,
+                        *radii,
                         effective_clip(*clip, &clip_stack),
                     );
                 }
                 PainterCommand::DrawShadow {
                     rect,
-                    radius,
+                    radii,
                     shadow,
                     clip,
                 } => {
@@ -796,14 +820,14 @@ impl SkiaPaintBackend {
                     self.draw_box_shadow_impl(
                         canvas,
                         *rect,
-                        *radius,
+                        *radii,
                         *shadow,
                         effective_clip(*clip, &clip_stack),
                     );
                 }
                 PainterCommand::ApplyFilter {
                     rect,
-                    radius,
+                    radii,
                     filter,
                     clip,
                 } => match filter {
@@ -828,7 +852,7 @@ impl SkiaPaintBackend {
                         self.apply_backdrop_filter_impl(
                             canvas,
                             *rect,
-                            *radius,
+                            *radii,
                             *filter,
                             effective_clip(*clip, &clip_stack),
                         );
@@ -937,7 +961,7 @@ impl SkiaPaintBackend {
         &self,
         canvas: &Canvas,
         rect: ClipRect,
-        radius: f32,
+        radii: Corners,
         color: Color,
         clip: ClipRect,
     ) {
@@ -946,11 +970,7 @@ impl SkiaPaintBackend {
             return;
         }
 
-        let half_w = (rect.width.max(0) as f32) * 0.5;
-        let half_h = (rect.height.max(0) as f32) * 0.5;
-        let radius = radius.max(0.0).min(half_w).min(half_h);
-
-        if radius < 0.5 {
+        if !corners_have_radius(radii) {
             self.fill_rect_impl(canvas, rect, color, clip);
             return;
         }
@@ -966,7 +986,7 @@ impl SkiaPaintBackend {
             None,
             false,
         );
-        let rect = Rect::from_xywh(
+        let skia_rect = Rect::from_xywh(
             rect.x as f32,
             rect.y as f32,
             rect.width as f32,
@@ -974,7 +994,7 @@ impl SkiaPaintBackend {
         );
         let mut paint = skia_paint(color, true);
         paint.set_style(PaintStyle::Fill);
-        canvas.draw_rrect(RRect::new_rect_xy(rect, radius, radius), &paint);
+        canvas.draw_rrect(rrect_from_corners(skia_rect, radii), &paint);
         canvas.restore_to_count(save_count);
     }
 
@@ -982,7 +1002,7 @@ impl SkiaPaintBackend {
         &self,
         canvas: &Canvas,
         rect: ClipRect,
-        radius: f32,
+        radii: Corners,
         stroke_width: i32,
         color: Color,
         clip: ClipRect,
@@ -996,10 +1016,7 @@ impl SkiaPaintBackend {
             return;
         }
 
-        let half_w = (rect.width.max(0) as f32) * 0.5;
-        let half_h = (rect.height.max(0) as f32) * 0.5;
-        let radius = radius.max(0.0).min(half_w).min(half_h);
-        if radius < 0.5 {
+        if !corners_have_radius(radii) {
             self.stroke_rect_impl(canvas, rect, stroke_width, color, clip);
             return;
         }
@@ -1026,23 +1043,92 @@ impl SkiaPaintBackend {
                 stroke_w,
                 stroke_h,
             );
-            let radius = (radius - inset)
-                .max(0.0)
-                .min(stroke_w * 0.5)
-                .min(stroke_h * 0.5);
+            let radii = inset_corners(radii, inset);
             let mut paint = skia_paint(color, true);
             paint.set_style(PaintStyle::Stroke);
             paint.set_stroke_width(stroke_width);
-            canvas.draw_rrect(RRect::new_rect_xy(rect, radius, radius), &paint);
+            canvas.draw_rrect(rrect_from_corners(rect, radii), &paint);
         }
         canvas.restore_to_count(save_count);
+    }
+
+    fn draw_border_command(
+        &self,
+        canvas: &Canvas,
+        rect: ClipRect,
+        radii: Corners,
+        widths: Edges,
+        paint: PainterPaint,
+        clip: ClipRect,
+    ) {
+        self.draw_with_blend(canvas, paint.blend_mode, rect, clip, |_, canvas| {
+            let clipped = intersect_clip(rect, clip);
+            if clipped.width <= 0 || clipped.height <= 0 || paint.color.a == 0 {
+                return;
+            }
+            if ![widths.top, widths.right, widths.bottom, widths.left]
+                .into_iter()
+                .any(|width| width > 0.0)
+            {
+                return;
+            }
+
+            let outer = Rect::from_xywh(
+                rect.x as f32,
+                rect.y as f32,
+                rect.width.max(0) as f32,
+                rect.height.max(0) as f32,
+            );
+            let outer_rrect = rrect_from_corners(outer, radii);
+            let inner_width = (outer.width() - widths.left - widths.right).max(0.0);
+            let inner_height = (outer.height() - widths.top - widths.bottom).max(0.0);
+            let inner = Rect::from_xywh(
+                outer.left + widths.left,
+                outer.top + widths.top,
+                inner_width,
+                inner_height,
+            );
+            let inner_radii = normalize_corners(
+                inner.width(),
+                inner.height(),
+                Corners {
+                    top_left: (radii.top_left - widths.top.max(widths.left)).max(0.0),
+                    top_right: (radii.top_right - widths.top.max(widths.right)).max(0.0),
+                    bottom_right: (radii.bottom_right - widths.bottom.max(widths.right)).max(0.0),
+                    bottom_left: (radii.bottom_left - widths.bottom.max(widths.left)).max(0.0),
+                },
+            );
+            let mut skia_paint = skia_paint(paint.color, true);
+            skia_paint.set_style(PaintStyle::Fill);
+            canvas.save();
+            canvas.clip_rect(
+                Rect::from_xywh(
+                    clipped.x as f32,
+                    clipped.y as f32,
+                    clipped.width as f32,
+                    clipped.height as f32,
+                ),
+                None,
+                false,
+            );
+            if inner_width <= 0.0 || inner_height <= 0.0 {
+                canvas.draw_rrect(outer_rrect, &skia_paint);
+            } else {
+                canvas.draw_drrect(
+                    outer_rrect,
+                    rrect_from_corners(inner, inner_radii),
+                    &skia_paint,
+                );
+            }
+            canvas.restore();
+        });
     }
 
     fn draw_box_shadow_impl(
         &self,
         canvas: &Canvas,
         rect: ClipRect,
-        radius: f32,
+        radii: Corners,
         shadow: BoxShadow,
         clip: ClipRect,
     ) {
@@ -1076,7 +1162,7 @@ impl SkiaPaintBackend {
             return;
         }
 
-        if shadow.blur_radius <= 0.0 && radius <= 0.5 {
+        if shadow.blur_radius <= 0.0 && !corners_have_radius(radii) {
             let save_count = canvas.save();
             canvas.clip_rect(
                 Rect::from_xywh(
@@ -1128,9 +1214,9 @@ impl SkiaPaintBackend {
                 Some(false),
             ));
         }
-        let radius = (radius + shadow.spread_radius).max(0.0);
-        if radius > 0.5 {
-            canvas.draw_rrect(RRect::new_rect_xy(rect, radius, radius), &paint);
+        let radii = add_corner_radius(radii, shadow.spread_radius);
+        if corners_have_radius(radii) {
+            canvas.draw_rrect(rrect_from_corners(rect, radii), &paint);
         } else {
             canvas.draw_rect(rect, &paint);
         }
@@ -1141,7 +1227,7 @@ impl SkiaPaintBackend {
         &self,
         canvas: &Canvas,
         rect: ClipRect,
-        radius: f32,
+        radii: Corners,
         filter: VisualFilter,
         clip: ClipRect,
     ) {
@@ -1191,8 +1277,8 @@ impl SkiaPaintBackend {
             rect.width as f32,
             rect.height as f32,
         );
-        if radius > 0.5 {
-            canvas.clip_rrect(RRect::new_rect_xy(rect, radius, radius), None, true);
+        if corners_have_radius(radii) {
+            canvas.clip_rrect(rrect_from_corners(rect, radii), None, true);
         } else {
             canvas.clip_rect(rect, None, false);
         }
@@ -1259,7 +1345,9 @@ impl SkiaPaintBackend {
             rect,
             clip,
             |this, canvas| match paint.style {
-                PainterPaintStyle::Fill => this.fill_shape(canvas, rect, 0.0, paint.color, clip),
+                PainterPaintStyle::Fill => {
+                    this.fill_shape(canvas, rect, Corners::zero(), paint.color, clip)
+                }
                 PainterPaintStyle::Stroke(stroke) => {
                     this.stroke_rect_impl(
                         canvas,
@@ -1277,7 +1365,7 @@ impl SkiaPaintBackend {
         &self,
         canvas: &Canvas,
         rect: ClipRect,
-        radius: f32,
+        radii: Corners,
         paint: PainterPaint,
         clip: ClipRect,
     ) {
@@ -1287,12 +1375,12 @@ impl SkiaPaintBackend {
             rect,
             clip,
             |this, canvas| match paint.style {
-                PainterPaintStyle::Fill => this.fill_shape(canvas, rect, radius, paint.color, clip),
+                PainterPaintStyle::Fill => this.fill_shape(canvas, rect, radii, paint.color, clip),
                 PainterPaintStyle::Stroke(stroke) => {
                     this.stroke_rounded_rect_impl(
                         canvas,
                         rect,
-                        radius,
+                        radii,
                         stroke.width.round() as i32,
                         paint.color,
                         clip,
@@ -1346,7 +1434,7 @@ impl SkiaPaintBackend {
         canvas: &Canvas,
         gradient: PainterLinearGradient,
         rect: ClipRect,
-        radius: f32,
+        radii: Corners,
         clip: ClipRect,
     ) {
         let clipped = intersect_clip(rect, clip);
@@ -1406,8 +1494,8 @@ impl SkiaPaintBackend {
         let mut paint = skia_safe::Paint::default();
         paint.set_anti_alias(true);
         paint.set_shader(shader);
-        if radius > 0.5 {
-            canvas.draw_rrect(RRect::new_rect_xy(rect, radius, radius), &paint);
+        if corners_have_radius(radii) {
+            canvas.draw_rrect(rrect_from_corners(rect, radii), &paint);
         } else {
             canvas.draw_rect(rect, &paint);
         }
@@ -1547,16 +1635,77 @@ impl SkiaPaintBackend {
         &self,
         canvas: &Canvas,
         rect: ClipRect,
-        radius: f32,
+        radii: Corners,
         color: Color,
         clip: ClipRect,
     ) {
-        if radius > 0.5 {
-            self.fill_rounded_rect_impl(canvas, rect, radius, color, clip);
+        if corners_have_radius(radii) {
+            self.fill_rounded_rect_impl(canvas, rect, radii, color, clip);
         } else {
             self.fill_rect_impl(canvas, rect, color, clip);
         }
     }
+}
+
+fn corners_have_radius(corners: Corners) -> bool {
+    corners.top_left > 0.5
+        || corners.top_right > 0.5
+        || corners.bottom_right > 0.5
+        || corners.bottom_left > 0.5
+}
+
+fn add_corner_radius(corners: Corners, amount: f32) -> Corners {
+    Corners {
+        top_left: (corners.top_left + amount).max(0.0),
+        top_right: (corners.top_right + amount).max(0.0),
+        bottom_right: (corners.bottom_right + amount).max(0.0),
+        bottom_left: (corners.bottom_left + amount).max(0.0),
+    }
+}
+
+fn inset_corners(corners: Corners, inset: f32) -> Corners {
+    Corners {
+        top_left: (corners.top_left - inset).max(0.0),
+        top_right: (corners.top_right - inset).max(0.0),
+        bottom_right: (corners.bottom_right - inset).max(0.0),
+        bottom_left: (corners.bottom_left - inset).max(0.0),
+    }
+}
+
+fn normalize_corners(width: f32, height: f32, corners: Corners) -> Corners {
+    let mut corners = Corners {
+        top_left: corners.top_left.max(0.0),
+        top_right: corners.top_right.max(0.0),
+        bottom_right: corners.bottom_right.max(0.0),
+        bottom_left: corners.bottom_left.max(0.0),
+    };
+    let scale = [
+        width / (corners.top_left + corners.top_right).max(1.0),
+        width / (corners.bottom_left + corners.bottom_right).max(1.0),
+        height / (corners.top_left + corners.bottom_left).max(1.0),
+        height / (corners.top_right + corners.bottom_right).max(1.0),
+    ]
+    .into_iter()
+    .fold(1.0, f32::min)
+    .min(1.0);
+    corners.top_left *= scale;
+    corners.top_right *= scale;
+    corners.bottom_right *= scale;
+    corners.bottom_left *= scale;
+    corners
+}
+
+fn rrect_from_corners(rect: Rect, corners: Corners) -> RRect {
+    let corners = normalize_corners(rect.width(), rect.height(), corners);
+    RRect::new_rect_radii(
+        rect,
+        &[
+            Vector::new(corners.top_left, corners.top_left),
+            Vector::new(corners.top_right, corners.top_right),
+            Vector::new(corners.bottom_right, corners.bottom_right),
+            Vector::new(corners.bottom_left, corners.bottom_left),
+        ],
+    )
 }
 
 fn effective_clip(clip: ClipRect, clip_stack: &[ClipRect]) -> ClipRect {

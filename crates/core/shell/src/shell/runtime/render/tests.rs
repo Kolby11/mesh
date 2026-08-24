@@ -2,7 +2,8 @@ use super::*;
 use mesh_core_elements::{
     BoxShadow, LayoutRect, VisualFilter,
     style::{
-        BackgroundPaint, Color, Edges, FontStyle, Overflow, TextAlign, TextDirection, TextOverflow,
+        BackgroundPaint, Color, Corners, Edges, FontStyle, Overflow, TextAlign, TextDirection,
+        TextOverflow,
     },
 };
 use mesh_core_render::{
@@ -39,7 +40,7 @@ fn make_cmd(x: f32, y: f32, width: f32, height: f32, blur_radius: f32) -> Displa
                     a: 0,
                 },
                 border_width: Edges::zero(),
-                border_radius: 0.0,
+                border_radius: Corners::zero(),
                 color: Color {
                     r: 0,
                     g: 0,
@@ -143,7 +144,7 @@ fn test_compute_blur_regions_keep_disjoint_nodes_separate() {
 #[test]
 fn test_compute_blur_regions_follow_rounded_element_shape() {
     let mut command = make_cmd(10.0, 20.0, 36.0, 36.0, 14.0);
-    Arc::make_mut(&mut command.node).style.border_radius = 18.0;
+    Arc::make_mut(&mut command.node).style.border_radius = Corners::all(18.0);
     command.clip = DisplayListClip {
         x: 10,
         y: 20,

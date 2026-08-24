@@ -1123,7 +1123,7 @@ impl FrontendRenderEngine {
                 )),
                 PainterCommand::DrawRoundedRect {
                     rect: layer_bounds,
-                    radius: radius + 1.0,
+                    radii: mesh_core_elements::style::Corners::all(radius + 1.0),
                     paint: PainterPaint::fill(border),
                     clip: tooltip_clip,
                 },
@@ -1134,7 +1134,7 @@ impl FrontendRenderEngine {
                         width: draw_w,
                         height: draw_h,
                     },
-                    radius,
+                    radii: mesh_core_elements::style::Corners::all(radius),
                     paint: PainterPaint::fill(bg),
                     clip: tooltip_clip,
                 },

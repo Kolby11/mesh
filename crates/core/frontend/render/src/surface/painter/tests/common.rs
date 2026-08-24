@@ -168,6 +168,7 @@ pub(super) fn painter_command_classes(commands: &[PainterCommand]) -> Vec<&'stat
             PainterCommand::PopLayer => "pop_layer",
             PainterCommand::DrawRect { .. } => "draw_rect",
             PainterCommand::DrawRoundedRect { .. } => "draw_rounded_rect",
+            PainterCommand::DrawBorder { .. } => "draw_border",
             PainterCommand::DrawPath { .. } => "draw_path",
             PainterCommand::DrawImage { .. } => "draw_image",
             PainterCommand::DrawLinearGradient { .. } => "draw_linear_gradient",

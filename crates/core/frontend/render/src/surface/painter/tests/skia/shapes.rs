@@ -1,7 +1,7 @@
 use super::super::super::*;
 use super::super::common::*;
 use mesh_core_elements::layout::LayoutRect;
-use mesh_core_elements::style::Edges;
+use mesh_core_elements::style::{Corners, Edges};
 use std::path::PathBuf;
 
 #[test]
@@ -235,7 +235,7 @@ fn skia_effect_linear_gradient_draws_top_and_bottom_colors() {
                 width: 8,
                 height: 12,
             },
-            radius: 0.0,
+            radii: mesh_core_elements::style::Corners::zero(),
             clip: full_clip(8, 12),
         }],
         &mut diagnostics,
@@ -269,7 +269,7 @@ fn skia_effect_linear_gradient_reuses_shader_for_moving_same_size_rects() {
                     width: 8,
                     height: 12,
                 },
-                radius: 0.0,
+                radii: mesh_core_elements::style::Corners::zero(),
                 clip: full_clip(24, 20),
             },
             PainterCommand::DrawLinearGradient {
@@ -280,7 +280,7 @@ fn skia_effect_linear_gradient_reuses_shader_for_moving_same_size_rects() {
                     width: 8,
                     height: 12,
                 },
-                radius: 0.0,
+                radii: mesh_core_elements::style::Corners::zero(),
                 clip: full_clip(24, 20),
             },
         ],
@@ -322,7 +322,7 @@ fn moving_gradient_shader_size_key_beats_position_churn_benchmark() {
                     width: 24,
                     height: 24,
                 },
-                radius: 0.0,
+                radii: mesh_core_elements::style::Corners::zero(),
                 clip: full_clip(96, 48),
             }],
             &mut diagnostics,
@@ -345,7 +345,7 @@ fn moving_gradient_shader_size_key_beats_position_churn_benchmark() {
                     width: 24,
                     height: 24,
                 },
-                radius: 0.0,
+                radii: mesh_core_elements::style::Corners::zero(),
                 clip: full_clip(96, 48),
             }],
             &mut diagnostics,
@@ -449,7 +449,7 @@ fn painter_effect_clipped_shadow_stays_inside_clip() {
                 width: 10,
                 height: 10,
             },
-            radius: 0.0,
+            radii: mesh_core_elements::style::Corners::zero(),
             shadow: BoxShadow {
                 offset_x: 1.0,
                 offset_y: 1.0,
@@ -495,7 +495,7 @@ fn painter_effect_gradient_respects_rounded_clip() {
                 width: 16,
                 height: 16,
             },
-            radius: 8.0,
+            radii: mesh_core_elements::style::Corners::all(8.0),
             clip: full_clip(24, 24),
         }],
         &mut diagnostics,
@@ -521,7 +521,7 @@ fn skia_shape_push_clip_intersects_command_clip() {
                     width: 4,
                     height: 4,
                 },
-                radius: 0.0,
+                radii: mesh_core_elements::style::Corners::zero(),
             }),
             PainterCommand::DrawRect {
                 rect: ClipRect {
@@ -600,6 +600,56 @@ fn skia_border_rounded_border_keeps_corners_clear() {
     assert!(pixel(&buffer, 10, 0).a > 0);
     assert!(pixel(&buffer, 0, 10).a > 0);
     assert_eq!(pixel(&buffer, 10, 10), Color::TRANSPARENT);
+}
+
+#[test]
+fn skia_border_lowering_uses_all_edges_and_corner_radii() {
+    let border = Color::from_hex("#ff0000").unwrap();
+    let corners = Corners {
+        top_left: 5.0,
+        top_right: 6.0,
+        bottom_right: 7.0,
+        bottom_left: 8.0,
+    };
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 32.0,
+            height: 24.0,
+        },
+        Color::TRANSPARENT,
+    );
+    root.computed_style.border_width = Edges {
+        top: 1.0,
+        right: 2.0,
+        bottom: 3.0,
+        left: 4.0,
+    };
+    root.computed_style.border_radius = corners;
+    root.computed_style.border_color = border;
+
+    let mut buffer = PixelBuffer::new(32, 24);
+    FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
+
+    for (x, y) in [(16, 0), (31, 12), (16, 23), (0, 12)] {
+        assert!(pixel(&buffer, x, y).a > 0, "missing border at ({x}, {y})");
+    }
+    for (x, y) in [(16, 1), (29, 12), (16, 20), (4, 12)] {
+        assert_eq!(
+            pixel(&buffer, x, y),
+            Color::TRANSPARENT,
+            "border width was not lowered at ({x}, {y})"
+        );
+    }
+    for (x, y) in [(0, 0), (31, 0), (31, 23), (0, 23)] {
+        assert_eq!(
+            pixel(&buffer, x, y),
+            Color::TRANSPARENT,
+            "corner radius was not lowered at ({x}, {y})"
+        );
+    }
 }
 
 #[test]

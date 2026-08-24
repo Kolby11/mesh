@@ -4,6 +4,9 @@
 
 ## Now
 
+Frontend paint lowering now carries all four border edges and corner radii
+through retained display commands, including asymmetric rounded border rings.
+
 Backend command and event ingress now uses bounded per-provider queues with
 shared JSON byte/depth validation. Luau provider events, queued side effects,
 child processes, callback output, and storage writes participate in explicit

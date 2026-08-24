@@ -112,7 +112,7 @@ fn painter_helper_lowering_routes_effect_helpers_through_command_backend() {
         &mut buffer,
         &[PainterCommand::DrawShadow {
             rect,
-            radius: 6.0,
+            radii: mesh_core_elements::style::Corners::all(6.0),
             shadow: BoxShadow {
                 offset_x: 2.0,
                 offset_y: 2.0,

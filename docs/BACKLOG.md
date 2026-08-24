@@ -81,7 +81,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/12-rendering-and-paint/improvements.md)
 
-- [ ] Lower asymmetric four-edge borders and four-corner radii correctly.
 - [ ] Use one cumulative affine transform/clip model across paint, damage, blur, descendants, and interaction.
 - [ ] Lower node opacity and blend mode as isolated compositing groups instead of per primitive.
 - [ ] Include paint-order/topology changes in display-list generations and stable equal-z ordering.

@@ -166,7 +166,7 @@ pub(super) fn compute_opaque_rect_for_root(
     if style.background_paint != BackgroundPaint::None {
         return None;
     }
-    if style.border_radius > 0.0 {
+    if style.border_radius != mesh_core_elements::style::Corners::zero() {
         return None;
     }
     if !style.overflow_x.clips_contents() || !style.overflow_y.clips_contents() {

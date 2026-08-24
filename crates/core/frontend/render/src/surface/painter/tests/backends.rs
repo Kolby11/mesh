@@ -18,14 +18,17 @@ fn painter_command_contract_constructs_required_command_set() {
     };
     let paint = PainterPaint::fill(Color::WHITE);
     let commands = vec![
-        PainterCommand::PushClip(PainterClip { rect, radius: 2.0 }),
+        PainterCommand::PushClip(PainterClip {
+            rect,
+            radii: mesh_core_elements::style::Corners::all(2.0),
+        }),
         PainterCommand::PopClip,
         PainterCommand::PushLayer(PainterLayer::isolated(clip, 0.5, PainterBlendMode::SrcOver)),
         PainterCommand::PopLayer,
         PainterCommand::DrawRect { rect, paint, clip },
         PainterCommand::DrawRoundedRect {
             rect,
-            radius: 4.0,
+            radii: mesh_core_elements::style::Corners::all(4.0),
             paint,
             clip,
         },
@@ -56,24 +59,24 @@ fn painter_command_contract_constructs_required_command_set() {
                 to: Color::WHITE,
             },
             rect,
-            radius: 4.0,
+            radii: mesh_core_elements::style::Corners::all(4.0),
             clip,
         },
         PainterCommand::DrawShadow {
             rect,
-            radius: 4.0,
+            radii: mesh_core_elements::style::Corners::all(4.0),
             shadow: BoxShadow::default(),
             clip,
         },
         PainterCommand::ApplyFilter {
             rect,
-            radius: 4.0,
+            radii: mesh_core_elements::style::Corners::all(4.0),
             filter: PainterFilter::Backdrop(VisualFilter { blur_radius: 2.0 }),
             clip,
         },
         PainterCommand::ApplyFilter {
             rect,
-            radius: 4.0,
+            radii: mesh_core_elements::style::Corners::all(4.0),
             filter: PainterFilter::Blur(VisualFilter { blur_radius: 2.0 }),
             clip,
         },

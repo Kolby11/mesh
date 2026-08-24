@@ -63,22 +63,57 @@ fn encode_background(scene: &mut Scene, command: &DisplayPaintCommand) -> usize 
 
 fn encode_border(scene: &mut Scene, command: &DisplayPaintCommand) -> usize {
     let bw = &command.node.style.border_width;
-    let avg = (bw.top + bw.right + bw.bottom + bw.left) / 4.0;
-    if avg <= 0.0 {
+    let widths = [
+        bw.top as f64,
+        bw.right as f64,
+        bw.bottom as f64,
+        bw.left as f64,
+    ];
+    if widths.iter().all(|width| *width <= 0.0) {
         return 0;
     }
+    let rect = command_rect(command);
     let rounded = RoundedRect::from_rect(
-        command_rect(command),
-        RoundedRectRadii::from_single_radius(command.node.style.border_radius as f64),
+        rect,
+        RoundedRectRadii::new(
+            command.node.style.border_radius.top_left as f64,
+            command.node.style.border_radius.top_right as f64,
+            command.node.style.border_radius.bottom_right as f64,
+            command.node.style.border_radius.bottom_left as f64,
+        ),
     );
-    scene.stroke(
-        &Stroke::new(avg as f64),
-        Affine::IDENTITY,
-        to_peniko_color(command.node.style.border_color),
-        None,
-        &rounded,
-    );
-    1
+    let color = to_peniko_color(command.node.style.border_color);
+    if widths.windows(2).all(|pair| pair[0] == pair[1]) {
+        scene.stroke(
+            &Stroke::new(widths[0] as f64),
+            Affine::IDENTITY,
+            color,
+            None,
+            &rounded,
+        );
+        return 1;
+    }
+
+    // AnyRender's stroke primitive has one width for the whole shape. For a
+    // deliberately asymmetric proof shape, clip four filled edge strips to
+    // the exact outer rounded rectangle instead of averaging the widths.
+    scene.push_clip_layer(Affine::IDENTITY, &rounded);
+    let edge_rects = [
+        Rect::new(rect.x0, rect.y0, rect.x1, rect.y0 + widths[0].max(0.0)),
+        Rect::new(rect.x1 - widths[1].max(0.0), rect.y0, rect.x1, rect.y1),
+        Rect::new(rect.x0, rect.y1 - widths[2].max(0.0), rect.x1, rect.y1),
+        Rect::new(
+            rect.x0,
+            rect.y0 + widths[0].max(0.0),
+            rect.x0 + widths[3].max(0.0),
+            rect.y1 - widths[2].max(0.0),
+        ),
+    ];
+    for edge in edge_rects {
+        scene.fill(Fill::NonZero, Affine::IDENTITY, color, None, &edge);
+    }
+    scene.pop_layer();
+    6
 }
 
 fn encode_icon(scene: &mut Scene, command: &DisplayPaintCommand) -> usize {
@@ -162,7 +197,7 @@ mod tests {
             background_paint: BackgroundPaint::None,
             border_color: Color::TRANSPARENT,
             border_width: Edges::zero(),
-            border_radius: 0.0,
+            border_radius: mesh_core_elements::style::Corners::zero(),
             color: Color::BLACK,
             padding: Edges::zero(),
             overflow_x: Overflow::Visible,

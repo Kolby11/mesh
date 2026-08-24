@@ -42,7 +42,7 @@ pub(super) fn build_paint_node_with_previous_transform(
             background_paint: node.computed_style.background_paint.clone(),
             border_color: opacity_color(node.computed_style.border_color, opacity),
             border_width: node.computed_style.border_width,
-            border_radius: node.computed_style.border_radius.top_left,
+            border_radius: node.computed_style.border_radius,
             color: opacity_color(node.computed_style.color, opacity),
             padding: node.computed_style.padding,
             overflow_x: node.computed_style.overflow_x,

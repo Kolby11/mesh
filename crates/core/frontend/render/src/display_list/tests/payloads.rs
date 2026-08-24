@@ -1,6 +1,7 @@
 use super::super::paint_node::*;
 use super::super::*;
 use super::common::*;
+use mesh_core_elements::style::Corners;
 use std::sync::Arc;
 
 #[test]
@@ -89,4 +90,19 @@ fn display_payload_equality_falls_back_to_text_content() {
         second.src.as_ref().expect("second src")
     ));
     assert_eq!(first, second);
+}
+
+#[test]
+fn display_paint_payload_retains_all_corner_radii() {
+    let mut root = node(1, "box", 0.0, 0.0, 80.0, 40.0);
+    root.computed_style.border_radius = Corners {
+        top_left: 2.0,
+        top_right: 4.0,
+        bottom_right: 6.0,
+        bottom_left: 8.0,
+    };
+
+    let paint = build_paint_node(&root, 0.0, 0.0);
+
+    assert_eq!(paint.style.border_radius, root.computed_style.border_radius);
 }

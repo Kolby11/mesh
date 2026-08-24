@@ -22,7 +22,7 @@ fn painter_backend_capabilities_identify_skia_and_unsupported_commands_diagnose(
         &mut buffer,
         &[PainterCommand::ApplyFilter {
             rect: full_clip(8, 8),
-            radius: 0.0,
+            radii: mesh_core_elements::style::Corners::zero(),
             filter: PainterFilter::Blur(VisualFilter { blur_radius: 2.0 }),
             clip: full_clip(16, 16),
         }],

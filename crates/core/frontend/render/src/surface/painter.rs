@@ -21,7 +21,7 @@ pub(crate) use backend::{
 };
 
 use mesh_core_elements::style::{
-    BackgroundPaint, Color, Overflow, TextAlign, TextDirection, TextOverflow,
+    BackgroundPaint, Color, Corners, Overflow, TextAlign, TextDirection, TextOverflow,
 };
 use mesh_core_elements::tree::WidgetNode;
 use mesh_core_elements::{BoxShadow, VisualFilter};
@@ -341,7 +341,7 @@ impl FrontendRenderEngine {
             buffer,
             &[PainterCommand::DrawRoundedRect {
                 rect,
-                radius,
+                radii: Corners::all(radius),
                 paint: PainterPaint::fill(color),
                 clip,
             }],
@@ -360,7 +360,7 @@ impl FrontendRenderEngine {
             session,
             &[PainterCommand::DrawRoundedRect {
                 rect,
-                radius,
+                radii: Corners::all(radius),
                 paint: PainterPaint::fill(color),
                 clip,
             }],

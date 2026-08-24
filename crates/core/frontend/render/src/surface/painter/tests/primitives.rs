@@ -18,14 +18,17 @@ fn painter_primitive_command_classes_record_helper_backed_rects() {
     };
     let paint = PainterPaint::fill(Color::WHITE);
     let commands = vec![
-        PainterCommand::PushClip(PainterClip { rect, radius: 2.0 }),
+        PainterCommand::PushClip(PainterClip {
+            rect,
+            radii: mesh_core_elements::style::Corners::all(2.0),
+        }),
         PainterCommand::PopClip,
         PainterCommand::PushLayer(PainterLayer::isolated(clip, 0.5, PainterBlendMode::SrcOver)),
         PainterCommand::PopLayer,
         PainterCommand::DrawRect { rect, paint, clip },
         PainterCommand::DrawRoundedRect {
             rect,
-            radius: 4.0,
+            radii: mesh_core_elements::style::Corners::all(4.0),
             paint,
             clip,
         },
@@ -50,18 +53,18 @@ fn painter_primitive_command_classes_record_helper_backed_rects() {
                 to: Color::WHITE,
             },
             rect,
-            radius: 4.0,
+            radii: mesh_core_elements::style::Corners::all(4.0),
             clip,
         },
         PainterCommand::DrawShadow {
             rect,
-            radius: 4.0,
+            radii: mesh_core_elements::style::Corners::all(4.0),
             shadow: BoxShadow::default(),
             clip,
         },
         PainterCommand::ApplyFilter {
             rect,
-            radius: 4.0,
+            radii: mesh_core_elements::style::Corners::all(4.0),
             filter: PainterFilter::Backdrop(VisualFilter { blur_radius: 2.0 }),
             clip,
         },
@@ -135,7 +138,7 @@ fn compatibility_and_retained_box_paths_emit_same_command_classes() {
 
     assert_eq!(
         direct_classes,
-        vec!["draw_rect", "draw_rounded_rect"],
+        vec!["draw_rect", "draw_border"],
         "direct box primitive should emit background and border commands"
     );
     assert_eq!(retained_classes, direct_classes);
@@ -164,7 +167,7 @@ fn painter_primitive_box_background_and_border_emit_rect_classes() {
 
     assert_eq!(
         painter_command_classes(&recorded.recorded_commands()),
-        vec!["draw_rect", "draw_rounded_rect"]
+        vec!["draw_rect", "draw_border"]
     );
 }
 
