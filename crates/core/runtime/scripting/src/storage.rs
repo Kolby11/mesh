@@ -1,15 +1,22 @@
 use mesh_core_runtime::SandboxConfig;
 use serde_json::{Map, Value};
 use std::fmt;
-use std::fs;
-use std::io;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use mlua::{Lua, LuaSerdeExt, Table, Value as LuaValue, Variadic};
+use sha2::{Digest, Sha256};
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+const STORAGE_SCHEMA_VERSION: u64 = 1;
+const STORAGE_SCHEMA_KEY: &str = "schemaVersion";
+const STORAGE_REVISION_KEY: &str = "revision";
+const STORAGE_DATA_KEY: &str = "data";
+const MAX_STORAGE_KEY_BYTES: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StorageKind {
@@ -126,38 +133,55 @@ impl StorageManager {
     pub fn open(&self, scope: StorageScope) -> ScopedStorage {
         let path = self.path_for_scope(&scope);
         let mut diagnostics = Vec::new();
-        let mut document = match fs::read_to_string(&path) {
-            Ok(contents) => match serde_json::from_str::<Value>(&contents) {
-                Ok(Value::Object(map)) => map,
-                Ok(_) => {
-                    diagnostics.push(StorageDiagnostic {
-                        scope: scope.clone(),
-                        path: path.clone(),
-                        reason: "storage document root is not a JSON object".to_string(),
-                    });
-                    Map::new()
+        let (mut document, revision) = match ensure_storage_parent(&self.root, path.parent())
+            .and_then(|_| StorageLock::acquire(&lock_path(&path)))
+        {
+            Ok(_lock) => match load_or_recover(&path, self.max_document_bytes) {
+                Ok(loaded) => {
+                    diagnostics.extend(loaded.diagnostics.into_iter().map(|reason| {
+                        StorageDiagnostic {
+                            scope: scope.clone(),
+                            path: path.clone(),
+                            reason,
+                        }
+                    }));
+                    (loaded.document, loaded.revision)
                 }
                 Err(error) => {
                     diagnostics.push(StorageDiagnostic {
                         scope: scope.clone(),
                         path: path.clone(),
-                        reason: format!("storage document could not be decoded: {error}"),
+                        reason: format!("storage document could not be read: {error}"),
                     });
-                    Map::new()
+                    (Map::new(), 0)
                 }
             },
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Map::new(),
             Err(error) => {
                 diagnostics.push(StorageDiagnostic {
                     scope: scope.clone(),
                     path: path.clone(),
-                    reason: format!("storage document could not be read: {error}"),
+                    reason: format!("storage directory or lock is not secure: {error}"),
                 });
-                Map::new()
+                (Map::new(), 0)
             }
         };
 
-        if serde_json::to_vec_pretty(&Value::Object(document.clone()))
+        let oversized_keys = document
+            .keys()
+            .filter(|key| key.len() > MAX_STORAGE_KEY_BYTES)
+            .count();
+        if oversized_keys > 0 {
+            document.retain(|key, _| key.len() <= MAX_STORAGE_KEY_BYTES);
+            diagnostics.push(StorageDiagnostic {
+                scope: scope.clone(),
+                path: path.clone(),
+                reason: format!(
+                    "storage document discarded {oversized_keys} key(s) exceeding {MAX_STORAGE_KEY_BYTES} bytes"
+                ),
+            });
+        }
+
+        if serialized_document(&document, revision)
             .map(|bytes| bytes.len() as u64 > self.max_document_bytes)
             .unwrap_or(true)
         {
@@ -173,8 +197,10 @@ impl StorageManager {
         }
 
         ScopedStorage {
+            root: self.root.clone(),
             scope,
             path,
+            revision,
             document,
             diagnostics,
             dirty: false,
@@ -185,8 +211,10 @@ impl StorageManager {
 
 #[derive(Debug, Clone)]
 pub struct ScopedStorage {
+    root: PathBuf,
     scope: StorageScope,
     path: PathBuf,
+    revision: u64,
     document: Map<String, Value>,
     diagnostics: Vec<StorageDiagnostic>,
     dirty: bool,
@@ -197,6 +225,12 @@ pub struct ScopedStorage {
 pub enum StorageError {
     #[error("storage document exceeds {limit} byte budget (attempted {attempted} bytes)")]
     QuotaExceeded { limit: u64, attempted: u64 },
+    #[error("storage key exceeds {limit} byte budget (attempted {attempted} bytes)")]
+    KeyTooLarge { limit: usize, attempted: usize },
+    #[error("storage revision conflict (expected {expected}, found {actual})")]
+    RevisionConflict { expected: u64, actual: u64 },
+    #[error("storage I/O error: {0}")]
+    Io(String),
     #[error("storage value could not be serialized: {0}")]
     Serialization(String),
 }
@@ -218,6 +252,10 @@ impl ScopedStorage {
         self.dirty
     }
 
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
     pub fn get(&self, key: &str) -> Option<&Value> {
         self.document.get(key)
     }
@@ -232,9 +270,15 @@ impl ScopedStorage {
         value: Value,
     ) -> Result<Option<Value>, StorageError> {
         let key = key.into();
+        if key.len() > MAX_STORAGE_KEY_BYTES {
+            return Err(StorageError::KeyTooLarge {
+                limit: MAX_STORAGE_KEY_BYTES,
+                attempted: key.len(),
+            });
+        }
         let mut candidate = self.document.clone();
         let previous = candidate.insert(key.clone(), value);
-        let attempted = serde_json::to_vec_pretty(&Value::Object(candidate.clone()))
+        let attempted = serialized_document(&candidate, self.revision.saturating_add(1))
             .map_err(|error| StorageError::Serialization(error.to_string()))?;
         if attempted.len() as u64 > self.max_document_bytes {
             return Err(StorageError::QuotaExceeded {
@@ -266,44 +310,504 @@ impl ScopedStorage {
         Value::Object(self.document.clone())
     }
 
-    pub fn persist(&mut self) -> io::Result<()> {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
+    pub fn persist(&mut self) -> Result<(), StorageError> {
+        ensure_storage_parent(&self.root, self.path.parent()).map_err(storage_io)?;
+        let _lock = StorageLock::acquire(&lock_path(&self.path)).map_err(storage_io)?;
+        let loaded = load_or_recover(&self.path, self.max_document_bytes).map_err(storage_io)?;
+        for reason in loaded.diagnostics {
+            self.diagnostics.push(StorageDiagnostic {
+                scope: self.scope.clone(),
+                path: self.path.clone(),
+                reason,
+            });
+        }
+        if loaded.revision != self.revision {
+            return Err(StorageError::RevisionConflict {
+                expected: self.revision,
+                actual: loaded.revision,
+            });
         }
 
-        let temp_path = self.temp_path();
-        let bytes = serde_json::to_vec_pretty(&self.snapshot())
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        let next_revision = self.revision.saturating_add(1);
+        let bytes = serialized_document(&self.document, next_revision)
+            .map_err(|error| StorageError::Serialization(error.to_string()))?;
         if bytes.len() as u64 > self.max_document_bytes {
-            return Err(io::Error::other(format!(
-                "storage document exceeds {} byte budget",
-                self.max_document_bytes
-            )));
+            return Err(StorageError::QuotaExceeded {
+                limit: self.max_document_bytes,
+                attempted: bytes.len() as u64,
+            });
         }
-        fs::write(&temp_path, bytes)?;
-        fs::rename(temp_path, &self.path)?;
+        let (temp_path, mut file) = create_storage_temporary(&self.path).map_err(storage_io)?;
+        let result = (|| {
+            file.write_all(&bytes)?;
+            file.sync_all()?;
+            drop(file);
+
+            if fs::symlink_metadata(&self.path).is_ok() {
+                ensure_secure_file(&self.path)?;
+                fs::rename(&self.path, backup_path(&self.path))?;
+            }
+            fs::rename(&temp_path, &self.path)?;
+            sync_storage_directory(self.path.parent().unwrap_or_else(|| Path::new(".")))
+        })();
+        if let Err(error) = result {
+            let _ = fs::remove_file(&temp_path);
+            return Err(storage_io(error));
+        }
+        self.revision = next_revision;
         self.dirty = false;
         Ok(())
     }
 
-    pub fn flush_if_dirty(&mut self) -> io::Result<bool> {
+    pub fn flush_if_dirty(&mut self) -> Result<bool, StorageError> {
         if !self.dirty {
             return Ok(false);
         }
         self.persist()?;
         Ok(true)
     }
+}
 
-    fn temp_path(&self) -> PathBuf {
-        let count = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let file_name = self
-            .path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("storage.json");
-        self.path
-            .with_file_name(format!("{file_name}.{count}.{}.tmp", std::process::id()))
+#[derive(Debug)]
+struct LoadedStorage {
+    document: Map<String, Value>,
+    revision: u64,
+    diagnostics: Vec<String>,
+}
+
+#[derive(Debug)]
+struct PersistedStorage {
+    document: Map<String, Value>,
+    revision: u64,
+}
+
+#[derive(Debug)]
+struct StorageLock {
+    file: File,
+}
+
+impl StorageLock {
+    fn acquire(path: &Path) -> io::Result<Self> {
+        match fs::symlink_metadata(path) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() || !metadata.is_file() {
+                    return Err(io::Error::other(format!(
+                        "storage lock is not a regular file: {}",
+                        path.display()
+                    )));
+                }
+                ensure_owned(&metadata, path)?;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+
+            options.mode(0o600);
+            options.custom_flags(libc::O_NOFOLLOW);
+        }
+        let file = options.open(path)?;
+        ensure_secure_file(path)?;
+        #[cfg(unix)]
+        {
+            let result =
+                unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&file), libc::LOCK_EX) };
+            if result != 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        Ok(Self { file })
     }
+}
+
+impl Drop for StorageLock {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        unsafe {
+            let _ = libc::flock(std::os::fd::AsRawFd::as_raw_fd(&self.file), libc::LOCK_UN);
+        }
+    }
+}
+
+fn storage_io(error: io::Error) -> StorageError {
+    StorageError::Io(error.to_string())
+}
+
+fn serialized_document(
+    document: &Map<String, Value>,
+    revision: u64,
+) -> Result<Vec<u8>, serde_json::Error> {
+    serde_json::to_vec_pretty(&serde_json::json!({
+        STORAGE_SCHEMA_KEY: STORAGE_SCHEMA_VERSION,
+        STORAGE_REVISION_KEY: revision,
+        STORAGE_DATA_KEY: Value::Object(document.clone()),
+    }))
+}
+
+fn decode_document(bytes: &[u8]) -> Result<PersistedStorage, String> {
+    let value = serde_json::from_slice::<Value>(bytes).map_err(|error| error.to_string())?;
+    let Value::Object(mut map) = value else {
+        return Err("storage document root is not a JSON object".to_string());
+    };
+
+    let is_envelope = map
+        .get(STORAGE_SCHEMA_KEY)
+        .and_then(Value::as_u64)
+        .is_some_and(|version| version == STORAGE_SCHEMA_VERSION)
+        && map.contains_key(STORAGE_DATA_KEY);
+    if !is_envelope {
+        return Ok(PersistedStorage {
+            document: map,
+            revision: 0,
+        });
+    }
+
+    let revision = map
+        .remove(STORAGE_REVISION_KEY)
+        .and_then(|value| value.as_u64())
+        .ok_or_else(|| "storage envelope has no valid revision".to_string())?;
+    let data = map
+        .remove(STORAGE_DATA_KEY)
+        .ok_or_else(|| "storage envelope has no data object".to_string())?;
+    let Value::Object(document) = data else {
+        return Err("storage envelope data is not a JSON object".to_string());
+    };
+    Ok(PersistedStorage { document, revision })
+}
+
+fn load_or_recover(path: &Path, max_document_bytes: u64) -> io::Result<LoadedStorage> {
+    match read_storage_file(path, max_document_bytes) {
+        Ok(Some(document)) => Ok(LoadedStorage {
+            document: document.document,
+            revision: document.revision,
+            diagnostics: Vec::new(),
+        }),
+        Ok(None) => recover_missing_storage(path, max_document_bytes),
+        Err(primary_error) => {
+            let mut recovered = recover_missing_storage(path, max_document_bytes)?;
+            if recovered.revision == 0 && recovered.document.is_empty() {
+                recovered.diagnostics.insert(
+                    0,
+                    format!("primary storage document was unusable: {primary_error}"),
+                );
+            } else {
+                recovered.diagnostics.insert(
+                    0,
+                    format!("storage document recovered after primary failure: {primary_error}"),
+                );
+            }
+            Ok(recovered)
+        }
+    }
+}
+
+fn recover_missing_storage(path: &Path, max_document_bytes: u64) -> io::Result<LoadedStorage> {
+    let backup = backup_path(path);
+    if let Ok(Some(document)) = read_storage_file(&backup, max_document_bytes) {
+        let mut diagnostics = vec!["storage document recovered from its backup".to_string()];
+        if fs::symlink_metadata(path).is_ok() {
+            let corrupt = corrupt_path(path);
+            if let Err(error) = fs::rename(path, &corrupt) {
+                diagnostics.push(format!(
+                    "could not preserve the damaged primary storage document: {error}"
+                ));
+            }
+        }
+        fs::rename(&backup, path)?;
+        sync_storage_directory(path.parent().unwrap_or_else(|| Path::new(".")))?;
+        return Ok(LoadedStorage {
+            document: document.document,
+            revision: document.revision,
+            diagnostics,
+        });
+    }
+
+    if let Some((temporary, document)) = recover_temporary(path, max_document_bytes)? {
+        fs::rename(&temporary, path)?;
+        sync_storage_directory(path.parent().unwrap_or_else(|| Path::new(".")))?;
+        return Ok(LoadedStorage {
+            document: document.document,
+            revision: document.revision,
+            diagnostics: vec!["storage document recovered from an interrupted write".to_string()],
+        });
+    }
+
+    if fs::symlink_metadata(path).is_ok() {
+        let corrupt = corrupt_path(path);
+        fs::rename(path, &corrupt)?;
+    }
+
+    Ok(LoadedStorage {
+        document: Map::new(),
+        revision: 0,
+        diagnostics: Vec::new(),
+    })
+}
+
+fn recover_temporary(
+    path: &Path,
+    max_document_bytes: u64,
+) -> io::Result<Option<(PathBuf, PersistedStorage)>> {
+    let Some(parent) = path.parent() else {
+        return Ok(None);
+    };
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return Ok(None);
+    };
+    let prefix = format!(".{file_name}.tmp-");
+    let mut candidates = Vec::new();
+    for entry in fs::read_dir(parent)? {
+        let entry = entry?;
+        let candidate = entry.path();
+        if !entry.file_name().to_string_lossy().starts_with(&prefix) {
+            continue;
+        }
+        if let Ok(Some(document)) = read_storage_file(&candidate, max_document_bytes) {
+            candidates.push((candidate, document));
+        }
+    }
+    Ok(candidates
+        .into_iter()
+        .max_by_key(|(_, document)| document.revision))
+}
+
+fn read_storage_file(path: &Path, max_document_bytes: u64) -> io::Result<Option<PersistedStorage>> {
+    let Some(metadata) = secure_existing_file(path)? else {
+        return Ok(None);
+    };
+    if metadata.len() > max_document_bytes {
+        return Err(io::Error::other(format!(
+            "storage document exceeds {max_document_bytes} byte budget"
+        )));
+    }
+    let bytes = fs::read(path)?;
+    decode_document(&bytes).map(Some).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("storage document could not be decoded: {error}"),
+        )
+    })
+}
+
+fn ensure_storage_parent(root: &Path, parent: Option<&Path>) -> io::Result<()> {
+    let parent = parent.ok_or_else(|| io::Error::other("storage path has no parent"))?;
+    ensure_secure_directory(root)?;
+    let relative = parent
+        .strip_prefix(root)
+        .map_err(|_| io::Error::other("storage path escaped its root"))?;
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        let std::path::Component::Normal(component) = component else {
+            return Err(io::Error::other(
+                "storage path contains a non-normal component",
+            ));
+        };
+        current.push(component);
+        ensure_secure_directory(&current)?;
+    }
+    Ok(())
+}
+
+fn ensure_secure_directory(path: &Path) -> io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(io::Error::other(format!(
+                    "storage directory is not a real directory: {}",
+                    path.display()
+                )));
+            }
+            ensure_owned(&metadata, path)?;
+            set_directory_permissions(path)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => create_directory_tree(path),
+        Err(error) => Err(error),
+    }
+}
+
+fn create_directory_tree(path: &Path) -> io::Result<()> {
+    let mut missing = Vec::new();
+    let mut current = path.to_path_buf();
+    loop {
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                    return Err(io::Error::other(format!(
+                        "storage directory ancestor is not a real directory: {}",
+                        current.display()
+                    )));
+                }
+                break;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                missing.push(current.clone());
+                current = current
+                    .parent()
+                    .filter(|parent| !parent.as_os_str().is_empty())
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| PathBuf::from("."));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    for directory in missing.into_iter().rev() {
+        match fs::create_dir(&directory) {
+            Ok(()) => set_directory_permissions(&directory)?,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                ensure_secure_directory(&directory)?;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn ensure_secure_file(path: &Path) -> io::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(io::Error::other(format!(
+            "storage path is not a regular file: {}",
+            path.display()
+        )));
+    }
+    ensure_owned(&metadata, path)?;
+    set_file_permissions(path)
+}
+
+fn secure_existing_file(path: &Path) -> io::Result<Option<fs::Metadata>> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            ensure_secure_file(path)?;
+            Ok(Some(metadata))
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn ensure_owned(metadata: &fs::Metadata, path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        let owner = unsafe { libc::geteuid() } as u32;
+        if metadata.uid() != owner {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!(
+                    "storage path is not owned by the current user: {}",
+                    path.display()
+                ),
+            ));
+        }
+    }
+    let _ = metadata;
+    let _ = path;
+    Ok(())
+}
+
+fn set_directory_permissions(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    }
+    let _ = path;
+    Ok(())
+}
+
+fn set_file_permissions(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    }
+    let _ = path;
+    Ok(())
+}
+
+fn create_storage_temporary(path: &Path) -> io::Result<(PathBuf, File)> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::other("storage path has no parent"))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("storage.json");
+    for _ in 0..128 {
+        let sequence = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let temporary = parent.join(format!(
+            ".{file_name}.tmp-{}-{sequence}",
+            std::process::id()
+        ));
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+
+            options.mode(0o600);
+        }
+        match options.open(&temporary) {
+            Ok(file) => return Ok((temporary, file)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        format!(
+            "could not allocate a unique storage temporary file in {}",
+            parent.display()
+        ),
+    ))
+}
+
+fn sync_storage_directory(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        File::open(path)?.sync_all()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+fn lock_path(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("storage.json");
+    path.with_file_name(format!(".{file_name}.lock"))
+}
+
+fn backup_path(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("storage.json");
+    path.with_file_name(format!(".{file_name}.bak"))
+}
+
+fn corrupt_path(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("storage.json");
+    let sequence = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    path.with_file_name(format!(
+        ".{file_name}.corrupt-{}-{sequence}",
+        std::process::id()
+    ))
 }
 
 pub type StorageDiagnosticSink = Arc<dyn Fn(String) + Send + Sync>;
@@ -423,17 +927,9 @@ fn scope_segment(raw: &str) -> String {
     } else {
         readable
     };
-    format!("{readable}--{}", hex_bytes(raw.as_bytes()))
-}
-
-fn hex_bytes(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut encoded = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        encoded.push(HEX[(byte >> 4) as usize] as char);
-        encoded.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    encoded
+    let mut digest = Sha256::new();
+    digest.update(raw.as_bytes());
+    format!("{readable}--{:x}", digest.finalize())
 }
 
 #[cfg(test)]
@@ -567,6 +1063,211 @@ mod tests {
             manager.open(second_scope).get("value"),
             Some(&json!("second"))
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn storage_paths_use_owner_only_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_root("permissions");
+        let manager = StorageManager::new(&root);
+        let scope = StorageScope::backend("audio", "pipewire", "default");
+        let mut storage = manager.open(scope);
+        storage.set("volume", json!(42));
+        storage.persist().unwrap();
+
+        let path = storage.path().to_path_buf();
+        assert_eq!(
+            fs::metadata(&root).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(path.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::metadata(&lock_path(&path))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::metadata(&backup_path(&path)).is_err(),
+            true,
+            "the first committed document has no previous revision"
+        );
+    }
+
+    #[test]
+    fn storage_creates_missing_parent_directories_securely() {
+        let root = temp_root("parent-chain").join("nested").join("runtime");
+        let manager = StorageManager::new(&root);
+        let mut storage = manager.open(StorageScope::backend("audio", "pipewire", "default"));
+        storage.set("volume", json!(42));
+        storage.persist().unwrap();
+
+        assert!(root.is_dir());
+        assert!(root.join("storage/v1/backend").is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn storage_does_not_follow_a_symlinked_primary() {
+        use std::os::unix::fs::symlink;
+
+        let root = temp_root("symlink");
+        let manager = StorageManager::new(&root);
+        let scope = StorageScope::backend("audio", "pipewire", "default");
+        let path = manager.path_for_scope(&scope);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let target = root.join("outside.json");
+        fs::write(&target, "{\"outside\":true}").unwrap();
+        symlink(&target, &path).unwrap();
+
+        let storage = manager.open(scope);
+        assert_eq!(storage.snapshot(), json!({}));
+        assert!(
+            storage
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.reason.contains("not a regular file"))
+        );
+        assert_eq!(fs::read_to_string(&target).unwrap(), "{\"outside\":true}");
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn stale_writers_are_rejected_by_revision() {
+        let root = temp_root("revision");
+        let manager = StorageManager::new(&root);
+        let scope = StorageScope::backend("network", "wifi", "default");
+        let mut first = manager.open(scope.clone());
+        let mut second = manager.open(scope.clone());
+
+        first.set("owner", json!("first"));
+        first.persist().unwrap();
+        assert_eq!(first.revision(), 1);
+
+        second.set("owner", json!("second"));
+        let error = second.persist().unwrap_err();
+        assert_eq!(
+            error,
+            StorageError::RevisionConflict {
+                expected: 0,
+                actual: 1
+            }
+        );
+        assert_eq!(manager.open(scope).get("owner"), Some(&json!("first")));
+    }
+
+    #[test]
+    fn interrupted_replace_recovers_the_last_committed_revision() {
+        let root = temp_root("recovery");
+        let manager = StorageManager::new(&root);
+        let scope = StorageScope::backend("theme", "palette", "default");
+        let mut storage = manager.open(scope.clone());
+        storage.set("version", json!(1));
+        storage.persist().unwrap();
+        storage.set("version", json!(2));
+        storage.persist().unwrap();
+
+        let path = manager.path_for_scope(&scope);
+        let backup = backup_path(&path);
+        fs::remove_file(&backup).unwrap();
+        fs::rename(&path, &backup).unwrap();
+
+        let recovered = manager.open(scope);
+        assert_eq!(recovered.revision(), 2);
+        assert_eq!(recovered.get("version"), Some(&json!(2)));
+        assert!(
+            recovered
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.reason.contains("recovered from its backup"))
+        );
+    }
+
+    #[test]
+    fn interrupted_write_recovers_a_fully_written_temporary_revision() {
+        let root = temp_root("temporary-recovery");
+        let manager = StorageManager::new(&root);
+        let scope = StorageScope::backend("theme", "palette", "default");
+        let path = manager.path_for_scope(&scope);
+        let _ = manager.open(scope.clone());
+        let (temporary, mut file) = create_storage_temporary(&path).unwrap();
+        file.write_all(
+            &serialized_document(&Map::from_iter([(String::from("version"), json!(2))]), 2)
+                .unwrap(),
+        )
+        .unwrap();
+        file.sync_all().unwrap();
+        drop(file);
+
+        let recovered = manager.open(scope);
+        assert_eq!(recovered.revision(), 2);
+        assert_eq!(recovered.get("version"), Some(&json!(2)));
+        assert!(
+            recovered
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.reason.contains("interrupted write"))
+        );
+        assert!(!temporary.exists());
+    }
+
+    #[test]
+    fn key_and_path_bounds_are_enforced() {
+        let root = temp_root("bounds");
+        let manager = StorageManager::new_with_limit(&root, 256);
+        let long_scope = "x".repeat(4_096);
+        let scope = StorageScope::frontend(&long_scope, &long_scope, &long_scope);
+        let path = manager.path_for_scope(&scope);
+        assert!(path.to_string_lossy().len() < 512);
+
+        let mut storage = manager.open(StorageScope::backend("module", "owner", "default"));
+        let error = storage
+            .try_set("k".repeat(MAX_STORAGE_KEY_BYTES + 1), json!(true))
+            .unwrap_err();
+        assert_eq!(
+            error,
+            StorageError::KeyTooLarge {
+                limit: MAX_STORAGE_KEY_BYTES,
+                attempted: MAX_STORAGE_KEY_BYTES + 1
+            }
+        );
+    }
+
+    #[test]
+    fn legacy_documents_migrate_to_revisioned_envelopes() {
+        let root = temp_root("migration");
+        let manager = StorageManager::new(&root);
+        let scope = StorageScope::frontend("module", "component", "default");
+        let path = manager.path_for_scope(&scope);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            serde_json::to_vec(&json!({ "legacy": true })).unwrap(),
+        )
+        .unwrap();
+
+        let mut storage = manager.open(scope.clone());
+        assert_eq!(storage.revision(), 0);
+        storage.persist().unwrap();
+        let raw: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        assert_eq!(raw[STORAGE_SCHEMA_KEY], json!(STORAGE_SCHEMA_VERSION));
+        assert_eq!(raw[STORAGE_REVISION_KEY], json!(1));
+        assert_eq!(raw[STORAGE_DATA_KEY]["legacy"], json!(true));
     }
 
     #[test]

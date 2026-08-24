@@ -77,7 +77,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md)
 
-- [ ] Move default runtime storage to secure durable XDG state with permissions, quotas, atomic recovery, and revisioned writers.
 - [ ] Make backend command dispatch typed, correlated, transactional, coalescable, generation-aware, and bounded.
 - [ ] Gate event and side-effect queues through one typed authorization/resource boundary before acceptance.
 - [ ] Represent locale as a host-owned per-context cell updated with the translation snapshot.

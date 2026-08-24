@@ -111,8 +111,8 @@ source of truth.
 
 ## Next
 
-Move default runtime storage to secure durable XDG state with permissions,
-quotas, atomic recovery, and revisioned writers (`docs/BACKLOG.md`).
+Make backend command dispatch typed, correlated, transactional, coalescable,
+generation-aware, and bounded (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 
