@@ -111,8 +111,8 @@ source of truth.
 
 ## Next
 
-Treat Luau `nil` writes as explicit deletions in Rust state and dependency
-invalidation (`docs/BACKLOG.md`).
+Restrict provider event publication to provider-owned handles and isolate
+subscriber callback failures (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

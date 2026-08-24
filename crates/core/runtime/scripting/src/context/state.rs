@@ -187,6 +187,28 @@ impl ScriptState {
             .take();
     }
 
+    /// Remove a script-owned variable and mark the public state as changed.
+    ///
+    /// Lua `nil` is the absence of a value, not a JSON null. Keeping the
+    /// deletion on the same mutation path as `set` ensures snapshots,
+    /// generation keys, and render invalidation all observe the removal.
+    pub fn remove(&mut self, name: &str) -> bool {
+        let removed_variable = self.variables.remove(name).is_some();
+        let removed_fingerprint = self.host_value_fingerprints.remove(name).is_some();
+        let removed = removed_variable || removed_fingerprint;
+        if !removed {
+            return false;
+        }
+        self.dirty = true;
+        self.snapshot_generation = self.snapshot_generation.wrapping_add(1);
+        self.mutation_generation = self.mutation_generation.wrapping_add(1);
+        self.cached_snapshot
+            .get_mut()
+            .expect("snapshot cache poisoned")
+            .take();
+        true
+    }
+
     /// Set a host-produced reactive value using its precomputed fingerprint.
     /// Unchanged values are rejected before cloning large JSON payloads or
     /// running a recursive equality comparison.

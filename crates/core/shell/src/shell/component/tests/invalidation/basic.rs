@@ -151,6 +151,58 @@ function changeLabel() label = "done" end
 }
 
 #[test]
+fn nil_write_removes_public_member_and_rebuilds_conditional_tree() {
+    let mut component = test_frontend_component(
+        r#"
+<script lang="luau">
+visible = true
+function hide() visible = nil end
+</script>
+<template>
+  <column>
+    {#if visible}<text>visible</text>{/if}
+    <text>always</text>
+  </column>
+</template>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(240, 80);
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
+    while component.wants_render() {
+        component
+            .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+            .unwrap();
+    }
+    let visible_pixels = buffer.data().to_vec();
+
+    component.call_namespaced_handler("hide", &[]).unwrap();
+    let runtime = component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get(component.id())
+        .expect("root runtime")
+        .script_ctx
+        .state()
+        .get("visible");
+    assert_eq!(runtime, None);
+
+    component
+        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
+    while component.wants_render() {
+        component
+            .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+            .unwrap();
+    }
+
+    assert_ne!(buffer.data(), visible_pixels.as_slice());
+}
+
+#[test]
 fn bound_handler_write_uses_sparse_pixel_damage() {
     let mut component = test_frontend_component(
         r#"

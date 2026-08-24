@@ -63,6 +63,12 @@ impl ScriptContext {
                     continue;
                 }
                 if let Ok(lua_value) = self.env().get::<LuaValue>(key.as_str()) {
+                    if matches!(lua_value, LuaValue::Nil) {
+                        if self.state.remove(key) {
+                            record_changed_public_member(&mut self.changed_public_members, key);
+                        }
+                        continue;
+                    }
                     if !matches!(lua_value, LuaValue::Nil | LuaValue::Function(_)) {
                         if is_proxyable_lua_scalar(&lua_value) {
                             newly_proxyable.push((key.clone(), lua_value.clone()));
@@ -102,7 +108,17 @@ impl ScriptContext {
                             continue;
                         }
                         if let Ok(lua_value) = self.env().get::<LuaValue>(name.as_str()) {
-                            if is_proxyable_lua_scalar(&lua_value) {
+                            if matches!(lua_value, LuaValue::Nil) {
+                                if self.proxied_scalar_global_keys.contains(&name) {
+                                    let _ = self.unproxy_scalar_global(&name, lua_value.clone());
+                                }
+                                if self.state.remove(&name) {
+                                    record_changed_public_member(
+                                        &mut self.changed_public_members,
+                                        &name,
+                                    );
+                                }
+                            } else if is_proxyable_lua_scalar(&lua_value) {
                                 if !self.state.get_ref(&name).is_some_and(|current| {
                                     lua_scalar_matches_json(&lua_value, current)
                                 }) && let Ok(value) = self.lua().from_value::<Value>(lua_value)

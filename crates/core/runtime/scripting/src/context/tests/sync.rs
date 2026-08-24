@@ -129,6 +129,39 @@ end
     assert!(ctx.has_user_global_key_for_test("late_value"));
 }
 
+#[test]
+fn nil_writes_remove_public_state_and_invalidate_template_dependencies() {
+    let mut ctx = ScriptContext::new("@test/nil-deletion", CapabilitySet::new()).unwrap();
+    ctx.compile_and_execute_component(
+        "visible = 'shown'\ndetails = { title = 'ready' }\nfunction clear() visible = nil; details = nil end\nfunction restore() visible = 'restored' end",
+        &[],
+        &["visible".to_string(), "details".to_string()],
+    )
+    .unwrap();
+
+    ctx.evaluate_template_expression("visible", &serde_json::Map::new())
+        .unwrap();
+    ctx.evaluate_template_expression("details", &serde_json::Map::new())
+        .unwrap();
+    ctx.mark_template_dependencies_ready();
+    ctx.state_mut().clear_dirty();
+    let previous_generation = ctx.state().mutation_generation();
+
+    ctx.call_handler("clear", &[]).unwrap();
+
+    assert_eq!(ctx.state().get("visible"), None);
+    assert_eq!(ctx.state().get("details"), None);
+    assert!(!ctx.state().keys().contains(&"visible".to_string()));
+    assert!(!ctx.state().keys().contains(&"details".to_string()));
+    assert!(ctx.state().is_dirty());
+    assert!(ctx.dirty_state_affects_template());
+    assert!(ctx.state().mutation_generation() > previous_generation);
+
+    ctx.state_mut().clear_dirty();
+    ctx.call_handler("restore", &[]).unwrap();
+    assert_eq!(ctx.state().get("visible"), Some(Value::from("restored")));
+}
+
 // cargo test -p mesh-core-scripting --release -- handler_only_discovery_flag_beats_repeated_env_scan --ignored --nocapture
 #[test]
 #[ignore = "release-only handler-only sync microbenchmark"]
