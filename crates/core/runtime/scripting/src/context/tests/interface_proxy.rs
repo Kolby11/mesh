@@ -832,6 +832,38 @@ end
 }
 
 #[test]
+fn control_only_proxy_can_command_without_receiving_service_state() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("service.audio.control"));
+    let mut ctx = ScriptContext::new("@test/control-only-audio", caps).unwrap();
+    ctx.set_interface_catalog(audio_catalog());
+    ctx.load_script(
+        r#"
+audio_percent = -1
+command_queued = false
+
+function invoke()
+    local audio = require("mesh.audio@>=1.0")
+    audio_percent = audio.percent or -1
+    command_queued = audio.set_volume("default", 50).queued
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.apply_service_payload("audio", &serde_json::json!({ "percent": 64 }));
+    assert_eq!(ctx.service_context_generation(), 0);
+    ctx.call_handler("invoke", &[]).unwrap();
+
+    assert_eq!(ctx.state.get("audio_percent"), Some(serde_json::json!(-1)));
+    assert_eq!(
+        ctx.state.get("command_queued"),
+        Some(serde_json::json!(true))
+    );
+    assert_eq!(ctx.drain_published_events().len(), 1);
+}
+
+#[test]
 fn popover_activate_publishes_focus_option_and_trigger_target() {
     let mut caps = CapabilitySet::new();
     caps.grant(Capability::new("shell.surface"));

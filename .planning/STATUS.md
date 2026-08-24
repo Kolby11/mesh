@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-08-24
+**Updated:** 2026-08-25
 
 ## Now
 
@@ -8,6 +8,10 @@ Backend command and event ingress now uses bounded per-provider queues with
 shared JSON byte/depth validation. Luau provider events, queued side effects,
 child processes, callback output, and storage writes participate in explicit
 event-count and aggregate runtime resource budgets.
+
+Effective service read and control grants are now separate: control-only
+proxies can issue contract methods without receiving provider state, and shell
+service fan-out applies the same read boundary.
 
 Backend source loading now runs in a startup-staged host phase: mutating
 service, process, event, logging, and durable-storage handles reject calls
@@ -128,8 +132,7 @@ source of truth.
 
 ## Next
 
-Separate effective read and control grants and enforce them through both proxy
-and shell paths (`docs/BACKLOG.md`).
+Reconcile changed poll intervals after every stream callback (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

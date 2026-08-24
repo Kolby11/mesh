@@ -156,6 +156,43 @@ end
 }
 
 #[test]
+fn control_only_component_does_not_receive_service_state() {
+    let mut component = test_frontend_component_with_catalog(
+        r#"
+<template>
+  <box />
+</template>
+<script lang="luau">
+audio_percent = -1
+
+function init()
+    local audio = require("mesh.audio@>=1.0")
+    audio_percent = audio.percent or -1
+end
+</script>
+"#,
+        audio_network_catalog(),
+        &["service.audio.control"],
+    );
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({ "percent": 64 }),
+        })
+        .unwrap();
+
+    let runtimes = component.runtimes.lock().unwrap();
+    let runtime = runtimes.values().next().expect("mounted root runtime");
+    assert_eq!(runtime.script_ctx.service_context_generation(), 0);
+    assert_eq!(
+        runtime.script_ctx.state().get("audio_percent"),
+        Some(serde_json::json!(-1))
+    );
+}
+
+#[test]
 fn frontend_proxy_update_reaches_panel_or_quick_settings_render_state() {
     let mut ctx = make_audio_ctx();
     ctx.load_script(
