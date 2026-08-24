@@ -61,6 +61,8 @@ pub struct BackendScriptContext {
     streams: Arc<StreamState>,
     policy: RuntimePolicy,
     host_side_effects_enabled: Arc<AtomicBool>,
+    #[cfg(test)]
+    host_setup_failure: Option<String>,
     script_loaded: bool,
     stop_attempted: bool,
     command_registry: Option<BackendCommandRegistry>,
@@ -155,6 +157,11 @@ impl BackendScriptContext {
         )
     }
 
+    #[cfg(test)]
+    pub fn fail_host_setup_for_test(&mut self, message: impl Into<String>) {
+        self.host_setup_failure = Some(message.into());
+    }
+
     fn new_with_settings_capabilities_and_storage_root(
         module_id: impl Into<String>,
         settings: JsonValue,
@@ -197,6 +204,8 @@ impl BackendScriptContext {
             streams: StreamState::new_with_budget(policy.budget()),
             policy,
             host_side_effects_enabled: Arc::new(AtomicBool::new(false)),
+            #[cfg(test)]
+            host_setup_failure: None,
             script_loaded: false,
             stop_attempted: false,
             command_registry: None,
@@ -231,27 +240,66 @@ impl BackendScriptContext {
         self.generation = generation;
     }
 
-    pub(super) fn ensure_lua(&mut self) -> &Lua {
+    pub(super) fn ensure_lua(&mut self) -> Result<&Lua, BackendScriptError> {
         if let Some(ref lua) = self.lua {
-            return lua;
+            return Ok(lua);
         }
         let lua = Lua::new();
         self.policy
             .install(&lua)
-            .expect("backend sandbox policy init failed");
+            .map_err(|error| BackendScriptError::HostSetup {
+                module_id: self.module_id.clone(),
+                message: format!("failed to install sandbox policy: {error}"),
+            })?;
         self.lua = Some(lua);
-        let globals = self.lua.as_ref().unwrap().globals();
-        self.install_host_api(&globals)
-            .expect("backend host API setup should succeed");
-        self.builtin_globals = self
-            .lua
-            .as_ref()
-            .unwrap()
-            .globals()
+        #[cfg(test)]
+        if let Some(message) = self.host_setup_failure.take() {
+            self.lua = None;
+            return Err(BackendScriptError::HostSetup {
+                module_id: self.module_id.clone(),
+                message,
+            });
+        }
+        let globals =
+            self.lua
+                .as_ref()
+                .map(Lua::globals)
+                .ok_or_else(|| BackendScriptError::HostSetup {
+                    module_id: self.module_id.clone(),
+                    message: "Lua runtime disappeared during initialization".to_string(),
+                })?;
+        if let Err(error) = self.install_host_api(&globals) {
+            self.lua = None;
+            self.cached_self_table = None;
+            return Err(BackendScriptError::HostSetup {
+                module_id: self.module_id.clone(),
+                message: error.to_string(),
+            });
+        }
+        self.builtin_globals = globals
             .pairs::<String, LuaValue>()
             .filter_map(|result| result.ok().map(|(key, _)| key))
             .collect();
-        self.lua.as_ref().unwrap()
+        self.lua
+            .as_ref()
+            .ok_or_else(|| BackendScriptError::HostSetup {
+                module_id: self.module_id.clone(),
+                message: "Lua runtime disappeared after host installation".to_string(),
+            })
+    }
+
+    fn lua_ref(&self) -> mlua::Result<&Lua> {
+        self.lua
+            .as_ref()
+            .ok_or_else(|| mlua::Error::runtime("backend Lua runtime is not initialized"))
+    }
+
+    fn backend_lua(&self) -> Result<&Lua, BackendScriptError> {
+        self.lua_ref()
+            .map_err(|error| BackendScriptError::HostSetup {
+                module_id: self.module_id.clone(),
+                message: error.to_string(),
+            })
     }
 
     pub fn poll_interval_ms(&self) -> u64 {
@@ -268,7 +316,7 @@ impl BackendScriptContext {
         self.host_side_effects_enabled
             .store(false, Ordering::Release);
         let _budget = self.policy.begin_callback();
-        self.ensure_lua()
+        self.ensure_lua()?
             .load(source)
             .set_name(&self.module_id)
             .exec()
@@ -282,7 +330,7 @@ impl BackendScriptContext {
                 message: err.to_string(),
             })?;
         self.script_environment = self
-            .ensure_lua()
+            .ensure_lua()?
             .globals()
             .get::<Function>("start")
             .ok()
@@ -296,7 +344,7 @@ impl BackendScriptContext {
     pub fn call_init(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
         let _budget = self.policy.begin_callback();
         self.reset_for_call(JsonValue::Null);
-        let globals = self.script_environment();
+        let globals = self.script_environment()?;
         let entrypoint = globals.get::<Function>("start").map_err(|_| {
             BackendScriptError::MissingEntrypoint {
                 module_id: self.module_id.clone(),
@@ -334,7 +382,7 @@ impl BackendScriptContext {
         } else {
             (|| {
                 self.reset_for_call(JsonValue::Null);
-                let globals = self.script_environment();
+                let globals = self.script_environment()?;
                 let stop = match globals.get::<Function>("stop") {
                     Ok(stop) => stop,
                     Err(_) => return Ok(()),
@@ -414,7 +462,7 @@ impl BackendScriptContext {
         self.host_side_effects_enabled
             .store(true, Ordering::Release);
         self.reset_for_call(JsonValue::Null);
-        let globals = self.script_environment();
+        let globals = self.script_environment()?;
         if let Ok(batch_handler) = globals.get::<Function>("on_stream_batch") {
             let current_self =
                 self.current_self_table()
@@ -423,7 +471,7 @@ impl BackendScriptContext {
                         message: err.to_string(),
                     })?;
             let lines_table = self
-                .ensure_lua()
+                .backend_lua()?
                 .create_sequence_from(lines.iter().cloned())
                 .map_err(|err| BackendScriptError::Runtime {
                     module_id: self.module_id.clone(),
@@ -461,8 +509,7 @@ impl BackendScriptContext {
     /// Whether this script opted into typed stream lifecycle records.
     pub fn has_stream_event_handler(&mut self) -> bool {
         self.script_environment()
-            .get::<Function>("on_stream_event")
-            .is_ok()
+            .is_ok_and(|globals| globals.get::<Function>("on_stream_event").is_ok())
     }
 
     /// Dispatch one typed stream record to `on_stream_event(self, event)`.
@@ -474,7 +521,7 @@ impl BackendScriptContext {
         self.host_side_effects_enabled
             .store(true, Ordering::Release);
         self.reset_for_call(JsonValue::Null);
-        let globals = self.script_environment();
+        let globals = self.script_environment()?;
         let handler = match globals.get::<Function>("on_stream_event") {
             Ok(handler) => handler,
             Err(_) => return Ok(None),
@@ -485,7 +532,7 @@ impl BackendScriptContext {
                     module_id: self.module_id.clone(),
                     message: err.to_string(),
                 })?;
-        let event_table = stream_event_table(self.ensure_lua(), event).map_err(|err| {
+        let event_table = stream_event_table(self.backend_lua()?, event).map_err(|err| {
             BackendScriptError::Runtime {
                 module_id: self.module_id.clone(),
                 message: err.to_string(),
@@ -512,7 +559,7 @@ impl BackendScriptContext {
         self.host_side_effects_enabled
             .store(true, Ordering::Release);
         self.reset_for_call(JsonValue::Null);
-        let globals = self.script_environment();
+        let globals = self.script_environment()?;
         let handler = match globals.get::<Function>("on_poll") {
             Ok(handler) => handler,
             Err(_) => return Ok(None),
@@ -549,7 +596,7 @@ impl BackendScriptContext {
         }
         let normalized = command.replace('-', "_");
 
-        let globals = self.script_environment();
+        let globals = self.script_environment()?;
         let handler_name = format!("on_command_{normalized}");
         let handler = match globals.get::<Function>(handler_name.as_str()) {
             Ok(handler) => handler,
@@ -581,7 +628,7 @@ impl BackendScriptContext {
         self.reset_for_call(payload.clone());
         let normalized = command.replace('-', "_");
 
-        let globals = self.script_environment();
+        let globals = self.script_environment()?;
         let handler_name = format!("on_command_{normalized}");
         if let Some(registry) = &self.command_registry {
             if let Err(message) = registry.validate_payload(command, payload) {
@@ -635,7 +682,7 @@ impl BackendScriptContext {
             }
         };
         let module_id = self.module_id.clone();
-        let lua = self.ensure_lua();
+        let lua = self.backend_lua()?;
         let result = match command_result_from_lua(lua, &module_id, returned) {
             Ok(result) => result,
             Err(error) => {
@@ -699,7 +746,7 @@ impl BackendScriptContext {
             return Ok(Some(payload));
         }
 
-        let globals = self.script_environment();
+        let globals = self.script_environment()?;
         let state =
             globals
                 .get::<LuaValue>("state")
@@ -713,7 +760,7 @@ impl BackendScriptContext {
         }
 
         let payload = self
-            .ensure_lua()
+            .backend_lua()?
             .from_value::<JsonValue>(state)
             .map_err(|err| BackendScriptError::SnapshotFailed {
                 module_id: self.module_id.clone(),
@@ -768,7 +815,9 @@ impl BackendScriptContext {
     }
 
     pub fn public_function_names(&mut self) -> Vec<String> {
-        let globals = self.script_environment();
+        let Ok(globals) = self.script_environment() else {
+            return Vec::new();
+        };
         let mut names = globals
             .pairs::<String, LuaValue>()
             .filter_map(|pair| {
@@ -789,7 +838,7 @@ impl BackendScriptContext {
     fn install_host_api(&mut self, target: &mlua::Table) -> mlua::Result<()> {
         let globals = target;
         globals.set("self", self.current_self_table()?)?;
-        let mesh = self.ensure_lua().create_table()?;
+        let mesh = self.lua_ref()?.create_table()?;
         self.install_service_api(&mesh)?;
         self.install_exec_api(&mesh)?;
         self.install_config_api(&mesh)?;
@@ -798,14 +847,20 @@ impl BackendScriptContext {
         Ok(())
     }
 
-    fn script_environment(&mut self) -> Table {
-        self.script_environment
-            .clone()
-            .unwrap_or_else(|| self.ensure_lua().globals())
+    fn script_environment(&mut self) -> Result<Table, BackendScriptError> {
+        if let Some(environment) = &self.script_environment {
+            return Ok(environment.clone());
+        }
+        self.lua_ref()
+            .map(|lua| lua.globals())
+            .map_err(|error| BackendScriptError::HostSetup {
+                module_id: self.module_id.clone(),
+                message: error.to_string(),
+            })
     }
 
     fn bind_script_environment_to_host_table(&mut self) -> mlua::Result<()> {
-        let lua = self.ensure_lua();
+        let lua = self.lua_ref()?;
         let globals = lua.globals();
         let mesh = globals.get::<Table>("mesh")?;
         if let Ok(start) = globals.get::<Function>("start")
@@ -817,14 +872,14 @@ impl BackendScriptContext {
     }
 
     fn install_service_api(&mut self, mesh: &Table) -> mlua::Result<()> {
-        let service = self.ensure_lua().create_table()?;
+        let service = self.lua_ref()?.create_table()?;
         let resources = self.policy.budget();
         let module_id = self.module_id.clone();
         let runtime = Arc::clone(&self.runtime);
         let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
         service.set(
             "set_poll_interval",
-            self.ensure_lua().create_function(move |_lua, ms: u64| {
+            self.lua_ref()?.create_function(move |_lua, ms: u64| {
                 require_started(&host_side_effects_enabled)?;
                 let poll_interval_ms = ms.max(MIN_POLL_INTERVAL_MS);
                 if poll_interval_ms != ms {
@@ -846,7 +901,7 @@ impl BackendScriptContext {
         let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
         service.set(
             "emit",
-            self.ensure_lua()
+            self.lua_ref()?
                 .create_function(move |lua, value: LuaValue| {
                     require_started(&host_side_effects_enabled)?;
                     let payload = lua.from_value::<JsonValue>(value)?;
@@ -869,7 +924,7 @@ impl BackendScriptContext {
         let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
         service.set(
             "emit_json",
-            self.ensure_lua()
+            self.lua_ref()?
                 .create_function(move |lua, value: Option<LuaValue>| {
                     require_started(&host_side_effects_enabled)?;
                     let payload = match value {
@@ -901,7 +956,7 @@ impl BackendScriptContext {
         let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
         service.set(
             "emit_unavailable",
-            self.ensure_lua().create_function(move |_lua, ()| {
+            self.lua_ref()?.create_function(move |_lua, ()| {
                 require_started(&host_side_effects_enabled)?;
                 resources_for_unavailable
                     .reserve_output(64)
@@ -917,7 +972,7 @@ impl BackendScriptContext {
         let runtime = Arc::clone(&self.runtime);
         service.set(
             "payload",
-            self.ensure_lua().create_function(move |lua, ()| {
+            self.lua_ref()?.create_function(move |lua, ()| {
                 let payload = runtime.lock().unwrap().current_payload.clone();
                 lua.to_value(&payload)
             })?,
@@ -926,7 +981,7 @@ impl BackendScriptContext {
         let capabilities = self.capabilities.clone();
         service.set(
             "has_capability",
-            self.ensure_lua()
+            self.lua_ref()?
                 .create_function(move |_lua, capability: String| {
                     Ok(capabilities.contains(capability.as_str()))
                 })?,
@@ -935,7 +990,7 @@ impl BackendScriptContext {
         let executable_policy = self.exec_policy.clone();
         service.set(
             "can_exec",
-            self.ensure_lua().create_function(
+            self.lua_ref()?.create_function(
                 move |_lua, (program, args): (String, Vec<String>)| {
                     Ok(executable_policy.allows(&program, &args))
                 },
@@ -954,7 +1009,7 @@ impl BackendScriptContext {
         let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
         mesh.set(
             "exec",
-            self.ensure_lua().create_function(
+            self.lua_ref()?.create_function(
                 move |lua, (program, args): (String, Vec<String>)| {
                     require_started(&host_side_effects_enabled)?;
                     if let Some(required) =
@@ -988,7 +1043,7 @@ impl BackendScriptContext {
         let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
         mesh.set(
             "exec_stream",
-            self.ensure_lua().create_function(
+            self.lua_ref()?.create_function(
                 move |_lua, (program, args): (String, Vec<String>)| {
                     require_started(&host_side_effects_enabled)?;
                     if let Some(required) =
@@ -1034,7 +1089,7 @@ impl BackendScriptContext {
         let resources = self.policy.budget();
         mesh.set(
             "config",
-            self.ensure_lua().create_function(move |lua, ()| {
+            self.lua_ref()?.create_function(move |lua, ()| {
                 let settings = runtime.lock().unwrap().settings.clone();
                 let output_bytes = serde_json::to_vec(&settings)
                     .map_err(mlua::Error::external)?
@@ -1049,12 +1104,12 @@ impl BackendScriptContext {
     }
 
     fn install_log_api(&mut self, mesh: &Table) -> mlua::Result<()> {
-        let log = self.ensure_lua().create_table()?;
+        let log = self.lua_ref()?.create_table()?;
         let module_id = self.module_id.clone();
         let resources = self.policy.budget();
         let resources_for_call = resources.clone();
         let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
-        let call_log = self.ensure_lua().create_function(
+        let call_log = self.lua_ref()?.create_function(
             move |_lua, (_self, level, message): (mlua::Table, String, String)| {
                 require_started(&host_side_effects_enabled)?;
                 resources_for_call
@@ -1064,7 +1119,7 @@ impl BackendScriptContext {
                 Ok(())
             },
         )?;
-        let log_meta = self.ensure_lua().create_table()?;
+        let log_meta = self.lua_ref()?.create_table()?;
         log_meta.set("__call", call_log)?;
         log.set_metatable(Some(log_meta))?;
 
@@ -1081,7 +1136,7 @@ impl BackendScriptContext {
             let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
             log.set(
                 name,
-                self.ensure_lua()
+                self.lua_ref()?
                     .create_function(move |_lua, message: String| {
                         require_started(&host_side_effects_enabled)?;
                         resources_for_level
@@ -1116,7 +1171,7 @@ impl BackendScriptContext {
 
     fn capture_state_for_rollback(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
         let state = self
-            .script_environment()
+            .script_environment()?
             .get::<LuaValue>("state")
             .map_err(|err| BackendScriptError::SnapshotFailed {
                 module_id: self.module_id.clone(),
@@ -1125,7 +1180,7 @@ impl BackendScriptContext {
         if matches!(state, LuaValue::Nil) {
             return Ok(None);
         }
-        self.ensure_lua()
+        self.backend_lua()?
             .from_value::<JsonValue>(state)
             .map(Some)
             .map_err(|err| BackendScriptError::SnapshotFailed {
@@ -1135,10 +1190,18 @@ impl BackendScriptContext {
     }
 
     fn rollback_command_state(&mut self, previous: Option<JsonValue>) {
-        let _ = self.script_environment().set(
+        let Ok(environment) = self.script_environment() else {
+            self.reset_for_call(JsonValue::Null);
+            return;
+        };
+        let _ = environment.set(
             "state",
             match previous {
-                Some(value) => self.ensure_lua().to_value(&value).unwrap_or(LuaValue::Nil),
+                Some(value) => self
+                    .lua_ref()
+                    .ok()
+                    .and_then(|lua| lua.to_value(&value).ok())
+                    .unwrap_or(LuaValue::Nil),
                 None => LuaValue::Nil,
             },
         );
@@ -1153,8 +1216,8 @@ impl BackendScriptContext {
         if let Some(table) = &self.cached_self_table {
             return Ok(table.clone());
         }
-        let current_self = self.ensure_lua().create_table()?;
-        let meta = self.ensure_lua().create_table()?;
+        let current_self = self.lua_ref()?.create_table()?;
+        let meta = self.lua_ref()?.create_table()?;
         meta.set("module_id", self.module_id.as_str())?;
         meta.set("provider_id", self.module_id.as_str())?;
         meta.set("kind", "backend")?;
@@ -1166,7 +1229,7 @@ impl BackendScriptContext {
         let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
         let storage_resources = self.policy.budget();
         let storage = create_lua_storage_table_with_write_guard_and_charge(
-            self.ensure_lua(),
+            self.lua_ref()?,
             storage_arc,
             Arc::new(move |reason| {
                 runtime_for_storage_diagnostics
@@ -1188,12 +1251,12 @@ impl BackendScriptContext {
         let runtime = Arc::clone(&self.runtime);
         let resources = self.policy.budget();
         let generation = self.generation;
-        let self_events_meta = self.ensure_lua().create_table()?;
+        let self_events_meta = self.lua_ref()?.create_table()?;
         let event_registry = self.event_registry.clone();
         let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
         self_events_meta.set(
             "__index",
-            self.ensure_lua()
+            self.lua_ref()?
                 .create_function(move |lua, (table, key): (Table, String)| {
                     if key == "meta" {
                         return table.get::<LuaValue>("meta");

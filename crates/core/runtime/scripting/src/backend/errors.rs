@@ -3,6 +3,9 @@ pub enum BackendScriptError {
     #[error("script error in {module_id}: {message}")]
     Runtime { module_id: String, message: String },
 
+    #[error("backend script {module_id} failed to install host API: {message}")]
+    HostSetup { module_id: String, message: String },
+
     #[error("backend script {module_id} is missing required entrypoint {name}()")]
     MissingEntrypoint { module_id: String, name: String },
 

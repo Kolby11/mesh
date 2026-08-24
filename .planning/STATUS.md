@@ -16,6 +16,10 @@ service fan-out applies the same read boundary.
 Backend stream callbacks now reconcile changed poll intervals immediately after
 each typed or legacy stream callback, before the next event or poll wait.
 
+Backend Luau host and sandbox setup now returns a structured `HostSetup` error
+instead of panicking, allowing the backend lifecycle to publish load failure
+and complete cleanup.
+
 Backend source loading now runs in a startup-staged host phase: mutating
 service, process, event, logging, and durable-storage handles reject calls
 until the explicit `start(self)` lifecycle entrypoint begins.
@@ -135,8 +139,8 @@ source of truth.
 
 ## Next
 
-Return recoverable host-installation errors instead of panicking during backend
-setup (`docs/BACKLOG.md`).
+Introduce a per-module `RuntimeSession` combining realm, host, resource broker,
+lifecycle, state, supervisor, health, backoff, and quarantine (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

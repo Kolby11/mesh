@@ -454,12 +454,14 @@ fn registers_handlers_from_script() {
     .unwrap();
     assert!(
         ctx.ensure_lua()
+            .unwrap()
             .globals()
             .get::<Function>("on_poll")
             .is_ok()
     );
     assert!(
         ctx.ensure_lua()
+            .unwrap()
             .globals()
             .get::<Function>("on_command_volume_up")
             .is_ok()
@@ -882,7 +884,12 @@ fn bundled_network_provider_exports_state() {
         payload.get("wifi_enabled").and_then(|v| v.as_bool()),
         Some(false)
     );
-    let exported_state = ctx.ensure_lua().globals().get::<Table>("state").unwrap();
+    let exported_state = ctx
+        .ensure_lua()
+        .unwrap()
+        .globals()
+        .get::<Table>("state")
+        .unwrap();
     assert!(exported_state.get::<Table>("connections").is_ok());
     assert!(exported_state.get::<Table>("devices").is_ok());
     assert!(exported_state.get::<Table>("networks").is_ok());
@@ -900,6 +907,7 @@ fn bundled_device_provider_normalizes_linux_system_information() {
     let mut ctx = BackendScriptContext::new("@mesh/device-info");
     ctx.load_script(&script).unwrap();
     ctx.ensure_lua()
+        .unwrap()
         .load(
             r#"
 mesh.exec = function(program, args)
@@ -988,6 +996,7 @@ fn bundled_brightness_provider_reads_and_controls_the_backlight() {
     let mut ctx = BackendScriptContext::new("@mesh/backlight-brightness");
     ctx.load_script(&script).unwrap();
     ctx.ensure_lua()
+        .unwrap()
         .load(
             r#"
 exec_calls = {}
@@ -1025,6 +1034,7 @@ end
 
     let calls = ctx
         .ensure_lua()
+        .unwrap()
         .globals()
         .get::<Table>("exec_calls")
         .unwrap();
@@ -1053,6 +1063,7 @@ fn hyprland_workspace_command_waits_for_event_state_instead_of_rereading() {
     let mut ctx = BackendScriptContext::new("@mesh/hyprland-wm");
     ctx.load_script(&script).unwrap();
     ctx.ensure_lua()
+        .unwrap()
         .load(
             r#"
 exec_calls = {}
@@ -1075,6 +1086,7 @@ end
     );
     let calls = ctx
         .ensure_lua()
+        .unwrap()
         .globals()
         .get::<Table>("exec_calls")
         .unwrap();
@@ -1110,7 +1122,7 @@ fn hyprland_stream_events_query_only_missing_fields_and_emit_selectively() {
     );
     let mut ctx = BackendScriptContext::new("@mesh/hyprland-wm");
     ctx.load_script(&script).unwrap();
-    ctx.ensure_lua()
+    ctx.ensure_lua().unwrap()
         .load(
             r#"
 exec_calls = {}
@@ -1150,7 +1162,11 @@ end
 
     ctx.call_init().unwrap();
     ctx.drain_events();
-    ctx.ensure_lua().load("exec_calls = {}").exec().unwrap();
+    ctx.ensure_lua()
+        .unwrap()
+        .load("exec_calls = {}")
+        .exec()
+        .unwrap();
 
     let title_state = ctx
         .run_stream_batch("nc", &["activewindow>>kitty,⠸ mesh, build".to_string()])
@@ -1158,6 +1174,7 @@ end
         .unwrap();
     let calls = ctx
         .ensure_lua()
+        .unwrap()
         .globals()
         .get::<Table>("exec_calls")
         .unwrap();
@@ -1242,7 +1259,12 @@ fn bundled_backend_scripts_expose_required_host_api_surface() {
         ctx.load_script(&script).unwrap();
         ctx.call_init().unwrap();
 
-        let mesh = ctx.ensure_lua().globals().get::<Table>("mesh").unwrap();
+        let mesh = ctx
+            .ensure_lua()
+            .unwrap()
+            .globals()
+            .get::<Table>("mesh")
+            .unwrap();
         let service = mesh.get::<Table>("service").unwrap();
         let log = mesh.get::<Table>("log").unwrap();
 
@@ -1321,6 +1343,7 @@ fn bundled_pipewire_backend_skips_successful_write_readback_when_streaming() {
     let mut ctx = BackendScriptContext::new("@mesh/pipewire-audio");
     ctx.load_script(&script).unwrap();
     ctx.ensure_lua()
+        .unwrap()
         .load(
             r#"
 exec_calls = {}
@@ -1344,6 +1367,7 @@ end
 
     let calls = ctx
         .ensure_lua()
+        .unwrap()
         .globals()
         .get::<Table>("exec_calls")
         .unwrap();
@@ -1368,6 +1392,7 @@ fn bundled_pulseaudio_backend_skips_successful_write_readback_when_streaming() {
     let mut ctx = BackendScriptContext::new("@mesh/pulseaudio-audio");
     ctx.load_script(&script).unwrap();
     ctx.ensure_lua()
+        .unwrap()
         .load(
             r#"
 exec_calls = {}
@@ -1391,6 +1416,7 @@ end
 
     let calls = ctx
         .ensure_lua()
+        .unwrap()
         .globals()
         .get::<Table>("exec_calls")
         .unwrap();
@@ -1462,7 +1488,7 @@ fn emit_json_rejects_invalid_json_string() {
     ctx.load_script("function start()\nend").unwrap();
     ctx.call_init().unwrap();
 
-    let globals = ctx.ensure_lua().globals();
+    let globals = ctx.ensure_lua().unwrap().globals();
     let mesh = globals.get::<mlua::Table>("mesh").unwrap();
     let service = mesh.get::<mlua::Table>("service").unwrap();
     let emit_json = service.get::<Function>("emit_json").unwrap();
@@ -1915,6 +1941,25 @@ fn backend_missing_start_entrypoint_is_reported() {
 }
 
 #[test]
+fn backend_host_setup_failure_is_recoverable() {
+    let mut ctx = BackendScriptContext::new("@test/backend-host-setup");
+    ctx.fail_host_setup_for_test("injected host registration failure");
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ctx.load_script("function start()\nend")
+    }));
+    let error = result
+        .expect("host setup failure must not panic")
+        .expect_err("injected host setup failure should be returned");
+    assert!(matches!(error, BackendScriptError::HostSetup { .. }));
+    assert!(
+        error
+            .to_string()
+            .contains("injected host registration failure")
+    );
+}
+
+#[test]
 fn backend_state_snapshot_failure_is_reported() {
     // A state global that cannot be serialized to JSON (a Lua function) triggers
     // SnapshotFailed, not a generic Runtime error, so the shell can bucket it correctly.
@@ -1932,10 +1977,14 @@ fn backend_state_snapshot_failure_is_reported() {
     ctx2.call_init().unwrap();
     // Inject a non-serializable value into state
     ctx2.ensure_lua()
+        .unwrap()
         .globals()
         .set(
             "state",
-            ctx2.ensure_lua().create_function(|_, ()| Ok(())).unwrap(),
+            ctx2.ensure_lua()
+                .unwrap()
+                .create_function(|_, ()| Ok(()))
+                .unwrap(),
         )
         .unwrap();
     let err = ctx2.take_service_state_snapshot().unwrap_err();
