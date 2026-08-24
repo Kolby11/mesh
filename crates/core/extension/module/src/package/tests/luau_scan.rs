@@ -133,14 +133,17 @@ end
 #[test]
 fn extract_frontend_interface_event_subscriptions_finds_static_proxy_events() {
     let src = r#"
+<template><box /></template>
+<script lang="luau">
 local audio = require("mesh.audio")
 local power = require('mesh.power')
-local dynamic = require(interface_name)
+local dynamic = import(interface_name)
 
 audio.VolumeChanged:on(function(_event) end)
 audio.events.DeviceChanged:subscribe(function(_event) end)
 power.BatteryChanged:on(function(_event) end)
 dynamic.Ignored:on(function(_event) end)
+</script>
 "#;
 
     assert_eq!(

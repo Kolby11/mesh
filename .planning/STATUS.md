@@ -82,10 +82,15 @@ Primary and contribution roots now share one reverse dependency graph for
 catalog invalidation, so a dependency used only by a contribution reaches the
 host surface that renders it.
 
+Shared full_moon metadata now drives Luau symbol discovery for component
+compiler/editor consumers, frontend event-subscription graph diagnostics, and
+LSP backend shape completion. Line-oriented symbol inference is no longer a
+source of truth.
+
 ## Next
 
-Replace line-oriented Luau symbol discovery with parser/compiler metadata or
-remove it as a source of truth (`docs/BACKLOG.md`).
+Make expression scanning UTF-8 safe and diagnose non-ASCII input instead of
+panicking (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

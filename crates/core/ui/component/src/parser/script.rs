@@ -5,8 +5,8 @@ use crate::{
 use full_moon::{
     LuaVersion,
     ast::{
-        Assignment, Call, Expression, FunctionArgs, FunctionCall, FunctionDeclaration, Index,
-        LocalAssignment, LocalFunction, Prefix, Suffix, Var,
+        Assignment, Call, Expression, Field, FunctionArgs, FunctionCall, FunctionDeclaration,
+        Index, LocalAssignment, LocalFunction, Prefix, Return, Suffix, TableConstructor, Var,
     },
     tokenizer::{Lexer, LexerResult, TokenReference, TokenType},
     visitors::Visitor,
@@ -31,7 +31,15 @@ pub(super) fn parse_script(
             span,
         });
     }
-    let metadata = visitor.metadata;
+    let mut metadata = visitor.metadata;
+    for (alias, event) in visitor.interface_event_subscriptions {
+        if let Some(interface) = metadata.interface_proxies.get(&alias) {
+            push_unique_pair(
+                &mut metadata.interface_event_subscriptions,
+                (interface.clone(), event),
+            );
+        }
+    }
     let require_imports = visitor.require_imports;
 
     let mut imports = explicit_imports;
@@ -186,6 +194,7 @@ struct ScriptVisitor {
     metadata: ScriptMetadata,
     require_imports: Vec<RequireImport>,
     invalid_require_span: Option<SourceSpan>,
+    interface_event_subscriptions: Vec<(String, String)>,
 }
 
 impl Visitor for ScriptVisitor {
@@ -284,6 +293,11 @@ impl Visitor for ScriptVisitor {
         };
         push_unique(&mut self.metadata.functions, name_text.to_string());
         push_unique(&mut self.metadata.public_functions, name_text.to_string());
+        if let Some(command) = name_text.strip_prefix("on_command_")
+            && is_lua_identifier(command)
+        {
+            push_unique(&mut self.metadata.backend_commands, command.to_string());
+        }
         self.push_symbol(name_text, ScriptSymbolKind::Function, name);
     }
 
@@ -299,6 +313,14 @@ impl Visitor for ScriptVisitor {
         let Some((callee, arguments)) = call_info(call) else {
             return;
         };
+        if let Some(subscription) = interface_event_subscription(&callee) {
+            push_unique_pair(&mut self.interface_event_subscriptions, subscription);
+        }
+        if callee == "mesh.service.emit"
+            && let Some(table) = first_table_argument(arguments)
+        {
+            collect_table_fields(table, &mut self.metadata.backend_state_fields);
+        }
         let mut values = string_arguments(arguments);
 
         if callee == "mesh.state.set" {
@@ -320,6 +342,14 @@ impl Visitor for ScriptVisitor {
             if let Some(local) = values.nth(1) {
                 self.metadata.service_bindings.push((service, local));
             }
+        }
+    }
+
+    fn visit_return(&mut self, return_statement: &Return) {
+        if let Some(expression) = return_statement.returns().iter().next()
+            && let Some(table) = table_constructor_expression(expression)
+        {
+            collect_table_fields(table, &mut self.metadata.backend_state_fields);
         }
     }
 }
@@ -544,6 +574,72 @@ fn push_unique(values: &mut Vec<String>, value: String) {
     if !values.iter().any(|existing| existing == &value) {
         values.push(value);
     }
+}
+
+fn push_unique_pair(values: &mut Vec<(String, String)>, value: (String, String)) {
+    if !values.iter().any(|existing| existing == &value) {
+        values.push(value);
+    }
+}
+
+fn interface_event_subscription(callee: &str) -> Option<(String, String)> {
+    let (path, method) = callee.rsplit_once(':')?;
+    let (alias, member) = path.split_once('.')?;
+    let event = match method {
+        "on" if !member.contains('.') => member,
+        "subscribe" => member.strip_prefix("events.")?,
+        _ => return None,
+    };
+    if event.is_empty()
+        || event.contains('.')
+        || !event
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_uppercase())
+    {
+        return None;
+    }
+    Some((alias.to_string(), event.to_string()))
+}
+
+fn first_table_argument(arguments: &FunctionArgs) -> Option<&TableConstructor> {
+    match arguments {
+        FunctionArgs::Parentheses { arguments, .. } => arguments
+            .iter()
+            .next()
+            .and_then(table_constructor_expression),
+        FunctionArgs::TableConstructor(table) => Some(table),
+        FunctionArgs::String(_) => None,
+        _ => None,
+    }
+}
+
+fn table_constructor_expression(expression: &Expression) -> Option<&TableConstructor> {
+    match expression {
+        Expression::TableConstructor(table) => Some(table),
+        Expression::Parentheses { expression, .. } => table_constructor_expression(expression),
+        _ => None,
+    }
+}
+
+fn collect_table_fields(table: &TableConstructor, fields: &mut Vec<String>) {
+    for field in table.fields() {
+        let Field::NameKey { key, .. } = field else {
+            continue;
+        };
+        if let Some(name) = identifier(key) {
+            push_unique(fields, name.to_string());
+        }
+    }
+}
+
+fn is_lua_identifier(value: &str) -> bool {
+    let mut characters = value.chars();
+    let Some(first) = characters.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_')
+        && characters.all(|character| character.is_ascii_alphanumeric() || character == '_')
 }
 
 fn token_span(token: &TokenReference) -> SourceSpan {

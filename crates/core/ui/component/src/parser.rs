@@ -2084,7 +2084,38 @@ end
             script.metadata.interface_proxies.get("audio"),
             Some(&"mesh.audio".to_string())
         );
+        assert!(script.metadata.interface_event_subscriptions.is_empty());
         assert!(!script.source.contains("\nimport\n"));
+    }
+
+    #[test]
+    fn derives_interface_event_subscriptions_from_luau_ast() {
+        let source = r#"
+<template><box /></template>
+<script lang="luau">
+local audio = require(
+  "mesh.audio"
+)
+local power = import(
+  "mesh.power"
+)
+-- audio.FakeChanged:on(function() end)
+local documentation = "power.FakeChanged:on(function() end)"
+audio.events.DeviceChanged:subscribe(function(_event) end)
+power.BatteryChanged:on(function(_event) end)
+audio.VolumeChanged:on(function(_event) end)
+</script>
+"#;
+
+        let file = parse_component(source).unwrap();
+        assert_eq!(
+            file.script.unwrap().metadata.interface_event_subscriptions,
+            vec![
+                ("mesh.audio".into(), "DeviceChanged".into()),
+                ("mesh.power".into(), "BatteryChanged".into()),
+                ("mesh.audio".into(), "VolumeChanged".into()),
+            ]
+        );
     }
 
     #[test]

@@ -2,7 +2,6 @@ use super::super::luau_scan;
 use mesh_core_component::{
     Attribute, AttributeValue, ComponentFile, SourceTag, TemplateNode, parse_component,
 };
-use std::collections::HashMap;
 use std::path::Path;
 
 fn extract_icon_names_from_component(component: &ComponentFile) -> Vec<String> {
@@ -168,76 +167,13 @@ fn collect_luau_expressions_from_attributes<'a>(
 pub(crate) fn extract_frontend_interface_event_subscriptions(
     content: &str,
 ) -> Vec<(String, String)> {
-    let mut aliases = HashMap::new();
-    for line in content.lines() {
-        let trimmed = line.trim();
-        let Some(binding) = trimmed.strip_prefix("local ") else {
-            continue;
-        };
-        let Some((alias, expression)) = binding.split_once('=') else {
-            continue;
-        };
-        let alias = alias.trim();
-        if alias.is_empty()
-            || !alias
-                .chars()
-                .all(|character| character.is_ascii_alphanumeric() || character == '_')
-        {
-            continue;
-        }
-        let expression = expression.trim();
-        let Some(arguments) = expression.strip_prefix("require(") else {
-            continue;
-        };
-        let quote = if arguments.starts_with('"') {
-            '"'
-        } else if arguments.starts_with('\'') {
-            '\''
-        } else {
-            continue;
-        };
-        let quoted = &arguments[1..];
-        let Some(end) = quoted.find(quote) else {
-            continue;
-        };
-        let interface = &quoted[..end];
-        if interface.starts_with("mesh.") {
-            aliases.insert(alias.to_string(), interface.to_string());
-        }
-    }
-
-    let mut subscriptions = Vec::new();
-    for (alias, interface) in aliases {
-        for prefix in [format!("{alias}."), format!("{alias}.events.")] {
-            let mut remaining = content;
-            while let Some(start) = remaining.find(&prefix) {
-                remaining = &remaining[start + prefix.len()..];
-                let event_len = remaining
-                    .find(|character: char| {
-                        !(character.is_ascii_alphanumeric() || character == '_')
-                    })
-                    .unwrap_or(remaining.len());
-                let event = &remaining[..event_len];
-                if event.is_empty()
-                    || !event
-                        .chars()
-                        .next()
-                        .is_some_and(|character| character.is_ascii_uppercase())
-                {
-                    continue;
-                }
-                let suffix = &remaining[event_len..];
-                let subscribes = if prefix.ends_with(".events.") {
-                    suffix.starts_with(":subscribe(")
-                } else {
-                    suffix.starts_with(":on(")
-                };
-                if subscribes {
-                    subscriptions.push((interface.clone(), event.to_string()));
-                }
-            }
-        }
-    }
+    let Ok(component) = parse_component(content) else {
+        return Vec::new();
+    };
+    let Some(script) = component.script else {
+        return Vec::new();
+    };
+    let mut subscriptions = script.metadata.interface_event_subscriptions;
     subscriptions.sort();
     subscriptions.dedup();
     subscriptions

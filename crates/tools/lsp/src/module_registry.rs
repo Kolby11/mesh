@@ -1,3 +1,4 @@
+use mesh_core_component::parse_luau_script;
 use mesh_core_config::{default_config_path, load_config, resolve_discovery_paths};
 use mesh_core_module::manifest::{Manifest, ModuleType, load_canonical_manifest};
 use mesh_core_resources::{
@@ -536,58 +537,13 @@ fn search_paths(workspace_root: &Path) -> Vec<PathBuf> {
 ///   `mesh.service.emit({ key = ... })`).
 /// - Commands from `function on_command_<name>()` definitions.
 fn analyze_backend_script(source: &str) -> InterfaceShape {
-    let mut state_fields: Vec<String> = Vec::new();
-    let mut commands: Vec<String> = Vec::new();
-
-    for line in source.lines() {
-        let t = line.trim();
-        if t.starts_with("--") {
-            continue;
-        }
-
-        // Command: `function on_command_<name>(`
-        if let Some(rest) = t.strip_prefix("function on_command_") {
-            if let Some(name) = rest.split('(').next() {
-                let name = name.trim().to_string();
-                if is_lua_identifier(&name) && !commands.contains(&name) {
-                    commands.push(name);
-                }
-            }
-            continue;
-        }
-
-        // State field: indented `key = value` line inside a table literal.
-        // Must be indented (leading whitespace) to distinguish from top-level assignments.
-        let indented = line.starts_with("    ") || line.starts_with('\t');
-        if indented {
-            // Split on ` = ` (space-padded) to avoid matching `==`
-            if let Some((key, rest)) = t.split_once(" = ") {
-                let key = key.trim();
-                let rest = rest.trim();
-                // Skip `==` and `~=` comparisons that got through
-                if !rest.starts_with('=')
-                    && is_lua_identifier(key)
-                    && !is_lua_keyword(key)
-                    && !state_fields.contains(&key.to_string())
-                {
-                    state_fields.push(key.to_string());
-                }
-            }
-        }
-    }
-
+    let Ok(script) = parse_luau_script(source) else {
+        return InterfaceShape::default();
+    };
     InterfaceShape {
-        state_fields,
-        commands,
+        state_fields: script.metadata.backend_state_fields,
+        commands: script.metadata.backend_commands,
     }
-}
-
-fn is_lua_identifier(s: &str) -> bool {
-    !s.is_empty()
-        && s.chars()
-            .next()
-            .map_or(false, |c| c.is_ascii_alphabetic() || c == '_')
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 #[cfg(test)]
@@ -641,31 +597,32 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
-}
 
-fn is_lua_keyword(s: &str) -> bool {
-    matches!(
-        s,
-        "local"
-            | "function"
-            | "if"
-            | "then"
-            | "else"
-            | "elseif"
-            | "end"
-            | "for"
-            | "while"
-            | "do"
-            | "return"
-            | "and"
-            | "or"
-            | "not"
-            | "true"
-            | "false"
-            | "nil"
-            | "in"
-            | "repeat"
-            | "until"
-            | "break"
-    )
+    #[test]
+    fn infers_backend_shape_from_luau_ast() {
+        let shape = analyze_backend_script(
+            r#"
+-- function on_command_fake() end
+local documentation = "percent = false"
+function
+  on_command_set_volume()
+end
+function on_command_toggle(
+)
+end
+mesh.service.emit(
+  {
+    percent = 65,
+    muted = false,
+  }
+)
+return {
+  available = true,
+}
+"#,
+        );
+
+        assert_eq!(shape.state_fields, ["percent", "muted", "available"]);
+        assert_eq!(shape.commands, ["set_volume", "toggle"]);
+    }
 }

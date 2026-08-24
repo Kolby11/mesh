@@ -413,6 +413,7 @@ fn graph_diagnostics_report_frontend_undeclared_interface_event_subscription() {
     fs::write(
         frontend_src.join("main.mesh"),
         r#"
+<template><box /></template>
 <script lang="luau">
 local example = require("mesh.example")
 example.MissingChanged:on(function(_event) end)

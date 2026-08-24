@@ -73,7 +73,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/10-frontend-compiler-and-host/improvements.md)
 
-- [ ] Replace line-oriented Luau symbol discovery with parser/compiler metadata or remove it as a source of truth.
 - [ ] Make expression scanning UTF-8 safe and diagnose non-ASCII input instead of panicking.
 - [ ] Publish runtime props transactionally so Rust and Luau cannot diverge after a failed update.
 - [ ] Preserve typed diagnostic categories and source spans through AST, compiler, shell, LSP, and debug paths.

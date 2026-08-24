@@ -15,7 +15,9 @@ pub mod style;
 /// any other mesh crate.
 pub mod template;
 
-pub use parser::{ParseError, parse_component, parse_inline_style, referenced_identifiers};
+pub use parser::{
+    ParseError, parse_component, parse_inline_style, parse_luau_script, referenced_identifiers,
+};
 pub use style::*;
 pub use template::*;
 
@@ -770,6 +772,14 @@ pub struct ScriptMetadata {
     pub public_functions: Vec<String>,
     pub required_aliases: Vec<String>,
     pub interface_proxies: std::collections::HashMap<String, String>,
+    /// Interface event members subscribed to by a statically resolvable proxy.
+    /// Each entry is `(interface, event)`, for example
+    /// `("mesh.audio", "VolumeChanged")`.
+    pub interface_event_subscriptions: Vec<(String, String)>,
+    /// State fields found in backend service payload tables.
+    pub backend_state_fields: Vec<String>,
+    /// Global `on_command_<name>` functions exposed by a backend service.
+    pub backend_commands: Vec<String>,
     pub symbols: Vec<ScriptSymbol>,
     pub element_ref_aliases: Vec<ScriptAlias>,
 }
