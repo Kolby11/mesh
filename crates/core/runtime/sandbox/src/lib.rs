@@ -5,6 +5,44 @@
 /// metadata that can be shared by those hosts without tying it to either side.
 use mesh_core_capability::CapabilitySet;
 
+pub const DEFAULT_JSON_MAX_BYTES: usize = 64 * 1024;
+pub const DEFAULT_JSON_MAX_DEPTH: usize = 32;
+
+/// Return the serialized size of a JSON value after enforcing the shared
+/// ingress/egress depth and byte policy.
+pub fn validate_json(
+    value: &serde_json::Value,
+    max_bytes: usize,
+    max_depth: usize,
+    label: &str,
+) -> Result<usize, String> {
+    let bytes =
+        serde_json::to_vec(value).map_err(|error| format!("failed to encode {label}: {error}"))?;
+    if bytes.len() > max_bytes {
+        return Err(format!("{label} exceeds {max_bytes} bytes"));
+    }
+
+    fn within_depth(value: &serde_json::Value, current: usize, max_depth: usize) -> bool {
+        if current > max_depth {
+            return false;
+        }
+        match value {
+            serde_json::Value::Array(values) => values
+                .iter()
+                .all(|value| within_depth(value, current + 1, max_depth)),
+            serde_json::Value::Object(values) => values
+                .values()
+                .all(|value| within_depth(value, current + 1, max_depth)),
+            _ => true,
+        }
+    }
+
+    if !within_depth(value, 0, max_depth) {
+        return Err(format!("{label} exceeds JSON depth {max_depth}"));
+    }
+    Ok(bytes.len())
+}
+
 /// Configuration for the module sandbox.
 ///
 /// The policy is deliberately shared by every Luau host.  Keeping the limits
@@ -22,6 +60,16 @@ pub struct SandboxConfig {
     pub output_budget: u64,
     /// Maximum number of queued host side effects and stream lines.
     pub queue_budget: u64,
+    /// Maximum number of provider events retained by one runtime generation.
+    pub event_budget: u64,
+    /// Maximum serialized JSON payload accepted by one host boundary.
+    pub json_max_bytes: u64,
+    /// Maximum nesting depth accepted by one host boundary.
+    pub json_max_depth: u64,
+    /// Maximum aggregate resource units retained by one runtime generation.
+    /// Byte-bearing resources consume one unit per byte; queue entries and
+    /// child processes consume one unit each.
+    pub aggregate_resource_budget: u64,
     /// Maximum serialized bytes in one durable storage document.
     pub storage_budget: u64,
     /// Maximum simultaneously active child processes for one realm.
@@ -38,6 +86,10 @@ impl Default for SandboxConfig {
             frame_budget_us: 4_000,     // 4ms
             output_budget: 1024 * 1024, // 1 MiB per callback
             queue_budget: 1024,
+            event_budget: 256,
+            json_max_bytes: DEFAULT_JSON_MAX_BYTES as u64,
+            json_max_depth: DEFAULT_JSON_MAX_DEPTH as u64,
+            aggregate_resource_budget: 8 * 1024 * 1024,
             storage_budget: 1024 * 1024, // 1 MiB per scoped document
             child_process_budget: 8,
             child_process_timeout_ms: 5_000,

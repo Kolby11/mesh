@@ -15,7 +15,8 @@ use super::{BackendScriptError, MIN_POLL_INTERVAL_MS};
 use crate::operation::{release_side_effect, reserve_side_effect};
 use crate::policy::RuntimePolicy;
 use crate::storage::{
-    ScopedStorage, StorageManager, StorageScope, create_lua_storage_table_with_write_guard,
+    ScopedStorage, StorageManager, StorageScope,
+    create_lua_storage_table_with_write_guard_and_charge,
 };
 use crate::util::{default_runtime_storage_root, is_named_event_channel};
 use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
@@ -652,6 +653,17 @@ impl BackendScriptContext {
                 });
             }
         };
+        if let Err(error) = self
+            .policy
+            .budget()
+            .validate_json(&result, "command result")
+        {
+            self.rollback_command_state(previous_state);
+            return Err(BackendScriptError::CommandResultConversionFailed {
+                module_id: self.module_id.clone(),
+                message: error.to_string(),
+            });
+        }
         if let Err(error) = self.policy.budget().reserve_output(result_bytes.len()) {
             self.rollback_command_state(previous_state);
             return Err(BackendScriptError::CommandResultConversionFailed {
@@ -677,6 +689,13 @@ impl BackendScriptContext {
 
     pub fn take_service_state_snapshot(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
         if let Some(payload) = self.take_pending_emit() {
+            self.policy
+                .budget()
+                .validate_json(&payload, "service state snapshot")
+                .map_err(|error| BackendScriptError::SnapshotFailed {
+                    module_id: self.module_id.clone(),
+                    message: error.to_string(),
+                })?;
             return Ok(Some(payload));
         }
 
@@ -707,6 +726,13 @@ impl BackendScriptContext {
             })?;
         self.policy
             .budget()
+            .validate_json(&payload, "service state snapshot")
+            .map_err(|error| BackendScriptError::SnapshotFailed {
+                module_id: self.module_id.clone(),
+                message: error.to_string(),
+            })?;
+        self.policy
+            .budget()
             .reserve_output(output_bytes.len())
             .map_err(|error| BackendScriptError::SnapshotFailed {
                 module_id: self.module_id.clone(),
@@ -721,6 +747,7 @@ impl BackendScriptContext {
             .iter()
             .map(BackendScriptEvent::queued_output_bytes)
             .sum();
+        self.policy.budget().release_event(events.len());
         release_side_effect(&self.policy.budget(), events.len(), bytes);
         events
     }
@@ -823,6 +850,9 @@ impl BackendScriptContext {
                 .create_function(move |lua, value: LuaValue| {
                     require_started(&host_side_effects_enabled)?;
                     let payload = lua.from_value::<JsonValue>(value)?;
+                    resources_for_emit
+                        .validate_json(&payload, "service payload")
+                        .map_err(|error| mlua::Error::external(error.to_string()))?;
                     let output_bytes = serde_json::to_vec(&payload)
                         .map_err(mlua::Error::external)?
                         .len();
@@ -855,6 +885,9 @@ impl BackendScriptContext {
                     let output_bytes = serde_json::to_vec(&payload)
                         .map_err(mlua::Error::external)?
                         .len();
+                    resources_for_json
+                        .validate_json(&payload, "service payload")
+                        .map_err(|error| mlua::Error::external(error.to_string()))?;
                     resources_for_json
                         .reserve_output(output_bytes)
                         .map_err(|error| mlua::Error::external(error.to_string()))?;
@@ -1075,6 +1108,7 @@ impl BackendScriptContext {
             .sum();
         runtime.pending_events.clear();
         drop(runtime);
+        self.policy.budget().release_event(event_count);
         release_side_effect(&self.policy.budget(), event_count, event_bytes);
         let mut runtime = self.runtime.lock().unwrap();
         runtime.current_payload = payload;
@@ -1130,7 +1164,8 @@ impl BackendScriptContext {
         let runtime_for_storage_diagnostics = Arc::clone(&self.runtime);
         let storage_arc = Arc::clone(&self.storage);
         let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
-        let storage = create_lua_storage_table_with_write_guard(
+        let storage_resources = self.policy.budget();
+        let storage = create_lua_storage_table_with_write_guard_and_charge(
             self.ensure_lua(),
             storage_arc,
             Arc::new(move |reason| {
@@ -1143,6 +1178,11 @@ impl BackendScriptContext {
             Arc::new(|_key| {}),
             Arc::new(|_key| {}),
             Arc::new(move || require_started(&host_side_effects_enabled)),
+            Arc::new(move |bytes| {
+                storage_resources
+                    .reserve_storage(bytes)
+                    .map_err(|error| mlua::Error::external(error.to_string()))
+            }),
         )?;
         current_self.set("storage", storage)?;
         let runtime = Arc::clone(&self.runtime);
@@ -1291,13 +1331,19 @@ fn create_backend_event_channel(
                     .validate_payload(&fire_event_name, &payload)
                     .map_err(mlua::Error::runtime)?;
             }
+            resources
+                .reserve_event()
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
             let output_bytes = serde_json::to_vec(&serde_json::json!({
                 "name": &fire_event_name,
                 "payload": &payload,
             }))
             .map_err(mlua::Error::external)?
             .len();
-            reserve_side_effect(&resources, output_bytes).map_err(mlua::Error::external)?;
+            if let Err(error) = reserve_side_effect(&resources, output_bytes) {
+                resources.release_event(1);
+                return Err(mlua::Error::external(error));
+            }
             let subscribers: Table = table.get("__subscribers")?;
             dispatch_backend_event_subscribers(
                 &subscribers,

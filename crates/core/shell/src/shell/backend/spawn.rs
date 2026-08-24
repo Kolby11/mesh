@@ -143,7 +143,8 @@ impl Shell {
         let provider_id = candidate.module_id.clone();
         let event_provider_id = Arc::new(std::sync::RwLock::new(initial_event_provider_id));
         let bridge_event_provider_id = event_provider_id.clone();
-        let (backend_tx, mut backend_rx) = mpsc::unbounded_channel::<BackendServiceEvent>();
+        let (backend_tx, mut backend_rx) =
+            mpsc::channel::<BackendServiceEvent>(mesh_core_backend::BACKEND_EVENT_QUEUE_CAPACITY);
         let bridge_interface = interface.clone();
         let bridge_provider_id = provider_id.clone();
         runtime.spawn(async move {
@@ -301,7 +302,7 @@ impl Shell {
             }
         });
         let task = runtime.spawn(
-            mesh_core_backend::spawn_backend_service_bounded_with_events(
+            mesh_core_backend::spawn_backend_service_bounded_with_events_and_queue(
                 candidate.module_id,
                 candidate.service_name,
                 candidate.capabilities,

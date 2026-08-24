@@ -4,6 +4,11 @@
 
 ## Now
 
+Backend command and event ingress now uses bounded per-provider queues with
+shared JSON byte/depth validation. Luau provider events, queued side effects,
+child processes, callback output, and storage writes participate in explicit
+event-count and aggregate runtime resource budgets.
+
 Backend source loading now runs in a startup-staged host phase: mutating
 service, process, event, logging, and durable-storage handles reject calls
 until the explicit `start(self)` lifecycle entrypoint begins.
@@ -123,8 +128,8 @@ source of truth.
 
 ## Next
 
-Bound command/event ingress, JSON depth/bytes, event counts, and aggregate
-runtime resource budgets (`docs/BACKLOG.md`).
+Separate effective read and control grants and enforce them through both proxy
+and shell paths (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

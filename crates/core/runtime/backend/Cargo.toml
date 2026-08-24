@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 mesh-core-scripting = { workspace = true }
+mesh-core-runtime = { workspace = true }
 
 serde_json = { workspace = true }
 tokio = { workspace = true }

@@ -17,7 +17,9 @@ pub(crate) enum ResourceKind {
     Instruction,
     Output,
     Queue,
+    Event,
     ChildProcess,
+    Aggregate,
 }
 
 impl ResourceKind {
@@ -26,7 +28,9 @@ impl ResourceKind {
             Self::Instruction => "instruction",
             Self::Output => "output",
             Self::Queue => "queue",
+            Self::Event => "event",
             Self::ChildProcess => "child-process",
+            Self::Aggregate => "aggregate",
         }
     }
 }
@@ -53,6 +57,8 @@ struct ResourceCounters {
     callback_output: AtomicU64,
     queued_items: AtomicU64,
     queued_output: AtomicU64,
+    events: AtomicU64,
+    aggregate: AtomicU64,
     active_children: AtomicU64,
     callback_depth: AtomicU32,
     remaining_instructions: AtomicU64,
@@ -64,6 +70,8 @@ impl Default for ResourceCounters {
             callback_output: AtomicU64::new(0),
             queued_items: AtomicU64::new(0),
             queued_output: AtomicU64::new(0),
+            events: AtomicU64::new(0),
+            aggregate: AtomicU64::new(0),
             active_children: AtomicU64::new(0),
             callback_depth: AtomicU32::new(0),
             remaining_instructions: AtomicU64::new(0),
@@ -92,6 +100,23 @@ impl ResourceBudget {
 
     pub(crate) fn output_limit(&self) -> u64 {
         self.config.output_budget
+    }
+
+    pub(crate) fn validate_json(
+        &self,
+        value: &serde_json::Value,
+        label: &str,
+    ) -> Result<usize, ResourceLimit> {
+        mesh_core_runtime::validate_json(
+            value,
+            self.config.json_max_bytes as usize,
+            self.config.json_max_depth as usize,
+            label,
+        )
+        .map_err(|_| ResourceLimit {
+            kind: ResourceKind::Output,
+            limit: self.config.json_max_bytes,
+        })
     }
 
     pub(crate) fn child_process_timeout(&self) -> Duration {
@@ -131,55 +156,116 @@ impl ResourceBudget {
     }
 
     pub(crate) fn reserve_output(&self, bytes: usize) -> Result<(), ResourceLimit> {
-        reserve_counter(
+        self.reserve_aggregate(bytes as u64)?;
+        if let Err(error) = reserve_counter(
             &self.counters.callback_output,
             bytes as u64,
             self.config.output_budget,
             ResourceKind::Output,
+        ) {
+            self.release_aggregate(bytes as u64);
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn reserve_storage(&self, bytes: usize) -> Result<(), ResourceLimit> {
+        self.reserve_aggregate(bytes as u64)
+    }
+
+    fn reserve_aggregate(&self, amount: u64) -> Result<(), ResourceLimit> {
+        reserve_counter(
+            &self.counters.aggregate,
+            amount,
+            self.config.aggregate_resource_budget,
+            ResourceKind::Aggregate,
         )
     }
 
+    fn release_aggregate(&self, amount: u64) {
+        self.counters.aggregate.fetch_sub(amount, Ordering::AcqRel);
+    }
+
     pub(crate) fn reserve_queue(&self) -> Result<(), ResourceLimit> {
-        reserve_counter(
+        self.reserve_aggregate(1)?;
+        if let Err(error) = reserve_counter(
             &self.counters.queued_items,
             1,
             self.config.queue_budget,
             ResourceKind::Queue,
-        )
+        ) {
+            self.release_aggregate(1);
+            return Err(error);
+        }
+        Ok(())
     }
 
-    pub(crate) fn release_queue(&self, count: usize) {
+    pub(crate) fn reserve_event(&self) -> Result<(), ResourceLimit> {
+        self.reserve_aggregate(1)?;
+        if let Err(error) = reserve_counter(
+            &self.counters.events,
+            1,
+            self.config.event_budget,
+            ResourceKind::Event,
+        ) {
+            self.release_aggregate(1);
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn release_event(&self, count: usize) {
         self.counters
-            .queued_items
+            .events
             .fetch_sub(count as u64, Ordering::AcqRel);
+        self.release_aggregate(count as u64);
     }
 
     pub(crate) fn reserve_queued_output(&self, bytes: usize) -> Result<(), ResourceLimit> {
-        reserve_counter(
+        self.reserve_aggregate(bytes as u64)?;
+        if let Err(error) = reserve_counter(
             &self.counters.queued_output,
             bytes as u64,
             self.config.output_budget,
             ResourceKind::Output,
-        )
+        ) {
+            self.release_aggregate(bytes as u64);
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub(crate) fn release_queued_output(&self, bytes: usize) {
         self.counters
             .queued_output
             .fetch_sub(bytes as u64, Ordering::AcqRel);
+        self.release_aggregate(bytes as u64);
     }
 
     pub(crate) fn acquire_child(&self) -> Result<(), ResourceLimit> {
-        reserve_counter(
+        self.reserve_aggregate(1)?;
+        if let Err(error) = reserve_counter(
             &self.counters.active_children,
             1,
             self.config.child_process_budget,
             ResourceKind::ChildProcess,
-        )
+        ) {
+            self.release_aggregate(1);
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub(crate) fn release_child(&self) {
         self.counters.active_children.fetch_sub(1, Ordering::AcqRel);
+        self.release_aggregate(1);
+    }
+
+    pub(crate) fn release_queue(&self, count: usize) {
+        self.counters
+            .queued_items
+            .fetch_sub(count as u64, Ordering::AcqRel);
+        self.release_aggregate(count as u64);
     }
 }
 
@@ -215,7 +301,14 @@ impl Drop for ExecutionGuard {
             .callback_depth
             .fetch_sub(1, Ordering::AcqRel)
             == 1
-        {}
+        {
+            let callback_output = self
+                .budget
+                .counters
+                .callback_output
+                .swap(0, Ordering::AcqRel);
+            self.budget.release_aggregate(callback_output);
+        }
     }
 }
 
@@ -303,5 +396,21 @@ mod tests {
         assert!(budget.acquire_child().is_ok());
         assert!(budget.acquire_child().is_err());
         budget.release_child();
+    }
+
+    #[test]
+    fn resource_budget_enforces_event_and_aggregate_limits() {
+        let mut config = SandboxConfig::default();
+        config.event_budget = 1;
+        config.aggregate_resource_budget = 4;
+        let budget = ResourceBudget::new(config);
+        let _guard = budget.begin_callback();
+
+        assert!(budget.reserve_event().is_ok());
+        assert!(budget.reserve_event().is_err());
+        budget.release_event(1);
+
+        assert!(budget.reserve_output(4).is_ok());
+        assert!(budget.reserve_storage(1).is_err());
     }
 }

@@ -419,13 +419,17 @@ impl Shell {
         // The renderer owns this snapshot. The backend receives a mirror for
         // compatibility and side effects, but it cannot replace render facts.
         let source_module = "@mesh/shell";
-        if let Some(tx) = self.service_handlers.get("mesh.theme") {
-            let _ = tx.send(ServiceCommandMsg {
-                call_id: mesh_core_backend::CallId::next(),
-                command: "set-current".to_string(),
-                payload: payload.clone(),
-                coalesce: true,
-            });
+        if mesh_core_backend::validate_command_payload(&payload).is_ok() {
+            if let Some(tx) = self.service_handlers.get("mesh.theme") {
+                let _ = tx.send(ServiceCommandMsg {
+                    call_id: mesh_core_backend::CallId::next(),
+                    command: "set-current".to_string(),
+                    payload: payload.clone(),
+                    coalesce: true,
+                });
+            }
+        } else {
+            tracing::warn!("theme service snapshot exceeded backend command JSON budget");
         }
         let mut requests = self.broadcast_service_event(ServiceEvent::Updated {
             service: "mesh.theme".into(),

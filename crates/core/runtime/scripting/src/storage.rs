@@ -813,6 +813,7 @@ fn corrupt_path(path: &Path) -> PathBuf {
 pub type StorageDiagnosticSink = Arc<dyn Fn(String) + Send + Sync>;
 pub type StorageKeySink = Arc<dyn Fn(&str) + Send + Sync>;
 pub type StorageWriteGuard = Arc<dyn Fn() -> mlua::Result<()> + Send + Sync>;
+pub type StorageCharge = Arc<dyn Fn(usize) -> mlua::Result<()> + Send + Sync>;
 
 pub fn create_lua_storage_table(
     lua: &Lua,
@@ -838,6 +839,26 @@ pub fn create_lua_storage_table_with_write_guard(
     read_sink: StorageKeySink,
     write_sink: StorageKeySink,
     write_guard: StorageWriteGuard,
+) -> mlua::Result<Table> {
+    create_lua_storage_table_with_write_guard_and_charge(
+        lua,
+        storage,
+        diagnostic_sink,
+        read_sink,
+        write_sink,
+        write_guard,
+        Arc::new(|_| Ok(())),
+    )
+}
+
+pub fn create_lua_storage_table_with_write_guard_and_charge(
+    lua: &Lua,
+    storage: Arc<Mutex<ScopedStorage>>,
+    diagnostic_sink: StorageDiagnosticSink,
+    read_sink: StorageKeySink,
+    write_sink: StorageKeySink,
+    write_guard: StorageWriteGuard,
+    charge: StorageCharge,
 ) -> mlua::Result<Table> {
     let table = lua.create_table()?;
     let metatable = lua.create_table()?;
@@ -869,6 +890,8 @@ pub fn create_lua_storage_table_with_write_guard(
     )?;
 
     let newindex_storage = Arc::clone(&storage);
+    let charge_storage = Arc::clone(&storage);
+    let charge = charge;
     metatable.set(
         "__newindex",
         lua.create_function(
@@ -882,13 +905,33 @@ pub fn create_lua_storage_table_with_write_guard(
                     }
 
                     match lua.from_value::<Value>(value) {
-                        Ok(value) => match newindex_storage.lock().unwrap().try_set(key, value) {
-                            Ok(_) => write_sink(key),
-                            Err(error) => {
-                                diagnostic_sink(error.to_string());
-                                return Err(mlua::Error::external(error));
+                        Ok(value) => {
+                            let previous =
+                                match newindex_storage.lock().unwrap().try_set(key, value) {
+                                    Ok(previous) => previous,
+                                    Err(error) => {
+                                        diagnostic_sink(error.to_string());
+                                        return Err(mlua::Error::external(error));
+                                    }
+                                };
+                            let attempted = charge_storage.lock().unwrap().snapshot();
+                            let attempted_bytes = serde_json::to_vec(&attempted)
+                                .map_err(mlua::Error::external)?
+                                .len();
+                            if let Err(error) = charge(attempted_bytes) {
+                                let mut storage = newindex_storage.lock().unwrap();
+                                match previous {
+                                    Some(previous) => {
+                                        let _ = storage.try_set(key, previous);
+                                    }
+                                    None => {
+                                        storage.remove(key);
+                                    }
+                                }
+                                return Err(error);
                             }
-                        },
+                            write_sink(key)
+                        }
                         Err(error) => {
                             diagnostic_sink(format!(
                                 "unsupported storage value for key '{key}': {error}"

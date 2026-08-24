@@ -1687,6 +1687,7 @@ dependencies = [
 name = "mesh-core-backend"
 version = "0.1.0"
 dependencies = [
+ "mesh-core-runtime",
  "mesh-core-scripting",
  "serde_json",
  "tokio",
@@ -1934,6 +1935,7 @@ name = "mesh-core-runtime"
 version = "0.1.0"
 dependencies = [
  "mesh-core-capability",
+ "serde_json",
  "thiserror 2.0.18",
  "tracing",
 ]

@@ -12,8 +12,9 @@ const MAX_CONSECUTIVE_POLL_FAILURES: u32 = 3;
 const MIN_POLL_INTERVAL_MS: u64 = 50;
 const MAX_COMMAND_BATCH: usize = 64;
 pub const BACKEND_COMMAND_QUEUE_CAPACITY: usize = 128;
-pub const MAX_COMMAND_PAYLOAD_BYTES: usize = 64 * 1024;
-pub const MAX_COMMAND_JSON_DEPTH: usize = 32;
+pub const BACKEND_EVENT_QUEUE_CAPACITY: usize = 256;
+pub const MAX_COMMAND_PAYLOAD_BYTES: usize = mesh_core_runtime::DEFAULT_JSON_MAX_BYTES;
+pub const MAX_COMMAND_JSON_DEPTH: usize = mesh_core_runtime::DEFAULT_JSON_MAX_DEPTH;
 
 static NEXT_CALL_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_RUNTIME_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -151,35 +152,13 @@ pub struct BackendServiceCommand {
 }
 
 pub fn validate_command_payload(payload: &serde_json::Value) -> Result<(), String> {
-    let bytes = serde_json::to_vec(payload)
-        .map_err(|error| format!("failed to encode command payload: {error}"))?;
-    if bytes.len() > MAX_COMMAND_PAYLOAD_BYTES {
-        return Err(format!(
-            "command payload exceeds {} bytes",
-            MAX_COMMAND_PAYLOAD_BYTES
-        ));
-    }
-    fn within_depth(value: &serde_json::Value, current: usize) -> bool {
-        if current > MAX_COMMAND_JSON_DEPTH {
-            return false;
-        }
-        match value {
-            serde_json::Value::Array(values) => {
-                values.iter().all(|value| within_depth(value, current + 1))
-            }
-            serde_json::Value::Object(values) => values
-                .values()
-                .all(|value| within_depth(value, current + 1)),
-            _ => true,
-        }
-    }
-    if !within_depth(payload, 0) {
-        return Err(format!(
-            "command payload exceeds JSON depth {}",
-            MAX_COMMAND_JSON_DEPTH
-        ));
-    }
-    Ok(())
+    mesh_core_runtime::validate_json(
+        payload,
+        MAX_COMMAND_PAYLOAD_BYTES,
+        MAX_COMMAND_JSON_DEPTH,
+        "command payload",
+    )
+    .map(|_| ())
 }
 
 fn coalescing_key(msg: &BackendServiceCommand) -> String {
@@ -295,6 +274,21 @@ pub enum BackendServiceEvent {
     },
 }
 
+#[derive(Debug, Clone)]
+enum BackendEventSender {
+    Unbounded(mpsc::UnboundedSender<BackendServiceEvent>),
+    Bounded(mpsc::Sender<BackendServiceEvent>),
+}
+
+impl BackendEventSender {
+    fn send(&self, event: BackendServiceEvent) -> Result<(), ()> {
+        match self {
+            Self::Unbounded(sender) => sender.send(event).map_err(|_| ()),
+            Self::Bounded(sender) => sender.try_send(event).map_err(|_| ()),
+        }
+    }
+}
+
 /// Run a backend module script and publish service updates.
 ///
 /// Core owns module discovery and channel wiring; this crate owns the Luau
@@ -314,7 +308,7 @@ pub async fn spawn_backend_service(
         capabilities,
         settings,
         script_source,
-        tx,
+        BackendEventSender::Unbounded(tx),
         CommandReceiver::Unbounded(cmd_rx),
         None,
         None,
@@ -372,7 +366,37 @@ pub async fn spawn_backend_service_bounded_with_events(
         capabilities,
         settings,
         script_source,
-        tx,
+        BackendEventSender::Unbounded(tx),
+        CommandReceiver::Bounded(cmd_rx),
+        command_registry,
+        event_registry,
+        generation,
+    )
+    .await;
+}
+
+/// Production backend entrypoint with bounded command and event ingress.
+/// A full downstream event queue is an explicit overload boundary rather
+/// than a reason to retain unbounded provider output in memory.
+pub async fn spawn_backend_service_bounded_with_events_and_queue(
+    module_id: String,
+    service_name: String,
+    capabilities: Vec<String>,
+    settings: JsonValue,
+    script_source: String,
+    tx: mpsc::Sender<BackendServiceEvent>,
+    cmd_rx: mpsc::Receiver<BackendServiceCommand>,
+    command_registry: Option<mesh_core_scripting::BackendCommandRegistry>,
+    event_registry: Option<mesh_core_scripting::BackendEventRegistry>,
+    generation: u64,
+) {
+    spawn_backend_service_inner(
+        module_id,
+        service_name,
+        capabilities,
+        settings,
+        script_source,
+        BackendEventSender::Bounded(tx),
         CommandReceiver::Bounded(cmd_rx),
         command_registry,
         event_registry,
@@ -408,7 +432,7 @@ async fn spawn_backend_service_inner(
     capabilities: Vec<String>,
     settings: JsonValue,
     script_source: String,
-    tx: mpsc::UnboundedSender<BackendServiceEvent>,
+    tx: BackendEventSender,
     cmd_rx: CommandReceiver,
     command_registry: Option<mesh_core_scripting::BackendCommandRegistry>,
     event_registry: Option<mesh_core_scripting::BackendEventRegistry>,
@@ -452,16 +476,12 @@ async fn spawn_backend_service_inner(
 struct BackendLifecycleGuard {
     service: Arc<str>,
     source_module: Arc<str>,
-    tx: mpsc::UnboundedSender<BackendServiceEvent>,
+    tx: BackendEventSender,
     terminal_sent: bool,
 }
 
 impl BackendLifecycleGuard {
-    fn new(
-        service: Arc<str>,
-        source_module: Arc<str>,
-        tx: mpsc::UnboundedSender<BackendServiceEvent>,
-    ) -> Self {
+    fn new(service: Arc<str>, source_module: Arc<str>, tx: BackendEventSender) -> Self {
         Self {
             service,
             source_module,
@@ -510,7 +530,7 @@ async fn run_backend_service(
     module_id: Arc<str>,
     service_name: Arc<str>,
     script_source: String,
-    tx: mpsc::UnboundedSender<BackendServiceEvent>,
+    tx: BackendEventSender,
     mut cmd_rx: CommandReceiver,
     generation: u64,
 ) {
@@ -841,7 +861,7 @@ async fn run_backend_service(
 fn dispatch_stream_events(
     ctx: &mut BackendScriptContext,
     events: Vec<StreamEvent>,
-    tx: &mpsc::UnboundedSender<BackendServiceEvent>,
+    tx: &BackendEventSender,
     service_name: &Arc<str>,
     module_id: &Arc<str>,
     last_payload: &mut Option<serde_json::Value>,
@@ -930,7 +950,7 @@ fn dispatch_stream_events(
 
 fn publish_stream_callback_result(
     result: Result<Option<serde_json::Value>, BackendScriptError>,
-    tx: &mpsc::UnboundedSender<BackendServiceEvent>,
+    tx: &BackendEventSender,
     service_name: &Arc<str>,
     module_id: &Arc<str>,
     last_payload: &mut Option<serde_json::Value>,
@@ -955,12 +975,26 @@ fn publish_stream_callback_result(
 }
 
 fn publish_script_events(
-    tx: &mpsc::UnboundedSender<BackendServiceEvent>,
+    tx: &BackendEventSender,
     service_name: &Arc<str>,
     module_id: &Arc<str>,
     events: Vec<mesh_core_scripting::BackendScriptEvent>,
 ) -> bool {
     for event in events {
+        if let Err(message) = mesh_core_runtime::validate_json(
+            &event.payload,
+            MAX_COMMAND_PAYLOAD_BYTES,
+            MAX_COMMAND_JSON_DEPTH,
+            "backend event payload",
+        ) {
+            let _ = tx.send(BackendServiceEvent::Failed {
+                service: Arc::clone(service_name),
+                source_module: Arc::clone(module_id),
+                stage: "event".to_string(),
+                message,
+            });
+            return false;
+        }
         if tx
             .send(BackendServiceEvent::InterfaceEvent(BackendInterfaceEvent {
                 service: Arc::clone(service_name),
@@ -978,7 +1012,7 @@ fn publish_script_events(
 }
 
 fn publish_changed_update(
-    tx: &mpsc::UnboundedSender<BackendServiceEvent>,
+    tx: &BackendEventSender,
     service_name: &Arc<str>,
     module_id: &Arc<str>,
     last_payload: &mut Option<serde_json::Value>,
@@ -986,6 +1020,20 @@ fn publish_changed_update(
 ) -> bool {
     if Some(&payload) == last_payload.as_ref() {
         return true;
+    }
+    if let Err(message) = mesh_core_runtime::validate_json(
+        &payload,
+        MAX_COMMAND_PAYLOAD_BYTES,
+        MAX_COMMAND_JSON_DEPTH,
+        "service state payload",
+    ) {
+        let _ = tx.send(BackendServiceEvent::Failed {
+            service: Arc::clone(service_name),
+            source_module: Arc::clone(module_id),
+            stage: "state".to_string(),
+            message,
+        });
+        return false;
     }
     last_payload.replace(payload.clone());
     tx.send(BackendServiceEvent::Update(BackendServiceUpdate {
@@ -1113,6 +1161,33 @@ mod tests {
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].payload["device_id"], "b");
         assert_eq!(out[1].payload["value"], 30);
+    }
+
+    #[test]
+    fn command_json_policy_enforces_shared_bytes_and_depth() {
+        let oversized = serde_json::json!({
+            "value": "x".repeat(MAX_COMMAND_PAYLOAD_BYTES),
+        });
+        assert!(validate_command_payload(&oversized).is_err());
+
+        let mut nested = serde_json::json!(null);
+        for _ in 0..=MAX_COMMAND_JSON_DEPTH {
+            nested = serde_json::json!([nested]);
+        }
+        assert!(validate_command_payload(&nested).is_err());
+    }
+
+    #[test]
+    fn bounded_event_sender_rejects_overflow_without_retaining_more_events() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let sender = BackendEventSender::Bounded(tx);
+        let event = BackendServiceEvent::Started {
+            service: Arc::from("test"),
+            source_module: Arc::from("test"),
+        };
+        assert!(sender.send(event.clone()).is_ok());
+        assert!(sender.send(event).is_err());
+        assert!(rx.try_recv().is_ok());
     }
 
     #[test]
