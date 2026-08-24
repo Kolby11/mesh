@@ -895,6 +895,38 @@ fn backdrop_regions_require_painted_content_beneath() {
 }
 
 #[test]
+fn transformed_backdrop_regions_follow_cumulative_geometry() {
+    let mut root = node(1, "box", 0.0, 0.0, 100.0, 100.0);
+    root.computed_style.background_color = Color::TRANSPARENT;
+    root.children.push(node(2, "box", 0.0, 0.0, 50.0, 100.0));
+    let mut frosted = frosted_node(3, 20.0, 20.0, 40.0, 20.0);
+    frosted.computed_style.transform.rotation = std::f32::consts::FRAC_PI_2;
+    root.children.push(frosted);
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 100, 100, true, true);
+
+    assert_eq!(
+        list.backdrop_filter_regions(),
+        &[DamageRect {
+            x: 17,
+            y: 0,
+            width: 45,
+            height: 62,
+        }]
+    );
+    assert_eq!(
+        list.blur_regions(),
+        &[DamageRect {
+            x: 30,
+            y: 10,
+            width: 20,
+            height: 40,
+        }]
+    );
+}
+
+#[test]
 fn blur_regions_come_from_full_tree_not_scoped_paint_commands() {
     // Popup-shaped case: transparent root with an opaque sibling beneath a
     // frosted node. The frosted node's compositor blur region must be the

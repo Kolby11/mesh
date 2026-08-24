@@ -3,7 +3,7 @@ use std::path::Path;
 
 use mesh_core_elements::BoxShadow;
 use mesh_core_elements::style::{BackgroundPaint, Color};
-use mesh_core_elements::{AffineTransform, WidgetNode, node_layout_bounds};
+use mesh_core_elements::{AffineTransform, LayoutRect, WidgetNode, node_layout_bounds};
 
 use super::build::*;
 use super::types::*;
@@ -121,34 +121,11 @@ pub(super) fn damage_rect_for_node_with_transform(
     if node.layout.width <= 0.0 || node.layout.height <= 0.0 {
         return None;
     }
-    let layout = node_layout_bounds(node, world_transform);
+    let layout = visual_bounds_for_node_with_transform(node, world_transform);
     let left = layout.x;
     let top = layout.y;
-    let mut left = left;
-    let mut top = top;
-    let mut right = left + layout.width;
-    let mut bottom = top + layout.height;
-    let shadow = node.computed_style.box_shadow;
-    if !shadow.is_none() && !shadow.inset {
-        let spread = shadow.spread_radius;
-        let blur_pad = shadow.blur_radius * 3.0;
-        left = left.min(layout.x + shadow.offset_x - spread - blur_pad);
-        top = top.min(layout.y + shadow.offset_y - spread - blur_pad);
-        right = right.max(layout.x + layout.width + shadow.offset_x + spread + blur_pad);
-        bottom = bottom.max(layout.y + layout.height + shadow.offset_y + spread + blur_pad);
-    }
-    let filter_pad = node
-        .computed_style
-        .filter
-        .blur_radius
-        .max(node.computed_style.backdrop_filter.blur_radius)
-        * 3.0;
-    if filter_pad > 0.0 {
-        left -= filter_pad;
-        top -= filter_pad;
-        right += filter_pad;
-        bottom += filter_pad;
-    }
+    let right = layout.x + layout.width;
+    let bottom = layout.y + layout.height;
     let x = left.floor().max(0.0) as u32;
     let y = top.floor().max(0.0) as u32;
     let right = right.ceil().max(0.0) as u32;
@@ -159,6 +136,61 @@ pub(super) fn damage_rect_for_node_with_transform(
         width: right.saturating_sub(x),
         height: bottom.saturating_sub(y),
     })
+}
+
+/// Return the conservative surface AABB for a node's transformed visual
+/// output. Effect overflow is expanded in local coordinates before applying
+/// the same cumulative affine transform as paint and descendant traversal;
+/// this keeps rotated shadows and filters from being expanded along the wrong
+/// surface axes.
+pub(super) fn visual_bounds_for_node_with_transform(
+    node: &WidgetNode,
+    world_transform: AffineTransform,
+) -> LayoutRect {
+    let local = LayoutRect {
+        x: 0.0,
+        y: 0.0,
+        width: node.layout.width.max(0.0),
+        height: node.layout.height.max(0.0),
+    };
+    let mut bounds = node_layout_bounds(node, world_transform);
+    let shadow = node.computed_style.box_shadow;
+    if !shadow.is_none() && !shadow.inset {
+        let pad = shadow.spread_radius + shadow.blur_radius * 3.0;
+        let shadow_bounds = world_transform.transform_rect(LayoutRect {
+            x: shadow.offset_x - pad,
+            y: shadow.offset_y - pad,
+            width: local.width + pad * 2.0,
+            height: local.height + pad * 2.0,
+        });
+        bounds = union_layout_rect(bounds, shadow_bounds);
+    }
+    let filter_pad = node
+        .computed_style
+        .filter
+        .blur_radius
+        .max(node.computed_style.backdrop_filter.blur_radius)
+        * 3.0;
+    if filter_pad > 0.0 {
+        bounds.x -= filter_pad;
+        bounds.y -= filter_pad;
+        bounds.width += filter_pad * 2.0;
+        bounds.height += filter_pad * 2.0;
+    }
+    bounds
+}
+
+fn union_layout_rect(left: LayoutRect, right: LayoutRect) -> LayoutRect {
+    let x = left.x.min(right.x);
+    let y = left.y.min(right.y);
+    let right_edge = (left.x + left.width).max(right.x + right.width);
+    let bottom_edge = (left.y + left.height).max(right.y + right.height);
+    LayoutRect {
+        x,
+        y,
+        width: (right_edge - x).max(0.0),
+        height: (bottom_edge - y).max(0.0),
+    }
 }
 
 pub(super) fn primitive_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {

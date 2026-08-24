@@ -112,7 +112,12 @@ pub(super) fn blur_bounds_from_layout(layout: LayoutRect) -> Option<DamageRect> 
 /// Approximate a rounded painted shape with `wl_region` rectangles, so a fully
 /// rounded 36×36 node masks as a circle. Rectangular nodes stay one rect.
 pub(super) fn rounded_blur_regions(command: &DisplayPaintCommand) -> Vec<DamageRect> {
-    let Some(bounds) = blur_bounds_from_layout(command.node.layout) else {
+    let Some(bounds) = blur_bounds_from_layout(
+        command
+            .node
+            .transform
+            .transform_rect(command.node.local_layout),
+    ) else {
         return Vec::new();
     };
     let clip = DamageRect {
@@ -246,10 +251,11 @@ pub(super) fn backdrop_read_region(
         return None;
     }
     let pad = radius * 3.0;
-    let left = node.layout.x - pad;
-    let top = node.layout.y - pad;
-    let right = node.layout.x + node.layout.width + pad;
-    let bottom = node.layout.y + node.layout.height + pad;
+    let layout = node.transform.transform_rect(node.local_layout);
+    let left = layout.x - pad;
+    let top = layout.y - pad;
+    let right = layout.x + layout.width + pad;
+    let bottom = layout.y + layout.height + pad;
     let x = left.max(0.0).floor() as u32;
     let y = top.max(0.0).floor() as u32;
     let right = right.max(0.0).ceil() as u32;

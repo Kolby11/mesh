@@ -477,6 +477,25 @@ fn animation_damage_includes_transform_visual_bounds() {
 }
 
 #[test]
+fn subtree_damage_uses_ancestor_affine_transform_for_descendants() {
+    let mut root = WidgetNode::new("box");
+    root.layout.width = 20.0;
+    root.layout.height = 20.0;
+    root.computed_style.transform.rotation = std::f32::consts::FRAC_PI_2;
+    let mut child = WidgetNode::new("box");
+    child.layout.x = 40.0;
+    child.layout.width = 20.0;
+    child.layout.height = 20.0;
+    root.children.push(child);
+
+    let (left, top, right, bottom) = subtree_visual_bounds(&root);
+    assert!(left.abs() < 0.001);
+    assert!(top.abs() < 0.001);
+    assert!((right - 20.0).abs() < 0.001);
+    assert!((bottom - 60.0).abs() < 0.001);
+}
+
+#[test]
 fn animation_damage_includes_shadow_filter_visual_bounds() {
     let mut node = visual_node();
     node.computed_style.box_shadow = mesh_core_elements::BoxShadow {

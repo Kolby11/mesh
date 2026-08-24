@@ -5,7 +5,7 @@ use mesh_core_elements::style::{
     BackgroundPaint, BlendMode, Color, Corners, Edges, FontStyle, Overflow, TextAlign,
     TextDirection, TextOverflow,
 };
-use mesh_core_elements::{BoxShadow, VisualFilter};
+use mesh_core_elements::{AffineClip, AffineTransform, BoxShadow, VisualFilter};
 use mesh_core_elements::{LayoutRect, NodeId};
 
 use super::build::*;
@@ -254,10 +254,50 @@ pub struct DisplayPaintCommand {
 #[derive(Debug, Clone)]
 pub struct DisplayPaintNode {
     pub id: NodeId,
+    /// The cumulative transform from this node's local border-box into the
+    /// surface. `layout` remains its transformed AABB for damage/culling.
+    pub transform: AffineTransform,
+    /// The node's untransformed local layout. Paint content uses this size
+    /// while the backend applies `transform` to the whole node.
+    pub local_layout: LayoutRect,
     pub layout: LayoutRect,
+    /// Ancestor overflow clips in the same surface coordinate system as
+    /// `transform`. Their exact affine shapes are retained alongside the
+    /// conservative AABB clip used for command selection.
+    pub ancestor_clips: Arc<[AffineClip]>,
     pub style: DisplayPaintStyle,
     pub content: DisplayPaintContent,
     pub scrollbars: DisplayScrollbars,
+}
+
+impl DisplayPaintNode {
+    /// Dimensions used by content layout. Axis-aligned transforms already
+    /// have their scaled dimensions in `layout`; rotated nodes must measure
+    /// text and controls in their untransformed local box before the backend
+    /// applies the affine matrix.
+    pub fn paint_width(&self) -> f32 {
+        if self.transform.m12.abs() > 0.0001
+            || self.transform.m21.abs() > 0.0001
+            || self.transform.m11 < -0.0001
+            || self.transform.m22 < -0.0001
+        {
+            self.local_layout.width
+        } else {
+            self.layout.width
+        }
+    }
+
+    pub fn paint_height(&self) -> f32 {
+        if self.transform.m12.abs() > 0.0001
+            || self.transform.m21.abs() > 0.0001
+            || self.transform.m11 < -0.0001
+            || self.transform.m22 < -0.0001
+        {
+            self.local_layout.height
+        } else {
+            self.layout.height
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

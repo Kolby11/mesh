@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use mesh_core_elements::style::Position;
 use mesh_core_elements::{
-    AffineTransform, InteractionTarget, NodeId, WidgetNode, child_transform, node_eligibility,
-    node_transform, root_transform,
+    AffineClipStack, AffineTransform, InteractionTarget, LayoutRect, NodeId, WidgetNode,
+    child_transform, node_eligibility, node_transform, root_transform,
 };
 
 use super::paint_node::*;
@@ -298,6 +298,7 @@ pub(super) fn build_paint_subtree(
     build_paint_subtree_with_transform(
         node,
         root_transform(offset_x, offset_y),
+        &AffineClipStack::default(),
         clip,
         viewport_clip,
         force_rebuild,
@@ -314,6 +315,7 @@ pub(super) fn build_paint_subtree(
 fn build_paint_subtree_with_transform(
     node: &WidgetNode,
     parent_transform: AffineTransform,
+    ancestor_clips: &AffineClipStack,
     clip: DisplayListClip,
     viewport_clip: DisplayListClip,
     force_rebuild: bool,
@@ -360,10 +362,11 @@ fn build_paint_subtree_with_transform(
         .and_then(|subtree| subtree.commands.first())
         .filter(|command| command.node.id == node.id)
         .map(|command| command.node.as_ref());
-    let paint_node = Arc::new(build_paint_node_with_previous_transform(
+    let paint_node = Arc::new(build_paint_node_with_previous_transform_and_clips(
         node,
         world_transform,
         previous_paint_node,
+        ancestor_clips,
     ));
     let bounds = node_clip_for(&paint_node);
     let visual_bounds = visual_clip_for(&paint_node);
@@ -412,6 +415,13 @@ fn build_paint_subtree_with_transform(
     } else {
         clip
     };
+    let child_ancestor_clips = if node.computed_style.overflow_x.clips_contents()
+        || node.computed_style.overflow_y.clips_contents()
+    {
+        ancestor_clips.push(mesh_core_elements::node_clip(node, world_transform))
+    } else {
+        ancestor_clips.clone()
+    };
     let child_order = compute_child_order(node);
     for_children_in_order(node, child_order.as_deref(), |child| {
         let (child_parent_transform, cc) = if child.computed_style.position == Position::Fixed {
@@ -419,10 +429,16 @@ fn build_paint_subtree_with_transform(
         } else {
             (child_transform, child_clip)
         };
+        let child_clips = if child.computed_style.position == Position::Fixed {
+            AffineClipStack::default()
+        } else {
+            child_ancestor_clips.clone()
+        };
         append_child_paint_subtree(
             &mut subtree,
             child,
             child_parent_transform,
+            &child_clips,
             cc,
             viewport_clip,
             force_rebuild || (node_is_dirty && !allow_clean_descendant_reuse),
@@ -527,6 +543,7 @@ pub(super) fn append_child_paint_subtree(
     subtree: &mut PaintSubtreeBuilder,
     child: &WidgetNode,
     child_parent_transform: AffineTransform,
+    child_ancestor_clips: &AffineClipStack,
     child_clip: DisplayListClip,
     viewport_clip: DisplayListClip,
     force_rebuild: bool,
@@ -547,6 +564,7 @@ pub(super) fn append_child_paint_subtree(
     let child_subtree = build_paint_subtree_with_transform(
         child,
         child_parent_transform,
+        child_ancestor_clips,
         child_clip,
         viewport_clip,
         force_rebuild,
@@ -739,19 +757,17 @@ pub(super) fn node_clip_for(node: &DisplayPaintNode) -> DisplayListClip {
 }
 
 pub(super) fn visual_clip_for(node: &DisplayPaintNode) -> DisplayListClip {
-    let mut left = node.layout.x;
-    let mut top = node.layout.y;
-    let mut right = node.layout.x + node.layout.width;
-    let mut bottom = node.layout.y + node.layout.height;
+    let mut layout = node.transform.transform_rect(node.local_layout);
     let shadow = node.style.box_shadow;
     if !shadow.is_none() && !shadow.inset {
-        let spread = shadow.spread_radius;
-        let blur_pad = shadow.blur_radius * 3.0;
-        left = left.min(node.layout.x + shadow.offset_x - spread - blur_pad);
-        top = top.min(node.layout.y + shadow.offset_y - spread - blur_pad);
-        right = right.max(node.layout.x + node.layout.width + shadow.offset_x + spread + blur_pad);
-        bottom =
-            bottom.max(node.layout.y + node.layout.height + shadow.offset_y + spread + blur_pad);
+        let pad = shadow.spread_radius + shadow.blur_radius * 3.0;
+        let shadow_layout = node.transform.transform_rect(LayoutRect {
+            x: shadow.offset_x - pad,
+            y: shadow.offset_y - pad,
+            width: node.local_layout.width + pad * 2.0,
+            height: node.local_layout.height + pad * 2.0,
+        });
+        layout = union_layout_rect(layout, shadow_layout);
     }
     let filter_pad = node
         .style
@@ -760,16 +776,29 @@ pub(super) fn visual_clip_for(node: &DisplayPaintNode) -> DisplayListClip {
         .max(node.style.backdrop_filter.blur_radius)
         * 3.0;
     if filter_pad > 0.0 {
-        left -= filter_pad;
-        top -= filter_pad;
-        right += filter_pad;
-        bottom += filter_pad;
+        layout.x -= filter_pad;
+        layout.y -= filter_pad;
+        layout.width += filter_pad * 2.0;
+        layout.height += filter_pad * 2.0;
     }
     DisplayListClip {
-        x: left.floor() as i32,
-        y: top.floor() as i32,
-        width: (right - left).ceil().max(0.0) as i32,
-        height: (bottom - top).ceil().max(0.0) as i32,
+        x: layout.x.floor() as i32,
+        y: layout.y.floor() as i32,
+        width: ((layout.x + layout.width).ceil() - layout.x.floor()).max(0.0) as i32,
+        height: ((layout.y + layout.height).ceil() - layout.y.floor()).max(0.0) as i32,
+    }
+}
+
+fn union_layout_rect(left: LayoutRect, right: LayoutRect) -> LayoutRect {
+    let x = left.x.min(right.x);
+    let y = left.y.min(right.y);
+    let right_edge = (left.x + left.width).max(right.x + right.width);
+    let bottom_edge = (left.y + left.height).max(right.y + right.height);
+    LayoutRect {
+        x,
+        y,
+        width: (right_edge - x).max(0.0),
+        height: (bottom_edge - y).max(0.0),
     }
 }
 

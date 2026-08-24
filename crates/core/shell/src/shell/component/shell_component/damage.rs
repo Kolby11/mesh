@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_elements::{AffineTransform, child_transform, node_transform, root_transform};
 
 pub(super) fn scale_damage_rect_to_buffer(
     rect: DamageRect,
@@ -303,19 +304,70 @@ pub(super) fn shadow_filter_extended_bounds(
 /// Shared by damage-rect computation (clipped to the surface) and popover
 /// buffer padding (which needs the raw, unclipped extent).
 pub(super) fn node_visual_bounds(node: &WidgetNode) -> Option<(f32, f32, f32, f32)> {
+    node_visual_bounds_with_transform(node, root_transform(0.0, 0.0)).map(layout_bounds_tuple)
+}
+
+fn node_visual_bounds_with_transform(
+    node: &WidgetNode,
+    parent_transform: AffineTransform,
+) -> Option<mesh_core_elements::LayoutRect> {
     if node.layout.width <= 0.0 || node.layout.height <= 0.0 {
         return None;
     }
-    let layout = mesh_core_elements::transformed_layout_at(node, 0.0, 0.0);
-    let width = layout.width;
-    let height = layout.height;
-    let left = layout.x;
-    let top = layout.y;
+    let world = node_transform(parent_transform, node);
+    let local = mesh_core_elements::LayoutRect {
+        x: 0.0,
+        y: 0.0,
+        width: node.layout.width.max(0.0),
+        height: node.layout.height.max(0.0),
+    };
+    let mut bounds = world.transform_rect(local);
+    let shadow = node.computed_style.box_shadow;
+    if !shadow.is_none() && !shadow.inset {
+        let pad = shadow.spread_radius + shadow.blur_radius * 3.0;
+        bounds = union_layout_rect(
+            bounds,
+            world.transform_rect(mesh_core_elements::LayoutRect {
+                x: shadow.offset_x - pad,
+                y: shadow.offset_y - pad,
+                width: local.width + pad * 2.0,
+                height: local.height + pad * 2.0,
+            }),
+        );
+    }
+    let filter_pad = node
+        .computed_style
+        .filter
+        .blur_radius
+        .max(node.computed_style.backdrop_filter.blur_radius)
+        * 3.0;
+    if filter_pad > 0.0 {
+        bounds.x -= filter_pad;
+        bounds.y -= filter_pad;
+        bounds.width += filter_pad * 2.0;
+        bounds.height += filter_pad * 2.0;
+    }
+    Some(bounds)
+}
 
-    let (left, top, right, bottom) =
-        shadow_filter_extended_bounds(left, top, width, height, &node.computed_style);
+fn layout_bounds_tuple(rect: mesh_core_elements::LayoutRect) -> (f32, f32, f32, f32) {
+    (rect.x, rect.y, rect.x + rect.width, rect.y + rect.height)
+}
 
-    Some((left, top, right, bottom))
+fn union_layout_rect(
+    left: mesh_core_elements::LayoutRect,
+    right: mesh_core_elements::LayoutRect,
+) -> mesh_core_elements::LayoutRect {
+    let x = left.x.min(right.x);
+    let y = left.y.min(right.y);
+    let right_edge = (left.x + left.width).max(right.x + right.width);
+    let bottom_edge = (left.y + left.height).max(right.y + right.height);
+    mesh_core_elements::LayoutRect {
+        x,
+        y,
+        width: (right_edge - x).max(0.0),
+        height: (bottom_edge - y).max(0.0),
+    }
 }
 
 pub(super) fn visual_damage_rect_for_widget_node(
@@ -352,14 +404,26 @@ pub(super) fn accumulate_subtree_visual_bounds(
     node: &WidgetNode,
     bounds: &mut (f32, f32, f32, f32),
 ) {
-    if let Some((left, top, right, bottom)) = node_visual_bounds(node) {
+    accumulate_subtree_visual_bounds_with_transform(node, root_transform(0.0, 0.0), bounds);
+}
+
+fn accumulate_subtree_visual_bounds_with_transform(
+    node: &WidgetNode,
+    parent_transform: AffineTransform,
+    bounds: &mut (f32, f32, f32, f32),
+) {
+    if let Some(rect) = node_visual_bounds_with_transform(node, parent_transform) {
+        let (left, top, right, bottom) = layout_bounds_tuple(rect);
         bounds.0 = bounds.0.min(left);
         bounds.1 = bounds.1.min(top);
         bounds.2 = bounds.2.max(right);
         bounds.3 = bounds.3.max(bottom);
     }
+    let world = node_transform(parent_transform, node);
+    let scroll = node.resolved_scroll_metrics();
+    let child_transform = child_transform(world, node, scroll.x, scroll.y);
     for child in &node.children {
-        accumulate_subtree_visual_bounds(child, bounds);
+        accumulate_subtree_visual_bounds_with_transform(child, child_transform, bounds);
     }
 }
 
@@ -371,10 +435,9 @@ pub(super) fn popover_content_padding(node: &WidgetNode) -> (u32, u32, u32, u32)
     if left > right || top > bottom {
         return (0, 0, 0, 0);
     }
-    let own_left = node.layout.x;
-    let own_top = node.layout.y;
-    let own_right = node.layout.x + node.layout.width;
-    let own_bottom = node.layout.y + node.layout.height;
+    let Some((own_left, own_top, own_right, own_bottom)) = node_visual_bounds(node) else {
+        return (0, 0, 0, 0);
+    };
     (
         (own_left - left).max(0.0).ceil() as u32,
         (own_top - top).max(0.0).ceil() as u32,

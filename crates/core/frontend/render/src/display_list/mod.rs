@@ -311,7 +311,14 @@ impl RetainedDisplayList {
                 next_subtrees.clear();
                 let mut local_metrics = LocalReuseMetrics::default();
                 let vclip = surface_clip(surface);
-                let allow_clean_descendant_reuse = changed_layout_count(dirty_summary) == 0;
+                // A transform or overflow-clip change changes every
+                // descendant's cumulative affine geometry even when their
+                // own layout/material slots are clean. Reusing those child
+                // subtrees would retain stale world transforms and clip
+                // stacks.
+                let allow_clean_descendant_reuse = changed_layout_count(dirty_summary) == 0
+                    && dirty_summary.transform == 0
+                    && dirty_summary.clip == 0;
                 let subtree = build_paint_subtree(
                     root,
                     offset_x,

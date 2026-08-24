@@ -19,12 +19,20 @@ fn make_cmd(x: f32, y: f32, width: f32, height: f32, blur_radius: f32) -> Displa
     DisplayPaintCommand {
         node: Arc::new(DisplayPaintNode {
             id: 1,
+            transform: mesh_core_elements::AffineTransform::translation(x, y),
+            local_layout: LayoutRect {
+                x: 0.0,
+                y: 0.0,
+                width,
+                height,
+            },
             layout: LayoutRect {
                 x,
                 y,
                 width,
                 height,
             },
+            ancestor_clips: Vec::new().into(),
             style: DisplayPaintStyle {
                 background_color: Color {
                     r: 0,

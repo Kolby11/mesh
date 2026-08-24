@@ -171,6 +171,13 @@ impl AffineClipStack {
         next
     }
 
+    /// Return the ordered transformed clips accumulated from the surface root.
+    /// Consumers that rasterize or serialize the shared geometry can use the
+    /// same clip stack without reconstructing it from axis-aligned bounds.
+    pub fn as_slice(&self) -> &[AffineClip] {
+        &self.clips
+    }
+
     pub fn contains(&self, x: f32, y: f32) -> bool {
         self.clips.iter().all(|clip| clip.contains(x, y))
     }

@@ -70,7 +70,7 @@ impl FrontendRenderEngine {
 
         let tx = (x + (style.padding.left * scale) as i32).max(0) as u32;
         let inner_height =
-            ((node.layout.height - style.padding.vertical()) * scale).max(0.0) as i32;
+            ((node.paint_height() - style.padding.vertical()) * scale).max(0.0) as i32;
         let (text_width, text_height) = self.text_renderer.measure_styled_with_font_style(
             text,
             &style.font_family,
@@ -352,129 +352,150 @@ impl FrontendRenderEngine {
         bounds: ClipRect,
         clip: ClipRect,
     ) {
-        let show_vertical = node.style.overflow_y.always_shows_scrollbar()
-            || (node.style.overflow_y.shows_scrollbar_when_overflowing()
-                && node.scrollbars.max_y > f32::EPSILON);
-        let show_horizontal = node.style.overflow_x.always_shows_scrollbar()
-            || (node.style.overflow_x.shows_scrollbar_when_overflowing()
-                && node.scrollbars.max_x > f32::EPSILON);
-
-        if !show_vertical && !show_horizontal {
-            return;
-        }
-
-        let inset = (4.0 * scale).round().max(2.0) as i32;
-        let thickness = (6.0 * scale).round().max(4.0) as i32;
-        let radius = (thickness as f32 / 2.0).max(2.0);
-        let (track_color, thumb_color) = scrollbar_colors(node.style.color);
-
-        if show_vertical {
-            let viewport_height = bounds.height.max(1) as f32;
-            let track_height = (bounds.height
-                - inset * 2
-                - if show_horizontal {
-                    thickness + inset
-                } else {
-                    0
-                })
-            .max(thickness);
-            let track = ClipRect {
-                x: bounds.x + bounds.width - inset - thickness,
-                y: bounds.y + inset,
-                width: thickness,
-                height: track_height,
-            };
-            self.fill_rounded_rect_clipped(
-                buffer,
-                track,
-                radius,
-                track_color,
-                intersect_clip(clip, bounds),
-            );
-
-            let thumb_height = if node.scrollbars.content_height <= 0.0 {
-                track_height
-            } else {
-                scrollbar_thumb_extent(
-                    (viewport_height / node.scrollbars.content_height.max(viewport_height))
-                        * track_height as f32,
-                    track_height,
-                    scale,
-                )
-            };
-            let thumb_range = (track_height - thumb_height).max(0) as f32;
-            let thumb_y = track.y
-                + if node.scrollbars.max_y <= f32::EPSILON {
-                    0
-                } else {
-                    ((node.scrollbars.scroll_y / node.scrollbars.max_y.max(1.0)) * thumb_range)
-                        .round() as i32
-                };
-            self.fill_rounded_rect_clipped(
-                buffer,
-                ClipRect {
-                    x: track.x,
-                    y: thumb_y,
-                    width: thickness,
-                    height: thumb_height.max(thickness),
-                },
-                radius,
-                thumb_color,
-                intersect_clip(clip, bounds),
-            );
-        }
-
-        if show_horizontal {
-            let viewport_width = bounds.width.max(1) as f32;
-            let track_width =
-                (bounds.width - inset * 2 - if show_vertical { thickness + inset } else { 0 })
-                    .max(thickness);
-            let track = ClipRect {
-                x: bounds.x + inset,
-                y: bounds.y + bounds.height - inset - thickness,
-                width: track_width,
-                height: thickness,
-            };
-            self.fill_rounded_rect_clipped(
-                buffer,
-                track,
-                radius,
-                track_color,
-                intersect_clip(clip, bounds),
-            );
-
-            let thumb_width = if node.scrollbars.content_width <= 0.0 {
-                track_width
-            } else {
-                scrollbar_thumb_extent(
-                    (viewport_width / node.scrollbars.content_width.max(viewport_width))
-                        * track_width as f32,
-                    track_width,
-                    scale,
-                )
-            };
-            let thumb_range = (track_width - thumb_width).max(0) as f32;
-            let thumb_x = track.x
-                + if node.scrollbars.max_x <= f32::EPSILON {
-                    0
-                } else {
-                    ((node.scrollbars.scroll_x / node.scrollbars.max_x.max(1.0)) * thumb_range)
-                        .round() as i32
-                };
-            self.fill_rounded_rect_clipped(
-                buffer,
-                ClipRect {
-                    x: thumb_x,
-                    y: track.y,
-                    width: thumb_width.max(thickness),
-                    height: thickness,
-                },
-                radius,
-                thumb_color,
-                intersect_clip(clip, bounds),
-            );
-        }
+        let commands = scrollbar_commands(node, scale, bounds, clip);
+        self.execute_painter_commands(buffer, &commands);
     }
+
+    pub(super) fn render_display_scrollbars_in_session(
+        &self,
+        node: &DisplayPaintNode,
+        session: &mut PixelCanvasSession<'_>,
+        scale: f32,
+        bounds: ClipRect,
+        clip: ClipRect,
+    ) {
+        let commands = scrollbar_commands(node, scale, bounds, clip);
+        self.execute_painter_commands_in_session(session, &commands);
+    }
+}
+
+fn scrollbar_commands(
+    node: &DisplayPaintNode,
+    scale: f32,
+    bounds: ClipRect,
+    clip: ClipRect,
+) -> Vec<PainterCommand> {
+    let show_vertical = node.style.overflow_y.always_shows_scrollbar()
+        || (node.style.overflow_y.shows_scrollbar_when_overflowing()
+            && node.scrollbars.max_y > f32::EPSILON);
+    let show_horizontal = node.style.overflow_x.always_shows_scrollbar()
+        || (node.style.overflow_x.shows_scrollbar_when_overflowing()
+            && node.scrollbars.max_x > f32::EPSILON);
+
+    if !show_vertical && !show_horizontal {
+        return Vec::new();
+    }
+
+    let clip = intersect_clip(clip, bounds);
+    let inset = (4.0 * scale).round().max(2.0) as i32;
+    let thickness = (6.0 * scale).round().max(4.0) as i32;
+    let radius = (thickness as f32 / 2.0).max(2.0);
+    let (track_color, thumb_color) = scrollbar_colors(node.style.color);
+    let mut commands = Vec::with_capacity(4);
+
+    if show_vertical {
+        let viewport_height = bounds.height.max(1) as f32;
+        let track_height = (bounds.height
+            - inset * 2
+            - if show_horizontal {
+                thickness + inset
+            } else {
+                0
+            })
+        .max(thickness);
+        let track = ClipRect {
+            x: bounds.x + bounds.width - inset - thickness,
+            y: bounds.y + inset,
+            width: thickness,
+            height: track_height,
+        };
+        commands.push(PainterCommand::DrawRoundedRect {
+            rect: track,
+            radii: Corners::all(radius),
+            paint: PainterPaint::fill(track_color),
+            clip,
+        });
+
+        let thumb_height = if node.scrollbars.content_height <= 0.0 {
+            track_height
+        } else {
+            scrollbar_thumb_extent(
+                (viewport_height / node.scrollbars.content_height.max(viewport_height))
+                    * track_height as f32,
+                track_height,
+                scale,
+            )
+        };
+        let thumb_range = (track_height - thumb_height).max(0) as f32;
+        let thumb_y = track.y
+            + if node.scrollbars.max_y <= f32::EPSILON {
+                0
+            } else {
+                ((node.scrollbars.scroll_y / node.scrollbars.max_y.max(1.0)) * thumb_range).round()
+                    as i32
+            };
+        commands.push(PainterCommand::DrawRoundedRect {
+            rect: ClipRect {
+                x: track.x,
+                y: thumb_y,
+                width: thickness,
+                height: thumb_height.max(thickness),
+            },
+            radii: Corners::all(radius),
+            paint: PainterPaint::fill(thumb_color),
+            clip,
+        });
+    }
+
+    if show_horizontal {
+        let viewport_width = bounds.width.max(1) as f32;
+        let track_width =
+            (bounds.width - inset * 2 - if show_vertical { thickness + inset } else { 0 })
+                .max(thickness);
+        let track = ClipRect {
+            x: bounds.x + inset,
+            y: bounds.y + bounds.height - inset - thickness,
+            width: track_width,
+            height: thickness,
+        };
+        commands.push(PainterCommand::DrawRoundedRect {
+            rect: track,
+            radii: Corners::all(radius),
+            paint: PainterPaint::fill(track_color),
+            clip,
+        });
+
+        let thumb_width = if node.scrollbars.content_width <= 0.0 {
+            track_width
+        } else {
+            scrollbar_thumb_extent(
+                (viewport_width / node.scrollbars.content_width.max(viewport_width))
+                    * track_width as f32,
+                track_width,
+                scale,
+            )
+        };
+        let thumb_range = (track_width - thumb_width).max(0) as f32;
+        let thumb_x = track.x
+            + if node.scrollbars.max_x <= f32::EPSILON {
+                0
+            } else {
+                ((node.scrollbars.scroll_x / node.scrollbars.max_x.max(1.0)) * thumb_range).round()
+                    as i32
+            };
+        commands.push(PainterCommand::DrawRoundedRect {
+            rect: ClipRect {
+                x: thumb_x,
+                y: track.y,
+                width: thumb_width.max(thickness),
+                height: thickness,
+            },
+            radii: Corners::all(radius),
+            paint: PainterPaint::fill(thumb_color),
+            clip,
+        });
+    }
+    commands
 }
 
 #[cfg(test)]

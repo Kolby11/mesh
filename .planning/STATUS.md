@@ -86,6 +86,10 @@ eligibility, target filtering, and one affine transform/clip contract through
 hit testing, focus, scrolling, tooltips, events, paint bounds, and downstream
 consumers.
 
+Retained display lists and shell damage now carry the same cumulative affine
+transform and exact ancestor clip stack through rotated paint, effect overflow,
+blur regions, descendant reuse, and interaction-facing geometry.
+
 Reduced-motion preferences now flow through one `MotionPolicy` snapshot that
 clamps non-essential transitions, keyframes, scrolling, inertia, tooltips, and
 surface motion at settings and frame boundaries.

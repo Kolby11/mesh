@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use mesh_core_elements::style::Color;
 use mesh_core_elements::{
-    AffineTransform, LayoutRect, WidgetNode, node_layout_bounds, node_transform, root_transform,
+    AffineClipStack, AffineTransform, LayoutRect, WidgetNode, node_layout_bounds, node_transform,
+    root_transform,
 };
 
 use super::types::*;
@@ -33,10 +34,32 @@ pub(super) fn build_paint_node_with_previous_transform(
     world_transform: AffineTransform,
     previous: Option<&DisplayPaintNode>,
 ) -> DisplayPaintNode {
+    build_paint_node_with_previous_transform_and_clips(
+        node,
+        world_transform,
+        previous,
+        &AffineClipStack::default(),
+    )
+}
+
+pub(super) fn build_paint_node_with_previous_transform_and_clips(
+    node: &WidgetNode,
+    world_transform: AffineTransform,
+    previous: Option<&DisplayPaintNode>,
+    ancestor_clips: &AffineClipStack,
+) -> DisplayPaintNode {
     let opacity = node.computed_style.opacity;
     DisplayPaintNode {
         id: node.id,
+        transform: world_transform,
+        local_layout: LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: node.layout.width.max(0.0),
+            height: node.layout.height.max(0.0),
+        },
         layout: node_layout_bounds(node, world_transform),
+        ancestor_clips: ancestor_clips.as_slice().into(),
         style: DisplayPaintStyle {
             background_color: opacity_color(node.computed_style.background_color, opacity),
             background_paint: node.computed_style.background_paint.clone(),

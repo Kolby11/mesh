@@ -903,7 +903,7 @@ impl FrontendRenderEngine {
         }
 
         let tx = (x + (style.padding.left * scale) as i32).max(0) as u32;
-        let inner_width = ((node.layout.width - style.padding.horizontal()) * scale).max(0.0);
+        let inner_width = ((node.paint_width() - style.padding.horizontal()) * scale).max(0.0);
 
         let display_text: std::borrow::Cow<'_, str> =
             if style.text_overflow == TextOverflow::Ellipsis && inner_width > 0.0 {
@@ -950,7 +950,7 @@ impl FrontendRenderEngine {
             style.font_style,
             style.line_height,
             render_max_width,
-            node.layout.height,
+            node.paint_height(),
             style.padding,
             scale,
             y,

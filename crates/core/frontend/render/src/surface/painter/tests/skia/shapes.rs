@@ -653,6 +653,43 @@ fn skia_border_lowering_uses_all_edges_and_corner_radii() {
 }
 
 #[test]
+fn skia_paint_uses_cumulative_affine_transform_instead_of_aabb_fill() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 80.0,
+        },
+        Color::TRANSPARENT,
+    );
+    let mut child = node(
+        "box",
+        LayoutRect {
+            x: 30.0,
+            y: 25.0,
+            width: 20.0,
+            height: 10.0,
+        },
+        Color::from_hex("#ff0000").unwrap(),
+    );
+    child.computed_style.transform.rotation = std::f32::consts::FRAC_PI_4;
+    root.children.push(child);
+
+    let mut buffer = PixelBuffer::new(100, 80);
+    FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
+
+    // The center is painted, while the corners of the transformed AABB are
+    // outside the rotated rectangle and must remain transparent.
+    assert!(pixel(&buffer, 40, 30).a > 0);
+    assert_eq!(pixel(&buffer, 30, 24), Color::TRANSPARENT);
+    assert_eq!(pixel(&buffer, 50, 24), Color::TRANSPARENT);
+    assert_eq!(pixel(&buffer, 30, 45), Color::TRANSPARENT);
+    assert_eq!(pixel(&buffer, 50, 45), Color::TRANSPARENT);
+}
+
+#[test]
 fn skia_path_fill_triangle_paints_expected_pixels() {
     let mut buffer = PixelBuffer::new(18, 14);
     let mut diagnostics = Vec::new();

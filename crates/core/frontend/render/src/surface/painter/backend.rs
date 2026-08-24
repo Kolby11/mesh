@@ -1,9 +1,9 @@
 use super::*;
 use crate::surface::icon;
 use mesh_core_elements::style::{Color, Corners, Edges};
-use mesh_core_elements::{BoxShadow, VisualFilter};
+use mesh_core_elements::{AffineClip, AffineTransform, BoxShadow, VisualFilter};
 use skia_safe::{
-    BlurStyle, Canvas, Color4f, Data, ImageInfo, MaskFilter, PaintStyle, Path as SkiaPath,
+    BlurStyle, Canvas, Color4f, Data, ImageInfo, MaskFilter, Matrix, PaintStyle, Path as SkiaPath,
     PathBuilder, Point, RRect, Rect, TileMode, Vector, canvas::SaveLayerRec,
     gradient as skia_gradient, image_filters, images,
 };
@@ -109,6 +109,23 @@ pub(crate) trait PaintBackend: Send + Sync {
             self.execute_commands(buffer, commands, diagnostics);
         });
     }
+
+    /// Begin painting one node in its cumulative local-to-surface affine
+    /// coordinate system. Backends without affine support retain their
+    /// existing command behavior; Skia applies the exact matrix and ancestor
+    /// overflow clips to the active canvas.
+    fn begin_affine_node(
+        &self,
+        _session: &mut PixelCanvasSession<'_>,
+        _transform: AffineTransform,
+        _ancestor_clips: &[AffineClip],
+        _scale: f32,
+        _device_clip: ClipRect,
+    ) -> Option<usize> {
+        None
+    }
+
+    fn end_affine_node(&self, _session: &mut PixelCanvasSession<'_>, _save_count: Option<usize>) {}
 
     /// The layer stack outlives this call: a filtered subtree opens a layer in
     /// one command buffer and closes it in a later one, so open layers cannot
@@ -550,6 +567,43 @@ impl PaintBackend for SkiaPaintBackend {
             shadows: true,
             filters: true,
             blend_modes: true,
+        }
+    }
+
+    fn begin_affine_node(
+        &self,
+        session: &mut PixelCanvasSession<'_>,
+        transform: AffineTransform,
+        ancestor_clips: &[AffineClip],
+        scale: f32,
+        device_clip: ClipRect,
+    ) -> Option<usize> {
+        session.with_canvas(|canvas| {
+            let save_count = canvas.save();
+            canvas.clip_rect(
+                Rect::from_xywh(
+                    device_clip.x as f32,
+                    device_clip.y as f32,
+                    device_clip.width.max(0) as f32,
+                    device_clip.height.max(0) as f32,
+                ),
+                None,
+                false,
+            );
+            for clip in ancestor_clips {
+                let path = affine_clip_path(*clip, scale);
+                canvas.clip_path(&path, None, true);
+            }
+            canvas.concat(&skia_matrix(transform, scale));
+            save_count
+        })
+    }
+
+    fn end_affine_node(&self, session: &mut PixelCanvasSession<'_>, save_count: Option<usize>) {
+        if let Some(save_count) = save_count {
+            let _ = session.with_canvas(|canvas| {
+                canvas.restore_to_count(save_count);
+            });
         }
     }
 
@@ -1714,6 +1768,42 @@ fn effective_clip(clip: ClipRect, clip_stack: &[ClipRect]) -> ClipRect {
         .copied()
         .map(|current| intersect_clip(clip, current))
         .unwrap_or(clip)
+}
+
+fn skia_matrix(transform: AffineTransform, scale: f32) -> Matrix {
+    let transform = AffineTransform::scale(scale, scale).then(transform);
+    Matrix::new_all(
+        transform.m11,
+        transform.m21,
+        transform.tx,
+        transform.m12,
+        transform.m22,
+        transform.ty,
+        0.0,
+        0.0,
+        1.0,
+    )
+}
+
+fn affine_clip_path(clip: AffineClip, scale: f32) -> SkiaPath {
+    let transform = AffineTransform::scale(scale, scale).then(clip.transform);
+    let left = clip.rect.x;
+    let top = clip.rect.y;
+    let right = left + clip.rect.width;
+    let bottom = top + clip.rect.height;
+    let points = [
+        transform.transform_point(left, top),
+        transform.transform_point(right, top),
+        transform.transform_point(right, bottom),
+        transform.transform_point(left, bottom),
+    ];
+    let mut builder = PathBuilder::new();
+    builder.move_to(points[0]);
+    for point in points.into_iter().skip(1) {
+        builder.line_to(point);
+    }
+    builder.close();
+    builder.detach()
 }
 
 fn skia_path(path: &PainterPath) -> Option<SkiaPath> {

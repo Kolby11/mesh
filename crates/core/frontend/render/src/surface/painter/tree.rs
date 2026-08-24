@@ -5,6 +5,7 @@ use crate::display_list::{
     DisplayPaintCommandKind, DisplayPaintContent, DisplayPaintNode, RetainedDisplayList,
     SelectedDisplayListPaint,
 };
+use mesh_core_elements::AffineTransform;
 use mesh_core_elements::style::{Corners, Edges};
 use smallvec::SmallVec;
 
@@ -630,6 +631,9 @@ impl FrontendRenderEngine {
         if paint_nodes.is_some_and(|nodes| !nodes.contains(&command.node.id)) {
             return false;
         }
+        if requires_affine_paint(&command.node) {
+            return false;
+        }
         if !matches!(command.node.content, DisplayPaintContent::None) {
             return false;
         }
@@ -707,15 +711,78 @@ impl FrontendRenderEngine {
             DisplayPaintCommandKind::Scrollbars => {
                 let bounds = scaled_display_node_bounds(&command.node, scale);
                 let node = &command.node;
-                session.with_buffer(|buffer| {
-                    self.render_display_scrollbars(node, buffer, scale, bounds, clip);
-                });
+                if requires_affine_paint(node) {
+                    let local_bounds = scaled_display_local_bounds(node, scale);
+                    let local_clip = local_clip_for(node.transform, scale, clip);
+                    let save_count = self.paint_backend.begin_affine_node(
+                        session,
+                        node.transform,
+                        &node.ancestor_clips,
+                        scale,
+                        clip,
+                    );
+                    self.render_display_scrollbars_in_session(
+                        node,
+                        session,
+                        scale,
+                        local_bounds,
+                        local_clip,
+                    );
+                    self.paint_backend.end_affine_node(session, save_count);
+                } else {
+                    session.with_buffer(|buffer| {
+                        self.render_display_scrollbars(node, buffer, scale, bounds, clip);
+                    });
+                }
             }
             DisplayPaintCommandKind::PushFilterLayer | DisplayPaintCommandKind::PopFilterLayer => {}
         }
     }
 
     fn render_display_node_self(
+        &self,
+        node: &DisplayPaintNode,
+        session: &mut PixelCanvasSession<'_>,
+        scale: f32,
+        bounds: ClipRect,
+        clip: ClipRect,
+        node_commands: &mut Vec<PainterCommand>,
+        module_id: Option<&str>,
+    ) {
+        if requires_affine_paint(node) {
+            let local_bounds = scaled_display_local_bounds(node, scale);
+            let local_clip = local_clip_for(node.transform, scale, clip);
+            let save_count = self.paint_backend.begin_affine_node(
+                session,
+                node.transform,
+                &node.ancestor_clips,
+                scale,
+                clip,
+            );
+            self.render_display_node_self_in_space(
+                node,
+                session,
+                scale,
+                local_bounds,
+                local_clip,
+                node_commands,
+                module_id,
+            );
+            self.paint_backend.end_affine_node(session, save_count);
+            return;
+        }
+        self.render_display_node_self_in_space(
+            node,
+            session,
+            scale,
+            bounds,
+            clip,
+            node_commands,
+            module_id,
+        );
+    }
+
+    fn render_display_node_self_in_space(
         &self,
         node: &DisplayPaintNode,
         session: &mut PixelCanvasSession<'_>,
@@ -1098,6 +1165,50 @@ fn corners_have_radius(corners: Corners) -> bool {
 fn scaled_visual_filter(filter: VisualFilter, scale: f32) -> VisualFilter {
     VisualFilter {
         blur_radius: filter.blur_radius * scale,
+    }
+}
+
+fn requires_affine_paint(node: &DisplayPaintNode) -> bool {
+    node.transform.m12.abs() > 0.0001
+        || node.transform.m21.abs() > 0.0001
+        || node.transform.m11 < -0.0001
+        || node.transform.m22 < -0.0001
+}
+
+fn scaled_display_local_bounds(node: &DisplayPaintNode, scale: f32) -> ClipRect {
+    ClipRect {
+        x: 0,
+        y: 0,
+        width: (node.local_layout.width * scale).round().max(0.0) as i32,
+        height: (node.local_layout.height * scale).round().max(0.0) as i32,
+    }
+}
+
+fn local_clip_for(transform: AffineTransform, scale: f32, clip: ClipRect) -> ClipRect {
+    let device_transform = AffineTransform::scale(scale, scale).then(transform);
+    let Some(inverse) = device_transform.inverse() else {
+        return ClipRect {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+        };
+    };
+    let local = inverse.transform_rect(mesh_core_elements::LayoutRect {
+        x: clip.x as f32,
+        y: clip.y as f32,
+        width: clip.width.max(0) as f32,
+        height: clip.height.max(0) as f32,
+    });
+    let left = local.x.floor();
+    let top = local.y.floor();
+    let right = (local.x + local.width).ceil();
+    let bottom = (local.y + local.height).ceil();
+    ClipRect {
+        x: left as i32,
+        y: top as i32,
+        width: (right - left).max(0.0) as i32,
+        height: (bottom - top).max(0.0) as i32,
     }
 }
 

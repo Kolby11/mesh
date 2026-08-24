@@ -226,12 +226,20 @@ mod tests {
         DisplayPaintCommand {
             node: Arc::new(DisplayPaintNode {
                 id: 1,
+                transform: mesh_core_elements::AffineTransform::IDENTITY,
+                local_layout: LayoutRect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 100.0,
+                    height: 40.0,
+                },
                 layout: LayoutRect {
                     x: 0.0,
                     y: 0.0,
                     width: 100.0,
                     height: 40.0,
                 },
+                ancestor_clips: Vec::new().into(),
                 style: base_style(),
                 content,
                 scrollbars: DisplayScrollbars::default(),

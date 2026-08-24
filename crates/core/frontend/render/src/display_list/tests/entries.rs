@@ -5,7 +5,9 @@ use crate::RenderObjectDirtySummary;
 use mesh_core_elements::style::{
     BackgroundPaint, Color, Overflow, StyleImageSource, StyleLinearGradient,
 };
-use mesh_core_elements::{BoxShadow, VisualFilter, WidgetNode};
+use mesh_core_elements::{
+    BoxShadow, VisualFilter, WidgetNode, child_transform, node_transform, root_transform,
+};
 
 #[test]
 fn display_list_reuses_unchanged_entries() {
@@ -44,6 +46,75 @@ fn display_list_effect_rebuilds_when_background_paint_changes() {
     let gradient_metrics = list.update(&root, 100, 40, false, false);
     assert_eq!(gradient_metrics.entries_rebuilt, 1);
     assert_eq!(gradient_metrics.entries_reused, 0);
+}
+
+#[test]
+fn display_list_retains_cumulative_transform_and_ancestor_clip() {
+    let mut root = node(1, "box", 0.0, 0.0, 100.0, 80.0);
+    root.computed_style.overflow_x = mesh_core_elements::style::Overflow::Hidden;
+    root.computed_style.overflow_y = mesh_core_elements::style::Overflow::Hidden;
+    root.computed_style.transform.rotation = std::f32::consts::FRAC_PI_4;
+    let child = node(2, "box", 30.0, 20.0, 20.0, 10.0);
+    root.children.push(child);
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 160, 140, false, true);
+
+    let child_command = list
+        .paint_commands()
+        .iter()
+        .find(|command| command.node.id == 2 && command.kind == DisplayPaintCommandKind::Node)
+        .expect("rotated child should have a retained paint command");
+    let root_world = node_transform(root_transform(0.0, 0.0), &root);
+    let child_parent = child_transform(root_world, &root, 0.0, 0.0);
+    let expected_child = node_transform(child_parent, &root.children[0]);
+
+    assert_eq!(child_command.node.transform, expected_child);
+    assert_eq!(child_command.node.local_layout.width, 20.0);
+    assert_eq!(child_command.node.local_layout.height, 10.0);
+    assert_eq!(child_command.node.ancestor_clips.len(), 1);
+    assert_eq!(child_command.node.ancestor_clips[0].transform, root_world);
+}
+
+#[test]
+fn display_list_rebuilds_descendant_geometry_after_ancestor_transform_changes() {
+    let mut root = node(1, "box", 0.0, 0.0, 100.0, 80.0);
+    root.computed_style.transform.rotation = std::f32::consts::FRAC_PI_4;
+    root.children.push(node(2, "box", 30.0, 20.0, 20.0, 10.0));
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 160, 140, false, true);
+    let before = list
+        .paint_commands()
+        .iter()
+        .find(|command| command.node.id == 2 && command.kind == DisplayPaintCommandKind::Node)
+        .expect("initial child command")
+        .node
+        .transform;
+
+    root.computed_style.transform.rotation = -std::f32::consts::FRAC_PI_4;
+    let metrics = list.update_with_dirty_nodes(
+        &root,
+        RenderObjectDirtySummary {
+            transform: 1,
+            ..Default::default()
+        },
+        &std::collections::HashSet::from([root.id]),
+        160,
+        140,
+        false,
+        true,
+    );
+    let after = list
+        .paint_commands()
+        .iter()
+        .find(|command| command.node.id == 2 && command.kind == DisplayPaintCommandKind::Node)
+        .expect("updated child command")
+        .node
+        .transform;
+
+    assert_ne!(before, after);
+    assert_eq!(metrics.subtree_segments_reused, 0);
 }
 
 #[test]
