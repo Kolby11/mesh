@@ -140,6 +140,13 @@ pub fn encode_command_to_scene(
     if matches!(command.kind, DisplayPaintCommandKind::Scrollbars) {
         return 0;
     }
+    // This proof adapter receives one display command at a time, so it cannot
+    // represent a layer spanning the node and its descendants. Leave layer
+    // topology to the authoritative software painter instead of encoding a
+    // push/pop as duplicate node content.
+    if !command.kind.draws_content() {
+        return 0;
+    }
 
     let mut scene = Scene::new();
     let mut encoded = 0usize;

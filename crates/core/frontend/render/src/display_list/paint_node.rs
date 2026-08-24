@@ -61,12 +61,15 @@ pub(super) fn build_paint_node_with_previous_transform_and_clips(
         layout: node_layout_bounds(node, world_transform),
         ancestor_clips: ancestor_clips.as_slice().into(),
         style: DisplayPaintStyle {
-            background_color: opacity_color(node.computed_style.background_color, opacity),
+            // Opacity is applied once when the whole node subtree is
+            // composited. Keeping primitive colors untouched is important for
+            // overlapping descendants and for non-solid paint payloads.
+            background_color: node.computed_style.background_color,
             background_paint: node.computed_style.background_paint.clone(),
-            border_color: opacity_color(node.computed_style.border_color, opacity),
+            border_color: node.computed_style.border_color,
             border_width: node.computed_style.border_width,
             border_radius: node.computed_style.border_radius,
-            color: opacity_color(node.computed_style.color, opacity),
+            color: node.computed_style.color,
             padding: node.computed_style.padding,
             overflow_x: node.computed_style.overflow_x,
             overflow_y: node.computed_style.overflow_y,
@@ -105,15 +108,6 @@ pub(super) fn build_paint_node_with_previous_transform_and_clips(
 
 pub(super) fn transformed_layout_at(node: &WidgetNode, offset_x: f32, offset_y: f32) -> LayoutRect {
     mesh_core_elements::transformed_layout_at(node, offset_x, offset_y)
-}
-
-pub(super) fn opacity_color(color: Color, opacity: f32) -> Color {
-    Color {
-        a: ((color.a as f32) * opacity.clamp(0.0, 1.0))
-            .round()
-            .clamp(0.0, 255.0) as u8,
-        ..color
-    }
 }
 
 #[cfg(test)]

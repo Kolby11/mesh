@@ -16,9 +16,10 @@ pub(super) struct RetainedPaintSubtree {
     pub(super) pruning: PruningMetrics,
     pub(super) command_span: Option<RetainedSubtreeSpan>,
     pub(super) child_order: Option<Arc<[usize]>>,
-    /// This subtree's commands open and close a blur layer, so its command
-    /// range is atomic: a partial repaint may not replay part of it.
-    pub(super) filter_layer: bool,
+    /// This subtree's commands open and close an effect/compositing layer, so
+    /// its command range is atomic: a partial repaint may not replay part of
+    /// it.
+    pub(super) layer_scope: bool,
 }
 
 impl Default for RetainedPaintSubtree {
@@ -31,7 +32,7 @@ impl Default for RetainedPaintSubtree {
             pruning: PruningMetrics::default(),
             command_span: None,
             child_order: None,
-            filter_layer: false,
+            layer_scope: false,
         }
     }
 }
@@ -151,10 +152,13 @@ impl PaintSubtreeBuilder {
             region = union_display_clip(region, padded_children);
         }
         let region = intersect_display_clip(clip, region);
-        let Some(push) = self.commands.first_mut() else {
+        let Some(push) = self
+            .commands
+            .iter_mut()
+            .find(|command| command.kind == DisplayPaintCommandKind::PushFilterLayer)
+        else {
             return;
         };
-        debug_assert_eq!(push.kind, DisplayPaintCommandKind::PushFilterLayer);
         push.clip = region;
         // The layer composites the whole padded region, so the subtree's
         // damage bounds have to cover it or a repaint would leave a stale
@@ -169,7 +173,30 @@ impl PaintSubtreeBuilder {
         self.local_bounds = self.local_bounds.union(padded);
     }
 
-    pub(super) fn into_retained(self, generation: u64, filter_layer: bool) -> RetainedPaintSubtree {
+    /// Widens the outer compositing group to cover every visual pixel in the
+    /// subtree. This is patched after children and any inner filter layer have
+    /// been appended, so nested effects are included in the group bounds.
+    pub(super) fn grow_compositing_layer_bounds(&mut self, clip: DisplayListClip) {
+        let region = intersect_display_clip(
+            clip,
+            DisplayListClip {
+                x: self.bounds.x as i32,
+                y: self.bounds.y as i32,
+                width: self.bounds.width as i32,
+                height: self.bounds.height as i32,
+            },
+        );
+        let Some(push) = self
+            .commands
+            .iter_mut()
+            .find(|command| command.kind == DisplayPaintCommandKind::PushCompositingLayer)
+        else {
+            return;
+        };
+        push.clip = region;
+    }
+
+    pub(super) fn into_retained(self, generation: u64, layer_scope: bool) -> RetainedPaintSubtree {
         let command_count = self.local_command_count;
         let command_span = if command_count == 0 {
             None
@@ -189,7 +216,7 @@ impl PaintSubtreeBuilder {
             pruning: self.pruning,
             command_span,
             child_order: self.child_order,
-            filter_layer,
+            layer_scope,
         }
     }
 }

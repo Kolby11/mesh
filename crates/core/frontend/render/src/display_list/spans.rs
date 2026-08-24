@@ -31,11 +31,11 @@ pub(super) fn collect_command_spans(
     };
     let subtree_end = command_start.saturating_add(subtree.commands.len());
 
-    // A blurred subtree is one indivisible span: its commands only produce the
-    // right pixels when replayed between their own layer push and pop, so no
-    // descendant may be selected on its own. The span's bounds are the whole
-    // subtree's, already inflated by the blur reach.
-    if subtree.filter_layer {
+    // An effect/compositing subtree is one indivisible span: its commands only
+    // produce the right pixels when replayed between their own layer push and
+    // pop, so no descendant may be selected on its own. The span's bounds are
+    // the whole subtree's, already expanded for any effect overflow.
+    if subtree.layer_scope {
         if let Some(span) = subtree.command_span {
             spans.push(RetainedCommandSpan {
                 owner: node.id,
@@ -113,7 +113,7 @@ pub(super) fn build_command_spans_with_ancestor_copying(
         let subtree_end = command_start.saturating_add(subtree.commands.len());
         let mut spans = Vec::new();
 
-        if subtree.filter_layer {
+        if subtree.layer_scope {
             if let Some(span) = subtree.command_span {
                 spans.push(RetainedCommandSpan {
                     owner: node.id,

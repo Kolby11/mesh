@@ -329,8 +329,10 @@ pub(super) fn collect_layer_scopes(commands: &[DisplayPaintCommand]) -> Vec<(usi
     let mut open: Vec<usize> = Vec::new();
     for (index, command) in commands.iter().enumerate() {
         match command.kind {
-            DisplayPaintCommandKind::PushFilterLayer => open.push(index),
-            DisplayPaintCommandKind::PopFilterLayer => {
+            DisplayPaintCommandKind::PushCompositingLayer
+            | DisplayPaintCommandKind::PushFilterLayer => open.push(index),
+            DisplayPaintCommandKind::PopCompositingLayer
+            | DisplayPaintCommandKind::PopFilterLayer => {
                 if let Some(start) = open.pop() {
                     scopes.push((start, index.saturating_add(1)));
                 }
@@ -352,6 +354,9 @@ pub(super) fn filter_layer_regions(
         .iter()
         .filter_map(|&(start, _)| {
             let push = commands.get(start)?;
+            if push.kind != DisplayPaintCommandKind::PushFilterLayer {
+                return None;
+            }
             clip_rect(
                 DamageRect {
                     x: push.clip.x.max(0) as u32,

@@ -4,6 +4,11 @@
 
 ## Now
 
+Node opacity and blend mode now lower as explicit isolated compositing groups
+around the complete retained node subtree, including gradients, images, text,
+shadows, and descendants. Primitive colors remain unmodified until the group
+is composited, and retained sparse selection keeps each group atomic.
+
 Frontend paint lowering now carries all four border edges and corner radii
 through retained display commands, including asymmetric rounded border rings.
 
@@ -146,8 +151,8 @@ source of truth.
 
 ## Next
 
-Lower asymmetric four-edge borders and four-corner radii correctly
-(`docs/BACKLOG.md`).
+Include paint-order/topology changes in display-list generations and stable
+equal-z ordering (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

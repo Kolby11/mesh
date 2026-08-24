@@ -298,6 +298,100 @@ fn blend_mode_multiply_and_screen_composite_with_backdrop() {
 }
 
 #[test]
+fn node_opacity_isolated_from_descendant_primitives() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 16.0,
+            height: 16.0,
+        },
+        Color::WHITE,
+    );
+    let mut group = node(
+        "box",
+        LayoutRect {
+            x: 2.0,
+            y: 2.0,
+            width: 12.0,
+            height: 12.0,
+        },
+        Color::from_hex("#ff0000").unwrap(),
+    );
+    group.computed_style.opacity = 0.5;
+    group.children.push(node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 12.0,
+            height: 12.0,
+        },
+        Color::from_hex("#0000ff").unwrap(),
+    ));
+    root.children.push(group);
+
+    let engine = FrontendRenderEngine::new();
+    let mut buffer = PixelBuffer::new(16, 16);
+    engine.render_tree(&root, &mut buffer, 1.0);
+
+    // The child covers the group's red background before the group is
+    // composited. Applying opacity per primitive would leave an opaque blue
+    // child; an isolated group produces blue at half opacity over white.
+    let color = pixel(&buffer, 8, 8);
+    assert!((120..=136).contains(&color.r), "{color:?}");
+    assert!((120..=136).contains(&color.g), "{color:?}");
+    assert!(color.b > 247, "{color:?}");
+}
+
+#[test]
+fn node_blend_mode_isolated_from_descendant_primitives() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 16.0,
+            height: 16.0,
+        },
+        Color::from_hex("#ff0000").unwrap(),
+    );
+    let mut group = node(
+        "box",
+        LayoutRect {
+            x: 2.0,
+            y: 2.0,
+            width: 12.0,
+            height: 12.0,
+        },
+        Color::from_hex("#00ff00").unwrap(),
+    );
+    group.computed_style.mix_blend_mode = mesh_core_elements::BlendMode::Multiply;
+    group.children.push(node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 12.0,
+            height: 12.0,
+        },
+        Color::from_hex("#0000ff").unwrap(),
+    ));
+    root.children.push(group);
+
+    let engine = FrontendRenderEngine::new();
+    let mut buffer = PixelBuffer::new(16, 16);
+    engine.render_tree(&root, &mut buffer, 1.0);
+
+    // The group's source is blue after its child paints over its green
+    // background. Multiplying that complete group with the red backdrop is
+    // black; per-primitive blend mode would leave the child blue.
+    let color = pixel(&buffer, 8, 8);
+    assert!(color.r < 8 && color.g < 8 && color.b < 8, "{color:?}");
+}
+
+#[test]
 fn checked_checkbox_rasterizes_checkmark_glyph() {
     let layout = LayoutRect {
         x: 0.0,

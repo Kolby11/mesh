@@ -39,13 +39,3 @@ pub(super) fn dim_color(color: Color, factor: f32) -> Color {
         a: color.a,
     }
 }
-
-#[cfg(test)]
-pub(super) fn opacity_color(color: Color, opacity: f32) -> Color {
-    Color {
-        a: ((color.a as f32) * opacity.clamp(0.0, 1.0))
-            .round()
-            .clamp(0.0, 255.0) as u8,
-        ..color
-    }
-}

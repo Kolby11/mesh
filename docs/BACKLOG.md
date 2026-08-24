@@ -81,7 +81,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/12-rendering-and-paint/improvements.md)
 
-- [ ] Lower node opacity and blend mode as isolated compositing groups instead of per primitive.
 - [ ] Include paint-order/topology changes in display-list generations and stable equal-z ordering.
 - [ ] Unify dirty contracts and paint signatures for all content/style fields, including controls, text, icons, and variables.
 - [ ] Include font/resource revisions in text style painting and all glyph/font/text cache keys.

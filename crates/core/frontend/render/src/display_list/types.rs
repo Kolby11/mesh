@@ -207,8 +207,8 @@ pub struct RetainedDisplayList {
     /// inflated by the blur kernel reach. Damage inside one has to grow to
     /// cover it, and the layer's command range is replayed as a whole.
     pub(super) filter_layer_regions: Vec<DamageRect>,
-    /// Command ranges `[start, end)` opened by `PushFilterLayer` and closed by
-    /// `PopFilterLayer`, in paint order. A selection that touches part of a
+    /// Command ranges `[start, end)` opened by an effect/compositing push and
+    /// closed by its pop, in paint order. A selection that touches part of a
     /// range is widened to all of it.
     pub(super) layer_scopes: Vec<(usize, usize)>,
     pub(super) last_metrics: DisplayListMetrics,
@@ -455,6 +455,12 @@ pub struct DisplayScrollbars {
 pub enum DisplayPaintCommandKind {
     Node,
     Scrollbars,
+    /// Opens an isolated compositing group for a node and its descendants.
+    /// The node's opacity and blend mode are applied when the group is
+    /// composited, rather than being threaded through individual primitives.
+    PushCompositingLayer,
+    /// Composites the open node group onto its parent.
+    PopCompositingLayer,
     /// Opens an offscreen layer that every following command paints into,
     /// until the matching [`DisplayPaintCommandKind::PopFilterLayer`]. Carries
     /// the blurred node, whose `style.filter` is the filter to apply, and a

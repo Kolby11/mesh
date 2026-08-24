@@ -1083,6 +1083,45 @@ fn unfiltered_tree_emits_no_layer_scopes() {
 }
 
 #[test]
+fn composited_node_wraps_its_whole_subtree_in_a_layer_scope() {
+    let mut root = node(1, "box", 0.0, 0.0, 100.0, 100.0);
+    let mut composited = node(2, "box", 20.0, 20.0, 40.0, 40.0);
+    composited.computed_style.opacity = 0.5;
+    composited.computed_style.mix_blend_mode = mesh_core_elements::BlendMode::Multiply;
+    composited
+        .children
+        .push(node(3, "box", 4.0, 4.0, 16.0, 16.0));
+    root.children.push(composited);
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 100, 100, true, true);
+
+    let kinds: Vec<_> = list
+        .paint_commands()
+        .iter()
+        .map(|command| command.kind)
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            DisplayPaintCommandKind::Node,
+            DisplayPaintCommandKind::PushCompositingLayer,
+            DisplayPaintCommandKind::Node,
+            DisplayPaintCommandKind::Node,
+            DisplayPaintCommandKind::PopCompositingLayer,
+        ],
+        "opacity and blend mode must scope the node and all descendants"
+    );
+    let push = &list.paint_commands()[1];
+    assert_eq!(push.node.style.opacity, 0.5);
+    assert_eq!(
+        push.node.style.mix_blend_mode,
+        mesh_core_elements::BlendMode::Multiply
+    );
+    assert!(push.clip.width >= 40 && push.clip.height >= 40);
+}
+
+#[test]
 fn damage_inside_a_blur_layer_selects_the_whole_scope() {
     let mut root = node(1, "box", 0.0, 0.0, 100.0, 100.0);
     let mut blurred = blurred_node(2, 20.0, 20.0, 40.0, 40.0, 4.0);

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::Hasher;
 use std::sync::Arc;
 
-use mesh_core_elements::style::Position;
+use mesh_core_elements::style::{BlendMode, Position};
 use mesh_core_elements::{
     AffineClipStack, AffineTransform, InteractionTarget, LayoutRect, NodeId, WidgetNode,
     child_transform, node_eligibility, node_transform, root_transform,
@@ -384,11 +384,21 @@ fn build_paint_subtree_with_transform(
     }
 
     let mut subtree = PaintSubtreeBuilder::default();
-    // `filter: blur()` blurs the element *and its descendants*, so it lowers
-    // into a layer scope around the whole subtree rather than a filtered paint
-    // on this node's own shape. The push clip starts at this node's blurred
-    // extent and grows to the subtree's once the children are known.
+    // Opacity and blend mode apply to the element as a single compositing
+    // group, including all descendants and non-solid paint. `filter: blur()`
+    // likewise operates on the whole subtree, so its layer is nested inside
+    // the compositing group when both are present.
+    let compositing_layer =
+        paint_node.style.opacity < 1.0 || paint_node.style.mix_blend_mode != BlendMode::Normal;
     let filter_layer = paint_node.style.filter.blur_radius > 0.0;
+    if compositing_layer {
+        subtree.push_command(DisplayPaintCommand {
+            node: Arc::clone(&paint_node),
+            clip: intersect_display_clip(clip, visual_bounds),
+            kind: DisplayPaintCommandKind::PushCompositingLayer,
+        });
+        metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
+    }
     if filter_layer {
         subtree.push_command(DisplayPaintCommand {
             node: Arc::clone(&paint_node),
@@ -464,13 +474,22 @@ fn build_paint_subtree_with_transform(
         let blur_pad = paint_node.style.filter.blur_radius * 3.0;
         subtree.grow_filter_layer_bounds(clip, blur_pad);
         subtree.push_command(DisplayPaintCommand {
-            node: paint_node,
+            node: Arc::clone(&paint_node),
             clip: node_clip,
             kind: DisplayPaintCommandKind::PopFilterLayer,
         });
         metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
     }
-    let subtree = Arc::new(subtree.into_retained(generation, filter_layer));
+    if compositing_layer {
+        subtree.grow_compositing_layer_bounds(clip);
+        subtree.push_command(DisplayPaintCommand {
+            node: paint_node,
+            clip: node_clip,
+            kind: DisplayPaintCommandKind::PopCompositingLayer,
+        });
+        metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
+    }
+    let subtree = Arc::new(subtree.into_retained(generation, compositing_layer || filter_layer));
     next_subtrees.insert(node.id, Arc::clone(&subtree));
     subtree
 }

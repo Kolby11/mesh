@@ -669,6 +669,22 @@ impl FrontendRenderEngine {
         // restoring a layer that was never opened or paint the subtree
         // unblurred.
         match kind {
+            DisplayPaintCommandKind::PushCompositingLayer => {
+                let bounds = intersect_clip(paint_clip, scaled_display_clip(command.clip, scale));
+                self.execute_painter_commands_in_session(
+                    session,
+                    &[PainterCommand::PushLayer(PainterLayer::isolated(
+                        bounds,
+                        command.node.style.opacity,
+                        PainterBlendMode::from_style(command.node.style.mix_blend_mode),
+                    ))],
+                );
+                return;
+            }
+            DisplayPaintCommandKind::PopCompositingLayer => {
+                self.execute_painter_commands_in_session(session, &[PainterCommand::PopLayer]);
+                return;
+            }
             DisplayPaintCommandKind::PushFilterLayer => {
                 let bounds = intersect_clip(paint_clip, scaled_display_clip(command.clip, scale));
                 self.execute_painter_commands_in_session(
@@ -736,6 +752,8 @@ impl FrontendRenderEngine {
                 }
             }
             DisplayPaintCommandKind::PushFilterLayer | DisplayPaintCommandKind::PopFilterLayer => {}
+            DisplayPaintCommandKind::PushCompositingLayer
+            | DisplayPaintCommandKind::PopCompositingLayer => {}
         }
     }
 
@@ -819,7 +837,6 @@ impl FrontendRenderEngine {
                 scale_corners(style.border_radius, scale),
                 style.background_color,
                 node_clip,
-                PainterBlendMode::from_style(style.mix_blend_mode),
             );
         }
         push_background_paint_command(
@@ -964,7 +981,6 @@ fn append_display_node_self_paint_commands(
             scale_corners(style.border_radius, scale),
             style.background_color,
             node_clip,
-            PainterBlendMode::from_style(style.mix_blend_mode),
         );
     }
     push_background_paint_command(
@@ -1064,9 +1080,8 @@ fn push_fill_shape_command(
     radii: Corners,
     color: Color,
     clip: ClipRect,
-    blend: PainterBlendMode,
 ) {
-    let paint = PainterPaint::fill(color).with_blend_mode(blend);
+    let paint = PainterPaint::fill(color);
     if corners_have_radius(radii) {
         commands.push(PainterCommand::DrawRoundedRect {
             rect,

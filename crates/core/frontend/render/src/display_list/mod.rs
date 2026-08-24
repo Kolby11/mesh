@@ -917,8 +917,9 @@ impl RetainedDisplayList {
         (selected, matched_spans, command_count)
     }
 
-    /// Replaying half a blur layer would drop either its push (painting the
-    /// subtree unblurred) or its pop (leaking the layer into later commands).
+    /// Replaying half an effect layer would drop either its push (changing the
+    /// compositing/filter semantics) or its pop (leaking the layer into later
+    /// commands).
     pub(in crate::display_list) fn widen_selection_to_layer_scopes(
         &self,
         selected: &mut Vec<SelectedCommandSpan>,
