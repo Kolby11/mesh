@@ -154,6 +154,20 @@ macro_rules! css_property_table {
             {
                 return false;
             }
+            // `inherit` has no dedicated color/font parsing — it is not a
+            // real value, it means "don't set this explicitly, let the
+            // normal parent-to-child inheritance pass fill it in". Treating
+            // it as an unresolved literal color/number would silently
+            // collapse it to transparent/0 and mark the property explicit,
+            // permanently blocking real inheritance (including on :hover).
+            if matches!($value, StyleValue::Literal(v) if v.trim() == "inherit")
+                && matches!(
+                    $property,
+                    "color" | "font-family" | "font-size" | "font-weight" | "line-height"
+                )
+            {
+                return false;
+            }
             match $property {
                 $($parsed)*
                 _ => tracing::warn!("unsupported CSS property '{}'", $property),

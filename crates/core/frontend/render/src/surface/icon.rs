@@ -1478,20 +1478,14 @@ pub fn draw_named_icon_in_session(
     dest_w: i32,
     dest_h: i32,
     tint: Color,
+    axes: GlyphAxes,
 ) {
     #[cfg(test)]
     let resolution = resolve_icon_result(name, size);
     #[cfg(not(test))]
     let resolution = resolve_icon_for_render("", name, size);
     draw_icon_resolution_with_axes_in_session(
-        session,
-        resolution,
-        dest_x,
-        dest_y,
-        dest_w,
-        dest_h,
-        tint,
-        GlyphAxes::default(),
+        session, resolution, dest_x, dest_y, dest_w, dest_h, tint, axes,
     );
 }
 

@@ -4,14 +4,19 @@
       "default_locale": "sk"
     }
   },
-  "revision": 7,
+  "revision": 31,
   "schemaVersion": 1,
   "shell": {
     "fonts": {
-      "ui_family": "FreeSans"
+      "ui_family": "DejaVu Sans"
+    },
+    "i18n": {
+      "fallback_locale": "en",
+      "locale": "en",
+      "policy": "manual"
     },
     "icons": {
-      "default_pack": "Papirus-Light"
+      "default_pack": "breeze"
     },
     "render": {
       "blur": {

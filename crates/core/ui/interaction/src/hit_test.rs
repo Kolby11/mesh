@@ -496,13 +496,29 @@ fn node_tooltip_text_ref(node: &WidgetNode) -> Option<&str> {
         return None;
     }
 
-    for key in [
-        "title",
-        "tooltip",
-        "aria-label",
-        "description",
-        "aria-description",
-    ] {
+    // `title`/`tooltip` are the dedicated, always-honored tooltip hints
+    // (docs/spec/09-accessibility.md: "title ... tooltip + AT description") —
+    // an author who wrote one meant it to show, regardless of what else the
+    // node renders.
+    for key in ["title", "tooltip"] {
+        if let Some(value) = non_empty_tooltip_text(node.attributes.get(key).map(String::as_str)) {
+            return Some(value);
+        }
+    }
+
+    // `aria-label`/`description`/`aria-description` and the computed
+    // accessibility label are accessible-*name* sources, not tooltip hints —
+    // spec: "aria-label ... AT name when visible text isn't it". A control
+    // that already renders its own visible text (any node with children, or
+    // a container's aggregated accessibility label) doesn't need a
+    // redundant tooltip repeating what's already on screen; only surface
+    // these for leaf nodes that render no visible text of their own, such
+    // as icon-only controls.
+    if !node.children.is_empty() {
+        return None;
+    }
+
+    for key in ["aria-label", "description", "aria-description"] {
         if let Some(value) = non_empty_tooltip_text(node.attributes.get(key).map(String::as_str)) {
             return Some(value);
         }
@@ -1583,6 +1599,72 @@ mod tests {
 
         assert_eq!(node_tooltip_text(&node), None);
         assert_eq!(find_tooltip_text_by_key(&node, "button"), None);
+    }
+
+    #[test]
+    fn aria_label_on_a_button_with_visible_text_children_is_not_a_redundant_tooltip() {
+        // e.g. clock-button.mesh: <button aria-label="{clock_aria_label}">
+        // wrapping <text>{clock_time}</text><text>{clock_date}</text> — the
+        // button already shows its own text on screen, so aria-label (the
+        // AT-only accessible name, per docs/spec/09-accessibility.md) must
+        // not also surface as a hover tooltip repeating it.
+        let mut button = WidgetNode::new("button");
+        button
+            .attributes
+            .insert("_mesh_key".into(), "clock-button".into());
+        button
+            .attributes
+            .insert("aria-label".into(), "10:32 AM, Monday August 24".into());
+
+        let time_text = WidgetNode::new("text");
+        button.children.push(time_text);
+
+        assert_eq!(node_tooltip_text(&button), None);
+    }
+
+    #[test]
+    fn title_attribute_still_wins_even_with_visible_text_children() {
+        let mut button = WidgetNode::new("button");
+        button
+            .attributes
+            .insert("_mesh_key".into(), "button".into());
+        button
+            .attributes
+            .insert("title".into(), "Open audio controls".into());
+
+        let label_text = WidgetNode::new("text");
+        button.children.push(label_text);
+
+        assert_eq!(
+            node_tooltip_text(&button).as_deref(),
+            Some("Open audio controls")
+        );
+    }
+
+    #[test]
+    fn container_without_own_tooltip_does_not_fall_back_to_aggregated_children_label() {
+        let mut container = WidgetNode::new("row");
+        container
+            .attributes
+            .insert("_mesh_key".into(), "container".into());
+        // Simulates the ARIA-style accessible name a wrapper gets once its
+        // accessibility snapshot concatenates every descendant's visible
+        // text — meaningful for assistive tech, not for a hover tooltip.
+        container.accessibility.label = Some("Clock Settings Volume".into());
+
+        let child = WidgetNode::new("button");
+        container.children.push(child);
+
+        assert_eq!(node_tooltip_text(&container), None);
+    }
+
+    #[test]
+    fn leaf_node_still_falls_back_to_accessible_label_for_tooltip() {
+        let mut leaf = WidgetNode::new("button");
+        leaf.attributes.insert("_mesh_key".into(), "leaf".into());
+        leaf.accessibility.label = Some("Mute".into());
+
+        assert_eq!(node_tooltip_text(&leaf).as_deref(), Some("Mute"));
     }
 
     #[test]

@@ -510,6 +510,82 @@ fn retained_restyle_preserves_explicit_transparent_and_default_inherited_values(
 }
 
 #[test]
+fn child_color_inherit_follows_parent_hover_color_instead_of_going_transparent() {
+    let theme = mesh_core_theme::default_theme();
+    let resolver = StyleResolver::new(&theme);
+    let rules = vec![
+        StyleRule {
+            selector: Selector::Class("parent".to_string()),
+            declarations: vec![Declaration {
+                property: "color".to_string(),
+                value: StyleValue::Literal("#123456".to_string()),
+            }],
+            container_query: None,
+        },
+        StyleRule {
+            selector: Selector::State("row".to_string(), "hover".to_string()),
+            declarations: vec![Declaration {
+                property: "color".to_string(),
+                value: StyleValue::Literal("#654321".to_string()),
+            }],
+            container_query: None,
+        },
+        StyleRule {
+            selector: Selector::Class("child".to_string()),
+            declarations: vec![Declaration {
+                property: "color".to_string(),
+                value: StyleValue::Literal("inherit".to_string()),
+            }],
+            container_query: None,
+        },
+    ];
+    let mut root = crate::tree::WidgetNode::new("row");
+    root.id = 1;
+    root.attributes.insert("class".into(), "parent".into());
+    let mut child = crate::tree::WidgetNode::new("text");
+    child.id = 2;
+    child.attributes.insert("class".into(), "child".into());
+    root.children.push(child);
+
+    resolver.restyle_subtree_cached(&mut root, &rules, StyleContext::default(), &mut None);
+    let initial_child = &root.children[0].computed_style;
+    assert_eq!(
+        initial_child.color,
+        Color {
+            r: 0x12,
+            g: 0x34,
+            b: 0x56,
+            a: 255
+        }
+    );
+    assert!(
+        !initial_child.explicit_properties.color,
+        "color: inherit must not be treated as an explicit override"
+    );
+
+    root.state.hovered = true;
+    let root_id = root.id;
+    resolver.restyle_subtree_for_ids(
+        &mut root,
+        &rules,
+        StyleContext::default(),
+        &std::collections::HashSet::from([root_id]),
+    );
+
+    let restyled_child = &root.children[0].computed_style;
+    assert_eq!(
+        restyled_child.color,
+        Color {
+            r: 0x65,
+            g: 0x43,
+            b: 0x21,
+            a: 255
+        },
+        "child with color: inherit must pick up the parent's hover color, not stay transparent"
+    );
+}
+
+#[test]
 fn targeted_restyle_skips_descendant_rule_resolution_for_non_inherited_change() {
     let theme = mesh_core_theme::default_theme();
     let resolver = StyleResolver::new(&theme);

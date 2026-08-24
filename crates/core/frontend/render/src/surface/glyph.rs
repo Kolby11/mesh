@@ -67,6 +67,33 @@ struct GlyphCacheKey {
     opsz_q: i32,
 }
 
+/// Identifies a glyph's rasterized *shape* — everything the alpha mask
+/// actually depends on — independent of tint or variable-font axes. Used to
+/// find a visually-close, already-rasterized stand-in while the exact
+/// `GlyphCacheKey` (which also varies with axes/color) is still being
+/// rasterized off-thread, so a pseudo-state change like `:hover` never
+/// blanks the icon for a frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct GlyphShapeKey {
+    font_path: u64,
+    resource_revision: u64,
+    font_fingerprint: Option<ResourceFingerprint>,
+    codepoint: u32,
+    px: u32,
+}
+
+impl From<GlyphCacheKey> for GlyphShapeKey {
+    fn from(key: GlyphCacheKey) -> Self {
+        GlyphShapeKey {
+            font_path: key.font_path,
+            resource_revision: key.resource_revision,
+            font_fingerprint: key.font_fingerprint,
+            codepoint: key.codepoint,
+            px: key.px,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct CachedGlyph {
     width: u32,
@@ -253,6 +280,32 @@ thread_local! {
         RefCell::new(ByteLruCache::new(ICON_GLYPH_SKIA_CAPACITY, ICON_GLYPH_SKIA_MAX_BYTES));
 }
 
+// Most recently rasterized exact key per glyph shape, so a miss on a new
+// axes/color combination (e.g. entering `:hover`) can keep drawing the
+// previous variant for this shape instead of blanking the icon while the
+// real one rasterizes off-thread.
+static LAST_GOOD_GLYPH_KEY: OnceLock<
+    Mutex<std::collections::HashMap<GlyphShapeKey, GlyphCacheKey>>,
+> = OnceLock::new();
+
+fn last_good_glyph_key_map()
+-> &'static Mutex<std::collections::HashMap<GlyphShapeKey, GlyphCacheKey>> {
+    LAST_GOOD_GLYPH_KEY.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+fn remember_last_good_glyph_key(key: GlyphCacheKey) {
+    if let Ok(mut map) = last_good_glyph_key_map().lock() {
+        map.insert(GlyphShapeKey::from(key), key);
+    }
+}
+
+fn last_good_glyph_key_for_shape(shape: GlyphShapeKey) -> Option<GlyphCacheKey> {
+    last_good_glyph_key_map()
+        .lock()
+        .ok()
+        .and_then(|map| map.get(&shape).copied())
+}
+
 fn font_bytes_cache() -> &'static FontBytesCache {
     FONT_BYTES.get_or_init(|| {
         Mutex::new(ByteLruCache::new(
@@ -372,6 +425,9 @@ fn cache_lookup(key: GlyphCacheKey) -> Option<Option<CachedGlyph>> {
 }
 
 fn cache_store(key: GlyphCacheKey, value: Option<CachedGlyph>) {
+    if value.is_some() {
+        remember_last_good_glyph_key(key);
+    }
     let cache = glyph_cache();
     if let Ok(mut guard) = cache.lock() {
         let weight = value.as_ref().map_or(1, |glyph| glyph.pixels.len().max(1));
@@ -560,8 +616,16 @@ pub fn draw_font_glyph_on_canvas(
         tint,
     );
 
-    let glyph = match cache_lookup(key) {
-        Some(value) => value,
+    // While the exact (axes, tint) variant is missing, draw with the most
+    // recently rasterized variant of the same glyph *shape* instead of
+    // nothing, so a pseudo-state change (e.g. `:hover` flipping
+    // `--icon-fill`/`--icon-weight`) never blanks the icon for a frame while
+    // the real variant rasterizes off-thread. `effective_key` only ever
+    // diverges from `key` for this fallback lookup/draw — the real `key`
+    // is never written with substitute data, so the exact variant still
+    // lands normally once its async job completes.
+    let (glyph, effective_key) = match cache_lookup(key) {
+        Some(value) => (value, key),
         None => {
             #[cfg(test)]
             {
@@ -576,11 +640,11 @@ pub fn draw_font_glyph_on_canvas(
                 );
                 profiling::record_icon_image_raster(raster_started.elapsed());
                 cache_store(key, value.clone());
-                value
+                (value, key)
             }
             #[cfg(not(test))]
             {
-                match schedule_glyph_raster_job(
+                let _ = schedule_glyph_raster_job(
                     key,
                     font_path,
                     prepared_bytes.cloned(),
@@ -588,9 +652,10 @@ pub fn draw_font_glyph_on_canvas(
                     px,
                     axes,
                     supported_axes,
-                ) {
-                    Some(_) => None,
-                    None => None,
+                );
+                match last_good_glyph_key_for_shape(GlyphShapeKey::from(key)) {
+                    Some(fallback_key) => (cache_lookup(fallback_key).flatten(), fallback_key),
+                    None => (None, key),
                 }
             }
         }
@@ -598,6 +663,7 @@ pub fn draw_font_glyph_on_canvas(
     let Some(glyph) = glyph else {
         return false;
     };
+    let key = effective_key;
 
     let skia_image = ICON_GLYPH_SKIA.with(|cell| {
         let mut atlas = cell.borrow_mut();
@@ -832,6 +898,82 @@ mod tests {
         assert!(poll_glyph_raster_jobs());
         assert!(!glyph_raster_jobs_pending());
         clear_glyph_cache();
+    }
+
+    #[test]
+    fn cache_store_remembers_last_good_key_per_shape_across_axes_and_tint_changes() {
+        let _guard = glyph_test_lock();
+        clear_glyph_cache();
+
+        let font_path = Path::new("/tmp/last-good-glyph-shape.ttf");
+        let rest_tint = Color {
+            r: 32,
+            g: 96,
+            b: 180,
+            a: 255,
+        };
+        let hover_tint = Color {
+            r: 200,
+            g: 40,
+            b: 64,
+            a: 255,
+        };
+        let supported_axes = SupportedAxes {
+            fill: true,
+            weight: true,
+            grade: false,
+            optical_size: false,
+        };
+        let rest_axes = GlyphAxes {
+            fill: Some(0.0),
+            weight: Some(400.0),
+            ..Default::default()
+        };
+        let hover_axes = GlyphAxes {
+            fill: Some(1.0),
+            weight: Some(500.0),
+            ..Default::default()
+        };
+        let rest_key = cached_test_key(font_path, rest_tint, 24, supported_axes, rest_axes);
+        let hover_key = cached_test_key(font_path, hover_tint, 24, supported_axes, hover_axes);
+        assert_eq!(
+            GlyphShapeKey::from(rest_key),
+            GlyphShapeKey::from(hover_key)
+        );
+
+        // No glyph has ever been rasterized for this shape yet.
+        assert_eq!(
+            last_good_glyph_key_for_shape(GlyphShapeKey::from(rest_key)),
+            None
+        );
+
+        let glyph = CachedGlyph {
+            width: 4,
+            height: 4,
+            placement_left: 0,
+            pixels: Arc::from(vec![255u8; 16]),
+        };
+        cache_store(rest_key, Some(glyph.clone()));
+        assert_eq!(
+            last_good_glyph_key_for_shape(GlyphShapeKey::from(hover_key)),
+            Some(rest_key),
+            "a hover-state miss for the same glyph shape should find the rest variant as a stand-in"
+        );
+
+        // Once the hover variant itself rasterizes, it becomes the new
+        // stand-in for the shape (most recent wins).
+        cache_store(hover_key, Some(glyph));
+        assert_eq!(
+            last_good_glyph_key_for_shape(GlyphShapeKey::from(rest_key)),
+            Some(hover_key)
+        );
+
+        // A failed rasterization must not evict the last good stand-in.
+        cache_store(hover_key, None);
+        assert_eq!(
+            last_good_glyph_key_for_shape(GlyphShapeKey::from(rest_key)),
+            Some(hover_key)
+        );
     }
 
     #[test]
