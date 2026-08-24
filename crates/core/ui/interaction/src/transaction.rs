@@ -1,6 +1,7 @@
 use crate::node_can_receive_target;
 use mesh_core_elements::{InteractionTarget, NodeId, WidgetNode};
 use std::collections::HashMap;
+use std::ops::BitOr;
 
 /// The kind of continuous interaction that currently owns a target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,6 +25,101 @@ pub struct PressOrigin {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScrollOwner {
     pub node_id: NodeId,
+}
+
+/// The renderer-neutral outputs that downstream frame stages may need to
+/// refresh after an interaction transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct InteractionDirtyFlags(u8);
+
+impl InteractionDirtyFlags {
+    /// Dynamic pseudo-state and interaction-dependent style matching changed.
+    pub const STYLE: Self = Self(1 << 0);
+    /// A node's interaction state changes painted output without requiring a
+    /// style walk.
+    pub const PAINT: Self = Self(1 << 1);
+    /// The semantic focus projection or exposed interaction state changed.
+    pub const ACCESSIBILITY: Self = Self(1 << 2);
+
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    fn insert(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+}
+
+impl BitOr for InteractionDirtyFlags {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+/// Typed dirty output for one interaction transition.
+///
+/// Node identities are stable runtime identities, so a renderer or retained
+/// tree can scope its work without knowing anything about shell surfaces,
+/// paint objects, or Wayland presentation.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct InteractionDirty {
+    pub nodes: Vec<NodeId>,
+    pub flags: InteractionDirtyFlags,
+}
+
+impl InteractionDirty {
+    pub const fn empty() -> Self {
+        Self {
+            nodes: Vec::new(),
+            flags: InteractionDirtyFlags::empty(),
+        }
+    }
+
+    pub const fn contains(&self, flags: InteractionDirtyFlags) -> bool {
+        self.flags.contains(flags)
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.nodes.is_empty() && self.flags.is_empty()
+    }
+}
+
+/// The result of changing the canonical focus owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusDecision {
+    Changed {
+        before: Option<NodeId>,
+        after: Option<NodeId>,
+    },
+    Retained,
+}
+
+/// The result of changing pointer capture and press-origin state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PointerCaptureDecision {
+    Changed {
+        before: Option<PressOrigin>,
+        after: Option<PressOrigin>,
+    },
+    Retained,
+}
+
+/// A typed decision emitted by a staged interaction transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InteractionDecision {
+    Focus(FocusDecision),
+    PointerCapture(PointerCaptureDecision),
+    Ownership(OwnershipDecision),
 }
 
 /// Typed invalidation produced by an interaction transaction.
@@ -59,9 +155,13 @@ impl InteractionInvalidation {
 pub struct InteractionDelta {
     pub revision: u64,
     pub changed_nodes: Vec<NodeId>,
+    pub dirty: InteractionDirty,
+    pub decisions: Vec<InteractionDecision>,
     pub invalidation: InteractionInvalidation,
     pub focus_before: Option<NodeId>,
     pub focus_after: Option<NodeId>,
+    pub focus_visible_before: Option<NodeId>,
+    pub focus_visible_after: Option<NodeId>,
     pub pointer_capture_before: Option<PressOrigin>,
     pub pointer_capture_after: Option<PressOrigin>,
     pub press_origin_before: Option<PressOrigin>,
@@ -74,7 +174,9 @@ pub struct InteractionDelta {
 
 impl InteractionDelta {
     pub fn changed(&self) -> bool {
-        !self.invalidation.is_empty() || !self.changed_nodes.is_empty()
+        !self.dirty.is_empty()
+            || !self.invalidation.is_empty()
+            || self.focus_visible_before != self.focus_visible_after
     }
 }
 
@@ -133,17 +235,19 @@ impl InteractionState {
     }
 }
 
-/// A staged, all-or-nothing update to [`InteractionState`].
+/// A renderer-neutral, staged, all-or-nothing update to [`InteractionState`].
 ///
 /// Callers resolve targets and handler policy outside this type, then stage
 /// ownership changes here.  No state is published until [`Self::commit`] is
 /// called, so focus, capture, press origin, gesture ownership, scroll
-/// ownership, and the dirty-node set describe one input boundary.
+/// ownership, typed decisions, and categorized dirty nodes describe one input
+/// boundary.
 #[derive(Debug, Clone)]
 pub struct InteractionTransaction {
     before: InteractionState,
     next: InteractionState,
-    changed_nodes: Vec<NodeId>,
+    dirty: InteractionDirty,
+    decisions: Vec<InteractionDecision>,
     invalidation: InteractionInvalidation,
 }
 
@@ -160,83 +264,140 @@ impl InteractionTransaction {
         Self {
             before: state.clone(),
             next: state.clone(),
-            changed_nodes: Vec::new(),
+            dirty: InteractionDirty::empty(),
+            decisions: Vec::new(),
             invalidation: InteractionInvalidation::empty(),
         }
     }
 
-    pub fn focus(&mut self, target: Option<NodeId>, focus_visible: bool) {
-        if self.next.focus_owner != target
-            || self.next.focus_visible_owner != (focus_visible.then_some(target).flatten())
-        {
-            self.mark_node(self.next.focus_owner);
-            self.mark_node(target);
+    pub fn focus(&mut self, target: Option<NodeId>, focus_visible: bool) -> FocusDecision {
+        let before = self.next.focus_owner;
+        let before_visible = self.next.focus_visible_owner;
+        let after_visible = focus_visible.then_some(target).flatten();
+        if self.next.focus_owner != target || before_visible != after_visible {
+            self.mark_node(
+                self.next.focus_owner,
+                InteractionDirtyFlags::STYLE | InteractionDirtyFlags::ACCESSIBILITY,
+            );
+            self.mark_node(
+                target,
+                InteractionDirtyFlags::STYLE | InteractionDirtyFlags::ACCESSIBILITY,
+            );
             self.next.focus_owner = target;
-            self.next.focus_visible_owner = focus_visible.then_some(target).flatten();
+            self.next.focus_visible_owner = after_visible;
             self.invalidation.insert(InteractionInvalidation::FOCUS);
+            let decision = FocusDecision::Changed {
+                before,
+                after: target,
+            };
+            self.decisions.push(InteractionDecision::Focus(decision));
+            decision
+        } else {
+            let decision = FocusDecision::Retained;
+            self.decisions.push(InteractionDecision::Focus(decision));
+            decision
         }
     }
 
-    pub fn capture_pointer(&mut self, origin: Option<PressOrigin>) {
+    pub fn capture_pointer(&mut self, origin: Option<PressOrigin>) -> PointerCaptureDecision {
+        let before = self.next.pointer_capture;
         if self.next.pointer_capture != origin {
-            self.mark_node(self.next.pointer_capture.map(|value| value.node_id));
-            self.mark_node(origin.map(|value| value.node_id));
+            self.mark_node(
+                self.next.pointer_capture.map(|value| value.node_id),
+                InteractionDirtyFlags::STYLE | InteractionDirtyFlags::PAINT,
+            );
+            self.mark_node(
+                origin.map(|value| value.node_id),
+                InteractionDirtyFlags::STYLE | InteractionDirtyFlags::PAINT,
+            );
             self.next.pointer_capture = origin;
             self.invalidation
                 .insert(InteractionInvalidation::POINTER_CAPTURE);
         }
         if self.next.press_origin != origin {
-            self.mark_node(self.next.press_origin.map(|value| value.node_id));
-            self.mark_node(origin.map(|value| value.node_id));
+            self.mark_node(
+                self.next.press_origin.map(|value| value.node_id),
+                InteractionDirtyFlags::STYLE | InteractionDirtyFlags::PAINT,
+            );
+            self.mark_node(
+                origin.map(|value| value.node_id),
+                InteractionDirtyFlags::STYLE | InteractionDirtyFlags::PAINT,
+            );
             self.next.press_origin = origin;
             self.invalidation
                 .insert(InteractionInvalidation::PRESS_ORIGIN);
         }
+        let decision = if before == origin {
+            PointerCaptureDecision::Retained
+        } else {
+            PointerCaptureDecision::Changed {
+                before,
+                after: origin,
+            }
+        };
+        self.decisions
+            .push(InteractionDecision::PointerCapture(decision));
+        decision
     }
 
     pub fn release_pointer(&mut self, button: Option<u32>) -> Option<PressOrigin> {
         let origin = self.next.press_origin;
         if button.is_none() || origin.is_some_and(|value| Some(value.button) == button) {
             self.capture_pointer(None);
+        } else {
+            self.decisions.push(InteractionDecision::PointerCapture(
+                PointerCaptureDecision::Retained,
+            ));
         }
         origin
     }
 
     pub fn claim_gesture(&mut self, node_id: NodeId, kind: GestureKind) -> OwnershipDecision {
-        match self.next.gesture_owner {
+        let decision = match self.next.gesture_owner {
             None => {
                 self.next.gesture_owner = Some((node_id, kind));
-                self.mark_node(Some(node_id));
+                self.mark_node(Some(node_id), InteractionDirtyFlags::STYLE);
                 self.invalidation.insert(InteractionInvalidation::GESTURE);
                 OwnershipDecision::Acquired
             }
             Some(owner) if owner == (node_id, kind) => OwnershipDecision::Retained,
             Some(_) => OwnershipDecision::Rejected,
-        }
+        };
+        self.decisions
+            .push(InteractionDecision::Ownership(decision));
+        decision
     }
 
     pub fn release_gesture(&mut self, node_id: Option<NodeId>) -> OwnershipDecision {
-        if node_id.is_none() || self.next.gesture_owner.map(|owner| owner.0) == node_id {
-            self.mark_node(self.next.gesture_owner.map(|owner| owner.0));
+        let decision = if let Some(owner) = self.next.gesture_owner
+            && (node_id.is_none() || Some(owner.0) == node_id)
+        {
+            self.mark_node(Some(owner.0), InteractionDirtyFlags::STYLE);
             self.next.gesture_owner = None;
             self.invalidation.insert(InteractionInvalidation::GESTURE);
             OwnershipDecision::Released
         } else {
             OwnershipDecision::Rejected
-        }
+        };
+        self.decisions
+            .push(InteractionDecision::Ownership(decision));
+        decision
     }
 
     pub fn claim_scroll(&mut self, node_id: NodeId) -> OwnershipDecision {
-        match self.next.scroll_owner {
+        let decision = match self.next.scroll_owner {
             None => {
                 self.next.scroll_owner = Some(ScrollOwner { node_id });
-                self.mark_node(Some(node_id));
+                self.mark_node(Some(node_id), InteractionDirtyFlags::STYLE);
                 self.invalidation.insert(InteractionInvalidation::SCROLL);
                 OwnershipDecision::Acquired
             }
             Some(owner) if owner.node_id == node_id => OwnershipDecision::Retained,
             Some(_) => OwnershipDecision::Rejected,
-        }
+        };
+        self.decisions
+            .push(InteractionDecision::Ownership(decision));
+        decision
     }
 
     /// Transfer scroll ownership at an input boundary. A wheel/touchpad
@@ -248,46 +409,67 @@ impl InteractionTransaction {
             .scroll_owner
             .is_some_and(|owner| owner.node_id == node_id)
         {
-            return OwnershipDecision::Retained;
+            let decision = OwnershipDecision::Retained;
+            self.decisions
+                .push(InteractionDecision::Ownership(decision));
+            return decision;
         }
-        self.mark_node(self.next.scroll_owner.map(|owner| owner.node_id));
-        self.mark_node(Some(node_id));
+        self.mark_node(
+            self.next.scroll_owner.map(|owner| owner.node_id),
+            InteractionDirtyFlags::STYLE,
+        );
+        self.mark_node(Some(node_id), InteractionDirtyFlags::STYLE);
         self.next.scroll_owner = Some(ScrollOwner { node_id });
         self.invalidation.insert(InteractionInvalidation::SCROLL);
-        OwnershipDecision::Acquired
+        let decision = OwnershipDecision::Acquired;
+        self.decisions
+            .push(InteractionDecision::Ownership(decision));
+        decision
     }
 
     pub fn release_scroll(&mut self, node_id: Option<NodeId>) -> OwnershipDecision {
-        if node_id.is_none() || self.next.scroll_owner.map(|owner| owner.node_id) == node_id {
-            self.mark_node(self.next.scroll_owner.map(|owner| owner.node_id));
+        let decision = if let Some(owner) = self.next.scroll_owner
+            && (node_id.is_none() || Some(owner.node_id) == node_id)
+        {
+            self.mark_node(Some(owner.node_id), InteractionDirtyFlags::STYLE);
             self.next.scroll_owner = None;
             self.invalidation.insert(InteractionInvalidation::SCROLL);
             OwnershipDecision::Released
         } else {
             OwnershipDecision::Rejected
-        }
+        };
+        self.decisions
+            .push(InteractionDecision::Ownership(decision));
+        decision
     }
 
     pub fn claim_touch(&mut self, touch_id: i32, node_id: NodeId) -> OwnershipDecision {
-        match self.next.touch_owners.get(&touch_id).copied() {
+        let decision = match self.next.touch_owners.get(&touch_id).copied() {
             None => {
                 self.next.touch_owners.insert(touch_id, node_id);
-                self.mark_node(Some(node_id));
+                self.mark_node(Some(node_id), InteractionDirtyFlags::STYLE);
                 self.invalidation.insert(InteractionInvalidation::GESTURE);
                 OwnershipDecision::Acquired
             }
             Some(owner) if owner == node_id => OwnershipDecision::Retained,
             Some(_) => OwnershipDecision::Rejected,
-        }
+        };
+        self.decisions
+            .push(InteractionDecision::Ownership(decision));
+        decision
     }
 
     pub fn release_touch(&mut self, touch_id: i32) -> OwnershipDecision {
-        let Some(node_id) = self.next.touch_owners.remove(&touch_id) else {
-            return OwnershipDecision::Rejected;
+        let decision = if let Some(node_id) = self.next.touch_owners.remove(&touch_id) {
+            self.mark_node(Some(node_id), InteractionDirtyFlags::STYLE);
+            self.invalidation.insert(InteractionInvalidation::GESTURE);
+            OwnershipDecision::Released
+        } else {
+            OwnershipDecision::Rejected
         };
-        self.mark_node(Some(node_id));
-        self.invalidation.insert(InteractionInvalidation::GESTURE);
-        OwnershipDecision::Released
+        self.decisions
+            .push(InteractionDecision::Ownership(decision));
+        decision
     }
 
     /// Drop owners that are no longer valid for the current tree. This is the
@@ -338,13 +520,23 @@ impl InteractionTransaction {
         if changed {
             self.next.revision = self.before.revision.saturating_add(1);
             *state = self.next.clone();
+        } else {
+            // A transaction may stage and then undo an operation while
+            // resolving one input boundary. Nothing from that speculative
+            // path is a committed dirty output.
+            self.dirty = InteractionDirty::empty();
+            self.invalidation = InteractionInvalidation::empty();
         }
         InteractionDelta {
             revision: state.revision,
-            changed_nodes: self.changed_nodes,
+            changed_nodes: self.dirty.nodes.clone(),
+            dirty: self.dirty,
+            decisions: self.decisions,
             invalidation: self.invalidation,
             focus_before: self.before.focus_owner,
             focus_after: state.focus_owner,
+            focus_visible_before: self.before.focus_visible_owner,
+            focus_visible_after: state.focus_visible_owner,
             pointer_capture_before: self.before.pointer_capture,
             pointer_capture_after: state.pointer_capture,
             press_origin_before: self.before.press_origin,
@@ -356,11 +548,12 @@ impl InteractionTransaction {
         }
     }
 
-    fn mark_node(&mut self, node_id: Option<NodeId>) {
-        if let Some(node_id) = node_id
-            && !self.changed_nodes.contains(&node_id)
-        {
-            self.changed_nodes.push(node_id);
+    fn mark_node(&mut self, node_id: Option<NodeId>, flags: InteractionDirtyFlags) {
+        if let Some(node_id) = node_id {
+            if !self.dirty.nodes.contains(&node_id) {
+                self.dirty.nodes.push(node_id);
+            }
+            self.dirty.flags.insert(flags);
         }
     }
 }
@@ -392,11 +585,26 @@ mod tests {
         let (_root, focus_id, scroll_id) = tree();
         let mut state = InteractionState::default();
         let mut transaction = state.begin();
-        transaction.focus(Some(focus_id), true);
-        transaction.capture_pointer(Some(PressOrigin {
-            node_id: focus_id,
-            button: 0x110,
-        }));
+        assert_eq!(
+            transaction.focus(Some(focus_id), true),
+            FocusDecision::Changed {
+                before: None,
+                after: Some(focus_id),
+            }
+        );
+        assert_eq!(
+            transaction.capture_pointer(Some(PressOrigin {
+                node_id: focus_id,
+                button: 0x110,
+            })),
+            PointerCaptureDecision::Changed {
+                before: None,
+                after: Some(PressOrigin {
+                    node_id: focus_id,
+                    button: 0x110,
+                }),
+            }
+        );
         assert_eq!(
             transaction.claim_gesture(focus_id, GestureKind::Swipe),
             OwnershipDecision::Acquired
@@ -439,6 +647,16 @@ mod tests {
         );
         assert!(delta.invalidation.contains(InteractionInvalidation::SCROLL));
         assert_eq!(delta.changed_nodes, vec![focus_id, scroll_id]);
+        assert_eq!(delta.dirty.nodes, vec![focus_id, scroll_id]);
+        assert!(delta.dirty.contains(InteractionDirtyFlags::STYLE));
+        assert!(delta.dirty.contains(InteractionDirtyFlags::PAINT));
+        assert!(delta.dirty.contains(InteractionDirtyFlags::ACCESSIBILITY));
+        assert_eq!(delta.focus_visible_before, None);
+        assert_eq!(delta.focus_visible_after, Some(focus_id));
+        assert!(delta.decisions.iter().any(|decision| matches!(
+            decision,
+            InteractionDecision::Focus(FocusDecision::Changed { .. })
+        )));
     }
 
     #[test]
@@ -464,6 +682,11 @@ mod tests {
         );
         let delta = competing.commit(&mut state);
         assert!(!delta.changed());
+        assert!(delta.dirty.is_empty());
+        assert!(delta.decisions.iter().all(|decision| matches!(
+            decision,
+            InteractionDecision::Ownership(OwnershipDecision::Rejected)
+        )));
         assert_eq!(state.gesture_owner(), Some((first_id, GestureKind::Pinch)));
         assert_eq!(
             state.scroll_owner().map(|value| value.node_id),
@@ -504,5 +727,55 @@ mod tests {
                 .invalidation
                 .contains(InteractionInvalidation::PRESS_ORIGIN)
         );
+        assert!(delta.dirty.contains(InteractionDirtyFlags::STYLE));
+        assert!(delta.dirty.contains(InteractionDirtyFlags::ACCESSIBILITY));
+    }
+
+    #[test]
+    fn repeated_transitions_are_typed_noops_without_dirty_output() {
+        let (_root, focus_id, _scroll_id) = tree();
+        let mut state = InteractionState::default();
+        let mut initial = state.begin();
+        initial.focus(Some(focus_id), true);
+        initial.commit(&mut state);
+
+        let mut transaction = state.begin();
+        assert_eq!(
+            transaction.focus(Some(focus_id), true),
+            FocusDecision::Retained
+        );
+        assert_eq!(
+            transaction.capture_pointer(None),
+            PointerCaptureDecision::Retained
+        );
+        let delta = transaction.commit(&mut state);
+
+        assert!(!delta.changed());
+        assert!(delta.dirty.is_empty());
+        assert!(delta.invalidation.is_empty());
+        assert_eq!(delta.focus_visible_after, Some(focus_id));
+    }
+
+    #[test]
+    fn an_undone_transition_does_not_publish_speculative_dirty_output() {
+        let (_root, focus_id, _scroll_id) = tree();
+        let mut state = InteractionState::default();
+        let mut transaction = state.begin();
+        assert_eq!(
+            transaction.claim_gesture(focus_id, GestureKind::Swipe),
+            OwnershipDecision::Acquired
+        );
+        assert_eq!(
+            transaction.release_gesture(None),
+            OwnershipDecision::Released
+        );
+        let delta = transaction.commit(&mut state);
+
+        assert_eq!(state.gesture_owner(), None);
+        assert_eq!(state.revision(), 0);
+        assert!(!delta.changed());
+        assert!(delta.dirty.is_empty());
+        assert!(delta.invalidation.is_empty());
+        assert_eq!(delta.decisions.len(), 2);
     }
 }

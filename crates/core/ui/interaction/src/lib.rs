@@ -27,8 +27,9 @@ pub use scroll::{
     scroll_into_view_offsets, scroll_limits,
 };
 pub use transaction::{
-    GestureKind, InteractionDelta, InteractionInvalidation, InteractionState,
-    InteractionTransaction, OwnershipDecision, PressOrigin, ScrollOwner,
+    FocusDecision, GestureKind, InteractionDecision, InteractionDelta, InteractionDirty,
+    InteractionDirtyFlags, InteractionInvalidation, InteractionState, InteractionTransaction,
+    OwnershipDecision, PointerCaptureDecision, PressOrigin, ScrollOwner,
 };
 
 pub type ContentBounds = (f32, f32, f32, f32);

@@ -8,8 +8,17 @@ impl FrontendSurfaceComponent {
         transaction: mesh_core_interaction::InteractionTransaction,
     ) -> InteractionDelta {
         let delta = transaction.commit(&mut self.interaction_state);
-        if delta.changed() {
+        if delta
+            .dirty
+            .contains(mesh_core_interaction::InteractionDirtyFlags::STYLE)
+        {
             self.invalidate_interaction_restyle();
+        }
+        if delta
+            .dirty
+            .contains(mesh_core_interaction::InteractionDirtyFlags::PAINT)
+        {
+            self.invalidate_paint();
         }
         delta
     }

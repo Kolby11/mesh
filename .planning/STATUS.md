@@ -7,8 +7,8 @@
 Focus, pointer capture, press origin, gesture ownership, and scroll ownership
 now publish through one staged `mesh-core-interaction` transaction. The shell
 keeps key-based lookup caches for script/render compatibility, while ownership
-changes, eligibility reconciliation, and typed dirty-node output share one
-commit boundary.
+changes, eligibility reconciliation, typed decisions, categorized dirty-node
+output, and speculative rollback share one commit boundary.
 
 Keyframe playback now preserves active progress through pause/resume, including
 delay, direction, iteration boundaries, and finite completion state.
@@ -38,8 +38,8 @@ through shell animation state into the core and tooltip samplers.
 
 ## Next
 
-Keep interaction policy in a renderer-neutral frame/state-machine contract with
-typed decisions and dirty outputs (`docs/BACKLOG.md`).
+Implement `box-shadow` parsing with structured errors or reject it before the
+public animation API (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 
