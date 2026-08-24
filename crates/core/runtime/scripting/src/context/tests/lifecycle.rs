@@ -68,6 +68,56 @@ end
 }
 
 #[test]
+fn lifecycle_self_meta_keeps_module_component_instance_and_generation_distinct() {
+    let mut ctx = ScriptContext::new_for_instance(
+        "@mesh/module",
+        "@mesh/component",
+        "@mesh/component#one",
+        CapabilitySet::new(),
+    )
+    .unwrap();
+    ctx.load_script(
+        r#"
+function init(self)
+    module_id = self.meta.module_id
+    component_id = self.meta.component_id
+    instance_id = self.meta.instance_id
+    diagnostics_id = self.meta.diagnostics_id
+    generation = self.meta.generation
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+
+    assert_eq!(
+        ctx.state.get("module_id"),
+        Some(serde_json::json!("@mesh/module"))
+    );
+    assert_eq!(
+        ctx.state.get("component_id"),
+        Some(serde_json::json!("@mesh/component"))
+    );
+    assert_eq!(
+        ctx.state.get("instance_id"),
+        Some(serde_json::json!("@mesh/component#one"))
+    );
+    assert_eq!(
+        ctx.state.get("diagnostics_id"),
+        Some(serde_json::json!(
+            "@mesh/module:@mesh/component:@mesh/component#one"
+        ))
+    );
+    assert!(
+        ctx.state
+            .get("generation")
+            .and_then(|value| value.as_u64())
+            .is_some_and(|generation| generation > 0)
+    );
+}
+
+#[test]
 fn lifecycle_self_storage_supports_json_values_snapshot_and_diagnostics() {
     let caps = CapabilitySet::new();
     let mut ctx = ScriptContext::new("@mesh/storage-component", caps).unwrap();

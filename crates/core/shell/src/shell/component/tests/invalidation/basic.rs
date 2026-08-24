@@ -1635,6 +1635,195 @@ fn source_reload_drops_stale_retained_tree_before_next_paint() {
 }
 
 #[test]
+fn source_reload_swaps_fresh_script_environment_and_preserves_storage() {
+    use crate::shell::component::catalog::FrontendCatalog;
+    use mesh_core_frontend::compile_frontend_module;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn write_source(module_dir: &std::path::Path, body: &str) {
+        std::fs::create_dir_all(module_dir.join("src")).unwrap();
+        std::fs::write(module_dir.join("src/main.mesh"), body).unwrap();
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let module_dir = temp.path();
+    let module_id = format!(
+        "@test/fresh-reload-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let manifest = minimal_test_manifest(&module_id);
+    write_source(
+        module_dir,
+        r#"<template><text content="before" /></template>
+<script lang="luau">
+legacy_global = "before"
+
+function legacy_handler()
+end
+
+function init(self)
+    self.storage.reload_count = (self.storage.reload_count or 0) + 1
+    storage_count = self.storage.reload_count
+end
+</script>
+"#,
+    );
+
+    let compiled = compile_frontend_module(&manifest, module_dir).unwrap();
+    let catalog = FrontendCatalog {
+        modules: Default::default(),
+        diagnostics: Default::default(),
+        extension_point_contributions: Default::default(),
+        extension_point_entries: Default::default(),
+        node_slot_placements: Default::default(),
+    };
+    let mut component = FrontendSurfaceComponent::new(
+        compiled,
+        module_dir.to_path_buf(),
+        catalog,
+        mesh_core_service::InterfaceCatalog::default(),
+        test_settings_store(),
+    );
+    component
+        .mount(ComponentContext {
+            component_id: module_id.clone(),
+            surface_id: module_id.clone(),
+            diagnostics: Diagnostics::new(module_id),
+        })
+        .unwrap();
+    let initial_generation = component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get(component.root_instance_key())
+        .unwrap()
+        .script_ctx
+        .generation;
+
+    write_source(
+        module_dir,
+        r#"<template><text content="after" /></template>
+<script lang="luau">
+fresh_global = "after"
+
+function fresh_handler()
+end
+
+function init(self)
+    storage_count = self.storage.reload_count
+end
+</script>
+"#,
+    );
+
+    assert!(component.reload_source().unwrap());
+    let mut runtimes = component.runtimes.lock().unwrap();
+    let runtime = runtimes.get_mut(component.root_instance_key()).unwrap();
+    assert_eq!(
+        runtime.script_ctx.state().get("fresh_global"),
+        Some(serde_json::json!("after"))
+    );
+    assert_ne!(runtime.script_ctx.generation, initial_generation);
+    assert_eq!(runtime.script_ctx.state().get("legacy_global"), None);
+    assert_eq!(
+        runtime.script_ctx.state().get("storage_count"),
+        Some(serde_json::json!(1))
+    );
+    assert!(!runtime.script_ctx.has_handler("legacy_handler"));
+    assert!(runtime.script_ctx.has_handler("fresh_handler"));
+}
+
+#[test]
+fn failed_source_reload_restores_the_last_good_runtime() {
+    use crate::shell::component::catalog::FrontendCatalog;
+    use mesh_core_frontend::compile_frontend_module;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn write_source(module_dir: &std::path::Path, body: &str) {
+        std::fs::create_dir_all(module_dir.join("src")).unwrap();
+        std::fs::write(module_dir.join("src/main.mesh"), body).unwrap();
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let module_dir = temp.path();
+    let module_id = format!(
+        "@test/rollback-reload-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let manifest = minimal_test_manifest(&module_id);
+    write_source(
+        module_dir,
+        r#"<template><text content="stable" /></template>
+<script lang="luau">
+stable_global = "before"
+
+function stable_handler()
+    stable_global = "still-active"
+end
+</script>
+"#,
+    );
+
+    let compiled = compile_frontend_module(&manifest, module_dir).unwrap();
+    let catalog = FrontendCatalog {
+        modules: Default::default(),
+        diagnostics: Default::default(),
+        extension_point_contributions: Default::default(),
+        extension_point_entries: Default::default(),
+        node_slot_placements: Default::default(),
+    };
+    let mut component = FrontendSurfaceComponent::new(
+        compiled,
+        module_dir.to_path_buf(),
+        catalog,
+        mesh_core_service::InterfaceCatalog::default(),
+        test_settings_store(),
+    );
+    component
+        .mount(ComponentContext {
+            component_id: module_id.clone(),
+            surface_id: module_id.clone(),
+            diagnostics: Diagnostics::new(module_id),
+        })
+        .unwrap();
+    let initial_generation = component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get(component.root_instance_key())
+        .unwrap()
+        .script_ctx
+        .generation;
+
+    write_source(
+        module_dir,
+        r#"<template><text content="broken" /></template>
+<script lang="luau">
+function init()
+    error("candidate initialization failed")
+end
+</script>
+"#,
+    );
+
+    assert!(component.reload_source().is_err());
+    let mut runtimes = component.runtimes.lock().unwrap();
+    let runtime = runtimes.get_mut(component.root_instance_key()).unwrap();
+    assert_eq!(
+        runtime.script_ctx.state().get("stable_global"),
+        Some(serde_json::json!("before"))
+    );
+    assert_eq!(runtime.script_ctx.generation, initial_generation);
+    assert!(runtime.script_ctx.has_handler("stable_handler"));
+}
+
+#[test]
 fn frontend_lifecycle_hooks_run_around_source_reload() {
     use crate::shell::component::catalog::FrontendCatalog;
     use mesh_core_frontend::compile_frontend_module;

@@ -218,13 +218,20 @@ impl ScriptContext {
         let meta = self.lua().create_table().map_err(lua_err)?;
         meta.set("module_id", self.module_id.as_str())
             .map_err(lua_err)?;
-        meta.set("component_id", self.module_id.as_str())
+        meta.set("component_id", self.component_id.as_str())
             .map_err(lua_err)?;
         meta.set("kind", "frontend").map_err(lua_err)?;
-        meta.set("instance_id", self.module_id.as_str())
+        meta.set("instance_id", self.instance_id.as_str())
             .map_err(lua_err)?;
-        meta.set("diagnostics_id", self.module_id.as_str())
-            .map_err(lua_err)?;
+        meta.set(
+            "diagnostics_id",
+            format!(
+                "{}:{}:{}",
+                self.module_id, self.component_id, self.instance_id
+            ),
+        )
+        .map_err(lua_err)?;
+        meta.set("generation", self.generation).map_err(lua_err)?;
         current_self.set("meta", meta).map_err(lua_err)?;
         let storage_diagnostics = Arc::clone(&self.shared_diagnostics);
         let storage_module_id = self.module_id.clone();

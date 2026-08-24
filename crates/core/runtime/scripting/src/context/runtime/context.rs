@@ -21,6 +21,9 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+static NEXT_SCRIPT_CONTEXT_GENERATION: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(1);
+
 /// The immutable-at-read boundary shared by `mesh.locale.current()` and the
 /// module-scoped `mesh.i18n` library. The shell replaces this cell with one
 /// translation snapshot so a script cannot observe a new locale alongside an
@@ -50,9 +53,14 @@ impl Default for LocaleCell {
 #[derive(Debug)]
 pub struct ScriptContext {
     pub module_id: String,
+    /// Component identity owning this context. It is distinct from the
+    /// installed module so embedded components remain diagnosable.
+    pub component_id: String,
     /// Stable frontend instance identity used for correlated service-result
     /// delivery when several components share one Lua VM.
     pub instance_id: String,
+    /// Monotonic identity for this compiled environment generation.
+    pub generation: u64,
     pub capabilities: CapabilitySet,
     pub state: ScriptState,
     pub(super) optional_interfaces: Arc<HashSet<String>>,
@@ -280,12 +288,13 @@ impl ScriptContext {
         capabilities: CapabilitySet,
         storage_root: impl Into<PathBuf>,
     ) -> Result<Self, ScriptError> {
+        let generation = NEXT_SCRIPT_CONTEXT_GENERATION.fetch_add(1, Ordering::Relaxed);
         let realm_policy = pool::thread_policy();
         let storage =
             StorageManager::new_with_limit(storage_root.into(), realm_policy.storage_budget())
                 .open(StorageScope::frontend(
                     module_id.clone(),
-                    component_id,
+                    component_id.clone(),
                     instance_id.clone(),
                 ));
         let storage_diagnostics = storage
@@ -301,7 +310,9 @@ impl ScriptContext {
             .collect();
         Ok(Self {
             module_id,
+            component_id,
             instance_id,
+            generation,
             capabilities,
             state: ScriptState::new(),
             optional_interfaces: Arc::new(HashSet::new()),

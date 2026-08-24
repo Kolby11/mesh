@@ -428,13 +428,14 @@ impl FrontendCatalogHandle {
         module_id: &str,
         manifest: &Manifest,
         module_dir: &Path,
-    ) -> Result<(), ShellRunError> {
+    ) -> Result<(FrontendCatalogState, FrontendCatalogState), ShellRunError> {
         let previous = self.snapshot();
         let catalog = previous
             .catalog
             .reload_module(module_id, manifest, module_dir)?;
         self.replace(catalog, Some(module_id));
-        Ok(())
+        let published = self.snapshot();
+        Ok((previous, published))
     }
 }
 

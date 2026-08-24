@@ -1352,15 +1352,18 @@ impl ShellComponent for FrontendSurfaceComponent {
     fn reload_source(&mut self) -> Result<bool, ComponentError> {
         let manifest = self.compiled.manifest.clone();
         let component_id = self.id().to_string();
-        self.frontend_catalog_handle
+        let previous_compiled = self.compiled.clone();
+        let previous_frontend_catalog = self.frontend_catalog.clone();
+        let previous_selective_service_build_supported = self.selective_service_build_supported;
+        let previous_element_metric_usage = self.element_metric_usage;
+        let (previous_catalog_state, published_catalog_state) = self
+            .frontend_catalog_handle
             .reload_module(&component_id, &manifest, &self.module_dir)
             .map_err(|err| ComponentError::Failed {
                 component_id: component_id.clone(),
                 message: format!("frontend recompile failed: {err}"),
             })?;
-        let recompiled = self
-            .frontend_catalog_handle
-            .snapshot()
+        let recompiled = published_catalog_state
             .catalog
             .module(&component_id)
             .map(|entry| entry.compiled.clone())
@@ -1369,20 +1372,49 @@ impl ShellComponent for FrontendSurfaceComponent {
                 message: "frontend recompile omitted the primary catalog entry".into(),
             })?;
 
+        let (previous_runtimes, unmount_error) = self.prepare_runtimes_for_reload();
+        if let Some(error) = unmount_error {
+            self.frontend_catalog_handle
+                .restore_if_current(published_catalog_state.version, previous_catalog_state);
+            self.restore_runtimes_after_reload(previous_runtimes);
+            return Err(error);
+        }
+
         self.compiled = recompiled;
         self.selective_service_build_supported = self.compiled.supports_selective_service_build();
         self.element_metric_usage = element_metric_usage(&self.compiled);
-        self.unmount_runtimes()?;
-        self.frontend_catalog_changed();
+        // Let the candidate runtime resolve embedded roots from the candidate
+        // catalog, but keep the published catalog generation private until the
+        // fresh environment has initialized successfully.
+        self.frontend_catalog = published_catalog_state.catalog.clone();
+        let replacement =
+            self.create_runtime(self.root_instance_key(), &self.compiled, &HashMap::new());
+        let replacement = match replacement {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                self.compiled = previous_compiled;
+                self.frontend_catalog = previous_frontend_catalog;
+                self.selective_service_build_supported = previous_selective_service_build_supported;
+                self.element_metric_usage = previous_element_metric_usage;
+                self.frontend_catalog_handle
+                    .restore_if_current(published_catalog_state.version, previous_catalog_state);
+                self.restore_runtimes_after_reload(previous_runtimes);
+                return Err(error);
+            }
+        };
+
         self.clear_runtime_generation_index();
-        if let Err(error) = self.init_root_runtime() {
-            let message = self.record_frontend_runtime_issue(
-                "replacement initialization",
-                self.root_instance_key(),
-                &error,
-            );
-            *self.runtime_failure.borrow_mut() = Some(message);
-        }
+        self.frontend_catalog_changed();
+        let generation = replacement.script_ctx.state().mutation_generation();
+        self.runtimes.lock().unwrap().insert(
+            self.instance_keys
+                .borrow_mut()
+                .intern(self.root_instance_key()),
+            replacement,
+        );
+        self.register_runtime_generation(self.root_instance_key(), generation);
+        self.runtime_failure.borrow_mut().take();
+        self.resolve_frontend_runtime_issue("replacement initialization", self.root_instance_key());
         self.render_hooks_pending = true;
         self.invalidate_script_state();
         // Prepared local-component rules own cloned selectors and declarations

@@ -119,8 +119,8 @@ source of truth.
 
 ## Next
 
-Compile and swap a fresh Luau environment on reload, preserving only explicit
-durable storage (`docs/BACKLOG.md`).
+Stage backend top-level execution so host side effects cannot escape a failed
+`start(self)` (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

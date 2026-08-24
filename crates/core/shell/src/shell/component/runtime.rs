@@ -106,11 +106,15 @@ impl FrontendSurfaceComponent {
         Ok(())
     }
 
-    /// Run authored `unmount` hooks for every live runtime, then remove the
-    /// runtime map. Taking the map first makes this safe for replacement and
-    /// teardown paths and guarantees that one failing hook cannot skip later
-    /// runtimes.
-    pub(super) fn unmount_runtimes(&mut self) -> Result<(), ComponentError> {
+    /// Run authored `unmount` hooks for every live runtime and return the
+    /// detached map. Reload uses the returned map as a rollback candidate until
+    /// the replacement environment has initialized successfully.
+    pub(super) fn prepare_runtimes_for_reload(
+        &mut self,
+    ) -> (
+        HashMap<Arc<str>, EmbeddedFrontendRuntime>,
+        Option<ComponentError>,
+    ) {
         let runtimes = std::mem::take(&mut *self.runtimes.lock().unwrap());
         let mut runtimes = runtimes.into_iter().collect::<Vec<_>>();
         // Embedded children are torn down before their parents, while the
@@ -121,10 +125,8 @@ impl FrontendSurfaceComponent {
         });
 
         let mut first_error = None;
-        for (_, mut runtime) in runtimes {
-            if let Err(error) =
-                Self::dispatch_runtime_hook(&self.diagnostics, &mut runtime, "unmount")
-            {
+        for (_, runtime) in &mut runtimes {
+            if let Err(error) = Self::dispatch_runtime_hook(&self.diagnostics, runtime, "unmount") {
                 first_error.get_or_insert(error);
             }
             // Lifecycle side channels cannot be applied after the surface is
@@ -132,6 +134,23 @@ impl FrontendSurfaceComponent {
             runtime.script_ctx.drain_published_events();
             runtime.script_ctx.drain_element_actions();
         }
+        (runtimes.into_iter().collect(), first_error)
+    }
+
+    pub(super) fn restore_runtimes_after_reload(
+        &mut self,
+        runtimes: HashMap<Arc<str>, EmbeddedFrontendRuntime>,
+    ) {
+        *self.runtimes.lock().unwrap() = runtimes;
+        self.rebuild_runtime_generation_index();
+    }
+
+    /// Run authored `unmount` hooks for every live runtime, then remove the
+    /// runtime map. Taking the map first makes this safe for replacement and
+    /// teardown paths and guarantees that one failing hook cannot skip later
+    /// runtimes.
+    pub(super) fn unmount_runtimes(&mut self) -> Result<(), ComponentError> {
+        let (_runtimes, first_error) = self.prepare_runtimes_for_reload();
         self.clear_runtime_generation_index();
         if let Some(error) = first_error {
             Err(error)
