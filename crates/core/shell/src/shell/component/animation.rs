@@ -353,31 +353,26 @@ impl FrontendSurfaceComponent {
                 .insert(animation_key.clone(), render_rule.clone());
 
             let existing = self.keyframe_animations.get(&animation_key).cloned();
-            let paused_at = match (&existing, animation_style.play_state) {
-                (Some(active), AnimationPlayState::Paused)
-                    if active.play_state == AnimationPlayState::Paused =>
-                {
-                    active.paused_at
-                }
-                (Some(_), AnimationPlayState::Paused) => Some(now),
-                (None, AnimationPlayState::Paused) => Some(now),
-                _ => None,
-            };
-
-            let active = ActiveKeyframeAnimation {
+            let mut active = existing.unwrap_or(ActiveKeyframeAnimation {
                 rule_name: animation_key.clone(),
-                started_at: existing
-                    .map(|animation| animation.started_at)
-                    .unwrap_or(now),
-                duration: Duration::from_millis(u64::from(animation_style.duration_ms)),
-                delay: Duration::from_millis(u64::from(animation_style.delay_ms)),
+                started_at: now,
+                duration: Duration::ZERO,
+                delay: Duration::ZERO,
                 easing: animation_style.easing.into(),
                 iteration_count: animation_style.iteration_count,
                 direction: animation_style.direction,
                 fill_mode: animation_style.fill_mode,
-                play_state: animation_style.play_state,
-                paused_at,
-            };
+                play_state: AnimationPlayState::Running,
+                paused_at: None,
+            });
+            active.rule_name = animation_key.clone();
+            active.duration = Duration::from_millis(u64::from(animation_style.duration_ms));
+            active.delay = Duration::from_millis(u64::from(animation_style.delay_ms));
+            active.easing = animation_style.easing.into();
+            active.iteration_count = animation_style.iteration_count;
+            active.direction = animation_style.direction;
+            active.fill_mode = animation_style.fill_mode;
+            active.set_play_state(animation_style.play_state, now);
             self.keyframe_animations
                 .insert(animation_key.clone(), active.clone());
 

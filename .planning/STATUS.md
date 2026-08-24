@@ -4,7 +4,10 @@
 
 ## Now
 
-Activation now revalidates live disabled/inert eligibility for descendants,
+Keyframe playback now preserves active progress through pause/resume, including
+delay, direction, iteration boundaries, and finite completion state.
+
+Activation revalidates live disabled/inert eligibility for descendants,
 captured pointer targets, focused keyboard targets, and synthesized activation
 routes before dispatching handlers.
 
@@ -19,8 +22,8 @@ the canonical generated element schema landed 2026-08-23 — see
 
 ## Next
 
-Preserve keyframe progress across pause/resume and iteration-boundary changes
-(`docs/BACKLOG.md`).
+Add a `MotionPolicy` snapshot for reduced motion across transitions, keyframes,
+scrolling, inertia, tooltips, and surfaces (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

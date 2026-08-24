@@ -69,6 +69,35 @@ pub struct ActiveKeyframeAnimation {
 }
 
 impl ActiveKeyframeAnimation {
+    /// Change playback state without changing the animation's active progress.
+    ///
+    /// A paused animation keeps its original timeline origin so that iteration
+    /// and direction calculations remain stable. Resuming moves that origin
+    /// forward by the time spent paused instead of counting the pause as active
+    /// playback time.
+    pub fn set_play_state(&mut self, play_state: AnimationPlayState, now: Instant) {
+        match (self.play_state, play_state) {
+            (AnimationPlayState::Running, AnimationPlayState::Paused) => {
+                self.paused_at = Some(now);
+            }
+            (AnimationPlayState::Paused, AnimationPlayState::Running) => {
+                if let Some(paused_at) = self.paused_at {
+                    let paused_duration = now.saturating_duration_since(paused_at);
+                    self.started_at = self
+                        .started_at
+                        .checked_add(paused_duration)
+                        .unwrap_or(self.started_at);
+                }
+                self.paused_at = None;
+            }
+            (AnimationPlayState::Running, AnimationPlayState::Running) => {
+                self.paused_at = None;
+            }
+            (AnimationPlayState::Paused, AnimationPlayState::Paused) => {}
+        }
+        self.play_state = play_state;
+    }
+
     /// Resolve the displayed style at `now`.
     pub fn current(
         &self,
@@ -149,9 +178,9 @@ impl ActiveKeyframeAnimation {
     fn total_active_duration(&self) -> Option<Duration> {
         match self.iteration_count {
             AnimationIterationCount::Infinite => None,
-            AnimationIterationCount::Number(count) => Some(Duration::from_secs_f32(
-                self.duration.as_secs_f32() * count as f32,
-            )),
+            AnimationIterationCount::Number(count) => {
+                Some(self.duration.checked_mul(count).unwrap_or(Duration::MAX))
+            }
         }
     }
 
@@ -160,11 +189,12 @@ impl ActiveKeyframeAnimation {
             return self.direct_progress(1.0, 0);
         }
 
-        let duration_secs = self.duration.as_secs_f32();
-        let elapsed_secs = active_elapsed.as_secs_f32();
-        let iteration_index = (elapsed_secs / duration_secs).floor() as u32;
-        let iteration_elapsed = (elapsed_secs % duration_secs) / duration_secs;
-        self.direct_progress(iteration_elapsed.clamp(0.0, 1.0), iteration_index)
+        let duration_nanos = self.duration.as_nanos();
+        let iteration_index =
+            (active_elapsed.as_nanos() / duration_nanos).min(u128::from(u32::MAX)) as u32;
+        let iteration_elapsed_nanos = active_elapsed.as_nanos() % duration_nanos;
+        let progress = iteration_elapsed_nanos as f64 / duration_nanos as f64;
+        self.direct_progress((progress.clamp(0.0, 1.0)) as f32, iteration_index)
     }
 
     fn final_progress(&self) -> f32 {
@@ -441,5 +471,64 @@ mod tests {
             .expect("still paused frame");
         assert_eq!(first.opacity, later.opacity);
         assert_eq!(first.transform.translate_x, later.transform.translate_x);
+    }
+
+    #[test]
+    fn resuming_preserves_progress_after_a_long_pause() {
+        let registry = registry();
+        let mut animation = animation();
+        animation.iteration_count = AnimationIterationCount::Number(3);
+        animation.direction = AnimationDirection::Alternate;
+        let started_at = animation.started_at;
+        let pause_at = started_at + Duration::from_millis(1250);
+
+        animation.set_play_state(AnimationPlayState::Paused, pause_at);
+        let paused = animation
+            .current(&registry, style(0.0, 0.0), pause_at)
+            .expect("paused frame");
+        assert!(!animation.finished(pause_at + Duration::from_secs(60)));
+
+        let resume_at = pause_at + Duration::from_secs(60);
+        animation.set_play_state(AnimationPlayState::Running, resume_at);
+        assert_eq!(animation.started_at, started_at + Duration::from_secs(60));
+        assert_eq!(animation.paused_at, None);
+
+        let resumed = animation
+            .current(&registry, style(0.0, 0.0), resume_at)
+            .expect("resumed frame");
+        assert_eq!(resumed.opacity, paused.opacity);
+        assert_eq!(resumed.transform.translate_x, paused.transform.translate_x);
+        assert!(!animation.finished(resume_at));
+    }
+
+    #[test]
+    fn resuming_preserves_progress_at_iteration_boundaries() {
+        let registry = registry();
+        for direction in [
+            AnimationDirection::Normal,
+            AnimationDirection::Reverse,
+            AnimationDirection::Alternate,
+            AnimationDirection::AlternateReverse,
+        ] {
+            for boundary in [Duration::from_secs(1), Duration::from_secs(2)] {
+                let mut animation = animation();
+                animation.iteration_count = AnimationIterationCount::Infinite;
+                animation.direction = direction;
+                let pause_at = animation.started_at + boundary;
+                animation.set_play_state(AnimationPlayState::Paused, pause_at);
+                let paused = animation
+                    .current(&registry, style(0.0, 0.0), pause_at)
+                    .expect("paused iteration-boundary frame");
+
+                let resume_at = pause_at + Duration::from_secs(30);
+                animation.set_play_state(AnimationPlayState::Running, resume_at);
+                let resumed = animation
+                    .current(&registry, style(0.0, 0.0), resume_at)
+                    .expect("resumed iteration-boundary frame");
+
+                assert_eq!(resumed.opacity, paused.opacity);
+                assert_eq!(resumed.transform.translate_x, paused.transform.translate_x);
+            }
+        }
     }
 }

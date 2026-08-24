@@ -327,6 +327,83 @@ end
 }
 
 #[test]
+fn keyframe_pause_resume_keeps_progress_across_an_iteration_boundary() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box class="panel" /></template>
+<style>
+.panel {
+  animation: pulse 1000ms linear infinite alternate running;
+}
+@keyframes pulse {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 40);
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
+
+    let key = "root/0::pulse".to_string();
+    let timeline_start = Instant::now()
+        .checked_sub(Duration::from_millis(1250))
+        .expect("monotonic instant subtraction");
+    component
+        .keyframe_animations
+        .get_mut(&key)
+        .expect("active keyframe animation")
+        .started_at = timeline_start;
+
+    let mut paused_tree = component.build_tree(&theme, 120, 40);
+    paused_tree.children[0].computed_style.animations[0].play_state =
+        mesh_core_elements::style::AnimationPlayState::Paused;
+    component.apply_style_animations(&mut paused_tree);
+    let paused_opacity = paused_tree.children[0].computed_style.opacity;
+    assert!(
+        component
+            .keyframe_animations
+            .get(&key)
+            .and_then(|animation| animation.paused_at)
+            .is_some()
+    );
+
+    let synthetic_pause_start = Instant::now()
+        .checked_sub(Duration::from_secs(30))
+        .expect("monotonic instant subtraction");
+    let synthetic_timeline_start = synthetic_pause_start
+        .checked_sub(Duration::from_millis(1250))
+        .expect("monotonic instant subtraction");
+    let paused_animation = component
+        .keyframe_animations
+        .get_mut(&key)
+        .expect("paused keyframe animation");
+    paused_animation.started_at = synthetic_timeline_start;
+    paused_animation.paused_at = Some(synthetic_pause_start);
+
+    let mut resumed_tree = component.build_tree(&theme, 120, 40);
+    resumed_tree.children[0].computed_style.animations[0].play_state =
+        mesh_core_elements::style::AnimationPlayState::Running;
+    component.apply_style_animations(&mut resumed_tree);
+    let resumed = component
+        .keyframe_animations
+        .get(&key)
+        .expect("resumed keyframe animation");
+
+    assert!(
+        resumed
+            .started_at
+            .saturating_duration_since(synthetic_timeline_start)
+            >= Duration::from_secs(29)
+    );
+    assert_eq!(resumed.paused_at, None);
+    assert!((resumed_tree.children[0].computed_style.opacity - paused_opacity).abs() < 0.01);
+}
+
+#[test]
 fn keyframe_animation_finite_completion_stops_render_requests() {
     let mut component = test_frontend_component(
         r#"
