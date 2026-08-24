@@ -32,21 +32,20 @@ shell.
 
 ## Codex implementation loop
 
-`./codex-until-limit.sh` runs one backlog item per turn and creates a commit
-only after the item is complete:
+`./scripts/codex-backlog-runner.sh` runs one backlog item per turn and requires
+the item to be complete before accepting the turn:
 
 ```bash
-./codex-until-limit.sh --once
-./codex-until-limit.sh --mode backlog --once
+./scripts/codex-backlog-runner.sh --once
+./scripts/codex-backlog-runner.sh --max-features 5
 ```
 
 The loop selects the next unchecked `docs/BACKLOG.md` item automatically. Its
 commit gate requires that exactly one unchecked item is removed, the selected
 item is absent from the resulting commit, and a required `.planning/log/` record
-was added. The outer loop refuses to create a commit for partial work and stops
-for review. The loop keeps its operational log and context handoff outside
-commits; set `CODEX_LOOP_LOG` or `CODEX_HANDOFF_FILE` to override those paths. A
-clean worktree is required unless `--allow-dirty` is explicitly supplied.
+was added. Any additional worktree changes are preserved in a separate recovery
+commit after the backlog commit passes validation. A clean worktree is required
+unless `--allow-dirty` is explicitly supplied.
 
 ## Code style
 

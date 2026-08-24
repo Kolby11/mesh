@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 
-# Run one Codex turn per backlog item. Every successful turn must leave exactly
-# one new commit on main, remove its backlog item, and add the required log
-# record before the next item is attempted.
+# Run one Codex turn per backlog item. Every successful turn must leave one
+# validated backlog commit on main, remove its backlog item, and add the
+# required log record before the next item is attempted. Any additional
+# worktree changes are preserved in a separate recovery commit.
 
 set -Eeuo pipefail
 IFS=$'\n\t'
@@ -12,13 +13,15 @@ usage() {
 Usage: scripts/codex-backlog-runner.sh [options]
 
 Run Codex against the next unchecked item in docs/BACKLOG.md. The runner
-requires a clean main branch by default and exactly one new commit per item.
+requires a clean main branch by default and exactly one validated backlog
+commit per item; extra changes are committed separately after validation.
 
 Options:
   --dry-run                 Show the next item and configuration without running Codex
   --max-features N          Stop after N successful items (default: unlimited)
   --once                    Alias for --max-features 1
-  --allow-dirty             Resume an interrupted turn with existing changes
+  --allow-dirty             Resume an interrupted turn with existing changes;
+                            preserve them in a separate commit after success
   -h, --help                Show this help
 
 Environment:
@@ -429,17 +432,30 @@ read_final_response() {
     ' "$1"
 }
 
+commit_extra_worktree_changes() {
+    local status
+
+    status=$(git -C "$ROOT" status --short)
+    [[ -n "$status" ]] || return 0
+
+    printf 'Preserving additional worktree changes in a separate commit:\n%s\n' \
+        "$status" >&2
+    git -C "$ROOT" add -A
+    if git -C "$ROOT" diff --cached --quiet; then
+        return 0
+    fi
+
+    git -C "$ROOT" commit -m "codex: preserve additional worktree changes" >&2
+    git -C "$ROOT" rev-parse HEAD
+}
+
 verify_feature_commit() {
     local before=$1
     local marker=$2
-    local after commit_count parent_count
-
-    if [[ -n "$(git -C "$ROOT" status --porcelain)" ]]; then
-        git -C "$ROOT" status --short >&2
-        die "Codex left uncommitted changes after its turn"
-    fi
+    local after commit_count parent_count primary_commit extra_commit
 
     after=$(git -C "$ROOT" rev-parse HEAD)
+    primary_commit=$after
     git -C "$ROOT" merge-base --is-ancestor "$before" "$after" || die "history was rewritten during the turn"
     commit_count=$(git -C "$ROOT" rev-list --count "$before..$after")
     [[ "$commit_count" == 1 ]] || die "expected exactly one new commit, found $commit_count"
@@ -457,7 +473,14 @@ verify_feature_commit() {
         die "feature commit did not add the required planning log record"
     fi
 
-    printf '%s\n' "$after"
+    if [[ -n "$(git -C "$ROOT" status --porcelain)" ]]; then
+        extra_commit=$(commit_extra_worktree_changes)
+        if [[ -n "$extra_commit" ]]; then
+            printf 'Additional worktree changes committed as %s\n' "$extra_commit" >&2
+        fi
+    fi
+
+    printf '%s\n' "$primary_commit"
 }
 
 while :; do
