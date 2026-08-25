@@ -11,9 +11,7 @@ use crate::paint_input::{PaintInput, PaintPrimitiveSlot};
 use super::build::*;
 use super::types::*;
 
-pub(super) fn compute_batch_metrics(
-    entries: &[(DisplayListKey, DisplayListEntry)],
-) -> DisplayListMetrics {
+pub(super) fn compute_batch_metrics(entries: &[DisplayBatchMaterial]) -> DisplayListMetrics {
     let mut batch_count = 0u64;
     let mut batched_primitives = 0u64;
     let mut barrier_count = 0u64;
@@ -21,7 +19,7 @@ pub(super) fn compute_batch_metrics(
     let mut current_batch_signature: Option<u64> = None;
     let mut current_batch_len = 0u64;
 
-    for (_, entry) in entries {
+    for entry in entries {
         if let Some(reason) = entry.barrier {
             if current_batch_len > 1 {
                 batch_count = batch_count.saturating_add(1);

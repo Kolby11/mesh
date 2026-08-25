@@ -162,7 +162,7 @@ source of truth.
 
 ## Next
 
-Preserve release batch/barrier metrics in diagnostics and debug telemetry
+Validate caller lineage before trusting generation shortcuts
 (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups

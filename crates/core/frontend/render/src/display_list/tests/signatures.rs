@@ -184,9 +184,8 @@ fn display_entries_skip_batch_signature_for_barriers() {
     collect_display_entries(&text, 0.0, 0.0, Some(&mut out), None, &mut next);
 
     assert_eq!(out.len(), 1);
-    assert_eq!(out[0].0.slot, DisplayPrimitiveSlot::Text);
-    assert_eq!(out[0].1.barrier, Some(DisplayBatchBarrier::Text));
-    assert_eq!(out[0].1.batch_signature, 0);
+    assert_eq!(out[0].barrier, Some(DisplayBatchBarrier::Text));
+    assert_eq!(out[0].batch_signature, 0);
 }
 
 #[test]

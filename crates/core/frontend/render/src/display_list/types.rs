@@ -163,6 +163,12 @@ pub(super) enum DisplayBatchBarrier {
     MaterialChange,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct DisplayBatchMaterial {
+    pub(super) batch_signature: u64,
+    pub(super) barrier: Option<DisplayBatchBarrier>,
+}
+
 impl DisplayBatchBarrier {
     pub(super) fn record(self, counts: &mut DisplayBatchBarrierCounts) {
         match self {
@@ -191,8 +197,10 @@ pub struct RetainedDisplayList {
     pub(super) paint_origin: (u32, u32),
     pub(super) entries: HashMap<DisplayListKey, DisplayListEntry>,
     pub(super) subtrees: HashMap<NodeId, Arc<RetainedPaintSubtree>>,
-    #[cfg(debug_assertions)]
-    pub(super) ordered_entries_scratch: Vec<(DisplayListKey, DisplayListEntry)>,
+    /// Ordered material metadata retained so release metrics describe the
+    /// same batch/barrier stream as debug diagnostics without retaining full
+    /// display entries or keys.
+    pub(super) batch_entries_scratch: Vec<DisplayBatchMaterial>,
     pub(super) next_entries_scratch: HashMap<DisplayListKey, DisplayListEntry>,
     pub(super) next_subtrees_scratch: HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     pub(super) dirty_ancestors_scratch: HashSet<NodeId>,
@@ -232,8 +240,7 @@ impl Default for RetainedDisplayList {
             paint_origin: (0.0_f32.to_bits(), 0.0_f32.to_bits()),
             entries: HashMap::new(),
             subtrees: HashMap::new(),
-            #[cfg(debug_assertions)]
-            ordered_entries_scratch: Vec::new(),
+            batch_entries_scratch: Vec::new(),
             next_entries_scratch: HashMap::new(),
             next_subtrees_scratch: HashMap::new(),
             dirty_ancestors_scratch: HashSet::new(),

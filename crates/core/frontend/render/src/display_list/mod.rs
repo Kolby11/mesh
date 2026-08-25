@@ -252,20 +252,15 @@ impl RetainedDisplayList {
                 surface.height,
             );
 
-        #[cfg(debug_assertions)]
-        let mut ordered_entries = std::mem::take(&mut self.ordered_entries_scratch);
-        #[cfg(debug_assertions)]
-        ordered_entries.clear();
+        let mut batch_entries = std::mem::take(&mut self.batch_entries_scratch);
+        batch_entries.clear();
         let mut next = std::mem::take(&mut self.next_entries_scratch);
         next.clear();
         collect_display_entries(
             root,
             offset_x,
             offset_y,
-            #[cfg(debug_assertions)]
-            Some(&mut ordered_entries),
-            #[cfg(not(debug_assertions))]
-            None,
+            Some(&mut batch_entries),
             patch_sparse_entries.then_some(dirty_node_ids),
             &mut next,
         );
@@ -278,10 +273,9 @@ impl RetainedDisplayList {
         {
             next.clear();
             self.next_entries_scratch = next;
-            #[cfg(debug_assertions)]
             {
-                ordered_entries.clear();
-                self.ordered_entries_scratch = ordered_entries;
+                batch_entries.clear();
+                self.batch_entries_scratch = batch_entries;
             }
             return self.update_metrics_without_rebuild(
                 surface,
@@ -439,10 +433,7 @@ impl RetainedDisplayList {
         } else {
             0
         };
-        #[cfg(debug_assertions)]
-        let batch_metrics = compute_batch_metrics(&ordered_entries);
-        #[cfg(not(debug_assertions))]
-        let batch_metrics = DisplayListMetrics::default();
+        let batch_metrics = compute_batch_metrics(&batch_entries);
 
         if rebuilt > 0 || removed > 0 || force_full_damage || topology_changed || policy_changed {
             self.generation = self.generation.saturating_add(1);
@@ -458,10 +449,7 @@ impl RetainedDisplayList {
         let mut previous_subtrees = std::mem::replace(&mut self.subtrees, subtrees);
         previous_subtrees.clear();
         self.next_subtrees_scratch = previous_subtrees;
-        #[cfg(debug_assertions)]
-        {
-            self.ordered_entries_scratch = ordered_entries;
-        }
+        self.batch_entries_scratch = batch_entries;
         self.command_spans = command_spans;
         self.paint_commands = paint_commands;
         self.command_kinds = command_kinds;

@@ -152,14 +152,14 @@ pub(super) fn collect_display_entries(
     node: &WidgetNode,
     offset_x: f32,
     offset_y: f32,
-    mut ordered_entries: Option<&mut Vec<(DisplayListKey, DisplayListEntry)>>,
+    batch_entries: Option<&mut Vec<DisplayBatchMaterial>>,
     selected_node_ids: Option<&HashSet<NodeId>>,
     next: &mut HashMap<DisplayListKey, DisplayListEntry>,
 ) {
     collect_display_entries_with_transform(
         node,
         root_transform(offset_x, offset_y),
-        ordered_entries,
+        batch_entries,
         selected_node_ids,
         next,
     );
@@ -168,7 +168,7 @@ pub(super) fn collect_display_entries(
 fn collect_display_entries_with_transform(
     node: &WidgetNode,
     parent_transform: AffineTransform,
-    mut ordered_entries: Option<&mut Vec<(DisplayListKey, DisplayListEntry)>>,
+    mut batch_entries: Option<&mut Vec<DisplayBatchMaterial>>,
     selected_node_ids: Option<&HashSet<NodeId>>,
     next: &mut HashMap<DisplayListKey, DisplayListEntry>,
 ) {
@@ -181,9 +181,9 @@ fn collect_display_entries_with_transform(
     if let Some(bounds) = damage_rect_for_node_with_transform(node, world_transform) {
         let selected = selected_node_ids.is_none_or(|node_ids| node_ids.contains(&node.id));
         for_each_primitive_slot(node, |slot| {
-            // Debug batch metrics still need the full ordered stream. Release
-            // builds can avoid constructing signatures for unselected nodes.
-            if !selected && ordered_entries.is_none() {
+            // Batch metrics need the full ordered material stream. A caller
+            // that does not request metrics may still skip unselected nodes.
+            if !selected && batch_entries.is_none() {
                 return;
             }
             let key = DisplayListKey {
@@ -191,18 +191,25 @@ fn collect_display_entries_with_transform(
                 slot,
             };
             let barrier = batch_barrier(node, slot);
-            let entry = DisplayListEntry {
-                bounds,
-                signature: primitive_signature(node, slot),
-                batch_signature: barrier.map_or_else(|| batch_signature(node, slot), |_| 0),
-                barrier,
-            };
-            if let Some(entries) = ordered_entries.as_deref_mut() {
-                entries.push((key, entry));
+            let batch_signature = barrier.map_or_else(|| batch_signature(node, slot), |_| 0);
+            if let Some(entries) = batch_entries.as_deref_mut() {
+                entries.push(DisplayBatchMaterial {
+                    batch_signature,
+                    barrier,
+                });
             }
-            if selected {
-                next.insert(key, entry);
+            if !selected {
+                return;
             }
+            next.insert(
+                key,
+                DisplayListEntry {
+                    bounds,
+                    signature: primitive_signature(node, slot),
+                    batch_signature,
+                    barrier,
+                },
+            );
         });
     }
 
@@ -213,7 +220,7 @@ fn collect_display_entries_with_transform(
         collect_display_entries_with_transform(
             child,
             child_transform,
-            ordered_entries.as_deref_mut(),
+            batch_entries.as_deref_mut(),
             selected_node_ids,
             next,
         );

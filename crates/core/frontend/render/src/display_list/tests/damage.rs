@@ -326,6 +326,25 @@ fn display_list_records_batch_barriers() {
 }
 
 #[test]
+fn release_display_metrics_preserve_batches_and_barriers() {
+    let mut root = node(1, "row", 0.0, 0.0, 100.0, 20.0);
+    root.children.push(node(2, "box", 0.0, 0.0, 20.0, 20.0));
+    root.children.push(node(3, "box", 20.0, 0.0, 20.0, 20.0));
+    let mut text = node(4, "text", 40.0, 0.0, 20.0, 20.0);
+    text.computed_style.background_color.a = 0;
+    text.attributes.insert("content".into(), "release".into());
+    root.children.push(text);
+
+    let mut list = RetainedDisplayList::default();
+    let metrics = list.update(&root, 100, 20, false, false);
+
+    assert_eq!(metrics.batch_count, 1);
+    assert_eq!(metrics.batched_primitives, 3);
+    assert_eq!(metrics.barriers.text, 1);
+    assert_eq!(metrics.barrier_count, 1);
+}
+
+#[test]
 fn display_list_keeps_opaque_backgrounds_batchable_and_translucent_backgrounds_conservative() {
     let mut opaque_root = node(1, "row", 0.0, 0.0, 100.0, 20.0);
     opaque_root
@@ -643,25 +662,25 @@ fn display_entry_scratch_reuse_beats_fresh_allocations_benchmark() {
     let old_start = std::time::Instant::now();
     let mut old_total = 0usize;
     for _ in 0..iterations {
-        let mut ordered_entries = Vec::new();
+        let mut batch_entries = Vec::new();
         let mut next = HashMap::new();
-        collect_display_entries(&tree, 0.0, 0.0, Some(&mut ordered_entries), None, &mut next);
+        collect_display_entries(&tree, 0.0, 0.0, Some(&mut batch_entries), None, &mut next);
         old_total = old_total
-            .saturating_add(std::hint::black_box(ordered_entries.len()))
+            .saturating_add(std::hint::black_box(batch_entries.len()))
             .saturating_add(std::hint::black_box(next.len()));
     }
     let old_elapsed = old_start.elapsed();
 
     let new_start = std::time::Instant::now();
     let mut new_total = 0usize;
-    let mut ordered_entries = Vec::new();
+    let mut batch_entries = Vec::new();
     let mut next = HashMap::new();
     for _ in 0..iterations {
-        ordered_entries.clear();
+        batch_entries.clear();
         next.clear();
-        collect_display_entries(&tree, 0.0, 0.0, Some(&mut ordered_entries), None, &mut next);
+        collect_display_entries(&tree, 0.0, 0.0, Some(&mut batch_entries), None, &mut next);
         new_total = new_total
-            .saturating_add(std::hint::black_box(ordered_entries.len()))
+            .saturating_add(std::hint::black_box(batch_entries.len()))
             .saturating_add(std::hint::black_box(next.len()));
     }
     let new_elapsed = new_start.elapsed();
@@ -675,50 +694,6 @@ fn display_entry_scratch_reuse_beats_fresh_allocations_benchmark() {
         new_elapsed < old_elapsed,
         "scratch reuse should be faster than fresh allocations"
     );
-}
-
-// cargo test -p mesh-core-render --release -- release_entry_collection_skips_debug_ordered_sink --ignored --nocapture
-#[test]
-#[ignore = "release-only display-list debug sink microbenchmark"]
-fn release_entry_collection_skips_debug_ordered_sink() {
-    let tree = display_entry_benchmark_tree(120, 20);
-    let iterations = 2_000;
-
-    let old_started = std::time::Instant::now();
-    let mut old_total = 0_usize;
-    let mut ordered_entries = Vec::new();
-    let mut old_next = HashMap::new();
-    for _ in 0..iterations {
-        ordered_entries.clear();
-        old_next.clear();
-        collect_display_entries(
-            &tree,
-            0.0,
-            0.0,
-            Some(&mut ordered_entries),
-            None,
-            &mut old_next,
-        );
-        old_total = old_total.saturating_add(std::hint::black_box(old_next.len()));
-    }
-    let old_time = old_started.elapsed();
-
-    let new_started = std::time::Instant::now();
-    let mut new_total = 0_usize;
-    let mut new_next = HashMap::new();
-    for _ in 0..iterations {
-        new_next.clear();
-        collect_display_entries(&tree, 0.0, 0.0, None, None, &mut new_next);
-        new_total = new_total.saturating_add(std::hint::black_box(new_next.len()));
-    }
-    let new_time = new_started.elapsed();
-
-    eprintln!(
-        "display entry debug sink: ordered {old_time:?}; release sink omitted {new_time:?}; ratio {:.2}x; totals={old_total}/{new_total}",
-        old_time.as_secs_f64() / new_time.as_secs_f64()
-    );
-    assert_eq!(old_total, new_total);
-    assert!(new_time < old_time);
 }
 
 // cargo test -p mesh-core-render --release -- retained_effect_count_beats_command_scan --ignored --nocapture
