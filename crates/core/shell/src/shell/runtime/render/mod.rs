@@ -37,7 +37,12 @@ impl Shell {
         let icon_resolutions_ready = mesh_core_render::poll_icon_resolution_jobs();
         let icon_rasters_ready = mesh_core_render::poll_icon_raster_jobs();
         let glyph_rasters_ready = mesh_core_render::poll_glyph_raster_jobs();
-        if icon_resolutions_ready || icon_rasters_ready || glyph_rasters_ready {
+        let image_decodes_ready = mesh_core_render::poll_image_decode_jobs();
+        if icon_resolutions_ready
+            || icon_rasters_ready
+            || glyph_rasters_ready
+            || image_decodes_ready
+        {
             for runtime in &mut self.components {
                 runtime.component.request_paint();
             }

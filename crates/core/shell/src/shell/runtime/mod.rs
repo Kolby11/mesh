@@ -116,6 +116,7 @@ impl Shell {
         if mesh_core_render::icon_resolution_jobs_pending()
             || mesh_core_render::icon_raster_jobs_pending()
             || mesh_core_render::glyph_raster_jobs_pending()
+            || mesh_core_render::image_decode_jobs_pending()
         {
             return Duration::from_millis(1);
         }

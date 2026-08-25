@@ -162,8 +162,8 @@ source of truth.
 
 ## Next
 
-Move resource decode and rasterization off the frame thread through a bounded
-resource broker (`docs/BACKLOG.md`).
+Enforce byte- and dimension-based cache budgets for decoded assets, fonts,
+glyphs, text, Skia, PixelBuffer, and SHM allocations (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

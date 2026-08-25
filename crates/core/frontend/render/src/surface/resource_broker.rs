@@ -5,7 +5,7 @@ use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Arc, Mutex, OnceLock};
 
 const RESOURCE_BROKER_QUEUE_CAPACITY: usize = 128;
-const RESOURCE_BROKER_MAX_BYTES: usize = 32 * 1024 * 1024;
+const RESOURCE_BROKER_MAX_BYTES: usize = 64 * 1024 * 1024;
 
 type ResourceWork = Box<dyn FnOnce(ResourceBrokerContext) + Send + 'static>;
 type ResourceCancellation = Box<dyn FnOnce(ResourceByteReservation) + Send + 'static>;

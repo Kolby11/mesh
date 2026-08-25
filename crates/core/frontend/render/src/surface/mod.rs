@@ -76,6 +76,17 @@ pub fn glyph_raster_jobs_pending() -> bool {
     glyph::glyph_raster_jobs_pending()
 }
 
+/// Drain completed source-image decode jobs and report whether an image became
+/// available for the next paint.
+pub fn poll_image_decode_jobs() -> bool {
+    icon::poll_image_decode_jobs()
+}
+
+/// Report whether a source-image decode is still in flight.
+pub fn image_decode_jobs_pending() -> bool {
+    icon::image_decode_jobs_pending()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PaintCommandClass {

@@ -13,11 +13,15 @@ use mesh_core_elements::lru::ByteLruCache;
 use mesh_core_elements::lru::LruCache;
 use mesh_core_elements::style::Color;
 #[cfg(test)]
+use mesh_core_icon::MISSING_ICON_SVG;
+#[cfg(test)]
 use mesh_core_icon::resolve_icon_result;
-use mesh_core_icon::{IconResolution, MISSING_ICON_SVG, ResolvedTarget};
+use mesh_core_icon::{IconResolution, ResolvedTarget};
 use mesh_core_resources::{
     ResourceByteReservation, ResourceFingerprint, resource_fingerprint, resource_revision,
 };
+#[cfg(not(test))]
+use skia_safe::PaintStyle;
 use skia_safe::{
     AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images,
 };
@@ -62,6 +66,7 @@ pub(crate) enum CachedResourceOpacity {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum RasterSourceKind {
     File,
+    #[cfg(test)]
     MissingIcon,
 }
 
@@ -92,6 +97,13 @@ struct CachedImage {
     resource_revision: u64,
     freshness: FileFreshness,
     image: Arc<image::RgbaImage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ImageDecodeKey {
+    resource_revision: u64,
+    path: Arc<Path>,
+    freshness: FileFreshness,
 }
 
 #[derive(Debug, Clone)]
@@ -163,6 +175,23 @@ struct IconRasterQueue {
 static ICON_RASTER_QUEUE: OnceLock<Mutex<IconRasterQueue>> = OnceLock::new();
 static ICON_RASTER_RESULTS_READY: AtomicBool = AtomicBool::new(false);
 
+struct ImageDecodeJobResult {
+    key: ImageDecodeKey,
+    image: Option<Arc<image::RgbaImage>>,
+    cancelled: bool,
+    _budget: ResourceByteReservation,
+}
+
+struct ImageDecodeQueue {
+    result_sender: Sender<ImageDecodeJobResult>,
+    receiver: Receiver<ImageDecodeJobResult>,
+    pending: HashSet<ImageDecodeKey>,
+    ready: HashMap<ImageDecodeKey, (Arc<image::RgbaImage>, ResourceByteReservation)>,
+}
+
+static IMAGE_DECODE_QUEUE: OnceLock<Mutex<ImageDecodeQueue>> = OnceLock::new();
+static IMAGE_DECODE_RESULTS_READY: AtomicBool = AtomicBool::new(false);
+
 #[cfg(not(test))]
 const ICON_RESOLUTION_WORK_BYTES: usize = 4 * 1024;
 
@@ -196,6 +225,18 @@ fn icon_raster_queue() -> &'static Mutex<IconRasterQueue> {
     ICON_RASTER_QUEUE.get_or_init(|| {
         let (result_sender, result_receiver) = mpsc::channel::<RasterJobResult>();
         Mutex::new(IconRasterQueue {
+            result_sender,
+            receiver: result_receiver,
+            pending: HashSet::new(),
+            ready: HashMap::new(),
+        })
+    })
+}
+
+fn image_decode_queue() -> &'static Mutex<ImageDecodeQueue> {
+    IMAGE_DECODE_QUEUE.get_or_init(|| {
+        let (result_sender, result_receiver) = mpsc::channel::<ImageDecodeJobResult>();
+        Mutex::new(ImageDecodeQueue {
             result_sender,
             receiver: result_receiver,
             pending: HashSet::new(),
@@ -363,6 +404,136 @@ fn icon_raster_bytes(width: u32, height: u32) -> Option<usize> {
     }
     let bytes = checked_pixel_bytes(width, height, 4)?;
     (bytes <= MAX_ICON_RASTER_BYTES).then_some(bytes)
+}
+
+const IMAGE_DECODE_WORK_BYTES: usize = MAX_SOURCE_IMAGE_BYTES;
+
+fn drain_image_decode_jobs() -> bool {
+    let results = {
+        let Some(queue) = IMAGE_DECODE_QUEUE.get() else {
+            return false;
+        };
+        let Ok(mut queue) = queue.lock() else {
+            return false;
+        };
+        let current_generation = resource_revision();
+        queue
+            .ready
+            .retain(|key, _| key.resource_revision == current_generation);
+        let mut results = Vec::new();
+        while let Ok(result) = queue.receiver.try_recv() {
+            queue.pending.remove(&result.key);
+            results.push(result);
+        }
+        results
+    };
+
+    let mut completed = false;
+    if let Some(queue) = IMAGE_DECODE_QUEUE.get()
+        && let Ok(mut queue) = queue.lock()
+    {
+        for result in results {
+            if result.cancelled
+                || result.image.is_none()
+                || !resource_generation_is_current(result.key.resource_revision)
+                || resource_fingerprint(&result.key.path) != Some(result.key.freshness)
+            {
+                continue;
+            }
+            queue.ready.insert(
+                result.key,
+                (result.image.expect("image checked above"), result._budget),
+            );
+            completed = true;
+        }
+    }
+    if completed {
+        IMAGE_DECODE_RESULTS_READY.store(true, Ordering::Release);
+    }
+    completed
+}
+
+fn take_ready_image(key: &ImageDecodeKey) -> Option<Arc<image::RgbaImage>> {
+    let queue = IMAGE_DECODE_QUEUE.get()?;
+    queue
+        .lock()
+        .ok()?
+        .ready
+        .remove(key)
+        .and_then(|(image, _budget)| {
+            (resource_generation_is_current(key.resource_revision)
+                && resource_fingerprint(&key.path) == Some(key.freshness))
+            .then_some(image)
+        })
+}
+
+fn schedule_image_decode_job(key: ImageDecodeKey) -> Option<bool> {
+    let Ok(mut queue) = image_decode_queue().lock() else {
+        return None;
+    };
+    if !queue.pending.insert(key.clone()) {
+        return Some(false);
+    }
+    let result_sender = queue.result_sender.clone();
+    let result_key = key.clone();
+    let cancellation_key = key.clone();
+    let cancellation_sender = result_sender.clone();
+    let job_path = Arc::clone(&key.path);
+    let Some(broker) = ResourceBroker::global() else {
+        queue.pending.remove(&key);
+        return None;
+    };
+    let scheduled = broker.submit(
+        IMAGE_DECODE_WORK_BYTES,
+        move |context: ResourceBrokerContext| {
+            let image = if context.is_current() && source_image_is_bounded(&job_path) {
+                image::open(job_path.as_ref())
+                    .ok()
+                    .map(|decoded| Arc::new(decoded.to_rgba8()))
+            } else {
+                None
+            };
+            let cancelled = !context.is_current();
+            let reservation = context.into_reservation();
+            let _ = result_sender.send(ImageDecodeJobResult {
+                key: result_key,
+                image: if cancelled { None } else { image },
+                cancelled,
+                _budget: reservation,
+            });
+        },
+        move |reservation| {
+            let _ = cancellation_sender.send(ImageDecodeJobResult {
+                key: cancellation_key,
+                image: None,
+                cancelled: true,
+                _budget: reservation,
+            });
+        },
+    );
+    match scheduled {
+        Some(true) => Some(true),
+        Some(false) => {
+            queue.pending.remove(&key);
+            Some(false)
+        }
+        None => {
+            queue.pending.remove(&key);
+            None
+        }
+    }
+}
+
+pub fn poll_image_decode_jobs() -> bool {
+    drain_image_decode_jobs() || IMAGE_DECODE_RESULTS_READY.swap(false, Ordering::AcqRel)
+}
+
+pub fn image_decode_jobs_pending() -> bool {
+    let pending = IMAGE_DECODE_QUEUE
+        .get()
+        .and_then(|queue| queue.lock().ok())
+        .is_some_and(|queue| !queue.pending.is_empty());
+    pending || IMAGE_DECODE_RESULTS_READY.load(Ordering::Acquire)
 }
 
 fn source_image_is_bounded(path: &Path) -> bool {
@@ -602,7 +773,7 @@ fn svg_cacheability_cache() -> &'static Mutex<ByteLruCache<Arc<Path>, CachedSvgC
     })
 }
 
-fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
+fn get_or_load_sync(path: &Path) -> Option<Arc<image::RgbaImage>> {
     if !source_image_is_bounded(path) {
         return None;
     }
@@ -632,6 +803,44 @@ fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
         );
     }
     Some(img)
+}
+
+#[cfg(test)]
+fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
+    get_or_load_sync(path)
+}
+
+#[cfg(not(test))]
+fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
+    let freshness = resource_fingerprint(path)?;
+    let key = ImageDecodeKey {
+        resource_revision: resource_revision(),
+        path: Arc::from(path),
+        freshness,
+    };
+    if let Ok(mut guard) = image_cache().lock()
+        && let Some(cached) = guard.get(path)
+        && cached.resource_revision == key.resource_revision
+        && cached.freshness == key.freshness
+    {
+        return Some(Arc::clone(&cached.image));
+    }
+    if let Some(image) = take_ready_image(&key) {
+        if let Ok(mut guard) = image_cache().lock() {
+            guard.insert(
+                Arc::clone(&key.path),
+                CachedImage {
+                    resource_revision: key.resource_revision,
+                    freshness: key.freshness,
+                    image: Arc::clone(&image),
+                },
+                image.as_raw().len(),
+            );
+        }
+        return Some(image);
+    }
+    let _ = schedule_image_decode_job(key);
+    None
 }
 
 pub(crate) fn load_image_rgba(path: &Path) -> Option<Arc<image::RgbaImage>> {
@@ -879,6 +1088,7 @@ fn svg_external_resource_references(svg_data: &str) -> Vec<String> {
     references
 }
 
+#[cfg(test)]
 fn missing_icon_key(width: u32, height: u32, tint: Color) -> RasterCacheKey {
     RasterCacheKey {
         resource_revision: resource_revision(),
@@ -1095,7 +1305,7 @@ fn raster_bitmap_variant(
     multicolor: bool,
 ) -> Option<RasterVariant> {
     let pixel_bytes = icon_raster_bytes(width, height)?;
-    let img = get_or_load(path)?;
+    let img = get_or_load_sync(path)?;
     let scaled = image::imageops::resize(img.as_ref(), width, height, FilterType::Lanczos3);
     let mut pixels = Vec::with_capacity(pixel_bytes);
     for y in 0..height {
@@ -1152,6 +1362,7 @@ fn raster_svg_variant_from_data(
     ))
 }
 
+#[cfg(test)]
 fn raster_missing_icon_variant(width: u32, height: u32, tint: Color) -> Option<RasterVariant> {
     icon_raster_bytes(width, height)?;
     let opt = resvg::usvg::Options::default();
@@ -1348,9 +1559,9 @@ fn resolve_file_variant_async(
     None
 }
 
-/// Draw the built-in "missing icon" glyph. Rasterizes the embedded SVG via
-/// resvg and tints it with the icon's text color, so it follows the same
-/// theming rules as a regular monochrome icon.
+/// Draw the built-in missing-icon fallback. Tests retain the embedded SVG
+/// raster for pixel coverage; production paints a deterministic placeholder so
+/// a missing resource never performs work on the frame thread.
 #[cfg(test)]
 pub fn draw_missing_icon_fallback(
     buffer: &mut PixelBuffer,
@@ -1373,11 +1584,17 @@ pub fn draw_missing_icon_fallback_on_canvas(
     dest_h: i32,
     tint: Color,
 ) {
+    #[cfg(test)]
     if let Some(variant) = resolve_missing_icon_variant(dest_w, dest_h, tint) {
         blit_variant_on_canvas(canvas, &variant, dest_x, dest_y);
+        return;
     }
+
+    #[cfg(not(test))]
+    draw_missing_icon_placeholder(canvas, dest_x, dest_y, dest_w, dest_h, tint);
 }
 
+#[cfg(test)]
 fn resolve_missing_icon_variant(dest_w: i32, dest_h: i32, tint: Color) -> Option<RasterVariant> {
     let (width, height) = icon_dimensions(dest_w, dest_h)?;
     let key = missing_icon_key(width, height, tint);
@@ -1393,6 +1610,36 @@ fn resolve_missing_icon_variant(dest_w: i32, dest_h: i32, tint: Color) -> Option
 
     store_variant(key, variant.clone());
     Some(variant)
+}
+
+#[cfg(not(test))]
+fn draw_missing_icon_placeholder(
+    canvas: &Canvas,
+    dest_x: i32,
+    dest_y: i32,
+    dest_w: i32,
+    dest_h: i32,
+    tint: Color,
+) {
+    let width = dest_w.max(1) as f32;
+    let height = dest_h.max(1) as f32;
+    let rect = Rect::from_xywh(dest_x as f32, dest_y as f32, width, height);
+    let mut paint = Paint::default();
+    paint.set_anti_alias(false);
+    paint.set_color(skia_safe::Color::from_argb(tint.a, tint.r, tint.g, tint.b));
+    paint.set_style(PaintStyle::Stroke);
+    paint.set_stroke_width((width.min(height) / 8.0).max(1.0));
+    canvas.draw_rect(rect, &paint);
+    canvas.draw_line(
+        (dest_x as f32, dest_y as f32),
+        ((dest_x as f32) + width, (dest_y as f32) + height),
+        &paint,
+    );
+    canvas.draw_line(
+        ((dest_x as f32) + width, dest_y as f32),
+        (dest_x as f32, (dest_y as f32) + height),
+        &paint,
+    );
 }
 
 #[cfg(test)]
@@ -1719,7 +1966,11 @@ mod tests {
         if let Some(queue) = ICON_RASTER_QUEUE.get() {
             queue.lock().unwrap().ready.clear();
         }
+        if let Some(queue) = IMAGE_DECODE_QUEUE.get() {
+            queue.lock().unwrap().ready.clear();
+        }
         ICON_RASTER_RESULTS_READY.store(false, Ordering::Release);
+        IMAGE_DECODE_RESULTS_READY.store(false, Ordering::Release);
         FILE_FRESHNESS_STAT_PROBES.store(0, Ordering::Relaxed);
         profiling::reset_raster_metrics();
     }
@@ -1765,6 +2016,41 @@ mod tests {
         assert!(prepared.is_some(), "worker did not publish the SVG variant");
         assert!(poll_icon_raster_jobs());
         assert!(!icon_raster_jobs_pending());
+    }
+
+    #[test]
+    fn image_decode_worker_transfers_bounded_image_off_the_paint_path() {
+        let _guard = icon_test_lock();
+        clear_icon_caches();
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("decoded.png");
+        ImageBuffer::from_fn(2, 1, |x, _| {
+            if x == 0 {
+                Rgba([255_u8, 0, 0, 255])
+            } else {
+                Rgba([0, 255, 0, 255])
+            }
+        })
+        .save(&path)
+        .unwrap();
+        let key = ImageDecodeKey {
+            resource_revision: resource_revision(),
+            path: Arc::from(path.as_path()),
+            freshness: resource_fingerprint(&path).unwrap(),
+        };
+
+        assert_eq!(schedule_image_decode_job(key.clone()), Some(true));
+        let image = loop {
+            drain_image_decode_jobs();
+            if let Some(image) = take_ready_image(&key) {
+                break image;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
+        assert_eq!(image.dimensions(), (2, 1));
+        assert_eq!(image.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
+        assert!(poll_image_decode_jobs());
+        assert!(!image_decode_jobs_pending());
     }
 
     #[test]
