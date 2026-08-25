@@ -1827,14 +1827,19 @@ impl Shell {
             return Ok(VecDeque::new());
         };
 
-        if self.components[index].component.surface_role() == role {
+        let current_role = self.components[index].component.surface_role();
+        if current_role == role {
             return Ok(VecDeque::new());
         }
 
         // Opt-in: a component laid out as a 32px-tall panel widget is not
         // automatically a sensible window, so the author declares that both
         // roles were designed for.
-        if !self.components[index].component.surface_promotable() {
+        if !mesh_core_surface_config::surface_role_change_allowed(
+            current_role,
+            role,
+            self.components[index].component.surface_promotable(),
+        ) {
             tracing::warn!(
                 %surface_id,
                 "cannot change surface role: surface does not declare mesh.surface.promotable"

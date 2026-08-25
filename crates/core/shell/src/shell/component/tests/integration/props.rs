@@ -263,6 +263,29 @@ fn settings_reload_drops_an_invalid_override_to_the_declared_default() {
 }
 
 #[test]
+fn settings_and_direct_role_changes_cannot_bypass_the_author_promotable_guard() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    let reloaded = test_settings_store_with(
+        "@test/reactive-surface",
+        serde_json::json!({ "surface": { "role": "window" } }),
+    );
+
+    component.apply_settings(&reloaded).unwrap();
+    assert_eq!(
+        component.surface_role(),
+        mesh_core_wayland::SurfaceRole::Layer
+    );
+    assert!(
+        !component.surface_role_changed(mesh_core_wayland::SurfaceRole::Window),
+        "the component boundary must reject an unauthorized live role change"
+    );
+    assert_eq!(
+        component.surface_role(),
+        mesh_core_wayland::SurfaceRole::Layer
+    );
+}
+
+#[test]
 fn settings_reload_preserves_a_higher_precedence_script_prop() {
     let mut component = test_frontend_component(PROP_WRITE_SOURCE);
     component.call_namespaced_handler("bump", &[]).unwrap();

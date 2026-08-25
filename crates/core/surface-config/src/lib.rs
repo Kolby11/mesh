@@ -102,6 +102,19 @@ pub fn generic_surface_layout_fallback() -> SurfaceLayoutSettings {
     }
 }
 
+/// Whether a live role request is authorized by the module declaration.
+///
+/// A surface may always repeat its current role, but crossing between layer
+/// shell and toplevel roles is an author opt-in. Keeping this policy here lets
+/// settings resolution and the shell's request path enforce the same rule.
+pub fn surface_role_change_allowed(
+    current: SurfaceRole,
+    requested: SurfaceRole,
+    promotable: bool,
+) -> bool {
+    current == requested || promotable
+}
+
 /// Resolve a surface's baseline layout: core defaults overridden by whatever
 /// the module's `mesh.surface` block declares. User overrides land on top of
 /// this in [`resolve_frontend_module_settings`].
@@ -710,7 +723,28 @@ fn validate_module_namespace(
         raw,
         &mut diagnostics,
     );
-    let surface = checked.get("surface").cloned().unwrap_or_default();
+    let declared = surface_layout_from_manifest(manifest);
+    let mut surface = checked.get("surface").cloned().unwrap_or_default();
+    let requested_role = surface
+        .get("role")
+        .and_then(serde_json::Value::as_str)
+        .and_then(parse_surface_role);
+    if requested_role.is_some_and(|requested_role| {
+        !surface_role_change_allowed(declared.role, requested_role, declared.promotable)
+    }) {
+        diagnostics.push(SettingsDiagnostic::warning(
+            namespace,
+            "surface.role",
+            format!(
+                "\"surface.role\" cannot change from \"{}\" because the module manifest does not declare \"mesh.surface.promotable\"",
+                surface_role_name(declared.role)
+            ),
+            "remove the override, or ask the module author to set mesh.surface.promotable to true",
+        ));
+        if let Some(surface) = surface.as_object_mut() {
+            surface.remove("role");
+        }
+    }
     let props = checked
         .get("props")
         .map(|value| validate_prop_scopes(namespace, value, props_block, &mut diagnostics))
@@ -985,16 +1019,57 @@ mod tests {
     }
 
     #[test]
-    fn user_settings_override_manifest_surface_role() {
+    fn a_surface_role_change_requires_the_author_promotable_opt_in() {
+        assert!(surface_role_change_allowed(
+            SurfaceRole::Layer,
+            SurfaceRole::Layer,
+            false
+        ));
+        assert!(!surface_role_change_allowed(
+            SurfaceRole::Layer,
+            SurfaceRole::Window,
+            false
+        ));
+        assert!(surface_role_change_allowed(
+            SurfaceRole::Layer,
+            SurfaceRole::Window,
+            true
+        ));
+    }
+
+    #[test]
+    fn non_promotable_user_settings_cannot_override_manifest_surface_role() {
         let manifest = manifest_with_surface_layout(SurfaceLayoutSection::default());
         let settings = resolve_frontend_module_settings(
             "@mesh/test",
-            serde_json::json!({ "surface": { "role": "window", "resizable": false } }),
+            serde_json::json!({ "surface": { "role": "window" } }),
+            &manifest,
+        );
+
+        assert_eq!(settings.layout.role, SurfaceRole::Layer);
+        let diagnostic = only(&settings.diagnostics);
+        assert_eq!(diagnostic.key_path, "surface.role");
+        assert!(diagnostic.message.contains("promotable"));
+    }
+
+    #[test]
+    fn promotable_user_settings_can_override_manifest_surface_role() {
+        let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
+            promotable: Some(true),
+            ..Default::default()
+        });
+        let settings = resolve_frontend_module_settings(
+            "@mesh/test",
+            serde_json::json!({ "surface": { "role": "window" } }),
             &manifest,
         );
 
         assert_eq!(settings.layout.role, SurfaceRole::Window);
-        assert!(!settings.layout.window.resizable);
+        assert!(
+            settings.diagnostics.is_empty(),
+            "{:#?}",
+            settings.diagnostics
+        );
     }
 
     #[test]
@@ -1122,6 +1197,7 @@ mod tests {
     fn an_ejected_window_block_round_trips_through_resolution() {
         let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
             role: Some("window".into()),
+            promotable: Some(true),
             app_id: Some("mesh.settings".into()),
             resizable: Some(false),
             decorations: Some("server".into()),
@@ -1131,7 +1207,10 @@ mod tests {
         let original = surface_layout_from_manifest(&manifest);
 
         let ejected = serde_json::json!({ "surface": surface_layout_to_json(&original) });
-        let bare = manifest_with_surface_layout(SurfaceLayoutSection::default());
+        let bare = manifest_with_surface_layout(SurfaceLayoutSection {
+            promotable: Some(true),
+            ..Default::default()
+        });
         let round_tripped = resolve_frontend_module_settings("@mesh/test", ejected, &bare).layout;
 
         assert_eq!(round_tripped, original);
@@ -1214,7 +1293,10 @@ mod tests {
 
     #[test]
     fn an_enum_alias_the_parser_accepts_is_not_reported() {
-        let manifest = manifest_with_surface_layout(SurfaceLayoutSection::default());
+        let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
+            promotable: Some(true),
+            ..Default::default()
+        });
         let (layout, diagnostics) = diagnose(serde_json::json!({ "role": "toplevel" }), &manifest);
 
         assert_eq!(layout.role, SurfaceRole::Window);
@@ -1293,7 +1375,7 @@ mod tests {
     }
 
     #[test]
-    fn a_user_role_override_decides_which_fields_are_inert() {
+    fn a_rejected_user_role_override_does_not_reclassify_inert_fields() {
         let manifest = manifest_with_surface_layout(SurfaceLayoutSection::default());
         let (_, diagnostics) = diagnose(
             serde_json::json!({ "role": "window", "anchor": "bottom" }),
@@ -1301,8 +1383,8 @@ mod tests {
         );
 
         let diagnostic = only(&diagnostics);
-        assert_eq!(diagnostic.key_path, "surface.anchor");
-        assert!(diagnostic.message.contains("role \"window\""));
+        assert_eq!(diagnostic.key_path, "surface.role");
+        assert!(diagnostic.message.contains("promotable"));
     }
 
     #[test]

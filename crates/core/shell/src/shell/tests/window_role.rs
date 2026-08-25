@@ -220,7 +220,7 @@ fn setting_the_role_a_surface_already_has_is_not_a_change() {
 }
 
 #[test]
-fn a_surface_that_is_not_promotable_refuses_a_role_change() {
+fn an_ipc_role_change_for_a_surface_that_is_not_promotable_is_refused() {
     // The opt-in is the point: a component laid out for one role is not
     // automatically usable in the other, so the author declares that both were
     // designed for.
@@ -233,12 +233,10 @@ fn a_surface_that_is_not_promotable_refuses_a_role_change() {
         Arc::clone(&state),
     )));
 
-    shell
-        .apply_request(CoreRequest::SetSurfaceRole {
-            surface_id: "@mesh/navigation-bar".into(),
-            role: mesh_core_wayland::SurfaceRole::Window,
-        })
-        .unwrap();
+    let request =
+        crate::shell::ipc::parse_ipc_command("shell:promote_surface:@mesh/navigation-bar")
+            .expect("promote IPC command");
+    shell.apply_request(request).unwrap();
 
     assert!(state.lock().unwrap().applied_roles.is_empty());
 }

@@ -168,6 +168,9 @@ Decoded assets, fonts, glyphs, text layouts, Skia images and shaders, icon
 resolutions, PixelBuffers, and Wayland SHM pools now enforce explicit byte and
 dimension budgets with deterministic rejection or LRU eviction.
 
+Author-declared `promotable` now gates settings, IPC, and live surface role
+changes through one shared role-transition authorization policy.
+
 ## Blocked / open follow-ups
 
 - Live multi-output membership and compositor conformance matrix (deferred,

@@ -669,6 +669,18 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn surface_role_changed(&mut self, role: mesh_core_wayland::SurfaceRole) -> bool {
+        if !mesh_core_surface_config::surface_role_change_allowed(
+            self.surface_layout.role,
+            role,
+            self.surface_layout.promotable,
+        ) {
+            tracing::warn!(
+                surface_id = %self.surface_id,
+                ?role,
+                "cannot change surface role: surface does not declare mesh.surface.promotable"
+            );
+            return false;
+        }
         let windowed = role == mesh_core_wayland::SurfaceRole::Window;
         self.surface_layout.role = role;
         // Leaving window role drops the compositor states with it: a layer
@@ -1302,10 +1314,24 @@ impl ShellComponent for FrontendSurfaceComponent {
             ),
         );
         self.settings_diagnostics = settings_state.diagnostics;
-        let layout_changed = self.surface_layout != settings_state.layout;
+        let mut next_layout = settings_state.layout;
+        if !mesh_core_surface_config::surface_role_change_allowed(
+            self.surface_layout.role,
+            next_layout.role,
+            self.surface_layout.promotable,
+        ) {
+            tracing::warn!(
+                surface_id = %self.surface_id,
+                current_role = ?self.surface_layout.role,
+                requested_role = ?next_layout.role,
+                "ignoring settings surface role change: surface does not declare mesh.surface.promotable"
+            );
+            next_layout.role = self.surface_layout.role;
+        }
+        let layout_changed = self.surface_layout != next_layout;
         let settings_changed = self.settings_json != settings_state.effective;
 
-        self.surface_layout = settings_state.layout;
+        self.surface_layout = next_layout;
         self.settings_json = settings_state.effective;
 
         if settings_changed {
