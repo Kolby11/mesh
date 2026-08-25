@@ -226,7 +226,7 @@ fn hidden_surface_reconfigures_and_presents_when_shown_again() {
         .iter()
         .skip(configures_before)
         .filter(|(id, _)| id == SURFACE)
-        .map(|(_, cfg)| (cfg.width, cfg.height))
+        .map(|(_, cfg)| cfg.surface_size())
         .collect::<Vec<_>>();
     assert_eq!(
         configures,
@@ -455,8 +455,11 @@ fn layer_configures_never_carry_an_unbacked_zero_dimension() {
         .presentation_engine
         .testing_surface_config_history()
         .iter()
-        .filter(|(id, cfg)| id == SURFACE && (cfg.width == 0 || cfg.height == 0))
-        .map(|(_, cfg)| (cfg.width, cfg.height))
+        .filter(|(id, cfg)| {
+            let (width, height) = cfg.surface_size();
+            id == SURFACE && (width == 0 || height == 0)
+        })
+        .map(|(_, cfg)| cfg.surface_size())
         .collect::<Vec<_>>();
     assert!(
         zero_configures.is_empty(),
@@ -545,10 +548,14 @@ fn padded_parent_surface_size_is_converted_to_content_geometry() {
         Arc::new(Mutex::new(InputSizeRecordingState::default())),
         (1920, 56),
     )));
+    let extent = mesh_core_presentation::SurfaceExtent::from_surface_and_padding(
+        mesh_core_presentation::ContentExtent::from_size((1920, 256)).unwrap(),
+        mesh_core_presentation::SurfacePadding::trailing(0, 200),
+    )
+    .unwrap();
     shell.components[0].parent.last_surface_config = Some(mesh_core_presentation::SurfaceConfig {
-        width: 0,
-        height: 256,
-        padding: mesh_core_presentation::SurfacePadding::trailing(0, 200),
+        extent,
+        wire_size: mesh_core_presentation::LayerWireSize::fixed(1920, 256).unwrap(),
         ..Default::default()
     });
 
@@ -743,7 +750,7 @@ fn layer_surface_input_region_excludes_the_tooltip_overlay_reserve() {
 
     let cfg = configured_surface(&shell, "@test/bar");
     assert!(
-        cfg.height > CONTENT.1,
+        cfg.surface_size().1 > CONTENT.1,
         "the bar surface is expected to be inflated by the tooltip overlay reserve; \
          if that reserve is gone this test is measuring nothing: {cfg:?}"
     );
@@ -757,8 +764,8 @@ fn layer_surface_input_region_excludes_the_tooltip_overlay_reserve() {
         (0, 0, CONTENT.0, CONTENT.1),
         "pointer input must stop at the content rect; every logical pixel of \
          {}x{} beyond it is a dead zone over the windows below the bar",
-        cfg.width,
-        cfg.height
+        cfg.surface_size().0,
+        cfg.surface_size().1
     );
 }
 
@@ -788,7 +795,7 @@ fn first_dynamic_layer_configure_uses_measured_content_not_one_pixel_fallback() 
         .testing_surface_config_history()
         .iter()
         .filter(|(id, _)| id == "@test/kde-navigation")
-        .map(|(_, cfg)| (cfg.width, cfg.height))
+        .map(|(_, cfg)| cfg.surface_size())
         .collect::<Vec<_>>();
     assert_eq!(
         configured_sizes,
@@ -841,17 +848,14 @@ fn every_configured_surface_declares_its_inflation_as_input_padding() {
             .map(|surface| (surface.width, surface.height))
             .unwrap_or_else(|| panic!("configured surface {surface_id} has no shell record"));
         assert_eq!(
-            (
-                cfg.width - cfg.padding.left - cfg.padding.right,
-                cfg.height - cfg.padding.top - cfg.padding.bottom,
-            ),
+            cfg.extent.content_size(),
             content,
             "{surface_id} was configured at {}x{} for {content:?} of content, so \
              {:?} of that must be declared input padding — otherwise the \
              difference silently becomes a click dead zone",
-            cfg.width,
-            cfg.height,
-            cfg.padding
+            cfg.surface_size().0,
+            cfg.surface_size().1,
+            cfg.padding()
         );
     }
 }
@@ -884,14 +888,14 @@ fn window_surface_is_not_inflated_and_takes_input_over_its_whole_area() {
 
     let cfg = configured_surface(&shell, "@test/window");
     assert_eq!(
-        (cfg.width, cfg.height),
+        cfg.surface_size(),
         (640, 480),
         "a window is sized by its content, never inflated by an overlay reserve"
     );
     assert!(
-        cfg.padding.is_zero(),
+        cfg.padding().is_zero(),
         "an uninflated surface declares no padding: {:?}",
-        cfg.padding
+        cfg.padding()
     );
     assert!(
         shell

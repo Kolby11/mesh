@@ -85,7 +85,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/13-surface-policy-and-configuration/improvements.md)
 
-- [ ] Use typed unmeasured/content/surface/wire extents at the shell/presentation boundary.
 - [ ] Replace split surface field lists with a revisioned semantic policy diff and generation.
 - [ ] Build the policy compiler producing declared contracts, effective snapshots, and typed transition plans.
 

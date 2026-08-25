@@ -5,8 +5,9 @@ use mesh_core_debug::{
     BenchmarkScenarioId, BenchmarkScenarioStatus, DebugBenchmarkRunState, ProfilingBackendStage,
 };
 use mesh_core_presentation::{
-    LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint, PopupGravity,
-    PopupPlacement, SurfacePadding,
+    ContentExtent, LayerSurfaceSizePolicy, LayerWireSize, PopupAnchor, PopupConfig,
+    PopupConstraint, PopupGravity, PopupPlacement, SurfaceConfig,
+    SurfaceExtent as ConfiguredSurfaceExtent, SurfacePadding,
 };
 
 /// Coalescable commands fire on the leading edge; further calls within the
@@ -538,6 +539,16 @@ impl Shell {
         }
 
         let cfg = if visible {
+            let content = ContentExtent::from_size((surface.width.max(1), surface.height.max(1)))
+                .expect("positive keyboard-mode surface extent");
+            let extent = ConfiguredSurfaceExtent::from_content_and_padding(
+                content,
+                SurfacePadding::default(),
+            )
+            .expect("keyboard-mode surface extent has no padding");
+            let wire_size =
+                LayerWireSize::from_requested((surface.width, surface.height), extent.surface())
+                    .expect("keyboard-mode surface wire extent is positive");
             SurfaceConfig {
                 role: surface.role,
                 window: surface.window.clone(),
@@ -547,9 +558,8 @@ impl Shell {
                 // Content-sized: this path re-sends placement/keyboard state
                 // for an already-sized surface and never applies the tooltip
                 // overlay reserve, so nothing of it is input-inert padding.
-                width: surface.width,
-                height: surface.height,
-                padding: SurfacePadding::default(),
+                extent,
+                wire_size,
                 exclusive_zone: surface.exclusive_zone,
                 keyboard_mode,
                 namespace: surface_id.to_string(),
@@ -566,9 +576,13 @@ impl Shell {
                 edge: surface.edge,
                 layer: surface.layer.unwrap_or(Layer::Top),
                 size_policy: LayerSurfaceSizePolicy::Fixed,
-                width: 1,
-                height: 1,
-                padding: SurfacePadding::default(),
+                extent: ConfiguredSurfaceExtent::from_content_and_padding(
+                    ContentExtent::from_size((1, 1)).expect("positive hidden extent"),
+                    SurfacePadding::default(),
+                )
+                .expect("hidden surface extent has no padding"),
+                wire_size: LayerWireSize::fixed(1, 1)
+                    .expect("hidden surface wire extent is positive"),
                 exclusive_zone: 0,
                 keyboard_mode: mesh_core_wayland::KeyboardMode::None,
                 namespace: surface_id.to_string(),

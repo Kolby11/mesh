@@ -75,8 +75,12 @@ pub(super) fn map_anchor(cfg: &SurfaceConfig) -> Anchor {
         // it vertically across the output.
         Some(Edge::Top) => Anchor::TOP | Anchor::LEFT | Anchor::RIGHT,
         Some(Edge::Bottom) => Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
-        Some(Edge::Left) if cfg.height == 0 => Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT,
-        Some(Edge::Right) if cfg.height == 0 => Anchor::TOP | Anchor::BOTTOM | Anchor::RIGHT,
+        Some(Edge::Left) if cfg.wire_size.height.is_span() => {
+            Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT
+        }
+        Some(Edge::Right) if cfg.wire_size.height.is_span() => {
+            Anchor::TOP | Anchor::BOTTOM | Anchor::RIGHT
+        }
         Some(Edge::Left) => Anchor::TOP | Anchor::LEFT,
         Some(Edge::Right) => Anchor::TOP | Anchor::RIGHT,
         None => Anchor::empty(),
@@ -107,8 +111,8 @@ pub(super) fn map_anchor(cfg: &SurfaceConfig) -> Anchor {
 ///   surface plus a log line beats a screen-wide input blackout.
 pub(super) fn layer_protocol_size(cfg: &SurfaceConfig) -> (u32, u32) {
     let anchor = map_anchor(cfg);
-    if cfg.width == 0
-        && cfg.height == 0
+    if cfg.wire_size.width.is_span()
+        && cfg.wire_size.height.is_span()
         && cfg.exclusive_zone <= 0
         && !matches!(cfg.edge, Some(Edge::Top | Edge::Bottom))
     {
@@ -121,15 +125,16 @@ pub(super) fn layer_protocol_size(cfg: &SurfaceConfig) -> (u32, u32) {
         );
         return (1, 1);
     }
-    let width = if cfg.width == 0 && !anchor.contains(Anchor::LEFT | Anchor::RIGHT) {
+    let width = if cfg.wire_size.width.is_span() && !anchor.contains(Anchor::LEFT | Anchor::RIGHT) {
         layer_protocol_fallback_size(cfg)
     } else {
-        cfg.width
+        cfg.wire_size.width.protocol_value()
     };
-    let height = if cfg.height == 0 && !anchor.contains(Anchor::TOP | Anchor::BOTTOM) {
+    let height = if cfg.wire_size.height.is_span() && !anchor.contains(Anchor::TOP | Anchor::BOTTOM)
+    {
         layer_protocol_fallback_size(cfg)
     } else {
-        cfg.height
+        cfg.wire_size.height.protocol_value()
     };
     (width, height)
 }

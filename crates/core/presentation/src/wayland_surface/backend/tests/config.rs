@@ -6,15 +6,16 @@ use mesh_core_render::DamageRect;
 // ---------------------------------------------------------------------------
 
 fn base_cfg() -> SurfaceConfig {
-    SurfaceConfig {
+    let mut cfg = SurfaceConfig {
         role: SurfaceRole::Layer,
         window: WindowOptions::default(),
         edge: Some(Edge::Left),
         layer: MeshLayer::Overlay,
         size_policy: LayerSurfaceSizePolicy::Fixed,
-        width: 280,
-        height: 164,
-        padding: SurfacePadding::default(),
+        ..SurfaceConfig::default()
+    };
+    set_requested_size(&mut cfg, (280, 164), SurfacePadding::default());
+    SurfaceConfig {
         exclusive_zone: 0,
         keyboard_mode: KeyboardMode::OnDemand,
         namespace: "@mesh/audio-popover".into(),
@@ -23,11 +24,12 @@ fn base_cfg() -> SurfaceConfig {
         margin_bottom: 0,
         margin_left: 24,
         blur: false,
+        ..cfg
     }
 }
 
 fn window_cfg() -> SurfaceConfig {
-    SurfaceConfig {
+    let mut cfg = SurfaceConfig {
         role: SurfaceRole::Window,
         window: WindowOptions {
             title: "Settings".into(),
@@ -35,11 +37,32 @@ fn window_cfg() -> SurfaceConfig {
             resizable: false,
             decorations: WindowDecorations::Client,
         },
-        width: 920,
-        height: 700,
         namespace: "@mesh/settings".into(),
         ..SurfaceConfig::default()
-    }
+    };
+    set_requested_size(&mut cfg, (920, 700), SurfacePadding::default());
+    cfg
+}
+
+fn set_requested_size(cfg: &mut SurfaceConfig, requested: (u32, u32), padding: SurfacePadding) {
+    let current = cfg.surface_size();
+    let surface_size = (
+        if requested.0 == 0 {
+            current.0
+        } else {
+            requested.0
+        },
+        if requested.1 == 0 {
+            current.1
+        } else {
+            requested.1
+        },
+    );
+    let surface = ContentExtent::from_size(surface_size).expect("test surface is positive");
+    cfg.extent = SurfaceExtent::from_surface_and_padding(surface, padding)
+        .expect("test padding fits surface");
+    cfg.wire_size = LayerWireSize::from_requested(requested, cfg.extent.surface())
+        .expect("test wire size is positive");
 }
 
 #[test]
@@ -49,15 +72,14 @@ fn window_config_is_not_clamped_to_an_output() {
     // The same numbers on a layer surface *are* clamped.
     let mut layer = base_cfg();
     layer.edge = Some(Edge::Top);
-    layer.width = 3000;
-    layer.height = 2000;
+    set_requested_size(&mut layer, (3000, 2000), SurfacePadding::default());
     let clamped_layer = clamp_surface_config_to_output(layer, Some((1920, 1080)));
-    assert_eq!((clamped_layer.width, clamped_layer.height), (1920, 1080));
+    assert_eq!(clamped_layer.surface_size(), (1920, 1080));
 
     let window = window_cfg();
     let clamped_window = clamp_surface_config_to_output(window, Some((640, 480)));
     assert_eq!(
-        (clamped_window.width, clamped_window.height),
+        clamped_window.surface_size(),
         (920, 700),
         "window surfaces must keep their requested size regardless of output geometry"
     );
@@ -166,7 +188,7 @@ fn window_diff_ignores_layer_only_fields() {
 fn layer_geometry_change_requires_fresh_configure() {
     let previous = base_cfg();
     let mut next = previous.clone();
-    next.width = 320;
+    set_requested_size(&mut next, (320, 164), SurfacePadding::default());
 
     assert_eq!(
         surface_config_change(&previous, previous.keyboard_mode, &next, next.keyboard_mode,),
@@ -212,8 +234,7 @@ fn layer_namespace_and_blur_require_surface_recreation() {
 fn dynamic_top_surface_uses_output_width_when_configure_width_is_unspecified() {
     let mut cfg = base_cfg();
     cfg.edge = Some(Edge::Top);
-    cfg.width = 0;
-    cfg.height = 50;
+    set_requested_size(&mut cfg, (0, 50), SurfacePadding::default());
 
     assert_eq!(
         resolved_surface_size_for_config(&cfg, 1, 50, Some((1920, 1080))),
@@ -226,8 +247,7 @@ fn dynamic_top_surface_uses_output_width_when_configure_width_is_unspecified() {
 fn dynamic_left_surface_uses_output_height_when_configure_height_is_unspecified() {
     let mut cfg = base_cfg();
     cfg.edge = Some(Edge::Left);
-    cfg.width = 56;
-    cfg.height = 0;
+    set_requested_size(&mut cfg, (56, 0), SurfacePadding::default());
 
     assert_eq!(
         resolved_surface_size_for_config(&cfg, 56, 1, Some((1920, 1080))),
@@ -240,14 +260,12 @@ fn dynamic_left_surface_uses_output_height_when_configure_height_is_unspecified(
 fn dynamic_surface_padding_uses_the_resolved_extent() {
     let mut cfg = base_cfg();
     cfg.edge = Some(Edge::Top);
-    cfg.width = 0;
-    cfg.height = 50;
-    cfg.padding = SurfacePadding::trailing(0, 12);
+    set_requested_size(&mut cfg, (0, 50), SurfacePadding::trailing(0, 12));
 
     let extent = resolved_surface_size_for_config(&cfg, 1, 50, Some((1920, 1080)));
     assert_eq!(extent, (1920, 50));
     assert_eq!(
-        cfg.padding.content_rect(extent.0, extent.1),
+        cfg.padding().content_rect(extent.0, extent.1),
         Some(DamageRect {
             x: 0,
             y: 0,
@@ -267,14 +285,14 @@ fn clamp_skips_when_surface_output_is_unknown() {
     // unclamped rather than being shrunk to an unrelated guessed output.
     let mut cfg = base_cfg();
     cfg.edge = Some(Edge::Top);
-    cfg.width = 3840; // resolved against the real (external, larger) output
-    cfg.height = 136;
+    set_requested_size(&mut cfg, (3840, 136), SurfacePadding::default());
     cfg.margin_left = 0;
     cfg.margin_right = 0;
 
     let clamped = clamp_surface_config_to_output(cfg.clone(), None);
     assert_eq!(
-        clamped.width, 3840,
+        clamped.surface_size().0,
+        3840,
         "width must pass through unclamped when the surface's own output isn't known yet"
     );
     assert_eq!(clamped.margin_left, 0);
@@ -292,20 +310,21 @@ fn clamp_does_not_shrink_top_surface_to_a_smaller_unrelated_output() {
     // with dead space on both sides.
     let mut cfg = base_cfg();
     cfg.edge = Some(Edge::Top);
-    cfg.width = 3840;
-    cfg.height = 136;
+    set_requested_size(&mut cfg, (3840, 136), SurfacePadding::default());
 
     let wrong_smaller_output = Some((2880, 1800));
     let clamped = clamp_surface_config_to_output(cfg.clone(), wrong_smaller_output);
     assert_eq!(
-        clamped.width, 2880,
+        clamped.surface_size().0,
+        2880,
         "sanity check: clamping against a smaller output does shrink width (this is the behavior that must never fire for an output the surface isn't actually on)"
     );
 
     let real_matching_output = Some((3840, 2160));
     let clamped = clamp_surface_config_to_output(cfg, real_matching_output);
     assert_eq!(
-        clamped.width, 3840,
+        clamped.surface_size().0,
+        3840,
         "clamping against the surface's real, matching output must leave a spanning width untouched"
     );
     assert_eq!(clamped.margin_left, 0);
@@ -316,8 +335,7 @@ fn clamp_does_not_shrink_top_surface_to_a_smaller_unrelated_output() {
 fn top_surface_protocol_size_keeps_only_spanning_width_dynamic() {
     let mut cfg = base_cfg();
     cfg.edge = Some(Edge::Top);
-    cfg.width = 0;
-    cfg.height = 0;
+    set_requested_size(&mut cfg, (0, 0), SurfacePadding::default());
     cfg.exclusive_zone = 56;
 
     assert_eq!(
@@ -331,8 +349,7 @@ fn top_surface_protocol_size_keeps_only_spanning_width_dynamic() {
 fn bottom_surface_protocol_size_keeps_only_spanning_width_dynamic() {
     let mut cfg = base_cfg();
     cfg.edge = Some(Edge::Bottom);
-    cfg.width = 0;
-    cfg.height = 0;
+    set_requested_size(&mut cfg, (0, 0), SurfacePadding::default());
     cfg.exclusive_zone = 56;
 
     assert_eq!(
@@ -346,8 +363,7 @@ fn bottom_surface_protocol_size_keeps_only_spanning_width_dynamic() {
 fn left_surface_protocol_size_keeps_only_spanning_height_dynamic() {
     let mut cfg = base_cfg();
     cfg.edge = Some(Edge::Left);
-    cfg.width = 0;
-    cfg.height = 0;
+    set_requested_size(&mut cfg, (0, 0), SurfacePadding::default());
     cfg.exclusive_zone = 48;
 
     assert_eq!(
@@ -365,8 +381,7 @@ fn undocked_side_surface_never_spans_the_output() {
     // full-height overlay swallowing all pointer/keyboard input.
     let mut cfg = base_cfg();
     cfg.edge = Some(Edge::Left);
-    cfg.width = 0;
-    cfg.height = 0;
+    set_requested_size(&mut cfg, (0, 0), SurfacePadding::default());
     cfg.exclusive_zone = 0;
 
     assert_eq!(
@@ -380,8 +395,7 @@ fn undocked_side_surface_never_spans_the_output() {
 fn unanchored_surface_protocol_size_replaces_dynamic_axes() {
     let mut cfg = base_cfg();
     cfg.edge = None;
-    cfg.width = 0;
-    cfg.height = 0;
+    set_requested_size(&mut cfg, (0, 0), SurfacePadding::default());
 
     assert_eq!(
         layer_protocol_size(&cfg),
@@ -394,8 +408,7 @@ fn unanchored_surface_protocol_size_replaces_dynamic_axes() {
 fn overlay_surface_without_exclusive_zone_uses_minimal_protocol_fallback() {
     let mut cfg = base_cfg();
     cfg.edge = Some(Edge::Top);
-    cfg.width = 0;
-    cfg.height = 0;
+    set_requested_size(&mut cfg, (0, 0), SurfacePadding::default());
     cfg.exclusive_zone = 0;
 
     assert_eq!(layer_protocol_size(&cfg), (0, 1));
@@ -452,6 +465,54 @@ fn zero_padding_leaves_the_whole_surface_taking_input() {
     assert_eq!(SurfacePadding::default().content_rect(640, 480), None);
 }
 
+#[test]
+fn typed_extents_keep_unmeasured_axes_out_of_content_and_wire_values() {
+    let measured = UnmeasuredSize::from_optional(Some(0), Some(56));
+    assert_eq!(measured.width(), None);
+    assert_eq!(measured.height(), Some(56));
+    assert!(!measured.is_complete());
+    assert_eq!(measured.content(), Err(SurfaceExtentError::UnmeasuredWidth));
+
+    let content = ContentExtent::from_size((1920, 56)).expect("positive content extent");
+    let padding = SurfacePadding::trailing(0, 200);
+    let extent = SurfaceExtent::from_content_and_padding(content, padding)
+        .expect("padding can inflate a positive content extent");
+    assert_eq!(extent.content_size(), (1920, 56));
+    assert_eq!(extent.surface_size(), (1920, 256));
+    assert_eq!(extent.padding(), padding);
+
+    let wire = LayerWireSize::from_requested((0, 56), extent.surface())
+        .expect("spanning and fixed axes are both representable");
+    assert!(wire.width.is_span());
+    assert_eq!(wire.height.protocol_value(), 256);
+    assert_eq!(
+        LayerWireExtent::fixed(0),
+        Err(SurfaceExtentError::InvalidWireExtent)
+    );
+}
+
+#[test]
+fn typed_surface_extent_round_trips_surface_padding() {
+    let surface = ContentExtent::from_size((348, 212)).expect("positive surface extent");
+    let padding = SurfacePadding {
+        left: 24,
+        top: 8,
+        right: 24,
+        bottom: 40,
+    };
+    let extent = SurfaceExtent::from_surface_and_padding(surface, padding)
+        .expect("surface is larger than its padding");
+
+    assert_eq!(extent.content_size(), (300, 164));
+    assert_eq!(extent.surface_size(), (348, 212));
+    assert_eq!(
+        SurfaceExtent::from_content_and_padding(extent.content(), extent.padding())
+            .expect("content and padding reconstruct the surface")
+            .surface_size(),
+        extent.surface_size()
+    );
+}
+
 /// A zero-area input region makes a surface completely unclickable, which is
 /// a worse failure than an oversized one and can legitimately happen for a
 /// frame while a surface is still being measured. Degrade to whole-surface
@@ -470,7 +531,7 @@ fn padding_larger_than_the_surface_does_not_collapse_the_region() {
 fn changing_only_the_padding_still_counts_as_a_config_change() {
     let cfg = base_cfg();
     let mut padded = cfg.clone();
-    padded.padding = SurfacePadding::trailing(0, 200);
+    set_requested_size(&mut padded, (280, 164), SurfacePadding::trailing(0, 200));
     assert_eq!(
         surface_config_change(
             &cfg,

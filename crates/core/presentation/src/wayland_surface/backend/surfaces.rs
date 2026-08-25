@@ -203,7 +203,7 @@ impl WaylandSurfaceBackend {
                     // Identical config: the reserve is identical too, but assign
                     // it anyway so the entry's padding can never drift from the
                     // last config the shell sent.
-                    entry.padding = cfg.padding;
+                    entry.padding = cfg.padding();
                 }
             }
             None => {
@@ -497,13 +497,16 @@ impl WaylandSurfaceBackend {
             popup
         };
 
+        let surface = ContentExtent::from_size(config.placement.size)
+            .and_then(|surface| SurfaceExtent::from_surface_and_padding(surface, config.padding))
+            .map_err(|error| PresentationError::SurfaceCreate(error.to_string()))?;
         let cfg = SurfaceConfig {
-            width: config.placement.size.0,
-            height: config.placement.size.1,
+            extent: surface,
+            wire_size: LayerWireSize::fixed(config.placement.size.0, config.placement.size.1)
+                .map_err(|error| PresentationError::SurfaceCreate(error.to_string()))?,
             // `placement.size` is the *padded* buffer: the popover content plus
             // the ring reserved for descendant shadow/filter overshoot. Carry
             // that reserve so the entry confines input to the visible content.
-            padding: config.padding,
             ..SurfaceConfig::default()
         };
         let entry = SurfaceEntry::new(

@@ -9,7 +9,10 @@ mod handlers;
 mod popup;
 mod state;
 
-pub use backend::{LayerSurfaceSizePolicy, SurfaceConfig, SurfacePadding, WaylandSurfaceBackend};
+pub use backend::{
+    ContentExtent, LayerSurfaceSizePolicy, LayerWireExtent, LayerWireSize, SurfaceConfig,
+    SurfaceExtent, SurfaceExtentError, SurfacePadding, UnmeasuredSize, WaylandSurfaceBackend,
+};
 pub use popup::{PopupAnchor, PopupConfig, PopupConstraint, PopupGravity, PopupPlacement};
 
 use crate::dev_window::{DevWindowEvent, DevWindowKeyEvent, KeyMods};

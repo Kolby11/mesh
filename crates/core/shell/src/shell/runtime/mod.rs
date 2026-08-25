@@ -30,7 +30,7 @@ impl Shell {
             .target(target)
             .last_surface_config
             .as_ref()
-            .map(|config| config.padding)
+            .map(|config| config.padding())
             .unwrap_or_default();
         (
             padded

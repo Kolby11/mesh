@@ -880,14 +880,14 @@ fn frontend_module_activation_mounts_shipped_surface_live() {
         .last_surface_config
         .as_ref()
         .expect("settings surface should be configured through the shell renderer");
-    assert_eq!(config.width, 920);
+    assert_eq!(config.surface_size().0, 920);
     // `@mesh/settings` is `promotable` and *starts* as chrome, so this is the
     // layer-surface shape: the 700px CSS-measured root plus the 200px tooltip
     // overlay reserve. Popping it out into a window drops that reserve, because
     // a toplevel's size is its content size — the compositor pins, decorates,
     // and tiles by it, so a padded buffer would make the window measurably
     // larger than the UI inside it.
-    assert_eq!(config.height, 900);
+    assert_eq!(config.surface_size().1, 900);
     assert_eq!(config.role, mesh_core_wayland::SurfaceRole::Layer);
 }
 

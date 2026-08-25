@@ -200,7 +200,7 @@ fn layer_surface_config_uses_content_size_not_stale_surface_size_on_first_show()
         .as_ref()
         .expect("layer surface should be configured on first show");
     assert_eq!(
-        (config.width, config.height),
+        config.surface_size(),
         (480, 640),
         "layer surface configure must use measured content size instead of the stale pre-measure size"
     );

@@ -546,7 +546,7 @@ fn promoting_an_embedded_child_replaces_its_popup_with_a_toplevel() {
         .find(|(surface_id, _)| surface_id == &child_id)
         .expect("promoted child should configure an xdg_toplevel");
     assert_eq!(config.role, mesh_core_wayland::SurfaceRole::Window);
-    assert_eq!((config.width, config.height), (72, 32));
+    assert_eq!(config.surface_size(), (72, 32));
     assert!(
         shell
             .presentation_engine

@@ -10,8 +10,9 @@ use mesh_core_wayland::WindowStates;
 
 pub use dev_window::{DevWindowEvent as WindowEvent, DevWindowKeyEvent as WindowKeyEvent, KeyMods};
 pub use wayland_surface::{
-    LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint, PopupGravity,
-    PopupPlacement, SurfaceConfig, SurfacePadding,
+    ContentExtent, LayerSurfaceSizePolicy, LayerWireExtent, LayerWireSize, PopupAnchor,
+    PopupConfig, PopupConstraint, PopupGravity, PopupPlacement, SurfaceConfig, SurfaceExtent,
+    SurfaceExtentError, SurfacePadding, UnmeasuredSize,
 };
 
 /// The Wayland seat and button-press serial that authorize an `xdg_popup` grab.
@@ -1414,8 +1415,8 @@ impl PresentationEngine {
                 .surface_configs
                 .get(surface_id)
                 .and_then(|cfg| {
-                    cfg.padding
-                        .content_rect(cfg.width.max(1), cfg.height.max(1))
+                    let (width, height) = cfg.surface_size();
+                    cfg.padding().content_rect(width, height)
                 })
                 .or_else(|| {
                     backend.popup_configs.get(surface_id).and_then(|cfg| {
@@ -2564,11 +2565,12 @@ mod tests {
             .expect("the initial config should be accepted");
         engine.testing_fail_next_configure("synthetic surface creation failure");
 
-        let replacement = SurfaceConfig {
-            width: 640,
-            height: 480,
-            ..accepted.clone()
-        };
+        let mut replacement = accepted.clone();
+        let content = ContentExtent::from_size((640, 480)).expect("positive test content");
+        replacement.extent =
+            SurfaceExtent::from_content_and_padding(content, SurfacePadding::default())
+                .expect("positive test extent");
+        replacement.wire_size = LayerWireSize::fixed(640, 480).expect("positive wire size");
         let error = engine
             .configure("panel", replacement)
             .expect_err("the injected creation failure must be observable");

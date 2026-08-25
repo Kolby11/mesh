@@ -269,15 +269,42 @@ impl Shell {
                 surface.exclusive_zone = 0;
                 surface.keyboard_mode = mesh_core_wayland::KeyboardMode::None;
                 surface.window = parent_window;
+                let content = ContentExtent::from_size((
+                    request.content_size.0.max(1),
+                    request.content_size.1.max(1),
+                ))
+                .map_err(|error| {
+                    ShellRunError::Presentation(
+                        mesh_core_presentation::PresentationError::SurfaceCreate(error.to_string()),
+                    )
+                })?;
+                let extent = ConfiguredSurfaceExtent::from_content_and_padding(
+                    content,
+                    SurfacePadding::default(),
+                )
+                .map_err(|error| {
+                    ShellRunError::Presentation(
+                        mesh_core_presentation::PresentationError::SurfaceCreate(error.to_string()),
+                    )
+                })?;
                 let config = SurfaceConfig {
                     role: mesh_core_wayland::SurfaceRole::Window,
                     window: surface.window.clone(),
                     edge: None,
                     layer: Layer::Top,
                     size_policy: LayerSurfaceSizePolicy::Flexible,
-                    width: padded_size.0.max(1),
-                    height: padded_size.1.max(1),
-                    padding: SurfacePadding::default(),
+                    wire_size: LayerWireSize::fixed(
+                        extent.surface_size().0,
+                        extent.surface_size().1,
+                    )
+                    .map_err(|error| {
+                        ShellRunError::Presentation(
+                            mesh_core_presentation::PresentationError::SurfaceCreate(
+                                error.to_string(),
+                            ),
+                        )
+                    })?,
+                    extent,
                     exclusive_zone: 0,
                     keyboard_mode: mesh_core_wayland::KeyboardMode::None,
                     namespace: child_surface_id.clone(),

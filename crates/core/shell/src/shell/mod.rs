@@ -52,7 +52,7 @@ use backend::{BackendRuntimeStatus, BackendRuntimeStatusEntry};
 use ipc::spawn_ipc_server;
 use mesh_core_backend::BackendServiceEvent;
 use mesh_core_presentation::{
-    PresentationEngine, SurfaceConfig, WindowEvent, WindowKeyEvent, coalesce_input_events,
+    PresentationEngine, WindowEvent, WindowKeyEvent, coalesce_input_events,
 };
 use mesh_core_render::{DebugOverlay, PixelBuffer};
 use sounds::{SoundKind, shell_sound_request};

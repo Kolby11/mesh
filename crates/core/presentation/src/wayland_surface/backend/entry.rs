@@ -282,9 +282,9 @@ impl SurfaceEntry {
     ) -> Self {
         Self {
             role,
-            width: cfg.width.max(1),
-            height: cfg.height.max(1),
-            padding: cfg.padding,
+            width: cfg.surface_size().0,
+            height: cfg.surface_size().1,
+            padding: cfg.padding(),
             cfg,
             applied_keyboard_mode,
             configured: false,
@@ -446,7 +446,7 @@ impl SurfaceEntry {
         // Adopt the reserve before anything can return early: the padding is
         // client-side state with no protocol request of its own, and a config
         // that changed only the reserve must still reach `content_input_region`.
-        self.padding = cfg.padding;
+        self.padding = cfg.padding();
         // A toplevel takes title/app_id/size-hint requests instead of the
         // layer-shell placement requests, and never invalidates `configured`
         // for them: the compositor is not obliged to answer a title change with
@@ -483,7 +483,7 @@ impl SurfaceEntry {
 
     /// Apply the toplevel-facing half of a [`SurfaceConfig`].
     ///
-    /// `cfg.width`/`cfg.height` are the CSS-measured *content* size. For a
+    /// `cfg.extent.content_size()` is the CSS-measured *content* size. For a
     /// window they are a request, not a decision: they seed the initial size,
     /// and nothing more — unless the surface is declared non-resizable, in
     /// which case reporting them as both min and max pins the window to its
@@ -507,7 +507,7 @@ impl SurfaceEntry {
         }
         self.applied_window_identity_pending = false;
 
-        let content = (cfg.width.max(1), cfg.height.max(1));
+        let content = cfg.content_size();
         let pinned = (!cfg.window.resizable).then_some(content);
         let hints = WindowSizeHints {
             min: pinned,
@@ -526,8 +526,8 @@ impl SurfaceEntry {
         window.commit();
         tracing::debug!(
             configured = self.configured,
-            width = self.cfg.width,
-            height = self.cfg.height,
+            width = self.cfg.content_size().0,
+            height = self.cfg.content_size().1,
             "layer_shell: window config committed"
         );
     }

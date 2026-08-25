@@ -15,8 +15,10 @@ use crate::shell::types::{
 use mesh_core_elements::style::BackgroundPaint;
 use mesh_core_elements::{PopoverAnchor, PopoverConstraintAdjustment, PopoverGrab, PopoverGravity};
 use mesh_core_presentation::{
-    LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint, PopupGravity,
-    PopupPlacement, PresentStatus, SurfaceLifecycleEvent, SurfacePadding, SurfaceStateStatus,
+    ContentExtent, LayerSurfaceSizePolicy, LayerWireSize, PopupAnchor, PopupConfig,
+    PopupConstraint, PopupGravity, PopupPlacement, PresentStatus, SurfaceConfig,
+    SurfaceExtent as ConfiguredSurfaceExtent, SurfaceLifecycleEvent, SurfacePadding,
+    SurfaceStateStatus, UnmeasuredSize,
 };
 use mesh_core_render::{BackdropBlurPolicy, DamageRect, DisplayPaintCommand};
 use mesh_core_wayland::SurfaceRole;
@@ -302,13 +304,56 @@ impl Shell {
                 // component sees) stay content-sized, and `configured_padding`
                 // travels with the inflated size so the presentation layer can
                 // confine pointer input back to the content rect.
-                let (configured_width, configured_height, configured_padding) =
-                    surface_geometry_with_overlay_reserve(
-                        &surface_id,
-                        surface.role,
-                        surface.width,
-                        surface.height,
-                    );
+                let (requested_width, requested_height, _) = surface_geometry_with_overlay_reserve(
+                    &surface_id,
+                    surface.role,
+                    surface.width,
+                    surface.height,
+                );
+                // `render()` may have just completed a measurement by updating
+                // the shell-side surface record, while `width`/`height` still
+                // describe the previous pass's buffer. Prefer that record and
+                // use the resolved pass size only for an intentional spanning
+                // axis so the typed extent follows the post-measurement
+                // geometry decision.
+                let measured_content = UnmeasuredSize::from_optional(
+                    (surface.width > 0)
+                        .then_some(surface.width)
+                        .or((width > 0).then_some(width)),
+                    (surface.height > 0)
+                        .then_some(surface.height)
+                        .or((height > 0).then_some(height)),
+                );
+                let content = measured_content.content().map_err(|error| {
+                    ShellRunError::Presentation(
+                        mesh_core_presentation::PresentationError::SurfaceCreate(error.to_string()),
+                    )
+                })?;
+                let (_, _, configured_padding) = surface_geometry_with_overlay_reserve(
+                    &surface_id,
+                    surface.role,
+                    content.width(),
+                    content.height(),
+                );
+                let extent =
+                    ConfiguredSurfaceExtent::from_content_and_padding(content, configured_padding)
+                        .map_err(|error| {
+                            ShellRunError::Presentation(
+                                mesh_core_presentation::PresentationError::SurfaceCreate(
+                                    error.to_string(),
+                                ),
+                            )
+                        })?;
+                let wire_size = if surface.role == SurfaceRole::Window {
+                    LayerWireSize::fixed(extent.surface_size().0, extent.surface_size().1)
+                } else {
+                    LayerWireSize::from_requested((surface.width, surface.height), extent.surface())
+                }
+                .map_err(|error| {
+                    ShellRunError::Presentation(
+                        mesh_core_presentation::PresentationError::SurfaceCreate(error.to_string()),
+                    )
+                })?;
                 let config_changed = self.components[index]
                     .parent
                     .last_surface_config
@@ -317,9 +362,8 @@ impl Shell {
                         last.edge != surface.edge
                             || last.layer != layer
                             || last.size_policy != size_policy
-                            || last.width != configured_width
-                            || last.height != configured_height
-                            || last.padding != configured_padding
+                            || last.extent != extent
+                            || last.wire_size != wire_size
                             || last.exclusive_zone != surface.exclusive_zone
                             || last.keyboard_mode != surface.keyboard_mode
                             || last.margin_top != surface.margin_top
@@ -355,8 +399,8 @@ impl Shell {
                     || layer_configure_size_is_resolved(
                         surface.edge,
                         surface.exclusive_zone,
-                        configured_width,
-                        configured_height,
+                        requested_width,
+                        requested_height,
                     );
                 // A pass that cannot produce a usable configure earns one more,
                 // taken after the paint below has measured the content.
@@ -375,9 +419,8 @@ impl Shell {
                         edge: surface.edge,
                         layer,
                         size_policy,
-                        width: configured_width,
-                        height: configured_height,
-                        padding: configured_padding,
+                        extent,
+                        wire_size,
                         exclusive_zone: surface.exclusive_zone,
                         keyboard_mode: surface.keyboard_mode,
                         namespace: surface_id.clone(),
@@ -389,8 +432,8 @@ impl Shell {
                     };
                     tracing::debug!(
                         surface_id = %surface_id,
-                        width = configured_width,
-                        height = configured_height,
+                        width = extent.surface_size().0,
+                        height = extent.surface_size().1,
                         edge = ?surface.edge,
                         exclusive_zone = surface.exclusive_zone,
                         margin_top = surface.margin_top,
@@ -576,17 +619,13 @@ impl Shell {
                 // is allocated with: `paint` lays an unknown axis out as
                 // `auto` and measures the content, rather than pinning the
                 // surface root to one pixel and measuring the collapse.
+                let measured = UnmeasuredSize::from_optional(
+                    (width_known || popup_measurement_bound.is_some()).then_some(width),
+                    (height_known || popup_measurement_bound.is_some()).then_some(height),
+                );
                 let extent_content = (
-                    if width_known || popup_measurement_bound.is_some() {
-                        width
-                    } else {
-                        0
-                    },
-                    if height_known || popup_measurement_bound.is_some() {
-                        height
-                    } else {
-                        0
-                    },
+                    measured.width().unwrap_or(0),
+                    measured.height().unwrap_or(0),
                 );
                 let paint_extent = if is_popup {
                     if popup_measurement_bound.is_some() && (!width_known || !height_known) {
