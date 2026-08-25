@@ -160,10 +160,14 @@ compiler/editor consumers, frontend event-subscription graph diagnostics, and
 LSP backend shape completion. Line-oriented symbol inference is no longer a
 source of truth.
 
+Decoded assets, fonts, glyphs, text layouts, Skia images and shaders, icon
+resolutions, PixelBuffers, and Wayland SHM pools now enforce explicit byte and
+dimension budgets with deterministic rejection or LRU eviction.
+
 ## Next
 
-Enforce byte- and dimension-based cache budgets for decoded assets, fonts,
-glyphs, text, Skia, PixelBuffer, and SHM allocations (`docs/BACKLOG.md`).
+Introduce a typed frame paint plan with immutable inputs, topology, transforms,
+effect regions, replay spans, and exact logical/device damage (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

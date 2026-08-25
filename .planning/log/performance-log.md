@@ -3694,3 +3694,28 @@ at least 5x in both shapes and at least 10x less exclusive retained payload.
 tests (3 release benchmarks ignored). Its three release end-to-end gates also
 pass: distinct-child memoization 1.4x, repeated aliases 1.16x, and slots 1.2x
 against forced misses in this run.
+
+---
+
+## 2026-08-25 — bound decoded asset and rendering cache residency
+
+`working tree` · area: rendering/resource cache budgets
+
+Decoded image, raster, glyph, font, text-layout, glyph-atlas, Skia image and
+gradient-shader caches now track resident byte weights in addition to entry
+counts. Icon resolution metadata, glyph-map parsing, named-font availability,
+intrinsic text measurement, ellipsis shaping, and the last-good glyph fallback
+map use the same bounded policy. Font and glyph inputs reject oversized files
+or dimensions before rendering; PixelBuffer keeps a process-wide allocation
+reservation and per-buffer byte/dimension limits; Wayland SHM retains its
+per-buffer, per-surface, and SlotPool byte gates.
+
+No speedup claim is made for this correctness/budget change.
+
+**Verified.** `cargo fmt --all`, `cargo check --workspace`, the full
+`mesh-core-render` library suite (250 passed, 36 ignored), and the full
+`mesh-core-icon` library suite (31 passed, 3 ignored) passed. Focused
+PixelBuffer, glyph, text, painter, layout-cache, icon, and SHM slices passed.
+The broad `mesh-core-elements` and `mesh-core-presentation` suites report
+unrelated failures in unchanged tests (10 and 2 tests respectively); those
+failures are recorded in the implementation handoff.

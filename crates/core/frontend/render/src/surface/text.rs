@@ -31,6 +31,7 @@ const GLYPH_ATLAS_CAPACITY: usize = 2048;
 const GLYPH_ATLAS_MAX_BYTES: usize = 8 * 1024 * 1024;
 const MAX_GLYPH_ATLAS_DIMENSION: u32 = 4096;
 const NAMED_FONT_AVAILABILITY_CACHE_CAPACITY: usize = 128;
+const NAMED_FONT_AVAILABILITY_CACHE_MAX_BYTES: usize = 32 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct NamedFontAvailabilityKey {
@@ -60,8 +61,11 @@ thread_local! {
     /// spaces) so we skip the swash lookup next time.
     static GLYPH_ATLAS: RefCell<ByteLruCache<GlyphAtlasKey, Option<GlyphAtlasEntry>>> =
         RefCell::new(ByteLruCache::new(GLYPH_ATLAS_CAPACITY, GLYPH_ATLAS_MAX_BYTES));
-    static NAMED_FONT_AVAILABILITY: RefCell<HashMap<NamedFontAvailabilityKey, bool>> =
-        RefCell::new(HashMap::new());
+    static NAMED_FONT_AVAILABILITY: RefCell<ByteLruCache<NamedFontAvailabilityKey, bool>> =
+        RefCell::new(ByteLruCache::new(
+            NAMED_FONT_AVAILABILITY_CACHE_CAPACITY,
+            NAMED_FONT_AVAILABILITY_CACHE_MAX_BYTES,
+        ));
 }
 
 pub struct TextRenderer {
@@ -1091,7 +1095,10 @@ fn build_glyph_atlas_entry(
     swash_cache: &mut SwashCache,
     cache_key: CacheKey,
 ) -> Option<GlyphAtlasEntry> {
-    let image = swash_cache.get_image(font_system, cache_key).as_ref()?;
+    // cosmic-text's SwashCache is an unbounded HashMap. Keep the bounded
+    // Skia atlas below as the sole resident glyph cache and rasterize
+    // misses without populating the dependency's cache.
+    let image = swash_cache.get_image_uncached(font_system, cache_key)?;
     let width = image.placement.width;
     let height = image.placement.height;
     if width == 0
@@ -1830,7 +1837,7 @@ fn named_family_is_available(font_system: &FontSystem, family: &str) -> bool {
         resource_revision: resource_revision(),
     };
     NAMED_FONT_AVAILABILITY.with(|cache| {
-        if let Some(available) = cache.borrow().get(&key).copied() {
+        if let Some(available) = cache.borrow_mut().get(&key).copied() {
             return available;
         }
         let available = font_system.db().faces().any(|face| {
@@ -1838,11 +1845,14 @@ fn named_family_is_available(font_system: &FontSystem, family: &str) -> bool {
                 .iter()
                 .any(|(candidate, _)| candidate.eq_ignore_ascii_case(family))
         });
-        let mut cache = cache.borrow_mut();
-        if cache.len() == NAMED_FONT_AVAILABILITY_CACHE_CAPACITY {
-            cache.clear();
-        }
-        cache.insert(key, available);
+        cache.borrow_mut().insert(
+            key,
+            available,
+            std::mem::size_of::<NamedFontAvailabilityKey>()
+                + std::mem::size_of::<bool>()
+                + family.len()
+                + 2 * std::mem::size_of::<usize>(),
+        );
         available
     })
 }

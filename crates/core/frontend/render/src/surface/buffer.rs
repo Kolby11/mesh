@@ -1,21 +1,53 @@
 //! Pixel buffer for software rendering.
 use mesh_core_elements::style::Color;
+use mesh_core_resources::{ResourceByteBudget, ResourceByteReservation};
 use skia_safe::{
     AlphaType, BlendMode, Canvas, ColorType, ImageInfo, Paint, PaintStyle, RRect, Rect, Surface,
     surfaces,
 };
+use std::sync::OnceLock;
+
+const PIXEL_BUFFER_GLOBAL_MAX_BYTES: usize = 512 * 1024 * 1024;
+static PIXEL_BUFFER_GLOBAL_BUDGET: OnceLock<ResourceByteBudget> = OnceLock::new();
+
+fn pixel_buffer_global_budget() -> &'static ResourceByteBudget {
+    PIXEL_BUFFER_GLOBAL_BUDGET
+        .get_or_init(|| ResourceByteBudget::new(PIXEL_BUFFER_GLOBAL_MAX_BYTES))
+}
 
 /// A premultiplied-alpha BGRA8888 pixel buffer, matching Wayland
 /// `wl_shm::Format::Argb8888` on little-endian hosts.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PixelBuffer {
     data: Vec<u8>,
     width: u32,
     height: u32,
     stride: u32,
+    _budget: ResourceByteReservation,
+}
+
+impl Clone for PixelBuffer {
+    fn clone(&self) -> Self {
+        let budget = pixel_buffer_global_budget()
+            .try_reserve(self.data.len())
+            .expect("PixelBuffer global allocation budget exhausted while cloning");
+        Self {
+            data: self.data.clone(),
+            width: self.width,
+            height: self.height,
+            stride: self.stride,
+            _budget: budget,
+        }
+    }
 }
 
 impl PixelBuffer {
+    /// Keep one software surface within the same practical dimension envelope
+    /// as a Wayland SHM surface. The byte limit remains authoritative for the
+    /// combined allocation, while this cap rejects pathological thin or tall
+    /// buffers before Skia sees them.
+    pub const MAX_DIMENSION: u32 = 16_384;
+
     /// Keep one software surface from consuming unbounded process memory.
     /// The shell applies the same limit before requesting a surface-sized
     /// buffer, while this type remains safe for all direct callers.
@@ -24,6 +56,9 @@ impl PixelBuffer {
     /// Allocate a pixel buffer without panicking on overflow, an oversized
     /// request, or allocator failure.
     pub fn try_new(width: u32, height: u32) -> Option<Self> {
+        if width > Self::MAX_DIMENSION || height > Self::MAX_DIMENSION {
+            return None;
+        }
         let stride = width.checked_mul(4)?;
         let byte_len = usize::try_from(stride)
             .ok()?
@@ -31,15 +66,19 @@ impl PixelBuffer {
         if byte_len > Self::MAX_BYTES {
             return None;
         }
+        let budget = pixel_buffer_global_budget().try_reserve(byte_len)?;
 
         let mut data = Vec::new();
-        data.try_reserve_exact(byte_len).ok()?;
+        if data.try_reserve_exact(byte_len).is_err() {
+            return None;
+        }
         data.resize(byte_len, 0);
         Some(Self {
             data,
             width,
             height,
             stride,
+            _budget: budget,
         })
     }
 
@@ -438,6 +477,7 @@ mod tests {
     #[test]
     fn try_new_rejects_overflow_and_oversized_allocations() {
         assert!(PixelBuffer::try_new(u32::MAX, 2).is_none());
+        assert!(PixelBuffer::try_new(PixelBuffer::MAX_DIMENSION + 1, 1).is_none());
         assert!(PixelBuffer::try_new(16_385, 8_192).is_none());
         assert!(PixelBuffer::try_new(16, 16).is_some());
     }

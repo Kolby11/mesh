@@ -21,6 +21,7 @@ use skia_safe::{
 };
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::io::Read;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -275,6 +276,8 @@ const MAX_GLYPH_PX: u32 = 2048;
 // Avoids rebuilding Skia A8 images on every paint frame.
 const ICON_GLYPH_SKIA_CAPACITY: usize = 512;
 const ICON_GLYPH_SKIA_MAX_BYTES: usize = 8 * 1024 * 1024;
+const LAST_GOOD_GLYPH_CAPACITY: usize = 1024;
+const LAST_GOOD_GLYPH_MAX_BYTES: usize = 128 * 1024;
 thread_local! {
     static ICON_GLYPH_SKIA: RefCell<ByteLruCache<GlyphCacheKey, skia_safe::Image>> =
         RefCell::new(ByteLruCache::new(ICON_GLYPH_SKIA_CAPACITY, ICON_GLYPH_SKIA_MAX_BYTES));
@@ -284,18 +287,25 @@ thread_local! {
 // axes/color combination (e.g. entering `:hover`) can keep drawing the
 // previous variant for this shape instead of blanking the icon while the
 // real one rasterizes off-thread.
-static LAST_GOOD_GLYPH_KEY: OnceLock<
-    Mutex<std::collections::HashMap<GlyphShapeKey, GlyphCacheKey>>,
-> = OnceLock::new();
+static LAST_GOOD_GLYPH_KEY: OnceLock<Mutex<ByteLruCache<GlyphShapeKey, GlyphCacheKey>>> =
+    OnceLock::new();
 
-fn last_good_glyph_key_map()
--> &'static Mutex<std::collections::HashMap<GlyphShapeKey, GlyphCacheKey>> {
-    LAST_GOOD_GLYPH_KEY.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+fn last_good_glyph_key_map() -> &'static Mutex<ByteLruCache<GlyphShapeKey, GlyphCacheKey>> {
+    LAST_GOOD_GLYPH_KEY.get_or_init(|| {
+        Mutex::new(ByteLruCache::new(
+            LAST_GOOD_GLYPH_CAPACITY,
+            LAST_GOOD_GLYPH_MAX_BYTES,
+        ))
+    })
 }
 
 fn remember_last_good_glyph_key(key: GlyphCacheKey) {
     if let Ok(mut map) = last_good_glyph_key_map().lock() {
-        map.insert(GlyphShapeKey::from(key), key);
+        map.insert(
+            GlyphShapeKey::from(key),
+            key,
+            2 * std::mem::size_of::<GlyphCacheKey>(),
+        );
     }
 }
 
@@ -303,7 +313,7 @@ fn last_good_glyph_key_for_shape(shape: GlyphShapeKey) -> Option<GlyphCacheKey> 
     last_good_glyph_key_map()
         .lock()
         .ok()
-        .and_then(|map| map.get(&shape).copied())
+        .and_then(|mut map| map.get(&shape).copied())
 }
 
 fn font_bytes_cache() -> &'static FontBytesCache {
@@ -345,12 +355,25 @@ fn font_bytes(path: &Path) -> Option<Arc<[u8]>> {
         Err(_) => 0,
     };
     profiling::record_font_bytes_cache_lookup(false, entries, FONT_BYTES_CACHE_CAPACITY);
-    let bytes: Arc<[u8]> = std::fs::read(path).ok()?.into();
+    let bytes = read_font_bytes(path)?;
     if let Ok(mut guard) = cache.lock() {
         guard.insert(key, Arc::clone(&bytes), bytes.len());
         profiling::update_font_bytes_cache_entries(guard.len(), FONT_BYTES_CACHE_CAPACITY);
     }
     Some(bytes)
+}
+
+fn read_font_bytes(path: &Path) -> Option<Arc<[u8]>> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take((FONT_BYTES_CACHE_MAX_BYTES.saturating_add(1)) as u64)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() > FONT_BYTES_CACHE_MAX_BYTES {
+        return None;
+    }
+    Some(bytes.into())
 }
 
 fn rasterize(
@@ -363,6 +386,9 @@ fn rasterize(
 ) -> Option<CachedGlyph> {
     glyph_work_bytes(px)?;
     let bytes = prepared_bytes.or_else(|| font_bytes(font_path))?;
+    if bytes.len() > FONT_BYTES_CACHE_MAX_BYTES {
+        return None;
+    }
     let font = FontRef::from_index(bytes.as_ref(), 0)?;
     let glyph_id = font.charmap().map(char::from_u32(codepoint)?);
     if glyph_id == 0 {

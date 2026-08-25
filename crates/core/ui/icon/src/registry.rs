@@ -4,6 +4,7 @@ use crate::xdg;
 use anyhow::{Result, bail};
 use mesh_core_resources::resource_revision;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::mem::size_of;
 use std::path::PathBuf;
 
 /// Result of resolving a logical icon name through the binding chain.
@@ -77,12 +78,16 @@ pub struct IconRegistry {
     generation: u64,
     cache: HashMap<IconCacheKey, IconResolution>,
     cache_order: VecDeque<IconCacheKey>,
+    cache_bytes: usize,
     warned_misses: HashSet<(String, String)>,
     warned_miss_order: VecDeque<(String, String)>,
+    warned_miss_bytes: usize,
 }
 
 const ICON_REGISTRY_CACHE_CAPACITY: usize = 2048;
+const ICON_REGISTRY_CACHE_MAX_BYTES: usize = 8 * 1024 * 1024;
 const ICON_WARNED_MISS_CAPACITY: usize = 2048;
+const ICON_WARNED_MISS_MAX_BYTES: usize = 256 * 1024;
 
 fn canonical_pack_id(value: &str) -> Result<&str> {
     if value.is_empty()
@@ -107,6 +112,56 @@ struct IconCacheKey {
     size: u32,
 }
 
+fn icon_resolution_cache_weight(key: &IconCacheKey, resolution: &IconResolution) -> usize {
+    let key_bytes = size_of::<IconCacheKey>()
+        .saturating_add(key.module_id.len())
+        .saturating_add(key.semantic_name.len());
+    let resolution_bytes = match resolution {
+        IconResolution::Found {
+            semantic_name,
+            candidate,
+            target,
+            provenance,
+            ..
+        } => size_of::<IconResolution>()
+            .saturating_add(semantic_name.len())
+            .saturating_add(candidate.len())
+            .saturating_add(icon_target_cache_weight(target))
+            .saturating_add(provenance.owner_module.as_deref().map_or(0, str::len))
+            .saturating_add(provenance.pack_id.as_deref().map_or(0, str::len))
+            .saturating_add(provenance.candidate.len())
+            .saturating_add(provenance.fallback_stage.len()),
+        IconResolution::Missing {
+            semantic_name,
+            tried,
+        } => size_of::<IconResolution>()
+            .saturating_add(semantic_name.len())
+            .saturating_add(size_of::<Vec<String>>())
+            .saturating_add(
+                tried
+                    .iter()
+                    .map(|candidate| size_of::<String>().saturating_add(candidate.len()))
+                    .fold(0usize, usize::saturating_add),
+            ),
+    };
+    key_bytes.saturating_add(resolution_bytes).max(1)
+}
+
+fn icon_target_cache_weight(target: &ResolvedTarget) -> usize {
+    match target {
+        ResolvedTarget::File(path) => {
+            size_of::<ResolvedTarget>().saturating_add(path.as_os_str().len())
+        }
+        ResolvedTarget::Glyph {
+            font_path,
+            font_bytes,
+            ..
+        } => size_of::<ResolvedTarget>()
+            .saturating_add(font_path.as_os_str().len())
+            .saturating_add(font_bytes.as_ref().map_or(0, |bytes| bytes.len())),
+    }
+}
+
 impl IconRegistry {
     pub fn from_config(config: IconConfig) -> Result<Self> {
         config.validate()?;
@@ -119,8 +174,10 @@ impl IconRegistry {
             generation: 0,
             cache: HashMap::new(),
             cache_order: VecDeque::new(),
+            cache_bytes: 0,
             warned_misses: HashSet::new(),
             warned_miss_order: VecDeque::new(),
+            warned_miss_bytes: 0,
         })
     }
 
@@ -262,8 +319,10 @@ impl IconRegistry {
         self.generation = self.generation.saturating_add(1);
         self.cache.clear();
         self.cache_order.clear();
+        self.cache_bytes = 0;
         self.warned_misses.clear();
         self.warned_miss_order.clear();
+        self.warned_miss_bytes = 0;
     }
 
     /// Legacy compat path — resolves a name with no module context. Used
@@ -296,14 +355,33 @@ impl IconRegistry {
         }
 
         let resolution = self.resolve_uncached(module_id, semantic_name, size);
-        self.cache_order.retain(|existing| existing != &cache_key);
-        self.cache_order.push_back(cache_key.clone());
-        self.cache.insert(cache_key, resolution.clone());
-        while self.cache.len() > ICON_REGISTRY_CACHE_CAPACITY {
-            let Some(evicted) = self.cache_order.pop_front() else {
-                break;
-            };
-            self.cache.remove(&evicted);
+        let weight = icon_resolution_cache_weight(&cache_key, &resolution);
+        if weight <= ICON_REGISTRY_CACHE_MAX_BYTES {
+            self.cache_order.retain(|existing| existing != &cache_key);
+            if let Some(previous) = self.cache.remove(&cache_key) {
+                self.cache_bytes = self
+                    .cache_bytes
+                    .saturating_sub(icon_resolution_cache_weight(&cache_key, &previous));
+            }
+            while self.cache.len() >= ICON_REGISTRY_CACHE_CAPACITY
+                || self.cache_bytes.saturating_add(weight) > ICON_REGISTRY_CACHE_MAX_BYTES
+            {
+                let Some(evicted) = self.cache_order.pop_front() else {
+                    break;
+                };
+                if let Some(previous) = self.cache.remove(&evicted) {
+                    self.cache_bytes = self
+                        .cache_bytes
+                        .saturating_sub(icon_resolution_cache_weight(&evicted, &previous));
+                }
+            }
+            if self.cache.len() < ICON_REGISTRY_CACHE_CAPACITY
+                && self.cache_bytes.saturating_add(weight) <= ICON_REGISTRY_CACHE_MAX_BYTES
+            {
+                self.cache_order.push_back(cache_key.clone());
+                self.cache.insert(cache_key, resolution.clone());
+                self.cache_bytes = self.cache_bytes.saturating_add(weight);
+            }
         }
 
         if matches!(resolution, IconResolution::Missing { .. })
@@ -339,12 +417,40 @@ impl IconRegistry {
         if !self.warned_misses.insert(key.clone()) {
             return false;
         }
+        let weight = size_of::<(String, String)>()
+            .saturating_add(key.0.len())
+            .saturating_add(key.1.len());
+        if weight > ICON_WARNED_MISS_MAX_BYTES {
+            self.warned_misses.remove(&key);
+            return true;
+        }
+        while self.warned_misses.len() >= ICON_WARNED_MISS_CAPACITY
+            || self.warned_miss_bytes.saturating_add(weight) > ICON_WARNED_MISS_MAX_BYTES
+        {
+            let Some(evicted) = self.warned_miss_order.pop_front() else {
+                break;
+            };
+            if self.warned_misses.remove(&evicted) {
+                self.warned_miss_bytes = self.warned_miss_bytes.saturating_sub(
+                    size_of::<(String, String)>()
+                        .saturating_add(evicted.0.len())
+                        .saturating_add(evicted.1.len()),
+                );
+            }
+        }
         self.warned_miss_order.push_back(key);
+        self.warned_miss_bytes = self.warned_miss_bytes.saturating_add(weight);
         while self.warned_misses.len() > ICON_WARNED_MISS_CAPACITY {
             let Some(evicted) = self.warned_miss_order.pop_front() else {
                 break;
             };
-            self.warned_misses.remove(&evicted);
+            if self.warned_misses.remove(&evicted) {
+                self.warned_miss_bytes = self.warned_miss_bytes.saturating_sub(
+                    size_of::<(String, String)>()
+                        .saturating_add(evicted.0.len())
+                        .saturating_add(evicted.1.len()),
+                );
+            }
         }
         true
     }

@@ -3,9 +3,10 @@
 /// Computes `LayoutRect` for every node in a widget tree. Supports row/column
 /// direction, flex-grow/shrink, gap, padding, and margin.
 use std::collections::{HashMap, HashSet};
+use std::mem::size_of;
 use std::sync::Arc;
 
-use crate::lru::LruCache;
+use crate::lru::ByteLruCache;
 use crate::style::{
     AlignContent, AlignItems, AlignSelf, Dimension, Display, Edges, FlexDirection, FontStyle,
     JustifyContent, Overflow, Position, TextDirection, WhiteSpace,
@@ -150,16 +151,20 @@ fn record_taffy_diagnostic(
 }
 
 const INTRINSIC_TEXT_CACHE_CAPACITY: usize = 512;
+const INTRINSIC_TEXT_CACHE_MAX_BYTES: usize = 512 * 1024;
 
 #[derive(Debug)]
 pub struct IntrinsicLayoutCache {
-    text_measurements: LruCache<TextMeasureKey, (f32, f32)>,
+    text_measurements: ByteLruCache<TextMeasureKey, (f32, f32)>,
 }
 
 impl Default for IntrinsicLayoutCache {
     fn default() -> Self {
         Self {
-            text_measurements: LruCache::new(INTRINSIC_TEXT_CACHE_CAPACITY),
+            text_measurements: ByteLruCache::new(
+                INTRINSIC_TEXT_CACHE_CAPACITY,
+                INTRINSIC_TEXT_CACHE_MAX_BYTES,
+            ),
         }
     }
 }
@@ -170,7 +175,8 @@ impl IntrinsicLayoutCache {
     }
 
     fn insert_text_measurement(&mut self, key: TextMeasureKey, value: (f32, f32)) {
-        self.text_measurements.insert(key, value);
+        let weight = key.estimated_bytes();
+        self.text_measurements.insert(key, value, weight);
     }
 }
 
@@ -210,6 +216,16 @@ impl TextMeasureKey {
             resource_revision: context.revisions.resource_revision,
             measurer_revision: context.revisions.measurer_revision,
         }
+    }
+
+    fn estimated_bytes(&self) -> usize {
+        size_of::<Self>()
+            .saturating_add(size_of::<(f32, f32)>())
+            .saturating_add(self.content.len())
+            .saturating_add(self.font_family.len())
+            .saturating_add(self.language.len())
+            .saturating_add(self.shaping_features.len())
+            .saturating_add(4 * size_of::<usize>())
     }
 }
 

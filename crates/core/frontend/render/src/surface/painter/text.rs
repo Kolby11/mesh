@@ -1,6 +1,6 @@
 use crate::display_list::{DisplayPaintNode, DisplayPaintStyle, DisplayTextPaint};
 use mesh_core_elements::Edges;
-use mesh_core_elements::lru::LruCache;
+use mesh_core_elements::lru::ByteLruCache;
 use mesh_core_elements::style::{FontStyle, WhiteSpace};
 use mesh_core_resources::resource_revision;
 use skia_safe::Canvas;
@@ -9,11 +9,19 @@ use std::sync::{Mutex, OnceLock};
 
 use super::*;
 
-static ELLIPSIS_CACHE: OnceLock<Mutex<LruCache<u64, EllipsisCacheEntry>>> = OnceLock::new();
+static ELLIPSIS_CACHE: OnceLock<Mutex<ByteLruCache<u64, EllipsisCacheEntry>>> = OnceLock::new();
 const ELLIPSIS_CACHE_CAPACITY: usize = 512;
+const ELLIPSIS_CACHE_MAX_BYTES: usize = 2 * 1024 * 1024;
+const MAX_ELLIPSIS_TEXT_BYTES: usize = 1024 * 1024;
+const MAX_ELLIPSIS_FAMILY_BYTES: usize = 4096;
 
-fn ellipsis_cache() -> &'static Mutex<LruCache<u64, EllipsisCacheEntry>> {
-    ELLIPSIS_CACHE.get_or_init(|| Mutex::new(LruCache::new(ELLIPSIS_CACHE_CAPACITY)))
+fn ellipsis_cache() -> &'static Mutex<ByteLruCache<u64, EllipsisCacheEntry>> {
+    ELLIPSIS_CACHE.get_or_init(|| {
+        Mutex::new(ByteLruCache::new(
+            ELLIPSIS_CACHE_CAPACITY,
+            ELLIPSIS_CACHE_MAX_BYTES,
+        ))
+    })
 }
 
 pub(super) fn display_text_style(style: &DisplayPaintStyle, scale: f32) -> TextPaintStyle<'_> {
@@ -1029,6 +1037,15 @@ impl EllipsisCacheEntry {
             && self.shaping_features == shaping_features
             && self.max_width == max_width
     }
+
+    fn estimated_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            .saturating_add(self.text.capacity())
+            .saturating_add(self.font_family.capacity())
+            .saturating_add(self.language.capacity())
+            .saturating_add(self.shaping_features.capacity())
+            .saturating_add(self.value.capacity())
+    }
 }
 
 struct EllipsisHasher(u64);
@@ -1083,26 +1100,34 @@ fn insert_ellipsis_cache_entry(
     resource_revision: u64,
     value: String,
 ) {
+    if text.len() > MAX_ELLIPSIS_TEXT_BYTES
+        || style.font_family.len() > MAX_ELLIPSIS_FAMILY_BYTES
+        || style.language.len() > MAX_ELLIPSIS_FAMILY_BYTES
+        || style.shaping_features.len() > MAX_ELLIPSIS_FAMILY_BYTES
+        || value.len() > MAX_ELLIPSIS_TEXT_BYTES
+    {
+        return;
+    }
+
+    let entry = EllipsisCacheEntry {
+        resource_revision,
+        text: text.to_string(),
+        font_family: style.font_family.to_string(),
+        font_size: style.font_size.to_bits(),
+        font_weight: style.font_weight,
+        font_style: style.font_style,
+        letter_spacing: style.letter_spacing.to_bits(),
+        line_height: style.line_height.to_bits(),
+        text_direction: style.text_direction,
+        white_space: style.white_space,
+        language: style.language.to_string(),
+        shaping_features: style.shaping_features.to_string(),
+        max_width: max_width_bits,
+        value,
+    };
+    let weight = entry.estimated_bytes();
     if let Ok(mut guard) = ellipsis_cache().lock() {
-        guard.insert(
-            cache_key,
-            EllipsisCacheEntry {
-                resource_revision,
-                text: text.to_string(),
-                font_family: style.font_family.to_string(),
-                font_size: style.font_size.to_bits(),
-                font_weight: style.font_weight,
-                font_style: style.font_style,
-                letter_spacing: style.letter_spacing.to_bits(),
-                line_height: style.line_height.to_bits(),
-                text_direction: style.text_direction,
-                white_space: style.white_space,
-                language: style.language.to_string(),
-                shaping_features: style.shaping_features.to_string(),
-                max_width: max_width_bits,
-                value,
-            },
-        );
+        guard.insert(cache_key, entry, weight);
     }
 }
 

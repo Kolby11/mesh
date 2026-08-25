@@ -4,16 +4,21 @@ use mesh_core_resources::{
     ResourceFingerprint, ResourcePreparationToken, resource_fingerprint, resource_revision,
 };
 use std::collections::{HashMap, VecDeque};
+use std::io::Read;
+use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 pub const MAX_GLYPH_MAP_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_GLYPH_MAP_ENTRIES: usize = 100_000;
+pub const MAX_FONT_BYTES: usize = 64 * 1024 * 1024;
 
 static SUPPORTED_AXES_CACHE: OnceLock<Mutex<SupportedAxesCache>> = OnceLock::new();
 static XDG_ICON_LOOKUP_CACHE: OnceLock<Mutex<XdgIconLookupCache>> = OnceLock::new();
 const SUPPORTED_AXES_CACHE_CAPACITY: usize = 128;
+const SUPPORTED_AXES_CACHE_MAX_BYTES: usize = 128 * 1024;
 const XDG_ICON_LOOKUP_CACHE_CAPACITY: usize = 2048;
+const XDG_ICON_LOOKUP_CACHE_MAX_BYTES: usize = 512 * 1024;
 
 type FontFreshness = ResourceFingerprint;
 
@@ -28,6 +33,7 @@ struct CachedSupportedAxes {
 struct SupportedAxesCache {
     entries: HashMap<PathBuf, CachedSupportedAxes>,
     order: VecDeque<PathBuf>,
+    bytes: usize,
 }
 
 impl SupportedAxesCache {
@@ -50,16 +56,39 @@ impl SupportedAxesCache {
     }
 
     fn insert(&mut self, path: PathBuf, value: CachedSupportedAxes) {
+        let weight = supported_axes_cache_weight(&path);
+        if weight > SUPPORTED_AXES_CACHE_MAX_BYTES {
+            return;
+        }
+        if self.entries.remove(&path).is_some() {
+            self.bytes = self
+                .bytes
+                .saturating_sub(supported_axes_cache_weight(&path));
+        }
         self.order.retain(|existing| existing != &path);
-        self.order.push_back(path.clone());
-        self.entries.insert(path, value);
-        while self.entries.len() > SUPPORTED_AXES_CACHE_CAPACITY {
+        while self.entries.len() >= SUPPORTED_AXES_CACHE_CAPACITY
+            || self.bytes.saturating_add(weight) > SUPPORTED_AXES_CACHE_MAX_BYTES
+        {
             let Some(evicted) = self.order.pop_front() else {
                 break;
             };
-            self.entries.remove(&evicted);
+            if self.entries.remove(&evicted).is_some() {
+                self.bytes = self
+                    .bytes
+                    .saturating_sub(supported_axes_cache_weight(&evicted));
+            }
         }
+        self.order.push_back(path.clone());
+        self.entries.insert(path, value);
+        self.bytes = self.bytes.saturating_add(weight);
     }
+}
+
+fn supported_axes_cache_weight(path: &Path) -> usize {
+    size_of::<PathBuf>()
+        .saturating_add(size_of::<CachedSupportedAxes>())
+        .saturating_add(path.as_os_str().len())
+        .max(1)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -75,6 +104,7 @@ struct XdgIconLookupKey {
 struct XdgIconLookupCache {
     entries: HashMap<XdgIconLookupKey, Option<PathBuf>>,
     order: VecDeque<XdgIconLookupKey>,
+    bytes: usize,
 }
 
 impl XdgIconLookupCache {
@@ -88,16 +118,42 @@ impl XdgIconLookupCache {
     }
 
     fn insert(&mut self, key: XdgIconLookupKey, value: Option<PathBuf>) {
+        let weight = xdg_lookup_cache_weight(&key, value.as_ref());
+        if weight > XDG_ICON_LOOKUP_CACHE_MAX_BYTES {
+            return;
+        }
+        if let Some(previous) = self.entries.remove(&key) {
+            self.bytes = self
+                .bytes
+                .saturating_sub(xdg_lookup_cache_weight(&key, previous.as_ref()));
+        }
         self.order.retain(|existing| existing != &key);
-        self.order.push_back(key.clone());
-        self.entries.insert(key, value);
-        while self.entries.len() > XDG_ICON_LOOKUP_CACHE_CAPACITY {
+        while self.entries.len() >= XDG_ICON_LOOKUP_CACHE_CAPACITY
+            || self.bytes.saturating_add(weight) > XDG_ICON_LOOKUP_CACHE_MAX_BYTES
+        {
             let Some(evicted) = self.order.pop_front() else {
                 break;
             };
-            self.entries.remove(&evicted);
+            if let Some(previous) = self.entries.remove(&evicted) {
+                self.bytes = self
+                    .bytes
+                    .saturating_sub(xdg_lookup_cache_weight(&evicted, previous.as_ref()));
+            }
         }
+        self.order.push_back(key.clone());
+        self.entries.insert(key, value);
+        self.bytes = self.bytes.saturating_add(weight);
     }
+}
+
+fn xdg_lookup_cache_weight(key: &XdgIconLookupKey, value: Option<&PathBuf>) -> usize {
+    size_of::<XdgIconLookupKey>()
+        .saturating_add(key.root.as_ref().map_or(0, |path| path.as_os_str().len()))
+        .saturating_add(key.theme.len())
+        .saturating_add(key.asset_name.len())
+        .saturating_add(size_of::<Option<PathBuf>>())
+        .saturating_add(value.map_or(0, |path| path.as_os_str().len()))
+        .max(1)
 }
 
 pub fn find_icon_in_pack(
@@ -282,6 +338,9 @@ pub fn parse_glyph_map_bytes_with_cancellation(
 /// prepared. Rendering still owns rasterization, but it should never be the
 /// first code path to discover that a published pack is not a font.
 pub fn validate_font_bytes(bytes: &[u8]) -> Result<(), String> {
+    if bytes.len() > MAX_FONT_BYTES {
+        return Err(format!("font file exceeds {MAX_FONT_BYTES} bytes"));
+    }
     let face = ttf_parser::Face::parse(bytes, 0)
         .map_err(|error| format!("font file is invalid: {error:?}"))?;
     if face.number_of_glyphs() == 0 {
@@ -363,6 +422,7 @@ fn resolve_pack_path(root: &Path, declared: &str) -> PathBuf {
 
 static CODEPOINTS_CACHE: OnceLock<Mutex<CodepointsCache>> = OnceLock::new();
 const CODEPOINTS_CACHE_CAPACITY: usize = 128;
+const CODEPOINTS_CACHE_MAX_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct CodepointsCacheKey {
@@ -375,6 +435,7 @@ struct CodepointsCacheKey {
 struct CodepointsCache {
     entries: HashMap<CodepointsCacheKey, HashMap<String, u32>>,
     order: VecDeque<CodepointsCacheKey>,
+    bytes: usize,
 }
 
 impl CodepointsCache {
@@ -391,16 +452,48 @@ impl CodepointsCache {
     }
 
     fn insert(&mut self, key: CodepointsCacheKey, value: HashMap<String, u32>) {
+        let weight = codepoints_cache_weight(&key, &value);
+        if weight > CODEPOINTS_CACHE_MAX_BYTES {
+            return;
+        }
+        if let Some(previous) = self.entries.remove(&key) {
+            self.bytes = self
+                .bytes
+                .saturating_sub(codepoints_cache_weight(&key, &previous));
+        }
         self.order.retain(|existing| existing != &key);
-        self.order.push_back(key.clone());
-        self.entries.insert(key, value);
-        while self.entries.len() > CODEPOINTS_CACHE_CAPACITY {
+        while self.entries.len() >= CODEPOINTS_CACHE_CAPACITY
+            || self.bytes.saturating_add(weight) > CODEPOINTS_CACHE_MAX_BYTES
+        {
             let Some(evicted) = self.order.pop_front() else {
                 break;
             };
-            self.entries.remove(&evicted);
+            if let Some(value) = self.entries.remove(&evicted) {
+                self.bytes = self
+                    .bytes
+                    .saturating_sub(codepoints_cache_weight(&evicted, &value));
+            }
         }
+        self.order.push_back(key.clone());
+        self.entries.insert(key, value);
+        self.bytes = self.bytes.saturating_add(weight);
     }
+}
+
+fn codepoints_cache_weight(key: &CodepointsCacheKey, value: &HashMap<String, u32>) -> usize {
+    let key_bytes = size_of::<CodepointsCacheKey>()
+        .saturating_add(key.path.as_os_str().len())
+        .saturating_add(2 * size_of::<usize>());
+    let map_bytes = size_of::<HashMap<String, u32>>()
+        .saturating_add(value.capacity().saturating_mul(size_of::<(String, u32)>()));
+    let names = value
+        .keys()
+        .map(|name| name.capacity().saturating_add(size_of::<String>()))
+        .fold(0usize, usize::saturating_add);
+    key_bytes
+        .saturating_add(map_bytes)
+        .saturating_add(names)
+        .max(1)
 }
 
 fn lookup_codepoint(path: &Path, glyph_name: &str) -> Option<u32> {
@@ -426,40 +519,18 @@ fn lookup_codepoint(path: &Path, glyph_name: &str) -> Option<u32> {
 }
 
 fn parse_codepoints_file(path: &Path) -> Option<HashMap<String, u32>> {
-    let raw = std::fs::read_to_string(path).ok()?;
-    // Preferred form: JSON `{ "name": "\uXXXX", ... }`. Each value is a
-    // single-character string whose code point is the glyph index in the
-    // PUA region.
-    if let Ok(map) = serde_json::from_str::<HashMap<String, String>>(&raw) {
-        let codepoints = map
-            .into_iter()
-            .filter_map(|(name, value)| value.chars().next().map(|c| (name, c as u32)))
-            .collect();
-        return Some(codepoints);
-    }
-    // Fallback: Google's `name codepoint` text format (e.g. `volume_up e050`).
-    let mut map = HashMap::new();
-    for line in raw.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let mut parts = line.split_whitespace();
-        let name = parts.next()?;
-        let cp_hex = parts.next()?;
-        if let Ok(cp) = u32::from_str_radix(cp_hex, 16) {
-            map.insert(name.to_string(), cp);
-        }
-    }
-    if map.is_empty() {
-        tracing::warn!(
-            "icon pack codepoints file at {} could not be parsed as JSON or text",
-            path.display()
-        );
-        None
-    } else {
-        Some(map)
-    }
+    let bytes = read_bounded_file(path, MAX_GLYPH_MAP_BYTES)?;
+    parse_glyph_map_bytes(&bytes).ok()
+}
+
+fn read_bounded_file(path: &Path, max_bytes: usize) -> Option<Vec<u8>> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take(u64::try_from(max_bytes.saturating_add(1)).ok()?)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (bytes.len() <= max_bytes).then_some(bytes)
 }
 
 /// Inspect the font's `fvar` table to discover which variable-font axes
@@ -478,9 +549,8 @@ fn detect_supported_axes(font_path: &Path) -> SupportedAxes {
         }
     }
 
-    let bytes = match std::fs::read(font_path) {
-        Ok(bytes) => bytes,
-        Err(_) => return SupportedAxes::default(),
+    let Some(bytes) = read_bounded_file(font_path, MAX_FONT_BYTES) else {
+        return SupportedAxes::default();
     };
     let face = match ttf_parser::Face::parse(&bytes, 0) {
         Ok(face) => face,

@@ -9,7 +9,7 @@ use skia_safe::{
 };
 use smallvec::SmallVec;
 
-use mesh_core_elements::lru::LruCache;
+use mesh_core_elements::lru::ByteLruCache;
 use skia_safe::SamplingOptions;
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -50,7 +50,12 @@ impl BlurQuality {
 }
 
 const SKIA_IMAGE_CACHE_CAPACITY: usize = 128;
+const SKIA_IMAGE_CACHE_MAX_BYTES: usize = 32 * 1024 * 1024;
 const GRADIENT_SHADER_CACHE_CAPACITY: usize = 64;
+const GRADIENT_SHADER_CACHE_MAX_BYTES: usize = 64 * 1024;
+const GRADIENT_SHADER_ENTRY_BYTES: usize = 1024;
+const MAX_GRADIENT_DIMENSION: i32 = 4096;
+const MAX_SKIA_IMAGE_DIMENSION: u32 = 8192;
 type GradientShaderCacheKey = (u32, u32, i32, i32);
 #[cfg(test)]
 static GRADIENT_SHADER_CREATIONS: AtomicUsize = AtomicUsize::new(0);
@@ -64,13 +69,21 @@ struct CachedSkiaImage {
 }
 
 thread_local! {
-    static SKIA_IMAGE_CACHE: RefCell<LruCache<usize, CachedSkiaImage>> =
-        RefCell::new(LruCache::new(SKIA_IMAGE_CACHE_CAPACITY));
+    static SKIA_IMAGE_CACHE: RefCell<ByteLruCache<usize, CachedSkiaImage>> =
+        RefCell::new(ByteLruCache::new(
+            SKIA_IMAGE_CACHE_CAPACITY,
+            SKIA_IMAGE_CACHE_MAX_BYTES,
+        ));
 
     // Keyed by (from_rgba, to_rgba, w, h) rather than position, so a moving
     // same-sized gradient reuses its shader instead of churning the cache.
-    static GRADIENT_SHADER_CACHE: RefCell<LruCache<GradientShaderCacheKey, skia_safe::Shader>> =
-        RefCell::new(LruCache::new(GRADIENT_SHADER_CACHE_CAPACITY));
+    static GRADIENT_SHADER_CACHE:
+        RefCell<ByteLruCache<GradientShaderCacheKey, skia_safe::Shader>> = RefCell::new(
+        ByteLruCache::new(
+            GRADIENT_SHADER_CACHE_CAPACITY,
+            GRADIENT_SHADER_CACHE_MAX_BYTES,
+        ),
+    );
 }
 
 #[cfg(test)]
@@ -1509,6 +1522,8 @@ impl SkiaPaintBackend {
         let to_rgba =
             u32::from_be_bytes([gradient.to.r, gradient.to.g, gradient.to.b, gradient.to.a]);
         let grad_cache_key = (from_rgba, to_rgba, rect.width, rect.height);
+        let cacheable =
+            rect.width <= MAX_GRADIENT_DIMENSION && rect.height <= MAX_GRADIENT_DIMENSION;
         let save_count = canvas.save();
         canvas.clip_rect(
             Rect::from_xywh(
@@ -1523,7 +1538,9 @@ impl SkiaPaintBackend {
         canvas.translate((rect.x as f32, rect.y as f32));
         let rect = Rect::from_xywh(0.0, 0.0, rect.width as f32, rect.height as f32);
         let cache_key = grad_cache_key;
-        let cached_shader = GRADIENT_SHADER_CACHE.with(|c| c.borrow_mut().get(&cache_key).cloned());
+        let cached_shader = cacheable
+            .then(|| GRADIENT_SHADER_CACHE.with(|c| c.borrow_mut().get(&cache_key).cloned()));
+        let cached_shader = cached_shader.flatten();
         let shader = if let Some(s) = cached_shader {
             s
         } else {
@@ -1547,7 +1564,15 @@ impl SkiaPaintBackend {
             };
             #[cfg(test)]
             GRADIENT_SHADER_CREATIONS.fetch_add(1, Ordering::Relaxed);
-            GRADIENT_SHADER_CACHE.with(|c| c.borrow_mut().insert(cache_key, new_shader.clone()));
+            if cacheable {
+                GRADIENT_SHADER_CACHE.with(|c| {
+                    c.borrow_mut().insert(
+                        cache_key,
+                        new_shader.clone(),
+                        GRADIENT_SHADER_ENTRY_BYTES,
+                    )
+                });
+            }
             new_shader
         };
         let mut paint = skia_safe::Paint::default();
@@ -1584,6 +1609,19 @@ impl SkiaPaintBackend {
             });
             return;
         };
+        if rgba.width() == 0
+            || rgba.height() == 0
+            || rgba.width() > MAX_SKIA_IMAGE_DIMENSION
+            || rgba.height() > MAX_SKIA_IMAGE_DIMENSION
+        {
+            diagnostics.push(PainterDiagnostic {
+                backend_id: self.id(),
+                feature: UnsupportedPainterFeature::Image,
+                message: format!("image source '{path}' exceeds the Skia dimension budget"),
+                source: None,
+            });
+            return;
+        }
         // Use the Arc pointer as cache key: same allocation == same pixel data,
         // so we can skip `Data::new_copy` and re-use the cached Skia image.
         // The cache value holds a strong Arc reference so the heap allocation
@@ -1608,6 +1646,7 @@ impl SkiaPaintBackend {
                     _keep_alive: Arc::clone(&rgba),
                     image: img.clone(),
                 },
+                rgba.as_raw().len().saturating_mul(2),
             );
             Some(img)
         });
