@@ -106,6 +106,10 @@ Retained display lists and shell damage now carry the same cumulative affine
 transform and exact ancestor clip stack through rotated paint, effect overflow,
 blur regions, descendant reuse, and interaction-facing geometry.
 
+Retained display lists now publish an immutable typed frame paint plan carrying
+paint inputs, command topology, transforms, effect regions, replay spans, and
+logical/device damage conversion.
+
 Reduced-motion preferences now flow through one `MotionPolicy` snapshot that
 clamps non-essential transitions, keyframes, scrolling, inertia, tooltips, and
 surface motion at settings and frame boundaries.
@@ -163,11 +167,6 @@ source of truth.
 Decoded assets, fonts, glyphs, text layouts, Skia images and shaders, icon
 resolutions, PixelBuffers, and Wayland SHM pools now enforce explicit byte and
 dimension budgets with deterministic rejection or LRU eviction.
-
-## Next
-
-Introduce a typed frame paint plan with immutable inputs, topology, transforms,
-effect regions, replay spans, and exact logical/device damage (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

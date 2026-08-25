@@ -8,6 +8,8 @@ use mesh_core_elements::style::{
 use mesh_core_elements::{AffineClip, AffineTransform, BoxShadow, VisualFilter};
 use mesh_core_elements::{LayoutRect, NodeId};
 
+use crate::fractional_scale::{DeviceRect, FractionalScale};
+
 use super::build::*;
 use super::subtree::*;
 
@@ -143,6 +145,168 @@ impl DisplayListRepaintPolicy {
     }
 }
 
+/// The immutable inputs, topology, geometry, effects, replay coverage, and
+/// damage decisions that describe one retained frame.
+///
+/// A frame plan is the hand-off between retained-tree construction and the
+/// painter/presentation seams. Consumers must use the plan snapshot rather
+/// than reconstructing any of these decisions from a partially filtered
+/// command stream.
+#[derive(Debug, Clone)]
+pub struct FramePaintPlan {
+    pub inputs: FramePaintInputs,
+    pub topology: FramePaintTopology,
+    pub transforms: Arc<[FramePaintTransform]>,
+    pub effects: FramePaintEffects,
+    pub replay: FramePaintReplay,
+    pub damage: FramePaintDamage,
+}
+
+impl FramePaintPlan {
+    pub(crate) fn new(
+        inputs: FramePaintInputs,
+        topology: FramePaintTopology,
+        transforms: Arc<[FramePaintTransform]>,
+        effects: FramePaintEffects,
+        replay: FramePaintReplay,
+        damage: FramePaintDamage,
+    ) -> Self {
+        Self {
+            inputs,
+            topology,
+            transforms,
+            effects,
+            replay,
+            damage,
+        }
+    }
+
+    pub(crate) fn empty() -> Self {
+        Self::new(
+            FramePaintInputs {
+                resource_revision: 0,
+                retained_tree_generation: None,
+                root_id: None,
+                surface_size: None,
+                paint_origin: (0.0, 0.0),
+                backdrop_blur_policy: BackdropBlurPolicy::CompositorRegion,
+                nodes: Vec::new().into(),
+            },
+            FramePaintTopology {
+                generation: 0,
+                commands: Vec::new().into(),
+                kinds: Vec::new().into(),
+            },
+            Vec::new().into(),
+            FramePaintEffects {
+                backdrop_regions: Vec::new().into(),
+                blur_regions: Vec::new().into(),
+                filter_layer_regions: Vec::new().into(),
+            },
+            FramePaintReplay {
+                spans: Vec::new().into(),
+                layer_scopes: Vec::new().into(),
+            },
+            FramePaintDamage {
+                logical: Vec::new().into(),
+                logical_bounds: DamageRect::default(),
+                surface: DamageRect::default(),
+                full_surface: false,
+                partial_present_supported: false,
+            },
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FramePaintInputs {
+    pub resource_revision: u64,
+    pub retained_tree_generation: Option<u64>,
+    pub root_id: Option<NodeId>,
+    pub surface_size: Option<(u32, u32)>,
+    pub paint_origin: (f32, f32),
+    pub backdrop_blur_policy: BackdropBlurPolicy,
+    /// Immutable node payloads referenced by the command topology.
+    pub nodes: Arc<[Arc<DisplayPaintNode>]>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FramePaintTopology {
+    pub generation: u64,
+    pub commands: Arc<[DisplayPaintCommand]>,
+    pub kinds: Arc<[DisplayPaintCommandKind]>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FramePaintTransform {
+    pub node_id: NodeId,
+    pub transform: AffineTransform,
+    pub local_layout: LayoutRect,
+    pub visual_bounds: LayoutRect,
+    pub ancestor_clips: Arc<[AffineClip]>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FramePaintEffects {
+    pub backdrop_regions: Arc<[DamageRect]>,
+    pub blur_regions: Arc<[DamageRect]>,
+    pub filter_layer_regions: Arc<[DamageRect]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FramePaintReplaySpan {
+    pub owner: NodeId,
+    pub start: usize,
+    pub end: usize,
+    pub bounds: DamageRect,
+    pub command_count: usize,
+    pub includes_scrollbars: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FramePaintReplay {
+    pub spans: Arc<[FramePaintReplaySpan]>,
+    pub layer_scopes: Arc<[(usize, usize)]>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FramePaintDamage {
+    pub logical: Arc<[DamageRect]>,
+    pub logical_bounds: DamageRect,
+    pub surface: DamageRect,
+    pub full_surface: bool,
+    pub partial_present_supported: bool,
+}
+
+impl FramePaintDamage {
+    /// Convert every logical damage edge with the shared floor/ceil coverage
+    /// contract. This is the authoritative device-space damage conversion.
+    pub fn device_rects(&self, scale: FractionalScale) -> Arc<[DeviceRect]> {
+        self.logical
+            .iter()
+            .copied()
+            .map(|rect| scale.device_rect(rect))
+            .collect::<Vec<_>>()
+            .into()
+    }
+
+    /// Convert and clip the logical damage to the physical buffer. The
+    /// returned rectangles are suitable for SHM clears and Wayland damage.
+    pub fn device_damage_for_buffer(
+        &self,
+        scale: FractionalScale,
+        buffer_width: u32,
+        buffer_height: u32,
+    ) -> Arc<[DamageRect]> {
+        self.logical
+            .iter()
+            .copied()
+            .filter_map(|rect| scale.clip_damage_rect(rect, buffer_width, buffer_height))
+            .collect::<Vec<_>>()
+            .into()
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DisplayBatchBarrierCounts {
     pub text: u64,
@@ -231,6 +395,7 @@ pub struct RetainedDisplayList {
     pub(super) layer_scopes: Vec<(usize, usize)>,
     pub(super) last_metrics: DisplayListMetrics,
     pub(super) last_damage_rects: Vec<DamageRect>,
+    pub(super) frame_plan: Arc<FramePaintPlan>,
 }
 
 impl Default for RetainedDisplayList {
@@ -262,6 +427,7 @@ impl Default for RetainedDisplayList {
             layer_scopes: Vec::new(),
             last_metrics: DisplayListMetrics::default(),
             last_damage_rects: Vec::new(),
+            frame_plan: Arc::new(FramePaintPlan::empty()),
         }
     }
 }

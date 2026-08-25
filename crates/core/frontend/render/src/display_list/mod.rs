@@ -540,6 +540,7 @@ impl RetainedDisplayList {
             barriers: batch_metrics.barriers,
         };
         self.last_damage_rects = damage_rects;
+        self.refresh_frame_plan(surface);
         self.last_metrics
     }
 
@@ -694,11 +695,88 @@ impl RetainedDisplayList {
             barrier_count: self.last_metrics.barrier_count,
             barriers: self.last_metrics.barriers,
         };
+        self.refresh_frame_plan(surface);
         self.last_metrics
     }
 
     pub fn last_metrics(&self) -> DisplayListMetrics {
         self.last_metrics
+    }
+
+    /// Immutable snapshot of the current frame's paint inputs and all
+    /// downstream decisions. The snapshot remains valid while a caller holds
+    /// it, even if the retained list is updated for a later frame.
+    pub fn frame_paint_plan(&self) -> &FramePaintPlan {
+        self.frame_plan.as_ref()
+    }
+
+    fn refresh_frame_plan(&mut self, surface: DamageRect) {
+        let mut nodes = Vec::new();
+        let mut transforms = Vec::new();
+        let mut seen_nodes = HashSet::new();
+        for command in self.paint_commands.iter() {
+            if !seen_nodes.insert(command.node.id) {
+                continue;
+            }
+            nodes.push(Arc::clone(&command.node));
+            transforms.push(FramePaintTransform {
+                node_id: command.node.id,
+                transform: command.node.transform,
+                local_layout: command.node.local_layout,
+                visual_bounds: command.node.layout,
+                ancestor_clips: Arc::clone(&command.node.ancestor_clips),
+            });
+        }
+        let spans = self
+            .command_spans
+            .iter()
+            .map(|span| FramePaintReplaySpan {
+                owner: span.owner,
+                start: span.start,
+                end: span.end,
+                bounds: span.bounds,
+                command_count: span.command_count,
+                includes_scrollbars: span.includes_scrollbars,
+            })
+            .collect::<Vec<_>>()
+            .into();
+        let damage = FramePaintDamage {
+            logical: self.last_damage_rects.clone().into(),
+            logical_bounds: self.last_metrics.damage_rect,
+            surface,
+            full_surface: self.last_metrics.full_surface_damage,
+            partial_present_supported: self.last_metrics.partial_present_supported,
+        };
+        self.frame_plan = Arc::new(FramePaintPlan::new(
+            FramePaintInputs {
+                resource_revision: self.resource_revision,
+                retained_tree_generation: self.retained_tree_generation,
+                root_id: self.root_id,
+                surface_size: self.surface_size,
+                paint_origin: (
+                    f32::from_bits(self.paint_origin.0),
+                    f32::from_bits(self.paint_origin.1),
+                ),
+                backdrop_blur_policy: self.built_backdrop_blur_policy,
+                nodes: nodes.into(),
+            },
+            FramePaintTopology {
+                generation: self.generation,
+                commands: Arc::clone(&self.paint_commands),
+                kinds: Arc::clone(&self.command_kinds),
+            },
+            transforms.into(),
+            FramePaintEffects {
+                backdrop_regions: self.backdrop_regions.clone().into(),
+                blur_regions: self.blur_regions.clone().into(),
+                filter_layer_regions: self.filter_layer_regions.clone().into(),
+            },
+            FramePaintReplay {
+                spans,
+                layer_scopes: self.layer_scopes.clone().into(),
+            },
+            damage,
+        ));
     }
 
     fn caller_lineage_is_valid(&self, root: &WidgetNode, retained_tree_generation: u64) -> bool {
@@ -723,27 +801,28 @@ impl RetainedDisplayList {
     }
 
     pub fn damage_rects(&self) -> &[DamageRect] {
-        &self.last_damage_rects
+        self.frame_plan.damage.logical.as_ref()
     }
 
     /// Node rects, inflated by the blur kernel reach, where a `backdrop-filter`
     /// node has painted content beneath it in paint order.
     pub fn backdrop_filter_regions(&self) -> &[DamageRect] {
-        &self.backdrop_regions
+        self.frame_plan.effects.backdrop_regions.as_ref()
     }
 
     /// Extents of `filter: blur()` layers, inflated by the kernel reach. Every
     /// pixel of a layer is a function of every other, so partial damage inside
     /// one must grow to the whole region.
     pub fn filter_layer_regions(&self) -> &[DamageRect] {
-        &self.filter_layer_regions
+        self.frame_plan.effects.filter_layer_regions.as_ref()
     }
 
     /// Grows every damage rect intersecting a blur region to cover that whole
     /// region, so a blur re-reads fresh pixels rather than mixing frames. Runs
     /// to a fixpoint so overlapping regions cascade; returns whether any grew.
     pub fn expand_damage_for_blur_regions(&self, rects: &mut [DamageRect]) -> bool {
-        if (self.backdrop_regions.is_empty() && self.filter_layer_regions.is_empty())
+        if (self.frame_plan.effects.backdrop_regions.is_empty()
+            && self.frame_plan.effects.filter_layer_regions.is_empty())
             || rects.is_empty()
         {
             return false;
@@ -752,9 +831,11 @@ impl RetainedDisplayList {
         loop {
             let mut changed = false;
             for region in self
+                .frame_plan
+                .effects
                 .backdrop_regions
                 .iter()
-                .chain(self.filter_layer_regions.iter())
+                .chain(self.frame_plan.effects.filter_layer_regions.iter())
             {
                 for rect in rects.iter_mut() {
                     if !rect.intersects(*region) {
@@ -776,17 +857,17 @@ impl RetainedDisplayList {
     }
 
     pub fn paint_commands(&self) -> &[DisplayPaintCommand] {
-        self.paint_commands.as_ref()
+        self.frame_plan.topology.commands.as_ref()
     }
 
     /// Derived from the full widget tree at the last rebuild and handed to
     /// `org_kde_kwin_blur`; empty means the surface has no blur.
     pub fn blur_regions(&self) -> &[DamageRect] {
-        &self.blur_regions
+        self.frame_plan.effects.blur_regions.as_ref()
     }
 
     pub fn paint_command_kinds(&self) -> &[DisplayPaintCommandKind] {
-        self.command_kinds.as_ref()
+        self.frame_plan.topology.kinds.as_ref()
     }
 
     pub fn select_paint_commands(
@@ -794,6 +875,7 @@ impl RetainedDisplayList {
         damage: Option<DamageRect>,
         policy: DisplayListRepaintPolicy,
     ) -> SelectedDisplayListPaint<'_> {
+        let plan = self.frame_plan.as_ref();
         let mut metrics = self.last_metrics;
         metrics.repaint_policy = policy;
         metrics.filtered_span_count = 0;
@@ -801,12 +883,12 @@ impl RetainedDisplayList {
         metrics.filtered_commands_skipped = 0;
         metrics.filtered_fallback_count = 0;
 
-        let full_commands = self.paint_commands.len() as u64;
-        if self.paint_commands.is_empty() {
+        let full_commands = plan.topology.commands.len() as u64;
+        if plan.topology.commands.is_empty() {
             metrics.filtered_commands_skipped = 0;
             return SelectedDisplayListPaint {
-                commands: self.paint_commands.as_ref(),
-                kinds: self.command_kinds.as_ref(),
+                commands: plan.topology.commands.as_ref(),
+                kinds: plan.topology.kinds.as_ref(),
                 selection: SelectedDisplayListSelection::None,
                 metrics,
             };
@@ -816,36 +898,38 @@ impl RetainedDisplayList {
             metrics.repaint_policy = DisplayListRepaintPolicy::MinimalDamage;
             metrics.filtered_commands_skipped = full_commands;
             return SelectedDisplayListPaint {
-                commands: self.paint_commands.as_ref(),
-                kinds: self.command_kinds.as_ref(),
+                commands: plan.topology.commands.as_ref(),
+                kinds: plan.topology.kinds.as_ref(),
                 selection: SelectedDisplayListSelection::None,
                 metrics,
             };
         };
 
         if matches!(policy, DisplayListRepaintPolicy::FullSurface) {
-            metrics.filtered_span_count = self.command_spans.len() as u64;
+            metrics.filtered_span_count = plan.replay.spans.len() as u64;
             metrics.filtered_command_count = full_commands;
-            metrics.filtered_fallback_count = u64::from(!self.paint_commands.is_empty());
+            metrics.filtered_fallback_count = u64::from(!plan.topology.commands.is_empty());
             return SelectedDisplayListPaint {
-                commands: self.paint_commands.as_ref(),
-                kinds: self.command_kinds.as_ref(),
+                commands: plan.topology.commands.as_ref(),
+                kinds: plan.topology.kinds.as_ref(),
                 selection: SelectedDisplayListSelection::All,
                 metrics,
             };
         }
 
         if self
+            .frame_plan
+            .inputs
             .surface_size
             .is_some_and(|surface_size| damage_covers_surface(damage, surface_size))
         {
             metrics.repaint_policy = DisplayListRepaintPolicy::FullSurface;
-            metrics.filtered_span_count = self.command_spans.len() as u64;
+            metrics.filtered_span_count = plan.replay.spans.len() as u64;
             metrics.filtered_command_count = full_commands;
-            metrics.filtered_fallback_count = u64::from(!self.paint_commands.is_empty());
+            metrics.filtered_fallback_count = u64::from(!plan.topology.commands.is_empty());
             return SelectedDisplayListPaint {
-                commands: self.paint_commands.as_ref(),
-                kinds: self.command_kinds.as_ref(),
+                commands: plan.topology.commands.as_ref(),
+                kinds: plan.topology.kinds.as_ref(),
                 selection: SelectedDisplayListSelection::All,
                 metrics,
             };
@@ -860,8 +944,8 @@ impl RetainedDisplayList {
             full_commands.saturating_sub(selected_command_count as u64);
 
         SelectedDisplayListPaint {
-            commands: self.paint_commands.as_ref(),
-            kinds: self.command_kinds.as_ref(),
+            commands: plan.topology.commands.as_ref(),
+            kinds: plan.topology.kinds.as_ref(),
             selection: SelectedDisplayListSelection::Spans {
                 spans: selected_spans,
                 command_count: selected_command_count,
@@ -877,6 +961,7 @@ impl RetainedDisplayList {
     ) -> SelectedDisplayListPaint<'_> {
         const MAX_SPARSE_DAMAGE_RECTS: usize = 8;
 
+        let plan = self.frame_plan.as_ref();
         let mut metrics = self.last_metrics;
         metrics.repaint_policy = policy;
         metrics.filtered_span_count = 0;
@@ -891,12 +976,12 @@ impl RetainedDisplayList {
             return self.select_paint_commands(union_damage_rects(damages), policy);
         }
 
-        let full_commands = self.paint_commands.len() as u64;
-        if self.paint_commands.is_empty() {
+        let full_commands = plan.topology.commands.len() as u64;
+        if plan.topology.commands.is_empty() {
             metrics.filtered_commands_skipped = 0;
             return SelectedDisplayListPaint {
-                commands: self.paint_commands.as_ref(),
-                kinds: self.command_kinds.as_ref(),
+                commands: plan.topology.commands.as_ref(),
+                kinds: plan.topology.kinds.as_ref(),
                 selection: SelectedDisplayListSelection::None,
                 metrics,
             };
@@ -906,20 +991,20 @@ impl RetainedDisplayList {
             metrics.repaint_policy = DisplayListRepaintPolicy::MinimalDamage;
             metrics.filtered_commands_skipped = full_commands;
             return SelectedDisplayListPaint {
-                commands: self.paint_commands.as_ref(),
-                kinds: self.command_kinds.as_ref(),
+                commands: plan.topology.commands.as_ref(),
+                kinds: plan.topology.kinds.as_ref(),
                 selection: SelectedDisplayListSelection::None,
                 metrics,
             };
         };
 
         if matches!(policy, DisplayListRepaintPolicy::FullSurface) {
-            metrics.filtered_span_count = self.command_spans.len() as u64;
+            metrics.filtered_span_count = plan.replay.spans.len() as u64;
             metrics.filtered_command_count = full_commands;
-            metrics.filtered_fallback_count = u64::from(!self.paint_commands.is_empty());
+            metrics.filtered_fallback_count = u64::from(!plan.topology.commands.is_empty());
             return SelectedDisplayListPaint {
-                commands: self.paint_commands.as_ref(),
-                kinds: self.command_kinds.as_ref(),
+                commands: plan.topology.commands.as_ref(),
+                kinds: plan.topology.kinds.as_ref(),
                 selection: SelectedDisplayListSelection::All,
                 metrics,
             };
@@ -934,8 +1019,8 @@ impl RetainedDisplayList {
             full_commands.saturating_sub(selected_command_count as u64);
 
         SelectedDisplayListPaint {
-            commands: self.paint_commands.as_ref(),
-            kinds: self.command_kinds.as_ref(),
+            commands: plan.topology.commands.as_ref(),
+            kinds: plan.topology.kinds.as_ref(),
             selection: SelectedDisplayListSelection::Spans {
                 spans: selected_spans,
                 command_count: selected_command_count,
@@ -948,9 +1033,10 @@ impl RetainedDisplayList {
         &self,
         matches: impl Fn(DamageRect) -> bool,
     ) -> (Vec<SelectedCommandSpan>, u64, usize) {
-        let mut selected = Vec::with_capacity(self.command_spans.len().min(32));
+        let plan = self.frame_plan.as_ref();
+        let mut selected = Vec::with_capacity(plan.replay.spans.len().min(32));
         let mut matched_spans = 0u64;
-        for span in self.command_spans.iter() {
+        for span in plan.replay.spans.iter() {
             if !matches(span.bounds) {
                 continue;
             }
@@ -964,7 +1050,7 @@ impl RetainedDisplayList {
             );
         }
         if selected.is_empty() {
-            for (index, command) in self.paint_commands.iter().enumerate() {
+            for (index, command) in plan.topology.commands.iter().enumerate() {
                 if matches(command_bounds(command)) {
                     insert_selected_command_span(
                         &mut selected,
@@ -991,12 +1077,12 @@ impl RetainedDisplayList {
         &self,
         selected: &mut Vec<SelectedCommandSpan>,
     ) {
-        if self.layer_scopes.is_empty() || selected.is_empty() {
+        if self.frame_plan.replay.layer_scopes.is_empty() || selected.is_empty() {
             return;
         }
         loop {
             let mut widened = None;
-            for &(start, end) in &self.layer_scopes {
+            for &(start, end) in self.frame_plan.replay.layer_scopes.iter() {
                 if let Some(span) = selected
                     .iter()
                     .find(|span| span.start < end && start < span.end)

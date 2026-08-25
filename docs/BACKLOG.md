@@ -81,8 +81,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/12-rendering-and-paint/improvements.md)
 
-- [ ] Introduce a typed frame paint plan with immutable inputs, topology, transforms, effect regions, replay spans, and exact logical/device damage.
-
 ### 13. Surface policy and configuration
 
 [Audit](../.planning/log/sections/13-surface-policy-and-configuration/improvements.md)

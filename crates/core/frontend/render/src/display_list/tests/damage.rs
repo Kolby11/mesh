@@ -1,9 +1,74 @@
 use super::super::*;
 use super::common::*;
 use crate::RenderObjectDirtySummary;
+use crate::{DeviceRect, FractionalScale};
 use mesh_core_elements::style::{Color, Overflow, Visibility};
 use mesh_core_elements::{NodeId, VisualFilter, WidgetNode};
 use std::sync::Arc;
+
+#[test]
+fn frame_paint_plan_contains_immutable_inputs_topology_geometry_replay_and_damage() {
+    let mut root = node(1, "row", 0.0, 0.0, 160.0, 40.0);
+    root.computed_style.transform.translate_x = 1.0;
+    root.children.push(node(2, "box", 8.0, 4.0, 40.0, 20.0));
+    root.children.push(node(3, "box", 80.0, 4.0, 40.0, 20.0));
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 160, 40, false, true);
+    let first = list.frame_paint_plan().clone();
+
+    assert_eq!(first.inputs.root_id, Some(root.id));
+    assert_eq!(first.inputs.surface_size, Some((160, 40)));
+    assert_eq!(first.inputs.nodes.len(), 3);
+    assert_eq!(first.topology.commands.len(), first.topology.kinds.len());
+    assert_eq!(first.topology.commands.len(), list.paint_commands().len());
+    assert_eq!(first.transforms.len(), first.inputs.nodes.len());
+    assert!(
+        first
+            .transforms
+            .iter()
+            .any(|transform| transform.node_id == 2 && transform.transform.tx > 8.0)
+    );
+    assert_eq!(first.replay.spans.len(), list.command_spans.len());
+    assert_eq!(
+        first.replay.layer_scopes.as_ref(),
+        list.layer_scopes.as_slice()
+    );
+    assert_eq!(first.damage.logical.as_ref(), list.damage_rects());
+    assert!(!first.damage.logical.is_empty());
+
+    let device_damage = first.damage.device_rects(FractionalScale::new(1.5));
+    assert_eq!(device_damage.len(), first.damage.logical.len());
+    assert_eq!(
+        device_damage[0],
+        FractionalScale::new(1.5).device_rect(first.damage.logical[0])
+    );
+    assert_eq!(
+        first
+            .damage
+            .device_damage_for_buffer(FractionalScale::new(1.5), 240, 60)
+            .len(),
+        device_damage.len()
+    );
+    assert_eq!(
+        FractionalScale::new(1.5).device_rect(DamageRect {
+            x: 1,
+            y: 0,
+            width: 2,
+            height: 1,
+        }),
+        DeviceRect::new(1, 0, 4, 2)
+    );
+
+    let first_generation = first.topology.generation;
+    root.children[0].computed_style.z_index = 1;
+    root.children[1].computed_style.z_index = 0;
+    list.update(&root, 160, 40, false, true);
+    let second = list.frame_paint_plan();
+    assert!(second.topology.generation > first_generation);
+    assert_eq!(first.topology.commands[1].node.id, 2);
+    assert_eq!(second.topology.commands[1].node.id, 3);
+}
 
 #[test]
 fn display_list_records_span_metadata_and_policy_labels() {
@@ -211,7 +276,9 @@ fn display_list_select_paint_commands_for_rects_matches_expected_commands() {
     drop(selected_multi);
     drop(selected_right);
     drop(selected_left);
-    list.command_spans = Vec::new().into();
+    let mut plan = list.frame_paint_plan().clone();
+    plan.replay.spans = Vec::new().into();
+    list.frame_plan = Arc::new(plan);
     let fallback = list.select_paint_commands_for_rects(
         &[
             DamageRect {

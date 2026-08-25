@@ -22,8 +22,9 @@ pub mod surface;
 pub use accesskit_adapter::build_accesskit_runtime_update;
 pub use display_list::{
     BackdropBlurPolicy, DamageRect, DisplayBatchBarrierCounts, DisplayListClip, DisplayListMetrics,
-    DisplayListRepaintPolicy, DisplayPaintCommand, DisplayPaintCommandKind, RetainedDisplayList,
-    SelectedDisplayListPaint,
+    DisplayListRepaintPolicy, DisplayPaintCommand, DisplayPaintCommandKind, FramePaintDamage,
+    FramePaintEffects, FramePaintInputs, FramePaintPlan, FramePaintReplay, FramePaintReplaySpan,
+    FramePaintTopology, FramePaintTransform, RetainedDisplayList, SelectedDisplayListPaint,
 };
 pub use fractional_scale::{DeviceRect, FractionalScale};
 pub use library_adapters::{
