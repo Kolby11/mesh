@@ -1426,6 +1426,12 @@ pub trait ShellComponent: Send {
     fn surface_promotable(&self) -> bool {
         false
     }
+    /// Revision of the normalized surface policy accepted by this component.
+    /// The shell uses it to seed presentation configs without publishing a
+    /// speculative generation before the compositor accepts the change.
+    fn surface_policy_revision(&self) -> u64 {
+        0
+    }
     /// Promote or demote an embedded widget identified by its retained node
     /// key. The default is a no-op for non-frontend components.
     fn set_child_surface_promoted(&mut self, _node_key: &str, _promoted: bool) -> bool {

@@ -1,6 +1,9 @@
 use super::*;
 use mesh_core_render::DamageRect;
-use mesh_core_surface_policy::{SurfaceRoleField, SurfaceRoleKind, role_field_applies};
+use mesh_core_surface_policy::{
+    SurfacePolicyDecorations, SurfacePolicyDiff, SurfacePolicyEdge, SurfacePolicyKeyboardMode,
+    SurfacePolicyLayer, SurfacePolicySizePolicy, SurfacePolicySnapshot, SurfaceRoleKind,
+};
 use std::num::NonZeroU32;
 
 /// Configuration passed from the shell before each present.
@@ -345,6 +348,9 @@ pub struct SurfaceConfig {
     /// single compositor rule can blur every opted-in MESH surface (Hyprland:
     /// `layerrule = blur, :blur$`). See [`SurfaceConfig::wayland_namespace`].
     pub blur: bool,
+    /// Accepted semantic policy generation. The shell assigns this only after
+    /// a configure succeeds, so retries do not publish speculative revisions.
+    pub policy_revision: u64,
 }
 
 impl Default for SurfaceConfig {
@@ -373,6 +379,7 @@ impl Default for SurfaceConfig {
             margin_bottom: 0,
             margin_left: 0,
             blur: false,
+            policy_revision: 0,
         }
     }
 }
@@ -410,36 +417,90 @@ impl SurfaceConfig {
             self.namespace.clone()
         }
     }
+
+    /// Lower this config into the one snapshot used by shell and presentation
+    /// semantic diffing. The effective keyboard mode is passed separately
+    /// because focus-transfer overrides are runtime policy, not manifest data.
+    pub fn policy_snapshot(&self, keyboard_mode: KeyboardMode) -> SurfacePolicySnapshot {
+        let extent = self.extent;
+        SurfacePolicySnapshot {
+            revision: self.policy_revision,
+            role: match self.role {
+                SurfaceRole::Layer => SurfaceRoleKind::Layer,
+                SurfaceRole::Window => SurfaceRoleKind::Window,
+            },
+            promotable: true,
+            visible: true,
+            namespace: self.namespace.clone(),
+            blur: self.blur,
+            window_title: Some(self.window.title.clone()),
+            window_app_id: Some(self.window.app_id.clone()),
+            window_resizable: self.window.resizable,
+            window_decorations: match self.window.decorations {
+                WindowDecorations::Client => SurfacePolicyDecorations::Client,
+                WindowDecorations::Server => SurfacePolicyDecorations::Server,
+            },
+            edge: self.edge.map(|edge| match edge {
+                Edge::Top => SurfacePolicyEdge::Top,
+                Edge::Bottom => SurfacePolicyEdge::Bottom,
+                Edge::Left => SurfacePolicyEdge::Left,
+                Edge::Right => SurfacePolicyEdge::Right,
+            }),
+            layer: match self.layer {
+                MeshLayer::Background => SurfacePolicyLayer::Background,
+                MeshLayer::Bottom => SurfacePolicyLayer::Bottom,
+                MeshLayer::Top => SurfacePolicyLayer::Top,
+                MeshLayer::Overlay => SurfacePolicyLayer::Overlay,
+            },
+            size_policy: match self.size_policy {
+                LayerSurfaceSizePolicy::Fixed => SurfacePolicySizePolicy::Fixed,
+                LayerSurfaceSizePolicy::Flexible => SurfacePolicySizePolicy::Flexible,
+            },
+            content_size: Some(extent.content_size()),
+            surface_size: Some(extent.surface_size()),
+            width_spans_output: self.wire_size.width.is_span(),
+            height_spans_output: self.wire_size.height.is_span(),
+            exclusive_zone: self.exclusive_zone,
+            keyboard_mode: match keyboard_mode {
+                KeyboardMode::None => SurfacePolicyKeyboardMode::None,
+                KeyboardMode::Exclusive => SurfacePolicyKeyboardMode::Exclusive,
+                KeyboardMode::OnDemand => SurfacePolicyKeyboardMode::OnDemand,
+            },
+            margins: [
+                self.margin_top,
+                self.margin_right,
+                self.margin_bottom,
+                self.margin_left,
+            ],
+            padding: [
+                extent.padding().left,
+                extent.padding().top,
+                extent.padding().right,
+                extent.padding().bottom,
+            ],
+        }
+    }
+
+    /// Return the canonical semantic diff between two accepted configs.
+    pub fn semantic_diff(
+        &self,
+        previous_keyboard_mode: KeyboardMode,
+        next: &Self,
+        next_keyboard_mode: KeyboardMode,
+    ) -> SurfacePolicyDiff {
+        self.policy_snapshot(previous_keyboard_mode)
+            .diff(&next.policy_snapshot(next_keyboard_mode))
+    }
 }
 
 /// The protocol work implied by a change from one accepted surface intent to
 /// another. Keeping this classification typed prevents a newly added config
 /// field from silently disappearing from a hash and lets the caller choose the
 /// safe transition instead of treating every change as the same reconfigure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SurfaceConfigChange {
-    /// No compositor-facing or retained surface state changed.
-    Unchanged,
-    /// Apply the new live state to the existing role. This includes title,
-    /// app-id, size hints, keyboard interactivity, and input-region padding.
-    Live,
-    /// Re-commit layer-shell geometry and wait for a fresh configure before
-    /// attaching another buffer.
-    Configure,
-    /// The role object's creation-time identity or protocol negotiation
-    /// changed; prepare a replacement object before destroying the old one.
-    Recreate,
-}
-
-impl SurfaceConfigChange {
-    pub(super) fn requires_recreation(self) -> bool {
-        matches!(self, Self::Recreate)
-    }
-
-    pub(super) fn requires_fresh_configure(self) -> bool {
-        matches!(self, Self::Configure | Self::Recreate)
-    }
-}
+/// Compatibility alias for backend-local call sites. The actual diff is the
+/// shared policy contract, so shell reload and presentation cannot grow
+/// divergent field lists again.
+pub(super) type SurfaceConfigChange = SurfacePolicyDiff;
 
 /// Classify a new shell surface intent against the intent currently applied to
 /// the live compositor object.
@@ -449,90 +510,7 @@ pub(super) fn surface_config_change(
     next: &SurfaceConfig,
     next_keyboard_mode: KeyboardMode,
 ) -> SurfaceConfigChange {
-    if previous.role != next.role {
-        return SurfaceConfigChange::Recreate;
-    }
-
-    // A layer namespace is supplied only while creating the role, and blur is
-    // encoded into that namespace. Decorations are negotiated while creating an
-    // xdg toplevel. Neither can be repaired by a later live request.
-    if creation_identity_changed(previous, next) {
-        return SurfaceConfigChange::Recreate;
-    }
-
-    let geometry_changed = if role_field_applies(
-        SurfaceRoleField::Anchor,
-        surface_role_kind(previous.role),
-        false,
-    ) {
-        let (previous_width, previous_height) = previous.surface_size();
-        let (next_width, next_height) = next.surface_size();
-        previous.edge != next.edge
-            || previous.layer != next.layer
-            || previous.exclusive_zone != next.exclusive_zone
-            || previous.wire_size != next.wire_size
-            || previous_width != next_width
-            || previous_height != next_height
-            || previous.margin_top != next.margin_top
-            || previous.margin_right != next.margin_right
-            || previous.margin_bottom != next.margin_bottom
-            || previous.margin_left != next.margin_left
-    } else {
-        false
-    };
-    if geometry_changed {
-        return SurfaceConfigChange::Configure;
-    }
-
-    // `SurfaceConfig` is shared by layer and toplevel roles, so comparing the
-    // whole struct here would treat fields ignored by the active protocol as
-    // compositor work. Keep the semantic diff role-aware: only fields that
-    // can reach the live role or the shared input/geometry state should wake
-    // an already configured surface.
-    let live_state_changed = if role_field_applies(
-        SurfaceRoleField::KeyboardMode,
-        surface_role_kind(previous.role),
-        false,
-    ) {
-        previous.padding() != next.padding() || previous_keyboard_mode != next_keyboard_mode
-    } else {
-        let (previous_width, previous_height) = previous.content_size();
-        let (next_width, next_height) = next.content_size();
-        previous.window.title != next.window.title
-            || previous.window.app_id != next.window.app_id
-            || previous.window.resizable != next.window.resizable
-            || previous_width != next_width
-            || previous_height != next_height
-            || previous.padding() != next.padding()
-    };
-    if live_state_changed {
-        SurfaceConfigChange::Live
-    } else {
-        SurfaceConfigChange::Unchanged
-    }
-}
-
-/// Compare the values that are actually consumed while creating the live
-/// compositor role. Layer-shell folds the blur intent into its namespace, while
-/// xdg-shell consumes the decoration request when it creates the toplevel.
-/// Keeping this comparison at the lowered identity boundary prevents either
-/// creation-time field from disappearing from semantic change detection.
-fn creation_identity_changed(previous: &SurfaceConfig, next: &SurfaceConfig) -> bool {
-    let role = surface_role_kind(previous.role);
-    if role_field_applies(SurfaceRoleField::Blur, role, false) {
-        previous.wayland_namespace() != next.wayland_namespace()
-    } else if role_field_applies(SurfaceRoleField::Decorations, role, false) {
-        previous.window.decorations != next.window.decorations
-    } else {
-        false
-    }
-}
-
-fn surface_role_kind(role: SurfaceRole) -> SurfaceRoleKind {
-    match role {
-        SurfaceRole::Layer => SurfaceRoleKind::Layer,
-        SurfaceRole::Window => SurfaceRoleKind::Window,
-    }
+    previous.semantic_diff(previous_keyboard_mode, next, next_keyboard_mode)
 }
 
 /// Clamp a layer-surface config's size/margins to a known output's logical

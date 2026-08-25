@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-08-25
+**Updated:** 2026-08-26
 
 ## Now
 
@@ -195,6 +195,10 @@ Configuration ejection now preserves structured localized surface titles and
 uses an explicit effective-policy serializer to materialize derived window
 identity such as `app_id`; emitted values are therefore distinguishable as
 pinned effective overrides rather than fallback-only or still-derived fields.
+
+Surface settings, shell reload, and presentation now share one revisioned
+`SurfacePolicySnapshot` semantic diff and accepted policy generation covering
+blur, decorations, padding, geometry, keyboard mode, and role transitions.
 
 ## Blocked / open follow-ups
 

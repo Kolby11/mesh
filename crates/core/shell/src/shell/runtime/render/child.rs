@@ -313,12 +313,18 @@ impl Shell {
                     margin_bottom: 0,
                     margin_left: 0,
                     blur: false,
+                    policy_revision: 0,
                 };
-                let changed = self.components[index].children[child_index]
+                let previous_config = self.components[index].children[child_index]
                     .target
                     .last_surface_config
-                    .as_ref()
-                    != Some(&config);
+                    .as_ref();
+                let config = super::revisioned_surface_config(previous_config, config);
+                let changed = previous_config.map_or(true, |previous| {
+                    !previous
+                        .semantic_diff(previous.keyboard_mode, &config, config.keyboard_mode)
+                        .is_noop()
+                });
                 if changed {
                     self.presentation_engine
                         .configure(&child_surface_id, config.clone())

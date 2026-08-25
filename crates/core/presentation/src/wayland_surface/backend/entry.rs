@@ -431,7 +431,7 @@ impl SurfaceEntry {
         cfg: &SurfaceConfig,
         keyboard_mode: KeyboardMode,
     ) -> bool {
-        !self.configured || self.config_change(cfg, keyboard_mode) != SurfaceConfigChange::Unchanged
+        !self.configured || !self.config_change(cfg, keyboard_mode).is_noop()
     }
 
     pub(super) fn config_change(

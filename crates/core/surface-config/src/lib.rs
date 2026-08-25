@@ -6,7 +6,9 @@ use mesh_core_config::validate::{
 };
 use mesh_core_module::{LocalizedText, Manifest};
 use mesh_core_surface_policy::{
-    SURFACE_ROLE_FIELD_METADATA, SurfaceRoleField, SurfaceRoleKind, role_field_applies,
+    SURFACE_ROLE_FIELD_METADATA, SurfacePolicyDecorations, SurfacePolicyEdge,
+    SurfacePolicyKeyboardMode, SurfacePolicyLayer, SurfacePolicySizePolicy, SurfacePolicySnapshot,
+    SurfaceRoleField, SurfaceRoleKind, role_field_applies,
 };
 use mesh_core_wayland::{Edge, KeyboardMode, Layer, SurfaceRole, WindowDecorations};
 use std::collections::BTreeMap;
@@ -61,6 +63,68 @@ impl Default for WindowLayoutSettings {
     }
 }
 
+impl SurfaceLayoutSettings {
+    /// Lower the resolved settings policy into the shared semantic snapshot.
+    /// Geometry is intentionally absent here: CSS measurement and presentation
+    /// padding are added by the shell when it creates a `SurfaceConfig`.
+    pub fn policy_snapshot(&self, revision: u64) -> SurfacePolicySnapshot {
+        SurfacePolicySnapshot {
+            revision,
+            role: surface_role_kind(self.role),
+            promotable: self.promotable,
+            visible: self.visible_on_start,
+            namespace: String::new(),
+            blur: self.blur,
+            window_title: self.window.title.as_ref().map(localized_policy_value),
+            window_app_id: self.window.app_id.clone(),
+            window_resizable: self.window.resizable,
+            window_decorations: match self.window.decorations {
+                WindowDecorations::Client => SurfacePolicyDecorations::Client,
+                WindowDecorations::Server => SurfacePolicyDecorations::Server,
+            },
+            edge: Some(match self.edge {
+                Edge::Top => SurfacePolicyEdge::Top,
+                Edge::Bottom => SurfacePolicyEdge::Bottom,
+                Edge::Left => SurfacePolicyEdge::Left,
+                Edge::Right => SurfacePolicyEdge::Right,
+            }),
+            layer: match self.layer {
+                Layer::Background => SurfacePolicyLayer::Background,
+                Layer::Bottom => SurfacePolicyLayer::Bottom,
+                Layer::Top => SurfacePolicyLayer::Top,
+                Layer::Overlay => SurfacePolicyLayer::Overlay,
+            },
+            size_policy: SurfacePolicySizePolicy::Fixed,
+            content_size: None,
+            surface_size: None,
+            width_spans_output: false,
+            height_spans_output: false,
+            exclusive_zone: self.exclusive_zone,
+            keyboard_mode: match self.keyboard_mode {
+                KeyboardMode::None => SurfacePolicyKeyboardMode::None,
+                KeyboardMode::Exclusive => SurfacePolicyKeyboardMode::Exclusive,
+                KeyboardMode::OnDemand => SurfacePolicyKeyboardMode::OnDemand,
+            },
+            margins: [
+                self.margin_top,
+                self.margin_right,
+                self.margin_bottom,
+                self.margin_left,
+            ],
+            padding: [0; 4],
+        }
+    }
+}
+
+fn localized_policy_value(value: &LocalizedText) -> String {
+    match value {
+        LocalizedText::Literal(value) => format!("literal:{value}"),
+        LocalizedText::Translation { key, fallback } => {
+            format!("translation:{key}\u{0}{fallback}")
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FrontendModuleSettingsState {
     /// The namespace exactly as stored, retained for diagnostics and tooling.
@@ -69,6 +133,9 @@ pub struct FrontendModuleSettingsState {
     /// declaration defaults win during precedence resolution.
     pub effective: serde_json::Value,
     pub layout: SurfaceLayoutSettings,
+    /// Normalized policy values used to generate one revisioned semantic diff
+    /// for settings reload and the presentation hand-off.
+    pub policy: SurfacePolicySnapshot,
     pub props: FrontendModulePropSettings,
     /// Returned rather than logged: only the caller knows whether this is a
     /// startup read or a reload, and a reload must not repeat itself.
@@ -116,6 +183,13 @@ pub fn surface_role_change_allowed(
     promotable: bool,
 ) -> bool {
     current == requested || promotable
+}
+
+fn surface_role_kind(role: SurfaceRole) -> SurfaceRoleKind {
+    match role {
+        SurfaceRole::Layer => SurfaceRoleKind::Layer,
+        SurfaceRole::Window => SurfaceRoleKind::Window,
+    }
 }
 
 /// Resolve a surface's baseline layout: core defaults overridden by whatever
@@ -330,11 +404,13 @@ pub fn resolve_frontend_module_settings_with_props(
             namespace.insert("props".into(), checked_props);
         }
     }
+    let policy = layout.policy_snapshot(0);
 
     FrontendModuleSettingsState {
         raw,
         effective,
         layout,
+        policy,
         props,
         diagnostics,
     }

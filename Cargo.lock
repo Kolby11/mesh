@@ -2004,6 +2004,7 @@ dependencies = [
  "mesh-core-scripting",
  "mesh-core-service",
  "mesh-core-surface-config",
+ "mesh-core-surface-policy",
  "mesh-core-theme",
  "mesh-core-wayland",
  "rayon",

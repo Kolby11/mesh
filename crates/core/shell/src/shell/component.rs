@@ -65,6 +65,7 @@ use mesh_core_scripting::{
     LocaleBoundState, OperationRegistry, PublishedEvent, ScriptContext, ScriptInterfaceImport,
     ScriptState, SurfaceVm,
 };
+use mesh_core_surface_policy::{SurfacePolicyGenerator, SurfacePolicySnapshot};
 use mesh_core_theme::{Theme, default_theme};
 use mesh_core_wayland::{Edge, KeyboardMode, ShellSurface, WindowStates};
 use std::cell::{Cell, RefCell};
@@ -730,6 +731,9 @@ pub(super) struct FrontendSurfaceComponent {
     /// save, and a user fixing one of five mistakes should hear about four.
     settings_diagnostics: Vec<mesh_core_config::SettingsDiagnostic>,
     pub(super) surface_layout: SurfaceLayoutSettings,
+    /// The normalized settings policy and its accepted monotonic generation.
+    surface_policy: SurfacePolicySnapshot,
+    surface_policy_generation: SurfacePolicyGenerator,
     /// Authorized settings role changes wait here until the shell's
     /// transactional transition supervisor replaces the compositor surface.
     pending_surface_role_change: Option<mesh_core_wayland::SurfaceRole>,
@@ -1178,6 +1182,10 @@ impl FrontendSurfaceComponent {
             &compiled.manifest,
             compiled.component.props.as_ref(),
         );
+        let mut surface_policy_generation = SurfacePolicyGenerator::default();
+        let surface_policy = surface_policy_generation
+            .update(settings_state.policy.clone())
+            .current;
         mesh_core_config::log_settings_diagnostics("settings", &settings_state.diagnostics);
         let service_payload_capacity = service_payload_cache_capacity(&compiled.manifest);
         let element_metric_usage = element_metric_usage(&compiled);
@@ -1198,6 +1206,8 @@ impl FrontendSurfaceComponent {
             motion_policy,
             settings_diagnostics: settings_state.diagnostics,
             surface_layout: settings_state.layout.clone(),
+            surface_policy,
+            surface_policy_generation,
             pending_surface_role_change: None,
             keyboard_mode_override: None,
             popup_promoted: false,

@@ -568,6 +568,7 @@ impl Shell {
                 margin_bottom: surface.margin_bottom,
                 margin_left: surface.margin_left,
                 blur: surface.blur,
+                policy_revision: 0,
             }
         } else {
             SurfaceConfig {
@@ -591,8 +592,14 @@ impl Shell {
                 margin_bottom: 0,
                 margin_left: 0,
                 blur: surface.blur,
+                policy_revision: 0,
             }
         };
+        let cfg = super::render::revisioned_surface_config(
+            self.component_index_for_surface(surface_id)
+                .and_then(|index| self.components[index].parent.last_surface_config.as_ref()),
+            cfg,
+        );
 
         if let Err(error) = self.presentation_engine.configure(surface_id, cfg.clone()) {
             tracing::warn!(%error, %surface_id, "failed to configure surface keyboard mode");

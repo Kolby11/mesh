@@ -684,6 +684,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.pending_surface_role_change = None;
         let windowed = role == mesh_core_wayland::SurfaceRole::Window;
         self.surface_layout.role = role;
+        self.surface_policy = self
+            .surface_policy_generation
+            .update(self.surface_layout.policy_snapshot(0))
+            .current;
         // Leaving window role drops the compositor states with it: a layer
         // surface is never fullscreen, maximized, activated, or tiled, and
         // keeping the last window's flags would strand the component in its
@@ -708,6 +712,10 @@ impl ShellComponent for FrontendSurfaceComponent {
 
     fn surface_promotable(&self) -> bool {
         self.surface_layout.promotable
+    }
+
+    fn surface_policy_revision(&self) -> u64 {
+        self.surface_policy.revision
     }
 
     fn render(&mut self, surface: &mut dyn ShellSurface) -> Result<(), ComponentError> {
@@ -1338,7 +1346,11 @@ impl ShellComponent for FrontendSurfaceComponent {
         } else {
             self.pending_surface_role_change = None;
         }
-        let layout_changed = self.surface_layout != next_layout;
+        let policy_update = self
+            .surface_policy_generation
+            .update(next_layout.policy_snapshot(0));
+        let policy_changed = !policy_update.diff.is_noop();
+        self.surface_policy = policy_update.current;
         let settings_changed = self.settings_json != settings_state.effective;
 
         self.surface_layout = next_layout;
@@ -1381,10 +1393,10 @@ impl ShellComponent for FrontendSurfaceComponent {
             }
         }
 
-        if layout_changed || settings_changed {
+        if policy_changed || settings_changed {
             self.invalidate_surface_config();
         }
-        Ok(layout_changed || settings_changed)
+        Ok(policy_changed || settings_changed)
     }
 
     fn pending_surface_role_change(&self) -> Option<mesh_core_wayland::SurfaceRole> {
@@ -1833,6 +1845,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.surface_layout.edge = Edge::Left;
         self.surface_layout.margin_top = margin_top;
         self.surface_layout.margin_left = margin_left;
+        self.surface_policy = self
+            .surface_policy_generation
+            .update(self.surface_layout.policy_snapshot(0))
+            .current;
         self.invalidate_surface_config();
     }
 
@@ -2009,6 +2025,14 @@ impl ShellComponent for FrontendSurfaceComponent {
 
     fn set_keyboard_mode_override(&mut self, mode: Option<KeyboardMode>) {
         self.keyboard_mode_override = mode;
+        let mut policy_layout = self.surface_layout.clone();
+        if let Some(mode) = mode {
+            policy_layout.keyboard_mode = mode;
+        }
+        self.surface_policy = self
+            .surface_policy_generation
+            .update(policy_layout.policy_snapshot(0))
+            .current;
         self.invalidate_surface_config();
     }
 

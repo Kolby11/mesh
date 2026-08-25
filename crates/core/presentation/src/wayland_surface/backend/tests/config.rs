@@ -1,5 +1,6 @@
 use super::*;
 use mesh_core_render::DamageRect;
+use mesh_core_surface_policy::{SurfacePolicyChange, SurfacePolicyDiff};
 
 // ---------------------------------------------------------------------------
 // layer-surface config tests
@@ -92,23 +93,23 @@ fn window_identity_and_role_have_typed_change_kinds() {
     let mut retitled = cfg.clone();
     retitled.window.title = "Settings — Audio".into();
     assert_eq!(
-        surface_config_change(&cfg, KeyboardMode::None, &retitled, KeyboardMode::None),
-        SurfaceConfigChange::Live,
+        surface_config_change(&cfg, KeyboardMode::None, &retitled, KeyboardMode::None).change,
+        SurfacePolicyChange::WindowLive,
         "a title change must reach the toplevel without requiring a fresh configure"
     );
 
     let mut resizable = cfg.clone();
     resizable.window.resizable = true;
     assert_eq!(
-        surface_config_change(&cfg, KeyboardMode::None, &resizable, KeyboardMode::None),
-        SurfaceConfigChange::Live
+        surface_config_change(&cfg, KeyboardMode::None, &resizable, KeyboardMode::None).change,
+        SurfacePolicyChange::WindowLive
     );
 
     let mut as_layer = cfg.clone();
     as_layer.role = SurfaceRole::Layer;
     assert_eq!(
-        surface_config_change(&cfg, KeyboardMode::None, &as_layer, KeyboardMode::None),
-        SurfaceConfigChange::Recreate,
+        surface_config_change(&cfg, KeyboardMode::None, &as_layer, KeyboardMode::None).change,
+        SurfacePolicyChange::RoleTransition,
         "a role change must replace the compositor object"
     );
 
@@ -120,8 +121,9 @@ fn window_identity_and_role_have_typed_change_kinds() {
             KeyboardMode::None,
             &server_decorations,
             KeyboardMode::None,
-        ),
-        SurfaceConfigChange::Recreate,
+        )
+        .change,
+        SurfacePolicyChange::WindowRecreate,
         "decoration negotiation is a creation-time window property"
     );
 }
@@ -133,8 +135,8 @@ fn keyboard_mode_only_change_is_live() {
     next.keyboard_mode = KeyboardMode::Exclusive;
 
     assert_eq!(
-        surface_config_change(&previous, previous.keyboard_mode, &next, next.keyboard_mode,),
-        SurfaceConfigChange::Live,
+        surface_config_change(&previous, previous.keyboard_mode, &next, next.keyboard_mode,).change,
+        SurfacePolicyChange::InputRegionOnly,
         "keyboard interactivity-only changes must not force a fresh configure for an already-visible surface"
     );
 }
@@ -155,8 +157,9 @@ fn layer_diff_ignores_toplevel_only_fields() {
             previous.keyboard_mode,
             &next,
             previous.keyboard_mode,
-        ),
-        SurfaceConfigChange::Unchanged,
+        )
+        .change,
+        SurfacePolicyChange::Noop,
         "layer diffs must not react to toplevel-only or desired keyboard fields"
     );
 }
@@ -178,8 +181,8 @@ fn window_diff_ignores_layer_only_fields() {
     next.keyboard_mode = KeyboardMode::Exclusive;
 
     assert_eq!(
-        surface_config_change(&previous, KeyboardMode::None, &next, KeyboardMode::None),
-        SurfaceConfigChange::Unchanged,
+        surface_config_change(&previous, KeyboardMode::None, &next, KeyboardMode::None).change,
+        SurfacePolicyChange::Noop,
         "window diffs must not react to layer-only placement fields"
     );
 }
@@ -191,8 +194,8 @@ fn layer_geometry_change_requires_fresh_configure() {
     set_requested_size(&mut next, (320, 164), SurfacePadding::default());
 
     assert_eq!(
-        surface_config_change(&previous, previous.keyboard_mode, &next, next.keyboard_mode,),
-        SurfaceConfigChange::Configure
+        surface_config_change(&previous, previous.keyboard_mode, &next, next.keyboard_mode,).change,
+        SurfacePolicyChange::LayerConfigure
     );
 }
 
@@ -202,10 +205,31 @@ fn unchanged_config_has_no_semantic_diff() {
     let next = previous.clone();
 
     assert_eq!(
-        surface_config_change(&previous, previous.keyboard_mode, &next, next.keyboard_mode,),
-        SurfaceConfigChange::Unchanged
+        surface_config_change(&previous, previous.keyboard_mode, &next, next.keyboard_mode,).change,
+        SurfacePolicyChange::Noop
     );
-    assert!(!SurfaceConfigChange::Unchanged.requires_fresh_configure());
+    assert!(
+        !SurfacePolicyDiff {
+            change: SurfacePolicyChange::Noop,
+            from_revision: None,
+            to_revision: 0,
+        }
+        .requires_fresh_configure()
+    );
+}
+
+#[test]
+fn semantic_diff_carries_accepted_policy_revisions() {
+    let mut previous = base_cfg();
+    previous.policy_revision = 7;
+    let mut next = previous.clone();
+    next.policy_revision = 8;
+    next.margin_top += 1;
+
+    let diff = previous.semantic_diff(previous.keyboard_mode, &next, next.keyboard_mode);
+    assert_eq!(diff.change, SurfacePolicyChange::LayerConfigure);
+    assert_eq!(diff.from_revision, Some(7));
+    assert_eq!(diff.to_revision, 8);
 }
 
 #[test]
@@ -217,16 +241,16 @@ fn layer_namespace_and_blur_require_surface_recreation() {
     let mut renamed = cfg.clone();
     renamed.namespace = "@mesh/other-popover".into();
     assert_eq!(
-        surface_config_change(&cfg, cfg.keyboard_mode, &renamed, renamed.keyboard_mode),
-        SurfaceConfigChange::Recreate
+        surface_config_change(&cfg, cfg.keyboard_mode, &renamed, renamed.keyboard_mode).change,
+        SurfacePolicyChange::LayerRecreate
     );
 
     let mut blurred = cfg.clone();
     blurred.blur = true;
     assert_eq!(blurred.wayland_namespace(), "@mesh/audio-popover:blur");
     assert_eq!(
-        surface_config_change(&cfg, cfg.keyboard_mode, &blurred, blurred.keyboard_mode),
-        SurfaceConfigChange::Recreate
+        surface_config_change(&cfg, cfg.keyboard_mode, &blurred, blurred.keyboard_mode).change,
+        SurfacePolicyChange::LayerRecreate
     );
 }
 
@@ -538,7 +562,8 @@ fn changing_only_the_padding_still_counts_as_a_config_change() {
             KeyboardMode::OnDemand,
             &padded,
             KeyboardMode::OnDemand,
-        ),
-        SurfaceConfigChange::Live,
+        )
+        .change,
+        SurfacePolicyChange::InputRegionOnly,
     );
 }

@@ -26,6 +26,21 @@ use smallvec::SmallVec;
 
 const DEBUG_INSPECTOR_SURFACE_ID: &str = "@mesh/debug-inspector";
 
+pub(super) fn revisioned_surface_config(
+    previous: Option<&SurfaceConfig>,
+    mut next: SurfaceConfig,
+) -> SurfaceConfig {
+    next.policy_revision = previous.map_or(1, |previous| {
+        let diff = previous.semantic_diff(previous.keyboard_mode, &next, next.keyboard_mode);
+        if diff.is_noop() {
+            previous.policy_revision
+        } else {
+            previous.policy_revision.saturating_add(1).max(1)
+        }
+    });
+    next
+}
+
 impl Shell {
     pub(in crate::shell) fn render_components(&mut self) -> Result<(), ShellRunError> {
         let backdrop_policy = if self.presentation_engine.supports_compositor_backdrop_blur() {
@@ -354,26 +369,34 @@ impl Shell {
                         mesh_core_presentation::PresentationError::SurfaceCreate(error.to_string()),
                     )
                 })?;
-                let config_changed = self.components[index]
-                    .parent
-                    .last_surface_config
-                    .as_ref()
-                    .map_or(true, |last| {
-                        last.edge != surface.edge
-                            || last.layer != layer
-                            || last.size_policy != size_policy
-                            || last.extent != extent
-                            || last.wire_size != wire_size
-                            || last.exclusive_zone != surface.exclusive_zone
-                            || last.keyboard_mode != surface.keyboard_mode
-                            || last.margin_top != surface.margin_top
-                            || last.margin_right != surface.margin_right
-                            || last.margin_bottom != surface.margin_bottom
-                            || last.margin_left != surface.margin_left
-                            || last.blur != surface.blur
-                            || last.role != surface.role
-                            || last.window != surface.window
-                    });
+                let mut cfg = SurfaceConfig {
+                    role: surface.role,
+                    window: surface.window.clone(),
+                    edge: surface.edge,
+                    layer,
+                    size_policy,
+                    extent,
+                    wire_size,
+                    exclusive_zone: surface.exclusive_zone,
+                    keyboard_mode: surface.keyboard_mode,
+                    namespace: surface_id.clone(),
+                    margin_top: surface.margin_top,
+                    margin_right: surface.margin_right,
+                    margin_bottom: surface.margin_bottom,
+                    margin_left: surface.margin_left,
+                    blur: surface.blur,
+                    policy_revision: 0,
+                };
+                let previous_config = self.components[index].parent.last_surface_config.as_ref();
+                let config_changed = previous_config.map_or(true, |last| {
+                    !last
+                        .semantic_diff(last.keyboard_mode, &cfg, cfg.keyboard_mode)
+                        .is_noop()
+                });
+                cfg = revisioned_surface_config(previous_config, cfg);
+                cfg.policy_revision = cfg
+                    .policy_revision
+                    .max(self.components[index].component.surface_policy_revision());
                 // `render_layout` writes `(0, 0)` for a component with no content
                 // measurement, and `observe_surface_size` drops that measurement
                 // whenever the available size changes — so a zero can reach this
@@ -413,23 +436,6 @@ impl Shell {
                     && !defer_first_layer_configure
                     && configure_size_resolved
                 {
-                    let cfg = SurfaceConfig {
-                        role: surface.role,
-                        window: surface.window.clone(),
-                        edge: surface.edge,
-                        layer,
-                        size_policy,
-                        extent,
-                        wire_size,
-                        exclusive_zone: surface.exclusive_zone,
-                        keyboard_mode: surface.keyboard_mode,
-                        namespace: surface_id.clone(),
-                        margin_top: surface.margin_top,
-                        margin_right: surface.margin_right,
-                        margin_bottom: surface.margin_bottom,
-                        margin_left: surface.margin_left,
-                        blur: surface.blur,
-                    };
                     tracing::debug!(
                         surface_id = %surface_id,
                         width = extent.surface_size().0,
