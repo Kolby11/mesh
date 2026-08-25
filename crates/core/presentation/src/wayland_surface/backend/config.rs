@@ -198,11 +198,7 @@ pub(super) fn surface_config_change(
     // A layer namespace is supplied only while creating the role, and blur is
     // encoded into that namespace. Decorations are negotiated while creating an
     // xdg toplevel. Neither can be repaired by a later live request.
-    let creation_identity_changed = match previous.role {
-        SurfaceRole::Layer => previous.namespace != next.namespace || previous.blur != next.blur,
-        SurfaceRole::Window => previous.window.decorations != next.window.decorations,
-    };
-    if creation_identity_changed {
+    if creation_identity_changed(previous, next) {
         return SurfaceConfigChange::Recreate;
     }
 
@@ -246,6 +242,18 @@ pub(super) fn surface_config_change(
         SurfaceConfigChange::Live
     } else {
         SurfaceConfigChange::Unchanged
+    }
+}
+
+/// Compare the values that are actually consumed while creating the live
+/// compositor role. Layer-shell folds the blur intent into its namespace, while
+/// xdg-shell consumes the decoration request when it creates the toplevel.
+/// Keeping this comparison at the lowered identity boundary prevents either
+/// creation-time field from disappearing from semantic change detection.
+fn creation_identity_changed(previous: &SurfaceConfig, next: &SurfaceConfig) -> bool {
+    match previous.role {
+        SurfaceRole::Layer => previous.wayland_namespace() != next.wayland_namespace(),
+        SurfaceRole::Window => previous.window.decorations != next.window.decorations,
     }
 }
 

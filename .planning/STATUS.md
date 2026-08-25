@@ -176,6 +176,11 @@ Manifest surface enums now use one canonical parser set across graph
 diagnostics, settings, and runtime layout resolution; invalid values and
 role-specific field contradictions are reported before runtime policy is used.
 
+Presentation surface change detection now compares the lowered layer namespace
+(including blur intent) and xdg decoration negotiation, so either creation-time
+change takes the compositor-role recreation path instead of being treated as a
+no-op.
+
 ## Blocked / open follow-ups
 
 - Live multi-output membership and compositor conformance matrix (deferred,

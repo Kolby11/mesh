@@ -85,7 +85,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/13-surface-policy-and-configuration/improvements.md)
 
-- [ ] Include blur and window decorations in semantic presentation change detection.
 - [ ] Route settings-driven role reloads through the same transactional transition supervisor as explicit promotion.
 - [ ] Share role-field metadata across manifest diagnostics, settings validation, ejection, and protocol lowering.
 - [ ] Preserve localization identity and distinguish effective values from overrides during configuration ejection.
