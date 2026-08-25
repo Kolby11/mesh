@@ -105,6 +105,7 @@ impl FrontendRenderEngine {
         module_id: Option<&str>,
     ) {
         let mut display_list = RetainedDisplayList::default();
+        display_list.set_backdrop_blur_policy(self.backdrop_blur_policy());
         display_list.update_at(
             root,
             offset_x,
@@ -669,6 +670,56 @@ impl FrontendRenderEngine {
         // restoring a layer that was never opened or paint the subtree
         // unblurred.
         match kind {
+            DisplayPaintCommandKind::ApplyBackdropFilterCompositor => {
+                // The presentation backend owns the compositor region. No
+                // client-side command is emitted, so the SHM pixels remain
+                // unchanged and the selected policy is observable in the
+                // retained topology.
+                return;
+            }
+            DisplayPaintCommandKind::ApplyBackdropFilterInSurface => {
+                if !self.paint_backend_supports_backdrop_blur() {
+                    self.record_painter_diagnostic(PainterDiagnostic {
+                        backend_id: self.paint_backend_id(),
+                        feature: UnsupportedPainterFeature::BackdropBlur,
+                        message: "in-surface backdrop blur is unsupported; painting flat"
+                            .to_string(),
+                        source: Some(PainterDiagnosticSource {
+                            node_id: Some(command.node.id),
+                            property: Some("backdrop-filter".to_string()),
+                        }),
+                    });
+                    return;
+                }
+                let bounds = scaled_display_node_bounds(&command.node, scale);
+                let clip = intersect_clip(paint_clip, scaled_display_clip(command.clip, scale));
+                self.execute_painter_commands_in_session(
+                    session,
+                    &[PainterCommand::ApplyFilter {
+                        rect: bounds,
+                        radii: scale_corners(command.node.style.border_radius, scale),
+                        filter: PainterFilter::Backdrop(scaled_visual_filter(
+                            command.node.style.backdrop_filter,
+                            scale,
+                        )),
+                        clip,
+                    }],
+                );
+                return;
+            }
+            DisplayPaintCommandKind::ApplyBackdropFilterRejected => {
+                self.record_painter_diagnostic(PainterDiagnostic {
+                    backend_id: self.paint_backend_id(),
+                    feature: UnsupportedPainterFeature::BackdropBlur,
+                    message: "backdrop blur rejected by presentation policy; painting flat"
+                        .to_string(),
+                    source: Some(PainterDiagnosticSource {
+                        node_id: Some(command.node.id),
+                        property: Some("backdrop-filter".to_string()),
+                    }),
+                });
+                return;
+            }
             DisplayPaintCommandKind::PushCompositingLayer => {
                 let bounds = intersect_clip(paint_clip, scaled_display_clip(command.clip, scale));
                 self.execute_painter_commands_in_session(
@@ -753,7 +804,10 @@ impl FrontendRenderEngine {
             }
             DisplayPaintCommandKind::PushFilterLayer | DisplayPaintCommandKind::PopFilterLayer => {}
             DisplayPaintCommandKind::PushCompositingLayer
-            | DisplayPaintCommandKind::PopCompositingLayer => {}
+            | DisplayPaintCommandKind::PopCompositingLayer
+            | DisplayPaintCommandKind::ApplyBackdropFilterCompositor
+            | DisplayPaintCommandKind::ApplyBackdropFilterInSurface
+            | DisplayPaintCommandKind::ApplyBackdropFilterRejected => {}
         }
     }
 
@@ -924,7 +978,7 @@ fn clipped_paint_regions(
 fn selection_has_layer_scopes(commands: &SelectedDisplayListPaint<'_>) -> bool {
     commands
         .iter_with_kinds()
-        .any(|(_, kind)| !kind.draws_content())
+        .any(|(_, kind)| kind.is_layer_scope())
 }
 
 fn paint_regions_overlap(clips: &[ClipRect]) -> bool {

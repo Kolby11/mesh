@@ -12,6 +12,7 @@ use super::text::{
     SharedTextMeasurer, TextCacheMetrics, TextPaintStyle, TextRenderer, TextSelectionGeometry,
 };
 use super::{PixelBuffer, PixelCanvasSession};
+use crate::display_list::BackdropBlurPolicy;
 pub use backend::{BlurQuality, MAX_BLUR_PASSES};
 #[allow(unused_imports)]
 pub(crate) use backend::{
@@ -103,6 +104,7 @@ pub struct FrontendRenderEngine {
     /// and pops it several buffers later.
     painter_layers: RefCell<PainterLayerStack>,
     blur_quality: Cell<BlurQuality>,
+    backdrop_blur_policy: Cell<BackdropBlurPolicy>,
 }
 
 #[derive(Default)]
@@ -151,6 +153,7 @@ impl FrontendRenderEngine {
             render_scratch: RefCell::new(RenderScratch::default()),
             painter_layers: RefCell::new(PainterLayerStack::default()),
             blur_quality: Cell::new(BlurQuality::default()),
+            backdrop_blur_policy: Cell::new(BackdropBlurPolicy::CompositorRegion),
         }
     }
 
@@ -167,6 +170,7 @@ impl FrontendRenderEngine {
             render_scratch: RefCell::new(RenderScratch::default()),
             painter_layers: RefCell::new(PainterLayerStack::default()),
             blur_quality: Cell::new(BlurQuality::default()),
+            backdrop_blur_policy: Cell::new(BackdropBlurPolicy::CompositorRegion),
         }
     }
 
@@ -178,6 +182,14 @@ impl FrontendRenderEngine {
 
     pub(super) fn blur_quality(&self) -> BlurQuality {
         self.blur_quality.get()
+    }
+
+    pub fn set_backdrop_blur_policy(&self, policy: BackdropBlurPolicy) {
+        self.backdrop_blur_policy.set(policy);
+    }
+
+    pub fn backdrop_blur_policy(&self) -> BackdropBlurPolicy {
+        self.backdrop_blur_policy.get()
     }
 
     pub fn set_tooltip_colors(&self, colors: TooltipPaintColors) {
@@ -245,6 +257,16 @@ impl FrontendRenderEngine {
         if let Ok(mut diagnostics) = self.painter_diagnostics.lock() {
             diagnostics.clear();
         }
+    }
+
+    pub(super) fn record_painter_diagnostic(&self, diagnostic: PainterDiagnostic) {
+        if let Ok(mut diagnostics) = self.painter_diagnostics.lock() {
+            diagnostics.push(diagnostic);
+        }
+    }
+
+    pub(crate) fn paint_backend_supports_backdrop_blur(&self) -> bool {
+        self.paint_backend.capabilities().backdrop_blur
     }
 
     fn execute_painter_commands(&self, buffer: &mut PixelBuffer, commands: &[PainterCommand]) {
@@ -417,6 +439,10 @@ fn painter_capability_snapshots(
             supported: capabilities.filters,
         },
         PainterCapabilitySnapshot {
+            feature: "backdrop_blur",
+            supported: capabilities.backdrop_blur,
+        },
+        PainterCapabilitySnapshot {
             feature: "blend_modes",
             supported: capabilities.blend_modes,
         },
@@ -444,6 +470,7 @@ fn unsupported_painter_feature_label(feature: UnsupportedPainterFeature) -> &'st
         UnsupportedPainterFeature::Image => "image",
         UnsupportedPainterFeature::Gradient => "gradient",
         UnsupportedPainterFeature::Filter => "filter",
+        UnsupportedPainterFeature::BackdropBlur => "backdrop_blur",
         UnsupportedPainterFeature::BlendMode => "blend_mode",
     }
 }

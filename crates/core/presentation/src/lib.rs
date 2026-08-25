@@ -1505,6 +1505,13 @@ impl PresentationEngine {
         }
     }
 
+    /// Whether this presentation backend can realize a compositor-owned
+    /// backdrop region. Non-Wayland backends deliberately report false so
+    /// the shell selects the renderer's validated in-surface fallback.
+    pub fn supports_compositor_backdrop_blur(&self) -> bool {
+        self.negotiated_capabilities().blur_version > 0
+    }
+
     pub fn surface_scale(&self, surface_id: &str) -> f32 {
         match &self.backend {
             Backend::WaylandSurface(bridge) => bridge.surface_scale(surface_id),
@@ -1962,6 +1969,13 @@ pub fn event_surface_id(event: &WindowEvent) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn testing_presentation_requires_renderer_fallback_for_backdrop_blur() {
+        let engine = PresentationEngine::testing_with_popup_support(false);
+        assert_eq!(engine.negotiated_capabilities().blur_version, 0);
+        assert!(!engine.supports_compositor_backdrop_blur());
+    }
 
     #[test]
     fn testing_backend_publishes_and_clears_text_input_state() {

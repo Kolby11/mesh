@@ -1,6 +1,8 @@
 use super::super::super::*;
 use super::super::common::*;
-use crate::display_list::{DamageRect, DisplayListRepaintPolicy, RetainedDisplayList};
+use crate::display_list::{
+    BackdropBlurPolicy, DamageRect, DisplayListRepaintPolicy, RetainedDisplayList,
+};
 use mesh_core_elements::layout::LayoutRect;
 
 #[test]
@@ -41,6 +43,126 @@ fn retained_backdrop_filter_delegates_to_compositor() {
         right.b > 247 && right.r < 8,
         "client-side backdrop filtering must preserve the adjacent color, got {right:?}"
     );
+}
+
+#[test]
+fn in_surface_backdrop_filter_uses_the_validated_renderer_fallback() {
+    let red = Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    let root = backdrop_blur_scene(red);
+
+    let mut list = RetainedDisplayList::default();
+    list.set_backdrop_blur_policy(BackdropBlurPolicy::InSurfaceFilter);
+    list.update(&root, 32, 32, true, true);
+    let selected = list.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 32,
+            height: 32,
+        }),
+        DisplayListRepaintPolicy::FullSurface,
+    );
+
+    let engine = FrontendRenderEngine::new();
+    let mut buffer = PixelBuffer::new(32, 32);
+    engine.render_selected_display_list_for_module(&selected, &mut buffer, 1.0, None, None, None);
+
+    let outside = pixel(&buffer, 4, 16);
+    assert!(
+        outside.r > 247 && outside.b < 8,
+        "pixels outside the fallback region stay unfiltered, got {outside:?}"
+    );
+    let inside = pixel(&buffer, 12, 16);
+    assert!(
+        inside.r > 0 && inside.b > 0 && inside.r < 255 && inside.b < 255,
+        "in-surface fallback should mix the painted backdrop, got {inside:?}"
+    );
+    assert!(engine.painter_diagnostics().is_empty());
+}
+
+#[test]
+fn unsupported_in_surface_backdrop_filter_is_rejected_with_diagnostic() {
+    let root = backdrop_blur_scene(Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    });
+    let mut list = RetainedDisplayList::default();
+    list.set_backdrop_blur_policy(BackdropBlurPolicy::InSurfaceFilter);
+    list.update(&root, 32, 32, true, true);
+    let selected = list.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 32,
+            height: 32,
+        }),
+        DisplayListRepaintPolicy::FullSurface,
+    );
+
+    let backend = RecordingPaintBackend::default();
+    let engine = FrontendRenderEngine::with_paint_backend(Box::new(backend.clone()));
+    let mut buffer = PixelBuffer::new(32, 32);
+    engine.render_selected_display_list_for_module(&selected, &mut buffer, 1.0, None, None, None);
+
+    assert!(engine.painter_diagnostics().iter().any(|diagnostic| {
+        diagnostic.feature == UnsupportedPainterFeature::BackdropBlur
+            && diagnostic.source.as_ref().and_then(|source| source.node_id) == Some(4)
+    }));
+    assert!(
+        engine
+            .paint_backend_snapshot()
+            .capabilities
+            .iter()
+            .any(|capability| capability.feature == "backdrop_blur" && !capability.supported)
+    );
+    assert!(
+        backend
+            .recorded_commands()
+            .iter()
+            .all(|command| !matches!(command, PainterCommand::ApplyFilter { .. }))
+    );
+}
+
+#[test]
+fn rejected_backdrop_filter_is_flat_and_diagnostic() {
+    let root = backdrop_blur_scene(Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    });
+    let mut list = RetainedDisplayList::default();
+    list.set_backdrop_blur_policy(BackdropBlurPolicy::Rejected);
+    list.update(&root, 32, 32, true, true);
+    let selected = list.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 32,
+            height: 32,
+        }),
+        DisplayListRepaintPolicy::FullSurface,
+    );
+
+    let engine = FrontendRenderEngine::new();
+    let mut buffer = PixelBuffer::new(32, 32);
+    engine.render_selected_display_list_for_module(&selected, &mut buffer, 1.0, None, None, None);
+
+    let inside = pixel(&buffer, 12, 16);
+    assert_eq!(inside.r, 255);
+    assert_eq!(inside.g, 0);
+    assert_eq!(inside.b, 0);
+    assert!(engine.painter_diagnostics().iter().any(|diagnostic| {
+        diagnostic.feature == UnsupportedPainterFeature::BackdropBlur
+            && diagnostic.message.contains("rejected")
+    }));
 }
 
 /// Changing content beneath a frosted panel and repainting only the expanded

@@ -895,6 +895,49 @@ fn backdrop_regions_require_painted_content_beneath() {
 }
 
 #[test]
+fn backdrop_blur_policy_changes_retained_command_topology_and_regions() {
+    let mut root = node(1, "box", 0.0, 0.0, 100.0, 100.0);
+    root.computed_style.background_color = Color::TRANSPARENT;
+    root.children.push(node(2, "box", 0.0, 0.0, 50.0, 100.0));
+    root.children.push(frosted_node(3, 20.0, 20.0, 40.0, 40.0));
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 100, 100, true, true);
+    let compositor_generation = list.generation();
+    assert_eq!(
+        list.backdrop_blur_policy(),
+        BackdropBlurPolicy::CompositorRegion
+    );
+    assert!(list.paint_commands().iter().any(|command| {
+        command.node.id == 3
+            && command.kind == DisplayPaintCommandKind::ApplyBackdropFilterCompositor
+    }));
+    assert!(!list.blur_regions().is_empty());
+    assert!(!list.backdrop_filter_regions().is_empty());
+
+    list.set_backdrop_blur_policy(BackdropBlurPolicy::InSurfaceFilter);
+    let in_surface_metrics = list.update(&root, 100, 100, false, true);
+    assert!(list.generation() > compositor_generation);
+    assert!(in_surface_metrics.full_surface_damage);
+    assert!(list.paint_commands().iter().any(|command| {
+        command.node.id == 3
+            && command.kind == DisplayPaintCommandKind::ApplyBackdropFilterInSurface
+    }));
+    assert!(list.blur_regions().is_empty());
+    assert!(!list.backdrop_filter_regions().is_empty());
+
+    let in_surface_generation = list.generation();
+    list.set_backdrop_blur_policy(BackdropBlurPolicy::Rejected);
+    list.update(&root, 100, 100, false, true);
+    assert!(list.generation() > in_surface_generation);
+    assert!(list.paint_commands().iter().any(|command| {
+        command.node.id == 3 && command.kind == DisplayPaintCommandKind::ApplyBackdropFilterRejected
+    }));
+    assert!(list.blur_regions().is_empty());
+    assert!(!list.backdrop_filter_regions().is_empty());
+}
+
+#[test]
 fn transformed_backdrop_regions_follow_cumulative_geometry() {
     let mut root = node(1, "box", 0.0, 0.0, 100.0, 100.0);
     root.computed_style.background_color = Color::TRANSPARENT;

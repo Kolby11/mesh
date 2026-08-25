@@ -294,6 +294,7 @@ pub(super) fn build_paint_subtree(
     previous_subtrees: &HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     next_subtrees: &mut HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     metrics: &mut LocalReuseMetrics,
+    backdrop_blur_policy: BackdropBlurPolicy,
 ) -> Arc<RetainedPaintSubtree> {
     build_paint_subtree_with_transform(
         node,
@@ -308,6 +309,7 @@ pub(super) fn build_paint_subtree(
         previous_subtrees,
         next_subtrees,
         metrics,
+        backdrop_blur_policy,
     )
 }
 
@@ -325,6 +327,7 @@ fn build_paint_subtree_with_transform(
     previous_subtrees: &HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     next_subtrees: &mut HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     metrics: &mut LocalReuseMetrics,
+    backdrop_blur_policy: BackdropBlurPolicy,
 ) -> Arc<RetainedPaintSubtree> {
     let node_is_dirty = dirty_node_ids.contains(&node.id);
     let node_is_ancestor = dirty_ancestors.contains(&node.id);
@@ -407,6 +410,23 @@ fn build_paint_subtree_with_transform(
         });
         metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
     }
+    if paint_node.style.backdrop_filter.blur_radius > 0.0 {
+        let kind = match backdrop_blur_policy {
+            BackdropBlurPolicy::CompositorRegion => {
+                DisplayPaintCommandKind::ApplyBackdropFilterCompositor
+            }
+            BackdropBlurPolicy::InSurfaceFilter => {
+                DisplayPaintCommandKind::ApplyBackdropFilterInSurface
+            }
+            BackdropBlurPolicy::Rejected => DisplayPaintCommandKind::ApplyBackdropFilterRejected,
+        };
+        subtree.push_command(DisplayPaintCommand {
+            node: Arc::clone(&paint_node),
+            clip: node_clip,
+            kind,
+        });
+        metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
+    }
     subtree.push_command(DisplayPaintCommand {
         node: Arc::clone(&paint_node),
         clip: node_clip,
@@ -458,6 +478,7 @@ fn build_paint_subtree_with_transform(
             previous_subtrees,
             next_subtrees,
             metrics,
+            backdrop_blur_policy,
         );
     });
     subtree.child_order = child_order;
@@ -572,6 +593,7 @@ pub(super) fn append_child_paint_subtree(
     previous_subtrees: &HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     next_subtrees: &mut HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     metrics: &mut LocalReuseMetrics,
+    backdrop_blur_policy: BackdropBlurPolicy,
 ) {
     if should_preclip_child_subtree_with_transform(child, child_parent_transform, child_clip) {
         subtree.pruning.record_omitted_subtree(
@@ -593,6 +615,7 @@ pub(super) fn append_child_paint_subtree(
         previous_subtrees,
         next_subtrees,
         metrics,
+        backdrop_blur_policy,
     );
     subtree.append_child(&child_subtree);
     subtree.append_pruning(&child_subtree);

@@ -517,6 +517,9 @@ pub(crate) struct PainterBackendCapabilities {
     pub images: bool,
     pub shadows: bool,
     pub filters: bool,
+    /// Whether `ApplyBackdropFilter::InSurface` can read and filter the
+    /// already-painted surface buffer.
+    pub backdrop_blur: bool,
     pub blend_modes: bool,
 }
 
@@ -529,6 +532,7 @@ pub(crate) enum UnsupportedPainterFeature {
     Image,
     Gradient,
     Filter,
+    BackdropBlur,
     BlendMode,
 }
 
@@ -566,6 +570,7 @@ impl PaintBackend for SkiaPaintBackend {
             images: true,
             shadows: true,
             filters: true,
+            backdrop_blur: true,
             blend_modes: true,
         }
     }

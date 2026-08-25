@@ -7,9 +7,10 @@ mod profiling;
 mod resource_broker;
 mod text;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashSet};
 
+use crate::display_list::BackdropBlurPolicy;
 use crate::display_list::{DisplayPaintCommand, SelectedDisplayListPaint};
 use mesh_core_elements::NodeId;
 
@@ -171,6 +172,7 @@ pub struct PaintProfilingMetrics {
 
 thread_local! {
     static FRONTEND_RENDERER: RefCell<FrontendRenderEngine> = RefCell::new(FrontendRenderEngine::new());
+    static BACKDROP_BLUR_POLICY: Cell<BackdropBlurPolicy> = const { Cell::new(BackdropBlurPolicy::CompositorRegion) };
 }
 
 /// Set how the painter spends its blur budget on this thread's renderer.
@@ -185,6 +187,26 @@ pub fn set_blur_quality(quality: BlurQuality) {
 /// The blur quality the next paint on this thread will use.
 pub fn blur_quality() -> BlurQuality {
     FRONTEND_RENDERER.with(|engine| engine.borrow().blur_quality())
+}
+
+/// Select the presentation policy used when retained display lists are built
+/// and painted on this thread. The shell updates it from negotiated backend
+/// capabilities before component rendering begins.
+pub fn set_backdrop_blur_policy(policy: BackdropBlurPolicy) {
+    BACKDROP_BLUR_POLICY.with(|current| current.set(policy));
+    FRONTEND_RENDERER.with(|engine| {
+        engine.borrow().set_backdrop_blur_policy(policy);
+    });
+}
+
+pub fn backdrop_blur_policy() -> BackdropBlurPolicy {
+    BACKDROP_BLUR_POLICY.with(Cell::get)
+}
+
+/// Whether the active paint backend can realize the in-surface backdrop
+/// fallback selected when the presentation compositor has no blur region.
+pub fn paint_backend_supports_backdrop_blur() -> bool {
+    FRONTEND_RENDERER.with(|engine| engine.borrow().paint_backend_supports_backdrop_blur())
 }
 
 /// Install the prepared host and bundled font database on this thread's text

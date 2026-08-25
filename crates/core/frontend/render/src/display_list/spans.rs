@@ -53,26 +53,27 @@ pub(super) fn collect_command_spans(
         let owned = span.command_count;
         let has_children = subtree_end > command_start.saturating_add(owned);
         let bounds = span.local_bounds;
-        if !has_children || owned <= 1 {
+        let leading_owned = owned.saturating_sub(usize::from(span.local_includes_scrollbars));
+        if !has_children {
             spans.push(RetainedCommandSpan {
                 owner: node.id,
                 start: command_start,
-                end: command_start.saturating_add(owned.min(2)),
+                end: command_start.saturating_add(owned),
                 bounds,
-                command_count: owned.min(2),
-                includes_scrollbars: owned > 1,
+                command_count: owned,
+                includes_scrollbars: span.local_includes_scrollbars,
             });
         } else {
             spans.push(RetainedCommandSpan {
                 owner: node.id,
                 start: command_start,
-                end: command_start.saturating_add(1),
+                end: command_start.saturating_add(leading_owned),
                 bounds,
-                command_count: 1,
+                command_count: leading_owned,
                 includes_scrollbars: false,
             });
             let scrollbar_index = subtree_end.saturating_sub(1);
-            if span.includes_scrollbars {
+            if span.local_includes_scrollbars {
                 spans.push(RetainedCommandSpan {
                     owner: node.id,
                     start: scrollbar_index,
@@ -89,7 +90,10 @@ pub(super) fn collect_command_spans(
         return subtree_end;
     }
 
-    let child_start = command_start.saturating_add(1);
+    let child_start = command_start.saturating_add(subtree.command_span.map_or(0, |span| {
+        span.command_count
+            .saturating_sub(usize::from(span.local_includes_scrollbars))
+    }));
     let mut next_child_start = child_start;
     for_children_in_order(node, subtree.child_order.as_deref(), |child| {
         next_child_start = collect_command_spans(child, subtrees, next_child_start, spans);
@@ -131,25 +135,26 @@ pub(super) fn build_command_spans_with_ancestor_copying(
             let owned = span.command_count;
             let has_children = subtree_end > command_start.saturating_add(owned);
             let bounds = span.local_bounds;
-            if !has_children || owned <= 1 {
+            let leading_owned = owned.saturating_sub(usize::from(span.local_includes_scrollbars));
+            if !has_children {
                 spans.push(RetainedCommandSpan {
                     owner: node.id,
                     start: command_start,
-                    end: command_start.saturating_add(owned.min(2)),
+                    end: command_start.saturating_add(owned),
                     bounds,
-                    command_count: owned.min(2),
-                    includes_scrollbars: owned > 1,
+                    command_count: owned,
+                    includes_scrollbars: span.local_includes_scrollbars,
                 });
             } else {
                 spans.push(RetainedCommandSpan {
                     owner: node.id,
                     start: command_start,
-                    end: command_start.saturating_add(1),
+                    end: command_start.saturating_add(leading_owned),
                     bounds,
-                    command_count: 1,
+                    command_count: leading_owned,
                     includes_scrollbars: false,
                 });
-                if span.includes_scrollbars {
+                if span.local_includes_scrollbars {
                     let scrollbar_index = subtree_end.saturating_sub(1);
                     spans.push(RetainedCommandSpan {
                         owner: node.id,
@@ -167,7 +172,11 @@ pub(super) fn build_command_spans_with_ancestor_copying(
             return (spans, subtree_end);
         }
 
-        let mut next_child_start = command_start.saturating_add(1);
+        let mut next_child_start =
+            command_start.saturating_add(subtree.command_span.map_or(0, |span| {
+                span.command_count
+                    .saturating_sub(usize::from(span.local_includes_scrollbars))
+            }));
         for_children_in_order(node, subtree.child_order.as_deref(), |child| {
             let (child_spans, child_end) = collect(child, subtrees, next_child_start);
             spans.extend(child_spans);

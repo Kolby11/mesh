@@ -290,6 +290,7 @@ impl PaintBackend for RecordingPaintBackend {
             images: false,
             shadows: true,
             filters: true,
+            backdrop_blur: false,
             blend_modes: true,
         }
     }

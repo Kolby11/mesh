@@ -43,6 +43,7 @@ pub(super) struct RetainedSubtreeSpan {
     pub(super) local_bounds: DamageRect,
     pub(super) command_count: usize,
     pub(super) includes_scrollbars: bool,
+    pub(super) local_includes_scrollbars: bool,
 }
 
 #[derive(Debug, Default)]
@@ -58,6 +59,7 @@ pub(super) struct PaintSubtreeBuilder {
     /// find the region the layer composites.
     pub(super) child_bounds: DamageRect,
     pub(super) includes_scrollbars: bool,
+    pub(super) local_includes_scrollbars: bool,
     pub(super) local_command_count: usize,
     pub(super) child_order: Option<Arc<[usize]>>,
 }
@@ -79,7 +81,10 @@ impl PaintSubtreeBuilder {
         } else {
             self.local_bounds.union(bounds)
         };
-        self.includes_scrollbars |= matches!(command.kind, DisplayPaintCommandKind::Scrollbars);
+        if matches!(command.kind, DisplayPaintCommandKind::Scrollbars) {
+            self.includes_scrollbars = true;
+            self.local_includes_scrollbars = true;
+        }
         self.local_command_count = self.local_command_count.saturating_add(1);
         self.commands.push(command);
         self.kinds.push(kind);
@@ -206,6 +211,7 @@ impl PaintSubtreeBuilder {
                 local_bounds: self.local_bounds,
                 command_count,
                 includes_scrollbars: self.includes_scrollbars,
+                local_includes_scrollbars: self.local_includes_scrollbars,
             })
         };
         RetainedPaintSubtree {

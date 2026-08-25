@@ -20,7 +20,7 @@ pub mod surface;
 #[cfg(feature = "renderer-accesskit")]
 pub use accesskit_adapter::build_accesskit_runtime_update;
 pub use display_list::{
-    DamageRect, DisplayBatchBarrierCounts, DisplayListClip, DisplayListMetrics,
+    BackdropBlurPolicy, DamageRect, DisplayBatchBarrierCounts, DisplayListClip, DisplayListMetrics,
     DisplayListRepaintPolicy, DisplayPaintCommand, DisplayPaintCommandKind, RetainedDisplayList,
     SelectedDisplayListPaint,
 };
@@ -40,8 +40,9 @@ pub use surface::{
     GlyphAxes, MAX_BLUR_PASSES, PaintCommandAttribution, PaintCommandClass,
     PaintCommandClassMetrics, PaintProfilingMetrics, PainterBackendSnapshot,
     PainterCapabilitySnapshot, PainterDiagnosticSnapshot, PixelBuffer, RasterMetrics,
-    SharedTextMeasurer, TextCacheMetrics, TextRenderer, TooltipPaintColors, blur_quality,
-    glyph_raster_jobs_pending, icon_raster_jobs_pending, icon_resolution_jobs_pending,
+    SharedTextMeasurer, TextCacheMetrics, TextRenderer, TooltipPaintColors, backdrop_blur_policy,
+    blur_quality, glyph_raster_jobs_pending, icon_raster_jobs_pending,
+    icon_resolution_jobs_pending, paint_backend_supports_backdrop_blur,
     paint_display_list_for_module_with_profiling_metrics, paint_frontend_tree,
     paint_frontend_tree_at, paint_frontend_tree_at_for_module,
     paint_frontend_tree_at_for_module_with_text_metrics,
@@ -50,7 +51,8 @@ pub use surface::{
     paint_selected_display_list_for_module_with_profiling_metrics,
     paint_selected_display_list_for_module_with_profiling_metrics_and_attribution,
     paint_selected_display_list_regions_for_module_with_profiling_metrics_and_attribution,
-    poll_glyph_raster_jobs, poll_icon_raster_jobs, poll_icon_resolution_jobs, set_blur_quality,
-    set_font_aliases, set_font_database, set_tooltip_center_x, set_tooltip_paint_colors,
-    set_tooltip_paint_opacity, set_tooltip_paint_scale,
+    poll_glyph_raster_jobs, poll_icon_raster_jobs, poll_icon_resolution_jobs,
+    set_backdrop_blur_policy, set_blur_quality, set_font_aliases, set_font_database,
+    set_tooltip_center_x, set_tooltip_paint_colors, set_tooltip_paint_opacity,
+    set_tooltip_paint_scale,
 };

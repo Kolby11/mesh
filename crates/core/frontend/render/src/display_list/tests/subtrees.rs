@@ -695,6 +695,7 @@ fn paint_only_dirty_parent_reuses_clean_descendants() {
             &list.subtrees,
             &mut next_subtrees,
             &mut metrics,
+            BackdropBlurPolicy::CompositorRegion,
         );
         old_rebuilt_commands =
             old_rebuilt_commands.saturating_add(std::hint::black_box(metrics.rebuilt_commands));
@@ -719,6 +720,7 @@ fn paint_only_dirty_parent_reuses_clean_descendants() {
             &list.subtrees,
             &mut next_subtrees,
             &mut metrics,
+            BackdropBlurPolicy::CompositorRegion,
         );
         new_rebuilt_commands =
             new_rebuilt_commands.saturating_add(std::hint::black_box(metrics.rebuilt_commands));

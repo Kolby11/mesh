@@ -162,8 +162,8 @@ source of truth.
 
 ## Next
 
-Make backdrop blur an explicit renderer/backend capability with validated
-fallback behavior (`docs/BACKLOG.md`).
+Use one fractional-scale rounding policy across layout, buffer, paint, copy,
+and protocol damage (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

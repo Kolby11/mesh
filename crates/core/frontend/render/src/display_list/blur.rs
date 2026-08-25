@@ -274,6 +274,9 @@ pub(super) fn backdrop_read_region(
 /// Whether replaying this command writes pixels. Conservative: over-reporting
 /// only costs an identity blur pass.
 pub(super) fn display_command_paints_pixels(command: &DisplayPaintCommand) -> bool {
+    if command.kind == DisplayPaintCommandKind::ApplyBackdropFilterInSurface {
+        return true;
+    }
     if !command.kind.draws_content() {
         return false;
     }
@@ -306,7 +309,7 @@ pub(super) fn compute_backdrop_regions(
 ) -> Vec<DamageRect> {
     let mut regions = Vec::new();
     for (index, command) in commands.iter().enumerate() {
-        if command.kind != DisplayPaintCommandKind::Node {
+        if !command.kind.is_backdrop_filter() {
             continue;
         }
         let Some(region) = backdrop_read_region(&command.node, surface) else {

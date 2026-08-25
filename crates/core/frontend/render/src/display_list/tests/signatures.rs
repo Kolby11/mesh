@@ -323,6 +323,7 @@ fn retained_subtree_handle_beats_fieldwise_clone() {
             },
             command_count: 1,
             includes_scrollbars: false,
+            local_includes_scrollbars: false,
         }),
         child_order: Some(vec![0, 1, 2, 3].into()),
     };

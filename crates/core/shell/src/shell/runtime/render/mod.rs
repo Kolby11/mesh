@@ -18,7 +18,7 @@ use mesh_core_presentation::{
     LayerSurfaceSizePolicy, PopupAnchor, PopupConfig, PopupConstraint, PopupGravity,
     PopupPlacement, PresentStatus, SurfaceLifecycleEvent, SurfacePadding, SurfaceStateStatus,
 };
-use mesh_core_render::{DamageRect, DisplayPaintCommand};
+use mesh_core_render::{BackdropBlurPolicy, DamageRect, DisplayPaintCommand};
 use mesh_core_wayland::SurfaceRole;
 use smallvec::SmallVec;
 
@@ -26,6 +26,14 @@ const DEBUG_INSPECTOR_SURFACE_ID: &str = "@mesh/debug-inspector";
 
 impl Shell {
     pub(in crate::shell) fn render_components(&mut self) -> Result<(), ShellRunError> {
+        let backdrop_policy = if self.presentation_engine.supports_compositor_backdrop_blur() {
+            BackdropBlurPolicy::CompositorRegion
+        } else if mesh_core_render::paint_backend_supports_backdrop_blur() {
+            BackdropBlurPolicy::InSurfaceFilter
+        } else {
+            BackdropBlurPolicy::Rejected
+        };
+        mesh_core_render::set_backdrop_blur_policy(backdrop_policy);
         let icon_resolutions_ready = mesh_core_render::poll_icon_resolution_jobs();
         let icon_rasters_ready = mesh_core_render::poll_icon_raster_jobs();
         let glyph_rasters_ready = mesh_core_render::poll_glyph_raster_jobs();

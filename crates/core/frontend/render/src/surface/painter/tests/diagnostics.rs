@@ -15,6 +15,7 @@ fn painter_backend_capabilities_identify_skia_and_unsupported_commands_diagnose(
     assert!(capabilities.paths);
 
     assert!(capabilities.blend_modes);
+    assert!(capabilities.backdrop_blur);
 
     let mut buffer = PixelBuffer::new(16, 16);
     let mut diagnostics = Vec::new();

@@ -27,6 +27,17 @@ impl RetainedDisplayList {
         self.generation
     }
 
+    /// Select how `backdrop-filter` commands are lowered on the next update.
+    /// A policy change is a command-topology change even when the widget tree
+    /// and retained render-object generation are unchanged.
+    pub fn set_backdrop_blur_policy(&mut self, policy: BackdropBlurPolicy) {
+        self.backdrop_blur_policy = policy;
+    }
+
+    pub fn backdrop_blur_policy(&self) -> BackdropBlurPolicy {
+        self.backdrop_blur_policy
+    }
+
     /// Stays stable when paint work elsewhere in the surface changes, so a
     /// promoted child surface can skip repainting for unrelated parent updates.
     pub fn subtree_generation(&self, node_id: NodeId) -> Option<u64> {
@@ -213,6 +224,7 @@ impl RetainedDisplayList {
             && self.retained_tree_generation == retained_tree_generation
             && self.surface_size == Some((surface.width, surface.height))
             && self.paint_origin == paint_origin
+            && self.built_backdrop_blur_policy == self.backdrop_blur_policy
         {
             return self.update_metrics_without_rebuild(
                 surface,
@@ -221,6 +233,7 @@ impl RetainedDisplayList {
             );
         }
 
+        let policy_changed = self.built_backdrop_blur_policy != self.backdrop_blur_policy;
         let has_authoritative_dirty_summary = dirty_summary.is_some();
         let dirty_summary = dirty_summary.unwrap_or_default();
         let empty_dirty_nodes = HashSet::new();
@@ -260,6 +273,7 @@ impl RetainedDisplayList {
             && self.surface_size == Some((surface.width, surface.height))
             && self.paint_origin == paint_origin
             && self.entries == next
+            && !policy_changed
             && !dirty_summary.any()
         {
             next.clear();
@@ -276,7 +290,9 @@ impl RetainedDisplayList {
             );
         }
         let origin_changed = self.paint_origin != paint_origin;
-        let decision = if origin_changed {
+        let decision = if policy_changed {
+            LocalReuseDecision::FallbackFull { broad_dirty: false }
+        } else if origin_changed {
             LocalReuseDecision::FallbackFull { broad_dirty: false }
         } else {
             self.local_reuse_decision(
@@ -332,6 +348,7 @@ impl RetainedDisplayList {
                     &self.subtrees,
                     &mut next_subtrees,
                     &mut local_metrics,
+                    self.backdrop_blur_policy,
                 );
                 self.dirty_ancestors_scratch = rebuild_ancestors;
                 self.ancestor_path_scratch = ancestor_path;
@@ -364,6 +381,7 @@ impl RetainedDisplayList {
                     &HashMap::new(),
                     &mut next_subtrees,
                     &mut local_metrics,
+                    self.backdrop_blur_policy,
                 );
                 let command_spans = build_command_spans(root, &next_subtrees).into();
                 (
@@ -389,17 +407,21 @@ impl RetainedDisplayList {
         // that topology change before blur regions are preserved.
         let can_reuse_blur_metadata = blur_metadata_reuse_candidate
             && removed == 0
-            && self.paint_commands.len() == paint_commands.len();
+            && self.paint_commands.len() == paint_commands.len()
+            && !policy_changed;
         let updated_blur_metadata = (!can_reuse_blur_metadata).then(|| {
             (
                 compute_backdrop_regions(paint_commands.as_ref(), surface),
                 // From the full `root` tree, not `paint_commands`, so scoped
                 // updates never drop blur nodes (see field docs).
-                backdrop_blur_regions_from_tree(root, offset_x, offset_y, surface),
+                (self.backdrop_blur_policy == BackdropBlurPolicy::CompositorRegion)
+                    .then(|| backdrop_blur_regions_from_tree(root, offset_x, offset_y, surface))
+                    .unwrap_or_default(),
             )
         });
 
-        let full_surface_damage = force_full_damage || damage.is_none() && self.entries.is_empty();
+        let full_surface_damage =
+            policy_changed || force_full_damage || damage.is_none() && self.entries.is_empty();
         let damage_rect = if full_surface_damage {
             surface
         } else {
@@ -422,7 +444,7 @@ impl RetainedDisplayList {
         #[cfg(not(debug_assertions))]
         let batch_metrics = DisplayListMetrics::default();
 
-        if rebuilt > 0 || removed > 0 || force_full_damage || topology_changed {
+        if rebuilt > 0 || removed > 0 || force_full_damage || topology_changed || policy_changed {
             self.generation = self.generation.saturating_add(1);
         }
         if patch_sparse_entries {
@@ -443,6 +465,7 @@ impl RetainedDisplayList {
         self.command_spans = command_spans;
         self.paint_commands = paint_commands;
         self.command_kinds = command_kinds;
+        self.built_backdrop_blur_policy = self.backdrop_blur_policy;
         self.layer_scopes = collect_layer_scopes(self.paint_commands.as_ref());
         self.filter_layer_regions =
             filter_layer_regions(self.paint_commands.as_ref(), &self.layer_scopes, surface);

@@ -181,6 +181,10 @@ impl DisplayBatchBarrier {
 #[derive(Debug)]
 pub struct RetainedDisplayList {
     pub(super) generation: u64,
+    /// Policy requested for the next command-stream build.
+    pub(super) backdrop_blur_policy: BackdropBlurPolicy,
+    /// Policy used by the currently retained command stream.
+    pub(super) built_backdrop_blur_policy: BackdropBlurPolicy,
     pub(super) retained_tree_generation: Option<u64>,
     pub(super) root_id: Option<NodeId>,
     pub(super) surface_size: Option<(u32, u32)>,
@@ -196,6 +200,7 @@ pub struct RetainedDisplayList {
     pub(super) command_spans: Arc<[RetainedCommandSpan]>,
     pub(super) paint_commands: Arc<[DisplayPaintCommand]>,
     pub(super) command_kinds: Arc<[DisplayPaintCommandKind]>,
+    /// In-surface read regions available to the renderer fallback.
     pub(super) backdrop_regions: Vec<DamageRect>,
     /// Compositor blur regions for `org_kde_kwin_blur`, computed from the full
     /// widget tree (not the scoped `paint_commands` selection). Deriving them
@@ -219,6 +224,8 @@ impl Default for RetainedDisplayList {
     fn default() -> Self {
         Self {
             generation: 0,
+            backdrop_blur_policy: BackdropBlurPolicy::CompositorRegion,
+            built_backdrop_blur_policy: BackdropBlurPolicy::CompositorRegion,
             retained_tree_generation: None,
             root_id: None,
             surface_size: None,
@@ -473,12 +480,65 @@ pub enum DisplayPaintCommandKind {
     PushFilterLayer,
     /// Composites the open filter layer onto its parent.
     PopFilterLayer,
+    /// Records that backdrop blur is delegated to the presentation
+    /// compositor. This command changes topology without writing SHM pixels.
+    ApplyBackdropFilterCompositor,
+    /// Applies backdrop blur by reading pixels already painted into the
+    /// renderer's surface buffer.
+    ApplyBackdropFilterInSurface,
+    /// Records an explicit rejected backdrop request. The node is painted
+    /// without blur and the renderer emits a diagnostic at the lowering seam.
+    ApplyBackdropFilterRejected,
 }
 
 impl DisplayPaintCommandKind {
     /// Whether this command draws content rather than managing layer scope.
     pub fn draws_content(self) -> bool {
         matches!(self, Self::Node | Self::Scrollbars)
+    }
+
+    /// Whether this command opens or closes a retained layer scope.
+    pub fn is_layer_scope(self) -> bool {
+        matches!(
+            self,
+            Self::PushCompositingLayer
+                | Self::PopCompositingLayer
+                | Self::PushFilterLayer
+                | Self::PopFilterLayer
+        )
+    }
+
+    /// Whether this command represents a selected backdrop-blur policy.
+    pub fn is_backdrop_filter(self) -> bool {
+        matches!(
+            self,
+            Self::ApplyBackdropFilterCompositor
+                | Self::ApplyBackdropFilterInSurface
+                | Self::ApplyBackdropFilterRejected
+        )
+    }
+}
+
+/// Where a `backdrop-filter` request is realized for one retained display
+/// list. The policy is part of command topology so changing presentation or
+/// renderer support cannot reuse a command stream lowered for another mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BackdropBlurPolicy {
+    /// Export the region to the compositor and leave client pixels unchanged.
+    CompositorRegion,
+    /// Read and filter pixels already painted into this surface buffer.
+    InSurfaceFilter,
+    /// Paint the node normally and retain an observable diagnostic.
+    Rejected,
+}
+
+impl BackdropBlurPolicy {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CompositorRegion => "compositor_region",
+            Self::InSurfaceFilter => "in_surface_filter",
+            Self::Rejected => "rejected",
+        }
     }
 }
 
