@@ -81,7 +81,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/12-rendering-and-paint/improvements.md)
 
-- [ ] Validate caller lineage before trusting generation shortcuts.
 - [ ] Include resource revisions in retained-present decisions and cache invalidation.
 - [ ] Move resource decode and rasterization off the frame thread through a bounded resource broker.
 - [ ] Enforce byte- and dimension-based cache budgets for decoded assets, fonts, glyphs, text, Skia, PixelBuffer, and SHM allocations.

@@ -4,6 +4,8 @@ use std::sync::Arc;
 use mesh_core_elements::{NodeId, WidgetNode};
 
 use crate::RenderObjectDirtySummary;
+#[cfg(debug_assertions)]
+use crate::render_object::caller_lineage_fingerprint;
 
 mod blur;
 mod build;
@@ -220,8 +222,18 @@ impl RetainedDisplayList {
             height: surface_height.max(1),
         };
         let paint_origin = (offset_x.to_bits(), offset_y.to_bits());
+        let caller_lineage_valid = match retained_tree_generation {
+            Some(generation) if self.retained_tree_generation == Some(generation) => {
+                self.caller_lineage_is_valid(root, generation)
+            }
+            _ => true,
+        };
+        let caller_lineage_changed = retained_tree_generation.is_some()
+            && self.retained_tree_generation == retained_tree_generation
+            && !caller_lineage_valid;
         if retained_tree_generation.is_some()
             && self.retained_tree_generation == retained_tree_generation
+            && caller_lineage_valid
             && self.surface_size == Some((surface.width, surface.height))
             && self.paint_origin == paint_origin
             && self.built_backdrop_blur_policy == self.backdrop_blur_policy
@@ -243,7 +255,8 @@ impl RetainedDisplayList {
             && self.surface_size == Some((surface.width, surface.height))
             && self.paint_origin == paint_origin
             && dirty_summary_preserves_blur_metadata(dirty_summary);
-        let patch_sparse_entries = (!cfg!(debug_assertions) || cfg!(test))
+        let patch_sparse_entries = !caller_lineage_changed
+            && (!cfg!(debug_assertions) || cfg!(test))
             && self.can_patch_sparse_entries(
                 root,
                 dirty_summary,
@@ -463,6 +476,10 @@ impl RetainedDisplayList {
         }
         self.root_id = Some(root.id);
         self.retained_tree_generation = retained_tree_generation;
+        #[cfg(debug_assertions)]
+        {
+            self.retained_caller_lineage = Some(caller_lineage_fingerprint(root));
+        }
         self.surface_size = Some((surface.width, surface.height));
         self.paint_origin = paint_origin;
         let (full_fallback_count, broad_dirty_fallback_count) = match decision {
@@ -667,6 +684,27 @@ impl RetainedDisplayList {
 
     pub fn last_metrics(&self) -> DisplayListMetrics {
         self.last_metrics
+    }
+
+    fn caller_lineage_is_valid(&self, root: &WidgetNode, retained_tree_generation: u64) -> bool {
+        #[cfg(not(debug_assertions))]
+        let _ = (root, retained_tree_generation);
+
+        #[cfg(debug_assertions)]
+        {
+            let caller_lineage = caller_lineage_fingerprint(root);
+            if self.retained_caller_lineage != Some(caller_lineage) {
+                tracing::warn!(
+                    retained_tree_generation,
+                    expected_lineage = ?self.retained_caller_lineage,
+                    actual_lineage = caller_lineage,
+                    "retained display-list generation changed caller lineage; rebuilding"
+                );
+                return false;
+            }
+        }
+
+        true
     }
 
     pub fn damage_rects(&self) -> &[DamageRect] {

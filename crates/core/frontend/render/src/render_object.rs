@@ -1,4 +1,8 @@
+#[cfg(debug_assertions)]
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
+#[cfg(debug_assertions)]
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use mesh_core_elements::style::{Transform2D, TransformOrigin, TransformOriginValue};
@@ -41,6 +45,8 @@ impl RenderObjectDirtySummary {
 pub struct RenderObjectTree {
     generation: u64,
     retained_tree_generation: Option<u64>,
+    #[cfg(debug_assertions)]
+    retained_caller_lineage: Option<u64>,
     update_epoch: u64,
     objects: HashMap<NodeId, RenderObjectPaintData>,
     root: Option<NodeId>,
@@ -58,7 +64,7 @@ impl RenderObjectTree {
         root: &WidgetNode,
         retained_tree_generation: u64,
     ) -> RenderObjectDirtySummary {
-        if self.retained_tree_generation == Some(retained_tree_generation) {
+        if self.can_skip_for_retained_generation(root, retained_tree_generation) {
             self.last_dirty = RenderObjectDirtySummary::default();
             self.dirty_nodes.clear();
             return self.last_dirty;
@@ -78,10 +84,13 @@ impl RenderObjectTree {
         retained_tree_generation: u64,
         retained_dirty_node_ids: &HashSet<NodeId>,
     ) -> RenderObjectDirtySummary {
-        if self.retained_tree_generation == Some(retained_tree_generation) {
+        if self.can_skip_for_retained_generation(root, retained_tree_generation) {
             self.last_dirty = RenderObjectDirtySummary::default();
             self.dirty_nodes.clear();
             return self.last_dirty;
+        }
+        if self.retained_tree_generation == Some(retained_tree_generation) {
+            return self.update_inner(root, Some(retained_tree_generation));
         }
 
         if self.root != Some(root.id) || self.objects.is_empty() {
@@ -104,6 +113,10 @@ impl RenderObjectTree {
             self.generation = self.generation.saturating_add(1);
         }
         self.retained_tree_generation = Some(retained_tree_generation);
+        #[cfg(debug_assertions)]
+        {
+            self.retained_caller_lineage = Some(caller_lineage_fingerprint(root));
+        }
         self.last_dirty = dirty;
         self.dirty_nodes = dirty_nodes;
         dirty
@@ -119,10 +132,13 @@ impl RenderObjectTree {
         retained_tree_generation: u64,
         retained_dirty_nodes: &[&WidgetNode],
     ) -> RenderObjectDirtySummary {
-        if self.retained_tree_generation == Some(retained_tree_generation) {
+        if self.can_skip_for_retained_generation(root, retained_tree_generation) {
             self.last_dirty = RenderObjectDirtySummary::default();
             self.dirty_nodes.clear();
             return self.last_dirty;
+        }
+        if self.retained_tree_generation == Some(retained_tree_generation) {
+            return self.update_inner(root, Some(retained_tree_generation));
         }
 
         if self.root != Some(root.id) || self.objects.is_empty() {
@@ -140,6 +156,10 @@ impl RenderObjectTree {
             self.generation = self.generation.saturating_add(1);
         }
         self.retained_tree_generation = Some(retained_tree_generation);
+        #[cfg(debug_assertions)]
+        {
+            self.retained_caller_lineage = Some(caller_lineage_fingerprint(root));
+        }
         self.last_dirty = dirty;
         self.dirty_nodes = dirty_nodes;
         dirty
@@ -194,6 +214,10 @@ impl RenderObjectTree {
         }
         self.root = Some(root.id);
         self.retained_tree_generation = retained_tree_generation;
+        #[cfg(debug_assertions)]
+        {
+            self.retained_caller_lineage = Some(caller_lineage_fingerprint(root));
+        }
         self.last_dirty = dirty;
         self.dirty_nodes = dirty_nodes;
         dirty
@@ -217,6 +241,39 @@ impl RenderObjectTree {
 
     pub fn dirty_node_ids(&self) -> &HashSet<NodeId> {
         &self.dirty_nodes
+    }
+
+    fn can_skip_for_retained_generation(
+        &self,
+        root: &WidgetNode,
+        retained_tree_generation: u64,
+    ) -> bool {
+        if self.retained_tree_generation != Some(retained_tree_generation) {
+            return false;
+        }
+
+        self.caller_lineage_is_valid(root, retained_tree_generation)
+    }
+
+    fn caller_lineage_is_valid(&self, root: &WidgetNode, retained_tree_generation: u64) -> bool {
+        #[cfg(not(debug_assertions))]
+        let _ = (root, retained_tree_generation);
+
+        #[cfg(debug_assertions)]
+        {
+            let caller_lineage = caller_lineage_fingerprint(root);
+            if self.retained_caller_lineage != Some(caller_lineage) {
+                tracing::warn!(
+                    retained_tree_generation,
+                    expected_lineage = ?self.retained_caller_lineage,
+                    actual_lineage = caller_lineage,
+                    "retained render-object generation changed caller lineage; rebuilding"
+                );
+                return false;
+            }
+        }
+
+        true
     }
 }
 
@@ -267,7 +324,7 @@ impl RenderObjectDirtySummary {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RenderObjectFingerprint {
     transform: TransformSlot,
     clip: ClipSlot,
@@ -295,10 +352,31 @@ type GeometrySlot = (u32, u32, u32, u32, u32, u32, u32, u32, u32, u32);
 type ClipSlot = (bool, u32, u32, u32, u32);
 type AccessibilitySlot = (AccessibilityRoleSlot, Option<Arc<str>>, bool, bool);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum AccessibilityRoleSlot {
     Builtin(u8),
     Custom(Arc<str>),
+}
+
+/// Computes a debug-only fingerprint of the tree a retained generation was
+/// produced from. The generation remains the production fast-path authority;
+/// this catches callers that reuse a plain generation number for a different
+/// tree while making the violation observable before stale paint data escapes.
+#[cfg(debug_assertions)]
+pub(crate) fn caller_lineage_fingerprint(root: &WidgetNode) -> u64 {
+    fn visit(node: &WidgetNode, hasher: &mut DefaultHasher) {
+        node.id.hash(hasher);
+        node.tag.hash(hasher);
+        node.children.len().hash(hasher);
+        RenderObjectFingerprint::for_node(node, None).hash(hasher);
+        for child in &node.children {
+            visit(child, hasher);
+        }
+    }
+
+    let mut hasher = DefaultHasher::new();
+    visit(root, &mut hasher);
+    hasher.finish()
 }
 
 fn update_retained_render_objects(
@@ -1144,7 +1222,7 @@ mod tests {
     }
 
     #[test]
-    fn render_object_tree_skips_rebuild_when_retained_generation_is_unchanged() {
+    fn render_object_tree_validates_caller_lineage_for_retained_generation() {
         let mut root = WidgetNode::new("row");
         root.id = 1;
         let mut child = WidgetNode::new("text");
@@ -1161,13 +1239,24 @@ mod tests {
             .attributes
             .insert("content".into(), "goodbye".into());
         let skipped = tree.update_for_retained_generation(&root, 1);
-        assert!(!skipped.any());
-        assert!(tree.dirty_node_ids().is_empty());
-        assert_eq!(tree.generation(), 1);
+        if cfg!(debug_assertions) {
+            assert_eq!(skipped.text, 1);
+            assert_eq!(tree.dirty_node_ids(), &HashSet::from([2]));
+            assert_eq!(tree.generation(), 2);
+        } else {
+            assert!(!skipped.any());
+            assert!(tree.dirty_node_ids().is_empty());
+            assert_eq!(tree.generation(), 1);
+        }
 
         let dirty = tree.update_for_retained_generation(&root, 2);
-        assert_eq!(dirty.text, 1);
-        assert_eq!(tree.generation(), 2);
+        if cfg!(debug_assertions) {
+            assert!(!dirty.any());
+            assert_eq!(tree.generation(), 2);
+        } else {
+            assert_eq!(dirty.text, 1);
+            assert_eq!(tree.generation(), 2);
+        }
     }
 
     #[test]

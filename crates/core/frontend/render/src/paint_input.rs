@@ -11,7 +11,7 @@ const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 /// The paint inputs shared by retained-object invalidation and display-list
 /// entry signatures. Keeping the categories here makes every paint-affecting
 /// value visible to both contracts instead of maintaining two field lists.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct PaintInput {
     pub(crate) resource_revision: u64,
     pub(crate) material: u64,
@@ -22,7 +22,7 @@ pub(crate) struct PaintInput {
     pub(crate) opacity: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct TextPaintInput {
     pub(crate) content: Option<Arc<str>>,
     pub(crate) signature: u64,

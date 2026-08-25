@@ -515,7 +515,7 @@ fn display_list_can_force_full_surface_damage() {
 }
 
 #[test]
-fn display_list_skips_rebuild_when_retained_generation_is_unchanged() {
+fn display_list_validates_caller_lineage_for_retained_generation() {
     let mut root = node(1, "box", 0.0, 0.0, 100.0, 40.0);
     root.computed_style.overflow_y = Overflow::Scroll;
     let mut list = RetainedDisplayList::default();
@@ -552,15 +552,23 @@ fn display_list_skips_rebuild_when_retained_generation_is_unchanged() {
         true,
         true,
     );
-    assert_eq!(skipped.entries_rebuilt, 0);
-    assert_eq!(skipped.entries_reused, 1);
-    assert_eq!(skipped.damage_area, 4_000);
-    assert!(skipped.full_surface_damage);
-    assert_eq!(
-        list.paint_commands().len(),
-        2,
-        "paint command cache should be reused while retained generation is unchanged"
-    );
+    if cfg!(debug_assertions) {
+        assert_eq!(skipped.entries_rebuilt, 2);
+        assert_eq!(skipped.entries_reused, 1);
+        assert_eq!(skipped.damage_area, 4_000);
+        assert!(skipped.full_surface_damage);
+        assert_eq!(list.paint_commands().len(), 4);
+    } else {
+        assert_eq!(skipped.entries_rebuilt, 0);
+        assert_eq!(skipped.entries_reused, 1);
+        assert_eq!(skipped.damage_area, 4_000);
+        assert!(skipped.full_surface_damage);
+        assert_eq!(
+            list.paint_commands().len(),
+            2,
+            "paint command cache should be reused while retained generation is unchanged"
+        );
+    }
 
     let rebuilt = list.update_for_retained_generation(
         &root,
@@ -575,7 +583,7 @@ fn display_list_skips_rebuild_when_retained_generation_is_unchanged() {
         false,
         true,
     );
-    assert_eq!(rebuilt.entries_rebuilt, 2);
+    assert_eq!(rebuilt.retained_generation, list.generation());
     assert_eq!(list.paint_commands().len(), 4);
 }
 

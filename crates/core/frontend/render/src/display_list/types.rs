@@ -192,6 +192,8 @@ pub struct RetainedDisplayList {
     /// Policy used by the currently retained command stream.
     pub(super) built_backdrop_blur_policy: BackdropBlurPolicy,
     pub(super) retained_tree_generation: Option<u64>,
+    #[cfg(debug_assertions)]
+    pub(super) retained_caller_lineage: Option<u64>,
     pub(super) root_id: Option<NodeId>,
     pub(super) surface_size: Option<(u32, u32)>,
     pub(super) paint_origin: (u32, u32),
@@ -235,6 +237,8 @@ impl Default for RetainedDisplayList {
             backdrop_blur_policy: BackdropBlurPolicy::CompositorRegion,
             built_backdrop_blur_policy: BackdropBlurPolicy::CompositorRegion,
             retained_tree_generation: None,
+            #[cfg(debug_assertions)]
+            retained_caller_lineage: None,
             root_id: None,
             surface_size: None,
             paint_origin: (0.0_f32.to_bits(), 0.0_f32.to_bits()),

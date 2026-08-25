@@ -1915,6 +1915,7 @@ dependencies = [
  "swash",
  "taffy",
  "tempfile",
+ "tracing",
  "vello_encoding",
  "zeno",
 ]

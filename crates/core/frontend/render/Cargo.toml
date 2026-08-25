@@ -18,6 +18,7 @@ renderer-libraries = ["renderer-taffy", "renderer-parley", "renderer-accesskit",
 mesh-core-icon = { workspace = true }
 mesh-core-elements = { workspace = true }
 mesh-core-resources = { workspace = true }
+tracing = { workspace = true }
 
 taffy = { workspace = true, optional = true }
 parley = { workspace = true, optional = true }

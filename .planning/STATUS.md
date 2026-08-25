@@ -162,7 +162,7 @@ source of truth.
 
 ## Next
 
-Validate caller lineage before trusting generation shortcuts
+Include resource revisions in retained-present decisions and cache invalidation
 (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
