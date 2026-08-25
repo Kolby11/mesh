@@ -1976,7 +1976,8 @@ fn cmd_config_eject(module_id: &str) {
         &module.manifest,
         props_block,
     );
-    let surface = mesh_core_surface_config::surface_layout_to_json(&resolved.layout);
+    let surface =
+        mesh_core_surface_config::effective_surface_layout_to_json(module_id, &resolved.layout);
     let props =
         mesh_core_surface_config::effective_global_props_to_json(props_block, &resolved.props);
 

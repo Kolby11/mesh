@@ -221,11 +221,10 @@ pub fn resolve_frontend_module_settings_with_props(
         layout.role = role;
     }
 
-    if let Some(title) = surface
-        .and_then(|value| value.get("title"))
-        .and_then(serde_json::Value::as_str)
-    {
-        layout.window.title = Some(LocalizedText::Literal(title.to_string()));
+    if let Some(title) = surface.and_then(|value| value.get("title")) {
+        if let Ok(title) = serde_json::from_value::<LocalizedText>(title.clone()) {
+            layout.window.title = Some(title);
+        }
     }
 
     if let Some(app_id) = surface
@@ -394,20 +393,20 @@ fn load_prop_settings(raw: &serde_json::Value) -> FrontendModulePropSettings {
     settings
 }
 
-/// Serialize a resolved layout back into a settings namespace's `surface`
-/// block, for `mesh-shell config eject`.
+/// Serialize the fields present in a resolved layout into a settings
+/// namespace's `surface` block.
 ///
-/// Round-trips through [`resolve_frontend_module_settings`], and emits
-/// role-specific fields only for the matching role so nothing inert is written.
-/// The author-only `promotable` capability is intentionally never serialized
-/// into the user settings namespace.
+/// This preserves a [`LocalizedText::Translation`] as its structured `t` /
+/// `fallback` value. Use [`effective_surface_layout_to_json`] for ejection
+/// when the module identity is available and derived effective values must be
+/// materialized as overrides too.
 pub fn surface_layout_to_json(layout: &SurfaceLayoutSettings) -> serde_json::Value {
     let mut block = serde_json::Map::new();
     block.insert("role".into(), surface_role_name(layout.role).into());
 
     if role_field_applies_to_layout(layout, SurfaceRoleField::Title) {
         if let Some(title) = &layout.window.title {
-            block.insert("title".into(), title.fallback_text().into());
+            block.insert("title".into(), localized_text_to_json(title));
         }
     }
     if role_field_applies_to_layout(layout, SurfaceRoleField::AppId) {
@@ -453,6 +452,36 @@ pub fn surface_layout_to_json(layout: &SurfaceLayoutSettings) -> serde_json::Val
     }
 
     serde_json::Value::Object(block)
+}
+
+/// Serialize a complete effective surface policy for configuration ejection.
+///
+/// `SurfaceLayoutSettings` intentionally keeps only policy values and does not
+/// own module identity, so the shell derives the default app id separately.
+/// Ejection must make that effective value explicit before writing it into the
+/// sparse settings store; otherwise the generated block would mix pinned
+/// overrides with a value still derived from the manifest/module id.
+pub fn effective_surface_layout_to_json(
+    module_id: &str,
+    layout: &SurfaceLayoutSettings,
+) -> serde_json::Value {
+    let mut block = surface_layout_to_json(layout);
+    if role_field_applies_to_layout(layout, SurfaceRoleField::AppId)
+        && layout.window.app_id.is_none()
+        && let serde_json::Value::Object(fields) = &mut block
+    {
+        fields.insert("app_id".into(), module_id.into());
+    }
+    block
+}
+
+fn localized_text_to_json(text: &LocalizedText) -> serde_json::Value {
+    match text {
+        LocalizedText::Literal(value) => serde_json::Value::String(value.clone()),
+        LocalizedText::Translation { key, fallback } => {
+            serde_json::json!({ "t": key, "fallback": fallback })
+        }
+    }
 }
 
 fn role_field_applies_to_layout(layout: &SurfaceLayoutSettings, field: SurfaceRoleField) -> bool {
@@ -627,7 +656,7 @@ pub const SURFACE_FIELDS: &[FieldSpec] = &[
             values: SURFACE_ROLE_VALUES,
         },
     ),
-    FieldSpec::new("title", FieldKind::Str),
+    FieldSpec::new("title", FieldKind::LocalizedText),
     FieldSpec::new("app_id", FieldKind::Str),
     FieldSpec::new("resizable", FieldKind::Bool),
     FieldSpec::new(
@@ -1009,6 +1038,49 @@ mod tests {
     }
 
     #[test]
+    fn localized_title_settings_preserve_translation_identity() {
+        let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
+            role: Some("window".into()),
+            title: Some(LocalizedText::Translation {
+                key: "manifest.title".into(),
+                fallback: "Manifest title".into(),
+            }),
+            ..Default::default()
+        });
+        assert_eq!(
+            surface_layout_to_json(&surface_layout_from_manifest(&manifest))["title"],
+            serde_json::json!({ "t": "manifest.title", "fallback": "Manifest title" })
+        );
+        let settings = resolve_frontend_module_settings(
+            "@mesh/test",
+            serde_json::json!({
+                "surface": {
+                    "title": { "t": "settings.title", "fallback": "Settings" }
+                }
+            }),
+            &manifest,
+        );
+
+        assert!(
+            settings.diagnostics.is_empty(),
+            "{:#?}",
+            settings.diagnostics
+        );
+        assert_eq!(
+            settings.layout.window.title,
+            Some(LocalizedText::Translation {
+                key: "settings.title".into(),
+                fallback: "Settings".into(),
+            })
+        );
+        let ejected = surface_layout_to_json(&settings.layout);
+        assert_eq!(
+            ejected["title"],
+            serde_json::json!({ "t": "settings.title", "fallback": "Settings" })
+        );
+    }
+
+    #[test]
     fn promotable_defaults_off_and_is_read_from_the_manifest() {
         let plain = manifest_with_surface_layout(SurfaceLayoutSection::default());
         assert!(!surface_layout_from_manifest(&plain).promotable);
@@ -1245,6 +1317,53 @@ mod tests {
         let round_tripped = resolve_frontend_module_settings("@mesh/test", ejected, &bare).layout;
 
         assert_eq!(round_tripped, original);
+    }
+
+    #[test]
+    fn effective_ejection_materializes_precedence_and_derived_app_id() {
+        let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
+            role: Some("window".into()),
+            title: Some(LocalizedText::Translation {
+                key: "manifest.title".into(),
+                fallback: "Manifest title".into(),
+            }),
+            resizable: Some(true),
+            ..Default::default()
+        });
+        let state = resolve_frontend_module_settings(
+            "@mesh/settings",
+            serde_json::json!({
+                "surface": {
+                    "title": { "t": "user.title", "fallback": "User title" },
+                    "resizable": false
+                }
+            }),
+            &manifest,
+        );
+
+        let ejected = effective_surface_layout_to_json("@mesh/settings", &state.layout);
+        assert_eq!(
+            ejected["title"],
+            serde_json::json!({ "t": "user.title", "fallback": "User title" })
+        );
+        assert_eq!(ejected["resizable"], serde_json::json!(false));
+        assert_eq!(ejected["app_id"], serde_json::json!("@mesh/settings"));
+
+        let round_tripped = resolve_frontend_module_settings(
+            "@mesh/settings",
+            serde_json::json!({ "surface": ejected }),
+            &manifest_with_surface_layout(SurfaceLayoutSection {
+                role: Some("window".into()),
+                ..Default::default()
+            }),
+        )
+        .layout;
+        assert_eq!(round_tripped.window.title, state.layout.window.title);
+        assert_eq!(round_tripped.window.app_id, Some("@mesh/settings".into()));
+        assert_eq!(
+            round_tripped.window.resizable,
+            state.layout.window.resizable
+        );
     }
 
     #[test]

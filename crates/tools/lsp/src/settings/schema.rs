@@ -153,6 +153,7 @@ fn node_from_kind(kind: &'static FieldKind, path: &str, found: &Discovered) -> N
         ),
         FieldKind::Float => scalar(doc, "number"),
         FieldKind::StrArray => array(doc, "array<string>", scalar(doc, "string")),
+        FieldKind::LocalizedText => scalar(doc, "string or localized text object"),
         FieldKind::Enum { values, .. } => enumeration(doc, values),
         FieldKind::Section(fields) => node_from_fields(doc, fields, path, found),
         FieldKind::Map(inner) => map(

@@ -168,6 +168,8 @@ pub enum FieldKind {
     },
     Float,
     StrArray,
+    /// A literal string or a localized text object with `t` and `fallback`.
+    LocalizedText,
     /// `accepts` *is* the defining parser, so aliases it takes are accepted
     /// here too; `values` is only the canonical list quoted in the suggestion.
     Enum {
@@ -200,6 +202,7 @@ impl FieldKind {
             },
             Self::Float => "a number".to_string(),
             Self::StrArray => "an array of strings".to_string(),
+            Self::LocalizedText => "a string or localized text object".to_string(),
             Self::Enum { values, .. } => format!("one of [{}]", values.join(", ")),
             Self::Section(_) | Self::Map(_) | Self::Opaque => "an object".to_string(),
             Self::Token => "a string, number, or boolean".to_string(),
@@ -209,6 +212,10 @@ impl FieldKind {
     fn suggestion(&self) -> String {
         match self {
             Self::Enum { values, .. } => format!("use one of: {}", values.join(", ")),
+            Self::LocalizedText => {
+                "use a literal string or an object with non-empty `t` and `fallback` strings"
+                    .to_string()
+            }
             other => format!(
                 "use {}, or remove the key to fall back to the declared default",
                 other.expectation()
@@ -446,6 +453,7 @@ pub fn validate_value(
             .as_array()
             .filter(|items| items.iter().all(JsonValue::is_string))
             .map(|_| value.clone()),
+        FieldKind::LocalizedText => localized_text_value(value).then(|| value.clone()),
         FieldKind::Enum { canonicalize, .. } => value
             .as_str()
             .and_then(canonicalize)
@@ -586,6 +594,24 @@ fn join_path(prefix: &str, key: &str) -> String {
     }
 }
 
+fn localized_text_value(value: &JsonValue) -> bool {
+    if value.is_string() {
+        return true;
+    }
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    object.len() == 2
+        && object
+            .get("t")
+            .and_then(JsonValue::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+        && object
+            .get("fallback")
+            .and_then(JsonValue::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+}
+
 /// Quotes scalars so the user sees what they typed: `the string "300"`.
 pub fn describe(value: &JsonValue) -> String {
     match value {
@@ -632,5 +658,43 @@ mod tests {
             diagnostic.to_string(),
             "warning: unknown_root_key: unknown key — remove it"
         );
+    }
+
+    #[test]
+    fn localized_text_validation_keeps_literals_and_translation_objects() {
+        let kind = FieldKind::LocalizedText;
+        let mut diagnostics = Vec::new();
+
+        assert_eq!(
+            validate_value(
+                "@mesh/test",
+                "surface.title",
+                &kind,
+                &serde_json::json!("Settings"),
+                &mut diagnostics,
+            ),
+            Some(serde_json::json!("Settings"))
+        );
+        assert_eq!(
+            validate_value(
+                "@mesh/test",
+                "surface.title",
+                &kind,
+                &serde_json::json!({ "t": "settings.title", "fallback": "Settings" }),
+                &mut diagnostics,
+            ),
+            Some(serde_json::json!({ "t": "settings.title", "fallback": "Settings" }))
+        );
+        assert!(
+            validate_value(
+                "@mesh/test",
+                "surface.title",
+                &kind,
+                &serde_json::json!({ "t": "", "fallback": "Settings" }),
+                &mut diagnostics,
+            )
+            .is_none()
+        );
+        assert_eq!(diagnostics.len(), 1);
     }
 }

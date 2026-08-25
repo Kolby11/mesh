@@ -191,6 +191,11 @@ diagnostics, settings validation, configuration ejection, and presentation
 protocol lowering. Layer-only and window-only fields therefore stay aligned,
 including keyboard mode, margins, blur, and decorations.
 
+Configuration ejection now preserves structured localized surface titles and
+uses an explicit effective-policy serializer to materialize derived window
+identity such as `app_id`; emitted values are therefore distinguishable as
+pinned effective overrides rather than fallback-only or still-derived fields.
+
 ## Blocked / open follow-ups
 
 - Live multi-output membership and compositor conformance matrix (deferred,
