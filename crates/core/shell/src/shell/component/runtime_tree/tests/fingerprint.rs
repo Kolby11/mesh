@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_component::style::StyleValue;
 
 #[test]
 fn attribute_fingerprint_uses_node_id_instead_of_runtime_key_string() {
@@ -14,6 +15,32 @@ fn attribute_fingerprint_uses_node_id_instead_of_runtime_key_string() {
 
     node.attributes.insert("class".into(), "card active".into());
     assert_ne!(attributes_fingerprint(&node), original);
+}
+
+#[test]
+fn style_fingerprint_tracks_custom_variables_in_stable_key_order() {
+    let mut first = ComputedStyle::default();
+    first
+        .custom_properties
+        .insert("--z-index".into(), StyleValue::Literal("2".into()));
+    first
+        .custom_properties
+        .insert("--accent".into(), StyleValue::Var("--brand".into()));
+
+    let mut second = ComputedStyle::default();
+    second
+        .custom_properties
+        .insert("--accent".into(), StyleValue::Var("--brand".into()));
+    second
+        .custom_properties
+        .insert("--z-index".into(), StyleValue::Literal("2".into()));
+
+    assert_eq!(style_fingerprint(&first), style_fingerprint(&second));
+
+    second
+        .custom_properties
+        .insert("--accent".into(), StyleValue::Literal("#fff".into()));
+    assert_ne!(style_fingerprint(&first), style_fingerprint(&second));
 }
 
 #[test]

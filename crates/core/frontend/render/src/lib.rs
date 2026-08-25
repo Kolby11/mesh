@@ -2,6 +2,7 @@
 
 pub mod display_list;
 pub mod library_adapters;
+mod paint_input;
 
 #[cfg(feature = "renderer-parley")]
 mod parley_adapter;
@@ -27,6 +28,7 @@ pub use library_adapters::{
     CURRENT_RENDERER_AUTHORITY, RendererLibraryStatus, renderer_library_rollback_authority,
     renderer_library_statuses,
 };
+pub use paint_input::paint_variables_fingerprint;
 pub use proof::{
     FocusedAccessKitUpdate, FocusedAccessibilityEvidence, FocusedDirtyEvidence,
     FocusedProofDiagnostic, FocusedProofNode, FocusedProofSnapshot, build_accesskit_update,

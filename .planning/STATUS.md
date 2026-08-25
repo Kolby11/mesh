@@ -14,6 +14,12 @@ topology, and child z-index sorting keeps authored order for equal-z siblings.
 Pure paint-order changes therefore advance the display-list generation even
 when primitive entry signatures are unchanged.
 
+Retained render-object dirty categories and display-list paint signatures now
+derive from one shared paint-input contract covering material, controls, text,
+icons, opacity, and custom-property variables. Tag-aware content hashing keeps
+irrelevant attributes out of generic entries while checked controls, text
+attributes and typography, icon axes, and variables invalidate both contracts.
+
 Frontend paint lowering now carries all four border edges and corner radii
 through retained display commands, including asymmetric rounded border rings.
 
@@ -156,8 +162,8 @@ source of truth.
 
 ## Next
 
-Unify dirty contracts and paint signatures for all content/style fields,
-including controls, text, icons, and variables (`docs/BACKLOG.md`).
+Include font/resource revisions in text style painting and all glyph/font/text
+cache keys (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

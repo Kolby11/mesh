@@ -143,6 +143,7 @@ pub(super) fn style_fingerprint(style: &ComputedStyle) -> u64 {
 }
 
 pub(super) fn hash_style_fields(style: &ComputedStyle, hasher: &mut impl Hasher) {
+    mesh_core_render::paint_variables_fingerprint(style).hash(hasher);
     hash_dimension(style.width, hasher);
     hash_dimension(style.height, hasher);
     hash_dimension(style.min_width, hasher);

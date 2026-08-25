@@ -5,6 +5,8 @@ use mesh_core_elements::BoxShadow;
 use mesh_core_elements::style::{BackgroundPaint, Color};
 use mesh_core_elements::{AffineTransform, LayoutRect, WidgetNode, node_layout_bounds};
 
+use crate::paint_input::{PaintInput, PaintPrimitiveSlot};
+
 use super::build::*;
 use super::types::*;
 
@@ -194,119 +196,15 @@ fn union_layout_rect(left: LayoutRect, right: LayoutRect) -> LayoutRect {
 }
 
 pub(super) fn primitive_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
-    let mut hasher = DisplaySignatureHasher::default();
-    slot.hash(&mut hasher);
-    node.tag.hash(&mut hasher);
-    hash_paint_content_attributes(node, &mut hasher);
-    node.computed_style.background_color.r.hash(&mut hasher);
-    node.computed_style.background_color.g.hash(&mut hasher);
-    node.computed_style.background_color.b.hash(&mut hasher);
-    node.computed_style.background_color.a.hash(&mut hasher);
-    node.computed_style.border_color.r.hash(&mut hasher);
-    node.computed_style.border_color.g.hash(&mut hasher);
-    node.computed_style.border_color.b.hash(&mut hasher);
-    node.computed_style.border_color.a.hash(&mut hasher);
-    node.computed_style.color.r.hash(&mut hasher);
-    node.computed_style.color.g.hash(&mut hasher);
-    node.computed_style.color.b.hash(&mut hasher);
-    node.computed_style.color.a.hash(&mut hasher);
-    node.computed_style
-        .border_width
-        .top
-        .to_bits()
-        .hash(&mut hasher);
-    node.computed_style
-        .border_width
-        .right
-        .to_bits()
-        .hash(&mut hasher);
-    node.computed_style
-        .border_width
-        .bottom
-        .to_bits()
-        .hash(&mut hasher);
-    node.computed_style
-        .border_width
-        .left
-        .to_bits()
-        .hash(&mut hasher);
-    node.computed_style
-        .border_radius
-        .top_left
-        .to_bits()
-        .hash(&mut hasher);
-    node.computed_style
-        .border_radius
-        .top_right
-        .to_bits()
-        .hash(&mut hasher);
-    node.computed_style
-        .border_radius
-        .bottom_right
-        .to_bits()
-        .hash(&mut hasher);
-    node.computed_style
-        .border_radius
-        .bottom_left
-        .to_bits()
-        .hash(&mut hasher);
-    node.computed_style.padding.top.to_bits().hash(&mut hasher);
-    node.computed_style
-        .padding
-        .right
-        .to_bits()
-        .hash(&mut hasher);
-    node.computed_style
-        .padding
-        .bottom
-        .to_bits()
-        .hash(&mut hasher);
-    node.computed_style.padding.left.to_bits().hash(&mut hasher);
-    node.computed_style.opacity.to_bits().hash(&mut hasher);
-    hash_box_shadow(node.computed_style.box_shadow, &mut hasher);
-    hash_background_paint(&node.computed_style.background_paint, &mut hasher);
-    node.computed_style
-        .filter
-        .blur_radius
-        .to_bits()
-        .hash(&mut hasher);
-    node.computed_style
-        .backdrop_filter
-        .blur_radius
-        .to_bits()
-        .hash(&mut hasher);
-    node.computed_style.mix_blend_mode.hash(&mut hasher);
-    node.computed_style.font_family.hash(&mut hasher);
-    node.computed_style.font_size.to_bits().hash(&mut hasher);
-    node.computed_style.font_weight.hash(&mut hasher);
-    node.computed_style.line_height.to_bits().hash(&mut hasher);
-    std::mem::discriminant(&node.computed_style.text_align).hash(&mut hasher);
-    std::mem::discriminant(&node.computed_style.text_overflow).hash(&mut hasher);
-    std::mem::discriminant(&node.computed_style.text_direction).hash(&mut hasher);
-    std::mem::discriminant(&node.computed_style.font_style).hash(&mut hasher);
-    std::mem::discriminant(&node.computed_style.overflow_x).hash(&mut hasher);
-    std::mem::discriminant(&node.computed_style.overflow_y).hash(&mut hasher);
-    node.computed_style
-        .letter_spacing
-        .to_bits()
-        .hash(&mut hasher);
-    node.computed_style
-        .icon_fill
-        .map(f32::to_bits)
-        .hash(&mut hasher);
-    node.computed_style
-        .icon_weight
-        .map(f32::to_bits)
-        .hash(&mut hasher);
-    node.computed_style
-        .icon_grade
-        .map(f32::to_bits)
-        .hash(&mut hasher);
-    node.computed_style
-        .icon_optical_size
-        .map(f32::to_bits)
-        .hash(&mut hasher);
-    hasher.finish()
+    let paint = PaintInput::for_node(node, None);
+    let slot = match slot {
+        DisplayPrimitiveSlot::Background => PaintPrimitiveSlot::Background,
+        DisplayPrimitiveSlot::Border => PaintPrimitiveSlot::Border,
+        DisplayPrimitiveSlot::Text => PaintPrimitiveSlot::Text,
+        DisplayPrimitiveSlot::Icon => PaintPrimitiveSlot::Icon,
+        DisplayPrimitiveSlot::Generic => PaintPrimitiveSlot::Generic,
+    };
+    paint.signature_for_slot(slot)
 }
 
 pub(super) fn hash_paint_content_attributes(

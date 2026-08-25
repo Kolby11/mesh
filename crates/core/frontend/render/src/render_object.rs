@@ -1,12 +1,10 @@
 use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use mesh_core_elements::style::{
-    BackgroundPaint, Color, ComputedStyle, Display, Edges, Transform2D, TransformOrigin,
-    TransformOriginValue,
-};
+use mesh_core_elements::style::{Transform2D, TransformOrigin, TransformOriginValue};
 use mesh_core_elements::{AccessibilityRole, NodeId, WidgetNode, live_accessibility_focus};
+
+use crate::paint_input::{PaintInput, retained_arc_str};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RenderObjectDirtySummary {
@@ -48,74 +46,6 @@ pub struct RenderObjectTree {
     root: Option<NodeId>,
     last_dirty: RenderObjectDirtySummary,
     dirty_nodes: HashSet<NodeId>,
-}
-
-struct RenderObjectHasher(u64);
-
-impl Default for RenderObjectHasher {
-    fn default() -> Self {
-        Self(0xcbf2_9ce4_8422_2325)
-    }
-}
-
-impl Hasher for RenderObjectHasher {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-
-    fn write(&mut self, bytes: &[u8]) {
-        for byte in bytes {
-            self.0 ^= u64::from(*byte);
-            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
-        }
-    }
-
-    fn write_u8(&mut self, value: u8) {
-        self.write_mix(u64::from(value));
-    }
-    fn write_u16(&mut self, value: u16) {
-        self.write_mix(u64::from(value));
-    }
-    fn write_u32(&mut self, value: u32) {
-        self.write_mix(u64::from(value));
-    }
-    fn write_u64(&mut self, value: u64) {
-        self.write_mix(value);
-    }
-    fn write_u128(&mut self, value: u128) {
-        self.write_mix(value as u64);
-        self.write_mix((value >> 64) as u64);
-    }
-    fn write_usize(&mut self, value: usize) {
-        self.write_mix(value as u64);
-    }
-    fn write_i8(&mut self, value: i8) {
-        self.write_mix(value as u8 as u64);
-    }
-    fn write_i16(&mut self, value: i16) {
-        self.write_mix(value as u16 as u64);
-    }
-    fn write_i32(&mut self, value: i32) {
-        self.write_mix(value as u32 as u64);
-    }
-    fn write_i64(&mut self, value: i64) {
-        self.write_mix(value as u64);
-    }
-    fn write_i128(&mut self, value: i128) {
-        self.write_u128(value as u128);
-    }
-    fn write_isize(&mut self, value: isize) {
-        self.write_mix(value as usize as u64);
-    }
-}
-
-impl RenderObjectHasher {
-    #[inline]
-    fn write_mix(&mut self, value: u64) {
-        self.0 ^= value;
-        self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
-        self.0 ^= self.0 >> 32;
-    }
 }
 
 impl RenderObjectTree {
@@ -305,7 +235,7 @@ impl RenderObjectDirtySummary {
             self.clip += 1;
             changed = true;
         }
-        if previous.opacity != next.opacity {
+        if previous.paint.opacity != next.paint.opacity {
             self.opacity += 1;
             changed = true;
         }
@@ -313,15 +243,19 @@ impl RenderObjectDirtySummary {
             self.geometry += 1;
             changed = true;
         }
-        if previous.material != next.material {
+        if previous.paint.material != next.paint.material
+            || previous.paint.variables != next.paint.variables
+        {
             self.material += 1;
             changed = true;
         }
-        if previous.primitive != next.primitive {
+        if previous.paint.primitive != next.paint.primitive
+            || previous.paint.icon != next.paint.icon
+        {
             self.primitive += 1;
             changed = true;
         }
-        if previous.text != next.text {
+        if previous.paint.text != next.paint.text {
             self.text += 1;
             changed = true;
         }
@@ -337,11 +271,8 @@ impl RenderObjectDirtySummary {
 pub struct RenderObjectFingerprint {
     transform: TransformSlot,
     clip: ClipSlot,
-    opacity: u32,
     geometry: GeometrySlot,
-    material: u64,
-    primitive: u64,
-    text: TextSlot,
+    paint: PaintInput,
     accessibility: AccessibilitySlot,
 }
 
@@ -369,18 +300,6 @@ enum AccessibilityRoleSlot {
     Builtin(u8),
     Custom(Arc<str>),
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct TextSlot {
-    content: Option<Arc<str>>,
-    family: Arc<str>,
-    size: u32,
-    weight: u16,
-    line_height: u32,
-    color: ColorSlot,
-}
-
-type ColorSlot = (u8, u8, u8, u8);
 
 fn update_retained_render_objects(
     node: &WidgetNode,
@@ -516,11 +435,8 @@ fn render_object_fingerprint(
             node.computed_style.transform_origin,
         ),
         clip: clip_slot(node, geometry),
-        opacity: node.computed_style.opacity.to_bits(),
         geometry,
-        material: material_hash(&node.computed_style),
-        primitive: primitive_hash(node),
-        text: text_slot(node, previous.map(|data| &data.text)),
+        paint: PaintInput::for_node(node, previous.map(|fingerprint| &fingerprint.paint)),
         accessibility: accessibility_slot(node, previous.map(|data| &data.accessibility)),
     }
 }
@@ -595,20 +511,6 @@ fn geometry_slot(node: &WidgetNode) -> GeometrySlot {
     )
 }
 
-fn text_slot(node: &WidgetNode, previous: Option<&TextSlot>) -> TextSlot {
-    TextSlot {
-        content: retained_arc_str(
-            node.attributes.get("content").map(String::as_str),
-            previous.and_then(|slot| slot.content.as_ref()),
-        ),
-        family: node.computed_style.font_family.clone(),
-        size: node.computed_style.font_size.to_bits(),
-        weight: node.computed_style.font_weight,
-        line_height: node.computed_style.line_height.to_bits(),
-        color: color_slot(node.computed_style.color),
-    }
-}
-
 fn accessibility_slot(
     node: &WidgetNode,
     previous: Option<&AccessibilitySlot>,
@@ -662,113 +564,11 @@ fn accessibility_role_slot(
     AccessibilityRoleSlot::Builtin(slot)
 }
 
-fn retained_arc_str(value: Option<&str>, previous: Option<&Arc<str>>) -> Option<Arc<str>> {
-    value.map(|value| match previous {
-        Some(previous) if previous.as_ref() == value => Arc::clone(previous),
-        _ => Arc::from(value),
-    })
-}
-
-fn material_hash(style: &ComputedStyle) -> u64 {
-    let mut hasher = RenderObjectHasher::default();
-    color_slot(style.background_color).hash(&mut hasher);
-    match &style.background_paint {
-        BackgroundPaint::None => 0_u8.hash(&mut hasher),
-        BackgroundPaint::Image(source) => {
-            1_u8.hash(&mut hasher);
-            source.path.hash(&mut hasher);
-        }
-        BackgroundPaint::LinearGradient(gradient) => {
-            2_u8.hash(&mut hasher);
-            color_slot(gradient.from).hash(&mut hasher);
-            color_slot(gradient.to).hash(&mut hasher);
-        }
-    }
-    color_slot(style.border_color).hash(&mut hasher);
-    hash_edges(style.border_width, &mut hasher);
-    hash_edges(style.padding, &mut hasher);
-    style.border_radius.top_left.to_bits().hash(&mut hasher);
-    style.border_radius.top_right.to_bits().hash(&mut hasher);
-    style.border_radius.bottom_right.to_bits().hash(&mut hasher);
-    style.border_radius.bottom_left.to_bits().hash(&mut hasher);
-    display_slot(style.display).hash(&mut hasher);
-    style.z_index.hash(&mut hasher);
-    style.box_shadow.offset_x.to_bits().hash(&mut hasher);
-    style.box_shadow.offset_y.to_bits().hash(&mut hasher);
-    style.box_shadow.blur_radius.to_bits().hash(&mut hasher);
-    style.box_shadow.spread_radius.to_bits().hash(&mut hasher);
-    color_slot(style.box_shadow.color).hash(&mut hasher);
-    style.box_shadow.inset.hash(&mut hasher);
-    style.filter.blur_radius.to_bits().hash(&mut hasher);
-    style
-        .backdrop_filter
-        .blur_radius
-        .to_bits()
-        .hash(&mut hasher);
-    hasher.finish()
-}
-
-fn primitive_hash(node: &WidgetNode) -> u64 {
-    let mut hasher = RenderObjectHasher::default();
-    node.tag.hash(&mut hasher);
-    match node.tag.as_str() {
-        "input" => {
-            node.attributes.get("value").hash(&mut hasher);
-            node.attributes.get("placeholder").hash(&mut hasher);
-            node.attributes.get("type").hash(&mut hasher);
-            node.attributes.get("_mesh_focused").hash(&mut hasher);
-        }
-        "slider" => {
-            attr_f32_with_default(node, "min", 0.0)
-                .to_bits()
-                .hash(&mut hasher);
-            attr_f32_with_default(node, "max", 100.0)
-                .to_bits()
-                .hash(&mut hasher);
-            attr_f32_with_default(node, "value", 50.0)
-                .to_bits()
-                .hash(&mut hasher);
-            node.attributes.get("orient").hash(&mut hasher);
-        }
-        "icon" => {
-            node.attributes.get("src").hash(&mut hasher);
-            node.attributes.get("name").hash(&mut hasher);
-            node.attributes.get("size").hash(&mut hasher);
-        }
-        _ => {}
-    }
-    hasher.finish()
-}
-
-fn hash_edges(edges: Edges, hasher: &mut impl Hasher) {
-    edges.top.to_bits().hash(hasher);
-    edges.right.to_bits().hash(hasher);
-    edges.bottom.to_bits().hash(hasher);
-    edges.left.to_bits().hash(hasher);
-}
-
-fn display_slot(display: Display) -> u8 {
-    match display {
-        Display::Flex => 0,
-        Display::None => 1,
-    }
-}
-
-fn color_slot(color: Color) -> ColorSlot {
-    (color.r, color.g, color.b, color.a)
-}
-
-fn attr_f32_with_default(node: &WidgetNode, key: &str, default: f32) -> f32 {
-    node.attributes
-        .get(key)
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(default)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use mesh_core_elements::WidgetNode;
+    use mesh_core_elements::style::Color;
     use std::time::Instant;
 
     fn retained_visual_node() -> WidgetNode {
@@ -1115,6 +915,7 @@ mod tests {
     #[test]
     fn render_object_reuses_unchanged_text_and_accessibility_strings() {
         let mut node = retained_visual_node();
+        node.tag = "text".into();
         node.attributes
             .insert("content".into(), "retained text".into());
         node.accessibility.label = Some("retained label".into());
@@ -1124,6 +925,7 @@ mod tests {
         let first_text = Arc::clone(
             first
                 .fingerprint
+                .paint
                 .text
                 .content
                 .as_ref()
@@ -1137,6 +939,7 @@ mod tests {
             &first_text,
             second
                 .fingerprint
+                .paint
                 .text
                 .content
                 .as_ref()

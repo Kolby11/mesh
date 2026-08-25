@@ -1,7 +1,7 @@
 use super::super::paint_node::*;
 use super::super::*;
 use super::common::*;
-use crate::RenderObjectDirtySummary;
+use crate::{RenderObjectDirtySummary, RenderObjectFingerprint};
 use mesh_core_elements::WidgetNode;
 use mesh_core_elements::style::{BackgroundPaint, Color, FontStyle, StyleLinearGradient};
 use std::hash::{Hash, Hasher};
@@ -42,6 +42,7 @@ fn primitive_signature_ignores_irrelevant_payload_attrs_for_generic_nodes() {
     let original = primitive_signature(&base, DisplayPrimitiveSlot::Generic);
 
     base.attributes.insert("content".into(), "ignored".into());
+    base.attributes.insert("text".into(), "ignored".into());
     base.attributes.insert("value".into(), "ignored".into());
     base.attributes.insert("src".into(), "ignored.png".into());
 
@@ -67,6 +68,50 @@ fn primitive_signature_tracks_relevant_paint_payload_attrs() {
     assert_ne!(
         primitive_signature(&checkbox, DisplayPrimitiveSlot::Generic),
         original_checkbox
+    );
+}
+
+#[test]
+fn retained_dirty_contract_matches_shared_paint_signature_inputs() {
+    let mut checkbox = node(1, "checkbox", 0.0, 0.0, 20.0, 20.0);
+    let checkbox_before = RenderObjectFingerprint::for_node(&checkbox, None);
+    let checkbox_signature = primitive_signature(&checkbox, DisplayPrimitiveSlot::Generic);
+    checkbox.attributes.insert("checked".into(), "true".into());
+    let checkbox_after = RenderObjectFingerprint::for_node(&checkbox, Some(&checkbox_before));
+    let mut dirty = RenderObjectDirtySummary::default();
+    assert!(dirty.add_fingerprint_diff(&checkbox_before, &checkbox_after));
+    assert_eq!(dirty.primitive, 1);
+    assert_ne!(
+        primitive_signature(&checkbox, DisplayPrimitiveSlot::Generic),
+        checkbox_signature
+    );
+
+    let mut text = node(2, "text", 0.0, 0.0, 20.0, 20.0);
+    text.attributes.insert("content".into(), "before".into());
+    let text_before = RenderObjectFingerprint::for_node(&text, None);
+    let text_signature = primitive_signature(&text, DisplayPrimitiveSlot::Text);
+    text.attributes.insert("text".into(), "after".into());
+    text.computed_style.letter_spacing = 1.5;
+    let text_after = RenderObjectFingerprint::for_node(&text, Some(&text_before));
+    let mut dirty = RenderObjectDirtySummary::default();
+    assert!(dirty.add_fingerprint_diff(&text_before, &text_after));
+    assert_eq!(dirty.text, 1);
+    assert_ne!(
+        primitive_signature(&text, DisplayPrimitiveSlot::Text),
+        text_signature
+    );
+
+    let mut icon = node(3, "icon", 0.0, 0.0, 20.0, 20.0);
+    let icon_before = RenderObjectFingerprint::for_node(&icon, None);
+    let icon_signature = primitive_signature(&icon, DisplayPrimitiveSlot::Icon);
+    icon.computed_style.icon_fill = Some(1.0);
+    let icon_after = RenderObjectFingerprint::for_node(&icon, Some(&icon_before));
+    let mut dirty = RenderObjectDirtySummary::default();
+    assert!(dirty.add_fingerprint_diff(&icon_before, &icon_after));
+    assert_eq!(dirty.primitive, 1);
+    assert_ne!(
+        primitive_signature(&icon, DisplayPrimitiveSlot::Icon),
+        icon_signature
     );
 }
 
