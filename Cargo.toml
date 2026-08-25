@@ -21,6 +21,7 @@ members = [
     "crates/core/frontend/host",
     "crates/core/frontend/abi",
     "crates/core/frontend/compiler",
+    "crates/core/surface-policy",
     "crates/core/surface-config",
     "crates/core/frontend/render",
     "crates/core/presentation",
@@ -71,6 +72,7 @@ mesh-core-scripting = { path = "crates/core/runtime/scripting" }
 mesh-core-frontend-host = { path = "crates/core/frontend/host" }
 mesh-core-frontend-abi = { path = "crates/core/frontend/abi" }
 mesh-core-frontend = { path = "crates/core/frontend/compiler" }
+mesh-core-surface-policy = { path = "crates/core/surface-policy" }
 mesh-core-surface-config = { path = "crates/core/surface-config" }
 mesh-core-render = { path = "crates/core/frontend/render" }
 mesh-core-presentation = { path = "crates/core/presentation" }

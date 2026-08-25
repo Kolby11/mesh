@@ -9,6 +9,7 @@ license.workspace = true
 mesh-core-config = { workspace = true }
 mesh-core-component = { workspace = true }
 mesh-core-module = { workspace = true }
+mesh-core-surface-policy = { workspace = true }
 mesh-core-wayland = { workspace = true }
 
 serde_json = { workspace = true }

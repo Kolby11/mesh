@@ -186,6 +186,11 @@ Presentation surface change detection now compares the lowered layer namespace
 change takes the compositor-role recreation path instead of being treated as a
 no-op.
 
+Role-field metadata now comes from one shared contract consumed by manifest
+diagnostics, settings validation, configuration ejection, and presentation
+protocol lowering. Layer-only and window-only fields therefore stay aligned,
+including keyboard mode, margins, blur, and decorations.
+
 ## Blocked / open follow-ups
 
 - Live multi-output membership and compositor conformance matrix (deferred,

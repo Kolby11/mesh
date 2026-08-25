@@ -1,0 +1,8 @@
+[package]
+name = "mesh-core-surface-policy"
+description = "Shared role-field metadata for MESH surface policy consumers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

@@ -1,5 +1,6 @@
 use super::*;
 use mesh_core_render::DamageRect;
+use mesh_core_surface_policy::{SurfaceRoleField, SurfaceRoleKind, role_field_applies};
 
 /// Configuration passed from the shell before each present.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,19 +203,22 @@ pub(super) fn surface_config_change(
         return SurfaceConfigChange::Recreate;
     }
 
-    let geometry_changed = match previous.role {
-        SurfaceRole::Layer => {
-            previous.edge != next.edge
-                || previous.layer != next.layer
-                || previous.exclusive_zone != next.exclusive_zone
-                || previous.width != next.width
-                || previous.height != next.height
-                || previous.margin_top != next.margin_top
-                || previous.margin_right != next.margin_right
-                || previous.margin_bottom != next.margin_bottom
-                || previous.margin_left != next.margin_left
-        }
-        SurfaceRole::Window => false,
+    let geometry_changed = if role_field_applies(
+        SurfaceRoleField::Anchor,
+        surface_role_kind(previous.role),
+        false,
+    ) {
+        previous.edge != next.edge
+            || previous.layer != next.layer
+            || previous.exclusive_zone != next.exclusive_zone
+            || previous.width != next.width
+            || previous.height != next.height
+            || previous.margin_top != next.margin_top
+            || previous.margin_right != next.margin_right
+            || previous.margin_bottom != next.margin_bottom
+            || previous.margin_left != next.margin_left
+    } else {
+        false
     };
     if geometry_changed {
         return SurfaceConfigChange::Configure;
@@ -225,18 +229,19 @@ pub(super) fn surface_config_change(
     // compositor work. Keep the semantic diff role-aware: only fields that
     // can reach the live role or the shared input/geometry state should wake
     // an already configured surface.
-    let live_state_changed = match previous.role {
-        SurfaceRole::Layer => {
-            previous.padding != next.padding || previous_keyboard_mode != next_keyboard_mode
-        }
-        SurfaceRole::Window => {
-            previous.window.title != next.window.title
-                || previous.window.app_id != next.window.app_id
-                || previous.window.resizable != next.window.resizable
-                || previous.width != next.width
-                || previous.height != next.height
-                || previous.padding != next.padding
-        }
+    let live_state_changed = if role_field_applies(
+        SurfaceRoleField::KeyboardMode,
+        surface_role_kind(previous.role),
+        false,
+    ) {
+        previous.padding != next.padding || previous_keyboard_mode != next_keyboard_mode
+    } else {
+        previous.window.title != next.window.title
+            || previous.window.app_id != next.window.app_id
+            || previous.window.resizable != next.window.resizable
+            || previous.width != next.width
+            || previous.height != next.height
+            || previous.padding != next.padding
     };
     if live_state_changed {
         SurfaceConfigChange::Live
@@ -251,9 +256,20 @@ pub(super) fn surface_config_change(
 /// Keeping this comparison at the lowered identity boundary prevents either
 /// creation-time field from disappearing from semantic change detection.
 fn creation_identity_changed(previous: &SurfaceConfig, next: &SurfaceConfig) -> bool {
-    match previous.role {
-        SurfaceRole::Layer => previous.wayland_namespace() != next.wayland_namespace(),
-        SurfaceRole::Window => previous.window.decorations != next.window.decorations,
+    let role = surface_role_kind(previous.role);
+    if role_field_applies(SurfaceRoleField::Blur, role, false) {
+        previous.wayland_namespace() != next.wayland_namespace()
+    } else if role_field_applies(SurfaceRoleField::Decorations, role, false) {
+        previous.window.decorations != next.window.decorations
+    } else {
+        false
+    }
+}
+
+fn surface_role_kind(role: SurfaceRole) -> SurfaceRoleKind {
+    match role {
+        SurfaceRole::Layer => SurfaceRoleKind::Layer,
+        SurfaceRole::Window => SurfaceRoleKind::Window,
     }
 }
 

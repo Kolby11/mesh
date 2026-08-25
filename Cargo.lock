@@ -1863,6 +1863,7 @@ dependencies = [
  "mesh-core-elements",
  "mesh-core-locale",
  "mesh-core-service",
+ "mesh-core-surface-policy",
  "mesh-core-theme",
  "rayon",
  "serde",
@@ -1878,6 +1879,7 @@ name = "mesh-core-presentation"
 version = "0.1.0"
 dependencies = [
  "mesh-core-render",
+ "mesh-core-surface-policy",
  "mesh-core-wayland",
  "minifb",
  "rustix 0.38.44",
@@ -2022,10 +2024,15 @@ dependencies = [
  "mesh-core-component",
  "mesh-core-config",
  "mesh-core-module",
+ "mesh-core-surface-policy",
  "mesh-core-wayland",
  "serde_json",
  "tracing",
 ]
+
+[[package]]
+name = "mesh-core-surface-policy"
+version = "0.1.0"
 
 [[package]]
 name = "mesh-core-theme"

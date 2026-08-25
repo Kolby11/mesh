@@ -29,8 +29,8 @@ fn graph_diagnostics_report_frontend_surface_contract_gaps() {
 
 #[test]
 fn graph_diagnostics_reject_layer_placement_on_a_window_surface() {
-    // A window is placed by the compositor, so an anchor/layer/margin on one is
-    // a contradiction in the manifest, not a field to quietly drop.
+    // A window is placed by the compositor, so layer-only fields on one are a
+    // contradiction in the manifest, not fields to quietly drop.
     let root = root_with_modules(&[("@mesh/window", ModuleKind::Frontend)], &[], None);
     let mut frontend = loaded_module(
         "@mesh/window",
@@ -44,7 +44,16 @@ fn graph_diagnostics_reject_layer_placement_on_a_window_surface() {
     frontend.manifest.mesh.surface_layout = Some(crate::manifest::SurfaceLayoutSection {
         role: Some("window".into()),
         anchor: Some("right".into()),
+        layer: Some("overlay".into()),
         exclusive_zone: Some(48),
+        margins: Some(crate::manifest::SurfaceMargins {
+            top: 1,
+            right: 2,
+            bottom: 3,
+            left: 4,
+        }),
+        keyboard_mode: Some("exclusive".into()),
+        blur: Some(true),
         ..Default::default()
     });
 
@@ -54,7 +63,11 @@ fn graph_diagnostics_reject_layer_placement_on_a_window_surface() {
         diagnostic.module_id == "@mesh/window"
             && diagnostic.status == "surface_role_field_mismatch"
             && diagnostic.message.contains("anchor")
+            && diagnostic.message.contains("layer")
             && diagnostic.message.contains("exclusiveZone")
+            && diagnostic.message.contains("margins")
+            && diagnostic.message.contains("keyboardMode")
+            && diagnostic.message.contains("blur")
     }));
 }
 
@@ -72,8 +85,10 @@ fn graph_diagnostics_reject_window_fields_on_a_layer_surface() {
     declare_frontend_surface_contract(&mut frontend);
     frontend.manifest.mesh.surface_layout = Some(crate::manifest::SurfaceLayoutSection {
         anchor: Some("top".into()),
+        title: Some(crate::manifest::LocalizedText::Literal("Panel".into())),
         app_id: Some("mesh.panel".into()),
         resizable: Some(false),
+        decorations: Some("server".into()),
         ..Default::default()
     });
 
@@ -82,8 +97,10 @@ fn graph_diagnostics_reject_window_fields_on_a_layer_surface() {
     assert!(graph.diagnostics().iter().any(|diagnostic| {
         diagnostic.module_id == "@mesh/panel"
             && diagnostic.status == "surface_role_field_mismatch"
+            && diagnostic.message.contains("title")
             && diagnostic.message.contains("appId")
             && diagnostic.message.contains("resizable")
+            && diagnostic.message.contains("decorations")
     }));
 }
 

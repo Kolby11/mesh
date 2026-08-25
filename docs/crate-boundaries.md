@@ -8,6 +8,7 @@ This workspace keeps browser-like concerns split by crate:
 - `mesh-core-interaction` queries `WidgetNode` trees for hit testing, focus, tooltip, and scroll behavior.
 - `mesh-core-render` paints `WidgetNode` trees into `PixelBuffer`s.
 - `mesh-core-presentation` presents `PixelBuffer`s and normalizes surface input events.
+- `mesh-core-surface-policy` owns role-field metadata shared by surface policy consumers.
 - `mesh-core-surface-config` resolves manifest/settings surface layout policy and
   validates stored `surface` blocks and component prop overrides against their
   owning declarations.
@@ -20,14 +21,16 @@ This workspace keeps browser-like concerns split by crate:
 Normal dependency direction should remain:
 
 ```text
-presentation -> render
+surface-policy -> no runtime boundary crates
 render -> elements + icon
 frontend -> component + elements + module + theme
 frontend-abi -> capability
 frontend-host -> frontend-abi + capability + elements + locale + render + theme + wayland
 animation -> elements
 interaction -> elements + module
-surface-config -> component + module + wayland + config
+surface-config -> component + module + wayland + config + surface-policy
+module -> surface-policy
+presentation -> render + surface-policy
 shell -> all boundary crates as orchestration glue
 ```
 

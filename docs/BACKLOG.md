@@ -85,7 +85,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/13-surface-policy-and-configuration/improvements.md)
 
-- [ ] Share role-field metadata across manifest diagnostics, settings validation, ejection, and protocol lowering.
 - [ ] Preserve localization identity and distinguish effective values from overrides during configuration ejection.
 - [ ] Use typed unmeasured/content/surface/wire extents at the shell/presentation boundary.
 - [ ] Replace split surface field lists with a revisioned semantic policy diff and generation.

@@ -5,6 +5,9 @@ use mesh_core_config::validate::{
     FieldKind, FieldSpec, SettingsDiagnostic, unknown_key_diagnostic_from, validate_object,
 };
 use mesh_core_module::{LocalizedText, Manifest};
+use mesh_core_surface_policy::{
+    SURFACE_ROLE_FIELD_METADATA, SurfaceRoleField, SurfaceRoleKind, role_field_applies,
+};
 use mesh_core_wayland::{Edge, KeyboardMode, Layer, SurfaceRole, WindowDecorations};
 use std::collections::BTreeMap;
 
@@ -402,38 +405,65 @@ pub fn surface_layout_to_json(layout: &SurfaceLayoutSettings) -> serde_json::Val
     let mut block = serde_json::Map::new();
     block.insert("role".into(), surface_role_name(layout.role).into());
 
-    if layout.role == SurfaceRole::Window || layout.promotable {
+    if role_field_applies_to_layout(layout, SurfaceRoleField::Title) {
         if let Some(title) = &layout.window.title {
             block.insert("title".into(), title.fallback_text().into());
         }
+    }
+    if role_field_applies_to_layout(layout, SurfaceRoleField::AppId) {
         if let Some(app_id) = &layout.window.app_id {
             block.insert("app_id".into(), app_id.clone().into());
         }
+    }
+    if role_field_applies_to_layout(layout, SurfaceRoleField::Resizable) {
         block.insert("resizable".into(), layout.window.resizable.into());
+    }
+    if role_field_applies_to_layout(layout, SurfaceRoleField::Decorations) {
         block.insert(
             "decorations".into(),
             window_decorations_name(layout.window.decorations).into(),
         );
     }
 
-    if layout.role == SurfaceRole::Layer || layout.promotable {
+    if role_field_applies_to_layout(layout, SurfaceRoleField::Anchor) {
         block.insert("anchor".into(), surface_edge_name(layout.edge).into());
+    }
+    if role_field_applies_to_layout(layout, SurfaceRoleField::Layer) {
         block.insert("layer".into(), surface_layer_name(layout.layer).into());
+    }
+    if role_field_applies_to_layout(layout, SurfaceRoleField::ExclusiveZone) {
         block.insert("exclusive_zone".into(), layout.exclusive_zone.into());
+    }
+    if role_field_applies_to_layout(layout, SurfaceRoleField::Blur) {
         block.insert("blur".into(), layout.blur.into());
     }
 
-    block.insert(
-        "keyboard_mode".into(),
-        keyboard_mode_name(layout.keyboard_mode).into(),
-    );
+    if role_field_applies_to_layout(layout, SurfaceRoleField::KeyboardMode) {
+        block.insert(
+            "keyboard_mode".into(),
+            keyboard_mode_name(layout.keyboard_mode).into(),
+        );
+    }
     block.insert("visible_on_start".into(), layout.visible_on_start.into());
-    block.insert("margin_top".into(), layout.margin_top.into());
-    block.insert("margin_right".into(), layout.margin_right.into());
-    block.insert("margin_bottom".into(), layout.margin_bottom.into());
-    block.insert("margin_left".into(), layout.margin_left.into());
+    if role_field_applies_to_layout(layout, SurfaceRoleField::Margins) {
+        block.insert("margin_top".into(), layout.margin_top.into());
+        block.insert("margin_right".into(), layout.margin_right.into());
+        block.insert("margin_bottom".into(), layout.margin_bottom.into());
+        block.insert("margin_left".into(), layout.margin_left.into());
+    }
 
     serde_json::Value::Object(block)
+}
+
+fn role_field_applies_to_layout(layout: &SurfaceLayoutSettings, field: SurfaceRoleField) -> bool {
+    role_field_applies(
+        field,
+        match layout.role {
+            SurfaceRole::Layer => SurfaceRoleKind::Layer,
+            SurfaceRole::Window => SurfaceRoleKind::Window,
+        },
+        layout.promotable,
+    )
 }
 
 pub const fn surface_role_name(role: SurfaceRole) -> &'static str {
@@ -663,9 +693,6 @@ pub const MODULE_NAMESPACE_FIELDS: &[FieldSpec] = &[
     ),
 ];
 
-const WINDOW_ONLY_KEYS: &[&str] = &["title", "app_id", "resizable", "decorations"];
-const LAYER_ONLY_KEYS: &[&str] = &["anchor", "layer", "exclusive_zone", "blur"];
-
 /// Validate one module's stored namespace, returning the `surface` block
 /// stripped of anything unusable plus everything worth telling the user.
 ///
@@ -853,25 +880,38 @@ fn report_inert_placement_fields(
         .and_then(serde_json::Value::as_str)
         .and_then(parse_surface_role)
         .unwrap_or(declared.role);
-    let (inert, other_role) = match role {
-        SurfaceRole::Layer => (WINDOW_ONLY_KEYS, SurfaceRole::Window),
-        SurfaceRole::Window => (LAYER_ONLY_KEYS, SurfaceRole::Layer),
+    let role_kind = match role {
+        SurfaceRole::Layer => SurfaceRoleKind::Layer,
+        SurfaceRole::Window => SurfaceRoleKind::Window,
+    };
+    let other_role = match role {
+        SurfaceRole::Layer => SurfaceRole::Window,
+        SurfaceRole::Window => SurfaceRole::Layer,
     };
 
-    for key in inert.iter().filter(|key| stored.contains_key(**key)) {
-        diagnostics.push(SettingsDiagnostic::warning(
-            namespace,
-            format!("surface.{key}"),
-            format!(
-                "\"{key}\" only applies to role \"{}\"; this surface has role \"{}\", so it has no effect",
-                surface_role_name(other_role),
-                surface_role_name(role)
-            ),
-            format!(
-                "remove it, or ask the module author to declare mesh.surface.promotable if this surface should be able to become a {}",
-                surface_role_name(other_role)
-            ),
-        ));
+    for metadata in SURFACE_ROLE_FIELD_METADATA {
+        if role_field_applies(metadata.field, role_kind, false) {
+            continue;
+        }
+        for key in metadata
+            .settings_keys
+            .iter()
+            .filter(|key| stored.contains_key(**key))
+        {
+            diagnostics.push(SettingsDiagnostic::warning(
+                namespace,
+                format!("surface.{key}"),
+                format!(
+                    "\"{key}\" only applies to role \"{}\"; this surface has role \"{}\", so it has no effect",
+                    surface_role_name(other_role),
+                    surface_role_name(role)
+                ),
+                format!(
+                    "remove it, or ask the module author to declare mesh.surface.promotable if this surface should be able to become a {}",
+                    surface_role_name(other_role)
+                ),
+            ));
+        }
     }
 }
 
@@ -1219,6 +1259,48 @@ mod tests {
         assert!(block.get("promotable").is_none());
     }
 
+    #[test]
+    fn an_ejected_window_block_omits_all_inert_layer_fields() {
+        let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
+            role: Some("window".into()),
+            anchor: Some("bottom".into()),
+            layer: Some("overlay".into()),
+            exclusive_zone: Some(48),
+            keyboard_mode: Some("exclusive".into()),
+            margins: Some(mesh_core_module::manifest::SurfaceMargins {
+                top: 1,
+                right: 2,
+                bottom: 3,
+                left: 4,
+            }),
+            blur: Some(true),
+            title: Some(LocalizedText::Literal("Settings".into())),
+            app_id: Some("mesh.settings".into()),
+            resizable: Some(false),
+            decorations: Some("server".into()),
+            ..Default::default()
+        });
+        let block = surface_layout_to_json(&surface_layout_from_manifest(&manifest));
+
+        for key in [
+            "anchor",
+            "layer",
+            "exclusive_zone",
+            "keyboard_mode",
+            "margin_top",
+            "margin_right",
+            "margin_bottom",
+            "margin_left",
+            "blur",
+        ] {
+            assert!(block.get(key).is_none(), "{key} is inert for a window");
+        }
+        assert_eq!(block["title"], serde_json::json!("Settings"));
+        assert_eq!(block["app_id"], serde_json::json!("mesh.settings"));
+        assert_eq!(block["resizable"], serde_json::json!(false));
+        assert_eq!(block["decorations"], serde_json::json!("server"));
+    }
+
     fn diagnose(
         surface: serde_json::Value,
         manifest: &Manifest,
@@ -1350,6 +1432,72 @@ mod tests {
             diagnostic.message
         );
         assert!(!layout.window.resizable);
+    }
+
+    #[test]
+    fn every_role_inert_field_warns_during_settings_validation() {
+        let window_manifest = manifest_with_surface_layout(SurfaceLayoutSection {
+            role: Some("window".into()),
+            ..Default::default()
+        });
+        let (_, diagnostics) = diagnose(
+            serde_json::json!({
+                "anchor": "bottom",
+                "layer": "overlay",
+                "exclusive_zone": 48,
+                "keyboard_mode": "exclusive",
+                "margin_top": 1,
+                "margin_right": 2,
+                "margin_bottom": 3,
+                "margin_left": 4,
+                "blur": true,
+            }),
+            &window_manifest,
+        );
+        let paths: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.key_path.as_str())
+            .collect();
+        assert_eq!(
+            paths,
+            vec![
+                "surface.anchor",
+                "surface.layer",
+                "surface.exclusive_zone",
+                "surface.keyboard_mode",
+                "surface.margin_top",
+                "surface.margin_right",
+                "surface.margin_bottom",
+                "surface.margin_left",
+                "surface.blur",
+            ]
+        );
+        assert!(diagnostics.iter().all(|diagnostic| !diagnostic.is_error()));
+
+        let layer_manifest = manifest_with_surface_layout(SurfaceLayoutSection::default());
+        let (_, diagnostics) = diagnose(
+            serde_json::json!({
+                "title": "Panel",
+                "app_id": "mesh.panel",
+                "resizable": false,
+                "decorations": "server",
+            }),
+            &layer_manifest,
+        );
+        let paths: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.key_path.as_str())
+            .collect();
+        assert_eq!(
+            paths,
+            vec![
+                "surface.title",
+                "surface.app_id",
+                "surface.resizable",
+                "surface.decorations",
+            ]
+        );
+        assert!(diagnostics.iter().all(|diagnostic| !diagnostic.is_error()));
     }
 
     #[test]

@@ -1,5 +1,8 @@
 use mesh_core_capability::Capability;
 use mesh_core_elements::style::is_supported_css_property;
+use mesh_core_surface_policy::{
+    SURFACE_ROLE_FIELD_METADATA, SurfaceFieldScope, SurfaceRoleField, SurfaceRoleFieldMetadata,
+};
 use mesh_core_theme::TokenValue;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -813,30 +816,37 @@ impl SurfaceLayoutSection {
     /// Drives the manifest diagnostic that rejects layer placement on a window
     /// rather than silently dropping it.
     pub fn layer_only_fields(&self) -> Vec<&'static str> {
-        [
-            ("anchor", self.anchor.is_some()),
-            ("layer", self.layer.is_some()),
-            ("exclusiveZone", self.exclusive_zone.is_some()),
-            ("margins", self.margins.is_some()),
-            ("keyboardMode", self.keyboard_mode.is_some()),
-        ]
-        .into_iter()
-        .filter_map(|(name, present)| present.then_some(name))
-        .collect()
+        self.role_only_fields(SurfaceFieldScope::Layer)
     }
 
     /// The mirror of [`Self::layer_only_fields`]: set fields that only apply
     /// to `role: "window"`.
     pub fn window_only_fields(&self) -> Vec<&'static str> {
-        [
-            ("title", self.title.is_some()),
-            ("appId", self.app_id.is_some()),
-            ("resizable", self.resizable.is_some()),
-            ("decorations", self.decorations.is_some()),
-        ]
-        .into_iter()
-        .filter_map(|(name, present)| present.then_some(name))
-        .collect()
+        self.role_only_fields(SurfaceFieldScope::Window)
+    }
+
+    fn role_only_fields(&self, scope: SurfaceFieldScope) -> Vec<&'static str> {
+        SURFACE_ROLE_FIELD_METADATA
+            .iter()
+            .filter(|metadata| metadata.scope == scope)
+            .filter(|metadata| self.has_role_field(metadata))
+            .map(|metadata| metadata.manifest_key)
+            .collect()
+    }
+
+    fn has_role_field(&self, metadata: &SurfaceRoleFieldMetadata) -> bool {
+        match metadata.field {
+            SurfaceRoleField::Title => self.title.is_some(),
+            SurfaceRoleField::AppId => self.app_id.is_some(),
+            SurfaceRoleField::Resizable => self.resizable.is_some(),
+            SurfaceRoleField::Decorations => self.decorations.is_some(),
+            SurfaceRoleField::Anchor => self.anchor.is_some(),
+            SurfaceRoleField::Layer => self.layer.is_some(),
+            SurfaceRoleField::ExclusiveZone => self.exclusive_zone.is_some(),
+            SurfaceRoleField::KeyboardMode => self.keyboard_mode.is_some(),
+            SurfaceRoleField::Margins => self.margins.is_some(),
+            SurfaceRoleField::Blur => self.blur.is_some(),
+        }
     }
 }
 
