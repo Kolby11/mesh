@@ -85,7 +85,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/13-surface-policy-and-configuration/improvements.md)
 
-- [ ] Build the policy compiler producing declared contracts, effective snapshots, and typed transition plans.
 
 ### 14. Wayland platform and presentation
 

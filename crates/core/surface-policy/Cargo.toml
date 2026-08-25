@@ -1,6 +1,6 @@
 [package]
 name = "mesh-core-surface-policy"
-description = "Shared role-field metadata for MESH surface policy consumers"
+description = "Compiled surface contracts, effective policy snapshots, and transition plans for MESH"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

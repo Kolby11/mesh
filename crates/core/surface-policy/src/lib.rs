@@ -1,9 +1,10 @@
-//! Shared metadata for fields whose meaning depends on a surface role.
+//! Compiled surface contracts and shared metadata for fields whose meaning
+//! depends on a surface role.
 //!
 //! Manifest diagnostics, settings validation/ejection, and presentation
-//! lowering all consume the same table. The crate intentionally contains no
-//! manifest, settings, or Wayland types so those boundary crates can depend on
-//! it without forming a cycle.
+//! lowering all consume the same table and normalized policy products. The
+//! crate intentionally contains no manifest, settings, or Wayland types so
+//! those boundary crates can depend on it without forming a cycle.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SurfaceRoleKind {
@@ -145,6 +146,41 @@ pub fn role_field_applies(
     surface_role_field_metadata(field).applies_to(role, promotable)
 }
 
+/// Where a semantic policy value came from. A declared contract is the
+/// immutable author boundary; settings and runtime overrides are layered on
+/// top by [`SurfacePolicyCompiler`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SurfacePolicyValueSource {
+    Declared,
+    Settings,
+    Runtime,
+    Derived,
+}
+
+/// Coarse provenance for the effective policy. Grouping fields by the
+/// protocol boundary keeps provenance useful without duplicating every
+/// snapshot member in a second parallel structure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SurfacePolicyProvenance {
+    pub role: SurfacePolicyValueSource,
+    pub window: SurfacePolicyValueSource,
+    pub placement: SurfacePolicyValueSource,
+    pub keyboard: SurfacePolicyValueSource,
+    pub visibility: SurfacePolicyValueSource,
+}
+
+impl Default for SurfacePolicyProvenance {
+    fn default() -> Self {
+        Self {
+            role: SurfacePolicyValueSource::Declared,
+            window: SurfacePolicyValueSource::Declared,
+            placement: SurfacePolicyValueSource::Declared,
+            keyboard: SurfacePolicyValueSource::Declared,
+            visibility: SurfacePolicyValueSource::Declared,
+        }
+    }
+}
+
 /// The normalized, compositor-independent values that participate in a live
 /// surface policy decision.
 ///
@@ -246,6 +282,233 @@ pub enum SurfacePolicyKeyboardMode {
     OnDemand,
 }
 
+/// The validated author contract produced from a module's declared surface
+/// block. The snapshot contains normalized declared defaults and manifest
+/// values; runtime geometry and input padding are intentionally unresolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeclaredSurfaceContract {
+    pub snapshot: SurfacePolicySnapshot,
+    pub promotable: bool,
+    pub provenance: SurfacePolicyProvenance,
+}
+
+impl DeclaredSurfaceContract {
+    pub fn from_snapshot(mut snapshot: SurfacePolicySnapshot) -> Self {
+        snapshot.revision = 0;
+        snapshot.content_size = None;
+        snapshot.surface_size = None;
+        snapshot.width_spans_output = false;
+        snapshot.height_spans_output = false;
+        snapshot.padding = [0; 4];
+        Self {
+            promotable: snapshot.promotable,
+            snapshot,
+            provenance: SurfacePolicyProvenance::default(),
+        }
+    }
+
+    pub fn role_change_allowed(&self, requested: SurfaceRoleKind) -> bool {
+        self.snapshot.role == requested || self.promotable
+    }
+}
+
+/// Sparse normalized settings/runtime values layered over a declared
+/// contract. `None` means that the declared value remains effective; a
+/// missing value is therefore different from a meaningful zero or `false`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SurfacePolicyPatch {
+    pub role: Option<SurfaceRoleKind>,
+    pub visible: Option<bool>,
+    pub namespace: Option<String>,
+    pub blur: Option<bool>,
+    pub window_title: Option<String>,
+    pub window_app_id: Option<String>,
+    pub window_resizable: Option<bool>,
+    pub window_decorations: Option<SurfacePolicyDecorations>,
+    pub edge: Option<SurfacePolicyEdge>,
+    pub layer: Option<SurfacePolicyLayer>,
+    pub size_policy: Option<SurfacePolicySizePolicy>,
+    pub content_size: Option<(u32, u32)>,
+    pub surface_size: Option<(u32, u32)>,
+    pub width_spans_output: Option<bool>,
+    pub height_spans_output: Option<bool>,
+    pub exclusive_zone: Option<i32>,
+    pub keyboard_mode: Option<SurfacePolicyKeyboardMode>,
+    pub margins: Option<[i32; 4]>,
+    pub padding: Option<[u32; 4]>,
+}
+
+impl SurfacePolicyPatch {
+    /// Build the sparse patch represented by the values that differ from a
+    /// declared baseline. This is the bridge used by settings resolution: the
+    /// resolver retains its existing validation/diagnostics, while the policy
+    /// crate owns the actual precedence and revisioned product.
+    pub fn between(base: &SurfacePolicySnapshot, target: &SurfacePolicySnapshot) -> Self {
+        Self {
+            role: (base.role != target.role).then_some(target.role),
+            visible: (base.visible != target.visible).then_some(target.visible),
+            namespace: (base.namespace != target.namespace).then(|| target.namespace.clone()),
+            blur: (base.blur != target.blur).then_some(target.blur),
+            window_title: (base.window_title != target.window_title)
+                .then(|| target.window_title.clone())
+                .flatten(),
+            window_app_id: (base.window_app_id != target.window_app_id)
+                .then(|| target.window_app_id.clone())
+                .flatten(),
+            window_resizable: (base.window_resizable != target.window_resizable)
+                .then_some(target.window_resizable),
+            window_decorations: (base.window_decorations != target.window_decorations)
+                .then_some(target.window_decorations),
+            edge: (base.edge != target.edge).then_some(target.edge).flatten(),
+            layer: (base.layer != target.layer).then_some(target.layer),
+            size_policy: (base.size_policy != target.size_policy).then_some(target.size_policy),
+            content_size: (base.content_size != target.content_size)
+                .then_some(target.content_size)
+                .flatten(),
+            surface_size: (base.surface_size != target.surface_size)
+                .then_some(target.surface_size)
+                .flatten(),
+            width_spans_output: (base.width_spans_output != target.width_spans_output)
+                .then_some(target.width_spans_output),
+            height_spans_output: (base.height_spans_output != target.height_spans_output)
+                .then_some(target.height_spans_output),
+            exclusive_zone: (base.exclusive_zone != target.exclusive_zone)
+                .then_some(target.exclusive_zone),
+            keyboard_mode: (base.keyboard_mode != target.keyboard_mode)
+                .then_some(target.keyboard_mode),
+            margins: (base.margins != target.margins).then_some(target.margins),
+            padding: (base.padding != target.padding).then_some(target.padding),
+        }
+    }
+
+    fn apply_to(
+        &self,
+        contract: &DeclaredSurfaceContract,
+    ) -> (
+        SurfacePolicySnapshot,
+        SurfacePolicyProvenance,
+        Vec<SurfacePolicyDiagnostic>,
+    ) {
+        let mut snapshot = contract.snapshot.clone();
+        let mut provenance = contract.provenance;
+        let mut diagnostics = Vec::new();
+
+        if let Some(requested) = self.role {
+            if contract.role_change_allowed(requested) {
+                snapshot.role = requested;
+                provenance.role = SurfacePolicyValueSource::Settings;
+            } else if requested != snapshot.role {
+                diagnostics.push(SurfacePolicyDiagnostic::RoleChangeRejected {
+                    declared: snapshot.role,
+                    requested,
+                });
+            }
+        }
+        if let Some(value) = self.visible {
+            snapshot.visible = value;
+            provenance.visibility = SurfacePolicyValueSource::Settings;
+        }
+        if let Some(value) = &self.namespace {
+            snapshot.namespace = value.clone();
+            provenance.placement = SurfacePolicyValueSource::Settings;
+        }
+        if let Some(value) = self.blur {
+            snapshot.blur = value;
+            provenance.placement = SurfacePolicyValueSource::Settings;
+        }
+        if let Some(value) = &self.window_title {
+            snapshot.window_title = Some(value.clone());
+            provenance.window = SurfacePolicyValueSource::Settings;
+        }
+        if let Some(value) = &self.window_app_id {
+            snapshot.window_app_id = Some(value.clone());
+            provenance.window = SurfacePolicyValueSource::Settings;
+        }
+        if let Some(value) = self.window_resizable {
+            snapshot.window_resizable = value;
+            provenance.window = SurfacePolicyValueSource::Settings;
+        }
+        if let Some(value) = self.window_decorations {
+            snapshot.window_decorations = value;
+            provenance.window = SurfacePolicyValueSource::Settings;
+        }
+        if let Some(value) = self.edge {
+            snapshot.edge = Some(value);
+            provenance.placement = SurfacePolicyValueSource::Settings;
+        }
+        if let Some(value) = self.layer {
+            snapshot.layer = value;
+            provenance.placement = SurfacePolicyValueSource::Settings;
+        }
+        if let Some(value) = self.size_policy {
+            snapshot.size_policy = value;
+            provenance.placement = SurfacePolicyValueSource::Settings;
+        }
+        if let Some(value) = self.content_size {
+            snapshot.content_size = Some(value);
+            provenance.placement = SurfacePolicyValueSource::Derived;
+        }
+        if let Some(value) = self.surface_size {
+            snapshot.surface_size = Some(value);
+            provenance.placement = SurfacePolicyValueSource::Derived;
+        }
+        if let Some(value) = self.width_spans_output {
+            snapshot.width_spans_output = value;
+            provenance.placement = SurfacePolicyValueSource::Derived;
+        }
+        if let Some(value) = self.height_spans_output {
+            snapshot.height_spans_output = value;
+            provenance.placement = SurfacePolicyValueSource::Derived;
+        }
+        if let Some(value) = self.exclusive_zone {
+            snapshot.exclusive_zone = value;
+            provenance.placement = SurfacePolicyValueSource::Settings;
+        }
+        if let Some(value) = self.keyboard_mode {
+            snapshot.keyboard_mode = value;
+            provenance.keyboard = SurfacePolicyValueSource::Settings;
+        }
+        if let Some(value) = self.margins {
+            snapshot.margins = value;
+            provenance.placement = SurfacePolicyValueSource::Settings;
+        }
+        if let Some(value) = self.padding {
+            snapshot.padding = value;
+            provenance.placement = SurfacePolicyValueSource::Derived;
+        }
+
+        (snapshot, provenance, diagnostics)
+    }
+}
+
+/// Diagnostics emitted while compiling normalized policy layers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SurfacePolicyDiagnostic {
+    RoleChangeRejected {
+        declared: SurfaceRoleKind,
+        requested: SurfaceRoleKind,
+    },
+}
+
+/// The complete effective product of policy compilation. The snapshot is the
+/// immutable value consumed by shell/presentation; the other fields preserve
+/// the contract, source provenance, sparse overrides, and non-fatal policy
+/// diagnostics that led to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectiveSurfacePolicy {
+    pub contract: DeclaredSurfaceContract,
+    pub snapshot: SurfacePolicySnapshot,
+    pub overrides: SurfacePolicyPatch,
+    pub provenance: SurfacePolicyProvenance,
+    pub diagnostics: Vec<SurfacePolicyDiagnostic>,
+}
+
+impl EffectiveSurfacePolicy {
+    pub fn snapshot(&self) -> &SurfacePolicySnapshot {
+        &self.snapshot
+    }
+}
+
 /// The semantic work required to move from one accepted surface policy to the
 /// next. The values are ordered from the most destructive transition to the
 /// least destructive one by [`SurfacePolicySnapshot::diff`].
@@ -292,6 +555,155 @@ impl SurfacePolicyDiff {
                 | SurfacePolicyChange::WindowRecreate
                 | SurfacePolicyChange::RoleTransition
         )
+    }
+
+    pub const fn transition_plan(self) -> SurfaceTransitionPlan {
+        SurfaceTransitionPlan::from_diff(self)
+    }
+}
+
+/// The shell-level operation selected by a semantic policy diff.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SurfaceTransitionAction {
+    Reject,
+    Keep,
+    UpdateInputRegion,
+    MeasureAgain,
+    ConfigureLayer,
+    RecreateLayer,
+    UpdateWindow,
+    RecreateWindow,
+    TransitionRole,
+    UpdateVisibility,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SurfaceChildTransition {
+    Preserve,
+    Recreate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SurfaceFocusTransition {
+    Preserve,
+    ClearAndReacquire,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SurfaceInputTransition {
+    Preserve,
+    RecomputeRegion,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SurfacePresentationTransition {
+    Noop,
+    ApplyLive,
+    AwaitMeasurement,
+    AwaitConfigure,
+    RecreateObject,
+}
+
+/// A typed plan for carrying one effective policy from the shell into
+/// presentation. The plan deliberately includes lifecycle-adjacent effects
+/// so callers do not need another field list to decide what happens to child
+/// surfaces, focus, input regions, or compositor readiness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SurfaceTransitionPlan {
+    pub diff: SurfacePolicyDiff,
+    pub action: SurfaceTransitionAction,
+    pub children: SurfaceChildTransition,
+    pub focus: SurfaceFocusTransition,
+    pub input: SurfaceInputTransition,
+    pub presentation: SurfacePresentationTransition,
+}
+
+impl SurfaceTransitionPlan {
+    pub const fn rejected(diff: SurfacePolicyDiff) -> Self {
+        Self {
+            diff,
+            action: SurfaceTransitionAction::Reject,
+            children: SurfaceChildTransition::Preserve,
+            focus: SurfaceFocusTransition::Preserve,
+            input: SurfaceInputTransition::Preserve,
+            presentation: SurfacePresentationTransition::Noop,
+        }
+    }
+
+    pub const fn from_diff(diff: SurfacePolicyDiff) -> Self {
+        let (action, children, focus, input, presentation) = match diff.change {
+            SurfacePolicyChange::Noop => (
+                SurfaceTransitionAction::Keep,
+                SurfaceChildTransition::Preserve,
+                SurfaceFocusTransition::Preserve,
+                SurfaceInputTransition::Preserve,
+                SurfacePresentationTransition::Noop,
+            ),
+            SurfacePolicyChange::InputRegionOnly => (
+                SurfaceTransitionAction::UpdateInputRegion,
+                SurfaceChildTransition::Preserve,
+                SurfaceFocusTransition::Preserve,
+                SurfaceInputTransition::RecomputeRegion,
+                SurfacePresentationTransition::ApplyLive,
+            ),
+            SurfacePolicyChange::MeasureAgain => (
+                SurfaceTransitionAction::MeasureAgain,
+                SurfaceChildTransition::Preserve,
+                SurfaceFocusTransition::Preserve,
+                SurfaceInputTransition::Preserve,
+                SurfacePresentationTransition::AwaitMeasurement,
+            ),
+            SurfacePolicyChange::LayerConfigure => (
+                SurfaceTransitionAction::ConfigureLayer,
+                SurfaceChildTransition::Preserve,
+                SurfaceFocusTransition::Preserve,
+                SurfaceInputTransition::RecomputeRegion,
+                SurfacePresentationTransition::AwaitConfigure,
+            ),
+            SurfacePolicyChange::LayerRecreate => (
+                SurfaceTransitionAction::RecreateLayer,
+                SurfaceChildTransition::Recreate,
+                SurfaceFocusTransition::ClearAndReacquire,
+                SurfaceInputTransition::RecomputeRegion,
+                SurfacePresentationTransition::RecreateObject,
+            ),
+            SurfacePolicyChange::WindowLive => (
+                SurfaceTransitionAction::UpdateWindow,
+                SurfaceChildTransition::Preserve,
+                SurfaceFocusTransition::Preserve,
+                SurfaceInputTransition::Preserve,
+                SurfacePresentationTransition::ApplyLive,
+            ),
+            SurfacePolicyChange::WindowRecreate => (
+                SurfaceTransitionAction::RecreateWindow,
+                SurfaceChildTransition::Recreate,
+                SurfaceFocusTransition::ClearAndReacquire,
+                SurfaceInputTransition::RecomputeRegion,
+                SurfacePresentationTransition::RecreateObject,
+            ),
+            SurfacePolicyChange::RoleTransition => (
+                SurfaceTransitionAction::TransitionRole,
+                SurfaceChildTransition::Recreate,
+                SurfaceFocusTransition::ClearAndReacquire,
+                SurfaceInputTransition::RecomputeRegion,
+                SurfacePresentationTransition::RecreateObject,
+            ),
+            SurfacePolicyChange::VisibilityOnly => (
+                SurfaceTransitionAction::UpdateVisibility,
+                SurfaceChildTransition::Preserve,
+                SurfaceFocusTransition::Preserve,
+                SurfaceInputTransition::Preserve,
+                SurfacePresentationTransition::ApplyLive,
+            ),
+        };
+        Self {
+            diff,
+            action,
+            children,
+            focus,
+            input,
+            presentation,
+        }
     }
 }
 
@@ -415,6 +827,60 @@ impl SurfacePolicyGenerator {
     }
 }
 
+/// Compiles one declared contract plus a sparse override patch into the
+/// effective policy consumed by the shell. One compiler belongs to one live
+/// surface, which gives it a stable revision stream across reloads and
+/// runtime overrides.
+#[derive(Debug, Clone, Default)]
+pub struct SurfacePolicyCompiler {
+    generator: SurfacePolicyGenerator,
+}
+
+impl SurfacePolicyCompiler {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn compile(
+        &mut self,
+        contract: &DeclaredSurfaceContract,
+        overrides: &SurfacePolicyPatch,
+    ) -> EffectiveSurfacePolicy {
+        let (candidate, provenance, diagnostics) = overrides.apply_to(contract);
+        let update = self.generator.update(candidate);
+        EffectiveSurfacePolicy {
+            contract: contract.clone(),
+            snapshot: update.current,
+            overrides: overrides.clone(),
+            provenance,
+            diagnostics,
+        }
+    }
+
+    pub fn current(&self) -> Option<&SurfacePolicySnapshot> {
+        self.generator.current()
+    }
+
+    pub fn plan(
+        previous: Option<&EffectiveSurfacePolicy>,
+        next: &EffectiveSurfacePolicy,
+    ) -> SurfaceTransitionPlan {
+        let diff = previous.map_or(
+            SurfacePolicyDiff {
+                change: SurfacePolicyChange::MeasureAgain,
+                from_revision: None,
+                to_revision: next.snapshot.revision,
+            },
+            |previous| previous.snapshot.diff(&next.snapshot),
+        );
+        if next.diagnostics.is_empty() {
+            diff.transition_plan()
+        } else {
+            SurfaceTransitionPlan::rejected(diff)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -511,5 +977,61 @@ mod tests {
         assert_eq!(update.diff.change, SurfacePolicyChange::InputRegionOnly);
         assert_eq!(update.diff.from_revision, Some(1));
         assert_eq!(update.diff.to_revision, 2);
+    }
+
+    #[test]
+    fn compiler_produces_effective_policy_and_role_transition_plan() {
+        let declared = DeclaredSurfaceContract::from_snapshot(SurfacePolicySnapshot {
+            promotable: true,
+            ..SurfacePolicySnapshot::default()
+        });
+        let first_patch = SurfacePolicyPatch {
+            blur: Some(true),
+            ..SurfacePolicyPatch::default()
+        };
+        let mut compiler = SurfacePolicyCompiler::new();
+        let first = compiler.compile(&declared, &first_patch);
+        assert_eq!(first.snapshot.revision, 1);
+        assert!(first.diagnostics.is_empty());
+        assert_eq!(
+            first.provenance.placement,
+            SurfacePolicyValueSource::Settings
+        );
+
+        let second_patch = SurfacePolicyPatch {
+            role: Some(SurfaceRoleKind::Window),
+            ..first_patch
+        };
+        let second = compiler.compile(&declared, &second_patch);
+        let plan = SurfacePolicyCompiler::plan(Some(&first), &second);
+        assert_eq!(plan.diff.change, SurfacePolicyChange::RoleTransition);
+        assert_eq!(plan.action, SurfaceTransitionAction::TransitionRole);
+        assert_eq!(plan.children, SurfaceChildTransition::Recreate);
+        assert_eq!(plan.focus, SurfaceFocusTransition::ClearAndReacquire);
+        assert_eq!(
+            plan.presentation,
+            SurfacePresentationTransition::RecreateObject
+        );
+    }
+
+    #[test]
+    fn compiler_rejects_unauthorized_role_patch_without_changing_effective_role() {
+        let declared = DeclaredSurfaceContract::from_snapshot(SurfacePolicySnapshot::default());
+        let patch = SurfacePolicyPatch {
+            role: Some(SurfaceRoleKind::Window),
+            ..SurfacePolicyPatch::default()
+        };
+        let effective = SurfacePolicyCompiler::new().compile(&declared, &patch);
+
+        assert_eq!(effective.snapshot.role, SurfaceRoleKind::Layer);
+        assert_eq!(
+            effective.diagnostics,
+            vec![SurfacePolicyDiagnostic::RoleChangeRejected {
+                declared: SurfaceRoleKind::Layer,
+                requested: SurfaceRoleKind::Window,
+            }]
+        );
+        let plan = SurfacePolicyCompiler::plan(None, &effective);
+        assert_eq!(plan.action, SurfaceTransitionAction::Reject);
     }
 }

@@ -8,8 +8,9 @@ This workspace keeps browser-like concerns split by crate:
 - `mesh-core-interaction` queries `WidgetNode` trees for hit testing, focus, tooltip, and scroll behavior.
 - `mesh-core-render` paints `WidgetNode` trees into `PixelBuffer`s.
 - `mesh-core-presentation` presents `PixelBuffer`s and normalizes surface input events.
-- `mesh-core-surface-policy` owns role-field metadata and the revisioned semantic
-  surface-policy snapshot/diff shared by surface policy consumers.
+- `mesh-core-surface-policy` owns role-field metadata plus the policy compiler
+  that produces declared contracts, effective snapshots, and typed transition
+  plans for surface policy consumers.
 - `mesh-core-surface-config` resolves manifest/settings surface layout policy and
   validates stored `surface` blocks and component prop overrides against their
   owning declarations.

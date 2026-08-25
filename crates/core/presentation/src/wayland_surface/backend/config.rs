@@ -3,6 +3,7 @@ use mesh_core_render::DamageRect;
 use mesh_core_surface_policy::{
     SurfacePolicyDecorations, SurfacePolicyDiff, SurfacePolicyEdge, SurfacePolicyKeyboardMode,
     SurfacePolicyLayer, SurfacePolicySizePolicy, SurfacePolicySnapshot, SurfaceRoleKind,
+    SurfaceTransitionPlan,
 };
 use std::num::NonZeroU32;
 
@@ -490,6 +491,17 @@ impl SurfaceConfig {
     ) -> SurfacePolicyDiff {
         self.policy_snapshot(previous_keyboard_mode)
             .diff(&next.policy_snapshot(next_keyboard_mode))
+    }
+
+    /// Return the shared typed transition plan for this config change.
+    pub fn transition_plan(
+        &self,
+        previous_keyboard_mode: KeyboardMode,
+        next: &Self,
+        next_keyboard_mode: KeyboardMode,
+    ) -> SurfaceTransitionPlan {
+        self.semantic_diff(previous_keyboard_mode, next, next_keyboard_mode)
+            .transition_plan()
     }
 }
 

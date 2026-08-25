@@ -1184,7 +1184,7 @@ impl FrontendSurfaceComponent {
         );
         let mut surface_policy_generation = SurfacePolicyGenerator::default();
         let surface_policy = surface_policy_generation
-            .update(settings_state.policy.clone())
+            .update(settings_state.effective_policy.snapshot.clone())
             .current;
         mesh_core_config::log_settings_diagnostics("settings", &settings_state.diagnostics);
         let service_payload_capacity = service_payload_cache_capacity(&compiled.manifest);

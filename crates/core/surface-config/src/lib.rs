@@ -6,8 +6,9 @@ use mesh_core_config::validate::{
 };
 use mesh_core_module::{LocalizedText, Manifest};
 use mesh_core_surface_policy::{
-    SURFACE_ROLE_FIELD_METADATA, SurfacePolicyDecorations, SurfacePolicyEdge,
-    SurfacePolicyKeyboardMode, SurfacePolicyLayer, SurfacePolicySizePolicy, SurfacePolicySnapshot,
+    DeclaredSurfaceContract, EffectiveSurfacePolicy, SURFACE_ROLE_FIELD_METADATA,
+    SurfacePolicyCompiler, SurfacePolicyDecorations, SurfacePolicyEdge, SurfacePolicyKeyboardMode,
+    SurfacePolicyLayer, SurfacePolicyPatch, SurfacePolicySizePolicy, SurfacePolicySnapshot,
     SurfaceRoleField, SurfaceRoleKind, role_field_applies,
 };
 use mesh_core_wayland::{Edge, KeyboardMode, Layer, SurfaceRole, WindowDecorations};
@@ -64,6 +65,12 @@ impl Default for WindowLayoutSettings {
 }
 
 impl SurfaceLayoutSettings {
+    /// Lower the manifest/default policy into the compiler's immutable author
+    /// contract. Runtime geometry and input padding are not declaration data.
+    pub fn declared_policy_contract(&self) -> DeclaredSurfaceContract {
+        DeclaredSurfaceContract::from_snapshot(self.policy_snapshot(0))
+    }
+
     /// Lower the resolved settings policy into the shared semantic snapshot.
     /// Geometry is intentionally absent here: CSS measurement and presentation
     /// padding are added by the shell when it creates a `SurfaceConfig`.
@@ -133,6 +140,12 @@ pub struct FrontendModuleSettingsState {
     /// declaration defaults win during precedence resolution.
     pub effective: serde_json::Value,
     pub layout: SurfaceLayoutSettings,
+    /// The validated manifest/default contract before sparse user settings are
+    /// layered over it.
+    pub declared_policy: DeclaredSurfaceContract,
+    /// The compiler product retained for reload diagnostics and transition
+    /// planning. `policy` remains as the snapshot compatibility projection.
+    pub effective_policy: EffectiveSurfacePolicy,
     /// Normalized policy values used to generate one revisioned semantic diff
     /// for settings reload and the presentation hand-off.
     pub policy: SurfacePolicySnapshot,
@@ -282,7 +295,8 @@ pub fn resolve_frontend_module_settings_with_props(
     manifest: &Manifest,
     props_block: Option<&PropsBlock>,
 ) -> FrontendModuleSettingsState {
-    let mut layout = surface_layout_from_manifest(manifest);
+    let declared_layout = surface_layout_from_manifest(manifest);
+    let mut layout = declared_layout.clone();
     let (checked_surface, checked_props, diagnostics) =
         validate_module_namespace(namespace, &raw, manifest, props_block);
     let surface = checked_surface.as_object();
@@ -404,12 +418,18 @@ pub fn resolve_frontend_module_settings_with_props(
             namespace.insert("props".into(), checked_props);
         }
     }
-    let policy = layout.policy_snapshot(0);
+    let declared_policy = declared_layout.declared_policy_contract();
+    let resolved_snapshot = layout.policy_snapshot(0);
+    let overrides = SurfacePolicyPatch::between(&declared_policy.snapshot, &resolved_snapshot);
+    let effective_policy = SurfacePolicyCompiler::new().compile(&declared_policy, &overrides);
+    let policy = effective_policy.snapshot.clone();
 
     FrontendModuleSettingsState {
         raw,
         effective,
         layout,
+        declared_policy,
+        effective_policy,
         policy,
         props,
         diagnostics,
@@ -1111,6 +1131,31 @@ mod tests {
         assert_eq!(layout.window.app_id.as_deref(), Some("mesh.settings"));
         assert!(!layout.window.resizable);
         assert_eq!(layout.window.decorations, WindowDecorations::Server);
+    }
+
+    #[test]
+    fn settings_resolution_exposes_declared_and_effective_policy_products() {
+        let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
+            role: Some("layer".into()),
+            blur: Some(false),
+            ..Default::default()
+        });
+        let settings = resolve_frontend_module_settings(
+            "@mesh/test",
+            serde_json::json!({
+                "surface": {
+                    "blur": true,
+                    "margin_left": 12
+                }
+            }),
+            &manifest,
+        );
+
+        assert_eq!(settings.declared_policy.snapshot.blur, false);
+        assert_eq!(settings.effective_policy.snapshot.blur, true);
+        assert_eq!(settings.effective_policy.snapshot.margins[3], 12);
+        assert_eq!(settings.policy, settings.effective_policy.snapshot);
+        assert!(settings.effective_policy.diagnostics.is_empty());
     }
 
     #[test]

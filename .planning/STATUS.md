@@ -200,6 +200,11 @@ Surface settings, shell reload, and presentation now share one revisioned
 `SurfacePolicySnapshot` semantic diff and accepted policy generation covering
 blur, decorations, padding, geometry, keyboard mode, and role transitions.
 
+Surface policy compilation now exposes the declared contract, effective
+revisioned policy with provenance and diagnostics, and a typed transition plan
+covering rejection, measurement, live updates, reconfiguration, recreation,
+children, focus, input regions, and presentation readiness.
+
 ## Blocked / open follow-ups
 
 - Live multi-output membership and compositor conformance matrix (deferred,
