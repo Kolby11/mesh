@@ -840,6 +840,62 @@ impl SurfaceLayoutSection {
     }
 }
 
+/// Canonical values accepted by the author-facing `mesh.surface` enums.
+///
+/// These parsers intentionally live with the manifest model rather than in a
+/// runtime resolver so graph validation and every downstream consumer agree on
+/// aliases and the normalized values.
+pub const SURFACE_ROLE_VALUES: &[&str] = &["layer", "window"];
+pub const WINDOW_DECORATIONS_VALUES: &[&str] = &["client", "server"];
+pub const SURFACE_EDGE_VALUES: &[&str] = &["top", "bottom", "left", "right"];
+pub const SURFACE_LAYER_VALUES: &[&str] = &["background", "bottom", "top", "overlay"];
+pub const KEYBOARD_MODE_VALUES: &[&str] = &["none", "exclusive", "on_demand"];
+
+pub fn canonical_surface_role(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "layer" => Some("layer"),
+        "window" | "toplevel" => Some("window"),
+        _ => None,
+    }
+}
+
+pub fn canonical_window_decorations(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "client" | "client_side" | "csd" => Some("client"),
+        "server" | "server_side" | "ssd" => Some("server"),
+        _ => None,
+    }
+}
+
+pub fn canonical_surface_edge(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "top" => Some("top"),
+        "bottom" => Some("bottom"),
+        "left" => Some("left"),
+        "right" => Some("right"),
+        _ => None,
+    }
+}
+
+pub fn canonical_surface_layer(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "background" => Some("background"),
+        "bottom" => Some("bottom"),
+        "top" => Some("top"),
+        "overlay" => Some("overlay"),
+        _ => None,
+    }
+}
+
+pub fn canonical_keyboard_mode(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "none" => Some("none"),
+        "exclusive" => Some("exclusive"),
+        "on_demand" | "ondemand" | "on-demand" => Some("on_demand"),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SurfaceMargins {
     #[serde(default)]

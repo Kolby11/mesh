@@ -176,6 +176,10 @@ Fields belonging to the *other* role are a **graph diagnostic**
 (`surface_role_field_mismatch`), not a silently ignored key: a block that names
 both an anchor and `role: "window"` states two incompatible intents, and a
 compositor places a toplevel regardless of what the manifest asks.
+Surface enum values are checked with the same canonical parsers used by runtime
+resolution before role policy is applied; an unknown value produces an
+`invalid_surface_enum` graph diagnostic naming the path, value, and canonical
+allowed values rather than silently selecting a default.
 
 For a surface whose manifest declares `promotable`, the user can move it
 between roles through the sparse settings store (`"surface": { "role":

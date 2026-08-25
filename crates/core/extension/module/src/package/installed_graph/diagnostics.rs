@@ -1,5 +1,11 @@
 use super::super::ModuleKind;
 use super::*;
+use crate::manifest::{
+    KEYBOARD_MODE_VALUES, SURFACE_EDGE_VALUES, SURFACE_LAYER_VALUES, SURFACE_ROLE_VALUES,
+    SurfaceLayoutSection, WINDOW_DECORATIONS_VALUES, canonical_keyboard_mode,
+    canonical_surface_edge, canonical_surface_layer, canonical_surface_role,
+    canonical_window_decorations,
+};
 use mesh_core_service::{ContractCapabilities, InterfaceContract};
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -412,15 +418,19 @@ fn diagnose_frontend_surfaces(
         // its own manifest.
         // A promotable surface is realized under both roles at different points
         // in its life, so both field sets apply to it and neither is a mismatch.
-        if let Some(layout) = &surface.surface_layout
-            && layout.promotable != Some(true)
-        {
-            let is_window = layout.role.as_deref().is_some_and(|role| {
-                matches!(
-                    role.trim().to_ascii_lowercase().as_str(),
-                    "window" | "toplevel"
-                )
-            });
+        if let Some(layout) = &surface.surface_layout {
+            if !diagnose_surface_enum_values(surface, layout, diagnostics) {
+                continue;
+            }
+            let role = layout
+                .role
+                .as_deref()
+                .map(canonical_surface_role)
+                .unwrap_or(Some("layer"));
+            let is_window = role == Some("window");
+            if layout.promotable == Some(true) {
+                continue;
+            }
             let (rejected, role_name) = if is_window {
                 (layout.layer_only_fields(), "window")
             } else {
@@ -456,6 +466,66 @@ fn diagnose_frontend_surfaces(
             });
         }
     }
+}
+
+fn diagnose_surface_enum_values(
+    surface: &ContributedFrontendSurface,
+    layout: &SurfaceLayoutSection,
+    diagnostics: &mut Vec<ModuleGraphDiagnostic>,
+) -> bool {
+    let enum_fields = [
+        (
+            "role",
+            layout.role.as_deref(),
+            canonical_surface_role as fn(&str) -> Option<&'static str>,
+            SURFACE_ROLE_VALUES,
+        ),
+        (
+            "decorations",
+            layout.decorations.as_deref(),
+            canonical_window_decorations,
+            WINDOW_DECORATIONS_VALUES,
+        ),
+        (
+            "anchor",
+            layout.anchor.as_deref(),
+            canonical_surface_edge,
+            SURFACE_EDGE_VALUES,
+        ),
+        (
+            "layer",
+            layout.layer.as_deref(),
+            canonical_surface_layer,
+            SURFACE_LAYER_VALUES,
+        ),
+        (
+            "keyboard_mode",
+            layout.keyboard_mode.as_deref(),
+            canonical_keyboard_mode,
+            KEYBOARD_MODE_VALUES,
+        ),
+    ];
+    let mut valid = true;
+    for (field, value, parser, allowed) in enum_fields {
+        let Some(value) = value else {
+            continue;
+        };
+        if parser(value).is_some() {
+            continue;
+        }
+        valid = false;
+        diagnostics.push(ModuleGraphDiagnostic {
+            module_id: surface.module_id.clone(),
+            contribution_id: Some(surface.source.scoped_id.clone()),
+            status: "invalid_surface_enum".into(),
+            message: format!(
+                "frontend module {} has invalid mesh.surface.{field} value {value:?}; expected one of: {}",
+                surface.module_id,
+                allowed.join(", ")
+            ),
+        });
+    }
+    valid
 }
 
 fn diagnose_required_binaries(

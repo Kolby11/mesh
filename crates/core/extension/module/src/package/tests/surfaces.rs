@@ -171,3 +171,103 @@ fn graph_diagnostics_accept_both_roles_fields_on_a_promotable_surface() {
         "the same manifest without `promotable` is still a contradiction"
     );
 }
+
+#[test]
+fn graph_diagnostics_validate_each_surface_enum_with_canonical_values() {
+    let cases = [
+        (
+            "role",
+            crate::manifest::SurfaceLayoutSection {
+                role: Some("windwo".into()),
+                ..Default::default()
+            },
+        ),
+        (
+            "decorations",
+            crate::manifest::SurfaceLayoutSection {
+                decorations: Some("native".into()),
+                ..Default::default()
+            },
+        ),
+        (
+            "anchor",
+            crate::manifest::SurfaceLayoutSection {
+                anchor: Some("centre".into()),
+                ..Default::default()
+            },
+        ),
+        (
+            "layer",
+            crate::manifest::SurfaceLayoutSection {
+                layer: Some("front".into()),
+                ..Default::default()
+            },
+        ),
+        (
+            "keyboard_mode",
+            crate::manifest::SurfaceLayoutSection {
+                keyboard_mode: Some("when_needed".into()),
+                ..Default::default()
+            },
+        ),
+    ];
+
+    for (field, layout) in cases {
+        let root = root_with_modules(&[("@mesh/surface", ModuleKind::Frontend)], &[], None);
+        let mut frontend = loaded_module(
+            "@mesh/surface",
+            ModuleKind::Frontend,
+            MeshDependencies::default(),
+            vec![],
+            MeshContributes::default(),
+        );
+        frontend.manifest.mesh.entrypoints.main = Some("src/main.mesh".into());
+        declare_frontend_surface_contract(&mut frontend);
+        frontend.manifest.mesh.surface_layout = Some(layout);
+
+        let graph = InstalledModuleGraph::from_parts(root, vec![frontend]).unwrap();
+        let diagnostic = graph
+            .diagnostics()
+            .iter()
+            .find(|diagnostic| diagnostic.status == "invalid_surface_enum")
+            .unwrap_or_else(|| panic!("missing invalid enum diagnostic for {field}"));
+        assert!(
+            diagnostic
+                .message
+                .contains(&format!("mesh.surface.{field}"))
+        );
+        assert!(diagnostic.message.contains("expected one of"));
+    }
+}
+
+#[test]
+fn graph_diagnostics_use_the_canonical_role_parser_for_aliases() {
+    let root = root_with_modules(&[("@mesh/window", ModuleKind::Frontend)], &[], None);
+    let mut frontend = loaded_module(
+        "@mesh/window",
+        ModuleKind::Frontend,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    frontend.manifest.mesh.entrypoints.main = Some("src/main.mesh".into());
+    declare_frontend_surface_contract(&mut frontend);
+    frontend.manifest.mesh.surface_layout = Some(crate::manifest::SurfaceLayoutSection {
+        role: Some(" TOPLEVEL ".into()),
+        anchor: Some("right".into()),
+        ..Default::default()
+    });
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![frontend]).unwrap();
+
+    assert!(graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.status == "surface_role_field_mismatch"
+            && diagnostic.message.contains("role \"window\"")
+    }));
+    assert!(
+        !graph
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.status == "invalid_surface_enum")
+    );
+}

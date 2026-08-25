@@ -172,6 +172,10 @@ Author-declared `promotable` now gates settings, IPC, and live surface role
 changes through one shared role-transition authorization policy; the
 author-only capability is excluded from user schemas and config ejection.
 
+Manifest surface enums now use one canonical parser set across graph
+diagnostics, settings, and runtime layout resolution; invalid values and
+role-specific field contradictions are reported before runtime policy is used.
+
 ## Blocked / open follow-ups
 
 - Live multi-output membership and compositor conformance matrix (deferred,

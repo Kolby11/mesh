@@ -477,23 +477,23 @@ pub const fn keyboard_mode_name(mode: KeyboardMode) -> &'static str {
 }
 
 pub fn parse_surface_role(value: &str) -> Option<SurfaceRole> {
-    match value.trim().to_ascii_lowercase().as_str() {
+    match mesh_core_module::manifest::canonical_surface_role(value)? {
         "layer" => Some(SurfaceRole::Layer),
-        "window" | "toplevel" => Some(SurfaceRole::Window),
+        "window" => Some(SurfaceRole::Window),
         _ => None,
     }
 }
 
 pub fn parse_window_decorations(value: &str) -> Option<WindowDecorations> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "client" | "client_side" | "csd" => Some(WindowDecorations::Client),
-        "server" | "server_side" | "ssd" => Some(WindowDecorations::Server),
+    match mesh_core_module::manifest::canonical_window_decorations(value)? {
+        "client" => Some(WindowDecorations::Client),
+        "server" => Some(WindowDecorations::Server),
         _ => None,
     }
 }
 
 pub fn parse_surface_edge(value: &str) -> Option<Edge> {
-    match value.trim().to_ascii_lowercase().as_str() {
+    match mesh_core_module::manifest::canonical_surface_edge(value)? {
         "top" => Some(Edge::Top),
         "bottom" => Some(Edge::Bottom),
         "left" => Some(Edge::Left),
@@ -503,7 +503,7 @@ pub fn parse_surface_edge(value: &str) -> Option<Edge> {
 }
 
 pub fn parse_surface_layer(value: &str) -> Option<Layer> {
-    match value.trim().to_ascii_lowercase().as_str() {
+    match mesh_core_module::manifest::canonical_surface_layer(value)? {
         "background" => Some(Layer::Background),
         "bottom" => Some(Layer::Bottom),
         "top" => Some(Layer::Top),
@@ -513,10 +513,10 @@ pub fn parse_surface_layer(value: &str) -> Option<Layer> {
 }
 
 pub fn parse_keyboard_mode(value: &str) -> Option<KeyboardMode> {
-    match value.trim().to_ascii_lowercase().as_str() {
+    match mesh_core_module::manifest::canonical_keyboard_mode(value)? {
         "none" => Some(KeyboardMode::None),
         "exclusive" => Some(KeyboardMode::Exclusive),
-        "on_demand" | "ondemand" | "on-demand" => Some(KeyboardMode::OnDemand),
+        "on_demand" => Some(KeyboardMode::OnDemand),
         _ => None,
     }
 }
@@ -527,35 +527,10 @@ pub fn parse_keyboard_mode(value: &str) -> Option<KeyboardMode> {
 // `*_is_listed` guards turn adding a variant into a compile error until its
 // value list is updated, so a new variant cannot go missing from a diagnostic.
 
-pub const SURFACE_ROLE_VALUES: &[&str] = &[
-    surface_role_name(SurfaceRole::Layer),
-    surface_role_name(SurfaceRole::Window),
-];
-
-pub const WINDOW_DECORATIONS_VALUES: &[&str] = &[
-    window_decorations_name(WindowDecorations::Client),
-    window_decorations_name(WindowDecorations::Server),
-];
-
-pub const SURFACE_EDGE_VALUES: &[&str] = &[
-    surface_edge_name(Edge::Top),
-    surface_edge_name(Edge::Bottom),
-    surface_edge_name(Edge::Left),
-    surface_edge_name(Edge::Right),
-];
-
-pub const SURFACE_LAYER_VALUES: &[&str] = &[
-    surface_layer_name(Layer::Background),
-    surface_layer_name(Layer::Bottom),
-    surface_layer_name(Layer::Top),
-    surface_layer_name(Layer::Overlay),
-];
-
-pub const KEYBOARD_MODE_VALUES: &[&str] = &[
-    keyboard_mode_name(KeyboardMode::None),
-    keyboard_mode_name(KeyboardMode::Exclusive),
-    keyboard_mode_name(KeyboardMode::OnDemand),
-];
+pub use mesh_core_module::manifest::{
+    KEYBOARD_MODE_VALUES, SURFACE_EDGE_VALUES, SURFACE_LAYER_VALUES, SURFACE_ROLE_VALUES,
+    WINDOW_DECORATIONS_VALUES,
+};
 
 const fn surface_role_is_listed(role: SurfaceRole) -> bool {
     match role {
@@ -596,19 +571,19 @@ const _: () = assert!(
 );
 
 fn canonical_surface_role(value: &str) -> Option<&'static str> {
-    parse_surface_role(value).map(surface_role_name)
+    mesh_core_module::manifest::canonical_surface_role(value)
 }
 fn canonical_window_decorations(value: &str) -> Option<&'static str> {
-    parse_window_decorations(value).map(window_decorations_name)
+    mesh_core_module::manifest::canonical_window_decorations(value)
 }
 fn canonical_surface_edge(value: &str) -> Option<&'static str> {
-    parse_surface_edge(value).map(surface_edge_name)
+    mesh_core_module::manifest::canonical_surface_edge(value)
 }
 fn canonical_surface_layer(value: &str) -> Option<&'static str> {
-    parse_surface_layer(value).map(surface_layer_name)
+    mesh_core_module::manifest::canonical_surface_layer(value)
 }
 fn canonical_keyboard_mode(value: &str) -> Option<&'static str> {
-    parse_keyboard_mode(value).map(keyboard_mode_name)
+    mesh_core_module::manifest::canonical_keyboard_mode(value)
 }
 
 /// One entry per user-overridable field [`resolve_frontend_module_settings`]
