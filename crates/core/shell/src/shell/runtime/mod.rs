@@ -185,8 +185,15 @@ impl Shell {
     }
 
     pub(in crate::shell) fn components_have_ready_render_work(&self) -> bool {
+        let resource_revision = mesh_core_resources::resource_revision();
         self.components.iter().any(|runtime| {
-            if !runtime.component.wants_render() {
+            let resource_revision_changed = runtime.targets().any(|target| {
+                self.surface_is_effectively_visible(target.surface_id.as_str())
+                    && target
+                        .last_paint_resource_revision
+                        .is_some_and(|seen| seen != resource_revision)
+            });
+            if !runtime.component.wants_render() && !resource_revision_changed {
                 return false;
             }
             // A component drives its parent surface plus any child popups from

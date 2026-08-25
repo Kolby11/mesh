@@ -59,7 +59,12 @@ pub(super) struct SurfaceTarget {
     pub(super) popover_relationship: Option<PopoverSurfaceRelationship>,
     /// Last size handed to `configure_popup`; used to skip redundant calls.
     pub(super) last_popup_size: Option<(u32, u32)>,
-    pub(super) last_region_state: Option<(u64, Option<(u32, u32)>, Option<(u32, u32)>)>,
+    pub(super) last_region_state: Option<(u64, u64, Option<(u32, u32)>, Option<(u32, u32)>)>,
+    /// Resource revision used by the pixels most recently painted into this
+    /// target's buffer. It is separate from compositor region state because a
+    /// resource replacement can require a new raster even when the tree and
+    /// region geometry are unchanged.
+    pub(super) last_paint_resource_revision: Option<u64>,
 }
 
 impl SurfaceTarget {
@@ -77,6 +82,7 @@ impl SurfaceTarget {
             popover_relationship: None,
             last_popup_size: None,
             last_region_state: None,
+            last_paint_resource_revision: None,
         }
     }
 }

@@ -187,6 +187,9 @@ impl DisplayBatchBarrier {
 #[derive(Debug)]
 pub struct RetainedDisplayList {
     pub(super) generation: u64,
+    /// Resource/catalog revision used to build the retained commands and
+    /// entries. A resource change can alter pixels without changing the tree.
+    pub(super) resource_revision: u64,
     /// Policy requested for the next command-stream build.
     pub(super) backdrop_blur_policy: BackdropBlurPolicy,
     /// Policy used by the currently retained command stream.
@@ -234,6 +237,7 @@ impl Default for RetainedDisplayList {
     fn default() -> Self {
         Self {
             generation: 0,
+            resource_revision: mesh_core_resources::resource_revision(),
             backdrop_blur_policy: BackdropBlurPolicy::CompositorRegion,
             built_backdrop_blur_policy: BackdropBlurPolicy::CompositorRegion,
             retained_tree_generation: None,

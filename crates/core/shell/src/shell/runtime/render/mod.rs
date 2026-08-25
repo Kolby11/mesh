@@ -104,6 +104,15 @@ impl Shell {
                     }
                 }
             }
+            let resource_revision = mesh_core_resources::resource_revision();
+            let resource_revision_changed = self.components[index].targets().any(|target| {
+                target
+                    .last_paint_resource_revision
+                    .is_some_and(|seen| seen != resource_revision)
+            });
+            if resource_revision_changed {
+                self.components[index].component.request_paint();
+            }
             if !self.components[index].component.wants_render() {
                 continue;
             }
@@ -659,6 +668,8 @@ impl Shell {
                         scale,
                     )
                     .map_err(ShellRunError::Component)?;
+                runtime.parent.last_paint_resource_revision =
+                    Some(mesh_core_resources::resource_revision());
                 component_stage_records.extend(runtime.component.take_profiling_records());
 
                 // When popup creation was deferred to measure the content, the
@@ -956,7 +967,12 @@ impl Shell {
             let generation = self.components[index].component.display_list_generation();
             let surface_size = self.components[index].target(target).known_surface_size;
             let content_size = self.components[index].component.content_input_size();
-            let region_state = (generation, surface_size, content_size);
+            let region_state = (
+                generation,
+                mesh_core_resources::resource_revision(),
+                surface_size,
+                content_size,
+            );
             if self.components[index].target(target).last_region_state != Some(region_state) {
                 let commands = self.components[index]
                     .component

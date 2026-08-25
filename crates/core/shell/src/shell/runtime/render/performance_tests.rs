@@ -14,6 +14,8 @@ fn child_paint_cache_requires_every_raster_input_to_match() {
             Some(7),
             exiting,
             Some(false),
+            7,
+            Some(7),
             scale,
             Some(1.0_f32.to_bits()),
             offset,
@@ -26,6 +28,18 @@ fn child_paint_cache_requires_every_raster_input_to_match() {
     assert!(!matches(Some(7), true, 1.0_f32.to_bits(), (4, 4)));
     assert!(!matches(Some(7), false, 2.0_f32.to_bits(), (4, 4)));
     assert!(!matches(Some(7), false, 1.0_f32.to_bits(), (8, 4)));
+    assert!(!child_surface_paint_cache_matches(
+        Some(7),
+        Some(7),
+        false,
+        Some(false),
+        8,
+        Some(7),
+        1.0_f32.to_bits(),
+        Some(1.0_f32.to_bits()),
+        (4, 4),
+        Some((4, 4)),
+    ));
 }
 
 // cargo test -p mesh-core-shell --release -- cached_child_paint_generation_beats_eager_buffer_clear --ignored --nocapture
@@ -49,6 +63,8 @@ fn cached_child_paint_generation_beats_eager_buffer_clear() {
             black_box(Some(7)),
             black_box(false),
             black_box(Some(false)),
+            black_box(7),
+            black_box(Some(7)),
             black_box(1.0_f32.to_bits()),
             black_box(Some(1.0_f32.to_bits())),
             black_box((4, 4)),

@@ -548,6 +548,7 @@ impl Shell {
             .component
             .child_surface_paint_generation(&node_key);
         let child_target = &self.components[index].children[child_index].target;
+        let resource_revision = mesh_core_resources::resource_revision();
         let has_pending_present =
             !child_target.pending_present_damage.is_empty() || child_target.force_full_present;
         if !has_pending_present
@@ -556,6 +557,8 @@ impl Shell {
                 self.components[index].children[child_index].last_paint_generation,
                 exiting,
                 self.components[index].children[child_index].last_paint_exiting,
+                resource_revision,
+                child_target.last_paint_resource_revision,
                 scale.to_bits(),
                 self.components[index].children[child_index].last_paint_scale_bits,
                 content_offset,
@@ -584,6 +587,9 @@ impl Shell {
             .component
             .child_surface_present_damage(&node_key);
         self.components[index].children[child_index].last_paint_generation = paint_generation;
+        self.components[index].children[child_index]
+            .target
+            .last_paint_resource_revision = Some(resource_revision);
         self.components[index].children[child_index].last_paint_exiting = Some(exiting);
         self.components[index].children[child_index].last_paint_scale_bits = Some(scale.to_bits());
         self.components[index].children[child_index].last_paint_content_offset =
@@ -680,6 +686,8 @@ pub(super) fn child_surface_paint_cache_matches(
     cached_generation: Option<u64>,
     exiting: bool,
     cached_exiting: Option<bool>,
+    resource_revision: u64,
+    cached_resource_revision: Option<u64>,
     scale_bits: u32,
     cached_scale_bits: Option<u32>,
     content_offset: (u32, u32),
@@ -688,6 +696,7 @@ pub(super) fn child_surface_paint_cache_matches(
     generation.is_some()
         && cached_generation == generation
         && cached_exiting == Some(exiting)
+        && cached_resource_revision == Some(resource_revision)
         && cached_scale_bits == Some(scale_bits)
         && cached_content_offset == Some(content_offset)
 }

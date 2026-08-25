@@ -27,6 +27,56 @@ fn display_list_reuses_unchanged_entries() {
 }
 
 #[test]
+fn resource_revision_forces_retained_present_damage_without_tree_changes() {
+    let root = node(1, "box", 0.0, 0.0, 100.0, 40.0);
+    let mut list = RetainedDisplayList::default();
+
+    list.update_for_retained_generation(
+        &root,
+        1,
+        RenderObjectDirtySummary {
+            inserted: 1,
+            ..Default::default()
+        },
+        &std::collections::HashSet::from([root.id]),
+        100,
+        40,
+        false,
+        true,
+    );
+    let stable = list.update_for_retained_generation(
+        &root,
+        1,
+        RenderObjectDirtySummary::default(),
+        &std::collections::HashSet::new(),
+        100,
+        40,
+        false,
+        true,
+    );
+    assert_eq!(stable.damage_area, 0);
+
+    // Model a resource replacement without advancing the process-global
+    // revision, which keeps this unit test independent from tests running in
+    // parallel that exercise the same global revision token.
+    list.resource_revision = list.resource_revision.saturating_sub(1);
+    let refreshed = list.update_for_retained_generation(
+        &root,
+        1,
+        RenderObjectDirtySummary::default(),
+        &std::collections::HashSet::new(),
+        100,
+        40,
+        false,
+        true,
+    );
+
+    assert!(refreshed.full_surface_damage);
+    assert_eq!(refreshed.damage_area, 4_000);
+    assert!(refreshed.retained_generation > stable.retained_generation);
+}
+
+#[test]
 fn display_list_effect_rebuilds_when_background_paint_changes() {
     let mut root = node(1, "box", 0.0, 0.0, 100.0, 40.0);
     let mut list = RetainedDisplayList::default();

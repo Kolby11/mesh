@@ -162,8 +162,8 @@ source of truth.
 
 ## Next
 
-Include resource revisions in retained-present decisions and cache invalidation
-(`docs/BACKLOG.md`).
+Move resource decode and rasterization off the frame thread through a bounded
+resource broker (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

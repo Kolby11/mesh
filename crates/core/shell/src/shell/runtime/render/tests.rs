@@ -34,6 +34,7 @@ fn make_cmd(x: f32, y: f32, width: f32, height: f32, blur_radius: f32) -> Displa
             },
             ancestor_clips: Vec::new().into(),
             style: DisplayPaintStyle {
+                resource_revision: mesh_core_resources::resource_revision(),
                 background_color: Color {
                     r: 0,
                     g: 0,
@@ -62,10 +63,14 @@ fn make_cmd(x: f32, y: f32, width: f32, height: f32, blur_radius: f32) -> Displa
                 font_size: 16.0,
                 font_weight: 400,
                 font_style: FontStyle::Normal,
+                letter_spacing: 0.0,
                 line_height: 1.0,
                 text_align: TextAlign::Left,
                 text_overflow: TextOverflow::Clip,
                 text_direction: TextDirection::default(),
+                white_space: mesh_core_elements::style::WhiteSpace::default(),
+                language: Arc::from(""),
+                shaping_features: Arc::from(""),
                 opacity: 1.0,
                 box_shadow: BoxShadow::default(),
                 filter: VisualFilter::NONE,

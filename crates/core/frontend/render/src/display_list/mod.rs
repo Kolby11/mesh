@@ -221,6 +221,8 @@ impl RetainedDisplayList {
             width: surface_width.max(1),
             height: surface_height.max(1),
         };
+        let resource_revision = mesh_core_resources::resource_revision();
+        let resource_revision_changed = self.resource_revision != resource_revision;
         let paint_origin = (offset_x.to_bits(), offset_y.to_bits());
         let caller_lineage_valid = match retained_tree_generation {
             Some(generation) if self.retained_tree_generation == Some(generation) => {
@@ -237,6 +239,7 @@ impl RetainedDisplayList {
             && self.surface_size == Some((surface.width, surface.height))
             && self.paint_origin == paint_origin
             && self.built_backdrop_blur_policy == self.backdrop_blur_policy
+            && !resource_revision_changed
         {
             return self.update_metrics_without_rebuild(
                 surface,
@@ -255,7 +258,8 @@ impl RetainedDisplayList {
             && self.surface_size == Some((surface.width, surface.height))
             && self.paint_origin == paint_origin
             && dirty_summary_preserves_blur_metadata(dirty_summary);
-        let patch_sparse_entries = !caller_lineage_changed
+        let patch_sparse_entries = !resource_revision_changed
+            && !caller_lineage_changed
             && (!cfg!(debug_assertions) || cfg!(test))
             && self.can_patch_sparse_entries(
                 root,
@@ -282,6 +286,7 @@ impl RetainedDisplayList {
             && self.paint_origin == paint_origin
             && self.entries == next
             && !policy_changed
+            && !resource_revision_changed
             && !dirty_summary.any()
         {
             next.clear();
@@ -297,7 +302,7 @@ impl RetainedDisplayList {
             );
         }
         let origin_changed = self.paint_origin != paint_origin;
-        let decision = if policy_changed {
+        let decision = if resource_revision_changed || policy_changed {
             LocalReuseDecision::FallbackFull { broad_dirty: false }
         } else if origin_changed {
             LocalReuseDecision::FallbackFull { broad_dirty: false }
@@ -412,7 +417,8 @@ impl RetainedDisplayList {
         // A text change can share a frame with a visibility annotation the
         // summary does not classify as primitive; the command count catches
         // that topology change before blur regions are preserved.
-        let can_reuse_blur_metadata = blur_metadata_reuse_candidate
+        let can_reuse_blur_metadata = !resource_revision_changed
+            && blur_metadata_reuse_candidate
             && removed == 0
             && self.paint_commands.len() == paint_commands.len()
             && !policy_changed;
@@ -427,8 +433,10 @@ impl RetainedDisplayList {
             )
         });
 
-        let full_surface_damage =
-            policy_changed || force_full_damage || damage.is_none() && self.entries.is_empty();
+        let full_surface_damage = resource_revision_changed
+            || policy_changed
+            || force_full_damage
+            || damage.is_none() && self.entries.is_empty();
         let damage_rect = if full_surface_damage {
             surface
         } else {
@@ -448,7 +456,13 @@ impl RetainedDisplayList {
         };
         let batch_metrics = compute_batch_metrics(&batch_entries);
 
-        if rebuilt > 0 || removed > 0 || force_full_damage || topology_changed || policy_changed {
+        if resource_revision_changed
+            || rebuilt > 0
+            || removed > 0
+            || force_full_damage
+            || topology_changed
+            || policy_changed
+        {
             self.generation = self.generation.saturating_add(1);
         }
         if patch_sparse_entries {
@@ -466,6 +480,7 @@ impl RetainedDisplayList {
         self.command_spans = command_spans;
         self.paint_commands = paint_commands;
         self.command_kinds = command_kinds;
+        self.resource_revision = resource_revision;
         self.built_backdrop_blur_policy = self.backdrop_blur_policy;
         self.layer_scopes = collect_layer_scopes(self.paint_commands.as_ref());
         self.filter_layer_regions =
