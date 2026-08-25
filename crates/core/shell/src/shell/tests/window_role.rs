@@ -173,6 +173,45 @@ fn promoting_a_surface_keeps_its_component_and_invalidates_the_cached_config() {
 }
 
 #[test]
+fn settings_role_reload_uses_the_same_transition_supervisor_as_promotion() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    shell.register_component(Box::new(
+        FocusRecordingComponent::promotable("@mesh/settings", Arc::clone(&state))
+            .with_settings_role_change(mesh_core_wayland::SurfaceRole::Window),
+    ));
+    if let Some(runtime) = shell
+        .components
+        .iter_mut()
+        .find(|runtime| runtime.surface_id == "@mesh/settings")
+    {
+        runtime.parent.known_surface_size = Some((920, 700));
+        runtime.parent.last_surface_config = Some(mesh_core_presentation::SurfaceConfig::default());
+    }
+
+    shell.apply_settings_to_components().unwrap();
+
+    assert_eq!(
+        state.lock().unwrap().applied_roles,
+        vec![mesh_core_wayland::SurfaceRole::Window]
+    );
+    let runtime = shell
+        .components
+        .iter()
+        .find(|runtime| runtime.surface_id == "@mesh/settings")
+        .expect("settings reload must keep the component runtime");
+    assert!(runtime.parent.last_surface_config.is_none());
+    assert!(runtime.parent.known_surface_size.is_none());
+    assert!(runtime.parent.force_full_present);
+    assert_eq!(
+        shell.presentation_engine.testing_destroyed_surfaces(),
+        ["@mesh/settings"]
+    );
+}
+
+#[test]
 fn toggling_a_surface_role_alternates_between_chrome_and_window() {
     let (mut shell, state) = promotable_surface_shell("@mesh/settings");
 

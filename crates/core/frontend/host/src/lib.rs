@@ -1547,6 +1547,13 @@ pub trait ShellComponent: Send {
     ) -> Result<bool, ComponentError> {
         Ok(false)
     }
+    /// Return a settings-selected role that still needs the shell's
+    /// transactional transition supervisor. Components stage this separately
+    /// from their realized role so the supervisor can tear down child
+    /// surfaces, focus state, and compositor bookkeeping atomically.
+    fn pending_surface_role_change(&self) -> Option<mesh_core_wayland::SurfaceRole> {
+        None
+    }
     /// Return the retained display list paint commands from the most recent paint,
     /// for opaque region computation.
     fn display_list_paint_commands(&self) -> &[DisplayPaintCommand] {

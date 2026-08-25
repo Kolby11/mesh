@@ -681,6 +681,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             );
             return false;
         }
+        self.pending_surface_role_change = None;
         let windowed = role == mesh_core_wayland::SurfaceRole::Window;
         self.surface_layout.role = role;
         // Leaving window role drops the compositor states with it: a layer
@@ -1328,6 +1329,15 @@ impl ShellComponent for FrontendSurfaceComponent {
             );
             next_layout.role = self.surface_layout.role;
         }
+        if next_layout.role != self.surface_layout.role {
+            self.pending_surface_role_change = Some(next_layout.role);
+            // Keep the component's realized policy aligned with the current
+            // compositor surface until the shell supervisor completes the
+            // role transition.
+            next_layout.role = self.surface_layout.role;
+        } else {
+            self.pending_surface_role_change = None;
+        }
         let layout_changed = self.surface_layout != next_layout;
         let settings_changed = self.settings_json != settings_state.effective;
 
@@ -1375,6 +1385,10 @@ impl ShellComponent for FrontendSurfaceComponent {
             self.invalidate_surface_config();
         }
         Ok(layout_changed || settings_changed)
+    }
+
+    fn pending_surface_role_change(&self) -> Option<mesh_core_wayland::SurfaceRole> {
+        self.pending_surface_role_change
     }
 
     fn reload_source(&mut self) -> Result<bool, ComponentError> {

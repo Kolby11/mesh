@@ -730,6 +730,9 @@ pub(super) struct FrontendSurfaceComponent {
     /// save, and a user fixing one of five mistakes should hear about four.
     settings_diagnostics: Vec<mesh_core_config::SettingsDiagnostic>,
     pub(super) surface_layout: SurfaceLayoutSettings,
+    /// Authorized settings role changes wait here until the shell's
+    /// transactional transition supervisor replaces the compositor surface.
+    pending_surface_role_change: Option<mesh_core_wayland::SurfaceRole>,
     /// Runtime override for `surface_layout.keyboard_mode`. Used during
     /// cross-surface Tab transfer to force `Exclusive` on the popover
     /// (compositors don't reliably switch `OnDemand` mid-flight). `None`
@@ -1195,6 +1198,7 @@ impl FrontendSurfaceComponent {
             motion_policy,
             settings_diagnostics: settings_state.diagnostics,
             surface_layout: settings_state.layout.clone(),
+            pending_surface_role_change: None,
             keyboard_mode_override: None,
             popup_promoted: false,
             frontend_catalog,

@@ -603,6 +603,8 @@ pub(super) struct FocusRecordingComponent {
     pub(super) popover_margin_left: i32,
     pub(super) role: mesh_core_wayland::SurfaceRole,
     pub(super) promotable: bool,
+    pub(super) settings_role_change: Option<mesh_core_wayland::SurfaceRole>,
+    pub(super) pending_settings_role_change: Option<mesh_core_wayland::SurfaceRole>,
     pub(super) always_render: bool,
 }
 
@@ -614,6 +616,8 @@ impl FocusRecordingComponent {
             popover_margin_left: 0,
             role: mesh_core_wayland::SurfaceRole::Layer,
             promotable: false,
+            settings_role_change: None,
+            pending_settings_role_change: None,
             always_render: false,
         }
     }
@@ -647,6 +651,14 @@ impl FocusRecordingComponent {
             always_render: true,
             ..Self::new(surface_id, state)
         }
+    }
+
+    pub(super) fn with_settings_role_change(
+        mut self,
+        role: mesh_core_wayland::SurfaceRole,
+    ) -> Self {
+        self.settings_role_change = Some(role);
+        self
     }
 }
 
@@ -767,8 +779,21 @@ impl super::types::ShellComponent for FocusRecordingComponent {
         self.promotable
     }
 
+    fn apply_settings(
+        &mut self,
+        _settings: &Arc<mesh_core_config::SettingsStore>,
+    ) -> Result<bool, super::types::ComponentError> {
+        self.pending_settings_role_change = self.settings_role_change;
+        Ok(self.settings_role_change.is_some())
+    }
+
+    fn pending_surface_role_change(&self) -> Option<mesh_core_wayland::SurfaceRole> {
+        self.pending_settings_role_change
+    }
+
     fn surface_role_changed(&mut self, role: mesh_core_wayland::SurfaceRole) -> bool {
         self.role = role;
+        self.pending_settings_role_change = None;
         self.state.lock().unwrap().applied_roles.push(role);
         true
     }

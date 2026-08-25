@@ -1817,7 +1817,7 @@ impl Shell {
     /// function owns is the shell-side bookkeeping that would otherwise describe
     /// the surface that no longer exists: the cached surface config, the cached
     /// size, and any popovers parented to the old object.
-    fn set_surface_role(
+    pub(in crate::shell) fn set_surface_role(
         &mut self,
         surface_id: SurfaceId,
         role: mesh_core_wayland::SurfaceRole,

@@ -172,6 +172,11 @@ Author-declared `promotable` now gates settings, IPC, and live surface role
 changes through one shared role-transition authorization policy; the
 author-only capability is excluded from user schemas and config ejection.
 
+Settings-driven role reloads now stage an authorized role change and route it
+through the same transactional transition supervisor as explicit promotion,
+so child surfaces, focus state, compositor objects, and cached surface state
+are invalidated together.
+
 Manifest surface enums now use one canonical parser set across graph
 diagnostics, settings, and runtime layout resolution; invalid values and
 role-specific field contradictions are reported before runtime policy is used.

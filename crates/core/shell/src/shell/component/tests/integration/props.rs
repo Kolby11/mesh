@@ -286,6 +286,35 @@ fn settings_and_direct_role_changes_cannot_bypass_the_author_promotable_guard() 
 }
 
 #[test]
+fn promotable_settings_role_changes_are_staged_until_the_shell_supervisor_runs() {
+    let mut manifest = minimal_test_manifest("@test/promotable-surface");
+    manifest.surface_layout = Some(mesh_core_module::manifest::SurfaceLayoutSection {
+        role: Some("layer".into()),
+        promotable: Some(true),
+        ..Default::default()
+    });
+    let mut component =
+        test_frontend_component_with_manifest("<template><box /></template>", manifest);
+    let reloaded = test_settings_store_with(
+        "@test/promotable-surface",
+        serde_json::json!({ "surface": { "role": "window" } }),
+    );
+
+    component.apply_settings(&reloaded).unwrap();
+
+    assert_eq!(
+        component.surface_role(),
+        mesh_core_wayland::SurfaceRole::Layer
+    );
+    assert_eq!(
+        component.pending_surface_role_change(),
+        Some(mesh_core_wayland::SurfaceRole::Window)
+    );
+    assert!(component.surface_role_changed(mesh_core_wayland::SurfaceRole::Window));
+    assert_eq!(component.pending_surface_role_change(), None);
+}
+
+#[test]
 fn settings_reload_preserves_a_higher_precedence_script_prop() {
     let mut component = test_frontend_component(PROP_WRITE_SOURCE);
     component.call_namespaced_handler("bump", &[]).unwrap();

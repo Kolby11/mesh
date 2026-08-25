@@ -655,6 +655,7 @@ impl Shell {
     /// component: they all adopt the snapshot the shell just read.
     pub(in crate::shell) fn apply_settings_to_components(&mut self) -> Result<(), ShellRunError> {
         let store = self.settings_store.clone();
+        let mut role_changes = Vec::new();
         for runtime in &mut self.components {
             let changed = runtime
                 .component
@@ -666,6 +667,15 @@ impl Shell {
                     runtime.component.id()
                 );
             }
+            if let Some(role) = runtime.component.pending_surface_role_change() {
+                role_changes.push((runtime.surface_id.clone(), role));
+            }
+        }
+        for (surface_id, role) in role_changes {
+            // Settings-selected roles use the same transactional supervisor as
+            // explicit promotion so child surfaces, focus, and cached
+            // compositor state are torn down together.
+            self.set_surface_role(surface_id, role)?;
         }
         Ok(())
     }
