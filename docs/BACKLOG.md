@@ -85,7 +85,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/13-surface-policy-and-configuration/improvements.md)
 
-- [ ] Remove or formally protect `promotable` from user-overridable/ejected settings.
 - [ ] Validate manifest surface enums and role constraints with canonical parsers before graph resolution.
 - [ ] Include blur and window decorations in semantic presentation change detection.
 - [ ] Route settings-driven role reloads through the same transactional transition supervisor as explicit promotion.

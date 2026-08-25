@@ -169,7 +169,8 @@ resolutions, PixelBuffers, and Wayland SHM pools now enforce explicit byte and
 dimension budgets with deterministic rejection or LRU eviction.
 
 Author-declared `promotable` now gates settings, IPC, and live surface role
-changes through one shared role-transition authorization policy.
+changes through one shared role-transition authorization policy; the
+author-only capability is excluded from user schemas and config ejection.
 
 ## Blocked / open follow-ups
 

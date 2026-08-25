@@ -53,7 +53,9 @@ $ mesh-shell config reset @mesh/quick-settings   # back to declared defaults
 ```
 
 Ejected values are pinned by definition — they are now user overrides, so later
-changes to the module's own defaults no longer reach them.
+changes to the module's own defaults no longer reach them. Author-only manifest
+capabilities such as `mesh.surface.promotable` remain in the module manifest and
+are not emitted into user settings.
 
 Settings are watched: editing the file re-applies theme, locale, surface
 placement, and module props to the running shell without a restart.

@@ -98,7 +98,8 @@ Rules:
   configured has no block to hand-edit. `mesh-shell config eject <module-id>`
   materializes that module's *effective* surface placement and exposed frontend
   prop values into its namespace, where they become ordinary overrides — pinned
-  from then on, like any other stored value.
+  from then on, like any other stored value. Author-only manifest capabilities,
+  such as `mesh.surface.promotable`, are never emitted into that namespace.
 - **Validated.** Every stored value is validated against the owning props
   declaration / core schema. Invalid values are rejected with a diagnostic
   naming the namespace, the key path, the value found, and what to do; the

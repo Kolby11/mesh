@@ -177,9 +177,11 @@ Fields belonging to the *other* role are a **graph diagnostic**
 both an anchor and `role: "window"` states two incompatible intents, and a
 compositor places a toplevel regardless of what the manifest asks.
 
-The user can move a surface between roles through the sparse settings store
-(`"surface": { "role": "window" }`, [08](08-settings.md)) — the author's `role`
-is a default like every other placement field.
+For a surface whose manifest declares `promotable`, the user can move it
+between roles through the sparse settings store (`"surface": { "role":
+"window" }`, [08](08-settings.md)) — the author's `role` is the startup
+default. A non-promotable surface rejects a stored role change, and the
+author-only capability is never a user setting.
 
 #### Promotable surfaces
 

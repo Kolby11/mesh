@@ -1255,7 +1255,6 @@ fn module_settings_properties() -> serde_json::Map<String, serde_json::Value> {
             "type": "object",
             "properties": {
                 "role": { "type": "string" },
-                "promotable": { "type": "boolean" },
                 "title": { "type": "string" },
                 "app_id": { "type": "string" },
                 "resizable": { "type": "boolean" },

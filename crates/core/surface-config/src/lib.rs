@@ -396,13 +396,11 @@ fn load_prop_settings(raw: &serde_json::Value) -> FrontendModulePropSettings {
 ///
 /// Round-trips through [`resolve_frontend_module_settings`], and emits
 /// role-specific fields only for the matching role so nothing inert is written.
+/// The author-only `promotable` capability is intentionally never serialized
+/// into the user settings namespace.
 pub fn surface_layout_to_json(layout: &SurfaceLayoutSettings) -> serde_json::Value {
     let mut block = serde_json::Map::new();
     block.insert("role".into(), surface_role_name(layout.role).into());
-
-    if layout.promotable {
-        block.insert("promotable".into(), true.into());
-    }
 
     if layout.role == SurfaceRole::Window || layout.promotable {
         if let Some(title) = &layout.window.title {
@@ -613,7 +611,9 @@ fn canonical_keyboard_mode(value: &str) -> Option<&'static str> {
     parse_keyboard_mode(value).map(keyboard_mode_name)
 }
 
-/// One entry per field [`resolve_frontend_module_settings`] reads.
+/// One entry per user-overridable field [`resolve_frontend_module_settings`]
+/// reads. The manifest-only `promotable` capability deliberately does not
+/// belong to this schema.
 pub const SURFACE_FIELDS: &[FieldSpec] = &[
     FieldSpec::new(
         "role",
@@ -622,7 +622,6 @@ pub const SURFACE_FIELDS: &[FieldSpec] = &[
             values: SURFACE_ROLE_VALUES,
         },
     ),
-    FieldSpec::new("promotable", FieldKind::Bool),
     FieldSpec::new("title", FieldKind::Str),
     FieldSpec::new("app_id", FieldKind::Str),
     FieldSpec::new("resizable", FieldKind::Bool),
@@ -870,11 +869,7 @@ fn report_inert_placement_fields(
     diagnostics: &mut Vec<SettingsDiagnostic>,
 ) {
     let declared = surface_layout_from_manifest(manifest);
-    let promotable = surface
-        .get("promotable")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(declared.promotable);
-    if promotable {
+    if declared.promotable {
         return;
     }
 
@@ -898,7 +893,7 @@ fn report_inert_placement_fields(
                 surface_role_name(role)
             ),
             format!(
-                "remove it, or set \"surface.promotable\" if this surface should be able to become a {}",
+                "remove it, or ask the module author to declare mesh.surface.promotable if this surface should be able to become a {}",
                 surface_role_name(other_role)
             ),
         ));
@@ -1073,6 +1068,27 @@ mod tests {
     }
 
     #[test]
+    fn promotable_is_manifest_only_for_settings_and_ejection() {
+        let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
+            promotable: Some(true),
+            ..Default::default()
+        });
+        let state = resolve_frontend_module_settings(
+            "@mesh/test",
+            serde_json::json!({ "surface": { "promotable": false } }),
+            &manifest,
+        );
+
+        assert!(state.layout.promotable);
+        let diagnostic = only(&state.diagnostics);
+        assert_eq!(diagnostic.key_path, "surface.promotable");
+        assert!(diagnostic.message.contains("unknown key"));
+
+        let ejected = surface_layout_to_json(&state.layout);
+        assert!(ejected.get("promotable").is_none());
+    }
+
+    #[test]
     fn user_settings_override_manifest_keyboard_mode_default() {
         let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
             keyboard_mode: Some("on_demand".into()),
@@ -1225,6 +1241,7 @@ mod tests {
         assert!(block.get("resizable").is_none());
         assert!(block.get("decorations").is_none());
         assert!(block.get("anchor").is_some());
+        assert!(block.get("promotable").is_none());
     }
 
     fn diagnose(

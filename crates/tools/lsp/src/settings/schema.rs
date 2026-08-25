@@ -297,7 +297,6 @@ fn doc_for(path: &str) -> &'static str {
              writes the effective placement here."
         }
         "<module>.surface.role" => "`layer` for a shell surface, `window` for an ordinary window.",
-        "<module>.surface.promotable" => "Whether the surface may be promoted to a window.",
         "<module>.surface.title" => "Window title (`role: window`).",
         "<module>.surface.app_id" => "Wayland app id (`role: window`).",
         "<module>.surface.resizable" => "Whether the window can be resized (`role: window`).",
