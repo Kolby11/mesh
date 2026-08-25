@@ -1,7 +1,7 @@
-use crate::display_list::{DisplayPaintNode, DisplayTextPaint};
+use crate::display_list::{DisplayPaintNode, DisplayPaintStyle, DisplayTextPaint};
 use mesh_core_elements::Edges;
 use mesh_core_elements::lru::LruCache;
-use mesh_core_elements::style::FontStyle;
+use mesh_core_elements::style::{FontStyle, WhiteSpace};
 use mesh_core_resources::resource_revision;
 use skia_safe::Canvas;
 use std::hash::{Hash, Hasher};
@@ -14,6 +14,21 @@ const ELLIPSIS_CACHE_CAPACITY: usize = 512;
 
 fn ellipsis_cache() -> &'static Mutex<LruCache<u64, EllipsisCacheEntry>> {
     ELLIPSIS_CACHE.get_or_init(|| Mutex::new(LruCache::new(ELLIPSIS_CACHE_CAPACITY)))
+}
+
+pub(super) fn display_text_style(style: &DisplayPaintStyle, scale: f32) -> TextPaintStyle<'_> {
+    TextPaintStyle {
+        font_family: &style.font_family,
+        font_size: style.font_size * scale,
+        font_weight: style.font_weight,
+        font_style: style.font_style,
+        letter_spacing: style.letter_spacing * scale,
+        line_height: style.line_height,
+        text_direction: style.text_direction,
+        white_space: style.white_space,
+        language: &style.language,
+        shaping_features: &style.shaping_features,
+    }
 }
 
 pub(super) trait TextRenderCache {
@@ -43,6 +58,23 @@ pub(super) trait TextRenderCache {
             font_size,
             font_weight,
             line_height,
+            max_width,
+        )
+    }
+
+    fn measure_text_style(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        max_width: Option<f32>,
+    ) -> (f32, f32) {
+        self.measure_styled_with_font_style(
+            text,
+            style.font_family,
+            style.font_size,
+            style.font_weight,
+            style.font_style,
+            style.line_height,
             max_width,
         )
     }
@@ -152,6 +184,36 @@ pub(super) trait TextRenderCache {
     }
 
     #[allow(clippy::too_many_arguments)]
+    fn render_clipped_on_canvas_with_text_style(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        align: TextAlign,
+        color: Color,
+        canvas: &Canvas,
+        x: u32,
+        y: u32,
+        clip: (u32, u32, u32, u32),
+        max_width: Option<f32>,
+    ) {
+        self.render_clipped_on_canvas_with_font_style(
+            text,
+            style.font_family,
+            style.font_size,
+            style.font_weight,
+            style.font_style,
+            style.line_height,
+            align,
+            color,
+            canvas,
+            x,
+            y,
+            clip,
+            max_width,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn selection_geometry(
         &self,
         text: &str,
@@ -192,6 +254,30 @@ pub(super) trait TextRenderCache {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn selection_geometry_with_text_style(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        align: TextAlign,
+        max_width: Option<f32>,
+        anchor: (f32, f32),
+        focus: (f32, f32),
+    ) -> Option<TextSelectionGeometry> {
+        self.selection_geometry_with_font_style(
+            text,
+            style.font_family,
+            style.font_size,
+            style.font_weight,
+            style.font_style,
+            style.line_height,
+            align,
+            max_width,
+            anchor,
+            focus,
+        )
+    }
+
     fn truncate_with_ellipsis_shaped(
         &self,
         _text: &str,
@@ -220,6 +306,23 @@ pub(super) trait TextRenderCache {
             font_size,
             font_weight,
             line_height,
+            max_width,
+        )
+    }
+
+    fn truncate_with_ellipsis_shaped_with_text_style(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        max_width: f32,
+    ) -> Option<String> {
+        self.truncate_with_ellipsis_shaped_with_font_style(
+            text,
+            style.font_family,
+            style.font_size,
+            style.font_weight,
+            style.font_style,
+            style.line_height,
             max_width,
         )
     }
@@ -268,6 +371,15 @@ impl TextRenderCache for TextRenderer {
         )
     }
 
+    fn measure_text_style(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        max_width: Option<f32>,
+    ) -> (f32, f32) {
+        TextRenderer::measure_text_style(self, text, style, max_width)
+    }
+
     #[cfg(test)]
     #[allow(dead_code)]
     fn render_clipped(
@@ -299,6 +411,23 @@ impl TextRenderCache for TextRenderer {
             y,
             clip,
             max_width,
+        );
+    }
+
+    fn render_clipped_on_canvas_with_text_style(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        align: TextAlign,
+        color: Color,
+        canvas: &Canvas,
+        x: u32,
+        y: u32,
+        clip: (u32, u32, u32, u32),
+        max_width: Option<f32>,
+    ) {
+        TextRenderer::render_clipped_on_canvas_with_text_style(
+            self, text, style, align, color, canvas, x, y, clip, max_width,
         );
     }
 
@@ -458,6 +587,20 @@ impl TextRenderCache for TextRenderer {
         )
     }
 
+    fn selection_geometry_with_text_style(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        align: TextAlign,
+        max_width: Option<f32>,
+        anchor: (f32, f32),
+        focus: (f32, f32),
+    ) -> Option<TextSelectionGeometry> {
+        TextRenderer::selection_geometry_with_text_style(
+            self, text, style, align, max_width, anchor, focus,
+        )
+    }
+
     fn truncate_with_ellipsis_shaped(
         &self,
         text: &str,
@@ -498,6 +641,15 @@ impl TextRenderCache for TextRenderer {
             line_height,
             max_width,
         )
+    }
+
+    fn truncate_with_ellipsis_shaped_with_text_style(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        max_width: f32,
+    ) -> Option<String> {
+        TextRenderer::truncate_with_ellipsis_shaped_with_text_style(self, text, style, max_width)
     }
 }
 
@@ -542,6 +694,15 @@ impl TextRenderCache for SharedTextMeasurer {
             line_height,
             max_width,
         )
+    }
+
+    fn measure_text_style(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        max_width: Option<f32>,
+    ) -> (f32, f32) {
+        SharedTextMeasurer::measure_text_style(self, text, style, max_width)
     }
 
     #[cfg(test)]
@@ -680,6 +841,23 @@ impl TextRenderCache for SharedTextMeasurer {
         );
     }
 
+    fn render_clipped_on_canvas_with_text_style(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        align: TextAlign,
+        color: Color,
+        canvas: &Canvas,
+        x: u32,
+        y: u32,
+        clip: (u32, u32, u32, u32),
+        max_width: Option<f32>,
+    ) {
+        SharedTextMeasurer::render_clipped_on_canvas_with_text_style(
+            self, text, style, align, color, canvas, x, y, clip, max_width,
+        );
+    }
+
     fn selection_geometry(
         &self,
         text: &str,
@@ -734,6 +912,20 @@ impl TextRenderCache for SharedTextMeasurer {
         )
     }
 
+    fn selection_geometry_with_text_style(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        align: TextAlign,
+        max_width: Option<f32>,
+        anchor: (f32, f32),
+        focus: (f32, f32),
+    ) -> Option<TextSelectionGeometry> {
+        SharedTextMeasurer::selection_geometry_with_text_style(
+            self, text, style, align, max_width, anchor, focus,
+        )
+    }
+
     fn truncate_with_ellipsis_shaped(
         &self,
         text: &str,
@@ -775,6 +967,17 @@ impl TextRenderCache for SharedTextMeasurer {
             max_width,
         )
     }
+
+    fn truncate_with_ellipsis_shaped_with_text_style(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        max_width: f32,
+    ) -> Option<String> {
+        SharedTextMeasurer::truncate_with_ellipsis_shaped_with_text_style(
+            self, text, style, max_width,
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -785,7 +988,12 @@ struct EllipsisCacheEntry {
     font_size: u32,
     font_weight: u16,
     font_style: FontStyle,
+    letter_spacing: u32,
     line_height: u32,
+    text_direction: TextDirection,
+    white_space: WhiteSpace,
+    language: String,
+    shaping_features: String,
     max_width: u32,
     value: String,
 }
@@ -799,7 +1007,12 @@ impl EllipsisCacheEntry {
         font_size: u32,
         font_weight: u16,
         font_style: FontStyle,
+        letter_spacing: u32,
         line_height: u32,
+        text_direction: TextDirection,
+        white_space: WhiteSpace,
+        language: &str,
+        shaping_features: &str,
         max_width: u32,
     ) -> bool {
         self.resource_revision == resource_revision
@@ -808,7 +1021,12 @@ impl EllipsisCacheEntry {
             && self.font_size == font_size
             && self.font_weight == font_weight
             && self.font_style == font_style
+            && self.letter_spacing == letter_spacing
             && self.line_height == line_height
+            && self.text_direction == text_direction
+            && self.white_space == white_space
+            && self.language == language
+            && self.shaping_features == shaping_features
             && self.max_width == max_width
     }
 }
@@ -836,21 +1054,22 @@ impl Hasher for EllipsisHasher {
 
 fn ellipsis_cache_key(
     text: &str,
-    font_family: &str,
-    font_size: u32,
-    font_weight: u16,
-    font_style: FontStyle,
-    line_height: u32,
+    style: TextPaintStyle<'_>,
     max_width: u32,
     resource_revision: u64,
 ) -> u64 {
     let mut state = EllipsisHasher::default();
     text.hash(&mut state);
-    font_family.hash(&mut state);
-    font_size.hash(&mut state);
-    font_weight.hash(&mut state);
-    font_style.hash(&mut state);
-    line_height.hash(&mut state);
+    style.font_family.hash(&mut state);
+    style.font_size.to_bits().hash(&mut state);
+    style.font_weight.hash(&mut state);
+    style.font_style.hash(&mut state);
+    style.letter_spacing.to_bits().hash(&mut state);
+    style.line_height.to_bits().hash(&mut state);
+    style.text_direction.hash(&mut state);
+    style.white_space.hash(&mut state);
+    style.language.hash(&mut state);
+    style.shaping_features.hash(&mut state);
     max_width.hash(&mut state);
     resource_revision.hash(&mut state);
     state.finish()
@@ -859,11 +1078,7 @@ fn ellipsis_cache_key(
 fn insert_ellipsis_cache_entry(
     cache_key: u64,
     text: &str,
-    font_family: &str,
-    font_size_bits: u32,
-    font_weight: u16,
-    font_style: FontStyle,
-    line_height_bits: u32,
+    style: TextPaintStyle<'_>,
     max_width_bits: u32,
     resource_revision: u64,
     value: String,
@@ -874,11 +1089,16 @@ fn insert_ellipsis_cache_entry(
             EllipsisCacheEntry {
                 resource_revision,
                 text: text.to_string(),
-                font_family: font_family.to_string(),
-                font_size: font_size_bits,
-                font_weight,
-                font_style,
-                line_height: line_height_bits,
+                font_family: style.font_family.to_string(),
+                font_size: style.font_size.to_bits(),
+                font_weight: style.font_weight,
+                font_style: style.font_style,
+                letter_spacing: style.letter_spacing.to_bits(),
+                line_height: style.line_height.to_bits(),
+                text_direction: style.text_direction,
+                white_space: style.white_space,
+                language: style.language.to_string(),
+                shaping_features: style.shaping_features.to_string(),
                 max_width: max_width_bits,
                 value,
             },
@@ -904,27 +1124,18 @@ impl FrontendRenderEngine {
 
         let tx = (x + (style.padding.left * scale) as i32).max(0) as u32;
         let inner_width = ((node.paint_width() - style.padding.horizontal()) * scale).max(0.0);
+        let text_style = display_text_style(style, scale);
 
         let display_text: std::borrow::Cow<'_, str> =
             if style.text_overflow == TextOverflow::Ellipsis && inner_width > 0.0 {
-                let (text_width, _) = self.text_renderer.measure_styled_with_font_style(
-                    &text.text,
-                    &style.font_family,
-                    style.font_size * scale,
-                    style.font_weight,
-                    style.font_style,
-                    style.line_height,
-                    None,
-                );
+                let (text_width, _) = self
+                    .text_renderer
+                    .measure_text_style(&text.text, text_style, None);
                 if text_width > inner_width {
-                    std::borrow::Cow::Owned(truncate_with_ellipsis_with_font_style(
+                    std::borrow::Cow::Owned(truncate_with_ellipsis_with_text_style(
                         &self.text_renderer,
                         &text.text,
-                        &style.font_family,
-                        style.font_size * scale,
-                        style.font_weight,
-                        style.font_style,
-                        style.line_height,
+                        text_style,
                         inner_width,
                     ))
                 } else {
@@ -941,14 +1152,10 @@ impl FrontendRenderEngine {
                 style.text_align
             };
         let render_max_width = Some(inner_width);
-        let ty = centered_text_origin_y_with_font_style(
+        let ty = centered_text_origin_y_with_text_style(
             &self.text_renderer,
             &display_text,
-            &style.font_family,
-            style.font_size * scale,
-            style.font_weight,
-            style.font_style,
-            style.line_height,
+            text_style,
             render_max_width,
             node.paint_height(),
             style.padding,
@@ -962,8 +1169,7 @@ impl FrontendRenderEngine {
             &display_text,
             effective_align,
             inner_width,
-            style.font_style,
-            scale,
+            text_style,
         ) {
             render_display_selection_highlights_in_session(
                 self,
@@ -976,8 +1182,7 @@ impl FrontendRenderEngine {
                 &display_text,
                 effective_align,
                 inner_width,
-                style.font_style,
-                scale,
+                text_style,
                 selection,
             );
             return;
@@ -986,13 +1191,9 @@ impl FrontendRenderEngine {
         // Hot path: text only. Routes glyph draws through the active
         // session canvas via the Skia glyph atlas.
         session.with_canvas(|canvas| {
-            self.text_renderer.render_clipped_on_canvas_with_font_style(
+            self.text_renderer.render_clipped_on_canvas_with_text_style(
                 &display_text,
-                &style.font_family,
-                style.font_size * scale,
-                style.font_weight,
-                style.font_style,
-                style.line_height,
+                text_style,
                 effective_align,
                 style.color,
                 canvas,
@@ -1206,6 +1407,7 @@ fn centered_text_origin_y(
     )
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 fn centered_text_origin_y_with_font_style(
     renderer: &impl TextRenderCache,
@@ -1236,6 +1438,23 @@ fn centered_text_origin_y_with_font_style(
     (y + (padding.top * scale + centered_offset).round() as i32).max(0) as u32
 }
 
+fn centered_text_origin_y_with_text_style(
+    renderer: &impl TextRenderCache,
+    text: &str,
+    style: TextPaintStyle<'_>,
+    max_width: Option<f32>,
+    layout_height: f32,
+    padding: Edges,
+    scale: f32,
+    y: i32,
+) -> u32 {
+    let inner_height = ((layout_height - padding.vertical()) * scale).max(0.0);
+    let (_, measured_height) = renderer.measure_text_style(text, style, max_width);
+    let text_height = measured_height.max((style.font_size).max(8.0));
+    let centered_offset = ((inner_height - text_height) / 2.0).max(0.0);
+    (y + (padding.top * scale + centered_offset).round() as i32).max(0) as u32
+}
+
 #[cfg(test)]
 pub(super) fn truncate_with_ellipsis(
     renderer: &impl TextRenderCache,
@@ -1246,54 +1465,51 @@ pub(super) fn truncate_with_ellipsis(
     line_height: f32,
     max_width: f32,
 ) -> String {
-    truncate_with_ellipsis_with_font_style(
+    truncate_with_ellipsis_with_text_style(
         renderer,
         text,
-        font_family,
-        font_size,
-        font_weight,
-        FontStyle::Normal,
-        line_height,
+        TextPaintStyle {
+            font_family,
+            font_size,
+            font_weight,
+            font_style: FontStyle::Normal,
+            letter_spacing: 0.0,
+            line_height,
+            text_direction: TextDirection::Ltr,
+            white_space: WhiteSpace::Normal,
+            language: "",
+            shaping_features: "",
+        },
         max_width,
     )
 }
 
-#[allow(clippy::too_many_arguments)]
-fn truncate_with_ellipsis_with_font_style(
+fn truncate_with_ellipsis_with_text_style(
     renderer: &impl TextRenderCache,
     text: &str,
-    font_family: &str,
-    font_size: f32,
-    font_weight: u16,
-    font_style: FontStyle,
-    line_height: f32,
+    style: TextPaintStyle<'_>,
     max_width: f32,
 ) -> String {
-    let font_size_bits = font_size.to_bits();
-    let line_height_bits = line_height.to_bits();
+    let font_size_bits = style.font_size.to_bits();
     let max_width_bits = max_width.to_bits();
     let resource_revision = resource_revision();
-    let cache_key = ellipsis_cache_key(
-        text,
-        font_family,
-        font_size_bits,
-        font_weight,
-        font_style,
-        line_height_bits,
-        max_width_bits,
-        resource_revision,
-    );
+    let cache_key = ellipsis_cache_key(text, style, max_width_bits, resource_revision);
     let cache = ellipsis_cache();
     if let Ok(mut guard) = cache.lock()
         && let Some(cached) = guard.get(&cache_key)
         && cached.matches(
             resource_revision,
             text,
-            font_family,
+            style.font_family,
             font_size_bits,
-            font_weight,
-            font_style,
-            line_height_bits,
+            style.font_weight,
+            style.font_style,
+            style.letter_spacing.to_bits(),
+            style.line_height.to_bits(),
+            style.text_direction,
+            style.white_space,
+            style.language,
+            style.shaping_features,
             max_width_bits,
         )
     {
@@ -1301,15 +1517,7 @@ fn truncate_with_ellipsis_with_font_style(
     }
 
     const ELLIPSIS: &str = "…";
-    let (ellipsis_width, _) = renderer.measure_styled_with_font_style(
-        ELLIPSIS,
-        font_family,
-        font_size,
-        font_weight,
-        font_style,
-        line_height,
-        None,
-    );
+    let (ellipsis_width, _) = renderer.measure_text_style(ELLIPSIS, style, None);
     let target = (max_width - ellipsis_width).max(0.0);
     let char_count = text.chars().count();
 
@@ -1317,23 +1525,13 @@ fn truncate_with_ellipsis_with_font_style(
         return ELLIPSIS.to_string();
     }
 
-    if let Some(output) = renderer.truncate_with_ellipsis_shaped_with_font_style(
-        text,
-        font_family,
-        font_size,
-        font_weight,
-        font_style,
-        line_height,
-        max_width,
-    ) {
+    if let Some(output) =
+        renderer.truncate_with_ellipsis_shaped_with_text_style(text, style, max_width)
+    {
         insert_ellipsis_cache_entry(
             cache_key,
             text,
-            font_family,
-            font_size_bits,
-            font_weight,
-            font_style,
-            line_height_bits,
+            style,
             max_width_bits,
             resource_revision,
             output.clone(),
@@ -1349,15 +1547,7 @@ fn truncate_with_ellipsis_with_font_style(
         let mid = (low + high) / 2;
         let split = boundaries[mid];
         let truncated = &text[..split];
-        let (width, _) = renderer.measure_styled_with_font_style(
-            truncated,
-            font_family,
-            font_size,
-            font_weight,
-            font_style,
-            line_height,
-            None,
-        );
+        let (width, _) = renderer.measure_text_style(truncated, style, None);
         if width <= target {
             low = mid + 1;
         } else {
@@ -1373,11 +1563,7 @@ fn truncate_with_ellipsis_with_font_style(
     insert_ellipsis_cache_entry(
         cache_key,
         text,
-        font_family,
-        font_size_bits,
-        font_weight,
-        font_style,
-        line_height_bits,
+        style,
         max_width_bits,
         resource_revision,
         output.clone(),
@@ -1391,8 +1577,7 @@ fn selection_geometry_for_display(
     display_text: &str,
     align: TextAlign,
     inner_width: f32,
-    font_style: FontStyle,
-    scale: f32,
+    text_style: TextPaintStyle<'_>,
 ) -> Option<(TextSelectionGeometry, Color, Color)> {
     let style = &node.style;
     if display_text.is_empty()
@@ -1408,13 +1593,9 @@ fn selection_geometry_for_display(
         _ => return None,
     };
 
-    let geometry = renderer.selection_geometry_with_font_style(
+    let geometry = renderer.selection_geometry_with_text_style(
         display_text,
-        &style.font_family,
-        style.font_size * scale,
-        style.font_weight,
-        font_style,
-        style.line_height,
+        text_style,
         align,
         Some(inner_width),
         (
@@ -1537,21 +1718,16 @@ fn render_display_selection_highlights_in_session(
     display_text: &str,
     align: TextAlign,
     inner_width: f32,
-    font_style: FontStyle,
-    scale: f32,
+    text_style: TextPaintStyle<'_>,
     selection: (TextSelectionGeometry, Color, Color),
 ) {
     let style = &node.style;
     let (selection_geometry, selection_background, selection_foreground) = selection;
 
     session.with_canvas(|canvas| {
-        renderer.render_clipped_on_canvas_with_font_style(
+        renderer.render_clipped_on_canvas_with_text_style(
             display_text,
-            &style.font_family,
-            style.font_size * scale,
-            style.font_weight,
-            font_style,
-            style.line_height,
+            text_style,
             align,
             style.color,
             canvas,
@@ -1577,13 +1753,9 @@ fn render_display_selection_highlights_in_session(
             highlight_clip,
         );
         session.with_canvas(|canvas| {
-            renderer.render_clipped_on_canvas_with_font_style(
+            renderer.render_clipped_on_canvas_with_text_style(
                 display_text,
-                &style.font_family,
-                style.font_size * scale,
-                style.font_weight,
-                font_style,
-                style.line_height,
+                text_style,
                 align,
                 selection_foreground,
                 canvas,

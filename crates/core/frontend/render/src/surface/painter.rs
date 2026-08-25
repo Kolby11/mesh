@@ -8,7 +8,9 @@ use std::cell::{Cell, RefCell};
 use std::sync::Mutex;
 
 use super::icon;
-use super::text::{SharedTextMeasurer, TextCacheMetrics, TextRenderer, TextSelectionGeometry};
+use super::text::{
+    SharedTextMeasurer, TextCacheMetrics, TextPaintStyle, TextRenderer, TextSelectionGeometry,
+};
 use super::{PixelBuffer, PixelCanvasSession};
 pub use backend::{BlurQuality, MAX_BLUR_PASSES};
 #[allow(unused_imports)]

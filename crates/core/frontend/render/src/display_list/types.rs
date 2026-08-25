@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use mesh_core_elements::style::{
     BackgroundPaint, BlendMode, Color, Corners, Edges, FontStyle, Overflow, TextAlign,
-    TextDirection, TextOverflow,
+    TextDirection, TextOverflow, WhiteSpace,
 };
 use mesh_core_elements::{AffineClip, AffineTransform, BoxShadow, VisualFilter};
 use mesh_core_elements::{LayoutRect, NodeId};
@@ -302,6 +302,7 @@ impl DisplayPaintNode {
 
 #[derive(Debug, Clone)]
 pub struct DisplayPaintStyle {
+    pub resource_revision: u64,
     pub background_color: Color,
     pub background_paint: BackgroundPaint,
     pub border_color: Color,
@@ -315,10 +316,14 @@ pub struct DisplayPaintStyle {
     pub font_size: f32,
     pub font_weight: u16,
     pub font_style: FontStyle,
+    pub letter_spacing: f32,
     pub line_height: f32,
     pub text_align: TextAlign,
     pub text_overflow: TextOverflow,
     pub text_direction: TextDirection,
+    pub white_space: WhiteSpace,
+    pub language: Arc<str>,
+    pub shaping_features: Arc<str>,
     pub opacity: f32,
     pub box_shadow: BoxShadow,
     pub filter: VisualFilter,

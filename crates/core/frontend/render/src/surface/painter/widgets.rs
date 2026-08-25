@@ -1,3 +1,4 @@
+use super::text::display_text_style;
 use crate::display_list::{
     DisplayIconPaint, DisplayInputPaint, DisplayPaintNode, DisplaySliderPaint,
 };
@@ -34,6 +35,7 @@ impl FrontendRenderEngine {
         clip: ClipRect,
     ) {
         let style = &node.style;
+        let text_style = display_text_style(style, scale);
         let display_value: Cow<'_, str> = if input.mask_text && !input.value.is_empty() {
             Cow::Owned("*".repeat(input.value.chars().count()))
         } else {
@@ -71,28 +73,18 @@ impl FrontendRenderEngine {
         let tx = (x + (style.padding.left * scale) as i32).max(0) as u32;
         let inner_height =
             ((node.paint_height() - style.padding.vertical()) * scale).max(0.0) as i32;
-        let (text_width, text_height) = self.text_renderer.measure_styled_with_font_style(
-            text,
-            &style.font_family,
-            style.font_size * scale,
-            style.font_weight,
-            style.font_style,
-            style.line_height,
-            None,
-        );
+        let (text_width, text_height) = self
+            .text_renderer
+            .measure_text_style(text, text_style, None);
         let glyph_height = text_height.max((style.font_size * scale).max(8.0)) as i32;
         let ty =
             (y + (style.padding.top * scale) as i32 + ((inner_height - glyph_height) / 2).max(0))
                 .max(0) as u32;
 
         session.with_canvas(|canvas| {
-            self.text_renderer.render_clipped_on_canvas_with_font_style(
+            self.text_renderer.render_clipped_on_canvas_with_text_style(
                 text,
-                &style.font_family,
-                style.font_size * scale,
-                style.font_weight,
-                style.font_style,
-                style.line_height,
+                text_style,
                 style.text_align,
                 text_color,
                 canvas,
@@ -105,22 +97,14 @@ impl FrontendRenderEngine {
 
         if input.focused {
             if let Some(preedit) = preedit {
-                let (prefix_width, _) = self.text_renderer.measure_styled_with_font_style(
+                let (prefix_width, _) = self.text_renderer.measure_text_style(
                     &display_text[..preedit.start],
-                    &style.font_family,
-                    style.font_size * scale,
-                    style.font_weight,
-                    style.font_style,
-                    style.line_height,
+                    text_style,
                     None,
                 );
-                let (preedit_width, _) = self.text_renderer.measure_styled_with_font_style(
+                let (preedit_width, _) = self.text_renderer.measure_text_style(
                     &display_text[preedit.start..preedit.end],
-                    &style.font_family,
-                    style.font_size * scale,
-                    style.font_weight,
-                    style.font_style,
-                    style.line_height,
+                    text_style,
                     None,
                 );
                 let underline_rect = ClipRect {
@@ -142,15 +126,7 @@ impl FrontendRenderEngine {
             let caret_width = preedit
                 .map(|preedit| {
                     self.text_renderer
-                        .measure_styled_with_font_style(
-                            &display_text[..preedit.cursor_end],
-                            &style.font_family,
-                            style.font_size * scale,
-                            style.font_weight,
-                            style.font_style,
-                            style.line_height,
-                            None,
-                        )
+                        .measure_text_style(&display_text[..preedit.cursor_end], text_style, None)
                         .0
                 })
                 .unwrap_or(text_width);

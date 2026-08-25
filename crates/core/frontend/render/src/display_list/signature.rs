@@ -272,6 +272,10 @@ pub(super) fn hash_batch_material(
         }
         DisplayPrimitiveSlot::Icon => {
             hash_color(node.computed_style.color, hasher);
+            node.computed_style.font_family.hash(hasher);
+            node.computed_style.font_size.to_bits().hash(hasher);
+            node.computed_style.font_weight.hash(hasher);
+            std::mem::discriminant(&node.computed_style.font_style).hash(hasher);
             node.computed_style.icon_fill.map(f32::to_bits).hash(hasher);
             node.computed_style
                 .icon_weight
@@ -285,6 +289,7 @@ pub(super) fn hash_batch_material(
                 .icon_optical_size
                 .map(f32::to_bits)
                 .hash(hasher);
+            mesh_core_resources::resource_revision().hash(hasher);
         }
         DisplayPrimitiveSlot::Generic => {
             hash_generic_batch_material(node, hasher);
@@ -309,8 +314,14 @@ pub(super) fn hash_text_batch_material(node: &WidgetNode, hasher: &mut DisplaySi
     node.computed_style.font_size.to_bits().hash(hasher);
     node.computed_style.font_weight.hash(hasher);
     std::mem::discriminant(&node.computed_style.font_style).hash(hasher);
+    node.computed_style.letter_spacing.to_bits().hash(hasher);
     node.computed_style.line_height.to_bits().hash(hasher);
     std::mem::discriminant(&node.computed_style.text_align).hash(hasher);
+    std::mem::discriminant(&node.computed_style.text_direction).hash(hasher);
+    std::mem::discriminant(&node.computed_style.white_space).hash(hasher);
+    node.attributes.get("lang").hash(hasher);
+    node.attributes.get("font-features").hash(hasher);
+    mesh_core_resources::resource_revision().hash(hasher);
 }
 
 pub(super) fn hash_color(color: Color, hasher: &mut DisplaySignatureHasher) {

@@ -162,8 +162,8 @@ source of truth.
 
 ## Next
 
-Include font/resource revisions in text style painting and all glyph/font/text
-cache keys (`docs/BACKLOG.md`).
+Make backdrop blur an explicit renderer/backend capability with validated
+fallback behavior (`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

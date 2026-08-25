@@ -64,6 +64,7 @@ pub(super) fn build_paint_node_with_previous_transform_and_clips(
             // Opacity is applied once when the whole node subtree is
             // composited. Keeping primitive colors untouched is important for
             // overlapping descendants and for non-solid paint payloads.
+            resource_revision: mesh_core_resources::resource_revision(),
             background_color: node.computed_style.background_color,
             background_paint: node.computed_style.background_paint.clone(),
             border_color: node.computed_style.border_color,
@@ -77,10 +78,22 @@ pub(super) fn build_paint_node_with_previous_transform_and_clips(
             font_size: node.computed_style.font_size,
             font_weight: node.computed_style.font_weight,
             font_style: node.computed_style.font_style,
+            letter_spacing: node.computed_style.letter_spacing,
             line_height: node.computed_style.line_height,
             text_align: node.computed_style.text_align,
             text_overflow: node.computed_style.text_overflow,
             text_direction: node.computed_style.text_direction,
+            white_space: node.computed_style.white_space,
+            language: node
+                .attributes
+                .get("lang")
+                .map(|value| Arc::from(value.as_str()))
+                .unwrap_or_default(),
+            shaping_features: node
+                .attributes
+                .get("font-features")
+                .map(|value| Arc::from(value.as_str()))
+                .unwrap_or_default(),
             opacity,
             box_shadow: node.computed_style.box_shadow,
             filter: node.computed_style.filter,

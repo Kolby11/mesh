@@ -81,7 +81,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/12-rendering-and-paint/improvements.md)
 
-- [ ] Include font/resource revisions in text style painting and all glyph/font/text cache keys.
 - [ ] Make backdrop blur an explicit renderer/backend capability with validated fallback behavior.
 - [ ] Use one fractional-scale rounding policy across layout, buffer, paint, copy, and protocol damage.
 - [ ] Preserve release batch/barrier metrics in diagnostics and debug telemetry.

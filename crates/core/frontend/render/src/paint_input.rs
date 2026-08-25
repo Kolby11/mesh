@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use mesh_core_elements::WidgetNode;
 use mesh_core_elements::style::{BackgroundPaint, ComputedStyle, Visibility};
+use mesh_core_resources::resource_revision;
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -12,6 +13,7 @@ const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 /// value visible to both contracts instead of maintaining two field lists.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PaintInput {
+    pub(crate) resource_revision: u64,
     pub(crate) material: u64,
     pub(crate) primitive: u64,
     pub(crate) text: TextPaintInput,
@@ -39,6 +41,7 @@ impl PaintInput {
     pub(crate) fn for_node(node: &WidgetNode, previous: Option<&Self>) -> Self {
         let previous_text = previous.map(|input| &input.text);
         Self {
+            resource_revision: resource_revision(),
             material: hash_material(&node.computed_style),
             primitive: hash_primitive(node),
             text: text_input(node, previous_text),
@@ -51,6 +54,7 @@ impl PaintInput {
     pub(crate) fn signature_for_slot(&self, slot: PaintPrimitiveSlot) -> u64 {
         let mut hasher = PaintInputHasher::default();
         slot.hash(&mut hasher);
+        self.resource_revision.hash(&mut hasher);
         self.material.hash(&mut hasher);
         self.primitive.hash(&mut hasher);
         self.text.signature.hash(&mut hasher);
@@ -163,6 +167,7 @@ fn text_input(node: &WidgetNode, previous: Option<&TextPaintInput>) -> TextPaint
             &mut hasher,
         );
     }
+    hash_attributes(node, &["lang", "font-features"], &mut hasher);
     hash_color(node.computed_style.color, &mut hasher);
     node.computed_style.font_family.hash(&mut hasher);
     node.computed_style.font_size.to_bits().hash(&mut hasher);

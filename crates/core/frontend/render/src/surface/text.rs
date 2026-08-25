@@ -32,6 +32,12 @@ const GLYPH_ATLAS_MAX_BYTES: usize = 8 * 1024 * 1024;
 const MAX_GLYPH_ATLAS_DIMENSION: u32 = 4096;
 const NAMED_FONT_AVAILABILITY_CACHE_CAPACITY: usize = 128;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct NamedFontAvailabilityKey {
+    family: String,
+    resource_revision: u64,
+}
+
 struct GlyphAtlasEntry {
     image: skia_safe::Image,
     placement_left: i32,
@@ -54,7 +60,7 @@ thread_local! {
     /// spaces) so we skip the swash lookup next time.
     static GLYPH_ATLAS: RefCell<ByteLruCache<GlyphAtlasKey, Option<GlyphAtlasEntry>>> =
         RefCell::new(ByteLruCache::new(GLYPH_ATLAS_CAPACITY, GLYPH_ATLAS_MAX_BYTES));
-    static NAMED_FONT_AVAILABILITY: RefCell<HashMap<String, bool>> =
+    static NAMED_FONT_AVAILABILITY: RefCell<HashMap<NamedFontAvailabilityKey, bool>> =
         RefCell::new(HashMap::new());
 }
 
@@ -79,6 +85,44 @@ thread_local! {
 }
 
 pub struct SharedTextMeasurer;
+
+/// The complete text style carried from display-list paint into shaping.
+/// Keeping this as one record prevents a paint caller from accidentally
+/// measuring or rendering with a subset of the style that identifies its
+/// cached layout.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TextPaintStyle<'a> {
+    pub(crate) font_family: &'a str,
+    pub(crate) font_size: f32,
+    pub(crate) font_weight: u16,
+    pub(crate) font_style: FontStyle,
+    pub(crate) letter_spacing: f32,
+    pub(crate) line_height: f32,
+    pub(crate) text_direction: TextDirection,
+    pub(crate) white_space: WhiteSpace,
+    pub(crate) language: &'a str,
+    pub(crate) shaping_features: &'a str,
+}
+
+impl<'a> TextPaintStyle<'a> {
+    pub(crate) fn context(self, text: &'a str, max_width: Option<f32>) -> TextMeasureContext<'a> {
+        TextMeasureContext {
+            text,
+            font_family: self.font_family,
+            font_size: self.font_size,
+            font_weight: self.font_weight,
+            font_style: self.font_style,
+            letter_spacing: self.letter_spacing,
+            line_height: self.line_height,
+            text_direction: self.text_direction,
+            white_space: self.white_space,
+            language: self.language,
+            shaping_features: self.shaping_features,
+            max_width,
+            revisions: TextMeasureRevisions::default(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TextCacheMetrics {
@@ -153,29 +197,6 @@ struct TextLayoutParams<'a> {
 }
 
 impl<'a> TextLayoutParams<'a> {
-    fn new(
-        text: &'a str,
-        font_family: &'a str,
-        font_size: f32,
-        font_weight: u16,
-        font_style: FontStyle,
-        line_height: f32,
-        max_width: Option<f32>,
-        align: TextAlign,
-        measurer_revision: u64,
-    ) -> Self {
-        let mut context = TextMeasureContext::new(
-            text,
-            font_family,
-            font_size,
-            font_weight,
-            line_height,
-            max_width,
-        );
-        context.font_style = font_style;
-        Self::from_context(&context, align, resource_revision(), measurer_revision)
-    }
-
     fn from_context(
         context: &TextMeasureContext<'a>,
         align: TextAlign,
@@ -560,28 +581,54 @@ impl TextRenderer {
         clip: (u32, u32, u32, u32),
         max_width: Option<f32>,
     ) {
+        let style = TextPaintStyle {
+            font_family,
+            font_size,
+            font_weight,
+            font_style,
+            letter_spacing: 0.0,
+            line_height,
+            text_direction: TextDirection::Ltr,
+            white_space: WhiteSpace::Normal,
+            language: "",
+            shaping_features: "",
+        };
+        self.render_clipped_on_canvas_with_text_style(
+            text, style, align, color, canvas, x, y, clip, max_width,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn render_clipped_on_canvas_with_text_style(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        align: TextAlign,
+        color: Color,
+        canvas: &Canvas,
+        x: u32,
+        y: u32,
+        clip: (u32, u32, u32, u32),
+        max_width: Option<f32>,
+    ) {
+        let context = style.context(text, max_width);
         let mut engine = self.engine.borrow_mut();
         engine.ensure_resource_revision();
         let (_, metrics, width, text_align) = text_config(
             &engine.font_system,
-            font_family,
-            font_size,
-            font_weight,
-            font_style,
-            line_height,
-            0.0,
-            max_width,
+            context.font_family,
+            context.font_size,
+            context.font_weight,
+            context.font_style,
+            context.line_height,
+            context.letter_spacing,
+            context.max_width,
             align,
         );
-        let params = TextLayoutParams::new(
-            text,
-            font_family,
-            font_size,
-            font_weight,
-            font_style,
-            line_height,
-            max_width,
+        let params = TextLayoutParams::from_context(
+            &context,
             align,
+            engine.resource_revision,
             engine.measurer_revision,
         );
         let cosmic = engine.take_layout(&params, metrics, width, text_align);
@@ -660,6 +707,16 @@ impl TextRenderer {
         self.measure_text_context(&context)
     }
 
+    pub(crate) fn measure_text_style(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        max_width: Option<f32>,
+    ) -> (f32, f32) {
+        let context = style.context(text, max_width);
+        self.measure_text_context(&context)
+    }
+
     pub fn measure_text_context(&self, context: &TextMeasureContext<'_>) -> (f32, f32) {
         let mut engine = self.engine.borrow_mut();
         engine.ensure_resource_revision();
@@ -730,35 +787,53 @@ impl TextRenderer {
         line_height: f32,
         max_width: f32,
     ) -> Option<String> {
+        let style = TextPaintStyle {
+            font_family,
+            font_size,
+            font_weight,
+            font_style,
+            letter_spacing: 0.0,
+            line_height,
+            text_direction: TextDirection::Ltr,
+            white_space: WhiteSpace::Normal,
+            language: "",
+            shaping_features: "",
+        };
+        self.truncate_with_ellipsis_shaped_with_text_style(text, style, max_width)
+    }
+
+    pub(crate) fn truncate_with_ellipsis_shaped_with_text_style(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        max_width: f32,
+    ) -> Option<String> {
         if text.is_empty() || text.contains('\n') {
             return None;
         }
 
         const ELLIPSIS: &str = "…";
+        let ellipsis_context = style.context(ELLIPSIS, None);
+        let text_context = style.context(text, None);
 
         let mut engine = self.engine.borrow_mut();
         engine.ensure_resource_revision();
         let (_, metrics, width, align) = text_config(
             &engine.font_system,
-            font_family,
-            font_size,
-            font_weight,
-            font_style,
-            line_height,
-            0.0,
+            style.font_family,
+            style.font_size,
+            style.font_weight,
+            style.font_style,
+            style.line_height,
+            style.letter_spacing,
             None,
             TextAlign::Left,
         );
 
-        let ellipsis_params = TextLayoutParams::new(
-            ELLIPSIS,
-            font_family,
-            font_size,
-            font_weight,
-            font_style,
-            line_height,
-            None,
+        let ellipsis_params = TextLayoutParams::from_context(
+            &ellipsis_context,
             TextAlign::Left,
+            engine.resource_revision,
             engine.measurer_revision,
         );
         let mut ellipsis_layout = engine.take_layout(&ellipsis_params, metrics, width, align);
@@ -772,15 +847,10 @@ impl TextRenderer {
         engine.store_layout(&ellipsis_params, ellipsis_layout);
 
         let target = (max_width - ellipsis_width).max(0.0);
-        let params = TextLayoutParams::new(
-            text,
-            font_family,
-            font_size,
-            font_weight,
-            font_style,
-            line_height,
-            None,
+        let params = TextLayoutParams::from_context(
+            &text_context,
             TextAlign::Left,
+            engine.resource_revision,
             engine.measurer_revision,
         );
         let mut cosmic = engine.take_layout(&params, metrics, width, align);
@@ -852,28 +922,49 @@ impl TextRenderer {
         anchor: (f32, f32),
         focus: (f32, f32),
     ) -> Option<TextSelectionGeometry> {
+        let style = TextPaintStyle {
+            font_family,
+            font_size,
+            font_weight,
+            font_style,
+            letter_spacing: 0.0,
+            line_height,
+            text_direction: TextDirection::Ltr,
+            white_space: WhiteSpace::Normal,
+            language: "",
+            shaping_features: "",
+        };
+        self.selection_geometry_with_text_style(text, style, align, max_width, anchor, focus)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn selection_geometry_with_text_style(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        align: TextAlign,
+        max_width: Option<f32>,
+        anchor: (f32, f32),
+        focus: (f32, f32),
+    ) -> Option<TextSelectionGeometry> {
+        let context = style.context(text, max_width);
         let mut engine = self.engine.borrow_mut();
         engine.ensure_resource_revision();
         let (_, metrics, width, text_align) = text_config(
             &engine.font_system,
-            font_family,
-            font_size,
-            font_weight,
-            font_style,
-            line_height,
-            0.0,
-            max_width,
+            context.font_family,
+            context.font_size,
+            context.font_weight,
+            context.font_style,
+            context.line_height,
+            context.letter_spacing,
+            context.max_width,
             align,
         );
-        let params = TextLayoutParams::new(
-            text,
-            font_family,
-            font_size,
-            font_weight,
-            font_style,
-            line_height,
-            max_width,
+        let params = TextLayoutParams::from_context(
+            &context,
             align,
+            engine.resource_revision,
             engine.measurer_revision,
         );
         let mut cosmic = engine.take_layout(&params, metrics, width, text_align);
@@ -1275,6 +1366,15 @@ impl SharedTextMeasurer {
         })
     }
 
+    pub(crate) fn measure_text_style(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        max_width: Option<f32>,
+    ) -> (f32, f32) {
+        RENDERER.with(|renderer| renderer.borrow().measure_text_style(text, style, max_width))
+    }
+
     pub fn measure_styled_with_font_style(
         &self,
         text: &str,
@@ -1341,6 +1441,19 @@ impl SharedTextMeasurer {
                     line_height,
                     max_width,
                 )
+        })
+    }
+
+    pub(crate) fn truncate_with_ellipsis_shaped_with_text_style(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        max_width: f32,
+    ) -> Option<String> {
+        RENDERER.with(|renderer| {
+            renderer
+                .borrow()
+                .truncate_with_ellipsis_shaped_with_text_style(text, style, max_width)
         })
     }
 
@@ -1485,6 +1598,26 @@ impl SharedTextMeasurer {
     }
 
     #[allow(clippy::too_many_arguments)]
+    pub(crate) fn render_clipped_on_canvas_with_text_style(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        align: TextAlign,
+        color: Color,
+        canvas: &Canvas,
+        x: u32,
+        y: u32,
+        clip: (u32, u32, u32, u32),
+        max_width: Option<f32>,
+    ) {
+        RENDERER.with(|renderer| {
+            renderer.borrow().render_clipped_on_canvas_with_text_style(
+                text, style, align, color, canvas, x, y, clip, max_width,
+            );
+        });
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub fn selection_geometry(
         &self,
         text: &str,
@@ -1539,6 +1672,23 @@ impl SharedTextMeasurer {
                 anchor,
                 focus,
             )
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn selection_geometry_with_text_style(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        align: TextAlign,
+        max_width: Option<f32>,
+        anchor: (f32, f32),
+        focus: (f32, f32),
+    ) -> Option<TextSelectionGeometry> {
+        RENDERER.with(|renderer| {
+            renderer
+                .borrow()
+                .selection_geometry_with_text_style(text, style, align, max_width, anchor, focus)
         })
     }
 }
@@ -1675,8 +1825,12 @@ fn fallback_text_family(font_system: &FontSystem) -> Family<'static> {
 }
 
 fn named_family_is_available(font_system: &FontSystem, family: &str) -> bool {
+    let key = NamedFontAvailabilityKey {
+        family: family.to_owned(),
+        resource_revision: resource_revision(),
+    };
     NAMED_FONT_AVAILABILITY.with(|cache| {
-        if let Some(available) = cache.borrow().get(family).copied() {
+        if let Some(available) = cache.borrow().get(&key).copied() {
             return available;
         }
         let available = font_system.db().faces().any(|face| {
@@ -1688,7 +1842,7 @@ fn named_family_is_available(font_system: &FontSystem, family: &str) -> bool {
         if cache.len() == NAMED_FONT_AVAILABILITY_CACHE_CAPACITY {
             cache.clear();
         }
-        cache.insert(family.to_owned(), available);
+        cache.insert(key, available);
         available
     })
 }
@@ -2017,6 +2171,19 @@ mod tests {
         assert!(atlas.insert(base, None::<GlyphAtlasEntry>, 1));
         assert!(atlas.get(&base).is_some());
         assert!(atlas.get(&changed).is_none());
+    }
+
+    #[test]
+    fn named_font_availability_key_includes_resource_revision() {
+        let base = NamedFontAvailabilityKey {
+            family: "Inter".to_owned(),
+            resource_revision: 7,
+        };
+        let changed = NamedFontAvailabilityKey {
+            resource_revision: 8,
+            ..base.clone()
+        };
+        assert_ne!(base, changed);
     }
 
     #[test]
