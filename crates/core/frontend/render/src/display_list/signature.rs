@@ -5,6 +5,7 @@ use mesh_core_elements::BoxShadow;
 use mesh_core_elements::style::{BackgroundPaint, Color};
 use mesh_core_elements::{AffineTransform, LayoutRect, WidgetNode, node_layout_bounds};
 
+use crate::FractionalScale;
 use crate::paint_input::{PaintInput, PaintPrimitiveSlot};
 
 use super::build::*;
@@ -124,20 +125,9 @@ pub(super) fn damage_rect_for_node_with_transform(
         return None;
     }
     let layout = visual_bounds_for_node_with_transform(node, world_transform);
-    let left = layout.x;
-    let top = layout.y;
-    let right = layout.x + layout.width;
-    let bottom = layout.y + layout.height;
-    let x = left.floor().max(0.0) as u32;
-    let y = top.floor().max(0.0) as u32;
-    let right = right.ceil().max(0.0) as u32;
-    let bottom = bottom.ceil().max(0.0) as u32;
-    Some(DamageRect {
-        x,
-        y,
-        width: right.saturating_sub(x),
-        height: bottom.saturating_sub(y),
-    })
+    FractionalScale::identity()
+        .device_layout_rect(layout)
+        .to_nonnegative_damage_rect()
 }
 
 /// Return the conservative surface AABB for a node's transformed visual
@@ -421,8 +411,9 @@ pub(super) fn cached_icon_resource_opacity(
     let Some(src) = node.attributes.get("src") else {
         return crate::surface::icon::CachedResourceOpacity::Unknown;
     };
-    let width = node.layout.width.round().max(1.0) as u32;
-    let height = node.layout.height.round().max(1.0) as u32;
+    let scale = FractionalScale::identity();
+    let width = scale.physical_extent_f32(node.layout.width);
+    let height = scale.physical_extent_f32(node.layout.height);
     crate::surface::icon::cached_file_resource_opacity(
         Path::new(src),
         width,

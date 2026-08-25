@@ -95,7 +95,16 @@ impl WaylandSurfaceBackend {
         // exposed by `surface_size_if_known`, so shell paint and presentation
         // cannot disagree about the logical destination.
         let output_size = self.output_logical_size_for_surface(surface_id);
-        let (buffer_index, copy_damage, logical_w, logical_h, physical_w, physical_h, scale) = {
+        let (
+            buffer_index,
+            copy_damage,
+            logical_w,
+            logical_h,
+            physical_w,
+            physical_h,
+            scale,
+            physical_damage,
+        ) = {
             let state = &mut self.state;
             let pool = state
                 .pool
@@ -115,14 +124,15 @@ impl WaylandSurfaceBackend {
             let physical_w = buffer.width().max(1);
             let physical_h = buffer.height().max(1);
 
-            // Damage rects arrive in logical/CSS coordinates; scale to physical
-            // before the copy so each SHM buffer can retain disjoint pending
-            // regions without expanding them into one bounding rectangle.
+            // Normalize logical damage to device-space edge coverage once. The
+            // exact physical rectangles are reused for SHM copy and protocol
+            // damage, so neither boundary can choose a different rounding rule.
+            let scale_policy = mesh_core_render::FractionalScale::new(scale);
             let mut shm_copy_damage: SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]> =
                 damage_rects
                     .iter()
                     .copied()
-                    .map(|r| scale_damage_rect_to_physical(r, scale))
+                    .filter_map(|r| scale_policy.clip_damage_rect(r, physical_w, physical_h))
                     .collect();
             if shm_copy_damage.is_empty() {
                 // If the slice is empty (shouldn't normally reach here due to
@@ -147,6 +157,7 @@ impl WaylandSurfaceBackend {
                 physical_w,
                 physical_h,
                 scale,
+                shm_copy_damage,
             )
         };
         // Stage compositor state only after a reusable SHM buffer has been
@@ -168,7 +179,7 @@ impl WaylandSurfaceBackend {
             logical_h,
             physical_w,
             physical_h,
-            damage_rects,
+            &physical_damage,
             &copy_damage,
             scale,
         ) {

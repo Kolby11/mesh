@@ -7,19 +7,9 @@ pub(super) fn scale_damage_rect_to_buffer(
     buffer_width: u32,
     buffer_height: u32,
 ) -> DamageRect {
-    let scale = scale.max(f32::EPSILON);
-    let left = (rect.x as f32 * scale).floor() as u32;
-    let top = (rect.y as f32 * scale).floor() as u32;
-    let right = (rect.x.saturating_add(rect.width) as f32 * scale).ceil() as u32;
-    let bottom = (rect.y.saturating_add(rect.height) as f32 * scale).ceil() as u32;
-    let x = left.min(buffer_width);
-    let y = top.min(buffer_height);
-    DamageRect {
-        x,
-        y,
-        width: right.min(buffer_width).saturating_sub(x),
-        height: bottom.min(buffer_height).saturating_sub(y),
-    }
+    mesh_core_render::FractionalScale::new(scale)
+        .clip_damage_rect(rect, buffer_width, buffer_height)
+        .unwrap_or_default()
 }
 
 pub(super) fn resolve_tooltip_colors(theme: &Theme) -> mesh_core_render::TooltipPaintColors {
@@ -175,8 +165,16 @@ pub(super) fn tooltip_damage_rect(
     let height = TOOLTIP_OVERLAY_HEIGHT.min(surface_height.max(1));
     let max_x = surface_width.saturating_sub(width).saturating_sub(6);
     let max_y = surface_height.saturating_sub(height).saturating_sub(6);
-    let x = ((*paint_x).round() as u32).min(max_x).max(4);
-    let y = ((*paint_y).round() as u32).min(max_y).max(4);
+    let device = mesh_core_render::FractionalScale::identity().device_layout_rect(
+        mesh_core_elements::LayoutRect {
+            x: *paint_x,
+            y: *paint_y,
+            width: width as f32,
+            height: height as f32,
+        },
+    );
+    let x = (device.x.max(0) as u32).min(max_x).max(4);
+    let y = (device.y.max(0) as u32).min(max_y).max(4);
     Some(DamageRect {
         x,
         y,
@@ -375,19 +373,15 @@ pub(super) fn visual_damage_rect_for_widget_node(
     surface: DamageRect,
 ) -> Option<DamageRect> {
     let (left, top, right, bottom) = node_visual_bounds(node)?;
-    let left = left.floor().max(0.0) as u32;
-    let top = top.floor().max(0.0) as u32;
-    let right = right.ceil().max(0.0) as u32;
-    let bottom = bottom.ceil().max(0.0) as u32;
-    clip_damage(
-        DamageRect {
+    let rect = mesh_core_render::FractionalScale::identity()
+        .device_layout_rect(mesh_core_elements::LayoutRect {
             x: left,
             y: top,
-            width: right.saturating_sub(left),
-            height: bottom.saturating_sub(top),
-        },
-        surface,
-    )
+            width: right - left,
+            height: bottom - top,
+        })
+        .to_nonnegative_damage_rect()?;
+    clip_damage(rect, surface)
 }
 
 /// Union of `node_visual_bounds` over `node` and its full subtree, in

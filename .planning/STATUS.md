@@ -162,8 +162,8 @@ source of truth.
 
 ## Next
 
-Use one fractional-scale rounding policy across layout, buffer, paint, copy,
-and protocol damage (`docs/BACKLOG.md`).
+Preserve release batch/barrier metrics in diagnostics and debug telemetry
+(`docs/BACKLOG.md`).
 
 ## Blocked / open follow-ups
 

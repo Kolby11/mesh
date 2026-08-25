@@ -294,8 +294,9 @@ fn scale_damage_rect_to_physical_never_produces_zero_dimensions() {
 
 #[test]
 fn damage_rects_remain_in_logical_space_until_present() {
-    // Proof that the render path emits logical damage rects and attach_shm_buffer
-    // scales them to physical. This is an architectural invariant test.
+    // Proof that the render path emits logical damage rects and the present
+    // boundary normalizes them to physical edge coverage once. This is an
+    // architectural invariant test.
     let logical_rects = vec![DamageRect {
         x: 0,
         y: 0,

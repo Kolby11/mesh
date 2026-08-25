@@ -593,8 +593,9 @@ impl Shell {
                     SurfaceExtent::padded(extent_content, (padded_width, padded_height))
                 };
                 (paint_width, paint_height) = paint_extent.padded;
-                let physical_w = ((paint_width as f32 * scale).ceil() as u32).max(1);
-                let physical_h = ((paint_height as f32 * scale).ceil() as u32).max(1);
+                let scale_policy = mesh_core_render::FractionalScale::new(scale);
+                let physical_w = scale_policy.physical_extent(paint_width);
+                let physical_h = scale_policy.physical_extent(paint_height);
 
                 // Cap the buffer allocation so a bad measured size cannot ask
                 // for gigabytes.
@@ -1018,7 +1019,9 @@ impl Shell {
             self.components[index].target_mut(target).force_full_present = false;
         }
         if force_full {
-            // Emit full damage in logical coordinates (attach_shm_buffer scales to physical)
+            // Emit full damage in logical coordinates; the present boundary
+            // applies the shared edge-coverage policy before copying and
+            // reporting protocol damage.
             present_damage = vec![DamageRect {
                 x: 0,
                 y: 0,

@@ -7,7 +7,7 @@ use mesh_core_elements::{
 use super::build::*;
 use super::signature::*;
 use super::types::*;
-use crate::RenderObjectDirtySummary;
+use crate::{FractionalScale, RenderObjectDirtySummary};
 
 /// Compositor blur regions read off the widget tree, not `paint_commands`: a
 /// scoped update rebuilds only the dirty subtree, so deriving from commands
@@ -91,22 +91,12 @@ pub fn backdrop_blur_regions(commands: &[DisplayPaintCommand]) -> Vec<DamageRect
     regions
 }
 
-/// Clamp a layout rect to integer `wl_region` bounds, matching the painter's
-/// ceil/floor rounding. `None` for degenerate rects.
+/// Clamp a layout rect to integer `wl_region` bounds using the shared device
+/// coverage policy. `None` for degenerate rects.
 pub(super) fn blur_bounds_from_layout(layout: LayoutRect) -> Option<DamageRect> {
-    let left = layout.x.max(0.0).ceil() as u32;
-    let top = layout.y.max(0.0).ceil() as u32;
-    let right = (layout.x + layout.width).max(0.0).floor() as u32;
-    let bottom = (layout.y + layout.height).max(0.0).floor() as u32;
-    if right <= left || bottom <= top {
-        return None;
-    }
-    Some(DamageRect {
-        x: left,
-        y: top,
-        width: right - left,
-        height: bottom - top,
-    })
+    FractionalScale::identity()
+        .device_layout_rect(layout)
+        .to_nonnegative_damage_rect()
 }
 
 /// Approximate a rounded painted shape with `wl_region` rectangles, so a fully
@@ -256,19 +246,15 @@ pub(super) fn backdrop_read_region(
     let top = layout.y - pad;
     let right = layout.x + layout.width + pad;
     let bottom = layout.y + layout.height + pad;
-    let x = left.max(0.0).floor() as u32;
-    let y = top.max(0.0).floor() as u32;
-    let right = right.max(0.0).ceil() as u32;
-    let bottom = bottom.max(0.0).ceil() as u32;
-    clip_rect(
-        DamageRect {
-            x,
-            y,
-            width: right.saturating_sub(x),
-            height: bottom.saturating_sub(y),
-        },
-        surface,
-    )
+    let rect = FractionalScale::identity()
+        .device_layout_rect(LayoutRect {
+            x: left,
+            y: top,
+            width: right - left,
+            height: bottom - top,
+        })
+        .to_nonnegative_damage_rect()?;
+    clip_rect(rect, surface)
 }
 
 /// Whether replaying this command writes pixels. Conservative: over-reporting

@@ -191,17 +191,12 @@ pub(super) fn union_damage(current: Option<DamageRect>, next: DamageRect) -> Dam
 }
 
 /// Scale a damage rect from logical (CSS) coordinates to physical (device) coordinates.
+#[cfg(test)]
 pub(super) fn scale_damage_rect_to_physical(rect: DamageRect, scale: f32) -> DamageRect {
-    let left = (rect.x as f32 * scale).floor() as u32;
-    let top = (rect.y as f32 * scale).floor() as u32;
-    let right = (rect.x.saturating_add(rect.width) as f32 * scale).ceil() as u32;
-    let bottom = (rect.y.saturating_add(rect.height) as f32 * scale).ceil() as u32;
-    DamageRect {
-        x: left,
-        y: top,
-        width: right.saturating_sub(left).max(1),
-        height: bottom.saturating_sub(top).max(1),
-    }
+    mesh_core_render::FractionalScale::new(scale)
+        .device_rect(rect)
+        .to_nonnegative_damage_rect()
+        .unwrap_or_default()
 }
 
 /// Clip a damage rect to the physical buffer bounds. Sending out-of-bounds
@@ -211,16 +206,9 @@ pub(super) fn clip_damage_rect_to_buffer(
     buffer_w: u32,
     buffer_h: u32,
 ) -> DamageRect {
-    let x = rect.x.min(buffer_w.saturating_sub(1));
-    let y = rect.y.min(buffer_h.saturating_sub(1));
-    let w = rect.width.min(buffer_w.saturating_sub(x));
-    let h = rect.height.min(buffer_h.saturating_sub(y));
-    DamageRect {
-        x,
-        y,
-        width: w.max(1),
-        height: h.max(1),
-    }
+    mesh_core_render::DeviceRect::from_damage_rect(rect)
+        .clip_to_buffer(buffer_w, buffer_h)
+        .unwrap_or_default()
 }
 
 pub(super) fn copy_bgra_damage_to_canvas(

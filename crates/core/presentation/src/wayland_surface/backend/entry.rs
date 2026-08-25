@@ -778,12 +778,13 @@ impl SurfaceEntry {
             .attach_to(wl_surface)
             .map_err(|error| PresentationError::BufferAttach(error.to_string()))?;
 
-        // Scale and clip in one pass. Keep the common <=16 rect path inline so
-        // ordinary presents avoid heap allocation entirely.
+        // The caller already normalized logical damage to device-space edge
+        // coverage. Clip that exact representation before sending it to the
+        // compositor; do not scale it again here.
         let mut clipped_damage: SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]> = damage_rects
             .iter()
-            .map(|r| scale_damage_rect_to_physical(*r, scale))
-            .map(|r| clip_damage_rect_to_buffer(r, physical_width, physical_height))
+            .map(|r| clip_damage_rect_to_buffer(*r, physical_width, physical_height))
+            .filter(|r| r.width > 0 && r.height > 0)
             .collect();
 
         // The region actually copied into THIS shm buffer (`copy_damage`, already
@@ -793,11 +794,10 @@ impl SurfaceEntry {
         // re-composites the regions we report here, so we must include the full
         // copied region — otherwise the stale pixels outside `damage_rects` keep
         // showing the previous buffer's content (the transparent rectangular cutout).
-        clipped_damage.extend(
-            copy_damage
-                .iter()
-                .map(|rect| clip_damage_rect_to_buffer(*rect, physical_width, physical_height)),
-        );
+        clipped_damage.extend(copy_damage.iter().filter_map(|rect| {
+            let clipped = clip_damage_rect_to_buffer(*rect, physical_width, physical_height);
+            (clipped.width > 0 && clipped.height > 0).then_some(clipped)
+        }));
 
         let protocol_damage =
             protocol_damage_rects(&clipped_damage, physical_width, physical_height);
@@ -810,20 +810,8 @@ impl SurfaceEntry {
             );
         }
 
-        let scale_is_integer = (scale - scale.round()).abs() < f32::EPSILON;
-        let buffer_scale = if scale_is_integer {
-            // Integer scale uses the viewport crop below when it is available.
-            scale as i32
-        } else if self.viewport.is_some() {
-            // Fractional scale WITH viewporter: set_buffer_scale to ceil(scale),
-            // then set_destination to logical dimensions so the compositor scales down.
-            scale.ceil() as i32
-        } else {
-            // Fractional scale WITHOUT viewporter: round to nearest integer and
-            // accept the slight sizing mismatch.
-            scale.round() as i32
-        }
-        .max(1);
+        let buffer_scale = mesh_core_render::FractionalScale::new(scale)
+            .protocol_buffer_scale(self.viewport.is_some());
         wl_surface.set_buffer_scale(buffer_scale);
 
         // Viewporter source coordinates apply *after* buffer scaling. Crop the

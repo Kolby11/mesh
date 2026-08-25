@@ -4,6 +4,7 @@
 /// The native overlay now only owns optional layout-bounds painting.
 use super::buffer::PixelBuffer;
 use super::painter::{ClipRect, FrontendRenderEngine};
+use crate::FractionalScale;
 use mesh_core_elements::style::Color;
 use mesh_core_elements::tree::WidgetNode;
 
@@ -191,11 +192,18 @@ impl DebugOverlay {
     ) {
         let engine = FrontendRenderEngine::new();
         let (x, y, width, height) = bounds;
+        let device =
+            FractionalScale::new(scale).device_layout_rect(mesh_core_elements::LayoutRect {
+                x,
+                y,
+                width,
+                height,
+            });
         let rect = ClipRect {
-            x: (x * scale).round() as i32,
-            y: (y * scale).round() as i32,
-            width: (width * scale).round().max(0.0) as i32,
-            height: (height * scale).round().max(0.0) as i32,
+            x: device.x,
+            y: device.y,
+            width: device.width.max(0),
+            height: device.height.max(0),
         };
         if rect.width <= 0 || rect.height <= 0 {
             return;
@@ -275,11 +283,12 @@ impl DebugOverlay {
         // Paint flashing is intentionally translucent and happens before the
         // opaque HUD card, so the counters remain legible over damaged content.
         for damage in paint_damage {
+            let device = FractionalScale::new(scale).device_rect(*damage);
             let rect = ClipRect {
-                x: (damage.x as f32 * scale).floor() as i32,
-                y: (damage.y as f32 * scale).floor() as i32,
-                width: (damage.width as f32 * scale).ceil().max(1.0) as i32,
-                height: (damage.height as f32 * scale).ceil().max(1.0) as i32,
+                x: device.x,
+                y: device.y,
+                width: device.width.max(0),
+                height: device.height.max(0),
             };
             let thickness = scale.round().max(1.0) as i32;
             for edge in [

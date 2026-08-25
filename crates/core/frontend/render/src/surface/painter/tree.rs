@@ -11,6 +11,7 @@ use smallvec::SmallVec;
 
 use super::*;
 use crate::surface::{PaintCommandAttribution, PaintCommandClass};
+use crate::{DeviceRect, FractionalScale};
 
 impl FrontendRenderEngine {
     pub fn render_tree(&self, root: &WidgetNode, buffer: &mut PixelBuffer, scale: f32) {
@@ -1245,12 +1246,14 @@ fn requires_affine_paint(node: &DisplayPaintNode) -> bool {
 }
 
 fn scaled_display_local_bounds(node: &DisplayPaintNode, scale: f32) -> ClipRect {
-    ClipRect {
-        x: 0,
-        y: 0,
-        width: (node.local_layout.width * scale).round().max(0.0) as i32,
-        height: (node.local_layout.height * scale).round().max(0.0) as i32,
-    }
+    device_rect_to_clip(FractionalScale::new(scale).device_layout_rect(
+        mesh_core_elements::LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: node.local_layout.width,
+            height: node.local_layout.height,
+        },
+    ))
 }
 
 fn local_clip_for(transform: AffineTransform, scale: f32, clip: ClipRect) -> ClipRect {
@@ -1269,32 +1272,29 @@ fn local_clip_for(transform: AffineTransform, scale: f32, clip: ClipRect) -> Cli
         width: clip.width.max(0) as f32,
         height: clip.height.max(0) as f32,
     });
-    let left = local.x.floor();
-    let top = local.y.floor();
-    let right = (local.x + local.width).ceil();
-    let bottom = (local.y + local.height).ceil();
-    ClipRect {
-        x: left as i32,
-        y: top as i32,
-        width: (right - left).max(0.0) as i32,
-        height: (bottom - top).max(0.0) as i32,
-    }
+    device_rect_to_clip(FractionalScale::identity().device_layout_rect(local))
 }
 
 fn scaled_display_node_bounds(node: &DisplayPaintNode, scale: f32) -> ClipRect {
-    ClipRect {
-        x: (node.layout.x * scale).round() as i32,
-        y: (node.layout.y * scale).round() as i32,
-        width: (node.layout.width * scale).round().max(0.0) as i32,
-        height: (node.layout.height * scale).round().max(0.0) as i32,
-    }
+    device_rect_to_clip(FractionalScale::new(scale).device_layout_rect(node.layout))
 }
 
 fn scaled_display_clip(clip: DisplayListClip, scale: f32) -> ClipRect {
+    device_rect_to_clip(FractionalScale::new(scale).device_layout_rect(
+        mesh_core_elements::LayoutRect {
+            x: clip.x as f32,
+            y: clip.y as f32,
+            width: clip.width.max(0) as f32,
+            height: clip.height.max(0) as f32,
+        },
+    ))
+}
+
+fn device_rect_to_clip(rect: DeviceRect) -> ClipRect {
     ClipRect {
-        x: (clip.x as f32 * scale).round() as i32,
-        y: (clip.y as f32 * scale).round() as i32,
-        width: (clip.width as f32 * scale).round().max(0.0) as i32,
-        height: (clip.height as f32 * scale).round().max(0.0) as i32,
+        x: rect.x,
+        y: rect.y,
+        width: rect.width.max(0),
+        height: rect.height.max(0),
     }
 }

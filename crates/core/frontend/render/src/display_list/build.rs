@@ -12,6 +12,7 @@ use super::paint_node::*;
 use super::signature::*;
 use super::subtree::*;
 use super::types::*;
+use crate::FractionalScale;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct DisplayListEntry {
@@ -793,12 +794,7 @@ pub(super) fn surface_clip(surface: DamageRect) -> DisplayListClip {
 }
 
 pub(super) fn node_clip_for(node: &DisplayPaintNode) -> DisplayListClip {
-    DisplayListClip {
-        x: node.layout.x.round() as i32,
-        y: node.layout.y.round() as i32,
-        width: node.layout.width.round().max(0.0) as i32,
-        height: node.layout.height.round().max(0.0) as i32,
-    }
+    layout_to_display_clip(node.layout)
 }
 
 pub(super) fn visual_clip_for(node: &DisplayPaintNode) -> DisplayListClip {
@@ -826,11 +822,16 @@ pub(super) fn visual_clip_for(node: &DisplayPaintNode) -> DisplayListClip {
         layout.width += filter_pad * 2.0;
         layout.height += filter_pad * 2.0;
     }
+    layout_to_display_clip(layout)
+}
+
+fn layout_to_display_clip(layout: LayoutRect) -> DisplayListClip {
+    let device = FractionalScale::identity().device_layout_rect(layout);
     DisplayListClip {
-        x: layout.x.floor() as i32,
-        y: layout.y.floor() as i32,
-        width: ((layout.x + layout.width).ceil() - layout.x.floor()).max(0.0) as i32,
-        height: ((layout.y + layout.height).ceil() - layout.y.floor()).max(0.0) as i32,
+        x: device.x,
+        y: device.y,
+        width: device.width.max(0),
+        height: device.height.max(0),
     }
 }
 

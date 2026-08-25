@@ -1642,8 +1642,9 @@ impl ShellComponent for FrontendSurfaceComponent {
         // promoted target owns the node's pixels and must paint its subtree.
         let mut child_root = node.clone();
         child_root.attributes.remove("hidden");
-        let logical_width = ((buffer.width() as f32) / scale.max(f32::EPSILON)).ceil() as u32;
-        let logical_height = ((buffer.height() as f32) / scale.max(f32::EPSILON)).ceil() as u32;
+        let scale_policy = mesh_core_render::FractionalScale::new(scale);
+        let logical_width = scale_policy.logical_extent(buffer.width());
+        let logical_height = scale_policy.logical_extent(buffer.height());
         let retained_generation = self
             .retained_display_list
             .subtree_generation(node.id)

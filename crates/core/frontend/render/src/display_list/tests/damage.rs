@@ -961,10 +961,10 @@ fn transformed_backdrop_regions_follow_cumulative_geometry() {
     assert_eq!(
         list.blur_regions(),
         &[DamageRect {
-            x: 30,
-            y: 10,
-            width: 20,
-            height: 40,
+            x: 29,
+            y: 9,
+            width: 21,
+            height: 41,
         }]
     );
 }

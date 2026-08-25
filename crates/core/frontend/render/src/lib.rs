@@ -1,6 +1,7 @@
 #![allow(clippy::too_many_arguments)]
 
 pub mod display_list;
+mod fractional_scale;
 pub mod library_adapters;
 mod paint_input;
 
@@ -24,6 +25,7 @@ pub use display_list::{
     DisplayListRepaintPolicy, DisplayPaintCommand, DisplayPaintCommandKind, RetainedDisplayList,
     SelectedDisplayListPaint,
 };
+pub use fractional_scale::{DeviceRect, FractionalScale};
 pub use library_adapters::{
     CURRENT_RENDERER_AUTHORITY, RendererLibraryStatus, renderer_library_rollback_authority,
     renderer_library_statuses,

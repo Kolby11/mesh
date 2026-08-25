@@ -30,8 +30,10 @@ pub(super) fn collect_child_surface_requests_with_diagnostics(
             kind: ChildSurfaceKind::Window,
             anchor_rect: bounds,
             content_size: (
-                node.layout.width.ceil().max(1.0) as u32,
-                node.layout.height.ceil().max(1.0) as u32,
+                mesh_core_render::FractionalScale::identity()
+                    .physical_extent_f32(node.layout.width),
+                mesh_core_render::FractionalScale::identity()
+                    .physical_extent_f32(node.layout.height),
             ),
             content_padding: (0, 0, 0, 0),
             placement: PopoverPlacement::default(),
@@ -88,8 +90,10 @@ pub(super) fn collect_child_surface_requests_with_diagnostics(
                 };
                 if let Some(anchor) = anchor {
                     let content = (
-                        node.layout.width.ceil().max(1.0) as u32,
-                        node.layout.height.ceil().max(1.0) as u32,
+                        mesh_core_render::FractionalScale::identity()
+                            .physical_extent_f32(node.layout.width),
+                        mesh_core_render::FractionalScale::identity()
+                            .physical_extent_f32(node.layout.height),
                     );
                     let content_padding = popover_content_padding(node);
                     requests.push(ChildSurfaceRequest {
@@ -272,10 +276,18 @@ pub(super) fn popover_is_open(node: &WidgetNode) -> bool {
 }
 
 pub(super) fn bounds_to_i32_rect(bounds: (f32, f32, f32, f32)) -> (i32, i32, i32, i32) {
-    let left = bounds.0.floor() as i32;
-    let top = bounds.1.floor() as i32;
-    let right = bounds.2.ceil() as i32;
-    let bottom = bounds.3.ceil() as i32;
+    let device = mesh_core_render::FractionalScale::identity().device_layout_rect(
+        mesh_core_elements::LayoutRect {
+            x: bounds.0,
+            y: bounds.1,
+            width: bounds.2 - bounds.0,
+            height: bounds.3 - bounds.1,
+        },
+    );
+    let left = device.x;
+    let top = device.y;
+    let right = device.right();
+    let bottom = device.bottom();
     (left, top, (right - left).max(1), (bottom - top).max(1))
 }
 

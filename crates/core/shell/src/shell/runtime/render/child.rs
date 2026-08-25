@@ -491,8 +491,9 @@ impl Shell {
 
         let scale = self.presentation_engine.surface_scale(&child_surface_id);
         let scale = if scale > 0.0 { scale } else { parent_scale };
-        let physical_w = ((width as f32 * scale).ceil() as u32).max(1);
-        let physical_h = ((height as f32 * scale).ceil() as u32).max(1);
+        let scale_policy = mesh_core_render::FractionalScale::new(scale);
+        let physical_w = scale_policy.physical_extent(width);
+        let physical_h = scale_policy.physical_extent(height);
 
         const MAX_BUFFER_BYTES: u64 = PixelBuffer::MAX_BYTES as u64;
         let requested_bytes = (physical_w as u64) * (physical_h as u64) * 4;
