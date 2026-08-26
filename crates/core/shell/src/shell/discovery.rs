@@ -1045,6 +1045,29 @@ fn builtin_state_contract(
 /// configuration. Declaring them as a contract rather than a reserved channel
 /// is what makes the settings frontend replaceable: the caller needs
 /// `service.<name>.control`, not a particular module id.
+/// Register a contract the shell itself owns.
+///
+/// `register_contract` discards compilation failures, which is survivable for a
+/// module-supplied contract but not for one compiled into the shell: a single
+/// bad field type silently removes the whole interface from the catalog, and
+/// every method on it then rejects as an unknown channel. A malformed built-in
+/// contract is a bug in this file, so say so loudly.
+fn register_builtin_contract(
+    interfaces: &mesh_core_service::InterfaceRegistry,
+    contract: mesh_core_service::InterfaceContract,
+) {
+    let interface = contract.interface.clone();
+    if let Err(error) = interfaces.try_register_contract(contract) {
+        tracing::error!(
+            "built-in interface '{interface}' was rejected and is unavailable: {error}"
+        );
+        debug_assert!(
+            false,
+            "built-in contract '{interface}' must compile: {error}"
+        );
+    }
+}
+
 fn builtin_contract(
     interface: &str,
     fields: &[(&str, &str)],
@@ -1423,7 +1446,7 @@ impl Shell {
                 ("tokens", "object?"),
                 ("provenance", "object?"),
                 ("revision", "string"),
-                ("fingerprint", "integer?"),
+                ("fingerprint", "int?"),
                 ("is_dark", "boolean"),
                 ("themes", "object[]"),
                 ("available", "string[]"),
@@ -1474,109 +1497,121 @@ impl Shell {
                 .collect(),
             },
         ];
-        interfaces.register_contract(theme_contract);
+        register_builtin_contract(&interfaces, theme_contract);
         // Locale writes stay on the `mesh.locale.set` host API, which already
         // enforces `locale.write`. A second, service-shaped way in would mean
         // two capability names for one operation.
-        interfaces.register_contract(builtin_state_contract(
-            "mesh.locale",
-            &[
-                ("current", "string"),
-                ("locale", "string"),
-                ("chain", "string[]"),
-                ("direction", "string"),
-                ("policy", "string"),
-                ("revision", "string"),
-            ],
-        ));
-        interfaces.register_contract(builtin_contract(
-            "mesh.settings",
-            &[("revision", "string"), ("namespaces", "object")],
-            &[
-                (
-                    "set_prop",
-                    &[
-                        ("module_id", "string"),
-                        ("instance_id", "string?"),
-                        ("prop", "string"),
-                        ("value", "any"),
-                    ],
-                ),
-                (
-                    "unset_prop",
-                    &[
-                        ("module_id", "string"),
-                        ("instance_id", "string?"),
-                        ("prop", "string"),
-                    ],
-                ),
-            ],
-        ));
-        interfaces.register_contract(builtin_contract(
-            "mesh.packages",
-            &[
-                ("modules", "object[]"),
-                ("providers", "object"),
-                ("profiles", "string[]"),
-                ("active_profile", "string"),
-            ],
-            &[
-                (
-                    "set_module_enabled",
-                    &[("module_id", "string"), ("enabled", "boolean")],
-                ),
-                (
-                    "set_provider",
-                    &[("interface", "string"), ("provider_id", "string")],
-                ),
-                ("switch_profile", &[("profile_id", "string")]),
-                (
-                    "install",
-                    &[
-                        ("source", "string"),
-                        ("profile_id", "string?"),
-                        ("available_only", "boolean?"),
-                        ("allow_elevated", "boolean?"),
-                        ("allow_high", "boolean?"),
-                    ],
-                ),
-                (
-                    "uninstall",
-                    &[("module_id", "string"), ("force", "boolean?")],
-                ),
-            ],
-        ));
-        interfaces.register_contract(builtin_contract(
-            "mesh.composition",
-            &[
-                ("profile_id", "string"),
-                ("generation", "string"),
-                ("roots", "object[]"),
-                ("slots", "object[]"),
-                ("palette", "object[]"),
-            ],
-            &[
-                (
-                    "apply_node_slot",
-                    &[
-                        ("profile_id", "string"),
-                        ("root_instance", "string"),
-                        ("slot", "string"),
-                        ("nodes", "object[]"),
-                        ("expected_generation", "string"),
-                    ],
-                ),
-                (
-                    "reset_node_slot",
-                    &[
-                        ("profile_id", "string"),
-                        ("root_instance", "string"),
-                        ("slot", "string"),
-                        ("expected_generation", "string"),
-                    ],
-                ),
-            ],
-        ));
+        register_builtin_contract(
+            &interfaces,
+            builtin_state_contract(
+                "mesh.locale",
+                &[
+                    ("current", "string"),
+                    ("locale", "string"),
+                    ("chain", "string[]"),
+                    ("direction", "string"),
+                    ("policy", "string"),
+                    ("revision", "string"),
+                ],
+            ),
+        );
+        register_builtin_contract(
+            &interfaces,
+            builtin_contract(
+                "mesh.settings",
+                &[("revision", "string"), ("namespaces", "object")],
+                &[
+                    (
+                        "set_prop",
+                        &[
+                            ("module_id", "string"),
+                            ("instance_id", "string?"),
+                            ("prop", "string"),
+                            ("value", "any"),
+                        ],
+                    ),
+                    (
+                        "unset_prop",
+                        &[
+                            ("module_id", "string"),
+                            ("instance_id", "string?"),
+                            ("prop", "string"),
+                        ],
+                    ),
+                ],
+            ),
+        );
+        register_builtin_contract(
+            &interfaces,
+            builtin_contract(
+                "mesh.packages",
+                &[
+                    ("modules", "object[]"),
+                    ("providers", "object"),
+                    ("profiles", "string[]"),
+                    ("active_profile", "string"),
+                ],
+                &[
+                    (
+                        "set_module_enabled",
+                        &[("module_id", "string"), ("enabled", "boolean")],
+                    ),
+                    (
+                        "set_provider",
+                        &[("interface", "string"), ("provider_id", "string")],
+                    ),
+                    ("switch_profile", &[("profile_id", "string")]),
+                    (
+                        "install",
+                        &[
+                            ("source", "string"),
+                            ("profile_id", "string?"),
+                            ("available_only", "boolean?"),
+                            ("allow_elevated", "boolean?"),
+                            ("allow_high", "boolean?"),
+                        ],
+                    ),
+                    (
+                        "uninstall",
+                        &[("module_id", "string"), ("force", "boolean?")],
+                    ),
+                ],
+            ),
+        );
+        register_builtin_contract(
+            &interfaces,
+            builtin_contract(
+                "mesh.composition",
+                &[
+                    ("profile_id", "string"),
+                    ("generation", "string"),
+                    ("roots", "object[]"),
+                    ("slots", "object[]"),
+                    ("palette", "object[]"),
+                ],
+                &[
+                    (
+                        "apply_node_slot",
+                        &[
+                            ("profile_id", "string"),
+                            ("root_instance", "string"),
+                            ("slot", "string"),
+                            ("nodes", "object[]"),
+                            ("expected_generation", "string"),
+                        ],
+                    ),
+                    (
+                        "reset_node_slot",
+                        &[
+                            ("profile_id", "string"),
+                            ("root_instance", "string"),
+                            ("slot", "string"),
+                            ("expected_generation", "string"),
+                        ],
+                    ),
+                ],
+            ),
+        );
         interfaces.register(InterfaceProvider {
             interface: mesh_core_debug::DEBUG_INTERFACE.to_string(),
             version: Some("1.0".to_string()),

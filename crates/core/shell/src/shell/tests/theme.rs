@@ -600,3 +600,71 @@ fn theme_file_recovery_syncs_mesh_theme_latest_state_and_components() {
     );
     assert_eq!(payload["is_dark"], serde_json::json!(false));
 }
+
+/// `register_contract` discards compilation failures, so one bad field type in
+/// a built-in contract removes the entire interface from the catalog without a
+/// word. `mesh.theme` declared `fingerprint` as `integer?` rather than `int?`,
+/// which left every theme method — `set_theme` among them — rejecting as an
+/// unknown channel, so no surface could change the theme.
+#[test]
+fn built_in_interfaces_compile_and_expose_their_methods() {
+    let shell = Shell::new();
+    let catalog = shell.interfaces.resolved_catalog();
+
+    for interface in [
+        "mesh.theme",
+        "mesh.locale",
+        "mesh.settings",
+        "mesh.packages",
+        "mesh.composition",
+    ] {
+        assert!(
+            catalog.resolve(interface, None).contract.is_some(),
+            "built-in interface '{interface}' is missing from the catalog, so every \
+             method on it rejects as an unknown channel"
+        );
+    }
+
+    let theme = catalog
+        .resolve("mesh.theme", None)
+        .contract
+        .expect("mesh.theme contract");
+    let methods = theme
+        .methods
+        .iter()
+        .map(|method| method.name.as_str())
+        .collect::<Vec<_>>();
+    for method in ["set_theme", "set_icon_theme", "set_font_family"] {
+        assert!(
+            methods.contains(&method),
+            "mesh.theme must expose {method}, found {methods:?}"
+        );
+    }
+}
+
+/// Live component dispatch authorizes published events against the catalog,
+/// not the shell operation registry, so this is the path that rejected every
+/// theme change with "Unknown shell channel 'mesh.theme.set_theme'".
+#[test]
+fn a_capable_module_may_publish_the_theme_service_methods() {
+    let shell = Shell::new();
+    let catalog = shell.interfaces.resolved_catalog();
+    let mut capabilities = mesh_core_capability::CapabilitySet::new();
+    capabilities.grant(mesh_core_capability::Capability::new(
+        "service.theme.control",
+    ));
+
+    let outcome = mesh_core_scripting::OperationRegistry::builtin().authorize_event_with_catalog(
+        "mesh.theme.set_theme",
+        &serde_json::json!({ "theme_id": "nord" }),
+        "@mesh/settings",
+        &capabilities,
+        &catalog,
+    );
+
+    assert!(
+        outcome.is_ok(),
+        "a module holding service.theme.control must be able to set the theme: {:?}",
+        outcome.unwrap_err()
+    );
+}

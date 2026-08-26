@@ -198,6 +198,15 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
       load external candidate contracts, align LSP/static analysis/codegen with
       the runtime ABI, and remove the unused transitional `ServiceRegistry`.
 
+## Service contracts (open)
+
+- [ ] Surface contract-compilation failures for module-supplied interfaces.
+      `InterfaceRegistry::register_contract` discards the error, so one bad
+      field type removes a whole interface from the catalog and every method on
+      it then rejects as an unknown channel. Built-in contracts now log and
+      debug-assert; graph contracts from `register_interfaces_from_graph` are
+      still dropped in silence.
+
 ## Themes
 
 - [ ] Make graph-authorized theme descriptors the only catalog/loader, with

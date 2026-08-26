@@ -4,6 +4,13 @@
 
 ## Now
 
+Theme switching works again. `mesh.theme` declared `fingerprint` as `integer?`
+where the contract vocabulary wants `int?`, the contract failed to compile, and
+`register_contract` discarded the error, so the interface was simply absent
+from the catalog and every theme method rejected as an unknown channel.
+Built-in contracts now register through a helper that logs and debug-asserts
+instead of dropping the failure.
+
 Themes ship as discoverable modules under `modules/themes` and contribute
 through `mesh.provides.themes`, so all seven reach the graph catalog and the
 Appearance page offers a real choice instead of only the active theme. The
