@@ -288,8 +288,20 @@ had frozen the shipped navigation bar a few frames after startup — hover
 restyles, service-driven icon changes, and the clock all resolved but never
 reached a buffer.
 
+The `Testing` presentation backend's deterministic protocol-state simulator
+(configure/popup failure injection, close/dismiss/connection-loss, frame
+pacing, buffer backpressure, scale/output generations, text-input-v3) was
+already complete from prior sessions. Added the missing half: a focused live
+compositor matrix (`crates/core/presentation/tests/live_compositor_matrix.rs`)
+that drives the real `WaylandSurfaceBackend` through configure/present,
+destroy-then-present, and orphan-popup rejection against whatever compositor
+is on `WAYLAND_DISPLAY`, skipping cleanly where none exists.
+
 ## Blocked / open follow-ups
 
-- Live multi-output membership and compositor conformance matrix (deferred,
-  simulator-covered only).
+- The new live compositor matrix has only been verified to compile and skip
+  cleanly; no Wayland compositor (headless or otherwise) exists in this
+  sandbox to run it for real.
+- Live multi-output membership beyond what the matrix now covers remains
+  simulator-covered only.
 - Connection recreation after a Wayland connection loss (separate follow-up).
