@@ -47,6 +47,22 @@ was added. Any additional worktree changes are preserved in a separate recovery
 commit after the backlog commit passes validation. A clean worktree is required
 unless `--allow-dirty` is explicitly supplied.
 
+## Claude Code implementation loop
+
+`./scripts/claude-backlog-runner.sh` provides the same unattended backlog loop
+for Claude Code. It uses Claude's stream JSON output and structured result
+schema, starts a fresh session for each item, and applies the same commit and
+planning-record gates:
+
+```bash
+./scripts/claude-backlog-runner.sh --once
+./scripts/claude-backlog-runner.sh --max-features 5
+```
+
+Use `CLAUDE_MODEL` to override the configured model and
+`CLAUDE_ALLOW_ALL=0` when permission bypass is not appropriate. The remaining
+options and dirty-worktree behavior mirror the Codex runner.
+
 ## Code style
 
 Rust code follows `rustfmt`. The workspace uses Rust edition 2024 and declares
