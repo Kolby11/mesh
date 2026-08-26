@@ -244,13 +244,15 @@ impl FrontendSurfaceComponent {
                     has_active_animation,
                 )
             };
+            let mut animation_is_live = false;
             if let Some(transition) = self.transitions.active_unfinished(node_id, now) {
+                animation_is_live = true;
                 *active_animation_bucket = merge_animation_bucket(
                     *active_animation_bucket,
                     active_transition_bucket(transition.source),
                 );
             }
-            self.apply_node_keyframe_animation(
+            animation_is_live |= self.apply_node_keyframe_animation(
                 node,
                 resolver,
                 theme,
@@ -259,7 +261,18 @@ impl FrontendSurfaceComponent {
                 has_active_keyframe_animation,
                 active_keyframe_bucket,
             );
-            if previous_style.is_some_and(|previous| previous != AnimatableStyle::from_node(node)) {
+            // `previous_styles` is this pass's own baseline, so it only reports
+            // a change when the pass that captured it also advanced the
+            // animation. A surface painted twice in one frame samples the same
+            // live transition again on the second pass, sees an unchanged
+            // baseline, and would leave the node out of the retained dirty
+            // roots while its resolved colors keep moving — handing the display
+            // list one retained generation for two different trees. A node
+            // whose animation is still running is dirty by definition.
+            if animation_is_live
+                || previous_style
+                    .is_some_and(|previous| previous != AnimatableStyle::from_node(node))
+            {
                 dirty_node_ids.insert(node.id);
             }
         }
@@ -325,6 +338,9 @@ impl FrontendSurfaceComponent {
         Some(previous_displayed)
     }
 
+    /// Returns whether this node still has a running, unfinished keyframe
+    /// animation, so the caller can keep it dirty for as long as it produces
+    /// new values.
     fn apply_node_keyframe_animation(
         &mut self,
         node: &mut WidgetNode,
@@ -334,7 +350,7 @@ impl FrontendSurfaceComponent {
         live_keyframe_keys: &mut HashSet<AnimationInstanceId>,
         has_active_keyframe_animation: &mut bool,
         active_keyframe_bucket: &mut AnimationPropertyBucket,
-    ) {
+    ) -> bool {
         // Apply all named keyframe animations on this node
         let animations: Vec<_> = node
             .computed_style
@@ -345,12 +361,14 @@ impl FrontendSurfaceComponent {
             .collect();
 
         if animations.is_empty() {
-            return;
+            return false;
         }
 
         let Some(_) = node.mesh_key() else {
-            return;
+            return false;
         };
+
+        let mut node_is_live = false;
 
         for (list_index, animation_style) in animations.into_iter().enumerate() {
             let animation_name = animation_style.name.clone().unwrap();
@@ -444,10 +462,13 @@ impl FrontendSurfaceComponent {
                 && !active.finished(now)
             {
                 *has_active_keyframe_animation = true;
+                node_is_live = true;
                 *active_keyframe_bucket =
                     merge_animation_bucket(*active_keyframe_bucket, keyframe_bucket);
             }
         } // end for animation_style in animations
+
+        node_is_live
     }
 
     fn animation_declaration_generation(

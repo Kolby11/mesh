@@ -83,13 +83,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/12-rendering-and-paint/improvements.md)
 
-- [ ] Advance the retained tree generation when animation sampling changes a
-      computed style. A running `background-color` transition mutates the tree
-      while `RetainedTree::generation()` stays put, so the display list is
-      handed the same generation for two different trees; only the debug-only
-      caller-lineage check forces the rebuild that keeps the frame correct, and
-      release builds have no such backstop.
-
 ### 13. Surface policy and configuration
 
 [Audit](../.planning/log/sections/13-surface-policy-and-configuration/improvements.md)

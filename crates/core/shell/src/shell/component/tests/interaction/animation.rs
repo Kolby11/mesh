@@ -784,6 +784,87 @@ fn animation_only_tick_uses_scoped_retained_fingerprinting() {
     }));
 }
 
+/// A surface can be painted twice inside one frame (the render loop re-runs a
+/// pass to honour a measured size). The animation pass compares against a
+/// baseline captured during that same pass, so on the second pass a still
+/// running animation reports no change even though the tree it is painting has
+/// moved since the retained tree last recorded it. Leaving the node out of the
+/// retained dirty roots holds the retained generation still while the tree
+/// changes, which hands the display list one generation for two different
+/// trees. A node whose animation is still running is dirty by definition.
+///
+/// The transition delay makes that pass-local "nothing changed" deterministic:
+/// the transition is unmistakably live, but its value is pinned to the start
+/// for the whole delay window.
+#[test]
+fn a_live_transition_stays_dirty_while_its_delay_pins_the_value() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(80, 40);
+    component
+        .paint(&theme, SurfaceExtent::unpadded(80, 40), &mut buffer, 1.0)
+        .unwrap();
+
+    let mut node = event_node("box", "root/0", 0.0, 0.0, 80.0, 20.0, &[]);
+    node.computed_style.transitions[0] = mesh_core_elements::TransitionStyle {
+        duration_ms: 200,
+        delay_ms: 60_000,
+        properties: mesh_core_elements::TransitionProperties {
+            background_color: true,
+            ..mesh_core_elements::TransitionProperties::none()
+        },
+        ..mesh_core_elements::TransitionStyle::default()
+    };
+    node.computed_style.background_color = mesh_core_elements::style::Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    let node_id = node.id;
+    let mut tree = root_with(vec![node]);
+    let surface_css_props = component.surface_css_props();
+
+    // First pass: the baseline differs from the node's target, so a transition
+    // starts and immediately parks on its start value for the delay window.
+    let mut baseline = crate::shell::component::animation::collect_visual_styles(&tree);
+    if let Some(style) = baseline.get_mut(&node_id) {
+        style.background_color = mesh_core_elements::style::Color {
+            r: 0,
+            g: 0,
+            b: 255,
+            a: 255,
+        };
+    }
+    component.apply_style_animations_with_previous(&mut tree, &baseline, &surface_css_props);
+
+    // What pass one left on screen: the transition's start value, pinned by the
+    // delay. This is the baseline the next pass in the same frame compares to.
+    let held = crate::shell::component::animation::collect_visual_styles(&tree);
+
+    // Every pass re-resolves the authored style before animating, so the
+    // transition target is still the authored colour rather than what pass one
+    // painted.
+    tree.children[0].computed_style.background_color = mesh_core_elements::style::Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+
+    // Second pass, the one a re-run frame performs: the delay keeps the value
+    // pinned, so nothing "changed" during this pass even though the transition
+    // is still running.
+    let dirty =
+        component.apply_style_animations_with_previous(&mut tree, &held, &surface_css_props);
+
+    assert!(
+        dirty.contains(&node_id),
+        "a running transition must keep its node in the retained dirty roots \
+         even when the pass-local baseline is unchanged"
+    );
+}
+
 #[test]
 fn smooth_scroll_animation_uses_scoped_retained_fingerprinting() {
     let mut component = test_frontend_component(

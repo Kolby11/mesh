@@ -12,11 +12,16 @@ iterations and killed `@mesh/upower-power` and `@mesh/hyprland-wm` inside
 longer reports its own `revision` stamp as an unknown key, and per-item startup
 enumeration moved to `debug`.
 
-One debug-only warning remains: the retained display list is handed the same
-generation for two different trees while a `background-color` transition
-animates, because animation sampling does not advance the retained tree
-generation. The caller-lineage check forces the correct rebuild; release builds
-have no such backstop. Tracked in the backlog under Rendering and paint.
+A node with a running animation now stays in the retained dirty roots on every
+pass. The animation pass compared against a baseline captured inside the same
+pass, so the second paint of a frame reported a still-moving node as clean and
+held the retained generation still while the tree changed — handing the display
+list one generation for two different trees. A 60-second run is now free of
+warnings and errors.
+
+Note for anyone reading test counts here: `cargo test -p mesh-core-shell` is
+flaky, giving 28-32 failures across runs of an unchanged tree. Compare failure
+sets, not counts.
 
 Development-shell startup diagnostics are clean in the code path: shipped
 frontend modules, locale imports, settings metadata, backend initialization,
