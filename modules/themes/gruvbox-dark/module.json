@@ -1,0 +1,27 @@
+{
+  "name": "@mesh/gruvbox-dark",
+  "version": "0.1.0",
+  "description": "Gruvbox Dark theme.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "theme",
+    "provides": {
+      "themes": [
+        {
+          "id": "gruvbox-dark",
+          "label": "Gruvbox Dark",
+          "modes": {
+            "dark": "theme.css"
+          },
+          "default_mode": "dark",
+          "mode_metadata": {
+            "dark": {
+              "color_scheme": "dark",
+              "contrast": "normal"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

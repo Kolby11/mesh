@@ -36,7 +36,7 @@ pub struct ModuleRegistry {
     /// Maps component tag name → module-id for modules that export a component tag.
     pub exported_tags: HashMap<String, String>,
     /// Theme ids installed on this machine, from the theme directory
-    /// (`config/themes` in a checkout, `$MESH_HOME/themes` otherwise) plus any
+    /// (`modules/themes` in a checkout, `$MESH_HOME/modules/themes` otherwise) plus any
     /// theme modules in the graph. Sorted, deduplicated.
     pub themes: Vec<String>,
     /// Locale codes some module ships a catalog for, plus the default locales
@@ -481,7 +481,7 @@ fn discover_themes(workspace_root: &Path, registry: &ModuleRegistry) -> Vec<Stri
     // A checkout being edited is not necessarily the checkout the LSP binary
     // was built from, so look next to the workspace root as well.
     ids.extend(
-        mesh_core_theme::load_themes_from_dir(&workspace_root.join("config/themes"))
+        mesh_core_theme::load_themes_from_dir(&workspace_root.join("modules/themes"))
             .into_iter()
             .map(|theme| theme.id),
     );

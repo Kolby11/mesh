@@ -4,6 +4,12 @@
 
 ## Now
 
+Themes ship as discoverable modules under `modules/themes` and contribute
+through `mesh.provides.themes`, so all seven reach the graph catalog and the
+Appearance page offers a real choice instead of only the active theme. The
+catalog resolves a bare local id (`nord`) as well as the scoped identity
+(`@mesh/nord:nord`) it keys on, so readable settings values still select.
+
 Development-shell startup is clean: no errors, no warnings, and 29 log lines
 instead of 90. The Luau sandbox charged each interpreter checkpoint as a
 thousand instructions, which capped a callback at roughly a thousand loop

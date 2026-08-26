@@ -398,3 +398,57 @@ fn shipped_module_luau_scan_cost() {
         contents.len()
     );
 }
+
+/// Every shipped theme is a discoverable module contributing through
+/// `mesh.provides.themes`. Themes that live outside a discovery root, or that
+/// declare the frontend-only `mesh.theme` section, never reach the graph's
+/// theme catalog, which leaves the settings surface offering only the theme
+/// that happens to be active.
+#[test]
+fn shipped_themes_are_discoverable_modules_that_contribute_theme_packs() {
+    let themes_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../modules/themes");
+    let mut ids = Vec::new();
+
+    for entry in fs::read_dir(&themes_dir).expect("shipped themes directory") {
+        let dir = entry.expect("theme directory entry").path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let loaded = load_module_manifest(&dir)
+            .unwrap_or_else(|error| panic!("{} must be a valid module: {error}", dir.display()));
+        assert_eq!(
+            loaded.manifest.mesh.kind,
+            ModuleKind::Theme,
+            "{} must declare mesh.kind theme",
+            dir.display()
+        );
+
+        let contributions = &loaded.manifest.mesh.contributes.themes;
+        assert_eq!(
+            contributions.len(),
+            1,
+            "{} must contribute exactly one theme pack",
+            dir.display()
+        );
+        let theme = &contributions[0];
+        assert!(
+            !theme.modes.is_empty(),
+            "theme {} must declare at least one mode",
+            theme.id
+        );
+        for path in theme.modes.values() {
+            assert!(
+                dir.join(path).exists(),
+                "theme {} names a missing stylesheet {path}",
+                theme.id
+            );
+        }
+        ids.push(theme.id.clone());
+    }
+
+    ids.sort();
+    assert!(
+        ids.len() >= 5,
+        "the shell ships a choice of themes, found only {ids:?}"
+    );
+}

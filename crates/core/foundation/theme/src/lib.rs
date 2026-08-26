@@ -851,8 +851,23 @@ impl ThemeCatalog {
         Ok(catalog)
     }
 
+    /// Resolve a theme by its scoped identity (`owner-module:local-id`), or by
+    /// a bare local id when exactly one pack claims it. Settings and
+    /// hand-written configuration name themes the readable way (`nord`), while
+    /// the scoped identity stays authoritative and is what a selection writes
+    /// back. An ambiguous local id resolves to nothing rather than guessing an
+    /// owner.
     pub fn get(&self, id: &str) -> Option<&ThemePackDescriptor> {
-        self.descriptors.get(id)
+        if let Some(descriptor) = self.descriptors.get(id) {
+            return Some(descriptor);
+        }
+
+        let mut matches = self
+            .descriptors
+            .values()
+            .filter(|descriptor| descriptor.local_id == id);
+        let first = matches.next()?;
+        matches.next().is_none().then_some(first)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &ThemePackDescriptor> {
@@ -1659,14 +1674,18 @@ pub fn theme_dir_path() -> PathBuf {
         return PathBuf::from(path);
     }
 
+    // Themes are modules like any other pack, so they live beside the other
+    // shipped module kinds rather than in the settings directory. This is the
+    // bootstrap/recovery lookup; once the installed graph is available its
+    // theme catalog is authoritative.
     let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../../..")
-        .join("config/themes");
+        .join("modules/themes");
     if repo_path.exists() {
         return repo_path;
     }
 
-    mesh_home_path().join("themes")
+    mesh_home_path().join("modules/themes")
 }
 
 pub fn theme_path_for_id(theme_id: &str) -> PathBuf {
@@ -1736,7 +1755,7 @@ fn embedded_default_theme() -> Theme {
     parse_theme_css(
         "tokyo-night",
         "Tokyo Night",
-        include_str!("../../../../../config/themes/tokyo-night/theme.css"),
+        include_str!("../../../../../modules/themes/tokyo-night/theme.css"),
     )
     .expect("embedded default theme css must be valid")
 }
@@ -1765,7 +1784,14 @@ struct ThemePackageManifest {
 
 #[derive(Debug, Deserialize)]
 struct ThemePackageMesh {
-    theme: ThemePackageTheme,
+    #[serde(default)]
+    provides: ThemePackageProvides,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ThemePackageProvides {
+    #[serde(default)]
+    themes: Vec<ThemePackageTheme>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1773,7 +1799,25 @@ struct ThemePackageTheme {
     #[serde(default)]
     id: Option<String>,
     #[serde(default)]
-    label: Option<String>,
+    label: Option<ThemePackageLabel>,
+}
+
+/// A theme label is either a literal or the manifest's translation record.
+/// Only the displayable text matters here; the locale engine owns lookup.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ThemePackageLabel {
+    Literal(String),
+    Translation { fallback: String },
+}
+
+impl ThemePackageLabel {
+    fn text(self) -> String {
+        match self {
+            Self::Literal(text) => text,
+            Self::Translation { fallback } => fallback,
+        }
+    }
 }
 
 fn parse_theme_css_file(path: &Path, content: &str) -> Result<Theme, ThemeError> {
@@ -1798,12 +1842,16 @@ fn load_theme_package_metadata(path: &Path) -> Result<(String, String), ThemeErr
             source,
         })?;
 
-    let id = manifest
-        .mesh
-        .theme
-        .id
-        .unwrap_or_else(|| manifest.name.trim_start_matches("@mesh/").to_string());
-    let name = manifest.mesh.theme.label.unwrap_or_else(|| id.clone());
+    // A theme module declares its packs under `mesh.provides.themes`. The
+    // first entry owns this directory's stylesheet; the graph descriptor
+    // remains the activation identity once it is available.
+    let contribution = manifest.mesh.provides.themes.into_iter().next();
+    let (declared_id, declared_label) = match contribution {
+        Some(theme) => (theme.id, theme.label.map(ThemePackageLabel::text)),
+        None => (None, None),
+    };
+    let id = declared_id.unwrap_or_else(|| manifest.name.trim_start_matches("@mesh/").to_string());
+    let name = declared_label.unwrap_or_else(|| id.clone());
     Ok((id, name))
 }
 
@@ -2815,6 +2863,51 @@ mod tests {
             composed.provenance_for("@mesh/weather.color.accent"),
             Some(&ThemeProvenance::UserOverride)
         );
+    }
+
+    fn catalog_descriptor(owner: &str, local: &str) -> ThemePackDescriptor {
+        ThemePackDescriptor::new(
+            format!("{owner}:{local}"),
+            owner,
+            local,
+            None,
+            format!("/modules/{owner}"),
+            [("dark".into(), "theme.css".into())],
+            None,
+        )
+        .expect("descriptor is valid")
+    }
+
+    #[test]
+    fn theme_catalog_resolves_a_bare_local_id_when_one_pack_claims_it() {
+        let catalog = ThemeCatalog::from_descriptors([catalog_descriptor("@mesh/nord", "nord")])
+            .expect("catalog is valid");
+
+        assert_eq!(
+            catalog.get("@mesh/nord:nord").map(|d| d.id.as_str()),
+            Some("@mesh/nord:nord")
+        );
+        assert_eq!(
+            catalog.get("nord").map(|d| d.id.as_str()),
+            Some("@mesh/nord:nord"),
+            "settings name themes the readable way, so a bare local id must resolve"
+        );
+        assert!(catalog.get("missing").is_none());
+    }
+
+    #[test]
+    fn theme_catalog_refuses_to_guess_an_owner_for_an_ambiguous_local_id() {
+        let catalog = ThemeCatalog::from_descriptors([
+            catalog_descriptor("@mesh/nord", "nord"),
+            catalog_descriptor("@other/pack", "nord"),
+        ])
+        .expect("catalog is valid");
+
+        assert!(
+            catalog.get("nord").is_none(),
+            "two packs claim this local id, so resolution must stay explicit"
+        );
+        assert!(catalog.get("@other/pack:nord").is_some());
     }
 
     #[test]

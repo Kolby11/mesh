@@ -1,0 +1,27 @@
+{
+  "name": "@mesh/mesh-default-light",
+  "version": "0.1.0",
+  "description": "MESH Default Light theme.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "theme",
+    "provides": {
+      "themes": [
+        {
+          "id": "mesh-default-light",
+          "label": "MESH Default Light",
+          "modes": {
+            "light": "theme.css"
+          },
+          "default_mode": "light",
+          "mode_metadata": {
+            "light": {
+              "color_scheme": "light",
+              "contrast": "normal"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
