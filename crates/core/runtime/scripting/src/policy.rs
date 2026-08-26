@@ -7,12 +7,14 @@
 use mesh_core_runtime::SandboxConfig;
 use mlua::{Compiler, Lua, VmState};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResourceKind {
     Instruction,
+    FrameTime,
     Output,
     Queue,
     Event,
@@ -24,6 +26,7 @@ impl ResourceKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Instruction => "instruction",
+            Self::FrameTime => "frame-time",
             Self::Output => "output",
             Self::Queue => "queue",
             Self::Event => "event",
@@ -60,6 +63,12 @@ struct ResourceCounters {
     active_children: AtomicU64,
     callback_depth: AtomicU32,
     remaining_instructions: AtomicU64,
+    /// `Some(t)` while the frame-time clock is running; `None` while it is
+    /// paused for a blocking host call (see [`ResourceBudget::pause_frame_clock`]).
+    frame_window_start: Mutex<Option<Instant>>,
+    /// Frame time banked from windows that already ended, in microseconds.
+    frame_accumulated_us: AtomicU64,
+    frame_pause_depth: AtomicU32,
 }
 
 impl Default for ResourceCounters {
@@ -73,6 +82,9 @@ impl Default for ResourceCounters {
             active_children: AtomicU64::new(0),
             callback_depth: AtomicU32::new(0),
             remaining_instructions: AtomicU64::new(0),
+            frame_window_start: Mutex::new(None),
+            frame_accumulated_us: AtomicU64::new(0),
+            frame_pause_depth: AtomicU32::new(0),
         }
     }
 }
@@ -127,8 +139,35 @@ impl ResourceBudget {
             self.counters
                 .remaining_instructions
                 .store(self.config.instruction_budget, Ordering::Release);
+            self.counters
+                .frame_accumulated_us
+                .store(0, Ordering::Release);
+            self.counters.frame_pause_depth.store(0, Ordering::Release);
+            *self.counters.frame_window_start.lock().unwrap() = Some(Instant::now());
         }
         ExecutionGuard {
+            budget: self.clone(),
+        }
+    }
+
+    /// Pause the frame-time clock for the duration of a blocking host
+    /// operation (for example waiting on a child process), which already has
+    /// its own timeout. `frame_budget_us` bounds the script's own CPU time
+    /// per callback, not time spent blocked on a host operation the sandbox
+    /// separately times out.
+    pub(crate) fn pause_frame_clock(&self) -> FramePause {
+        if self
+            .counters
+            .frame_pause_depth
+            .fetch_add(1, Ordering::AcqRel)
+            == 0
+            && let Some(start) = self.counters.frame_window_start.lock().unwrap().take()
+        {
+            self.counters
+                .frame_accumulated_us
+                .fetch_add(start.elapsed().as_micros() as u64, Ordering::AcqRel);
+        }
+        FramePause {
             budget: self.clone(),
         }
     }
@@ -140,6 +179,11 @@ impl ResourceBudget {
     /// exactly one unit. Charging a firing as if it stood for a thousand
     /// instructions cut the real ceiling to a thousand loop iterations per
     /// callback and killed ordinary backend startup work.
+    ///
+    /// The same checkpoint also enforces `frame_budget_us`: a script whose
+    /// loop back-edges and calls never exhaust the instruction budget can
+    /// still hold the frame far longer than one frame's CPU time, since each
+    /// checkpoint may do arbitrarily expensive work between interrupts.
     fn checkpoint(&self) -> Result<(), ResourceLimit> {
         if self.counters.callback_depth.load(Ordering::Acquire) == 0 {
             return Ok(());
@@ -156,6 +200,16 @@ impl ResourceBudget {
                 kind: ResourceKind::Instruction,
                 limit: self.config.instruction_budget,
             });
+        }
+        if let Some(start) = *self.counters.frame_window_start.lock().unwrap() {
+            let elapsed_us = self.counters.frame_accumulated_us.load(Ordering::Acquire)
+                + start.elapsed().as_micros() as u64;
+            if elapsed_us > self.config.frame_budget_us {
+                return Err(ResourceLimit {
+                    kind: ResourceKind::FrameTime,
+                    limit: self.config.frame_budget_us,
+                });
+            }
         }
         Ok(())
     }
@@ -271,6 +325,27 @@ impl ResourceBudget {
             .queued_items
             .fetch_sub(count as u64, Ordering::AcqRel);
         self.release_aggregate(count as u64);
+    }
+}
+
+/// RAII handle from [`ResourceBudget::pause_frame_clock`]. Resumes the frame
+/// clock on drop; nested pauses only resume once the outermost handle drops.
+#[derive(Debug)]
+pub(crate) struct FramePause {
+    budget: ResourceBudget,
+}
+
+impl Drop for FramePause {
+    fn drop(&mut self) {
+        if self
+            .budget
+            .counters
+            .frame_pause_depth
+            .fetch_sub(1, Ordering::AcqRel)
+            == 1
+        {
+            *self.budget.counters.frame_window_start.lock().unwrap() = Some(Instant::now());
+        }
     }
 }
 
@@ -390,7 +465,12 @@ mod tests {
     /// and aborted ordinary backend startup work.
     #[test]
     fn ordinary_loops_and_calls_fit_inside_the_default_budget() {
-        let policy = RuntimePolicy::new(SandboxConfig::default());
+        // Isolate the instruction budget from the frame-time budget: an
+        // unoptimized debug build of the interpreter can take longer than one
+        // production frame to run ten thousand iterations.
+        let mut config = SandboxConfig::default();
+        config.frame_budget_us = 1_000_000;
+        let policy = RuntimePolicy::new(config);
         let lua = Lua::new();
         policy.install(&lua).unwrap();
         let _guard = policy.begin_callback();
@@ -409,6 +489,7 @@ mod tests {
     fn the_budget_counts_one_unit_for_each_interpreter_checkpoint() {
         let mut config = SandboxConfig::default();
         config.instruction_budget = 5_000;
+        config.frame_budget_us = 1_000_000;
         let policy = RuntimePolicy::new(config);
         let lua = Lua::new();
         policy.install(&lua).unwrap();
@@ -419,6 +500,25 @@ mod tests {
             .exec()
             .expect_err("a loop past the budget still aborts");
         assert!(error.to_string().contains("instruction"));
+    }
+
+    #[test]
+    fn frame_budget_aborts_a_long_running_callback_before_the_instruction_budget() {
+        let mut config = SandboxConfig::default();
+        config.instruction_budget = u64::MAX;
+        config.frame_budget_us = 1;
+        let policy = RuntimePolicy::new(config);
+        let lua = Lua::new();
+        policy.install(&lua).unwrap();
+        let _guard = policy.begin_callback();
+
+        std::thread::sleep(Duration::from_millis(5));
+
+        let error = lua
+            .load("local total = 0 for _ = 1, 10 do total = total + 1 end")
+            .exec()
+            .expect_err("a callback that overruns the frame budget still aborts");
+        assert!(error.to_string().contains("frame-time"));
     }
 
     #[test]

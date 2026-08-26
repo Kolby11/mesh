@@ -75,10 +75,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md)
 
-- [ ] Enforce `SandboxConfig::frame_budget_us` or delete it. It is declared and
-      defaulted to 4ms but no code reads it, so the checkpoint budget is the
-      only guard against a script that runs too long without looping forever.
-
 ### 12. Rendering and paint
 
 [Audit](../.planning/log/sections/12-rendering-and-paint/improvements.md)

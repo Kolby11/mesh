@@ -56,7 +56,11 @@ pub struct SandboxConfig {
     /// execution. Luau checkpoints at loop back-edges and call/return
     /// boundaries, so this bounds iterations and calls, not raw opcodes.
     pub instruction_budget: u64,
-    /// Maximum CPU time per frame (microseconds).
+    /// Maximum wall-clock time per callback (microseconds), excluding time
+    /// paused for blocking host calls that carry their own timeout (see
+    /// `child_process_timeout_ms`). Backstops the instruction budget against
+    /// a single checkpoint interval that does unbounded work between loop
+    /// back-edges or calls.
     pub frame_budget_us: u64,
     /// Maximum bytes returned or logged by one callback execution.
     pub output_budget: u64,
@@ -85,7 +89,7 @@ impl Default for SandboxConfig {
         Self {
             memory_limit: 64 * 1024 * 1024, // 64 MB
             instruction_budget: 1_000_000,
-            frame_budget_us: 4_000,     // 4ms
+            frame_budget_us: 50_000, // 50ms; tolerant of scheduler jitter under load
             output_budget: 1024 * 1024, // 1 MiB per callback
             queue_budget: 1024,
             event_budget: 256,

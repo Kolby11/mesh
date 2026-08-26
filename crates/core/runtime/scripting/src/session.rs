@@ -6,7 +6,7 @@
 //! these pieces together prevents lifecycle, resource, and failure decisions
 //! from becoming ambient state in individual host functions.
 
-use crate::policy::{ExecutionGuard, ResourceBudget, RuntimePolicy};
+use crate::policy::{ExecutionGuard, FramePause, ResourceBudget, RuntimePolicy};
 use mesh_core_capability::{Capability, CapabilitySet};
 use mesh_core_runtime::SandboxConfig;
 use mlua::Lua;
@@ -517,6 +517,23 @@ impl ResourceBroker {
     pub fn release_child(&self) {
         self.inner.release_child();
     }
+
+    /// Pause the frame-time budget for a blocking host call (for example
+    /// waiting on a child process) that has its own timeout, so the wait does
+    /// not also count against the script's per-callback frame budget.
+    pub fn pause_frame_clock(&self) -> FramePauseLease {
+        FramePauseLease {
+            _guard: self.inner.pause_frame_clock(),
+        }
+    }
+}
+
+/// A callback-scoped pause of the frame-time clock. Dropping it resumes the
+/// clock.
+#[must_use]
+#[derive(Debug)]
+pub struct FramePauseLease {
+    _guard: FramePause,
 }
 
 /// A callback-scoped resource lease. Dropping it releases per-callback output

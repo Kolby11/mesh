@@ -405,13 +405,17 @@ pub(super) fn run_exec(
     service: &ExecService,
 ) -> mlua::Result<LuaValue> {
     let resources = &service.resources;
-    let outcome = match service.run_with_argv0(
-        program,
-        argv0,
-        args,
-        resources.output_limit() as usize,
-        resources.child_process_timeout(),
-    ) {
+    let outcome = {
+        let _frame_pause = resources.pause_frame_clock();
+        service.run_with_argv0(
+            program,
+            argv0,
+            args,
+            resources.output_limit() as usize,
+            resources.child_process_timeout(),
+        )
+    };
+    let outcome = match outcome {
         Ok(outcome) => outcome,
         Err(ExecRunError::Resource(error)) => {
             return Err(mlua::Error::external(error.to_string()));
