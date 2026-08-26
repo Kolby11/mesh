@@ -88,7 +88,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/14-wayland-platform-and-presentation/improvements.md)
 
-- [ ] Commit opaque, blur, and other surface-state changes even when pixel damage is empty.
 - [ ] Make input ownership per seat and cancel pointer, touch, gesture, focus, and repeat transactions during teardown.
 - [ ] Validate buffer length/stride/scale, propagate attach/region errors, expose connection loss, and reap clipboard children.
 - [ ] Replace the recorder backend with a deterministic protocol-state lifecycle simulator plus a focused live compositor matrix.
