@@ -1282,14 +1282,20 @@ impl PresentationEngine {
                 if visible && backend.missing_surfaces.contains(surface_id) {
                     return Ok(PresentStatus::SurfaceMissing);
                 }
+                // Check the explicit not-yet-configured stand-in before the
+                // "was this surface ever configured" existence check: tests
+                // use `testing_set_surface_configured(false)` on its own to
+                // simulate a surface that was created but has not received
+                // its first compositor configure, without also calling
+                // `configure()` to seed `surface_configs`.
+                if visible && backend.unconfigured_surfaces.contains(surface_id) {
+                    return Ok(PresentStatus::NotReady);
+                }
                 if visible
                     && !backend.surface_configs.contains_key(surface_id)
                     && !backend.popup_configs.contains_key(surface_id)
                 {
                     return Ok(PresentStatus::SurfaceMissing);
-                }
-                if visible && backend.unconfigured_surfaces.contains(surface_id) {
-                    return Ok(PresentStatus::NotReady);
                 }
                 if visible
                     && (backend.frame_pending_surfaces.contains(surface_id)
@@ -1325,13 +1331,13 @@ impl PresentationEngine {
                 if backend.missing_surfaces.contains(surface_id) {
                     return Ok(SurfaceStateStatus::SurfaceMissing);
                 }
+                if backend.unconfigured_surfaces.contains(surface_id) {
+                    return Ok(SurfaceStateStatus::NotReady);
+                }
                 if !backend.surface_configs.contains_key(surface_id)
                     && !backend.popup_configs.contains_key(surface_id)
                 {
                     return Ok(SurfaceStateStatus::SurfaceMissing);
-                }
-                if backend.unconfigured_surfaces.contains(surface_id) {
-                    return Ok(SurfaceStateStatus::NotReady);
                 }
                 if backend.pending_surface_states.remove(surface_id) {
                     backend.surface_state_commits.push(surface_id.to_string());
@@ -2397,6 +2403,9 @@ mod tests {
     #[test]
     fn unconfigured_surface_returns_typed_not_ready_without_recording_present() {
         let mut engine = PresentationEngine::testing_with_popup_support(false);
+        engine
+            .configure("panel", SurfaceConfig::default())
+            .expect("testing surface configuration succeeds");
         engine.testing_set_surface_configured("panel", false);
         let buffer = PixelBuffer::new(32, 16);
         let damage = [DamageRect {
@@ -2589,7 +2598,7 @@ mod tests {
 
     #[test]
     fn lifecycle_events_are_typed_and_testing_teardown_is_idempotent() {
-        let mut engine = PresentationEngine::testing_with_popup_support(false);
+        let mut engine = PresentationEngine::testing_with_popup_support(true);
         engine
             .configure("panel", SurfaceConfig::default())
             .expect("surface config should be accepted");
@@ -2603,6 +2612,10 @@ mod tests {
         );
         assert!(engine.take_surface_lifecycle_events().is_empty());
         assert!(engine.testing_surface_configs().is_empty());
+
+        engine
+            .configure("panel", SurfaceConfig::default())
+            .expect("a closed surface should be configurable again");
 
         engine
             .configure_popup(
@@ -2624,9 +2637,6 @@ mod tests {
             }]
         );
 
-        engine
-            .configure("panel", SurfaceConfig::default())
-            .expect("a closed surface should be configurable again");
         engine.destroy_surface("panel");
         engine.destroy_surface("panel");
         assert_eq!(engine.testing_destroyed_surfaces(), ["panel"]);

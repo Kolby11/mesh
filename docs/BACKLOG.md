@@ -88,7 +88,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/14-wayland-platform-and-presentation/improvements.md)
 
-- [ ] Return typed create/configure/present/lost outcomes, cache only accepted generations, and retain damage for missing surfaces.
 - [ ] Route close, dismiss, parent destruction, role replacement, and connection loss through one idempotent teardown supervisor.
 - [ ] Gate popup reposition by negotiated protocol version and validate popup role, parent, identity, and reparenting.
 - [ ] Commit opaque, blur, and other surface-state changes even when pixel damage is empty.
