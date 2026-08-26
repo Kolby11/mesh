@@ -61,7 +61,9 @@ planning-record gates:
 
 Use `CLAUDE_MODEL` to override the configured model and
 `CLAUDE_ALLOW_ALL=0` when permission bypass is not appropriate. The remaining
-options and dirty-worktree behavior mirror the Codex runner.
+options and dirty-worktree behavior mirror the Codex runner. Usage-limit and
+rate-limit responses are retried indefinitely; set `CLAUDE_USAGE_RETRY_SECONDS`
+to change the polling interval from its 300-second default.
 
 ## Code style
 

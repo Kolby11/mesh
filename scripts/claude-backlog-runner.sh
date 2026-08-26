@@ -34,6 +34,9 @@ Environment:
                             (default: 1)
   CLAUDE_WIFI_RECOVERY_COOLDOWN_SECONDS
                             Minimum seconds between recovery attempts (default: 30)
+  CLAUDE_USAGE_RETRY_SECONDS
+                            Seconds between retries after a usage-limit response
+                            (default: 300; retries continue indefinitely)
   CLAUDE_BIN                Claude executable (default: claude)
 EOF
 }
@@ -82,12 +85,14 @@ CLAUDE_ALLOW_ALL=${CLAUDE_ALLOW_ALL:-1}
 CLAUDE_AUTO_APPROVE=${CLAUDE_AUTO_APPROVE:-1}
 CLAUDE_WIFI_RECOVERY=${CLAUDE_WIFI_RECOVERY:-1}
 CLAUDE_WIFI_RECOVERY_COOLDOWN_SECONDS=${CLAUDE_WIFI_RECOVERY_COOLDOWN_SECONDS:-30}
+CLAUDE_USAGE_RETRY_SECONDS=${CLAUDE_USAGE_RETRY_SECONDS:-300}
 CLAUDE_MODEL=${CLAUDE_MODEL:-}
 
 [[ "$CLAUDE_ALLOW_ALL" == 0 || "$CLAUDE_ALLOW_ALL" == 1 ]] || die "CLAUDE_ALLOW_ALL must be 0 or 1"
 [[ "$CLAUDE_AUTO_APPROVE" == 0 || "$CLAUDE_AUTO_APPROVE" == 1 ]] || die "CLAUDE_AUTO_APPROVE must be 0 or 1"
 [[ "$CLAUDE_WIFI_RECOVERY" == 0 || "$CLAUDE_WIFI_RECOVERY" == 1 ]] || die "CLAUDE_WIFI_RECOVERY must be 0 or 1"
 [[ "$CLAUDE_WIFI_RECOVERY_COOLDOWN_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "CLAUDE_WIFI_RECOVERY_COOLDOWN_SECONDS must be a positive integer"
+[[ "$CLAUDE_USAGE_RETRY_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "CLAUDE_USAGE_RETRY_SECONDS must be a positive integer"
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(git -C "$SCRIPT_DIR/.." rev-parse --show-toplevel 2>/dev/null) || die "not inside a Git repository"
@@ -135,6 +140,7 @@ print_configuration() {
     printf 'auto approval: %s\n' "$CLAUDE_AUTO_APPROVE"
     printf 'allow dirty recovery: %s\n' "$ALLOW_DIRTY"
     printf 'Wi-Fi recovery: %s (cooldown %ss)\n' "$CLAUDE_WIFI_RECOVERY" "$CLAUDE_WIFI_RECOVERY_COOLDOWN_SECONDS"
+    printf 'usage-limit retry: every %ss, indefinitely\n' "$CLAUDE_USAGE_RETRY_SECONDS"
     printf 'session policy: fresh Claude session per backlog item\n'
 }
 
@@ -342,6 +348,70 @@ run_turn() {
     return "$result"
 }
 
+is_usage_limit_response() {
+    local file
+    local pattern='usage[[:space:]_-]*limit|rate[[:space:]_-]*limit|quota|too many requests|hit your limit|limit([[:space:]]+(has|is))?[[:space:]]+reached|out of( extra)? usage'
+
+    file=$2
+    if [[ -s "$file" ]] && grep -Eiq -- "$pattern" "$file"; then
+        return 0
+    fi
+
+    file=$1
+    if [[ -s "$file" ]] && jq -r -s '
+        .[]
+        | select(
+            .type == "error"
+            or (.type == "result" and (.is_error // false))
+            or (.type == "system" and ((.subtype // "") | test("error|limit"; "i")))
+          )
+        | [(.result // ""), (.error // ""), (.message // ""), (.subtype // "")]
+        | .[]
+      ' "$file" 2>/dev/null | grep -Eiq -- "$pattern"; then
+        return 0
+    fi
+
+    return 1
+}
+
+wait_for_usage_retry() {
+    local remaining=$CLAUDE_USAGE_RETRY_SECONDS
+    local chunk
+
+    while ((remaining > 0)); do
+        chunk=$remaining
+        ((chunk > 60)) && chunk=60
+        printf '[usage] Claude usage limit is active; retrying in %ss\n' "$remaining" >&2
+        sleep "$chunk"
+        remaining=$((remaining - chunk))
+    done
+}
+
+run_turn_until_available() {
+    local prompt=$1
+    local event_file=$2
+    local stderr_file=$3
+    local turn_status usage_attempt=0
+
+    while :; do
+        if run_turn "$prompt" "$event_file" "$stderr_file"; then
+            turn_status=0
+        else
+            turn_status=$?
+        fi
+
+        if is_usage_limit_response "$event_file" "$stderr_file"; then
+            usage_attempt=$((usage_attempt + 1))
+            printf '[usage] Claude usage limit detected (attempt %s); waiting before retrying this backlog item\n' \
+                "$usage_attempt" >&2
+            wait_for_usage_retry
+            continue
+        fi
+
+        return "$turn_status"
+    done
+}
+
 read_final_response() {
     jq -r -s '
         map(select(.type == "result" and ((.is_error // false) | not)))
@@ -432,7 +502,7 @@ while :; do
     prompt=$(build_prompt "$line")
 
     printf '\n=== feature %s: %s ===\n' "$((successful_features + 1))" "$marker"
-    if ! run_turn "$prompt" "$event_file" "$stderr_file"; then
+    if ! run_turn_until_available "$prompt" "$event_file" "$stderr_file"; then
         die "Claude turn failed; inspect the repository and the captured session before retrying"
     fi
 
