@@ -26,10 +26,6 @@ Options:
 
 Environment:
   CLAUDE_MODEL              Optional model override; otherwise Claude config applies
-  CLAUDE_ALLOW_ALL          Set to 0 to use Claude's normal permission mode
-                            (default: 1; unattended mode bypasses approvals)
-  CLAUDE_AUTO_APPROVE       Set to 0 to leave permission prompts enabled when
-                            CLAUDE_ALLOW_ALL=0 (default: 1)
   CLAUDE_WIFI_RECOVERY      Set to 0 to disable NetworkManager recovery
                             (default: 1)
   CLAUDE_WIFI_RECOVERY_COOLDOWN_SECONDS
@@ -81,15 +77,11 @@ while (($# > 0)); do
 done
 
 CLAUDE_BIN=${CLAUDE_BIN:-claude}
-CLAUDE_ALLOW_ALL=${CLAUDE_ALLOW_ALL:-1}
-CLAUDE_AUTO_APPROVE=${CLAUDE_AUTO_APPROVE:-1}
 CLAUDE_WIFI_RECOVERY=${CLAUDE_WIFI_RECOVERY:-1}
 CLAUDE_WIFI_RECOVERY_COOLDOWN_SECONDS=${CLAUDE_WIFI_RECOVERY_COOLDOWN_SECONDS:-30}
 CLAUDE_USAGE_RETRY_SECONDS=${CLAUDE_USAGE_RETRY_SECONDS:-300}
 CLAUDE_MODEL=${CLAUDE_MODEL:-}
 
-[[ "$CLAUDE_ALLOW_ALL" == 0 || "$CLAUDE_ALLOW_ALL" == 1 ]] || die "CLAUDE_ALLOW_ALL must be 0 or 1"
-[[ "$CLAUDE_AUTO_APPROVE" == 0 || "$CLAUDE_AUTO_APPROVE" == 1 ]] || die "CLAUDE_AUTO_APPROVE must be 0 or 1"
 [[ "$CLAUDE_WIFI_RECOVERY" == 0 || "$CLAUDE_WIFI_RECOVERY" == 1 ]] || die "CLAUDE_WIFI_RECOVERY must be 0 or 1"
 [[ "$CLAUDE_WIFI_RECOVERY_COOLDOWN_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "CLAUDE_WIFI_RECOVERY_COOLDOWN_SECONDS must be a positive integer"
 [[ "$CLAUDE_USAGE_RETRY_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "CLAUDE_USAGE_RETRY_SECONDS must be a positive integer"
@@ -136,8 +128,7 @@ assert_main_and_clean() {
 print_configuration() {
     printf 'repository: %s\n' "$ROOT"
     printf 'branch: %s\n' "$(git -C "$ROOT" branch --show-current)"
-    printf 'permission bypass: %s\n' "$CLAUDE_ALLOW_ALL"
-    printf 'auto approval: %s\n' "$CLAUDE_AUTO_APPROVE"
+    printf 'permissions: --dangerously-skip-permissions (always enabled)\n'
     printf 'allow dirty recovery: %s\n' "$ALLOW_DIRTY"
     printf 'Wi-Fi recovery: %s (cooldown %ss)\n' "$CLAUDE_WIFI_RECOVERY" "$CLAUDE_WIFI_RECOVERY_COOLDOWN_SECONDS"
     printf 'usage-limit retry: every %ss, indefinitely\n' "$CLAUDE_USAGE_RETRY_SECONDS"
@@ -298,16 +289,9 @@ run_turn() {
     local -a pipeline_status
     local result
 
-    command=("$CLAUDE_BIN" --print --verbose --output-format stream-json --json-schema "$SCHEMA_CONTENT")
+    command=("$CLAUDE_BIN" --print --verbose --dangerously-skip-permissions --output-format stream-json --json-schema "$SCHEMA_CONTENT")
     if [[ -n "$CLAUDE_MODEL" ]]; then
         command+=(--model "$CLAUDE_MODEL")
-    fi
-    if ((CLAUDE_ALLOW_ALL)); then
-        command+=(--dangerously-skip-permissions)
-    elif ((CLAUDE_AUTO_APPROVE)); then
-        command+=(--permission-mode acceptEdits)
-    else
-        command+=(--permission-mode manual)
     fi
 
     set +e

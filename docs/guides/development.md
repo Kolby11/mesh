@@ -59,11 +59,11 @@ planning-record gates:
 ./scripts/claude-backlog-runner.sh --max-features 5
 ```
 
-Use `CLAUDE_MODEL` to override the configured model and
-`CLAUDE_ALLOW_ALL=0` when permission bypass is not appropriate. The remaining
-options and dirty-worktree behavior mirror the Codex runner. Usage-limit and
-rate-limit responses are retried indefinitely; set `CLAUDE_USAGE_RETRY_SECONDS`
-to change the polling interval from its 300-second default.
+Use `CLAUDE_MODEL` to override the configured model. The runner always passes
+`--dangerously-skip-permissions`; the remaining options and dirty-worktree
+behavior mirror the Codex runner. Usage-limit and rate-limit responses are
+retried indefinitely; set `CLAUDE_USAGE_RETRY_SECONDS` to change the polling
+interval from its 300-second default.
 
 ## Code style
 
