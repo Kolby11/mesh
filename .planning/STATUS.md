@@ -1,8 +1,14 @@
 # Status
 
-**Updated:** 2026-08-26
+**Updated:** 2026-08-27
 
 ## Now
+
+`WaylandClipboard::write_text` now kills and reaps its spawned helper on a
+failed stdin write instead of leaking it unreaped; the rest of the Section 14
+finding 10 (SHM buffer validation, attach/region error propagation, and
+connection-loss surfacing) was already shipped by earlier work. See
+[`.planning/log/2026-08.md`](log/2026-08.md) for the dated entry.
 
 The active development graph now grants the Hyprland backend's optional
 `socat`/`nc` socket-stream capabilities, so workspace changes use the socket2
