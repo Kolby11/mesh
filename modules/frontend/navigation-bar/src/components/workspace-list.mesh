@@ -1,5 +1,7 @@
 <template>
   <row class="workspace-list">
+    <box class="ws-active-trail" style={trail_style} aria-hidden="true" />
+    <box class="ws-active-indicator" style={indicator_style} aria-hidden="true" />
     <button class="{ws1_class}" onclick={onSwitch1} title="Workspace 1" aria-label="Workspace 1">
       <text class="ws-num">1</text>
     </button>
@@ -25,6 +27,8 @@ ws2_class = "ws-btn"
 ws3_class = "ws-btn"
 ws4_class = "ws-btn"
 ws5_class = "ws-btn"
+indicator_style = "transform: translateX(0px);"
+trail_style = "transform: translateX(0px);"
 
 local wm = require("mesh.wm")
 
@@ -35,12 +39,20 @@ local function get_wm_state()
     return nil
 end
 
+local function sync_indicator()
+    local slot = math.max(1, math.min(5, ws_active))
+    local offset = (slot - 1) * 28
+    indicator_style = string.format("transform: translateX(%dpx);", offset)
+    trail_style = string.format("transform: translateX(%dpx);", offset)
+end
+
 local function sync_classes()
     ws1_class = ws_active == 1 and "ws-btn ws-btn-active" or "ws-btn"
     ws2_class = ws_active == 2 and "ws-btn ws-btn-active" or "ws-btn"
     ws3_class = ws_active == 3 and "ws-btn ws-btn-active" or "ws-btn"
     ws4_class = ws_active == 4 and "ws-btn ws-btn-active" or "ws-btn"
     ws5_class = ws_active == 5 and "ws-btn ws-btn-active" or "ws-btn"
+    sync_indicator()
 end
 
 function render(self)
@@ -73,9 +85,36 @@ function onSwitch5() switch_to(5) end
 
 <style>
 .workspace-list {
+    position: relative;
+    height: 26px;
     align-items: center;
     gap: 2px;
     flex-shrink: 0;
+}
+
+.ws-active-indicator {
+    position: absolute;
+    top: 0px;
+    left: 0px;
+    width: 26px;
+    height: 26px;
+    border-radius: var(--radius-full);
+    background: var(--color-primary);
+    z-index: 1;
+    transition: transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
+}
+
+.ws-active-trail {
+    position: absolute;
+    top: 0px;
+    left: 0px;
+    width: 26px;
+    height: 26px;
+    border-radius: var(--radius-full);
+    background: var(--color-primary);
+    opacity: 0.28;
+    z-index: 0;
+    transition: transform var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate), opacity var(--animation-duration-medium) var(--animation-curves-bezier-standard);
 }
 
 .ws-btn {
@@ -87,8 +126,8 @@ function onSwitch5() switch_to(5) end
     background: transparent;
     color: var(--color-on-surface-variant);
     border-width: 0;
-    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                color var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    z-index: 2;
+    transition: color var(--animation-duration-short) var(--animation-curves-bezier-standard);
 }
 
 .ws-btn:hover {
@@ -97,12 +136,12 @@ function onSwitch5() switch_to(5) end
 }
 
 .ws-btn-active {
-    background: var(--color-primary);
+    background: transparent;
     color: var(--color-on-primary);
 }
 
 .ws-btn-active:hover {
-    background: var(--color-primary);
+    background: transparent;
     color: var(--color-on-primary);
 }
 

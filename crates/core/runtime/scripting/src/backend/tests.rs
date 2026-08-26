@@ -1226,6 +1226,32 @@ end
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].name, "WorkspaceChanged");
 
+    let rapid_state = ctx
+        .run_stream_batch(
+            "nc",
+            &[
+                "workspacev2>>5,work".to_string(),
+                "workspacev2>>2,code".to_string(),
+                "workspacev2>>3,chat".to_string(),
+            ],
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(rapid_state["active_workspace"], serde_json::json!(3));
+    let rapid_events = ctx.drain_events();
+    assert_eq!(rapid_events.len(), 3);
+    assert_eq!(
+        rapid_events
+            .iter()
+            .map(|event| event.payload["id"].clone())
+            .collect::<Vec<_>>(),
+        vec![
+            serde_json::json!(5),
+            serde_json::json!(2),
+            serde_json::json!(3)
+        ]
+    );
+
     let catalog_state = ctx
         .run_stream_batch(
             "nc",
@@ -1238,7 +1264,7 @@ end
     assert_eq!(call.get::<String>("program").unwrap(), "hyprctl");
     let args = call.get::<Table>("args").unwrap();
     assert_eq!(args.get::<String>(1).unwrap(), "workspaces");
-    assert_eq!(catalog_state["active_workspace"], serde_json::json!(4));
+    assert_eq!(catalog_state["active_workspace"], serde_json::json!(3));
     assert!(ctx.drain_events().is_empty());
 }
 

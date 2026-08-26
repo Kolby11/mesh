@@ -651,6 +651,27 @@ impl Shell {
         self.service_delivery_index = index;
     }
 
+    /// Whether an interface event has any possible observer in the current
+    /// component generation. Components without an authoritative observation
+    /// summary remain conservative fallbacks, so this gate never suppresses
+    /// an event that the legacy delivery path could observe.
+    pub(in crate::shell) fn has_interface_event_observers(
+        &mut self,
+        interface: &str,
+        event: &str,
+    ) -> bool {
+        self.rebuild_service_delivery_index_if_needed();
+        if !self.service_delivery_index.fallback_components.is_empty() {
+            return true;
+        }
+        let service_name = crate::shell::service::service_name_from_interface_cow(interface);
+        self.service_delivery_index
+            .interface_events
+            .get(service_name.as_ref())
+            .and_then(|events| events.get(event))
+            .is_some_and(|subscribers| !subscribers.is_empty())
+    }
+
     /// Deliver an interface event produced by the shell itself. Shell-owned
     /// snapshots do not have to impersonate a backend provider, but they still
     /// use the same contract validation and capability-filtered delivery path.

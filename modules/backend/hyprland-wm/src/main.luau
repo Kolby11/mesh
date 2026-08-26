@@ -292,8 +292,18 @@ local function parse_workspace_v2_event(payload)
     return id
 end
 
-function on_stream_batch(self, program, lines)
+-- Handle one socket2 line at a time. Workspace changes are ordered state
+-- transitions, not just a final snapshot: keeping the callback line-oriented
+-- lets the backend publish every hop in a rapid sequence. The shell can still
+-- batch ordinary provider updates, while the WorkspaceChanged event emitted
+-- for each hop remains an ordering barrier for this stream.
+function on_stream_line(self, program, line)
     if program ~= stream_program then
+        return
+    end
+
+    local event, payload = line:match("^([%a%d]+)>>(.*)$")
+    if not event then
         return
     end
 
@@ -304,29 +314,26 @@ function on_stream_batch(self, program, lines)
     local needs_active_workspace_query = false
     local needs_workspace_list_query = false
 
-    for _, line in ipairs(lines) do
-        local event, payload = line:match("^([%a%d]+)>>(.*)$")
-        if event == "activewindow" then
-            active_window, has_active_window_payload = parse_active_window_event(payload)
-            needs_active_window_query = false
-        elseif event == "activewindowv2" and not has_active_window_payload then
-            -- The v2 event carries only the address. Most batches also carry
-            -- `activewindow`; query just this field when they do not.
-            needs_active_window_query = true
-        elseif event == "workspacev2" then
-            active_workspace = parse_workspace_v2_event(payload)
-            needs_active_workspace_query = active_workspace == nil
-        elseif event == "workspace" then
-            -- Legacy payloads carry a workspace name, commonly the numeric id.
-            active_workspace = tonumber(payload)
-            needs_active_workspace_query = active_workspace == nil
-        elseif event == "focusedmon" and active_workspace == nil then
-            local workspace_name = payload:match("^[^,]*,(.*)$") or ""
-            active_workspace = tonumber(workspace_name)
-            needs_active_workspace_query = active_workspace == nil
-        elseif event and WORKSPACE_LIST_EVENTS[event] then
-            needs_workspace_list_query = true
-        end
+    if event == "activewindow" then
+        active_window, has_active_window_payload = parse_active_window_event(payload)
+        needs_active_window_query = false
+    elseif event == "activewindowv2" then
+        -- The v2 event carries only the address. Query just this field when
+        -- there is no richer activewindow line to use.
+        needs_active_window_query = true
+    elseif event == "workspacev2" then
+        active_workspace = parse_workspace_v2_event(payload)
+        needs_active_workspace_query = active_workspace == nil
+    elseif event == "workspace" then
+        -- Legacy payloads carry a workspace name, commonly the numeric id.
+        active_workspace = tonumber(payload)
+        needs_active_workspace_query = active_workspace == nil
+    elseif event == "focusedmon" then
+        local workspace_name = payload:match("^[^,]*,(.*)$") or ""
+        active_workspace = tonumber(workspace_name)
+        needs_active_workspace_query = active_workspace == nil
+    elseif WORKSPACE_LIST_EVENTS[event] then
+        needs_workspace_list_query = true
     end
 
     if not (has_active_window_payload

@@ -183,6 +183,19 @@ pub(super) fn graph_from_json(root: &str, modules: Vec<&str>) -> InstalledModule
     .unwrap()
 }
 
+/// Applying a theme persists the user's appearance override, so a test that
+/// changes one has to own its settings file. Without this it rewrites the
+/// repository's `config/settings.json`.
+///
+/// The returned pair drops in order: the environment is restored first, then
+/// the lock is released.
+pub(super) fn isolated_settings_file(dir: &Path) -> (EnvGuard, std::sync::MutexGuard<'static, ()>) {
+    let lock = settings_env_lock();
+    let path = dir.join("settings.json");
+    std::fs::write(&path, "{}").unwrap();
+    (EnvGuard::set("MESH_SETTINGS_PATH", &path), lock)
+}
+
 pub(super) fn graph_with_theme_source(
     module_root: &Path,
     theme_id: &str,
@@ -206,9 +219,14 @@ pub(super) fn graph_with_theme_source(
             }}
         }}"#
     );
+    // Loading a graph theme reads the `module.json` beside its stylesheet for
+    // the pack's declared identity, so the manifest has to exist on disk and
+    // not just in the in-memory graph.
+    let manifest_path = module_root.join("module.json");
+    std::fs::write(&manifest_path, &module).unwrap();
     let loaded = LoadedModuleManifest {
         manifest: ModuleManifest::from_json_str(&module).unwrap(),
-        path: module_root.join("module.json"),
+        path: manifest_path,
         source: ModuleManifestSource::CanonicalModuleJson,
         diagnostics: Vec::new(),
     };

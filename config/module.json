@@ -52,7 +52,9 @@
         "exec.argv:hyprctl:[\"workspaces\",\"-j\"]",
         "exec.argv:sh:[\"-c\",\"printf '%s' \\\"$HYPRLAND_INSTANCE_SIGNATURE\\\"\"]",
         "exec.argv:sh:[\"-c\",\"printf '%s' \\\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\\\"\"]",
-        "exec.argv:sh:[\"-c\",\"test -S * && echo ok\"]"
+        "exec.argv:sh:[\"-c\",\"test -S * && echo ok\"]",
+        "exec.argv:nc:[\"-U\",\"*\"]",
+        "exec.argv:socat:[\"-\",\"UNIX-CONNECT:*\"]"
       ],
       "@mesh/language-popover": ["locale.read", "locale.write"],
       "@mesh/navigation-bar": [

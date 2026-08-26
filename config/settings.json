@@ -4,10 +4,11 @@
       "default_locale": "sk"
     }
   },
+  "revision": 49,
   "schemaVersion": 1,
   "shell": {
     "fonts": {
-      "ui_family": "DejaVu Sans"
+      "ui_family": "DejaVu Sans Mono"
     },
     "i18n": {
       "fallback_locale": "en",
@@ -15,7 +16,7 @@
       "policy": "manual"
     },
     "icons": {
-      "default_pack": "breeze"
+      "default_pack": "Bibata-Modern-Amber-Right"
     },
     "render": {
       "blur": {
@@ -24,7 +25,8 @@
       }
     },
     "theme": {
-      "active": "tokyo-night"
+      "active": "@mesh/tokyo-night:tokyo-night",
+      "mode": null
     }
   }
 }

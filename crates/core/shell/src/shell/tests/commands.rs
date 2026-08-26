@@ -418,9 +418,24 @@ fn command_state_binding_updates_non_audio_service() {
 /// A shell-provided interface has no backend command queue, so the dispatcher
 /// must answer it directly. Before core interfaces were routed, this returned
 /// `service_unavailable` because `service_handlers` only knows Luau backends.
+/// It later returned `capability_denied` for every caller, because the
+/// contract-authorized path asked for a bare `theme.control` grant that no
+/// manifest, capability registry entry, or spec line has ever used.
 #[test]
 fn a_core_provided_command_is_applied_by_the_shell_itself() {
+    let dir = tempfile::tempdir().unwrap();
+    let _settings = isolated_settings_file(dir.path());
+    std::fs::write(
+        dir.path().join("theme.css"),
+        ":root { --color-surface: #FFF; }",
+    )
+    .unwrap();
     let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph_with_theme_source(
+        dir.path(),
+        "mesh-default-light",
+        "theme.css",
+    ));
     let mut capabilities = mesh_core_capability::CapabilitySet::new();
     capabilities.grant(mesh_core_capability::Capability::new(
         "service.theme.control",
@@ -430,14 +445,17 @@ fn a_core_provided_command_is_applied_by_the_shell_itself() {
     let result = shell.dispatch_service_command(
         "mesh.theme",
         "set_theme",
-        &serde_json::json!({ "theme_id": "mesh-default-light" }),
+        &serde_json::json!({ "theme_id": "@mesh/test-theme:mesh-default-light" }),
         "@mesh/any-module-at-all",
         &capabilities,
     );
 
     assert_eq!(result["ok"], serde_json::json!(true));
     assert_eq!(result["status"], serde_json::json!("applied"));
-    assert_eq!(shell.theme.active().id, "mesh-default-light");
+    assert_eq!(
+        shell.theme.active().id,
+        "@mesh/test-theme:mesh-default-light"
+    );
     assert_ne!(
         shell.theme.active().id,
         before,

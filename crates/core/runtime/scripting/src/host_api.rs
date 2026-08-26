@@ -125,10 +125,14 @@ impl InterfaceProxy {
 
     /// Whether the capability set can control an interface. Control grants
     /// authorize mutations but never make the service state readable.
+    ///
+    /// `theme` takes the generic `service.<name>.control` path: reads use the
+    /// short `theme.read` grant, but theme writes are declared as
+    /// `service.theme.control` by manifests, the capability registry, and the
+    /// spec alike.
     pub fn can_control(caps: &CapabilitySet, interface: &str) -> bool {
         if let Some(service_name) = interface.strip_prefix("mesh.") {
             return match service_name {
-                "theme" => caps.is_granted(&Capability::new("theme.control")),
                 "locale" => caps.is_granted(&Capability::new("locale.write")),
                 _ => has_service_capability(caps, service_name, "control"),
             };
@@ -272,6 +276,41 @@ mod tests {
         subscribe.grant(Capability::new("alice.thermal.subscribe"));
         assert!(InterfaceProxy::can_access_contract(&subscribe, &contract));
         assert!(!InterfaceProxy::can_read_contract(&subscribe, &contract));
+    }
+
+    /// A built-in contract declares no method policy, so authorization falls
+    /// through to `can_control`. Theme writes are granted as
+    /// `service.theme.control` everywhere else in the tree, and that grant
+    /// must reach `mesh.theme.set_theme`.
+    #[test]
+    fn theme_control_uses_the_service_capability_name() {
+        let mut control = CapabilitySet::new();
+        control.grant(Capability::new("service.theme.control"));
+        assert!(InterfaceProxy::can_control(&control, "mesh.theme"));
+
+        let contract = parse_interface_contract(
+            "mesh.theme",
+            "1.0",
+            &serde_json::json!({
+                "state": [{ "name": "theme_id", "type": "string" }],
+                "methods": [{ "name": "set_theme", "args": [{ "name": "theme_id", "type": "string" }] }],
+            }),
+        )
+        .unwrap();
+        assert!(InterfaceProxy::can_call_contract_method(
+            &control,
+            &contract,
+            "set_theme"
+        ));
+
+        let mut read_only = CapabilitySet::new();
+        read_only.grant(Capability::new("theme.read"));
+        assert!(!InterfaceProxy::can_control(&read_only, "mesh.theme"));
+        assert!(!InterfaceProxy::can_call_contract_method(
+            &read_only,
+            &contract,
+            "set_theme"
+        ));
     }
 
     #[test]

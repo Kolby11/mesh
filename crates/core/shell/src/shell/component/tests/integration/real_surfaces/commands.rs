@@ -138,6 +138,10 @@ fn shipped_workspace_button_publishes_focus_workspace_request() {
     .unwrap();
 
     ctx.call_handler("onSwitch2", &[]).unwrap();
+    assert_eq!(
+        ctx.state().get("indicator_style"),
+        Some(serde_json::json!("transform: translateX(28px);"))
+    );
     let requests = crate::shell::service::script_events_to_requests(ctx.drain_published_events());
 
     match requests.as_slice() {

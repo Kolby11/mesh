@@ -4,6 +4,29 @@
 
 ## Now
 
+The active development graph now grants the Hyprland backend's optional
+`socat`/`nc` socket-stream capabilities, so workspace changes use the socket2
+event path instead of the 500 ms polling fallback. The workspace showcase uses
+one animated shared indicator with a translucent trailing layer beneath the
+workspace numbers, and the backend preserves each rapid socket2 workspace
+transition for the shell.
+
+Theme/locale switching now avoids two kinds of redundant preparation. Theme
+publication computes its token delta once and skips individual `TokenChanged`
+validation/fan-out when the exact event has no observer, while retaining the
+aggregate revision event and conservative fallback semantics. Locale-only
+settings transactions reuse the active immutable catalog snapshot; graph and
+profile activation still prepare replacements when catalog sources can change.
+
+Theme switching works end to end. After the contract compiled, every
+`mesh.theme` command was still denied: the contract-authorized path checked a
+bare `theme.control` capability that no manifest, capability registry entry,
+or spec line uses, while logging the `service.theme.control` name it had not
+consulted. Theme control now takes the generic `service.<name>.control` path.
+Two test gaps hid it — the dispatch test ran without an installed graph, and
+the graph theme helper never wrote its `module.json` to disk, so
+`apply_set_theme` silently no-opped in every test that used it.
+
 Theme switching works again. `mesh.theme` declared `fingerprint` as `integer?`
 where the contract vocabulary wants `int?`, the contract failed to compile, and
 `register_contract` discarded the error, so the interface was simply absent

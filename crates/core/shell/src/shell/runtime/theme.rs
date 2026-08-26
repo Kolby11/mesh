@@ -440,14 +440,14 @@ impl Shell {
         if let Some(previous_snapshot) = previous_snapshot.as_ref()
             && previous_snapshot != &snapshot
         {
-            let changed_tokens = snapshot
-                .changed_token_names(previous_snapshot)
-                .into_iter()
+            let changed_token_names = snapshot.changed_token_names(previous_snapshot);
+            let changed_tokens = changed_token_names
+                .iter()
                 .map(|name| {
                     serde_json::json!({
                         "name": name,
-                        "value": snapshot.tokens.get(&name),
-                        "provenance": snapshot.provenance.get(&name),
+                        "value": snapshot.tokens.get(name),
+                        "provenance": snapshot.provenance.get(name),
                     })
                 })
                 .collect::<Vec<_>>();
@@ -467,19 +467,21 @@ impl Shell {
                     "changed_tokens": changed_tokens,
                 }),
             )?);
-            for name in snapshot.changed_token_names(previous_snapshot) {
-                requests.extend(self.broadcast_shell_interface_event(
-                    "mesh.theme",
-                    "TokenChanged",
-                    serde_json::json!({
-                        "theme_id": snapshot.id.clone(),
-                        "mode": snapshot.mode.clone(),
-                        "name": name,
-                        "value": snapshot.tokens.get(&name),
-                        "provenance": snapshot.provenance.get(&name),
-                        "revision": revision.clone(),
-                    }),
-                )?);
+            if self.has_interface_event_observers("mesh.theme", "TokenChanged") {
+                for name in changed_token_names {
+                    requests.extend(self.broadcast_shell_interface_event(
+                        "mesh.theme",
+                        "TokenChanged",
+                        serde_json::json!({
+                            "theme_id": snapshot.id.clone(),
+                            "mode": snapshot.mode.clone(),
+                            "name": name,
+                            "value": snapshot.tokens.get(&name),
+                            "provenance": snapshot.provenance.get(&name),
+                            "revision": revision.clone(),
+                        }),
+                    )?);
+                }
             }
         }
         self.last_published_theme_snapshot = Some(snapshot);
@@ -560,11 +562,10 @@ impl Shell {
             || old_i18n.policy != new_i18n.policy;
 
         let prepared_locale = if locale_changed {
-            let result = if let Some(graph) = self.installed_module_graph.as_ref() {
-                self.prepare_locale_for_settings(&new_settings, graph)
-            } else {
-                self.prepare_locale_selection_for_settings(&new_settings)
-            };
+            // A settings-only locale selection does not change the installed
+            // catalog graph. Reuse its immutable snapshot; graph/profile
+            // activation remains responsible for preparing a replacement.
+            let result = self.prepare_locale_selection_for_settings(&new_settings);
             match result {
                 Ok(candidate) => Some(candidate),
                 Err(error) => {
@@ -832,11 +833,11 @@ impl Shell {
             super::super::discovery::register_graph_settings_schemas(&mut candidate, graph)
                 .map_err(|error| ShellRunError::Package(error.to_string()))?;
         }
-        let locale = if let Some(graph) = graph {
-            self.prepare_locale_for_settings(candidate.shell(), graph)?
-        } else {
-            self.prepare_locale_selection_for_settings(candidate.shell())?
-        };
+        // The active graph and its complete immutable catalog snapshot are
+        // unchanged by this durable selection transaction. Recompilation is
+        // reserved for graph/profile activation, where catalog sources can
+        // actually differ.
+        let locale = self.prepare_locale_selection_for_settings(candidate.shell())?;
 
         if let Some((paths, profile_id, profile, expected_revision)) = profile_commit {
             SettingsStore::load_from(&shared_path)

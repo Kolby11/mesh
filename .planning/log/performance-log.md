@@ -1,5 +1,58 @@
 # MESH Performance Log
 
+## 2026-08-26 — enable Hyprland socket events in the active graph
+
+`working tree` · area: Hyprland workspace reaction latency
+
+The Hyprland backend already consumes `.socket2.sock` events, but the active
+development graph approved only its `hyprctl` and socket-discovery commands.
+Because `socat` and `nc` are optional capabilities and optional grants default
+to denied, the backend could not start either stream and fell back to its
+500 ms safety poll. The graph now explicitly approves both stream forms; the
+backend will use whichever installed tool is available and retain polling only
+when neither is available.
+
+**Measured.** No live compositor before/after range is claimed in this
+environment. The structural baseline is the configured 500 ms fallback; with
+an approved stream, delivery is event-driven rather than gated by that poll.
+
+## 2026-08-26 — skip unobserved theme-token fan-out and locale catalog recompilation
+
+`working tree` · area: theme/locale switching
+
+Theme revision publication now computes the changed-token identities once and
+consults the existing service-delivery subscription index before constructing
+individual `TokenChanged` payloads. Exact subscribers retain per-token events;
+components without an authoritative observation summary remain conservative
+fallback observers. Every revision still publishes the aggregate
+`ThemeChanged.changed_tokens` payload.
+
+Locale-only settings writes and settings-file reloads now replace the locale
+selection while retaining the active immutable catalog `Arc`. Graph/profile
+activation remains the owner of catalog snapshot preparation, so a source-set
+change still reads, compiles, validates, and atomically replaces the snapshot.
+
+**Measured.** Release profile under `nix develop`, three runs of
+`unsubscribed_theme_token_event_gate_beats_fanout`: 100 batches of 215 token
+changes, matching the shipped theme token count, with an indexed component
+subscribed to `ThemeChanged` but not `TokenChanged`. Forced construction,
+contract validation, and no-subscriber routing took 16.239–17.446ms; the exact
+subscriber gate took 4.749–4.750us. This measures only the removed event work,
+not an end-to-end theme-switch speedup. The ignored release gate requires the
+subscriber path to finish before the forced-fan-out control.
+
+**Verified.** The service-delivery slice passed 7 active tests; the focused
+theme/locale regressions passed, including fallback-observer preservation,
+individual-event delivery to a real subscriber, aggregate-only delivery without
+one, durable locale revision commit, and catalog-snapshot pointer reuse. The
+serialized theme slice passed 18 active tests and reproduced only the existing
+`malformed_theme_reload_retains_last_known_good_snapshot` diagnostic-count
+failure recorded in the current monthly log. Formatting and diff checks passed.
+Workspace clippy remains blocked by the existing warning backlog, including
+warnings in dependencies and 172 shell warnings with `--no-deps`.
+
+---
+
 ## 2026-08-16 — key animation transition state by NodeId
 
 `working tree` · area: animation identity and per-frame allocation

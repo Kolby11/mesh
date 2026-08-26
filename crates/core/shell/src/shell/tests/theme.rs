@@ -103,6 +103,100 @@ fn theme_revision_events_mirror_the_rendered_snapshot_and_token_delta() {
 }
 
 #[test]
+fn theme_revision_skips_individual_token_events_without_a_subscriber() {
+    let summary = Arc::new(Mutex::new(Some(ServiceObservationSummary {
+        update_services: Vec::new(),
+        cached_update_services: Vec::new(),
+        interface_events: vec![ServiceInterfaceEventSubscription {
+            service: "theme".to_string(),
+            event: "ThemeChanged".to_string(),
+        }],
+    })));
+    let state = Arc::new(Mutex::new(IndexedRecordingState::default()));
+    let mut shell = Shell::new();
+    shell.register_component(Box::new(IndexedRecordingComponent::new(
+        "@test/theme-revision-observer",
+        summary,
+        Arc::clone(&state),
+    )));
+
+    shell.sync_theme_service_state().unwrap();
+    shell.theme.update_active(|theme| {
+        theme.set_token(
+            "color.primary",
+            mesh_core_theme::TokenValue::String("#123456".into()),
+            mesh_core_theme::ThemeProvenance::UserOverride,
+        );
+    });
+    shell.sync_theme_service_state().unwrap();
+
+    let state = state.lock().unwrap();
+    assert!(state.handled.iter().any(
+        |event| matches!(event, ServiceEvent::InterfaceEvent { name, .. } if name == "ThemeChanged")
+    ));
+    assert!(!state.handled.iter().any(
+        |event| matches!(event, ServiceEvent::InterfaceEvent { name, .. } if name == "TokenChanged")
+    ));
+}
+
+// cargo test -p mesh-core-shell --release -- unsubscribed_theme_token_event_gate_beats_fanout --ignored --nocapture
+#[test]
+#[ignore = "release-only unsubscribed theme-token event benchmark"]
+fn unsubscribed_theme_token_event_gate_beats_fanout() {
+    let summary = Arc::new(Mutex::new(Some(ServiceObservationSummary {
+        update_services: Vec::new(),
+        cached_update_services: Vec::new(),
+        interface_events: vec![ServiceInterfaceEventSubscription {
+            service: "theme".to_string(),
+            event: "ThemeChanged".to_string(),
+        }],
+    })));
+    let mut shell = Shell::new();
+    shell.register_component(Box::new(IndexedRecordingComponent::new(
+        "@test/theme-benchmark-observer",
+        summary,
+        Arc::new(Mutex::new(IndexedRecordingState::default())),
+    )));
+    assert!(!shell.has_interface_event_observers("mesh.theme", "TokenChanged"));
+
+    const BATCHES: usize = 100;
+    const TOKENS: usize = 215;
+    let started = std::time::Instant::now();
+    for batch in 0..BATCHES {
+        for token in 0..TOKENS {
+            shell
+                .broadcast_shell_interface_event(
+                    "mesh.theme",
+                    "TokenChanged",
+                    serde_json::json!({
+                        "theme_id": "@mesh/benchmark",
+                        "mode": "dark",
+                        "name": format!("color.token-{token}"),
+                        "value": format!("#{:06x}", token),
+                        "provenance": "ThemePack",
+                        "revision": batch.to_string(),
+                    }),
+                )
+                .unwrap();
+        }
+    }
+    let forced_fanout = started.elapsed();
+
+    let started = std::time::Instant::now();
+    for _ in 0..BATCHES {
+        if shell.has_interface_event_observers("mesh.theme", "TokenChanged") {
+            std::hint::black_box(TOKENS);
+        }
+    }
+    let subscriber_gate = started.elapsed();
+
+    eprintln!(
+        "unsubscribed theme token events: forced={forced_fanout:?} gated={subscriber_gate:?}"
+    );
+    assert!(subscriber_gate < forced_fanout);
+}
+
+#[test]
 fn locale_snapshot_is_published_by_the_active_provider() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();
@@ -138,6 +232,27 @@ fn manual_locale_change_commits_the_shared_settings_revision_before_broadcast() 
     assert_eq!(persisted.revision(), 1);
     assert_eq!(persisted.shell().i18n.locale, "sk-SK");
     assert_eq!(persisted.shell().i18n.fallback_locale, "en");
+}
+
+#[test]
+fn manual_locale_change_reuses_the_active_graph_catalog_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let _settings = isolated_settings_file(dir.path());
+    let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph_from_json(
+        r#"{
+              "schemaVersion": 1,
+              "modulesDir": "modules",
+              "modules": {}
+            }"#,
+        Vec::new(),
+    ));
+    let catalogs = shell.locale.catalog_snapshot();
+
+    shell.apply_set_locale("sk-SK").unwrap();
+
+    assert!(Arc::ptr_eq(&catalogs, &shell.locale.catalog_snapshot()));
+    assert_eq!(shell.locale.current(), "sk-SK");
 }
 
 #[test]
@@ -368,6 +483,7 @@ fn settings_theme_reload_syncs_theme_service_state() {
 #[test]
 fn set_theme_forces_full_present_on_existing_components() {
     let dir = tempfile::tempdir().unwrap();
+    let _settings = isolated_settings_file(dir.path());
     fs::write(dir.path().join("theme.css"), "node { color: #fff; }").unwrap();
     let mut shell = Shell::new();
     let seen_events = Arc::new(Mutex::new(Vec::new()));
@@ -396,6 +512,7 @@ fn set_theme_forces_full_present_on_existing_components() {
 #[test]
 fn set_theme_loads_css_package_and_updates_runtime_setting() {
     let dir = tempfile::tempdir().unwrap();
+    let _settings = isolated_settings_file(dir.path());
     fs::write(
         dir.path().join("theme.css"),
         ":root { --color-surface: #FFFBFE; }",

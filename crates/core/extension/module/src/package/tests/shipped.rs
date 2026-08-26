@@ -195,6 +195,27 @@ fn shipped_module_graph_loads_repo_module_fixture() {
 }
 
 #[test]
+fn shipped_graph_approves_hyprland_event_stream_capabilities() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let root =
+        RootModuleGraphManifest::from_path(&workspace_root.join("config/module.json")).unwrap();
+    let policy = mesh_core_capability::CapabilityPolicy::from_approvals(root.capability_approvals);
+    let effective = policy
+        .resolve(
+            "@mesh/hyprland-wm",
+            &[],
+            &[
+                "exec.argv:nc:[\"-U\",\"*\"]".into(),
+                "exec.argv:socat:[\"-\",\"UNIX-CONNECT:*\"]".into(),
+            ],
+        )
+        .unwrap();
+
+    assert!(effective.is_granted_id("exec.argv:nc:[\"-U\",\"*\"]"));
+    assert!(effective.is_granted_id("exec.argv:socat:[\"-\",\"UNIX-CONNECT:*\"]"));
+}
+
+#[test]
 fn shipped_module_graph_preserves_navigation_localized_keybind_text() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
     let graph = load_installed_module_graph(&workspace_root.join("config/module.json")).unwrap();

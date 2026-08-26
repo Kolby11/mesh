@@ -177,6 +177,33 @@ fn service_delivery_index_routes_interface_events_by_name() {
 }
 
 #[test]
+fn interface_event_observer_gate_uses_exact_subscriptions_and_preserves_fallbacks() {
+    let theme_summary = Arc::new(Mutex::new(Some(ServiceObservationSummary {
+        update_services: Vec::new(),
+        cached_update_services: Vec::new(),
+        interface_events: vec![ServiceInterfaceEventSubscription {
+            service: "theme".to_string(),
+            event: "ThemeChanged".to_string(),
+        }],
+    })));
+    let mut indexed = Shell::new();
+    indexed.register_component(Box::new(IndexedRecordingComponent::new(
+        "@test/theme-observer",
+        theme_summary,
+        Arc::new(Mutex::new(IndexedRecordingState::default())),
+    )));
+
+    assert!(indexed.has_interface_event_observers("mesh.theme", "ThemeChanged"));
+    assert!(!indexed.has_interface_event_observers("mesh.theme", "TokenChanged"));
+
+    let mut fallback = Shell::new();
+    fallback.register_component(Box::new(RecordingComponent::new(Arc::new(Mutex::new(
+        Vec::new(),
+    )))));
+    assert!(fallback.has_interface_event_observers("mesh.theme", "TokenChanged"));
+}
+
+#[test]
 fn service_delivery_index_deduplicates_component_subscriptions_when_rebuilt() {
     let summary = Arc::new(Mutex::new(Some(ServiceObservationSummary {
         update_services: vec!["audio".to_string(), "audio".to_string()],
