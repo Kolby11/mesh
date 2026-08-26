@@ -10,8 +10,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
-const INSTRUCTION_CHECKPOINT: u64 = 1_000;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResourceKind {
     Instruction,
@@ -135,6 +133,13 @@ impl ResourceBudget {
         }
     }
 
+    /// Charge one unit for one interpreter checkpoint.
+    ///
+    /// Luau fires the interrupt at loop back-edges and call/return boundaries,
+    /// not once per fixed count of executed instructions, so a firing is worth
+    /// exactly one unit. Charging a firing as if it stood for a thousand
+    /// instructions cut the real ceiling to a thousand loop iterations per
+    /// callback and killed ordinary backend startup work.
     fn checkpoint(&self) -> Result<(), ResourceLimit> {
         if self.counters.callback_depth.load(Ordering::Acquire) == 0 {
             return Ok(());
@@ -143,10 +148,10 @@ impl ResourceBudget {
             .counters
             .remaining_instructions
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |remaining| {
-                Some(remaining.saturating_sub(INSTRUCTION_CHECKPOINT))
+                Some(remaining.saturating_sub(1))
             })
             .unwrap_or(0);
-        if previous <= INSTRUCTION_CHECKPOINT {
+        if previous == 0 {
             return Err(ResourceLimit {
                 kind: ResourceKind::Instruction,
                 limit: self.config.instruction_budget,
@@ -378,6 +383,42 @@ mod tests {
         let result = lua.load("while true do end").exec();
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("instruction"));
+    }
+
+    /// Luau checkpoints per loop back-edge and call, so charging a firing as a
+    /// thousand instructions left roughly a thousand iterations per callback
+    /// and aborted ordinary backend startup work.
+    #[test]
+    fn ordinary_loops_and_calls_fit_inside_the_default_budget() {
+        let policy = RuntimePolicy::new(SandboxConfig::default());
+        let lua = Lua::new();
+        policy.install(&lua).unwrap();
+        let _guard = policy.begin_callback();
+
+        lua.load(
+            "local function step(acc) return acc + 1 end
+             local total = 0
+             for _ = 1, 10000 do total = step(total) end
+             assert(total == 10000)",
+        )
+        .exec()
+        .expect("ten thousand iterations and calls stay inside the default budget");
+    }
+
+    #[test]
+    fn the_budget_counts_one_unit_for_each_interpreter_checkpoint() {
+        let mut config = SandboxConfig::default();
+        config.instruction_budget = 5_000;
+        let policy = RuntimePolicy::new(config);
+        let lua = Lua::new();
+        policy.install(&lua).unwrap();
+        let _guard = policy.begin_callback();
+
+        let error = lua
+            .load("local total = 0 for _ = 1, 100000 do total = total + 1 end")
+            .exec()
+            .expect_err("a loop past the budget still aborts");
+        assert!(error.to_string().contains("instruction"));
     }
 
     #[test]

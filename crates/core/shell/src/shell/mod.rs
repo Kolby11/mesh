@@ -316,7 +316,7 @@ pub(crate) fn prepare_icon_pack_bindings_with_cancellation(
     if cancellation.is_cancelled() {
         return Err("resource preparation cancelled".into());
     }
-    tracing::info!(
+    tracing::debug!(
         "prepared icon-pack '{}' (id={}, mappings={}, font_aliases={})",
         module_id,
         section.id,

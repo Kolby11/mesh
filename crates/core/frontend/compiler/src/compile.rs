@@ -235,7 +235,7 @@ pub fn compile_frontend_entrypoint(
     validate_standalone_imports(&component, &source_path, module_dir, &local_components)?;
     validate_customizable_slots(manifest, &component, &source_path)?;
 
-    tracing::info!(
+    tracing::debug!(
         "compiled frontend module '{}' from {}",
         manifest.package.id,
         source_path.display()

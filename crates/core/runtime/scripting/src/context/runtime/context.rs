@@ -642,7 +642,7 @@ impl ScriptContext {
             .exec()
             .map_err(map_lua_error)?;
         self.sync_state_from_lua();
-        tracing::info!("loaded script for module {}", self.module_id);
+        tracing::debug!("loaded script for module {}", self.module_id);
         Ok(())
     }
 

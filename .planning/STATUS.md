@@ -4,6 +4,20 @@
 
 ## Now
 
+Development-shell startup is clean: no errors, no warnings, and 29 log lines
+instead of 90. The Luau sandbox charged each interpreter checkpoint as a
+thousand instructions, which capped a callback at roughly a thousand loop
+iterations and killed `@mesh/upower-power` and `@mesh/hyprland-wm` inside
+`start()`; all five backend providers now come up. The settings loader no
+longer reports its own `revision` stamp as an unknown key, and per-item startup
+enumeration moved to `debug`.
+
+One debug-only warning remains: the retained display list is handed the same
+generation for two different trees while a `background-color` transition
+animates, because animation sampling does not advance the retained tree
+generation. The caller-lineage check forces the correct rebuild; release builds
+have no such backstop. Tracked in the backlog under Rendering and paint.
+
 Development-shell startup diagnostics are clean in the code path: shipped
 frontend modules, locale imports, settings metadata, backend initialization,
 optional command capability checks, and core-owned provider status reporting

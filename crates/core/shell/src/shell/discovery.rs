@@ -1379,16 +1379,21 @@ impl Shell {
         // Icon-pack binding modules reference them by name in their
         // mapping targets (`<theme>/<icon-name>`). Failures are logged
         // but non-fatal — hicolor fallback still works.
+        let mut registered_themes = 0usize;
         for pack in mesh_core_icon::discover_xdg_packs() {
             let id = pack.id.clone();
             match mesh_core_icon::register_default_pack(pack) {
-                Ok(true) => tracing::info!("registered XDG icon theme '{}'", id),
+                Ok(true) => {
+                    registered_themes += 1;
+                    tracing::debug!("registered XDG icon theme '{}'", id);
+                }
                 Ok(false) => tracing::debug!("XDG icon theme '{}' already registered", id),
                 Err(err) => {
                     tracing::warn!("failed to register XDG icon theme '{}': {err}", id)
                 }
             }
         }
+        tracing::info!("registered {registered_themes} XDG icon theme(s)");
         mesh_core_icon::set_default_shell_pack(settings.icons.default_pack.clone());
         mesh_core_render::set_blur_quality(blur_quality_from_settings(&settings.render.blur));
         let (theme, theme_watch) = load_active_theme(&settings);
@@ -1941,7 +1946,7 @@ impl Shell {
 
     fn register_loaded_module(&mut self, dir: &Path, loaded: mesh_core_module::LoadedManifest) {
         let id = loaded.manifest.package.id.clone();
-        tracing::info!(
+        tracing::debug!(
             "discovered module: {} v{} ({}) from {}",
             id,
             loaded.manifest.package.version,

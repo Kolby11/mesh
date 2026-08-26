@@ -351,10 +351,9 @@ impl SettingsStore {
 
     /// Namespaces with stored overrides, in file order.
     pub fn namespace_names(&self) -> impl Iterator<Item = &str> {
-        self.root
-            .keys()
-            .map(String::as_str)
-            .filter(|key| *key != SHELL_NAMESPACE && *key != SCHEMA_VERSION_KEY)
+        self.root.keys().map(String::as_str).filter(|key| {
+            *key != SHELL_NAMESPACE && *key != SCHEMA_VERSION_KEY && *key != REVISION_KEY
+        })
     }
 
     /// Replace one namespace's overrides; an empty object removes it so the
@@ -785,6 +784,16 @@ fn validate_settings_root(root: &JsonMap<String, JsonValue>) -> Vec<SettingsDiag
                     format!("set it to {SETTINGS_SCHEMA_VERSION}"),
                 )),
             },
+            REVISION_KEY => {
+                if value.as_u64().is_none() {
+                    diagnostics.push(SettingsDiagnostic::error(
+                        key.clone(),
+                        "",
+                        format!("expected a non-negative integer, found {}", describe(value)),
+                        "remove it; MESH rewrites it on the next save".to_string(),
+                    ));
+                }
+            }
             SHELL_NAMESPACE => {}
             other if is_namespace_id(other) => {}
             other => diagnostics.push(unknown_key_diagnostic_from("", "", other, ROOT_KEYS)),
@@ -1410,6 +1419,27 @@ mod tests {
         let diagnostic = only(store.diagnostics());
         assert!(diagnostic.is_error());
         assert_eq!(store.shell().theme.active, "tokyo-night");
+    }
+
+    #[test]
+    fn the_revision_stamp_is_reserved_rather_than_an_unknown_namespace() {
+        let store = store(json!({ "revision": 7, "schemaVersion": SETTINGS_SCHEMA_VERSION }));
+
+        assert!(
+            store.diagnostics().is_empty(),
+            "the revision stamp MESH writes itself must not be diagnosed: {:?}",
+            store.diagnostics()
+        );
+        assert_eq!(store.namespace_names().count(), 0);
+    }
+
+    #[test]
+    fn a_non_integer_revision_stamp_is_reported() {
+        let store = store(json!({ "revision": "seven" }));
+
+        let diagnostic = only(store.diagnostics());
+        assert!(diagnostic.is_error());
+        assert_eq!(diagnostic.namespace, "revision");
     }
 
     #[test]

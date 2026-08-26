@@ -52,7 +52,9 @@ pub fn validate_json(
 pub struct SandboxConfig {
     /// Maximum memory the module can allocate (bytes).
     pub memory_limit: u64,
-    /// Maximum Luau instructions allowed during one callback execution.
+    /// Maximum Luau interpreter checkpoints allowed during one callback
+    /// execution. Luau checkpoints at loop back-edges and call/return
+    /// boundaries, so this bounds iterations and calls, not raw opcodes.
     pub instruction_budget: u64,
     /// Maximum CPU time per frame (microseconds).
     pub frame_budget_us: u64,

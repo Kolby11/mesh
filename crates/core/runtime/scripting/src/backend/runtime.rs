@@ -362,7 +362,7 @@ impl BackendScriptContext {
                 module_id: self.module_id.clone(),
                 message: error.to_string(),
             })?;
-        tracing::info!("loaded backend script for {}", self.module_id);
+        tracing::debug!("loaded backend script for {}", self.module_id);
         Ok(())
     }
 
