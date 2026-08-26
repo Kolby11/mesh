@@ -350,7 +350,7 @@ run_turn() {
 
 is_usage_limit_response() {
     local file
-    local pattern='usage[[:space:]_-]*limit|rate[[:space:]_-]*limit|quota|too many requests|hit your limit|limit([[:space:]]+(has|is))?[[:space:]]+reached|out of( extra)? usage'
+    local pattern='usage[[:space:]_-]*limit|session[[:space:]_-]*limit|rate[[:space:]_-]*limit|quota|too many requests|hit your .*limit|limit([[:space:]]+(has|is))?[[:space:]]+reached|out of( extra)? usage'
 
     file=$2
     if [[ -s "$file" ]] && grep -Eiq -- "$pattern" "$file"; then
