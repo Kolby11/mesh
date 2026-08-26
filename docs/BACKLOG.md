@@ -88,7 +88,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/14-wayland-platform-and-presentation/improvements.md)
 
-- [ ] Make input ownership per seat and cancel pointer, touch, gesture, focus, and repeat transactions during teardown.
 - [ ] Validate buffer length/stride/scale, propagate attach/region errors, expose connection loss, and reap clipboard children.
 - [ ] Replace the recorder backend with a deterministic protocol-state lifecycle simulator plus a focused live compositor matrix.
 - [ ] Complete IME/text-input-v3 support with live compositor/lifecycle coverage; per-seat objects, atomic `done` transactions, deletion, surrounding-text publication, inline preedit projection, composition decoration/cursor placement, stale text-input teardown cancellation, and deterministic state publication are now wired.
