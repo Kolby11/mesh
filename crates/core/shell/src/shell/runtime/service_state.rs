@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Compatibility event routing remains covered by shell tests.
+
 use super::super::*;
 #[cfg(test)]
 use mesh_core_service::InterfaceArgument;

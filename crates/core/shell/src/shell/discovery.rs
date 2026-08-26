@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Legacy manifest discovery helpers remain for migration tests.
+
 use super::component::{FrontendCatalog, FrontendCatalogHandle, FrontendSurfaceComponent};
 use super::*;
 use mesh_core_module::ModuleHealthRecord;

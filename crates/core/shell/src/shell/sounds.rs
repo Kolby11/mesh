@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Sound variants await their corresponding module providers.
+
 use super::types::CoreRequest;
 /// Shell sound event dispatch.
 ///

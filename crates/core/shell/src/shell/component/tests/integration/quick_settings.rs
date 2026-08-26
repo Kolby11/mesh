@@ -64,6 +64,12 @@ end
                 command,
                 payload,
                 ..
+            }
+            | CoreRequest::ServiceCall {
+                interface,
+                command,
+                payload,
+                ..
             },
         ] => {
             assert_eq!(interface, "mesh.network");

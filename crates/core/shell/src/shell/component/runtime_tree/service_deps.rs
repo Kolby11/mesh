@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Reverse dependency queries are retained for tree diagnostics.
+
 use super::*;
 
 /// Bidirectional index from widget nodes to the service fields they read.

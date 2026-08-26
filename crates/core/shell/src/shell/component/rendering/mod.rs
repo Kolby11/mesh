@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Alternate style paths remain available to renderer fixtures.
+
 mod annotate;
 
 #[cfg(test)]
@@ -53,7 +55,17 @@ impl FrontendSurfaceComponent {
     }
 
     fn module_restyle_rules(&mut self) -> &[mesh_core_component::style::StyleRule] {
+        let current_contribution_count = self
+            .frontend_catalog
+            .contribution_entries_for_host(self.id())
+            .len();
+        if self.cached_restyle_rules.is_some()
+            && current_contribution_count != self.cached_restyle_rules_contribution_count
+        {
+            self.cached_restyle_rules = None;
+        }
         if self.cached_restyle_rules.is_none() {
+            self.cached_restyle_rules_contribution_count = current_contribution_count;
             let mut rules = Vec::new();
 
             if let Some(style) = self.compiled.component.style.as_ref() {

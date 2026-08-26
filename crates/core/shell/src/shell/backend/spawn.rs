@@ -31,13 +31,26 @@ impl Shell {
                         BackendRuntimeStatus::from_str(status.status),
                         status.message.clone(),
                     );
-                    tracing::warn!(
-                        interface = status.interface,
-                        provider_id = status.provider_id.as_deref().unwrap_or("<none>"),
-                        status = status.status,
-                        "{}",
-                        status.message
-                    );
+                    if matches!(
+                        status.status,
+                        "optional_backend_unavailable" | "optional_backend_inactive"
+                    ) {
+                        tracing::debug!(
+                            interface = status.interface,
+                            provider_id = status.provider_id.as_deref().unwrap_or("<none>"),
+                            status = status.status,
+                            "{}",
+                            status.message
+                        );
+                    } else {
+                        tracing::warn!(
+                            interface = status.interface,
+                            provider_id = status.provider_id.as_deref().unwrap_or("<none>"),
+                            status = status.status,
+                            "{}",
+                            status.message
+                        );
+                    }
                 }
                 for mut candidate in candidates {
                     self.apply_shell_runtime_settings(&mut candidate);

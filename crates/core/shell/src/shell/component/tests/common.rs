@@ -27,6 +27,26 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+pub(super) fn service_request_parts(
+    request: &CoreRequest,
+) -> Option<(&str, &str, &serde_json::Value)> {
+    match request {
+        CoreRequest::ServiceCommand {
+            interface,
+            command,
+            payload,
+            ..
+        }
+        | CoreRequest::ServiceCall {
+            interface,
+            command,
+            payload,
+            ..
+        } => Some((interface, command, payload)),
+        _ => None,
+    }
+}
+
 /// A settings store with no user overrides — the state of a fresh install.
 ///
 /// Tests that need overrides build their own store with
@@ -51,7 +71,23 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
     catalog.register_contract(InterfaceContract {
         interface: "mesh.audio".into(),
         version: parse_contract_version("1.0").unwrap(),
-        state_fields: Vec::new(),
+        state_fields: vec![
+            ContractStateField {
+                name: "available".into(),
+                field_type: "boolean".into(),
+                description: None,
+            },
+            ContractStateField {
+                name: "percent".into(),
+                field_type: "float".into(),
+                description: None,
+            },
+            ContractStateField {
+                name: "muted".into(),
+                field_type: "boolean".into(),
+                description: None,
+            },
+        ],
         methods: vec![
             InterfaceMethod {
                 name: "set_volume".into(),
@@ -86,8 +122,12 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
                     },
                 ],
                 returns: None,
-                coalesce: false,
-                state_binding: None,
+                coalesce: true,
+                state_binding: Some(mesh_core_service::StateBinding {
+                    field: "muted".into(),
+                    from_arg: Some("muted".into()),
+                    toggle: false,
+                }),
             },
             InterfaceMethod {
                 name: "volume_up".into(),
@@ -197,7 +237,38 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
             description: None,
         })
         .collect(),
-        methods: Vec::new(),
+        methods: vec![
+            InterfaceMethod {
+                name: "set_theme".into(),
+                args: vec![InterfaceArgument {
+                    name: "theme_id".into(),
+                    arg_type: "string".into(),
+                }],
+                returns: Some("Result".into()),
+                coalesce: false,
+                state_binding: None,
+            },
+            InterfaceMethod {
+                name: "set_icon_theme".into(),
+                args: vec![InterfaceArgument {
+                    name: "theme_id".into(),
+                    arg_type: "string".into(),
+                }],
+                returns: Some("Result".into()),
+                coalesce: false,
+                state_binding: None,
+            },
+            InterfaceMethod {
+                name: "set_font_family".into(),
+                args: vec![InterfaceArgument {
+                    name: "family".into(),
+                    arg_type: "string".into(),
+                }],
+                returns: Some("Result".into()),
+                coalesce: false,
+                state_binding: None,
+            },
+        ],
         events: Vec::new(),
         types: HashMap::new(),
         capabilities: ContractCapabilities::default(),
@@ -301,7 +372,7 @@ pub(super) fn navigation_bar_catalog() -> InterfaceCatalog {
             (
                 vec![ContractStateField {
                     name: "level".into(),
-                    field_type: "number".into(),
+                    field_type: "float".into(),
                     description: None,
                 }],
                 vec![
@@ -309,7 +380,7 @@ pub(super) fn navigation_bar_catalog() -> InterfaceCatalog {
                         name: "set".into(),
                         args: vec![InterfaceArgument {
                             name: "level".into(),
-                            arg_type: "number".into(),
+                            arg_type: "float".into(),
                         }],
                         returns: None,
                         coalesce: true,
@@ -323,7 +394,7 @@ pub(super) fn navigation_bar_catalog() -> InterfaceCatalog {
                         name: "increase".into(),
                         args: vec![InterfaceArgument {
                             name: "amount".into(),
-                            arg_type: "number".into(),
+                            arg_type: "float".into(),
                         }],
                         returns: None,
                         coalesce: false,
@@ -333,7 +404,7 @@ pub(super) fn navigation_bar_catalog() -> InterfaceCatalog {
                         name: "decrease".into(),
                         args: vec![InterfaceArgument {
                             name: "amount".into(),
-                            arg_type: "number".into(),
+                            arg_type: "float".into(),
                         }],
                         returns: None,
                         coalesce: false,
@@ -344,15 +415,19 @@ pub(super) fn navigation_bar_catalog() -> InterfaceCatalog {
         } else {
             (Vec::new(), Vec::new())
         };
-        catalog.register_contract(InterfaceContract {
-            interface: interface.into(),
-            version: parse_contract_version("1.0").unwrap(),
-            state_fields,
-            methods,
-            events: Vec::new(),
-            types: HashMap::new(),
-            capabilities: ContractCapabilities::default(),
-        });
+        catalog
+            .try_register_contract(InterfaceContract {
+                interface: interface.into(),
+                version: parse_contract_version("1.0").unwrap(),
+                state_fields,
+                methods,
+                events: Vec::new(),
+                types: HashMap::new(),
+                capabilities: ContractCapabilities::default(),
+            })
+            .unwrap_or_else(|error| {
+                panic!("invalid navigation interface contract {interface}: {error}")
+            });
         catalog.register_provider(InterfaceProvider {
             interface: interface.into(),
             version: Some("1.0".into()),

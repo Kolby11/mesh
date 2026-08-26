@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Test-facing candidate wrappers share the production validator.
+
 use super::super::*;
 use super::{BackendLaunchCandidate, BackendLifecycleStatusRecord};
 use mesh_core_capability::EffectiveCapabilities;
@@ -27,7 +29,7 @@ pub(in crate::shell) fn backend_launch_candidates_from_graph_with_capabilities(
     Vec<BackendLaunchCandidate>,
     Vec<BackendLifecycleStatusRecord>,
 ) {
-    let mut statuses = backend_requirement_statuses(graph);
+    let mut statuses = backend_requirement_statuses(graph, interfaces);
     let mut interface_names: Vec<String> = graph
         .backend_provider_contributions()
         .into_iter()
@@ -220,14 +222,23 @@ pub(in crate::shell) fn launch_candidate_for_provider_with_capabilities(
     })
 }
 
-fn backend_requirement_statuses(graph: &InstalledModuleGraph) -> Vec<BackendLifecycleStatusRecord> {
+fn backend_requirement_statuses(
+    graph: &InstalledModuleGraph,
+    interfaces: &InterfaceRegistry,
+) -> Vec<BackendLifecycleStatusRecord> {
+    let is_core_provider = |provider: &mesh_core_service::InterfaceProvider| {
+        provider.provider_module == "@mesh/shell"
+            || provider.provider_module == mesh_core_debug::DEBUG_SOURCE_MODULE_ID
+    };
     let mut statuses = Vec::new();
     for frontend in graph.frontend_modules() {
         let Some(requirements) = graph.requirements_for_frontend(&frontend.id) else {
             continue;
         };
         for interface in requirements.backend.keys() {
-            if graph.backend_providers_for_interface(interface).is_empty() {
+            let providers = interfaces.providers_for(interface);
+            let shell_owned = providers.iter().any(is_core_provider);
+            if graph.backend_providers_for_interface(interface).is_empty() && providers.is_empty() {
                 statuses.push(BackendLifecycleStatusRecord {
                     interface: interface.clone(),
                     provider_id: Some(frontend.id.clone()),
@@ -237,7 +248,7 @@ fn backend_requirement_statuses(graph: &InstalledModuleGraph) -> Vec<BackendLife
                         frontend.id
                     ),
                 });
-            } else if graph.active_provider(interface).is_none() {
+            } else if graph.active_provider(interface).is_none() && !shell_owned {
                 statuses.push(BackendLifecycleStatusRecord {
                     interface: interface.clone(),
                     provider_id: Some(frontend.id.clone()),
@@ -247,11 +258,13 @@ fn backend_requirement_statuses(graph: &InstalledModuleGraph) -> Vec<BackendLife
                         frontend.id
                     ),
                 });
-            } else if let Some(record) = graph.health().iter().find(|record| {
-                record.module_id == frontend.id
-                    && record.interface.as_deref() == Some(interface.as_str())
-                    && record.status == "required_interface_unavailable"
-            }) {
+            } else if !shell_owned
+                && let Some(record) = graph.health().iter().find(|record| {
+                    record.module_id == frontend.id
+                        && record.interface.as_deref() == Some(interface.as_str())
+                        && record.status == "required_interface_unavailable"
+                })
+            {
                 statuses.push(BackendLifecycleStatusRecord {
                     interface: interface.clone(),
                     provider_id: record.provider_id.clone(),
@@ -261,7 +274,9 @@ fn backend_requirement_statuses(graph: &InstalledModuleGraph) -> Vec<BackendLife
             }
         }
         for interface in requirements.optional_backend.keys() {
-            if graph.backend_providers_for_interface(interface).is_empty() {
+            let providers = interfaces.providers_for(interface);
+            let shell_owned = providers.iter().any(is_core_provider);
+            if graph.backend_providers_for_interface(interface).is_empty() && providers.is_empty() {
                 statuses.push(BackendLifecycleStatusRecord {
                     interface: interface.clone(),
                     provider_id: Some(frontend.id.clone()),
@@ -271,7 +286,7 @@ fn backend_requirement_statuses(graph: &InstalledModuleGraph) -> Vec<BackendLife
                         frontend.id
                     ),
                 });
-            } else if graph.active_provider(interface).is_none() {
+            } else if graph.active_provider(interface).is_none() && !shell_owned {
                 statuses.push(BackendLifecycleStatusRecord {
                     interface: interface.clone(),
                     provider_id: Some(frontend.id.clone()),
@@ -281,11 +296,13 @@ fn backend_requirement_statuses(graph: &InstalledModuleGraph) -> Vec<BackendLife
                         frontend.id
                     ),
                 });
-            } else if let Some(record) = graph.health().iter().find(|record| {
-                record.module_id == frontend.id
-                    && record.interface.as_deref() == Some(interface.as_str())
-                    && record.status == "optional_interface_unavailable"
-            }) {
+            } else if !shell_owned
+                && let Some(record) = graph.health().iter().find(|record| {
+                    record.module_id == frontend.id
+                        && record.interface.as_deref() == Some(interface.as_str())
+                        && record.status == "optional_interface_unavailable"
+                })
+            {
                 statuses.push(BackendLifecycleStatusRecord {
                     interface: interface.clone(),
                     provider_id: record.provider_id.clone(),

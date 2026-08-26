@@ -14,8 +14,9 @@ use super::types::{
 use mesh_core_config::SettingsStore;
 use mesh_core_interaction::{
     GestureKind, InteractionDelta, InteractionFrame, InteractionState, ScrollbarAxis,
-    collect_focus_traversal, find_click_handler, find_event_handler, find_node_bounds_by_key,
-    find_node_by_key, find_node_path_at, find_node_with_bounds_by_key, find_nodes_by_keys,
+    collect_focus_traversal, find_click_handler, find_event_handler,
+    find_focus_node_with_bounds_by_key, find_node_bounds_by_key, find_node_by_key,
+    find_node_path_at, find_node_with_bounds_by_key, find_nodes_by_keys,
     find_scrollable_at_with_limits, find_scrollbar_at, is_input_key, is_slider_key,
     measure_content_size, next_focus_target, node_can_receive_target as tree_target_is_eligible,
     node_is_source, pointer_event_handler_hit, pointer_press_hit, scroll_into_view_offsets,
@@ -1091,6 +1092,11 @@ pub(super) struct FrontendSurfaceComponent {
     /// first restyle and invalidated whenever the compiled module is replaced
     /// (source reload). Avoids allocating + cloning every StyleRule per paint.
     cached_restyle_rules: Option<Vec<mesh_core_component::style::StyleRule>>,
+    /// The number of contribution entries the cached rules were built from.
+    /// A contribution root appearing or disappearing changes the rule set
+    /// without replacing the compiled module, so the count is compared on
+    /// every lookup and invalidates the cache on its own.
+    cached_restyle_rules_contribution_count: usize,
     /// Pseudo-state dependencies in the cached aggregate. Interaction diffs
     /// use this to target only states that can change CSS for this surface.
     cached_restyle_state_dependencies: StyleStateDependencies,
@@ -1368,6 +1374,7 @@ impl FrontendSurfaceComponent {
             visual_damage_scratch: Vec::new(),
             effective_damage_scratch: Vec::new(),
             cached_restyle_rules: None,
+            cached_restyle_rules_contribution_count: 0,
             cached_restyle_state_dependencies: StyleStateDependencies::default(),
             cached_style_rule_index: None,
             style_rules_generation: 0,

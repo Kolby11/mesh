@@ -32,6 +32,12 @@ end
                 command,
                 payload,
                 ..
+            }
+            | CoreRequest::ServiceCall {
+                interface,
+                command,
+                payload,
+                ..
             },
         ] => {
             assert_eq!(interface, "mesh.audio");
@@ -70,6 +76,12 @@ end
     match network_requests.as_slice() {
         [
             CoreRequest::ServiceCommand {
+                interface,
+                command,
+                payload,
+                ..
+            }
+            | CoreRequest::ServiceCall {
                 interface,
                 command,
                 payload,
@@ -131,6 +143,12 @@ fn shipped_workspace_button_publishes_focus_workspace_request() {
     match requests.as_slice() {
         [
             CoreRequest::ServiceCommand {
+                interface,
+                command,
+                payload,
+                ..
+            }
+            | CoreRequest::ServiceCall {
                 interface,
                 command,
                 payload,

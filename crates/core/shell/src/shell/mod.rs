@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Shell compatibility and diagnostic paths are exercised by tests.
+
 use mesh_core_capability::{CapabilityPolicy, EffectiveCapabilities};
 use mesh_core_config::{
     ModuleSettingsOverrides, SettingsNamespaceSchema, SettingsStore, ShellConfig, ShellSettings,

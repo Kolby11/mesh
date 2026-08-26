@@ -5,10 +5,10 @@
 //! icon's tint color, so glyphs flow through the same theme-token coloring
 //! path as monochrome SVG icons.
 
-#[cfg(test)]
-use super::PixelBuffer;
 use super::profiling;
 use super::resource_broker::{ResourceBroker, ResourceBrokerContext};
+#[cfg(test)]
+use super::{PixelBuffer, PixelCanvasSession};
 use super::{checked_pixel_bytes, resource_generation_is_current};
 use mesh_core_elements::lru::ByteLruCache;
 use mesh_core_elements::style::Color;
@@ -680,8 +680,27 @@ pub fn draw_font_glyph_on_canvas(
                     supported_axes,
                 );
                 match last_good_glyph_key_for_shape(GlyphShapeKey::from(key)) {
-                    Some(fallback_key) => (cache_lookup(fallback_key).flatten(), fallback_key),
-                    None => (None, key),
+                    Some(fallback_key) => match cache_lookup(fallback_key).flatten() {
+                        Some(glyph) => (Some(glyph), fallback_key),
+                        None => rasterize_on_render_thread(
+                            key,
+                            font_path,
+                            prepared_bytes,
+                            codepoint,
+                            px,
+                            axes,
+                            supported_axes,
+                        ),
+                    },
+                    None => rasterize_on_render_thread(
+                        key,
+                        font_path,
+                        prepared_bytes,
+                        codepoint,
+                        px,
+                        axes,
+                        supported_axes,
+                    ),
                 }
             }
         }
@@ -738,6 +757,35 @@ pub fn draw_font_glyph_on_canvas(
         &paint,
     );
     true
+}
+
+#[cfg(not(test))]
+fn rasterize_on_render_thread(
+    key: GlyphCacheKey,
+    font_path: &Path,
+    prepared_bytes: Option<&Arc<[u8]>>,
+    codepoint: u32,
+    px: u32,
+    axes: GlyphAxes,
+    supported_axes: SupportedAxes,
+) -> (Option<CachedGlyph>, GlyphCacheKey) {
+    // A first-frame icon is much more useful than a missing-glyph marker. The
+    // bundled icon fonts are already bounded by `glyph_work_bytes`, and the
+    // synchronous path is only used when no exact or last-good shape is in the
+    // cache. Subsequent paints remain cache-only; queued jobs may still fill
+    // the same key in the background.
+    let started = std::time::Instant::now();
+    let glyph = rasterize(
+        font_path,
+        prepared_bytes.cloned(),
+        codepoint,
+        px,
+        axes,
+        supported_axes,
+    );
+    profiling::record_icon_image_raster(started.elapsed());
+    cache_store(key, glyph.clone());
+    (glyph, key)
 }
 
 #[cfg(test)]
@@ -875,6 +923,61 @@ mod tests {
         )
         .expect("prepared bytes should be sufficient for glyph rasterization");
         assert!(glyph.pixels.iter().any(|alpha| *alpha > 0));
+    }
+
+    #[test]
+    fn prepared_font_glyph_draws_visible_pixels_on_skia_canvas() {
+        let font_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../../../modules/icon-packs/material-symbols/assets/MaterialSymbolsRounded.ttf",
+        );
+        let bytes: Arc<[u8]> = std::fs::read(&font_path).unwrap().into();
+        let supported = SupportedAxes {
+            fill: true,
+            weight: true,
+            grade: true,
+            optical_size: true,
+        };
+        let axes = GlyphAxes {
+            fill: Some(0.0),
+            weight: Some(400.0),
+            grade: Some(0.0),
+            optical_size: Some(24.0),
+        };
+        let tint = Color {
+            r: 220,
+            g: 220,
+            b: 240,
+            a: 255,
+        };
+        let mut buffer = PixelBuffer::new(32, 32);
+        let mut session = PixelCanvasSession::new(&mut buffer);
+        let drew = session
+            .with_canvas(|canvas| {
+                draw_font_glyph_on_canvas(
+                    canvas,
+                    &font_path,
+                    Some(&bytes),
+                    resource_fingerprint(&font_path),
+                    0xe8b8,
+                    supported,
+                    axes,
+                    4,
+                    4,
+                    24,
+                    24,
+                    tint,
+                )
+            })
+            .expect("Skia canvas should wrap the pixel buffer");
+        assert!(
+            drew,
+            "prepared material glyph should render on the Skia path"
+        );
+        drop(session);
+        assert!(
+            buffer.data().chunks_exact(4).any(|pixel| pixel[3] != 0),
+            "Skia glyph draw should leave non-transparent pixels in the buffer"
+        );
     }
 
     #[test]

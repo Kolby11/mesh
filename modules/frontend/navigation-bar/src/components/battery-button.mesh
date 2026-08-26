@@ -1,19 +1,15 @@
 <template>
-  <box
-    class="battery-widget"
-    title="{t('nav.battery') .. newline .. t(remaining_key) .. ': ' .. remaining_label .. newline .. t(rate_key) .. ': ' .. rate_label .. newline .. t('nav.health') .. ': ' .. health_label}"
-    aria-label="{t('nav.battery') .. ' ' .. battery_label .. '. ' .. t(rate_key) .. '. ' .. t(remaining_key) .. ': ' .. remaining_label .. '. ' .. t('nav.health') .. ': ' .. health_label .. '.'}"
-  >
-    <icon class="battery-glyph" name="{battery_icon_name}" size="18" />
-    <text class="battery-value">{battery_label}</text>
-  </box>
+    <box
+        class="battery-widget"
+        title={t('nav.battery') .. newline .. t(remaining_key) .. ': ' .. remaining_label .. newline .. t(rate_key) .. ': ' .. rate_label .. newline .. t('nav.health') .. ': ' .. health_label}
+        aria-label={t('nav.battery') .. ' ' .. battery_label .. '. ' .. t(rate_key) .. '. ' .. t(remaining_key) .. ': ' .. remaining_label .. '. ' .. t('nav.health') .. ': ' .. health_label .. '.'}
+    >
+        <icon class="battery-glyph" name={battery_icon_name} size="18" />
+        <text class="battery-value">{battery_label}</text>
+    </box>
 </template>
 
 <script lang="luau">
--- `t(...)` only resolves through the real locale store when called from a
--- template `{...}` expression (compiled to a TranslateExpr); the `mesh.i18n`
--- Luau host API is an identity stub. So this script computes raw keys and
--- formatted values, and the template above applies `t()` to the keys.
 local power = require("mesh.power")
 
 newline = "\n"
@@ -27,11 +23,15 @@ health_label = "--"
 
 function round_percent(level_value)
     local safe = level_value or 0
-    if safe < 0 then safe = 0 end
+    if safe < 0 then
+        safe = 0
+    end
     if safe <= 1 then
         safe = safe * 100
     end
-    if safe > 100 then safe = 100 end
+    if safe > 100 then
+        safe = 100
+    end
     return math.floor(safe + 0.5)
 end
 
@@ -65,10 +65,18 @@ function format_health(health_percent)
 end
 
 function battery_icon_for(percent_value)
-    if percent_value >= 95 then return "battery-full" end
-    if percent_value >= 70 then return "battery-good" end
-    if percent_value >= 45 then return "battery-low" end
-    if percent_value >= 20 then return "battery-caution" end
+    if percent_value >= 95 then
+        return "battery-full"
+    end
+    if percent_value >= 70 then
+        return "battery-good"
+    end
+    if percent_value >= 45 then
+        return "battery-low"
+    end
+    if percent_value >= 20 then
+        return "battery-caution"
+    end
     return "battery-empty"
 end
 
@@ -90,8 +98,7 @@ function render(self)
     battery_icon_name = battery_icon_for(percent_value)
     battery_label = string.format("%d%%", percent_value)
     remaining_key = charging and "nav.time_to_full" or "nav.time_to_empty"
-    remaining_label = charging
-        and format_minutes(power.time_to_full_minutes)
+    remaining_label = charging and format_minutes(power.time_to_full_minutes)
         or format_minutes(power.time_remaining_minutes)
     rate_key = charging and "nav.charging" or "nav.discharging"
     rate_label = format_watts(power.power_draw_watts)
@@ -100,49 +107,49 @@ end
 </script>
 
 <style>
-.battery-widget {
-    height: 40px;
-    flex-shrink: 0;
-    justify-content: center;
-    align-items: center;
-    gap: var(--spacing-xs);
-    padding-inline: var(--spacing-sm);
-    border-radius: var(--radius-full);
-    background: var(--color-surface-container);
-    color: var(--color-on-surface);
-    text-wrap: none;
-    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                color var(--animation-duration-short) var(--animation-curves-bezier-standard);
-}
-
-.battery-widget:hover {
-    background: var(--color-secondary-container);
-    color: var(--color-on-secondary-container);
-}
-
-.battery-glyph {
-    width: 24px;
-    height: 24px;
-    justify-content: center;
-    align-items: center;
-    color: inherit;
-    transition: color var(--animation-duration-short) var(--animation-curves-bezier-standard);
-}
-
-.battery-value {
-    color: inherit;
-    font-size: var(--typography-size-sm);
-    font-weight: 700;
-}
-
-@container (max-width: 720px) {
-    .battery-value {
-        display: none;
-    }
-
     .battery-widget {
-        width: 44px;
-        padding-inline: var(--spacing-xs);
+        height: 40px;
+        flex-shrink: 0;
+        justify-content: center;
+        align-items: center;
+        gap: var(--spacing-xs);
+        padding-inline: var(--spacing-sm);
+        border-radius: var(--radius-full);
+        background: var(--color-surface-container);
+        color: var(--color-on-surface);
+        text-wrap: none;
+        transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+        color var(--animation-duration-short) var(--animation-curves-bezier-standard);
     }
-}
+
+    .battery-widget:hover {
+        background: var(--color-secondary-container);
+        color: var(--color-on-secondary-container);
+    }
+
+    .battery-glyph {
+        width: 24px;
+        height: 24px;
+        justify-content: center;
+        align-items: center;
+        color: inherit;
+        transition: color var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    }
+
+    .battery-value {
+        color: inherit;
+        font-size: var(--typography-size-sm);
+        font-weight: 700;
+    }
+
+    @container (max-width: 720px) {
+        .battery-value {
+            display: none;
+        }
+
+        .battery-widget {
+            width: 44px;
+            padding-inline: var(--spacing-xs);
+        }
+    }
 </style>

@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Signature compatibility helpers remain for retained-render tests.
+
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 

@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Debug snapshots are used by optional profiling integrations.
+
 use super::super::*;
 
 impl Shell {

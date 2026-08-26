@@ -442,6 +442,11 @@ pub struct DisplayPaintCommand {
 #[derive(Debug, Clone)]
 pub struct DisplayPaintNode {
     pub id: NodeId,
+    /// The authored module that owns this node. A mounted component can be
+    /// painted inside a different root surface, so resource-backed content
+    /// such as icons must resolve against the node owner rather than the
+    /// surface root.
+    pub module_id: Option<Arc<str>>,
     /// The cumulative transform from this node's local border-box into the
     /// surface. `layout` remains its transformed AABB for damage/culling.
     pub transform: AffineTransform,

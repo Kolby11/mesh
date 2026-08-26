@@ -335,6 +335,16 @@ pub fn icon_resolution_jobs_pending() -> bool {
 
 #[cfg(not(test))]
 fn resolve_icon_for_render(module_id: &str, name: &str, size: u32) -> IconResolution {
+    // Semantic lookup is an in-memory operation over the prepared module
+    // bindings. It must not turn a valid icon into a visible missing-icon
+    // marker merely because the optional resource worker has not completed its
+    // first queue turn yet. Keep the queue for callers that need asynchronous
+    // resource preparation, but make the render-time lookup deterministic.
+    let resolved = mesh_core_icon::resolve_icon_for_module(module_id, name, size);
+    if !matches!(resolved, IconResolution::Missing { .. }) {
+        return resolved;
+    }
+
     drain_icon_resolution_jobs();
     let key = IconResolutionKey {
         resource_revision: resource_revision(),
@@ -1552,11 +1562,57 @@ fn resolve_file_variant_async(
         return Some(variant);
     }
 
-    match schedule_icon_raster_job(key, path, kind, width, height, tint, multicolor) {
+    match schedule_icon_raster_job(key.clone(), path, kind, width, height, tint, multicolor) {
         Some(true) | Some(false) => {}
-        None => return None,
+        None => {}
     }
-    None
+
+    // A missing first-frame file icon is user-visible and particularly
+    // confusing for shell controls: the resolver found a real asset, but the
+    // asynchronous worker has not published its pixels yet, so the canvas
+    // would otherwise draw the crossed-box marker. System icon files are
+    // already bounded by the same dimensions/source checks as the worker;
+    // rasterize this small first request synchronously and keep the worker as
+    // the normal path for subsequent uncached variants.
+    let started = std::time::Instant::now();
+    let (variant, cacheable) =
+        raster_file_variant_on_render_thread(path, kind, width, height, tint, multicolor);
+    profiling::record_icon_image_raster(started.elapsed());
+    let variant = variant?;
+    if cacheable {
+        profiling::record_raster_cache_miss();
+        store_variant(key, variant.clone());
+    } else {
+        profiling::record_raster_cache_bypass();
+    }
+    Some(variant)
+}
+
+#[cfg(not(test))]
+fn raster_file_variant_on_render_thread(
+    path: &Path,
+    kind: IconFileKind,
+    width: u32,
+    height: u32,
+    tint: Color,
+    multicolor: bool,
+) -> (Option<RasterVariant>, bool) {
+    match kind {
+        IconFileKind::Bitmap => (
+            raster_bitmap_variant(path, width, height, tint, multicolor),
+            true,
+        ),
+        IconFileKind::Svg => {
+            let Ok(svg_data) = std::fs::read_to_string(path) else {
+                return (None, false);
+            };
+            let cacheable = !svg_has_external_resource_reference(&svg_data);
+            (
+                raster_svg_variant_from_data(path, &svg_data, width, height, tint, multicolor),
+                cacheable,
+            )
+        }
+    }
 }
 
 /// Draw the built-in missing-icon fallback. Tests retain the embedded SVG
@@ -1643,6 +1699,7 @@ fn draw_missing_icon_placeholder(
 }
 
 #[cfg(test)]
+#[allow(dead_code)] // Test-only pixel-buffer API retained for renderer fixtures.
 pub fn draw_named_icon(
     buffer: &mut PixelBuffer,
     name: &str,
@@ -1671,6 +1728,7 @@ pub fn draw_named_icon(
 /// `axes` carries CSS `--icon-*` values for variable-font axis settings;
 /// pass [`GlyphAxes::default()`] when no axis state is available.
 #[cfg(test)]
+#[allow(dead_code)] // Test-only pixel-buffer API retained for renderer fixtures.
 pub fn draw_named_icon_for_module(
     buffer: &mut PixelBuffer,
     module_id: &str,

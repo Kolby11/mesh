@@ -516,9 +516,12 @@ fn runtime_props_json(props: &AttributeMap) -> HashMap<String, serde_json::Value
     let mut props_json = HashMap::with_capacity(props.len());
     for (key, value) in props.iter_values() {
         let value = value.to_json_value();
-        if mesh_core_component::json_to_prop_value_ref(&value).is_ok() {
-            props_json.insert(key.as_str().to_string(), value);
-        }
+        // `<props>` configuration remains scalar and is validated separately.
+        // Component composition also carries resolved runtime values, though,
+        // including arrays/tables such as BubbleOptions' `items`. Dropping
+        // those values here makes the child see its script default instead of
+        // the parent's binding and silently removes the child subtree.
+        props_json.insert(key.as_str().to_string(), value);
     }
     props_json
 }
@@ -930,10 +933,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_props_json_rejects_structured_props() {
-        // Structured bindings retain their JSON type at this boundary, so the
-        // scalar prop conversion can reject them instead of accepting their
-        // stringified representation as a `string` prop.
+    fn runtime_props_json_preserves_structured_runtime_props() {
         let mut props = AttributeMap::new();
         props.insert_value(
             "items".into(),
@@ -949,8 +949,17 @@ mod tests {
 
         let props_json = runtime_props_json(&props);
 
-        assert!(!props_json.contains_key("items"));
-        assert!(!props_json.contains_key("config"));
+        assert_eq!(
+            props_json.get("items"),
+            Some(&serde_json::json!([
+                {"id": "en", "text": "EN"},
+                {"id": "sk", "text": "SK"},
+            ]))
+        );
+        assert_eq!(
+            props_json.get("config"),
+            Some(&serde_json::json!({"enabled": true}))
+        );
         assert_eq!(
             props_json.get("label"),
             Some(&serde_json::Value::String("Volume".into()))

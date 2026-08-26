@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Alternate display-list helpers remain during renderer migration.
+
 use std::collections::{HashMap, HashSet};
 use std::hash::Hasher;
 use std::sync::Arc;

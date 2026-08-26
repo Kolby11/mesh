@@ -22,6 +22,19 @@
 </template>
 
 <script lang="luau">
+overview_tab_class = "view-tab"
+elements_tab_class = "view-tab"
+modules_tab_class = "view-tab"
+surfaces_tab_class = "view-tab"
+backend_tab_class = "view-tab"
+benchmark_tab_class = "view-tab"
+
+onOverview = nil
+onElements = nil
+onModules = nil
+onSurfaces = nil
+onBackendServices = nil
+onBenchmark = nil
 </script>
 
 <style>

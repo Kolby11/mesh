@@ -346,34 +346,43 @@ impl SeatHandler for State {
                 .is_some_and(|input| input.pointer.is_none())
         {
             let cursor_surface = self.compositor_state.create_surface(qh);
-            if let Ok(ptr) = self.seat_state.get_pointer_with_theme(
+            let pointer = self.seat_state.get_pointer_with_theme(
                 qh,
                 &seat,
                 self.shm.wl_shm(),
                 cursor_surface,
                 ThemeSpec::default(),
-            ) {
-                tracing::debug!("[hover] layer_shell: pointer capability acquired");
-                let pointer_id = ptr.pointer().id();
-                let mut gesture_handles = None;
-                if let Some(gestures) = self.pointer_gestures.as_ref() {
-                    let wl_ptr = ptr.pointer();
-                    let swipe = gestures.get_swipe_gesture(wl_ptr, qh, GlobalData);
-                    let pinch = gestures.get_pinch_gesture(wl_ptr, qh, GlobalData);
-                    let hold = gestures.get_hold_gesture(wl_ptr, qh, GlobalData);
-                    self.swipe_seats.insert(swipe.id(), seat_id.clone());
-                    self.pinch_seats.insert(pinch.id(), seat_id.clone());
-                    self.hold_seats.insert(hold.id(), seat_id.clone());
-                    gesture_handles = Some((swipe, pinch, hold));
-                }
-                self.pointer_seats.insert(pointer_id, seat_id.clone());
-                if let Some(input) = self.input_seats.get_mut(&seat_id) {
-                    input.pointer = Some(ptr);
-                    if let Some((swipe, pinch, hold)) = gesture_handles {
-                        input.gesture_swipe = Some(swipe);
-                        input.gesture_pinch = Some(pinch);
-                        input.gesture_hold = Some(hold);
+            );
+            match pointer {
+                Ok(ptr) => {
+                    tracing::debug!("[hover] layer_shell: pointer capability acquired");
+                    let pointer_id = ptr.pointer().id();
+                    let mut gesture_handles = None;
+                    if let Some(gestures) = self.pointer_gestures.as_ref() {
+                        let wl_ptr = ptr.pointer();
+                        let swipe = gestures.get_swipe_gesture(wl_ptr, qh, GlobalData);
+                        let pinch = gestures.get_pinch_gesture(wl_ptr, qh, GlobalData);
+                        let hold = gestures.get_hold_gesture(wl_ptr, qh, GlobalData);
+                        self.swipe_seats.insert(swipe.id(), seat_id.clone());
+                        self.pinch_seats.insert(pinch.id(), seat_id.clone());
+                        self.hold_seats.insert(hold.id(), seat_id.clone());
+                        gesture_handles = Some((swipe, pinch, hold));
                     }
+                    self.pointer_seats.insert(pointer_id, seat_id.clone());
+                    if let Some(input) = self.input_seats.get_mut(&seat_id) {
+                        input.pointer = Some(ptr);
+                        if let Some((swipe, pinch, hold)) = gesture_handles {
+                            input.gesture_swipe = Some(swipe);
+                            input.gesture_pinch = Some(pinch);
+                            input.gesture_hold = Some(hold);
+                        }
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        "[hover] layer_shell: failed to acquire pointer capability for seat={:?}: {error}",
+                        seat_id
+                    );
                 }
             }
         }
@@ -506,12 +515,20 @@ impl PointerHandler for State {
         events: &[PointerEvent],
     ) {
         let Some(seat_id) = self.seat_id_for_pointer(pointer) else {
+            tracing::warn!(
+                "[hover] layer_shell: dropping pointer frame for unknown wl_pointer id={:?}",
+                pointer.id()
+            );
             return;
         };
         for event in events {
-            let surface_id = match self.surface_id_for_wl_surface(&event.surface) {
-                Some(id) => id,
-                None => continue,
+            let Some(surface_id) = self.surface_id_for_wl_surface(&event.surface) else {
+                tracing::debug!(
+                    "[hover] layer_shell: dropping pointer event for unknown wl_surface id={:?} kind={:?}",
+                    event.surface.id(),
+                    event.kind
+                );
+                continue;
             };
             match event.kind {
                 PointerEventKind::Enter { .. } => {

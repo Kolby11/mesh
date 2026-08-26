@@ -416,6 +416,14 @@ pub(super) fn accumulate_descendant_extents(
     max_bottom: &mut f32,
 ) {
     for child in &node.children {
+        // Promoted popovers are retained below a zero-size wrapper so the
+        // child surface can paint and interact with them. Their visual bounds
+        // are intentionally out of the parent's layout contract, however;
+        // including them here makes a fit-sized control row grow to the
+        // popup's right edge and can push ordinary controls off-screen.
+        if child.is_promoted_popover() {
+            continue;
+        }
         if child.computed_style.position == Position::Fixed {
             continue;
         }

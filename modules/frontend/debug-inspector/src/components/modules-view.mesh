@@ -44,6 +44,10 @@
 <script lang="luau">
 hidden = false
 rows = {}
+state_copy = ""
+filter_value = ""
+onFilterChange = nil
+empty_hidden = false
 </script>
 
 <style>

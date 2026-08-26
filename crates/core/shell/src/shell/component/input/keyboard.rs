@@ -44,7 +44,9 @@ impl FrontendSurfaceComponent {
         tree: &'a WidgetNode,
         node_key: &str,
     ) -> Option<ResolvedInputTarget<'a>> {
-        let (node, bounds) = find_node_with_bounds_by_key(tree, node_key)?;
+        let (node, bounds) = find_node_with_bounds_by_key(tree, node_key).or_else(|| {
+            mesh_core_interaction::find_focus_node_with_bounds_by_key(tree, node_key)
+        })?;
         Some(ResolvedInputTarget { node, bounds })
     }
 
@@ -215,7 +217,8 @@ impl FrontendSurfaceComponent {
         self.commit_interaction_delta(transaction);
         self.focus_visible_key = self.focused_key.clone();
         self.focus_visible_id = self.focused_id;
-        if let Some(focused_key) = self.normalized_focused_key(tree) {
+        let normalized_focused_key = self.normalized_focused_key(tree);
+        if let Some(focused_key) = normalized_focused_key {
             let mut requests = self.dispatch_focused_keyboard_handler(
                 tree,
                 &focused_key,

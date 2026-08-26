@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Alternate damage-bound helpers remain for paint fixtures.
+
 use super::*;
 use mesh_core_elements::{AffineTransform, child_transform, node_transform, root_transform};
 

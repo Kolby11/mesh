@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Scanner helpers are consumed by migration and test tooling.
+
 //! Static analysis of the Luau a module actually runs.
 //!
 //! Graph scanning cross-checks module scripts against module declarations:

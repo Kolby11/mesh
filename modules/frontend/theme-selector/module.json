@@ -30,6 +30,9 @@
         "weather-clear-night"
       ]
     },
+    "icons": {
+      "ignore_shell_default": true
+    },
     "entry": "src/main.mesh",
     "accessibility": {
       "role": "menu"

@@ -249,10 +249,10 @@ function start(self)
             stream_active = true
             mesh.service.set_poll_interval(2000)
         else
-            log_warn("no stream tool available (socat/nc); using 500 ms poll")
+            log_debug("no stream tool available (socat/nc); using 500 ms poll")
         end
     else
-        log_warn("could not locate Hyprland event socket; using 500 ms poll")
+        log_debug("could not locate Hyprland event socket; using 500 ms poll")
     end
 
     refresh_state(self)

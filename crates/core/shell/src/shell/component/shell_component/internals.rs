@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Debug paint accessors remain for integration diagnostics.
+
 use super::*;
 
 impl FrontendSurfaceComponent {

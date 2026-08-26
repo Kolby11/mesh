@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Compatibility painter entry points remain for alternate backends.
+
 mod backend;
 mod geometry;
 mod text;

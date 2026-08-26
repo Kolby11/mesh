@@ -233,6 +233,7 @@ mod tests {
         DisplayPaintCommand {
             node: Arc::new(DisplayPaintNode {
                 id: 1,
+                module_id: None,
                 transform: mesh_core_elements::AffineTransform::IDENTITY,
                 local_layout: LayoutRect {
                     x: 0.0,

@@ -128,6 +128,9 @@ impl Shell {
             };
 
             let Some((index, target)) = self.component_target_for_surface(route_surface_id) else {
+                tracing::debug!(
+                    "[hover] dispatch_wayland: no component target for surface_id={route_surface_id}"
+                );
                 continue;
             };
 

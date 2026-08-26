@@ -42,13 +42,14 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
             },
         )
         .unwrap();
-    assert!(matches!(
-        shortcut_requests.as_slice(),
-        [CoreRequest::ServiceCommand { interface, command, payload, .. }]
-            if interface == "mesh.audio"
+    assert_eq!(shortcut_requests.len(), 1);
+    assert!(service_request_parts(&shortcut_requests[0]).is_some_and(
+        |(interface, command, payload)| {
+            interface == "mesh.audio"
                 && command == "set_muted"
                 && payload["device_id"] == serde_json::json!("default")
                 && payload["muted"] == serde_json::json!(true)
+        }
     ));
 
     let tree = component
@@ -135,13 +136,13 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
         )
         .unwrap();
     assert!(
-        selection_requests.iter().any(|request| matches!(
-            request,
-            CoreRequest::ServiceCommand { interface, command, payload, .. }
-                if interface == "mesh.theme"
+        selection_requests.iter().any(|request| {
+            service_request_parts(request).is_some_and(|(interface, command, payload)| {
+                interface == "mesh.theme"
                     && command == "set_theme"
                     && payload.get("theme_id") == Some(&serde_json::json!("solarized-dark"))
-        )),
+            })
+        }),
         "Enter on a focused theme option should select it: {selection_requests:?}"
     );
 
@@ -1290,16 +1291,17 @@ fn navigation_bar_keyboard_activation_toggles_volume_mute_on_real_surface() {
         .unwrap();
 
     assert!(
-        requests.iter().any(|request| matches!(
-            request,
-            CoreRequest::ServiceCommand { interface, command, payload, .. }
-                if interface == "mesh.audio"
+        requests.iter().any(|request| {
+            service_request_parts(request).is_some_and(|(interface, command, payload)| {
+                interface == "mesh.audio"
                     && command == "set_muted"
-                    && payload == &serde_json::json!({
-                        "device_id": "default",
-                        "muted": true
-                    })
-        )),
+                    && payload
+                        == &serde_json::json!({
+                            "device_id": "default",
+                            "muted": true
+                        })
+            })
+        }),
         "Enter on the focused volume button should toggle mute: {requests:?}"
     );
 }
@@ -1378,16 +1380,17 @@ fn navigation_bar_pointer_activation_toggles_volume_mute() {
         .unwrap();
 
     assert!(
-        requests.iter().any(|request| matches!(
-            request,
-            CoreRequest::ServiceCommand { interface, command, payload, .. }
-                if interface == "mesh.audio"
+        requests.iter().any(|request| {
+            service_request_parts(request).is_some_and(|(interface, command, payload)| {
+                interface == "mesh.audio"
                     && command == "set_muted"
-                    && payload == &serde_json::json!({
-                        "device_id": "default",
-                        "muted": true
-                    })
-        )),
+                    && payload
+                        == &serde_json::json!({
+                            "device_id": "default",
+                            "muted": true
+                        })
+            })
+        }),
         "pointer click should toggle mute: {requests:?}"
     );
 }
@@ -1452,14 +1455,14 @@ fn navigation_bar_volume_scroll_changes_level_immediately() {
         )
         .unwrap();
     assert!(
-        down_requests.iter().any(|request| matches!(
-            request,
-            CoreRequest::ServiceCommand { interface, command, payload, .. }
-                if interface == "mesh.audio"
+        down_requests.iter().any(|request| {
+            service_request_parts(request).is_some_and(|(interface, command, payload)| {
+                interface == "mesh.audio"
                     && command == "set_volume"
                     && payload["device_id"] == serde_json::json!("default")
                     && payload["percent"] == serde_json::json!(45)
-        )),
+            })
+        }),
         "scrolling down should lower volume by the default step: {down_requests:?}"
     );
 
@@ -1477,14 +1480,14 @@ fn navigation_bar_volume_scroll_changes_level_immediately() {
         )
         .unwrap();
     assert!(
-        up_requests.iter().any(|request| matches!(
-            request,
-            CoreRequest::ServiceCommand { interface, command, payload, .. }
-                if interface == "mesh.audio"
+        up_requests.iter().any(|request| {
+            service_request_parts(request).is_some_and(|(interface, command, payload)| {
+                interface == "mesh.audio"
                     && command == "set_volume"
                     && payload["device_id"] == serde_json::json!("default")
                     && payload["percent"] == serde_json::json!(50)
-        )),
+            })
+        }),
         "two-finger scroll up should raise volume by the default step: {up_requests:?}"
     );
 }
@@ -1558,14 +1561,14 @@ fn navigation_bar_volume_scroll_respects_instance_sensitivity() {
         )
         .unwrap();
     assert!(
-        requests.iter().any(|request| matches!(
-            request,
-            CoreRequest::ServiceCommand { interface, command, payload, .. }
-                if interface == "mesh.audio"
+        requests.iter().any(|request| {
+            service_request_parts(request).is_some_and(|(interface, command, payload)| {
+                interface == "mesh.audio"
                     && command == "set_volume"
                     && payload["device_id"] == serde_json::json!("default")
                     && payload["percent"] == serde_json::json!(62)
-        )),
+            })
+        }),
         "configured volume scroll sensitivity should apply to wheel input: {requests:?}"
     );
 }
@@ -1652,16 +1655,17 @@ fn navigation_bar_volume_trigger_keeps_click_capture_during_press_animation() {
         .unwrap();
 
     assert!(
-        requests.iter().any(|request| matches!(
-            request,
-            CoreRequest::ServiceCommand { interface, command, payload, .. }
-                if interface == "mesh.audio"
+        requests.iter().any(|request| {
+            service_request_parts(request).is_some_and(|(interface, command, payload)| {
+                interface == "mesh.audio"
                     && command == "set_muted"
-                    && payload == &serde_json::json!({
-                        "device_id": "default",
-                        "muted": true
-                    })
-        )),
+                    && payload
+                        == &serde_json::json!({
+                            "device_id": "default",
+                            "muted": true
+                        })
+            })
+        }),
         "release at the original press point should still click while the active animation changes visual bounds: {requests:?}"
     );
 }
@@ -1707,14 +1711,9 @@ fn navigation_bar_keyboard_audio_popover_slider_responds_to_arrow_keys() {
         )
         .unwrap();
     match requests.as_slice() {
-        [
-            CoreRequest::ServiceCommand {
-                interface,
-                command,
-                payload,
-                ..
-            },
-        ] => {
+        [request] => {
+            let (interface, command, payload) =
+                service_request_parts(request).expect("expected a service request");
             assert_eq!(interface, "mesh.audio");
             assert_eq!(command, "set_volume");
             assert_eq!(payload["device_id"], serde_json::json!("default"));

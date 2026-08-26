@@ -19,6 +19,7 @@ fn make_cmd(x: f32, y: f32, width: f32, height: f32, blur_radius: f32) -> Displa
     DisplayPaintCommand {
         node: Arc::new(DisplayPaintNode {
             id: 1,
+            module_id: None,
             transform: mesh_core_elements::AffineTransform::translation(x, y),
             local_layout: LayoutRect {
                 x: 0.0,

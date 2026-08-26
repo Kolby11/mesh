@@ -1093,7 +1093,6 @@ impl FrontendSurfaceComponent {
         )
         .entered();
         let (handler_name, merged_args) = unpack_handler_args(target.handler(), args);
-
         let mut runtimes = self.runtimes.lock().unwrap();
         let instance_key = target
             .instance_key()

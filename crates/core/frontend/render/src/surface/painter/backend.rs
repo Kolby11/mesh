@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Backend paint variants are retained for renderer compatibility.
+
 use super::*;
 use crate::surface::icon;
 use mesh_core_elements::style::{Color, Corners, Edges};

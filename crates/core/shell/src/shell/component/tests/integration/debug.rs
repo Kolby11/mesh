@@ -790,6 +790,12 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
             command,
             payload,
             ..
+        }
+        | CoreRequest::ServiceCall {
+            interface,
+            command,
+            payload,
+            ..
         }] if interface == "mesh.audio"
             && command == "set_volume"
             && payload == &serde_json::json!({ "device_id": "default", "percent": 38 })
@@ -854,7 +860,8 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
-        [CoreRequest::ServiceCommand { interface, command, payload, .. }]
+        [CoreRequest::ServiceCommand { interface, command, payload, .. }
+            | CoreRequest::ServiceCall { interface, command, payload, .. }]
             if interface == "mesh.settings"
                 && command == "set_prop"
                 && payload.get("module_id")
@@ -897,7 +904,8 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
-        [CoreRequest::ServiceCommand { interface, command, payload, .. }]
+        [CoreRequest::ServiceCommand { interface, command, payload, .. }
+            | CoreRequest::ServiceCall { interface, command, payload, .. }]
             if interface == "mesh.settings"
                 && command == "set_prop"
                 && payload.get("module_id")
@@ -1016,6 +1024,12 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
                 command,
                 payload,
                 ..
+            }
+            | CoreRequest::ServiceCall {
+                interface,
+                command,
+                payload,
+                ..
             },
         ] => {
             assert_eq!(interface, "mesh.theme");
@@ -1033,7 +1047,8 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
-        [CoreRequest::ServiceCommand { interface, command, payload, .. }]
+        [CoreRequest::ServiceCommand { interface, command, payload, .. }
+            | CoreRequest::ServiceCall { interface, command, payload, .. }]
             if interface == "mesh.theme"
                 && command == "set_icon_theme"
                 && payload.get("theme_id") == Some(&serde_json::json!("Papirus-Dark"))
@@ -1047,7 +1062,8 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
-        [CoreRequest::ServiceCommand { interface, command, payload, .. }]
+        [CoreRequest::ServiceCommand { interface, command, payload, .. }
+            | CoreRequest::ServiceCall { interface, command, payload, .. }]
             if interface == "mesh.theme"
                 && command == "set_font_family"
                 && payload.get("family") == Some(&serde_json::json!("Noto Sans"))
@@ -1064,7 +1080,8 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
-        [CoreRequest::ServiceCommand { interface, command, payload, .. }]
+        [CoreRequest::ServiceCommand { interface, command, payload, .. }
+            | CoreRequest::ServiceCall { interface, command, payload, .. }]
             if interface == "mesh.packages"
                 && command == "set_provider"
                 && payload.get("interface") == Some(&serde_json::json!("mesh.audio"))
@@ -1083,7 +1100,8 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
-        [CoreRequest::ServiceCommand { interface, command, payload, .. }]
+        [CoreRequest::ServiceCommand { interface, command, payload, .. }
+            | CoreRequest::ServiceCall { interface, command, payload, .. }]
             if interface == "mesh.packages"
                 && command == "set_module_enabled"
                 && payload.get("module_id")

@@ -43,16 +43,19 @@ function start(self)
     -- changes that produce no monitor output at all.
     mesh.service.set_poll_interval(1000)
 
-    local started = mesh.exec_stream(
-        "pw-mon",
-        { "--hide-props", "--hide-params", "--print-separator" }
-    )
-    if started then
-        stream_active = true
-        debug_info("subscribed to pw-mon for live volume events")
+    local stream_args = { "--hide-props", "--hide-params", "--print-separator" }
+    if mesh.service.can_exec("pw-mon", stream_args) then
+        local started = mesh.exec_stream("pw-mon", stream_args)
+        if started then
+            stream_active = true
+            debug_info("subscribed to pw-mon for live volume events")
+        else
+            mesh.service.set_poll_interval(250)
+            debug_warn("pw-mon stream unavailable; falling back to 250ms poll")
+        end
     else
         mesh.service.set_poll_interval(250)
-        debug_warn("pw-mon stream unavailable; falling back to 250ms poll")
+        mesh.log.debug("[pipewire-audio] pw-mon capability unavailable; using 250ms poll")
     end
 end
 

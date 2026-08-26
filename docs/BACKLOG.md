@@ -21,8 +21,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ---
 
-## Shell features
-
 ## Section audit feature checklist
 
 These are the feature-level items extracted from the section improvement audits.

@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Legacy hit-test helpers remain for interaction regression fixtures.
+
 use super::*;
 use mesh_core_elements::HandlerTarget;
 use mesh_core_elements::style::TooltipAnchor;
@@ -439,6 +441,49 @@ pub fn find_node_with_bounds_by_key<'a>(
         &AffineClipStack::default(),
     )
     .map(|(node, bounds)| (node, bounds))
+}
+
+/// Resolve a keyboard target's bounds, including descendants of a promoted
+/// popover. Those wrappers are hidden and collapsed in their source surface
+/// because the child surface owns their pixels, but the retained descendants
+/// remain the authoritative source for keyboard dispatch and event payloads.
+pub fn find_focus_node_with_bounds_by_key<'a>(
+    node: &'a WidgetNode,
+    key: &str,
+) -> Option<(&'a WidgetNode, ContentBounds)> {
+    find_focus_node_with_bounds_by_key_affine(
+        node,
+        key,
+        root_transform(0.0, 0.0),
+        &AffineClipStack::default(),
+        false,
+    )
+}
+
+fn find_focus_node_with_bounds_by_key_affine<'a>(
+    node: &'a WidgetNode,
+    key: &str,
+    parent_transform: AffineTransform,
+    clips: &AffineClipStack,
+    promoted_ancestor: bool,
+) -> Option<(&'a WidgetNode, ContentBounds)> {
+    let promoted_wrapper = node.is_promoted_popover();
+    let promoted = promoted_ancestor || promoted_wrapper;
+    if !promoted_wrapper && !node_allows(node, InteractionTarget::Focus) {
+        return None;
+    }
+    let world = node_world_transform(parent_transform, node);
+    if node.mesh_key().is_some_and(|value| value == key) {
+        return promoted
+            .then(|| clipped_node_bounds(node, world, clips))
+            .flatten()
+            .map(|bounds| (node, bounds));
+    }
+    let child_world = child_world_transform(world, node);
+    let child_clips = push_node_clip(clips, node, world);
+    node.children.iter().find_map(|child| {
+        find_focus_node_with_bounds_by_key_affine(child, key, child_world, &child_clips, promoted)
+    })
 }
 
 fn find_node_with_bounds_by_key_at<'a>(

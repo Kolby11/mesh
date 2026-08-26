@@ -49,6 +49,23 @@ impl ScriptContext {
         globals.set("mesh", mesh).map_err(lua_err)?;
 
         self.install_loader_api(globals, &mesh_for_require, &manifest)?;
+        // Template expressions run in a separate Luau environment from the
+        // component script, so a script-local `local t = import(...)` is not
+        // visible to markup such as `title={t("nav.volume")}`. Keep the
+        // template helper on the same capability boundary as the explicit
+        // `mesh.i18n` import instead of making every component duplicate
+        // translated strings into public state.
+        if manifest.has_locale_read {
+            let i18n = create_i18n_library(
+                self.lua(),
+                Arc::clone(&self.locale_cell),
+                self.module_id.clone(),
+                Arc::clone(&self.localized_misses),
+            )
+            .map_err(lua_err)?;
+            let translate = i18n.get::<mlua::Function>("t").map_err(lua_err)?;
+            globals.set("t", translate).map_err(lua_err)?;
+        }
         self.install_refs_api(globals)?;
         Ok(())
     }

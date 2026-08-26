@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Tree inspection methods support benchmarks and regression tests.
+
 use super::*;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

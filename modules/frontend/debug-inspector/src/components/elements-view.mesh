@@ -61,6 +61,8 @@ padding_label = "0"
 content_size_label = "0 × 0"
 computed_rows = {}
 open_source_button_text = "Open in VS Code"
+onTogglePicker = nil
+onOpenSource = nil
 </script>
 
 <style>

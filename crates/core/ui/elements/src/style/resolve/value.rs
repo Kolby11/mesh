@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Compatibility wrappers remain for test and migration callers.
+
 use super::StyleResolver;
 use super::cache::*;
 use super::declaration::*;

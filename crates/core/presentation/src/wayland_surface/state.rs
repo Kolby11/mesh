@@ -350,8 +350,41 @@ impl State {
         }
     }
 
-    pub(super) fn seat_id_for_pointer(&self, pointer: &wl_pointer::WlPointer) -> Option<SeatId> {
-        self.pointer_seats.get(&pointer.id()).cloned()
+    pub(super) fn seat_id_for_pointer(
+        &mut self,
+        pointer: &wl_pointer::WlPointer,
+    ) -> Option<SeatId> {
+        let pointer_id = pointer.id();
+        if let Some(seat_id) = self.pointer_seats.get(&pointer_id).cloned()
+            && self
+                .input_seats
+                .get(&seat_id)
+                .and_then(|input| input.pointer.as_ref())
+                .is_some_and(|tracked| tracked.pointer() == pointer)
+        {
+            return Some(seat_id);
+        }
+
+        // The index is normally populated with the same proxy before any
+        // compositor event can arrive. Keep a proxy-comparison recovery path
+        // anyway: capability teardown/recreation and a queued callback can
+        // leave the object-id index briefly out of sync, and silently dropping
+        // the frame makes every hover and tooltip appear broken.
+        let recovered = self.input_seats.iter().find_map(|(seat_id, input)| {
+            input
+                .pointer
+                .as_ref()
+                .filter(|tracked| tracked.pointer() == pointer)
+                .map(|_| seat_id.clone())
+        });
+        if let Some(seat_id) = recovered.as_ref() {
+            self.pointer_seats.insert(pointer_id, seat_id.clone());
+            tracing::debug!(
+                "[hover] layer_shell: recovered wl_pointer mapping by proxy comparison seat_id={:?}",
+                seat_id
+            );
+        }
+        recovered
     }
 
     pub(super) fn seat_id_for_keyboard(
@@ -938,10 +971,41 @@ impl State {
     }
 
     pub(super) fn surface_id_for_wl_surface(
-        &self,
+        &mut self,
         surface: &wl_surface::WlSurface,
     ) -> Option<Arc<str>> {
-        self.surface_ids_by_wl_id.get(&surface.id()).cloned()
+        if let Some(surface_id) = self.surface_ids_by_wl_id.get(&surface.id()).cloned() {
+            if self
+                .surfaces
+                .get(surface_id.as_ref())
+                .is_some_and(|entry| entry.wl_surface() == surface)
+            {
+                return Some(surface_id);
+            }
+            tracing::debug!(
+                "[hover] layer_shell: stale wl_surface index entry id={:?} surface_id={surface_id}",
+                surface.id()
+            );
+        }
+
+        // The object-id index is the normal path, but a role replacement can
+        // race a compositor input callback during the same dispatch cycle.
+        // Recover by comparing the live proxies before dropping the event;
+        // otherwise a single stale index entry silently loses pointer enter,
+        // motion, and press events until the compositor sends another enter.
+        let recovered: Option<Arc<str>> = self
+            .surfaces
+            .iter()
+            .find(|(_, entry)| entry.wl_surface() == surface)
+            .map(|(surface_id, _)| Arc::from(surface_id.as_str()));
+        if let Some(surface_id) = recovered.as_ref() {
+            self.surface_ids_by_wl_id
+                .insert(surface.id(), surface_id.clone());
+            tracing::debug!(
+                "[hover] layer_shell: recovered wl_surface mapping by proxy comparison surface_id={surface_id}"
+            );
+        }
+        recovered
     }
 
     pub(super) fn bind_fractional_scale(

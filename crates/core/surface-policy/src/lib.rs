@@ -751,11 +751,35 @@ impl SurfacePolicySnapshot {
     fn layer_geometry_changed(&self, next: &Self) -> bool {
         self.edge != next.edge
             || self.layer != next.layer
-            || self.surface_size != next.surface_size
+            || self.layer_wire_size() != next.layer_wire_size()
             || self.width_spans_output != next.width_spans_output
             || self.height_spans_output != next.height_spans_output
             || self.exclusive_zone != next.exclusive_zone
             || self.margins != next.margins
+    }
+
+    /// The size a layer surface actually puts on the wire, per axis.
+    ///
+    /// An axis that spans its output is sent as the protocol's `0` no matter
+    /// what the resolved extent is, so its resolved size is invisible to the
+    /// compositor. Comparing the resolved size instead would classify the
+    /// first output-size resolution (a placeholder width becoming the real
+    /// output width) as a geometry change, and `LayerConfigure` invalidates
+    /// the surface's configured state while it waits for a fresh configure —
+    /// one the compositor has no reason to send, because every request it
+    /// received was byte-identical to the last. The surface then never
+    /// presents again: no hover restyle, no service-driven repaint, no clock
+    /// tick. A resolved-size change with an unchanged wire size is a
+    /// measurement change, not a reconfigure.
+    fn layer_wire_size(&self) -> (Option<u32>, Option<u32>) {
+        let (width, height) = match self.surface_size {
+            Some((width, height)) => (Some(width), Some(height)),
+            None => (None, None),
+        };
+        (
+            width.filter(|_| !self.width_spans_output),
+            height.filter(|_| !self.height_spans_output),
+        )
     }
 
     fn window_live_state_changed(&self, next: &Self) -> bool {
@@ -766,9 +790,13 @@ impl SurfacePolicySnapshot {
             || self.surface_size != next.surface_size
     }
 
+    /// Whether the resolved measurement changed at all — including a change
+    /// that carries no protocol request with it, such as a spanning axis
+    /// resolving from its pre-output placeholder to the real output size.
+    /// Those frames still have to repaint at the new extent; they just must
+    /// not wait on a configure. See [`Self::layer_wire_size`].
     fn measurement_changed(&self, next: &Self) -> bool {
-        self.content_size.is_none() != next.content_size.is_none()
-            || self.surface_size.is_none() != next.surface_size.is_none()
+        self.content_size != next.content_size || self.surface_size != next.surface_size
     }
 }
 
@@ -953,6 +981,56 @@ mod tests {
             previous.diff(&creation).change,
             SurfacePolicyChange::LayerRecreate
         );
+    }
+
+    #[test]
+    fn spanning_layer_axis_resolving_its_output_size_is_a_measurement_not_a_configure() {
+        // A top bar spans its output: the wire width is the protocol's `0`
+        // before and after, so the compositor sees no change and will not send
+        // a fresh configure. Classifying this as `LayerConfigure` invalidated
+        // the surface's configured state permanently and froze every later
+        // frame.
+        let previous = SurfacePolicySnapshot {
+            revision: 1,
+            namespace: "panel".into(),
+            content_size: Some((1, 56)),
+            surface_size: Some((1, 256)),
+            width_spans_output: true,
+            exclusive_zone: 56,
+            ..SurfacePolicySnapshot::default()
+        };
+        let resolved = SurfacePolicySnapshot {
+            revision: 2,
+            content_size: Some((2880, 56)),
+            surface_size: Some((2880, 256)),
+            ..previous.clone()
+        };
+
+        let diff = previous.diff(&resolved);
+        assert_eq!(diff.change, SurfacePolicyChange::MeasureAgain);
+        assert!(!diff.requires_fresh_configure());
+        assert!(!diff.is_noop(), "the new extent still has to reach paint");
+    }
+
+    #[test]
+    fn fixed_layer_axis_resizing_still_requires_a_fresh_configure() {
+        let previous = SurfacePolicySnapshot {
+            revision: 1,
+            namespace: "panel".into(),
+            content_size: Some((320, 56)),
+            surface_size: Some((320, 56)),
+            ..SurfacePolicySnapshot::default()
+        };
+        let resized = SurfacePolicySnapshot {
+            revision: 2,
+            content_size: Some((480, 56)),
+            surface_size: Some((480, 56)),
+            ..previous.clone()
+        };
+
+        let diff = previous.diff(&resized);
+        assert_eq!(diff.change, SurfacePolicyChange::LayerConfigure);
+        assert!(diff.requires_fresh_configure());
     }
 
     #[test]

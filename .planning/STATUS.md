@@ -4,6 +4,20 @@
 
 ## Now
 
+Development-shell startup diagnostics are clean in the code path: shipped
+frontend modules, locale imports, settings metadata, backend initialization,
+optional command capability checks, and core-owned provider status reporting
+were repaired. The remaining smoke-test limitations are environment-owned
+(no Wayland compositor and a read-only IPC socket directory).
+
+Live navigation surfaces now synchronously resolve and rasterize bundled icons
+on the first frame, preserve structured component props, and route revisioned
+service effects. Navigation and settings surfaces opt out of an unreliable
+system icon-theme precedence path in favor of their prepared Material pack.
+Wayland pointer and surface identity lookups recover against live proxies and
+emit boundary diagnostics for dropped events; actual compositor input remains
+unverified in this environment because no Wayland compositor is available.
+
 Node opacity and blend mode now lower as explicit isolated compositing groups
 around the complete retained node subtree, including gradients, images, text,
 shadows, and descendants. Primitive colors remain unmodified until the group
@@ -204,6 +218,14 @@ Surface policy compilation now exposes the declared contract, effective
 revisioned policy with provenance and diagnostics, and a typed transition plan
 covering rejection, measurement, live updates, reconfiguration, recreation,
 children, focus, input regions, and presentation readiness.
+
+Semantic layer-surface diffs compare the size the protocol actually carries,
+so a spanning axis resolving its real output size is a measurement change
+rather than a reconfigure. A spanning bar therefore no longer clears
+`configured` waiting for a configure event the compositor will not send, which
+had frozen the shipped navigation bar a few frames after startup — hover
+restyles, service-driven icon changes, and the clock all resolved but never
+reached a buffer.
 
 ## Blocked / open follow-ups
 

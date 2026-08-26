@@ -14,6 +14,11 @@
         "mesh.power": ">=1.0",
         "mesh.theme": ">=1.0"
       },
+      "resources": {
+        "icons": [
+          "@mesh/icons-material-symbols"
+        ]
+      },
       "optionalInterfaces": {
         "mesh.brightness": ">=1.0"
       },
@@ -29,6 +34,9 @@
         "locale.write",
         "service.theme.control"
       ]
+    },
+    "icons": {
+      "ignore_shell_default": true
     },
     "entry": "src/main.mesh",
     "accessibility": {

@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Legacy service adapters remain for integration fixtures.
+
 use super::types::CoreRequest;
 use mesh_core_capability::Capability;
 use mesh_core_frontend_abi::{
@@ -203,6 +205,11 @@ fn lower_frontend_effect(
         event.source_capabilities.clone(),
     );
     let effect = ScopedFrontendEffect::new(scope, effect);
+    let effect = if let Some(revision) = revision {
+        effect.with_revision(revision)
+    } else {
+        effect
+    };
     let lowered = match revision {
         Some(revision) => ShellEffectAdapter::lower_at(effect, revision),
         None => ShellEffectAdapter::lower_unchecked(effect),

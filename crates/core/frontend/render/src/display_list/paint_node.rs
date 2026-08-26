@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Legacy paint-node helpers are retained for renderer tests.
+
 use std::sync::Arc;
 
 use mesh_core_elements::style::Color;
@@ -51,6 +53,7 @@ pub(super) fn build_paint_node_with_previous_transform_and_clips(
     let opacity = node.computed_style.opacity;
     DisplayPaintNode {
         id: node.id,
+        module_id: node.shared_module_id().cloned(),
         transform: world_transform,
         local_layout: LayoutRect {
             x: 0.0,

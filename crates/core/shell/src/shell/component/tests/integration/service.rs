@@ -297,6 +297,12 @@ end
             command,
             payload,
             ..
+        }
+        | CoreRequest::ServiceCall {
+            interface,
+            command,
+            payload,
+            ..
         } => {
             assert_eq!(
                 interface, "mesh.network",
@@ -488,6 +494,12 @@ end
                 command,
                 payload,
                 ..
+            }
+            | CoreRequest::ServiceCall {
+                interface,
+                command,
+                payload,
+                ..
             },
         ] => {
             assert_eq!(interface, "mesh.audio");
@@ -536,6 +548,12 @@ end
     match requests.as_slice() {
         [
             CoreRequest::ServiceCommand {
+                interface,
+                command,
+                payload,
+                ..
+            }
+            | CoreRequest::ServiceCall {
                 interface,
                 command,
                 payload,

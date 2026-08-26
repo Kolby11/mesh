@@ -79,6 +79,26 @@
 
 <script lang="luau">
 hidden = false
+state_title = ""
+state_copy = ""
+off_hidden = false
+warming_hidden = true
+idle_hidden = true
+session_value = ""
+overlay_value = ""
+module_count = ""
+active_surface_count = ""
+backend_count = ""
+allocation_value = ""
+shell_stage_label = ""
+shell_render_label = ""
+onToggleProfiling = nil
+profiling_button_label = ""
+profiling_button_text = ""
+onToggleLayoutBounds = nil
+layout_bounds_button_label = ""
+layout_bounds_button_text = ""
+layout_bounds_value = ""
 </script>
 
 <style>

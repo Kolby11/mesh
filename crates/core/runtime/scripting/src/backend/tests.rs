@@ -922,7 +922,14 @@ fn bundled_device_provider_normalizes_linux_system_information() {
     let script = bundled_backend_script(
         "../../../../packages/modules/backend/core/device-info/src/main.luau",
     );
-    let mut ctx = BackendScriptContext::new("@mesh/device-info");
+    let mut ctx = BackendScriptContext::new_with_capabilities(
+        "@mesh/device-info",
+        [
+            "exec.argv:printenv:[\"XDG_CURRENT_DESKTOP\"]".to_string(),
+            "exec.argv:printenv:[\"DESKTOP_SESSION\"]".to_string(),
+            "exec.argv:lspci:[]".to_string(),
+        ],
+    );
     ctx.load_script(&script).unwrap();
     ctx.ensure_lua()
         .unwrap()
@@ -1358,7 +1365,13 @@ fn bundled_pipewire_backend_skips_successful_write_readback_when_streaming() {
     let script = bundled_backend_script(
         "../../../../packages/modules/backend/core/pipewire-audio/src/main.luau",
     );
-    let mut ctx = BackendScriptContext::new("@mesh/pipewire-audio");
+    let mut ctx = BackendScriptContext::new_with_capabilities(
+        "@mesh/pipewire-audio",
+        [
+            "exec.argv:pw-mon:[\"--hide-props\",\"--hide-params\",\"--print-separator\"]"
+                .to_string(),
+        ],
+    );
     ctx.load_script(&script).unwrap();
     ctx.ensure_lua()
         .unwrap()

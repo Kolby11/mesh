@@ -32,6 +32,8 @@
 <script lang="luau">
 hidden = false
 rows = {}
+state_copy = ""
+empty_hidden = false
 </script>
 
 <style>

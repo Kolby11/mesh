@@ -86,7 +86,7 @@
                   </button>
                   <button
                     class="quiet"
-                    hidden={#prop.options == 0}
+                    hidden={(#prop.options) == 0}
                     onclick={nextPropOption(prop.name, prop.value, prop.options)}
                   >
                     <text>{prop.display_value}</text>

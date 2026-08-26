@@ -28,6 +28,9 @@
         "palette"
       ]
     },
+    "icons": {
+      "ignore_shell_default": true
+    },
     "i18n": {
       "defaultLocale": "en",
       "supportedLocales": [

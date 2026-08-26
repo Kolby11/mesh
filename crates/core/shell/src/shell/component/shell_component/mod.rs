@@ -822,10 +822,22 @@ impl ShellComponent for FrontendSurfaceComponent {
             self.surface_pixels_invalid = true;
         }
         self.last_painted_buffer_size = Some((buffer.width(), buffer.height()));
+        // Pointer-enter handlers can update script state while the same input
+        // event changes the hovered pseudo-state. The narrow script builder
+        // intentionally reuses native subtrees, including their computed
+        // styles; using it for this combined invalidation would leave those
+        // subtrees with their pre-hover appearance even though annotation has
+        // correctly marked them hovered. A full build keeps the script update
+        // and interaction restyle in one coherent frame. Service-only narrow
+        // updates still use the selective path below.
+        let combined_script_and_interaction_update = dirty_types
+            .contains(ComponentDirtyFlags::SCRIPT_NARROW)
+            && dirty_types.contains(ComponentDirtyFlags::STATE);
         let use_retained_style_path = !requires_tree_rebuild
             && can_use_retained_path
             && self.last_tree.is_some()
-            && !self.render_hooks_pending;
+            && !self.render_hooks_pending
+            && !combined_script_and_interaction_update;
         let run_style_animation_pass = self.should_run_style_animation_pass();
         let previous_visual_styles = if run_style_animation_pass && self.last_tree.is_some() {
             self.take_previous_visual_styles()
@@ -834,7 +846,9 @@ impl ShellComponent for FrontendSurfaceComponent {
         };
         let surface_css_props = self.surface_css_props();
         let mut tree_was_rebuilt = false;
-        let mut tree = if dirty_types.contains(ComponentDirtyFlags::SCRIPT_NARROW) {
+        let mut tree = if dirty_types.contains(ComponentDirtyFlags::SCRIPT_NARROW)
+            && !combined_script_and_interaction_update
+        {
             tree_was_rebuilt = true;
             self.narrow_script_update(theme, content_width, content_height, &surface_css_props)
         } else if use_retained_style_path {
@@ -1256,6 +1270,17 @@ impl ShellComponent for FrontendSurfaceComponent {
                 .replace_catalog_snapshot(locale.catalog_snapshot());
         }
         self.locale.replace_selection(locale.selection());
+        // Graph-owned module catalogs are kept on the component when the
+        // shell assembles a frontend graph. Replacing only the locale
+        // selection leaves those catalogs on the previous locale, so the
+        // already-mounted navigation controls keep their old tooltip text.
+        // Rebuild the graph snapshot before refreshing each runtime's
+        // translator cell.
+        self.load_graph_i18n_catalogs();
+        // Component memo entries contain localized attributes and text. Their
+        // locale key is useful for normal reuse, but clearing them here also
+        // covers a catalog snapshot replacement that keeps the same locale.
+        self.clear_component_memo();
         let selection = locale.selection();
         let payload = serde_json::json!({
             "locale": locale.current(),
@@ -1571,7 +1596,9 @@ impl ShellComponent for FrontendSurfaceComponent {
         let Some(node) = find_node_by_key(tree, node_key) else {
             return Ok(Vec::new());
         };
-        let Some(bounds) = find_node_bounds_by_key(tree, node_key, 0.0, 0.0) else {
+        let Some(bounds) = find_node_bounds_by_key(tree, node_key, 0.0, 0.0).or_else(|| {
+            find_focus_node_with_bounds_by_key(tree, node_key).map(|(_, bounds)| bounds)
+        }) else {
             return Ok(Vec::new());
         };
         // The promoted popover is laid out in-flow under its trigger (often extending
@@ -1631,7 +1658,9 @@ impl ShellComponent for FrontendSurfaceComponent {
     ) -> Option<WidgetNode> {
         let tree = self.last_tree.as_ref()?;
         let node = find_node_by_key(tree, node_key)?;
-        let bounds = find_node_bounds_by_key(tree, node_key, 0.0, 0.0)?;
+        let bounds = find_node_bounds_by_key(tree, node_key, 0.0, 0.0).or_else(|| {
+            find_focus_node_with_bounds_by_key(tree, node_key).map(|(_, bounds)| bounds)
+        })?;
         let mut child_tree = node.clone();
         child_tree.attributes.remove("hidden");
         // Must match `paint_child_surface`'s offset exactly: that call bakes
@@ -1680,7 +1709,9 @@ impl ShellComponent for FrontendSurfaceComponent {
         let Some(node) = find_node_by_key(tree, node_key) else {
             return Ok(false);
         };
-        let Some(bounds) = find_node_bounds_by_key(tree, node_key, 0.0, 0.0) else {
+        let Some(bounds) = find_node_bounds_by_key(tree, node_key, 0.0, 0.0).or_else(|| {
+            find_focus_node_with_bounds_by_key(tree, node_key).map(|(_, bounds)| bounds)
+        }) else {
             return Ok(false);
         };
 

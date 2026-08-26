@@ -128,6 +128,24 @@ pub(super) fn build_component_ref(
                 );
                 prop_handler_calls.insert(attr.name.clone(), call);
             }
+        } else if let AttributeValue::Binding(binding) | AttributeValue::TwoWayBinding(binding) =
+            &attr.value
+            && is_event_handler_attribute(&attr.name)
+        {
+            let mut target =
+                HandlerTarget::from_legacy_serialized(resolve_event_handler_value(state, binding));
+            target.namespace(host_instance_key);
+            composition_props.values.insert(
+                AttrKey::new(&attr.name),
+                component_prop_handler_token(host_instance_key, &attr.name),
+            );
+            prop_handler_calls.insert(
+                attr.name.clone(),
+                EventHandlerCall {
+                    handler: target,
+                    args: Vec::new(),
+                },
+            );
         } else if let AttributeValue::Binding(binding) = &attr.value {
             composition_props
                 .bindings

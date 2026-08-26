@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Alternate scroll hit paths remain for interaction regression fixtures.
+
 use super::*;
 use mesh_core_elements::NodeId;
 use std::collections::HashMap;

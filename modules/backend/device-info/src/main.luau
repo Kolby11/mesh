@@ -19,7 +19,24 @@ state = {
 }
 
 local function trim(value)
-    return (value or ""):match("^%s*(.-)%s*$")
+    value = value or ""
+    local first = 1
+    local last = #value
+    while first <= last do
+        local byte = value:byte(first)
+        if byte ~= 9 and byte ~= 10 and byte ~= 11 and byte ~= 12 and byte ~= 13 and byte ~= 32 then
+            break
+        end
+        first = first + 1
+    end
+    while last >= first do
+        local byte = value:byte(last)
+        if byte ~= 9 and byte ~= 10 and byte ~= 11 and byte ~= 12 and byte ~= 13 and byte ~= 32 then
+            break
+        end
+        last = last - 1
+    end
+    return value:sub(first, last)
 end
 
 local function first_non_empty(...)
@@ -38,6 +55,14 @@ local function run(program, args)
     return trim(result.stdout)
 end
 
+local function run_raw(program, args)
+    local result = mesh.exec(program, args or {})
+    if not result.success then
+        return ""
+    end
+    return result.stdout or ""
+end
+
 local function unquote(value)
     value = trim(value)
     if value:sub(1, 1) == '"' and value:sub(-1) == '"' then
@@ -48,25 +73,38 @@ local function unquote(value)
 end
 
 local function parse_os_release(content)
+    content = content or ""
     local values = {}
-    for line in (content or ""):gmatch("([^\n]+)") do
-        local key, value = line:match("^([%w_]+)=(.*)$")
-        if key and value then
-            values[key] = unquote(value)
+    for _, key in ipairs({ "NAME", "PRETTY_NAME", "VERSION_ID", "VERSION" }) do
+        local start = content:find("\n" .. key .. "=", 1, true)
+        if start then
+            start = start + 1
+        elseif content:sub(1, #key + 1) == key .. "=" then
+            start = 1
+        end
+        if start then
+            local value_start = start + #key + 1
+            local line_end = content:find("\n", value_start, true) or (#content + 1)
+            values[key] = unquote(content:sub(value_start, line_end - 1))
         end
     end
     return values
 end
 
 local function parse_processor(content)
-    local processor = (content or ""):match("model name%s*:%s*([^\n]+)")
-    if processor then return trim(processor) end
-
-    processor = (content or ""):match("Hardware%s*:%s*([^\n]+)")
-    if processor then return trim(processor) end
-
-    processor = (content or ""):match("Processor%s*:%s*([^\n]+)")
-    return trim(processor)
+    content = content or ""
+    for _, key in ipairs({ "model name", "Hardware", "Processor" }) do
+        local start = content:find(key, 1, true)
+        if start then
+            local line_end = content:find("\n", start, true) or (#content + 1)
+            local line = content:sub(start, line_end - 1)
+            local colon = line:find(":", 1, true)
+            if colon then
+                return trim(line:sub(colon + 1))
+            end
+        end
+    end
+    return ""
 end
 
 local function parse_memory_bytes(content)
@@ -82,6 +120,9 @@ local function parse_uptime_seconds(content)
 end
 
 local function parse_graphics()
+    if not mesh.service.can_exec("lspci", {}) then
+        return ""
+    end
     local output = run("lspci", {})
     if output == "" then return "" end
 
@@ -102,16 +143,23 @@ local function read_state()
     local kernel = run("uname", { "-r" })
     local architecture = run("uname", { "-m" })
     local system = run("uname", { "-s" })
-    local release = parse_os_release(run("cat", { "/etc/os-release" }))
+    local os_release = run("cat", { "/etc/os-release" })
+    local release = parse_os_release(os_release)
     local hostname = run("hostname", {})
-    local desktop = run("printenv", { "XDG_CURRENT_DESKTOP" })
+    local desktop = ""
+    if mesh.service.can_exec("printenv", { "XDG_CURRENT_DESKTOP" }) then
+        desktop = run("printenv", { "XDG_CURRENT_DESKTOP" })
+    end
     if desktop == "" then
-        desktop = run("printenv", { "DESKTOP_SESSION" })
+        if mesh.service.can_exec("printenv", { "DESKTOP_SESSION" }) then
+            desktop = run("printenv", { "DESKTOP_SESSION" })
+        end
     end
 
     local os_name = first_non_empty(release.NAME, release.PRETTY_NAME, system)
     local os_version = first_non_empty(release.VERSION_ID, release.VERSION)
-    local processor = parse_processor(run("cat", { "/proc/cpuinfo" }))
+    local cpuinfo = run_raw("cat", { "/proc/cpuinfo" })
+    local processor = parse_processor(cpuinfo)
     local memory_total_bytes = parse_memory_bytes(run("cat", { "/proc/meminfo" }))
 
     return {

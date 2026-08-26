@@ -1,3 +1,5 @@
+#![allow(dead_code)] // The non-diagnostic wrapper remains for component fixtures.
+
 use super::*;
 use crate::shell::PopoverTriggerReference;
 

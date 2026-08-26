@@ -54,6 +54,7 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-surface-b
     }
 
     .right-cluster {
+        width: fit;
         height: 40px;
         flex-shrink: 0;
         align-items: center;

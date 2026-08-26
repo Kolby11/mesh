@@ -388,6 +388,11 @@ impl ScriptContext {
             translations: translator.entries(),
             snapshot_revision: translator.snapshot_revision(),
         };
+        // Template expressions containing t(...) can otherwise remain in the
+        // pure-member cache when the script members themselves did not change.
+        // A locale/catalog replacement changes their result even when all
+        // referenced public values are identical.
+        self.clear_template_expression_cache();
     }
 
     /// Shared sink used by template evaluation while the Rust state snapshot

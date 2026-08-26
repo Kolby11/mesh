@@ -336,6 +336,12 @@ fn audio_popover_first_slider_grab_dispatches_change() {
                 command,
                 payload,
                 ..
+            }
+            | CoreRequest::ServiceCall {
+                interface,
+                command,
+                payload,
+                ..
             },
         ] => {
             assert_eq!(interface, "mesh.audio");
@@ -628,6 +634,12 @@ fn audio_popover_slider_keyboard_still_steps_after_mouse_drag() {
     match requests.as_slice() {
         [
             CoreRequest::ServiceCommand {
+                interface,
+                command,
+                payload,
+                ..
+            }
+            | CoreRequest::ServiceCall {
                 interface,
                 command,
                 payload,

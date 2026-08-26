@@ -50,6 +50,9 @@
     "i18n": {
       "defaultLocale": "en"
     },
+    "icons": {
+      "ignore_shell_default": true
+    },
     "entry": "src/main.mesh",
     "iconRequirements": {
       "required": [

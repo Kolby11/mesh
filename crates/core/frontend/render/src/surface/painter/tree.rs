@@ -927,7 +927,16 @@ impl FrontendRenderEngine {
                 );
             }
             DisplayPaintContent::Icon(icon) => {
-                self.render_display_icon_node(node, icon, session, x, y, w, h, module_id);
+                self.render_display_icon_node(
+                    node,
+                    icon,
+                    session,
+                    x,
+                    y,
+                    w,
+                    h,
+                    node.module_id.as_deref().or(module_id),
+                );
             }
             DisplayPaintContent::Checkmark(mark) => {
                 self.render_display_checkmark_node(node, *mark, session, bounds, node_clip);
