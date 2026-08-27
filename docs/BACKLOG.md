@@ -92,7 +92,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/15-shell-core-and-orchestration/improvements.md)
 
-- [ ] Give detached workers owned wake handles and lifecycle guards that outlive the eventfd until join.
 - [ ] Isolate component/runtime callback, tick, build, render, and reload failures with placeholders, diagnostics, and quarantine.
 - [ ] Replace static startup watching with a managed generation-aware watch set and bounded polling fallback.
 - [ ] Process CoreRequest effects through one fair bounded scheduler with causal budgets and cycle detection.

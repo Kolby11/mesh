@@ -1,6 +1,5 @@
 use super::super::*;
 use super::candidates::launch_candidate_for_provider_with_capabilities;
-use rustix::fd::BorrowedFd;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
@@ -45,12 +44,12 @@ impl BackendSupervisionState {
 
 /// Handles the shell loop needs to respawn backend runtimes outside the
 /// startup path: the Tokio handle backends run on, the shell message sender,
-/// and the eventfd that wakes the main loop.
+/// and the owned wake handle that wakes the main loop.
 #[derive(Clone)]
 pub(in crate::shell) struct BackendRespawnContext {
     pub(in crate::shell) handle: tokio::runtime::Handle,
     pub(in crate::shell) tx: mpsc::UnboundedSender<ShellMessage>,
-    pub(in crate::shell) eventfd_fd: std::os::unix::io::RawFd,
+    pub(in crate::shell) wake: WakeHandle,
 }
 
 impl Shell {
@@ -171,10 +170,9 @@ impl Shell {
                 identity,
                 restart_generation,
             });
-            let evfd = unsafe { BorrowedFd::borrow_raw(ctx.eventfd_fd) };
-            let _ = rustix::io::write(&evfd, &1u64.to_ne_bytes());
+            ctx.wake.wake();
         });
-        self.backend_restart_tasks.push(task.abort_handle());
+        self.backend_restart_tasks.push(task);
     }
 
     /// A supervised restart came due: pick the best non-quarantined provider
@@ -285,7 +283,7 @@ impl Shell {
                     &ctx.handle,
                     ctx.tx.clone(),
                     candidate,
-                    ctx.eventfd_fd,
+                    ctx.wake.clone(),
                 );
             }
             Err(status) => {

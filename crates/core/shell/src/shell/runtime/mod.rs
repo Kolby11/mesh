@@ -1,7 +1,7 @@
 use super::*;
 
 use rustix::event::EventfdFlags;
-use std::os::unix::io::{AsFd, AsRawFd};
+use std::os::unix::io::AsFd;
 
 mod debug;
 pub(crate) mod profiling;
@@ -275,22 +275,24 @@ impl Shell {
 
         let eventfd = rustix::event::eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK)
             .map_err(|e| ShellRunError::EventfdCreate(format!("eventfd: {e}")))?;
-        let eventfd_raw = eventfd.as_raw_fd();
+        let wake = WakeHandle::from_fd(&eventfd)
+            .map_err(|e| ShellRunError::EventfdCreate(format!("eventfd wake handle: {e}")))?;
         self.eventfd_fd = Some(eventfd);
+        self.wake_handle = Some(wake.clone());
 
         self.file_watcher =
-            file_watch::spawn_file_watcher(self.file_watch_paths(), tx.clone(), eventfd_raw);
+            file_watch::spawn_file_watcher(self.file_watch_paths(), tx.clone(), wake.clone());
         self.file_watcher_active = self.file_watcher.is_some();
         self.backend_respawn = Some(backend::BackendRespawnContext {
             handle: runtime.handle().clone(),
             tx: tx.clone(),
-            eventfd_fd: eventfd_raw,
+            wake: wake.clone(),
         });
-        self.spawn_backend_modules(runtime.handle(), tx.clone(), eventfd_raw);
+        self.spawn_backend_modules(runtime.handle(), tx.clone(), wake.clone());
         let ipc_socket_path = default_ipc_socket_path();
         let run_result = (|| -> Result<(), ShellRunError> {
             self.ipc_server = Some(
-                spawn_ipc_server(&runtime, ipc_socket_path.clone(), tx, eventfd_raw).map_err(
+                spawn_ipc_server(&runtime, ipc_socket_path.clone(), tx, wake.clone()).map_err(
                     |source| ShellRunError::IpcInit {
                         path: ipc_socket_path.clone(),
                         source,
@@ -414,11 +416,19 @@ impl Shell {
         self.shutdown_started = true;
         self.core.shutting_down = true;
         self.backend_respawn = None;
-        for task in self.backend_restart_tasks.drain(..) {
+        let restart_tasks = self.backend_restart_tasks.drain(..).collect::<Vec<_>>();
+        for task in &restart_tasks {
             task.abort();
         }
         for state in self.backend_supervision.values_mut() {
             state.invalidate_pending_restart();
+        }
+        if !restart_tasks.is_empty() {
+            runtime.block_on(async move {
+                for task in restart_tasks {
+                    let _ = task.await;
+                }
+            });
         }
 
         if let Some(ipc_server) = self.ipc_server.take() {
@@ -457,6 +467,7 @@ impl Shell {
         self.shutdown_backend_runtimes(runtime);
         self.pending_profile_switch = None;
         self.backend_supervision.clear();
+        self.wake_handle.take();
         self.eventfd_fd.take();
         let _ = std::fs::remove_file(ipc_socket_path);
         self.shutdown_complete = true;

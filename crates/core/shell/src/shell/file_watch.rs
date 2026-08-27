@@ -1,3 +1,4 @@
+use super::WakeHandle;
 use super::types::ShellMessage;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -34,7 +35,7 @@ impl Drop for FileWatcherHandle {
 pub(super) fn spawn_file_watcher(
     paths: Vec<PathBuf>,
     tx: mpsc::UnboundedSender<ShellMessage>,
-    eventfd_fd: std::os::unix::io::RawFd,
+    wake: WakeHandle,
 ) -> Option<FileWatcherHandle> {
     let watch_dirs = watch_dirs(paths);
     if watch_dirs.is_empty() {
@@ -45,7 +46,7 @@ pub(super) fn spawn_file_watcher(
     let thread_stop = stop.clone();
     std::thread::Builder::new()
         .name("mesh-file-watch".into())
-        .spawn(move || watch_thread(watch_dirs, tx, eventfd_fd, thread_stop))
+        .spawn(move || watch_thread(watch_dirs, tx, wake, thread_stop))
         .map(|join| {
             Some(FileWatcherHandle {
                 stop,
@@ -62,7 +63,7 @@ pub(super) fn spawn_file_watcher(
 pub(super) fn spawn_file_watcher(
     _paths: Vec<PathBuf>,
     _tx: mpsc::UnboundedSender<ShellMessage>,
-    _eventfd_fd: std::os::unix::io::RawFd,
+    _wake: WakeHandle,
 ) -> Option<FileWatcherHandle> {
     None
 }
@@ -90,10 +91,9 @@ fn watch_dirs(paths: Vec<PathBuf>) -> Vec<PathBuf> {
 fn watch_thread(
     watch_dirs: Vec<PathBuf>,
     tx: mpsc::UnboundedSender<ShellMessage>,
-    eventfd_fd: std::os::unix::io::RawFd,
+    wake: WakeHandle,
     stop: Arc<AtomicBool>,
 ) {
-    use rustix::fd::BorrowedFd;
     use rustix::fs::inotify::{self, CreateFlags, WatchFlags};
     use std::mem::MaybeUninit;
 
@@ -102,7 +102,7 @@ fn watch_thread(
         Err(err) => {
             tracing::warn!("failed to initialise file watcher: {err}");
             if !stop.load(Ordering::Acquire) {
-                notify_watcher_stopped(&tx, eventfd_fd);
+                notify_watcher_stopped(&tx, &wake);
             }
             return;
         }
@@ -127,7 +127,7 @@ fn watch_thread(
     if watched == 0 {
         tracing::warn!("file watcher has no active directories");
         if !stop.load(Ordering::Acquire) {
-            notify_watcher_stopped(&tx, eventfd_fd);
+            notify_watcher_stopped(&tx, &wake);
         }
         return;
     }
@@ -143,8 +143,7 @@ fn watch_thread(
                 if tx.send(ShellMessage::FilesystemChanged).is_err() {
                     return;
                 }
-                let evfd = unsafe { BorrowedFd::borrow_raw(eventfd_fd) };
-                let _ = rustix::io::write(&evfd, &1u64.to_ne_bytes());
+                wake.wake();
             }
             Err(err) => {
                 if err == rustix::io::Errno::WOULDBLOCK {
@@ -153,7 +152,7 @@ fn watch_thread(
                 }
                 tracing::warn!("file watcher stopped: {err}");
                 if !stop.load(Ordering::Acquire) {
-                    notify_watcher_stopped(&tx, eventfd_fd);
+                    notify_watcher_stopped(&tx, &wake);
                 }
                 return;
             }
@@ -166,14 +165,9 @@ fn watch_thread(
 /// very next reload check instead of staying parked for up to 24h. Best
 /// effort: if the shell has already gone, there is nothing left to wake.
 #[cfg(target_os = "linux")]
-fn notify_watcher_stopped(
-    tx: &mpsc::UnboundedSender<ShellMessage>,
-    eventfd_fd: std::os::unix::io::RawFd,
-) {
-    use rustix::fd::BorrowedFd;
+fn notify_watcher_stopped(tx: &mpsc::UnboundedSender<ShellMessage>, wake: &WakeHandle) {
     if tx.send(ShellMessage::FileWatcherStopped).is_err() {
         return;
     }
-    let evfd = unsafe { BorrowedFd::borrow_raw(eventfd_fd) };
-    let _ = rustix::io::write(&evfd, &1u64.to_ne_bytes());
+    wake.wake();
 }

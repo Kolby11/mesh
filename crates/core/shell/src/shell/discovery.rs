@@ -1716,6 +1716,7 @@ impl Shell {
             surfaces: HashMap::new(),
             clipboard: Box::new(WaylandClipboard::default()),
             presentation_engine: PresentationEngine::select(),
+            wake_handle: None,
             eventfd_fd: None,
             ipc_server: None,
             file_watcher: None,

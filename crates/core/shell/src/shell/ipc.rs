@@ -1,5 +1,5 @@
+use super::WakeHandle;
 use super::types::{CoreRequest, ShellMessage};
-use rustix::fd::BorrowedFd;
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -55,7 +55,7 @@ pub(super) fn spawn_ipc_server(
     runtime: &Runtime,
     socket_path: PathBuf,
     tx: mpsc::UnboundedSender<ShellMessage>,
-    eventfd_fd: std::os::unix::io::RawFd,
+    wake: WakeHandle,
 ) -> Result<IpcServerHandle, std::io::Error> {
     if let Some(parent) = socket_path.parent() {
         prepare_ipc_parent(parent)?;
@@ -100,8 +100,9 @@ pub(super) fn spawn_ipc_server(
                     };
 
                     let tx = tx.clone();
+                    let wake = wake.clone();
                     clients.spawn(async move {
-                        if let Err(err) = handle_ipc_client(stream, tx, eventfd_fd).await {
+                        if let Err(err) = handle_ipc_client(stream, tx, wake).await {
                             tracing::warn!("ipc client failed: {err}");
                         }
                     });
@@ -158,7 +159,7 @@ fn current_uid() -> u32 {
 async fn handle_ipc_client(
     stream: tokio::net::UnixStream,
     tx: mpsc::UnboundedSender<ShellMessage>,
-    eventfd_fd: std::os::unix::io::RawFd,
+    wake: WakeHandle,
 ) -> Result<(), std::io::Error> {
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
@@ -179,8 +180,7 @@ async fn handle_ipc_client(
                 tx.send(ShellMessage::Ipc(request)).map_err(|_| {
                     std::io::Error::new(std::io::ErrorKind::BrokenPipe, "shell is not running")
                 })?;
-                let evfd = unsafe { BorrowedFd::borrow_raw(eventfd_fd) };
-                let _ = rustix::io::write(&evfd, &1u64.to_ne_bytes());
+                wake.wake();
                 writer.write_all(b"ok\n").await?;
             }
             None => {
@@ -300,8 +300,8 @@ fn is_private_tmp_ipc_dir(path: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::fd::AsFd;
     use std::os::unix::fs::{FileTypeExt, PermissionsExt, symlink};
-    use std::os::unix::io::AsRawFd;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -317,6 +317,11 @@ mod tests {
         rustix::event::eventfd(0, rustix::event::EventfdFlags::NONBLOCK).unwrap()
     }
 
+    fn test_wake_handle() -> WakeHandle {
+        let eventfd = test_eventfd();
+        WakeHandle::from_fd(&eventfd).unwrap()
+    }
+
     #[test]
     fn ipc_server_refuses_to_replace_non_socket_path() {
         let dir = tempfile::tempdir().unwrap();
@@ -325,8 +330,7 @@ mod tests {
         let runtime = Runtime::new().unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
 
-        let err =
-            spawn_ipc_server(&runtime, socket_path, tx, test_eventfd().as_raw_fd()).unwrap_err();
+        let err = spawn_ipc_server(&runtime, socket_path, tx, test_wake_handle()).unwrap_err();
 
         assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
     }
@@ -338,13 +342,7 @@ mod tests {
         let runtime = Runtime::new().unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
 
-        spawn_ipc_server(
-            &runtime,
-            socket_path.clone(),
-            tx,
-            test_eventfd().as_raw_fd(),
-        )
-        .unwrap();
+        spawn_ipc_server(&runtime, socket_path.clone(), tx, test_wake_handle()).unwrap();
 
         let metadata = std::fs::symlink_metadata(socket_path).unwrap();
         assert!(metadata.file_type().is_socket());
@@ -358,13 +356,7 @@ mod tests {
         let runtime = Runtime::new().unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
 
-        spawn_ipc_server(
-            &runtime,
-            socket_path.clone(),
-            tx,
-            test_eventfd().as_raw_fd(),
-        )
-        .unwrap();
+        spawn_ipc_server(&runtime, socket_path.clone(), tx, test_wake_handle()).unwrap();
 
         let parent_metadata = std::fs::symlink_metadata(&parent).unwrap();
         let socket_metadata = std::fs::symlink_metadata(&socket_path).unwrap();
@@ -384,8 +376,7 @@ mod tests {
         let runtime = Runtime::new().unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
 
-        let err =
-            spawn_ipc_server(&runtime, socket_path, tx, test_eventfd().as_raw_fd()).unwrap_err();
+        let err = spawn_ipc_server(&runtime, socket_path, tx, test_wake_handle()).unwrap_err();
         std::fs::remove_dir(parent).unwrap();
 
         assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
@@ -400,8 +391,7 @@ mod tests {
         let runtime = Runtime::new().unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
 
-        let err =
-            spawn_ipc_server(&runtime, socket_path, tx, test_eventfd().as_raw_fd()).unwrap_err();
+        let err = spawn_ipc_server(&runtime, socket_path, tx, test_wake_handle()).unwrap_err();
         std::fs::remove_file(&parent).unwrap();
 
         assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
@@ -413,9 +403,7 @@ mod tests {
         runtime.block_on(async {
             let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
             let (tx, _rx) = mpsc::unbounded_channel();
-            let eventfd = test_eventfd();
-            let eventfd_raw = eventfd.as_raw_fd();
-            let task = tokio::spawn(handle_ipc_client(server, tx, eventfd_raw));
+            let task = tokio::spawn(handle_ipc_client(server, tx, test_wake_handle()));
 
             let mut payload = vec![b'x'; MAX_IPC_COMMAND_BYTES + 1];
             payload.push(b'\n');
@@ -425,6 +413,36 @@ mod tests {
             task.await.unwrap().unwrap();
 
             assert_eq!(response, "error command-too-long\n");
+        });
+    }
+
+    #[test]
+    fn ipc_client_wakes_through_owned_handle_after_source_drops() {
+        let runtime = Runtime::new().unwrap();
+        let eventfd = test_eventfd();
+        let reader = eventfd.try_clone().unwrap();
+        let wake = WakeHandle::from_fd(&eventfd).unwrap();
+        drop(eventfd);
+
+        runtime.block_on(async {
+            let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            let task = tokio::spawn(handle_ipc_client(server, tx, wake));
+
+            client.write_all(b"shell:shutdown\n").await.unwrap();
+            client.shutdown().await.unwrap();
+            let mut response = String::new();
+            client.read_to_string(&mut response).await.unwrap();
+            task.await.unwrap().unwrap();
+
+            assert_eq!(response, "ok\n");
+            assert!(matches!(
+                rx.try_recv(),
+                Ok(ShellMessage::Ipc(CoreRequest::Shutdown))
+            ));
+            let mut counter = [0u8; 8];
+            rustix::io::read(reader.as_fd(), &mut counter).unwrap();
+            assert_eq!(u64::from_ne_bytes(counter), 1);
         });
     }
 

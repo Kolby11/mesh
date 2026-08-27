@@ -26,6 +26,7 @@ use mesh_core_wayland::{ClipboardWriter, Layer, StubSurface, WaylandClipboard};
 use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::io::Read;
+use std::os::fd::{AsFd, OwnedFd};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -68,6 +69,26 @@ use types::{
     ServiceCallRoute, ServiceCommandMsg, ServiceDeliveryIndex, SettingsWatchState, ShellCoreState,
     ShellMessage, SurfaceState, TargetRef, ThemeWatchState,
 };
+
+/// An owned duplicate of the shell wake descriptor. Workers keep this handle
+/// in their own task/thread state instead of borrowing the shell's raw fd, so
+/// a late wake can never target a closed or reused descriptor.
+#[derive(Debug, Clone)]
+pub(in crate::shell) struct WakeHandle {
+    fd: Arc<OwnedFd>,
+}
+
+impl WakeHandle {
+    pub(in crate::shell) fn from_fd(fd: &OwnedFd) -> std::io::Result<Self> {
+        Ok(Self {
+            fd: Arc::new(fd.try_clone()?),
+        })
+    }
+
+    pub(in crate::shell) fn wake(&self) {
+        let _ = rustix::io::write(self.fd.as_fd(), &1u64.to_ne_bytes());
+    }
+}
 pub use types::{
     ChildSurfaceDiagnostic, ComponentContext, ComponentError, ComponentInput, CoreEvent,
     CoreRequest, FrontendEffectRevision, FrontendFrame, FrontendFrameEffects, FrontendFrameError,
@@ -497,7 +518,7 @@ pub struct Shell {
     backend_supervision: HashMap<String, backend::BackendSupervisionState>,
     backend_respawn: Option<backend::BackendRespawnContext>,
     retiring_backend_runtimes: Vec<BackendRuntimeTasks>,
-    backend_restart_tasks: Vec<AbortHandle>,
+    backend_restart_tasks: Vec<JoinHandle<()>>,
     shutdown_started: bool,
     shutdown_complete: bool,
     latest_service_state: HashMap<String, LatestServiceState>,
@@ -516,9 +537,10 @@ pub struct Shell {
     pending_service_call_routes: HashMap<u64, ServiceCallRoute>,
     pending_popover_hides: HashMap<SurfaceId, std::time::Instant>,
     profiling: runtime::profiling::ProfilingRuntimeState,
-    /// Kept after every worker handle so raw-fd users are stopped before the
-    /// wake fd is finally closed, including the defensive `Drop` path.
-    eventfd_fd: Option<std::os::unix::io::OwnedFd>,
+    wake_handle: Option<WakeHandle>,
+    /// Kept after every lifecycle guard so the shared wake handle is released
+    /// only after workers have been stopped or joined, including `Drop`.
+    eventfd_fd: Option<OwnedFd>,
 }
 
 impl Drop for Shell {
@@ -537,6 +559,8 @@ impl Drop for Shell {
         if let Some(file_watcher) = self.file_watcher.take() {
             file_watcher.stop_and_join();
         }
+        self.wake_handle.take();
+        self.eventfd_fd.take();
     }
 }
 

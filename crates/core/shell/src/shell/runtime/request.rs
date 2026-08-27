@@ -420,7 +420,7 @@ impl Shell {
                 }
             };
         self.apply_shell_runtime_settings(&mut candidate);
-        let slot = self.start_backend_candidate(&ctx.handle, ctx.tx, candidate, ctx.eventfd_fd);
+        let slot = self.start_backend_candidate(&ctx.handle, ctx.tx, candidate, ctx.wake);
         self.stage_backend_runtime_switch(interface.to_string(), slot, graph_path);
         tracing::info!(
             interface,

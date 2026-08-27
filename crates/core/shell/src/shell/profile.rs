@@ -1257,7 +1257,7 @@ impl Shell {
                     &ctx.handle,
                     ctx.tx.clone(),
                     candidate,
-                    ctx.eventfd_fd,
+                    ctx.wake.clone(),
                     event_provider_id,
                     identity,
                 );
