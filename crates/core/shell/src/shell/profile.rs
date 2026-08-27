@@ -2,11 +2,13 @@ use super::backend::{
     BackendLaunchCandidate, BackendRuntimeStatus,
     backend_launch_candidates_from_graph_with_capabilities,
 };
-use super::component::{FrontendCatalog, FrontendCatalogHandle, FrontendSurfaceComponent};
+use super::component::{
+    FrontendCatalog, FrontendCatalogHandle, FrontendCatalogState, FrontendSurfaceComponent,
+};
 use super::*;
 use mesh_core_module::package::{
-    ComponentPlacement, InstalledModuleGraph, NodeSlotOverride, ProfilePaths, ProfileRootInstance,
-    ShellProfile, load_installed_module_graph_for_profile,
+    ComponentPlacement, InstalledModuleGraph, NodeSlotOverride, PackageTransaction, ProfilePaths,
+    ProfileRootInstance, ShellProfile, load_installed_module_graph_for_profile,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -213,6 +215,10 @@ pub(super) struct PendingProfileSwitch {
     candidate_initial_states: HashMap<String, serde_json::Value>,
     persist_active_profile: bool,
     rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
+    /// A package mutation stays journaled until this prepared runtime is
+    /// committed. Dropping it before that point restores the package state.
+    pub(in crate::shell) package_transaction: Option<PackageTransaction>,
+    pub(in crate::shell) package_rollback: Option<PackageRuntimeRollback>,
 }
 
 pub(super) struct PendingResourcePreparation {
@@ -227,9 +233,148 @@ pub(super) struct PendingResourcePreparation {
     /// for both profile and no-profile graph deltas.
     persist_active_profile: bool,
     pub(in crate::shell) rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
+    /// The package journal spans asynchronous resource preparation as well as
+    /// the later runtime activation commit.
+    pub(in crate::shell) package_transaction: Option<PackageTransaction>,
+    pub(in crate::shell) package_rollback: Option<PackageRuntimeRollback>,
 }
 
 const LEGACY_ACTIVATION_ID: &str = "@mesh/legacy-graph";
+
+/// In-memory mirrors that package service operations update while their
+/// journal is still open. Runtime candidates are prepared from those mirrors,
+/// so aborting the journal must restore them along with the protected files.
+pub(super) struct PackageRuntimeRollback {
+    installed_module_graph: Option<InstalledModuleGraph>,
+    resource_snapshot: Arc<super::discovery::ResourceSnapshot>,
+    resource_explanation: Arc<mesh_core_resources::ResourceExplanationSnapshot>,
+    font_registry: mesh_core_resources::FontRegistry,
+    font_renderer_revision: u64,
+    settings: ShellSettings,
+    settings_store: Arc<SettingsStore>,
+    control_plane_revision: DurableControlPlaneRevision,
+    theme: ThemeEngine,
+    locale: LocaleEngine,
+    interfaces: mesh_core_service::InterfaceCatalog,
+    effective_capabilities: Arc<HashMap<String, EffectiveCapabilities>>,
+    composition_mode: ShellCompositionMode,
+    active_profile_id: Option<String>,
+    frontend_catalog: FrontendCatalogState,
+    module_dirs: Vec<PathBuf>,
+    last_published_theme_snapshot: Option<mesh_core_theme::ThemeSnapshot>,
+    theme_watch: ThemeWatchState,
+}
+
+impl PackageRuntimeRollback {
+    pub(in crate::shell) fn capture(shell: &Shell) -> Self {
+        Self {
+            installed_module_graph: shell.installed_module_graph.clone(),
+            resource_snapshot: shell.resource_snapshot.clone(),
+            resource_explanation: shell.resource_explanation.clone(),
+            font_registry: shell.font_registry.clone(),
+            font_renderer_revision: shell.font_renderer_revision,
+            settings: shell.settings.clone(),
+            settings_store: shell.settings_store.clone(),
+            control_plane_revision: shell.control_plane_revision,
+            theme: shell.theme.clone(),
+            locale: shell.locale.clone(),
+            interfaces: shell.interfaces.resolved_catalog(),
+            effective_capabilities: shell.effective_capabilities.clone(),
+            composition_mode: shell.composition_mode.clone(),
+            active_profile_id: shell.active_profile_id.clone(),
+            frontend_catalog: shell.frontend_catalog.snapshot(),
+            module_dirs: shell.module_dirs.clone(),
+            last_published_theme_snapshot: shell.last_published_theme_snapshot.clone(),
+            theme_watch: shell.theme_watch.clone(),
+        }
+    }
+
+    fn restore(self, shell: &mut Shell) {
+        let Self {
+            installed_module_graph,
+            resource_snapshot,
+            resource_explanation,
+            font_registry,
+            font_renderer_revision,
+            settings,
+            settings_store,
+            control_plane_revision,
+            theme,
+            locale,
+            interfaces,
+            effective_capabilities,
+            composition_mode,
+            active_profile_id,
+            frontend_catalog,
+            module_dirs,
+            last_published_theme_snapshot,
+            theme_watch,
+        } = self;
+
+        // Rebuild module instances from the journal-restored graph before
+        // putting back the exact snapshots captured at package-operation
+        // entry. This also returns resolved module state after an uninstall
+        // removed an instance from the live map.
+        shell.composition_mode = composition_mode.clone();
+        shell.active_profile_id = active_profile_id.clone();
+        shell.installed_module_graph = installed_module_graph.clone();
+        shell.module_dirs = module_dirs;
+        shell.discover_modules();
+        if let Err(error) = shell.resolve_modules() {
+            tracing::warn!("failed to re-resolve restored package state: {error}");
+        }
+
+        shell.installed_module_graph = installed_module_graph;
+        shell.resource_snapshot = resource_snapshot;
+        shell.resource_explanation = resource_explanation;
+        shell.font_registry = font_registry;
+        shell.font_renderer_revision = font_renderer_revision;
+        shell.settings = settings;
+        shell.settings_store = settings_store;
+        shell.control_plane_revision = control_plane_revision;
+        shell.theme = theme;
+        shell.locale = locale;
+        shell.interfaces.replace_catalog(interfaces);
+        shell.effective_capabilities = effective_capabilities;
+        shell.composition_mode = composition_mode;
+        shell.active_profile_id = active_profile_id;
+        let current_catalog_version = shell.frontend_catalog.snapshot().version;
+        shell
+            .frontend_catalog
+            .restore_if_current(current_catalog_version, frontend_catalog);
+        shell.last_published_theme_snapshot = last_published_theme_snapshot;
+        shell.theme_watch = theme_watch;
+    }
+}
+
+fn restore_module_config(rollback: crate::shell::module_config::ModuleConfigRollback) {
+    if let Err(error) = rollback.restore() {
+        tracing::error!("failed to restore graph activation decision: {error}");
+    }
+}
+
+fn restore_module_config_if_present(
+    rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
+) {
+    if let Some(rollback) = rollback {
+        restore_module_config(rollback);
+    }
+}
+
+pub(in crate::shell) fn abort_package_transaction(
+    package_transaction: Option<PackageTransaction>,
+    package_rollback: Option<PackageRuntimeRollback>,
+    shell: &mut Shell,
+) {
+    if let Some(package_transaction) = package_transaction
+        && let Err(error) = package_transaction.abort()
+    {
+        tracing::error!("failed to abort package transaction: {error}");
+    }
+    if let Some(package_rollback) = package_rollback {
+        package_rollback.restore(shell);
+    }
+}
 
 fn candidate_interface_catalog(
     live: &mesh_core_service::InterfaceCatalog,
@@ -325,21 +470,43 @@ impl Shell {
         &mut self,
         graph: InstalledModuleGraph,
     ) -> VecDeque<CoreRequest> {
+        self.activate_graph_candidate_with_package_transaction(graph, None, None)
+    }
+
+    pub(in crate::shell) fn activate_graph_candidate_with_package_transaction(
+        &mut self,
+        graph: InstalledModuleGraph,
+        package_transaction: Option<PackageTransaction>,
+        package_rollback: Option<PackageRuntimeRollback>,
+    ) -> VecDeque<CoreRequest> {
         if self.profile_transition_pending() {
             tracing::warn!("graph activation rejected while another activation is pending");
+            abort_package_transaction(package_transaction, package_rollback, self);
             return VecDeque::new();
         }
         if !self.pending_backend_runtimes.is_empty() {
             tracing::warn!("graph activation rejected while a provider switch is pending");
+            abort_package_transaction(package_transaction, package_rollback, self);
             return VecDeque::new();
         }
 
         let selection =
             super::discovery::load_configured_profile(&self.installed_module_graph_path());
         match selection {
-            Ok(Some((profile_id, _))) => self.apply_switch_profile(&profile_id),
-            Ok(None) => self.begin_legacy_graph_activation(graph, None),
+            Ok(Some((profile_id, _))) => self.begin_profile_activation_with_package_transaction(
+                &profile_id,
+                None,
+                package_transaction,
+                package_rollback,
+            ),
+            Ok(None) => self.begin_legacy_graph_activation_with_package_transaction(
+                graph,
+                None,
+                package_transaction,
+                package_rollback,
+            ),
             Err(error) => {
+                abort_package_transaction(package_transaction, package_rollback, self);
                 let message =
                     format!("configured shell graph/profile could not be activated: {error}");
                 if self.installed_module_graph.is_none() {
@@ -393,11 +560,22 @@ impl Shell {
     pub(in crate::shell) fn begin_legacy_graph_activation(
         &mut self,
         graph: InstalledModuleGraph,
+        rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
+    ) -> VecDeque<CoreRequest> {
+        self.begin_legacy_graph_activation_with_package_transaction(graph, rollback, None, None)
+    }
+
+    pub(in crate::shell) fn begin_legacy_graph_activation_with_package_transaction(
+        &mut self,
+        graph: InstalledModuleGraph,
         mut rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
+        package_transaction: Option<PackageTransaction>,
+        package_rollback: Option<PackageRuntimeRollback>,
     ) -> VecDeque<CoreRequest> {
         if !self.pending_backend_runtimes.is_empty() {
+            abort_package_transaction(package_transaction, package_rollback, self);
             if let Some(rollback) = rollback {
-                let _ = rollback.restore();
+                restore_module_config(rollback);
             }
             self.reject_profile_switch(
                 LEGACY_ACTIVATION_ID,
@@ -409,8 +587,9 @@ impl Shell {
         let locale = match self.prepare_locale_for_graph(&graph) {
             Ok(locale) => locale,
             Err(error) => {
+                abort_package_transaction(package_transaction, package_rollback, self);
                 if let Some(rollback) = rollback.take() {
-                    let _ = rollback.restore();
+                    restore_module_config(rollback);
                 }
                 self.reject_profile_switch(LEGACY_ACTIVATION_ID, error.to_string());
                 return VecDeque::new();
@@ -419,8 +598,9 @@ impl Shell {
         let resource_job = match self.start_resource_preparation_job(&graph, &settings) {
             Ok(job) => job,
             Err(error) => {
+                abort_package_transaction(package_transaction, package_rollback, self);
                 if let Some(rollback) = rollback {
-                    let _ = rollback.restore();
+                    restore_module_config(rollback);
                 }
                 self.reject_profile_switch(LEGACY_ACTIVATION_ID, error.to_string());
                 return VecDeque::new();
@@ -435,6 +615,8 @@ impl Shell {
             resource_job,
             persist_active_profile: false,
             rollback: rollback.take(),
+            package_transaction,
+            package_rollback,
         });
         self.poll_pending_resource_preparation()
     }
@@ -444,9 +626,20 @@ impl Shell {
         profile_id: &str,
         rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
     ) -> VecDeque<CoreRequest> {
+        self.begin_profile_activation_with_package_transaction(profile_id, rollback, None, None)
+    }
+
+    pub(in crate::shell) fn begin_profile_activation_with_package_transaction(
+        &mut self,
+        profile_id: &str,
+        rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
+        package_transaction: Option<PackageTransaction>,
+        package_rollback: Option<PackageRuntimeRollback>,
+    ) -> VecDeque<CoreRequest> {
         if !self.pending_backend_runtimes.is_empty() {
+            abort_package_transaction(package_transaction, package_rollback, self);
             if let Some(rollback) = rollback {
-                let _ = rollback.restore();
+                restore_module_config(rollback);
             }
             self.reject_profile_switch(
                 profile_id,
@@ -458,8 +651,9 @@ impl Shell {
         let paths = match ProfilePaths::from_root_graph(&graph_path) {
             Ok(paths) => paths,
             Err(error) => {
+                abort_package_transaction(package_transaction, package_rollback, self);
                 if let Some(rollback) = rollback {
-                    let _ = rollback.restore();
+                    restore_module_config(rollback);
                 }
                 self.reject_profile_switch(profile_id, error.to_string());
                 return VecDeque::new();
@@ -468,8 +662,9 @@ impl Shell {
         let profile = match paths.load(profile_id) {
             Ok(profile) => profile,
             Err(error) => {
+                abort_package_transaction(package_transaction, package_rollback, self);
                 if let Some(rollback) = rollback {
-                    let _ = rollback.restore();
+                    restore_module_config(rollback);
                 }
                 self.reject_profile_switch(profile_id, error.to_string());
                 return VecDeque::new();
@@ -478,8 +673,9 @@ impl Shell {
         let graph = match load_installed_module_graph_for_profile(&graph_path, &profile) {
             Ok(graph) => graph,
             Err(error) => {
+                abort_package_transaction(package_transaction, package_rollback, self);
                 if let Some(rollback) = rollback {
-                    let _ = rollback.restore();
+                    restore_module_config(rollback);
                 }
                 self.reject_profile_switch(profile_id, error.to_string());
                 return VecDeque::new();
@@ -488,8 +684,9 @@ impl Shell {
         let shared = match SettingsStore::load() {
             Ok(settings) => settings,
             Err(error) => {
+                abort_package_transaction(package_transaction, package_rollback, self);
                 if let Some(rollback) = rollback {
-                    let _ = rollback.restore();
+                    restore_module_config(rollback);
                 }
                 self.reject_profile_switch(profile_id, error.to_string());
                 return VecDeque::new();
@@ -500,8 +697,9 @@ impl Shell {
                 if let Err(error) =
                     super::discovery::register_graph_settings_schemas(&mut settings, &graph)
                 {
+                    abort_package_transaction(package_transaction, package_rollback, self);
                     if let Some(rollback) = rollback {
-                        let _ = rollback.restore();
+                        restore_module_config(rollback);
                     }
                     self.reject_profile_switch(profile_id, error.to_string());
                     return VecDeque::new();
@@ -509,8 +707,9 @@ impl Shell {
                 Arc::new(settings)
             }
             Err(error) => {
+                abort_package_transaction(package_transaction, package_rollback, self);
                 if let Some(rollback) = rollback {
-                    let _ = rollback.restore();
+                    restore_module_config(rollback);
                 }
                 self.reject_profile_switch(profile_id, error.to_string());
                 return VecDeque::new();
@@ -519,8 +718,9 @@ impl Shell {
         let locale = match self.prepare_locale_for_settings(settings.shell(), &graph) {
             Ok(locale) => locale,
             Err(error) => {
+                abort_package_transaction(package_transaction, package_rollback, self);
                 if let Some(rollback) = rollback {
-                    let _ = rollback.restore();
+                    restore_module_config(rollback);
                 }
                 self.reject_profile_switch(profile_id, error.to_string());
                 return VecDeque::new();
@@ -529,8 +729,9 @@ impl Shell {
         let resource_job = match self.start_resource_preparation_job(&graph, &settings) {
             Ok(job) => job,
             Err(error) => {
+                abort_package_transaction(package_transaction, package_rollback, self);
                 if let Some(rollback) = rollback {
-                    let _ = rollback.restore();
+                    restore_module_config(rollback);
                 }
                 self.reject_profile_switch(profile_id, error.to_string());
                 return VecDeque::new();
@@ -545,6 +746,8 @@ impl Shell {
             resource_job,
             persist_active_profile: true,
             rollback,
+            package_transaction,
+            package_rollback,
         });
         self.poll_pending_resource_preparation()
     }
@@ -874,9 +1077,8 @@ impl Shell {
         }
         if let Some(pending) = self.pending_resource_preparation.take() {
             pending.resource_job.cancel();
-            if let Some(rollback) = pending.rollback {
-                let _ = rollback.restore();
-            }
+            restore_module_config_if_present(pending.rollback);
+            abort_package_transaction(pending.package_transaction, pending.package_rollback, self);
             self.reject_profile_switch(
                 &pending.profile_id,
                 format!("profile switch was superseded by '{profile_id}'"),
@@ -905,6 +1107,8 @@ impl Shell {
             mut resource_job,
             persist_active_profile,
             rollback,
+            package_transaction,
+            package_rollback,
         } = pending;
         let Some(result) = resource_job.try_wait() else {
             self.pending_resource_preparation = Some(PendingResourcePreparation {
@@ -916,6 +1120,8 @@ impl Shell {
                 resource_job,
                 persist_active_profile,
                 rollback,
+                package_transaction,
+                package_rollback,
             });
             return VecDeque::new();
         };
@@ -935,10 +1141,13 @@ impl Shell {
                     resources,
                     persist_active_profile,
                     rollback,
+                    package_transaction,
+                    package_rollback,
                 )
             }
             Ok(_) => {
                 resource_job.retire();
+                abort_package_transaction(package_transaction, package_rollback, self);
                 if let Some(rollback) = rollback {
                     let _ = rollback.restore();
                 }
@@ -950,6 +1159,7 @@ impl Shell {
             }
             Err(error) => {
                 resource_job.retire();
+                abort_package_transaction(package_transaction, package_rollback, self);
                 if let Some(rollback) = rollback {
                     let _ = rollback.restore();
                 }
@@ -972,12 +1182,19 @@ impl Shell {
         resources: super::discovery::PreparedResourceSnapshot,
         persist_active_profile: bool,
         mut rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
+        mut package_transaction: Option<PackageTransaction>,
+        mut package_rollback: Option<PackageRuntimeRollback>,
     ) -> VecDeque<CoreRequest> {
         macro_rules! reject_candidate {
             ($message:expr) => {{
                 if let Some(rollback) = rollback.take() {
                     let _ = rollback.restore();
                 }
+                abort_package_transaction(
+                    package_transaction.take(),
+                    package_rollback.take(),
+                    self,
+                );
                 self.reject_profile_switch(&profile_id, $message.into());
                 return VecDeque::new();
             }};
@@ -1229,6 +1446,8 @@ impl Shell {
             candidate_initial_states: HashMap::new(),
             persist_active_profile,
             rollback: rollback.take(),
+            package_transaction: package_transaction.take(),
+            package_rollback: package_rollback.take(),
         };
         if !changed.is_empty() {
             let Some(ctx) = self.backend_respawn.clone() else {
@@ -1459,6 +1678,18 @@ impl Shell {
             return VecDeque::new();
         }
 
+        // The journal is the durable half of this activation. Commit it only
+        // after every candidate is prepared and the active-profile pointer
+        // has been updated, but before publishing any replacement runtime
+        // objects. A crash after this point reopens the same committed graph;
+        // every failure before it drops the transaction and restores disk.
+        if let Some(package_transaction) = pending.package_transaction.take()
+            && let Err(error) = package_transaction.commit()
+        {
+            self.abort_profile_candidate(pending, error.to_string());
+            return VecDeque::new();
+        }
+
         self.frontend_catalog.replace(plan.catalog.clone(), None);
         for prepared in &mut pending.prepared_frontends {
             prepared
@@ -1657,18 +1888,19 @@ impl Shell {
         }
     }
 
-    fn abort_profile_candidate(&mut self, pending: PendingProfileSwitch, message: String) {
+    pub(in crate::shell) fn abort_profile_candidate(
+        &mut self,
+        pending: PendingProfileSwitch,
+        message: String,
+    ) {
         if let Some(lease) = pending.plan.resources.resource_lease.as_ref() {
             lease.retire();
         }
         for slot in pending.candidate_backends.into_values() {
             self.retire_backend_runtime_slot(slot);
         }
-        if let Some(rollback) = pending.rollback {
-            if let Err(error) = rollback.restore() {
-                tracing::error!("failed to restore graph activation decision: {error}");
-            }
-        }
+        restore_module_config_if_present(pending.rollback);
+        abort_package_transaction(pending.package_transaction, pending.package_rollback, self);
         self.reject_profile_switch(&pending.plan.profile_id, message);
     }
 

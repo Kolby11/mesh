@@ -4,7 +4,7 @@
 
 ## Now
 
-Section 15's first ten items are complete. Profile activation now prepares one
+Section 15's first eleven items are complete. Profile activation now prepares one
 immutable `ActivationPlan`, resolves candidate components and backends against
 its interface/capability snapshots, and publishes one `RuntimeGeneration` at
 the commit point. Backend enable/disable, package graph changes, and installed
@@ -22,6 +22,6 @@ CoreRequest effects now run through a fair bounded scheduler with causal budgets
 and cycle detection. Control-plane writes now stage shared or profile-owned
 settings, commit through revision-checked durable boundaries, and publish one
 declared settings/theme/locale effect batch in order. The next open item is
-connecting package journal commit/rollback to runtime activation so disk and
-live state share one recoverable transaction.
+introducing `ActiveSnapshot` with candidate preview in hidden surfaces and an
+explicit quiescing-to-stopped shutdown state machine.
 See [`.planning/log/2026-08.md`](log/2026-08.md).

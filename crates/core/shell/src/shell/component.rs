@@ -36,7 +36,7 @@ mod shell_component;
 mod tooltip;
 
 pub(in crate::shell) use catalog::{
-    FrontendCatalog, FrontendCatalogHandle, SharedCompiledFrontendModule,
+    FrontendCatalog, FrontendCatalogHandle, FrontendCatalogState, SharedCompiledFrontendModule,
 };
 #[cfg(test)]
 pub(crate) use input::KeybindResolutionSource;

@@ -583,9 +583,16 @@ impl Shell {
             if let Some(rollback) = pending.rollback {
                 let _ = rollback.restore();
             }
+            super::profile::abort_package_transaction(
+                pending.package_transaction,
+                pending.package_rollback,
+                self,
+            );
+        }
+        if let Some(pending) = self.pending_profile_switch.take() {
+            self.abort_profile_candidate(pending, "shell runtime is shutting down".into());
         }
         self.shutdown_backend_runtimes(runtime);
-        self.pending_profile_switch = None;
         self.backend_supervision.clear();
         self.wake_handle.take();
         self.eventfd_fd.take();
