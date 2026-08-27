@@ -405,6 +405,7 @@ impl Shell {
             ShellMessage::BackendInterfaceEvent { .. } => "backend_interface_event",
             ShellMessage::BackendRestartDue { .. } => "backend_restart_due",
             ShellMessage::FilesystemChanged => "filesystem_changed",
+            ShellMessage::FileWatcherStopped => "file_watcher_stopped",
             ShellMessage::Ipc(_) => "ipc",
         };
         match message {
@@ -558,6 +559,20 @@ impl Shell {
             }
             ShellMessage::FilesystemChanged => {
                 self.schedule_reload_checks_now();
+            }
+            ShellMessage::FileWatcherStopped => {
+                // Reload checks were parked at FILE_WATCHER_RELOAD_PARK
+                // (24h) on the assumption inotify would report every
+                // change. With the thread gone that assumption is false;
+                // fall back to short-interval polling starting now instead
+                // of leaving the shell blind until the park expires.
+                if self.file_watcher_active {
+                    tracing::warn!(
+                        "file watcher stopped; falling back to short-interval reload polling"
+                    );
+                    self.file_watcher_active = false;
+                    self.schedule_reload_checks_now();
+                }
             }
             ShellMessage::Ipc(request) => {
                 pending.push_back(request);

@@ -560,3 +560,45 @@ fn a_core_provided_command_with_a_malformed_payload_changes_nothing() {
     assert_eq!(result["ok"], serde_json::json!(false));
     assert_eq!(shell.theme.active().id, before);
 }
+
+#[test]
+fn file_watcher_stopped_message_clears_active_flag_and_forces_immediate_reload_checks() {
+    let mut shell = Shell::new();
+    shell.file_watcher_active = true;
+    let far_future = std::time::Instant::now() + std::time::Duration::from_secs(3600);
+    shell.next_theme_reload_check = far_future;
+    shell.next_shell_settings_reload_check = far_future;
+    shell.next_frontend_reload_check = far_future;
+
+    let mut pending = VecDeque::new();
+    shell
+        .handle_shell_message(&mut pending, super::types::ShellMessage::FileWatcherStopped)
+        .unwrap();
+
+    assert!(
+        !shell.file_watcher_active,
+        "a dead watch thread must not be trusted to keep reporting changes"
+    );
+    let now = std::time::Instant::now();
+    assert!(shell.next_theme_reload_check <= now);
+    assert!(shell.next_shell_settings_reload_check <= now);
+    assert!(shell.next_frontend_reload_check <= now);
+}
+
+#[test]
+fn file_watcher_stopped_message_is_a_noop_when_the_watcher_was_never_active() {
+    let mut shell = Shell::new();
+    assert!(!shell.file_watcher_active);
+    let far_future = std::time::Instant::now() + std::time::Duration::from_secs(3600);
+    shell.next_theme_reload_check = far_future;
+
+    let mut pending = VecDeque::new();
+    shell
+        .handle_shell_message(&mut pending, super::types::ShellMessage::FileWatcherStopped)
+        .unwrap();
+
+    assert_eq!(
+        shell.next_theme_reload_check, far_future,
+        "an already-inactive watcher must not disturb existing poll scheduling"
+    );
+}

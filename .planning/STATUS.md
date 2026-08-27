@@ -4,6 +4,13 @@
 
 ## Now
 
+Section 15 finding #7: a dead file-watcher thread now tells the shell loop
+(`ShellMessage::FileWatcherStopped`) instead of silently vanishing, so
+polling falls back immediately instead of staying parked for 24h. Watch
+coverage itself (new directories from live graph/import changes) is still
+static-at-startup and remains open. See
+[`.planning/log/2026-08.md`](log/2026-08.md).
+
 Section 15 finding #6: one component's service-event handler failure no
 longer aborts delivery to every other component (and, unhandled above
 `Shell::run`, the whole shell process). Diagnosed per-component and skipped

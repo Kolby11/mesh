@@ -409,6 +409,11 @@ pub(super) enum ShellMessage {
         restart_generation: u64,
     },
     FilesystemChanged,
+    /// The inotify watch thread exited (setup or read failure). Without this,
+    /// `file_watcher_active` never reverts to false after the watcher dies,
+    /// leaving reload polling parked for `FILE_WATCHER_RELOAD_PARK` (24h)
+    /// even though nothing is watching anymore.
+    FileWatcherStopped,
     Ipc(CoreRequest),
 }
 

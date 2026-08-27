@@ -66,6 +66,7 @@ fn watch_thread(
         Ok(fd) => fd,
         Err(err) => {
             tracing::warn!("failed to initialise file watcher: {err}");
+            notify_watcher_stopped(&tx, eventfd_fd);
             return;
         }
     };
@@ -88,6 +89,7 @@ fn watch_thread(
     }
     if watched == 0 {
         tracing::warn!("file watcher has no active directories");
+        notify_watcher_stopped(&tx, eventfd_fd);
         return;
     }
 
@@ -104,8 +106,23 @@ fn watch_thread(
             }
             Err(err) => {
                 tracing::warn!("file watcher stopped: {err}");
+                notify_watcher_stopped(&tx, eventfd_fd);
                 return;
             }
         }
     }
+}
+
+/// Tell the shell loop the watch thread is gone so it stops trusting
+/// `file_watcher_active` and falls back to short-interval polling on the
+/// very next reload check instead of staying parked for up to 24h. Best
+/// effort: if the shell has already gone, there is nothing left to wake.
+#[cfg(target_os = "linux")]
+fn notify_watcher_stopped(tx: &mpsc::UnboundedSender<ShellMessage>, eventfd_fd: std::os::unix::io::RawFd) {
+    use rustix::fd::BorrowedFd;
+    if tx.send(ShellMessage::FileWatcherStopped).is_err() {
+        return;
+    }
+    let evfd = unsafe { BorrowedFd::borrow_raw(eventfd_fd) };
+    let _ = rustix::io::write(&evfd, &1u64.to_ne_bytes());
 }
