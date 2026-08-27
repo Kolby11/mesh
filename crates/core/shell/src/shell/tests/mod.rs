@@ -9,6 +9,7 @@ mod graph;
 mod input;
 mod popover;
 mod profiling;
+mod request_drain;
 mod scheduler;
 mod service_contract;
 mod service_delivery;

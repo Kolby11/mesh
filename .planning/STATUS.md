@@ -4,6 +4,14 @@
 
 ## Now
 
+Section 15 finding #8: `drain_requests` now caps processing at 4096
+requests per batch and diagnoses/drops the remainder instead of hanging on a
+self-emitting request cycle. Backstop only, not the full bounded-scheduler
+redesign the finding describes. Findings #3 (generation tagging) and #9
+(provider-failure state delivery) were checked and are already fully shipped
+by prior work — no action needed there. See
+[`.planning/log/2026-08.md`](log/2026-08.md).
+
 Section 15 finding #2: enabling a backend-kind module now actually spawns it
 live (`apply_set_module_enabled` was frontend-only), reusing the existing
 provider-switch staged-activation path. Disable side needed no fix — already

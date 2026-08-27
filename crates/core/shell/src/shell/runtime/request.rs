@@ -22,6 +22,14 @@ const SERVICE_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_mill
 const MAX_COALESCED_COMMAND_KEYS: usize = 256;
 const POPOVER_HOVER_BRIDGE_DELAY: std::time::Duration = std::time::Duration::from_millis(180);
 const DEBUG_INSPECTOR_SURFACE_ID: &str = "@mesh/debug-inspector";
+/// Hard ceiling on requests processed by one `drain_requests` call. Nothing
+/// bounds how many `CoreRequest`s one applied request can emit in turn — a
+/// component reacting to a service snapshot by re-requesting the same change
+/// (e.g. `mesh.theme`'s `SetTheme` republishing its own state) can otherwise
+/// grow the queue without bound and hang the shell loop before presentation.
+/// This does not detect *which* source is cycling; it only guarantees the
+/// loop always terminates.
+const MAX_DRAINED_REQUESTS_PER_BATCH: usize = 4096;
 
 /// Canonical failure payload when a service command cannot be delivered (no
 /// backend channel, send failure, or unregistered interface).
@@ -769,7 +777,25 @@ impl Shell {
         &mut self,
         requests: &mut VecDeque<CoreRequest>,
     ) -> Result<(), ShellRunError> {
+        let mut processed = 0usize;
         while let Some(request) = requests.pop_front() {
+            processed += 1;
+            if processed > MAX_DRAINED_REQUESTS_PER_BATCH {
+                let dropped = requests.len() + 1;
+                requests.clear();
+                let message = format!(
+                    "dropped {dropped} pending shell requests after exceeding the \
+                     {MAX_DRAINED_REQUESTS_PER_BATCH}-request drain budget; a component or \
+                     backend is likely emitting a repeating request cycle"
+                );
+                tracing::error!("{message}");
+                self.diagnostics.record_lifecycle_error(
+                    "@mesh/shell".to_string(),
+                    "request_drain_budget_exceeded",
+                    message,
+                );
+                return Ok(());
+            }
             let emitted = self.apply_request(request)?;
             requests.extend(emitted);
         }
