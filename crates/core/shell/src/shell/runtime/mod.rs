@@ -322,55 +322,73 @@ impl Shell {
             return Ok(());
         }
         self.discover_modules();
-        if let Some(graph) = self.installed_module_graph.as_ref() {
-            for descriptor in graph.theme_catalog().iter() {
-                let source = descriptor.default_source();
-                match mesh_core_theme::load_theme_from_source(source) {
-                    Ok(mut theme) => {
-                        // The graph identity, not CSS metadata, is the
-                        // activation identity. CSS labels remain content,
-                        // while ownership and mode selection come from the
-                        // authorized descriptor.
-                        theme.id = descriptor.id.clone();
-                        if let Some(label) = &descriptor.label {
-                            theme.name = label.clone();
+        if self.composition_mode.is_recovery() {
+            let reason = self
+                .composition_mode
+                .recovery_reason()
+                .unwrap_or("configured shell state is invalid");
+            tracing::error!(
+                "starting explicit shell recovery without configured modules: {reason}"
+            );
+        } else {
+            if let Some(graph) = self.installed_module_graph.as_ref() {
+                for descriptor in graph.theme_catalog().iter() {
+                    let source = descriptor.default_source();
+                    match mesh_core_theme::load_theme_from_source(source) {
+                        Ok(mut theme) => {
+                            // The graph identity, not CSS metadata, is the
+                            // activation identity. CSS labels remain content,
+                            // while ownership and mode selection come from the
+                            // authorized descriptor.
+                            theme.id = descriptor.id.clone();
+                            if let Some(label) = &descriptor.label {
+                                theme.name = label.clone();
+                            }
+                            tracing::debug!(
+                                "registering graph-authorized theme '{}' mode '{}'",
+                                descriptor.id,
+                                descriptor.default_mode
+                            );
+                            if let Err(error) = self.theme.register_theme(theme) {
+                                tracing::warn!(
+                                    "skipping graph-authorized theme '{}' due to duplicate identity: {error}",
+                                    descriptor.id
+                                );
+                            }
                         }
-                        tracing::debug!(
-                            "registering graph-authorized theme '{}' mode '{}'",
+                        Err(error) => tracing::warn!(
+                            "failed to load graph-authorized theme '{}' mode '{}': {error}",
                             descriptor.id,
                             descriptor.default_mode
-                        );
-                        if let Err(error) = self.theme.register_theme(theme) {
-                            tracing::warn!(
-                                "skipping graph-authorized theme '{}' due to duplicate identity: {error}",
-                                descriptor.id
-                            );
-                        }
+                        ),
+                    }
+                }
+            }
+            if let Some(graph) = self.installed_module_graph.clone()
+                && !graph.theme_catalog().is_empty()
+            {
+                match prepare_theme_for_graph(&self.settings, &graph) {
+                    Ok((theme, watch)) => {
+                        self.theme.replace_active(theme);
+                        self.theme_watch = watch;
                     }
                     Err(error) => tracing::warn!(
-                        "failed to load graph-authorized theme '{}' mode '{}': {error}",
-                        descriptor.id,
-                        descriptor.default_mode
+                        "failed to compose selected graph theme '{}': {error}; retaining recovery theme",
+                        self.settings.theme.active
                     ),
                 }
             }
-        }
-        if let Some(graph) = self.installed_module_graph.clone()
-            && !graph.theme_catalog().is_empty()
-        {
-            match prepare_theme_for_graph(&self.settings, &graph) {
-                Ok((theme, watch)) => {
-                    self.theme.replace_active(theme);
-                    self.theme_watch = watch;
-                }
-                Err(error) => tracing::warn!(
-                    "failed to compose selected graph theme '{}': {error}; retaining recovery theme",
-                    self.settings.theme.active
-                ),
+            if let Err(error) = self
+                .resolve_modules()
+                .and_then(|_| self.load_frontend_components())
+            {
+                let message = format!(
+                    "configured shell graph/profile could not prepare an active composition: {error}"
+                );
+                tracing::error!("{message}");
+                self.enter_composition_recovery(message);
             }
         }
-        self.resolve_modules()?;
-        self.load_frontend_components()?;
 
         let runtime = Runtime::new().map_err(ShellRunError::RuntimeInit)?;
         let (tx, mut rx) = mpsc::unbounded_channel::<ShellMessage>();

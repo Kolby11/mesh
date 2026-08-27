@@ -1373,6 +1373,40 @@ pub(super) fn load_shell_module_manifests_serial(
         .collect()
 }
 
+pub(in crate::shell) fn load_configured_profile(
+    graph_path: &Path,
+) -> Result<Option<(String, ShellProfile)>, mesh_core_module::package::ModuleManifestError> {
+    let paths = mesh_core_module::package::ProfilePaths::from_root_graph(graph_path)?;
+    let Some(profile_id) = paths.active_profile_id()? else {
+        return Ok(None);
+    };
+    let profile = paths.load(&profile_id)?;
+    Ok(Some((profile_id, profile)))
+}
+
+pub(in crate::shell) fn startup_composition(
+    graph_path: &Path,
+) -> (ShellCompositionMode, Option<(String, ShellProfile)>) {
+    match load_configured_profile(graph_path) {
+        Ok(None) => (ShellCompositionMode::LegacyNoProfile, None),
+        Ok(Some((profile_id, profile))) => (
+            ShellCompositionMode::ConfiguredProfile {
+                id: profile_id.clone(),
+            },
+            Some((profile_id, profile)),
+        ),
+        Err(error) => (
+            ShellCompositionMode::Recovery {
+                reason: format!(
+                    "configured shell profile could not be loaded from {}: {error}",
+                    graph_path.display()
+                ),
+            },
+            None,
+        ),
+    }
+}
+
 impl Shell {
     pub fn new() -> Self {
         let config_path = mesh_core_config::default_config_path();
@@ -1396,12 +1430,10 @@ impl Shell {
                 );
                 CapabilityPolicy::default()
             });
-        let active_profile = mesh_core_module::package::ProfilePaths::from_root_graph(&graph_path)
-            .and_then(|paths| paths.load_active())
-            .unwrap_or_else(|error| {
-                tracing::warn!("failed to load active shell profile: {error}");
-                None
-            });
+        let (composition_mode, active_profile) = startup_composition(&graph_path);
+        if let Some(reason) = composition_mode.recovery_reason() {
+            tracing::error!("starting shell in recovery mode: {reason}");
+        }
         let active_profile_id = active_profile.as_ref().map(|(id, _)| id.clone());
         let settings_store = Arc::new(
             effective_profile_settings(
@@ -1616,6 +1648,8 @@ impl Shell {
             builtin_contract(
                 "mesh.composition",
                 &[
+                    ("mode", "string"),
+                    ("recovery_reason", "string?"),
                     ("profile_id", "string"),
                     ("generation", "string"),
                     ("roots", "object[]"),
@@ -1696,6 +1730,15 @@ impl Shell {
 
         let now = std::time::Instant::now();
 
+        let mut diagnostics = DiagnosticsCollector::new();
+        if let Some(reason) = composition_mode.recovery_reason() {
+            diagnostics.record_lifecycle_error(
+                "@mesh/shell",
+                "configured_composition_recovery",
+                reason,
+            );
+        }
+
         Self {
             config,
             settings,
@@ -1703,7 +1746,7 @@ impl Shell {
             control_plane_revision,
             theme,
             locale,
-            diagnostics: DiagnosticsCollector::new(),
+            diagnostics,
             interfaces,
             capability_policy,
             effective_capabilities: Arc::new(HashMap::new()),
@@ -1715,6 +1758,7 @@ impl Shell {
             font_registry: mesh_core_resources::FontRegistry::default(),
             font_renderer_revision: 0,
             resource_preparation: mesh_core_resources::ResourcePreparationCoordinator::default(),
+            composition_mode,
             active_profile_id,
             modules: HashMap::new(),
             frontend_catalog: FrontendCatalogHandle::default(),
@@ -1779,20 +1823,107 @@ impl Shell {
         }
     }
 
+    pub(in crate::shell) fn enter_composition_recovery(&mut self, reason: impl Into<String>) {
+        let reason = reason.into();
+        let component_surfaces = self
+            .components
+            .iter()
+            .map(|runtime| {
+                (
+                    runtime.component.id().to_string(),
+                    runtime.surface_id.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        if self.components.iter().any(|runtime| runtime.mounted) {
+            let _ = self.unmount_components();
+        }
+        for (module_id, surface_id) in component_surfaces {
+            self.diagnostics.unregister(&module_id, &surface_id);
+            self.core.surfaces.remove(&surface_id);
+            self.surfaces.remove(&surface_id);
+            self.pending_popover_hides.remove(&surface_id);
+            self.transfer_owned_keyboard_modes.remove(&surface_id);
+            if self.keyboard_focus_surface.as_deref() == Some(surface_id.as_str()) {
+                self.keyboard_focus_surface = None;
+            }
+        }
+        self.components.clear();
+        self.component_by_surface.clear();
+        self.composition_mode = ShellCompositionMode::Recovery {
+            reason: reason.clone(),
+        };
+        self.active_profile_id = None;
+        self.installed_module_graph = None;
+        self.modules.clear();
+        self.effective_capabilities = Arc::new(HashMap::new());
+        self.frontend_catalog
+            .replace(FrontendCatalog::default(), None);
+        let (theme, theme_watch) = load_active_theme(&self.settings);
+        self.theme = theme;
+        self.theme_watch = theme_watch;
+        self.resource_snapshot = Arc::new(ResourceSnapshot::default());
+        self.resource_explanation =
+            Arc::new(mesh_core_resources::ResourceExplanationSnapshot::default());
+        self.font_registry = mesh_core_resources::FontRegistry::default();
+        self.font_renderer_revision = 0;
+        self.diagnostics.record_lifecycle_error(
+            "@mesh/shell",
+            "configured_composition_recovery",
+            reason,
+        );
+    }
+
     pub fn discover_modules(&mut self) {
-        let graph = match self.load_installed_module_graph_candidate() {
+        let graph_path = self.installed_module_graph_path();
+        self.discover_modules_at_path(&graph_path);
+    }
+
+    #[cfg(test)]
+    pub(in crate::shell) fn discover_modules_at(&mut self, graph_path: &Path) {
+        self.discover_modules_at_path(graph_path);
+    }
+
+    fn discover_modules_at_path(&mut self, graph_path: &Path) {
+        if self.composition_mode.is_recovery() {
+            tracing::debug!(
+                "skipping configured module discovery while the shell is in recovery mode"
+            );
+            return;
+        }
+        let graph = match load_installed_module_graph_candidate(graph_path) {
             Ok(graph) => graph,
             Err(error) => {
-                tracing::error!(
-                    "failed to load installed module graph; retaining last-known-good discovery: {error}"
+                let message = format!(
+                    "configured shell graph/profile is invalid; retaining last-known-good discovery: {error}"
                 );
+                tracing::error!("{message}");
+                if self.installed_module_graph.is_none() {
+                    self.enter_composition_recovery(message);
+                } else {
+                    self.diagnostics.record_lifecycle_error(
+                        "@mesh/shell",
+                        "configured_composition_recovery",
+                        message,
+                    );
+                }
                 return;
             }
         };
         if let Err(error) = self.commit_installed_module_graph(graph.clone()) {
-            tracing::error!(
-                "failed to prepare graph locale catalogs; retaining last-known-good discovery: {error}"
+            let message = format!(
+                "configured shell graph could not prepare its locale catalogs; retaining last-known-good discovery: {error}"
             );
+            tracing::error!("{message}");
+            if self.installed_module_graph.is_none() {
+                self.enter_composition_recovery(message);
+            } else {
+                self.diagnostics.record_lifecycle_error(
+                    "@mesh/shell",
+                    "configured_composition_recovery",
+                    message,
+                );
+            }
             return;
         }
         self.modules.clear();

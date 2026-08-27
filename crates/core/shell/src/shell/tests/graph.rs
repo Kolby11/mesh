@@ -150,6 +150,118 @@ fn load_frontend_components_keeps_shell_shipped_debug_inspector_even_when_not_in
 }
 
 #[test]
+fn missing_active_profile_is_explicit_legacy_composition() {
+    let root = tempfile::tempdir().unwrap();
+    let graph_path = root.path().join("module.json");
+    let (mode, profile) = startup_composition(&graph_path);
+    assert_eq!(mode, ShellCompositionMode::LegacyNoProfile);
+    assert_eq!(mode.service_name(), "legacy_no_profile");
+    assert!(profile.is_none());
+}
+
+#[test]
+fn valid_active_profile_is_explicit_configured_composition() {
+    let root = tempfile::tempdir().unwrap();
+    let graph_path = root.path().join("module.json");
+    let paths = mesh_core_module::package::ProfilePaths::from_root_graph(&graph_path).unwrap();
+    fs::create_dir_all(paths.profiles_dir()).unwrap();
+    fs::write(
+        paths.profile_path("default").unwrap(),
+        serde_json::to_vec(&mesh_core_module::package::ShellProfile::new()).unwrap(),
+    )
+    .unwrap();
+    fs::write(root.path().join("active-profile"), "default\n").unwrap();
+
+    let (mode, profile) = startup_composition(&graph_path);
+    assert_eq!(
+        mode,
+        ShellCompositionMode::ConfiguredProfile {
+            id: "default".into()
+        }
+    );
+    assert_eq!(profile.map(|(id, _)| id).as_deref(), Some("default"));
+}
+
+#[test]
+fn invalid_configured_profile_enters_recovery_instead_of_legacy_mode() {
+    let root = tempfile::tempdir().unwrap();
+    let graph_path = root.path().join("module.json");
+    fs::write(root.path().join("active-profile"), "missing\n").unwrap();
+    let (mode, profile) = startup_composition(&graph_path);
+    assert!(matches!(&mode, ShellCompositionMode::Recovery { .. }));
+    assert!(profile.is_none());
+    assert!(
+        mode.recovery_reason()
+            .is_some_and(|reason| reason.contains("configured shell profile"))
+    );
+}
+
+#[test]
+fn invalid_initial_graph_enters_explicit_recovery_without_discovering_modules() {
+    let root = tempfile::tempdir().unwrap();
+    let graph_path = root.path().join("module.json");
+    fs::write(&graph_path, "{\"mesh\":").unwrap();
+
+    let mut shell = Shell::new();
+    shell.discover_modules_at(&graph_path);
+
+    assert!(matches!(
+        shell.composition_mode,
+        ShellCompositionMode::Recovery { .. }
+    ));
+    assert!(shell.installed_module_graph.is_none());
+    assert_eq!(shell.modules.len(), 0);
+    assert!(
+        shell
+            .diagnostics
+            .snapshot()
+            .into_iter()
+            .flat_map(|module| module.instances)
+            .flat_map(|instance| instance.active_issues)
+            .any(|issue| {
+                issue.issue_code.contains("configured_composition_recovery")
+                    && issue.message.contains("configured shell graph/profile")
+            })
+    );
+}
+
+#[test]
+fn invalid_live_graph_keeps_last_known_good_composition_active() {
+    let mut shell = Shell::new();
+    let last_known_good = graph_from_json(
+        r#"{
+            "modulesDir": "modules",
+            "modules": {
+                "@test/old": {
+                    "kind": "frontend",
+                    "path": "old",
+                    "enabled": true
+                }
+            }
+        }"#,
+        vec![
+            r#"{
+                "name": "@test/old",
+                "version": "0.1.0",
+                "mesh": { "apiVersion": "0.1", "kind": "frontend" }
+            }"#,
+        ],
+    );
+    shell.installed_module_graph = Some(last_known_good);
+
+    let root = tempfile::tempdir().unwrap();
+    let invalid_graph = root.path().join("module.json");
+    fs::write(&invalid_graph, "{\"mesh\":").unwrap();
+    shell.discover_modules_at(&invalid_graph);
+    assert!(
+        shell
+            .installed_module_graph
+            .as_ref()
+            .is_some_and(|graph| graph.module("@test/old").is_some())
+    );
+}
+
+#[test]
 fn invalid_graph_reload_keeps_the_last_known_good_graph() {
     let mut shell = Shell::new();
     let last_known_good = graph_from_json(

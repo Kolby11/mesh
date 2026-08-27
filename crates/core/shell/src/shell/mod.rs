@@ -14,7 +14,8 @@ use mesh_core_locale::LocaleEngine;
 use mesh_core_module::DependencyGraphError;
 use mesh_core_module::lifecycle::{ModuleInstance, ModuleState};
 use mesh_core_module::package::{
-    InstalledModuleGraph, ModuleKind, RootModuleGraphManifest, load_installed_module_graph,
+    InstalledModuleGraph, ModuleKind, RootModuleGraphManifest, ShellProfile,
+    load_installed_module_graph,
 };
 use mesh_core_service::{
     InterfaceProvider, InterfaceRegistry, canonical_interface_name, canonical_interface_name_cow,
@@ -120,6 +121,40 @@ impl DurableControlPlaneRevision {
         match self.profile {
             Some(profile) => format!("shared:{};profile:{profile}", self.shared),
             None => format!("shared:{}", self.shared),
+        }
+    }
+}
+
+/// Identifies which persisted composition policy owns shell activation.
+///
+/// The absence of `active-profile` is an intentional migration-era legacy
+/// mode. It must not be represented by the same value as a malformed graph or
+/// profile, because the latter must fail closed into recovery rather than
+/// enabling an implicit set of frontends or backends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::shell) enum ShellCompositionMode {
+    LegacyNoProfile,
+    ConfiguredProfile { id: String },
+    Recovery { reason: String },
+}
+
+impl ShellCompositionMode {
+    pub(in crate::shell) fn is_recovery(&self) -> bool {
+        matches!(self, Self::Recovery { .. })
+    }
+
+    pub(in crate::shell) fn service_name(&self) -> &'static str {
+        match self {
+            Self::LegacyNoProfile => "legacy_no_profile",
+            Self::ConfiguredProfile { .. } => "configured_profile",
+            Self::Recovery { .. } => "recovery",
+        }
+    }
+
+    pub(in crate::shell) fn recovery_reason(&self) -> Option<&str> {
+        match self {
+            Self::Recovery { reason } => Some(reason),
+            Self::LegacyNoProfile | Self::ConfiguredProfile { .. } => None,
         }
     }
 }
@@ -490,6 +525,7 @@ pub struct Shell {
     pub font_registry: mesh_core_resources::FontRegistry,
     font_renderer_revision: u64,
     resource_preparation: mesh_core_resources::ResourcePreparationCoordinator,
+    composition_mode: ShellCompositionMode,
     active_profile_id: Option<String>,
     modules: HashMap<String, ModuleInstance>,
     frontend_catalog: component::FrontendCatalogHandle,

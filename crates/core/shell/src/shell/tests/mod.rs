@@ -22,12 +22,12 @@ use super::types;
 use super::{
     BackendLaunchCandidate, BackendRuntimeSlot, BackendRuntimeStatus, ComponentInput, CoreRequest,
     InterfaceProvider, InterfaceRegistry, KeyModifiers, ServiceCommandMsg, ServiceEvent,
-    ServiceInterfaceEventSubscription, ServiceObservationSummary, Shell, TabFocusTarget,
-    backend_launch_candidates_from_graph, blur_quality_from_settings, component_key_pressed_input,
-    component_key_released_input,
+    ServiceInterfaceEventSubscription, ServiceObservationSummary, Shell, ShellCompositionMode,
+    TabFocusTarget, backend_launch_candidates_from_graph, blur_quality_from_settings,
+    component_key_pressed_input, component_key_released_input,
     discovery::{
         discover_shell_module_manifest_dirs, load_shell_module_manifests,
-        load_shell_module_manifests_serial,
+        load_shell_module_manifests_serial, startup_composition,
     },
     ipc::parse_ipc_command,
     service::{

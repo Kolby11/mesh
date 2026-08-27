@@ -92,7 +92,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/15-shell-core-and-orchestration/improvements.md)
 
-- [ ] Distinguish intentional legacy/no-profile operation from invalid configured graph/profile recovery.
 - [ ] Connect package journal commit/rollback to runtime activation so disk and live state share one recoverable transaction.
 - [ ] Introduce `ActiveSnapshot` with candidate preview in hidden surfaces and an explicit quiescing-to-stopped shutdown state machine.
 

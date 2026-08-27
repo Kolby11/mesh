@@ -585,6 +585,18 @@ impl Shell {
         module_id: &str,
         enabled: bool,
     ) -> VecDeque<CoreRequest> {
+        if self.composition_mode.is_recovery() {
+            let message = format!(
+                "cannot change module {module_id} while the shell is in configured composition recovery"
+            );
+            tracing::warn!(module_id, enabled, "{message}");
+            self.diagnostics.record_lifecycle_error(
+                "@mesh/settings",
+                "configured_composition_recovery",
+                message,
+            );
+            return VecDeque::new();
+        }
         if self.profile_transition_pending() {
             tracing::warn!(
                 module_id,

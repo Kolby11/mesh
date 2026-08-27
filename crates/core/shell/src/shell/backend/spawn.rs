@@ -22,6 +22,12 @@ impl Shell {
         tx: mpsc::UnboundedSender<ShellMessage>,
         wake: WakeHandle,
     ) {
+        if self.composition_mode.is_recovery() {
+            tracing::warn!(
+                "configured shell graph/profile is invalid; recovery mode starts without backend modules"
+            );
+            return;
+        }
         let graph_path = self.installed_module_graph_path();
         match self.load_installed_module_graph_cached() {
             Ok(graph) => {

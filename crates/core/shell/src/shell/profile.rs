@@ -334,11 +334,26 @@ impl Shell {
             return VecDeque::new();
         }
 
-        if let Some(profile_id) = self.active_profile_id.clone() {
-            return self.apply_switch_profile(&profile_id);
+        let selection =
+            super::discovery::load_configured_profile(&self.installed_module_graph_path());
+        match selection {
+            Ok(Some((profile_id, _))) => self.apply_switch_profile(&profile_id),
+            Ok(None) => self.begin_legacy_graph_activation(graph, None),
+            Err(error) => {
+                let message =
+                    format!("configured shell graph/profile could not be activated: {error}");
+                if self.installed_module_graph.is_none() {
+                    self.enter_composition_recovery(message);
+                } else {
+                    self.diagnostics.record_lifecycle_error(
+                        "@mesh/shell",
+                        "configured_composition_recovery",
+                        message,
+                    );
+                }
+                VecDeque::new()
+            }
         }
-
-        self.begin_legacy_graph_activation(graph, None)
     }
 
     /// Re-read the installed graph and activate it only when its normalized
@@ -346,17 +361,24 @@ impl Shell {
     /// path; module, provider, contribution, and resource deltas all enter the
     /// same activation coordinator.
     pub(in crate::shell) fn reconcile_installed_graph(&mut self) -> VecDeque<CoreRequest> {
-        let candidate = if let Some(profile_id) = self.active_profile_id.clone() {
-            let graph_path = self.installed_module_graph_path();
-            ProfilePaths::from_root_graph(&graph_path)
-                .and_then(|paths| paths.load(&profile_id))
-                .and_then(|profile| load_installed_module_graph_for_profile(&graph_path, &profile))
-        } else {
-            self.load_installed_module_graph_candidate()
-        };
-        let Ok(candidate) = candidate else {
-            tracing::warn!("installed graph change could not be loaded; retaining active graph");
-            return VecDeque::new();
+        let candidate = match self.load_installed_module_graph_candidate() {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                let message = format!(
+                    "configured shell graph/profile change was rejected; retaining active graph: {error}"
+                );
+                tracing::warn!("{message}");
+                if self.installed_module_graph.is_none() {
+                    self.enter_composition_recovery(message);
+                } else {
+                    self.diagnostics.record_lifecycle_error(
+                        "@mesh/shell",
+                        "configured_composition_recovery",
+                        message,
+                    );
+                }
+                return VecDeque::new();
+            }
         };
         if self
             .installed_module_graph
@@ -631,11 +653,15 @@ impl Shell {
     pub(in crate::shell) fn sync_composition_service_state(
         &mut self,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let mode = self.composition_mode.service_name();
+        let recovery_reason = self.composition_mode.recovery_reason().map(str::to_owned);
         let Some(profile_id) = self.active_profile_id.clone() else {
             return self.broadcast_service_event(ServiceEvent::Updated {
                 service: "mesh.composition".into(),
                 source_module: "@mesh/shell".into(),
                 payload: serde_json::json!({
+                    "mode": mode,
+                    "recovery_reason": recovery_reason,
                     "profile_id": "",
                     "generation": "",
                     "roots": [],
@@ -747,6 +773,8 @@ impl Shell {
             service: "mesh.composition".into(),
             source_module: "@mesh/shell".into(),
             payload: serde_json::json!({
+                "mode": mode,
+                "recovery_reason": recovery_reason,
                 "profile_id": profile_id,
                 "generation": generation,
                 "roots": roots,
@@ -1558,6 +1586,12 @@ impl Shell {
         self.installed_module_graph = Some(plan.graph.clone());
         if pending.persist_active_profile {
             self.active_profile_id = Some(plan.profile_id.clone());
+            self.composition_mode = ShellCompositionMode::ConfiguredProfile {
+                id: plan.profile_id.clone(),
+            };
+        } else {
+            self.active_profile_id = None;
+            self.composition_mode = ShellCompositionMode::LegacyNoProfile;
         }
         for (interface, provider_id, payload) in prepared_states {
             let event = ServiceEvent::Updated {
