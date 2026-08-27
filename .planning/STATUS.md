@@ -4,6 +4,14 @@
 
 ## Now
 
+The backlog's Section 14 umbrella item ("build the transactional,
+capability-aware presentation engine...") is closed and deleted from
+`docs/BACKLOG.md`: all 12 audit findings were verified already shipped in the
+current tree. See [`.planning/log/2026-08.md`](log/2026-08.md) for the dated
+entry and the finding-by-finding evidence. Working through
+`docs/BACKLOG.md` top to bottom next; Section 15 (shell core and
+orchestration) is up next.
+
 `WaylandClipboard::write_text` now kills and reaps its spawned helper on a
 failed stdin write instead of leaking it unreaped; the rest of the Section 14
 finding 10 (SHM buffer validation, attach/region error propagation, and

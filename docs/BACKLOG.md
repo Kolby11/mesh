@@ -88,8 +88,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/14-wayland-platform-and-presentation/improvements.md)
 
-- [ ] Build the transactional, capability-aware presentation engine with version reporting, reactive popups, multi-output membership, per-seat input, and shared SHM/dmabuf/GPU frame contracts.
-
 ### 15. Shell core and orchestration
 
 [Audit](../.planning/log/sections/15-shell-core-and-orchestration/improvements.md)
