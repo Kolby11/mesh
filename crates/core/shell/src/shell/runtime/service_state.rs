@@ -513,12 +513,20 @@ impl Shell {
                     }
                     component_epochs[component_index] = epoch;
                     if runtime.component.observes_service_event(event) {
-                        requests.extend(
-                            runtime
-                                .component
-                                .handle_service_event_with_generation(event, generation)
-                                .map_err(ShellRunError::Component)?,
-                        );
+                        let module_id = runtime.component.id().to_string();
+                        match runtime
+                            .component
+                            .handle_service_event_with_generation(event, generation)
+                        {
+                            Ok(emitted) => requests.extend(emitted),
+                            Err(error) => {
+                                self.diagnostics.record_lifecycle_error(
+                                    module_id,
+                                    "service_event_delivery",
+                                    error.to_string(),
+                                );
+                            }
+                        };
                     } else {
                         runtime
                             .component
@@ -532,12 +540,20 @@ impl Shell {
                         };
                         if component_epochs[component_index] != epoch {
                             component_epochs[component_index] = epoch;
-                            requests.extend(
-                                runtime
-                                    .component
-                                    .handle_service_event_with_generation(event, generation)
-                                    .map_err(ShellRunError::Component)?,
-                            );
+                            let module_id = runtime.component.id().to_string();
+                            match runtime
+                                .component
+                                .handle_service_event_with_generation(event, generation)
+                            {
+                                Ok(emitted) => requests.extend(emitted),
+                                Err(error) => {
+                                    self.diagnostics.record_lifecycle_error(
+                                        module_id,
+                                        "service_event_delivery",
+                                        error.to_string(),
+                                    );
+                                }
+                            };
                         }
                     }
                 }
@@ -566,12 +582,17 @@ impl Shell {
                         continue;
                     };
                     if runtime.component.observes_service_event(event) {
-                        requests.extend(
-                            runtime
-                                .component
-                                .handle_service_event(event)
-                                .map_err(ShellRunError::Component)?,
-                        );
+                        let module_id = runtime.component.id().to_string();
+                        match runtime.component.handle_service_event(event) {
+                            Ok(emitted) => requests.extend(emitted),
+                            Err(error) => {
+                                self.diagnostics.record_lifecycle_error(
+                                    module_id,
+                                    "service_event_delivery",
+                                    error.to_string(),
+                                );
+                            }
+                        }
                     }
                 }
                 if let Some(subscribers) = index
@@ -583,12 +604,17 @@ impl Shell {
                         let Some(runtime) = components.get_mut(component_index) else {
                             continue;
                         };
-                        requests.extend(
-                            runtime
-                                .component
-                                .handle_service_event(event)
-                                .map_err(ShellRunError::Component)?,
-                        );
+                        let module_id = runtime.component.id().to_string();
+                        match runtime.component.handle_service_event(event) {
+                            Ok(emitted) => requests.extend(emitted),
+                            Err(error) => {
+                                self.diagnostics.record_lifecycle_error(
+                                    module_id,
+                                    "service_event_delivery",
+                                    error.to_string(),
+                                );
+                            }
+                        }
                     }
                 }
             }

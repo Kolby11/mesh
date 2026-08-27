@@ -483,6 +483,12 @@ pub(super) struct IndexedRecordingState {
     pub(super) observed: usize,
     pub(super) handled: Vec<ServiceEvent>,
     pub(super) cached: Vec<ServiceEvent>,
+    /// When true, `handle_service_event`/`handle_service_event_with_generation`
+    /// return `ComponentError::Failed` instead of recording the event, so a
+    /// test can simulate one broken component's service-event handler
+    /// without touching every other `IndexedRecordingComponent` in the same
+    /// delivery pass.
+    pub(super) fail_handling: bool,
 }
 
 pub(super) struct IndexedRecordingComponent {
@@ -532,6 +538,12 @@ impl super::types::ShellComponent for IndexedRecordingComponent {
         &mut self,
         event: &ServiceEvent,
     ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        if self.state.lock().unwrap().fail_handling {
+            return Err(super::types::ComponentError::Failed {
+                component_id: self.id.clone(),
+                message: "injected test failure".to_string(),
+            });
+        }
         self.state.lock().unwrap().handled.push(event.clone());
         Ok(Vec::new())
     }

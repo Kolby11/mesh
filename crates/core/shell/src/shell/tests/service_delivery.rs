@@ -388,3 +388,70 @@ fn service_delivery_index_beats_full_component_scan_benchmark() {
         "indexed delivery should be at least 5x faster than a full component scan, measured {speedup:.3}x"
     );
 }
+
+#[test]
+fn one_component_service_handler_failure_does_not_stop_delivery_to_others() {
+    let audio_summary = Arc::new(Mutex::new(Some(ServiceObservationSummary {
+        update_services: vec!["audio".to_string()],
+        cached_update_services: Vec::new(),
+        interface_events: Vec::new(),
+    })));
+    let other_summary = Arc::new(Mutex::new(Some(ServiceObservationSummary {
+        update_services: vec!["audio".to_string()],
+        cached_update_services: Vec::new(),
+        interface_events: Vec::new(),
+    })));
+    let failing_state = Arc::new(Mutex::new(IndexedRecordingState {
+        fail_handling: true,
+        ..IndexedRecordingState::default()
+    }));
+    let healthy_state = Arc::new(Mutex::new(IndexedRecordingState::default()));
+
+    let mut shell = Shell::new();
+    shell.register_component(Box::new(IndexedRecordingComponent::new(
+        "@test/failing-observer",
+        audio_summary,
+        Arc::clone(&failing_state),
+    )));
+    shell.register_component(Box::new(IndexedRecordingComponent::new(
+        "@test/healthy-observer",
+        other_summary,
+        Arc::clone(&healthy_state),
+    )));
+
+    // Must not propagate the failing component's error out of delivery: the
+    // whole shell must not go down because one component's handler broke.
+    let requests = shell
+        .broadcast_service_event(service_update(
+            "mesh.audio",
+            "@mesh/pipewire-audio",
+            serde_json::json!({ "available": true, "percent": 10.0 }),
+        ))
+        .expect("one component's handler failure must not fail delivery for the others");
+    assert!(requests.is_empty());
+
+    assert!(
+        failing_state.lock().unwrap().handled.is_empty(),
+        "the failing component must not have recorded a successful handle"
+    );
+    assert_eq!(
+        healthy_state.lock().unwrap().handled.len(),
+        1,
+        "an unrelated component must still receive the event"
+    );
+
+    let diagnosed = shell
+        .diagnostics
+        .snapshot()
+        .iter()
+        .flat_map(|module| module.instances.iter())
+        .flat_map(|instance| instance.issues.iter())
+        .any(|issue| {
+            issue.issue_code.contains("service_event_delivery")
+                && issue.module_id == "@test/failing-observer"
+        });
+    assert!(
+        diagnosed,
+        "the failing component's handler error must be recorded as a diagnosable issue"
+    );
+}

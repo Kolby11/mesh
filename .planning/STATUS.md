@@ -4,6 +4,12 @@
 
 ## Now
 
+Section 15 finding #6: one component's service-event handler failure no
+longer aborts delivery to every other component (and, unhandled above
+`Shell::run`, the whole shell process). Diagnosed per-component and skipped
+instead. `tick`/`render`/reload failure isolation is still open follow-up
+within the same finding. See [`.planning/log/2026-08.md`](log/2026-08.md).
+
 Section 15 finding #8: `drain_requests` now caps processing at 4096
 requests per batch and diagnoses/drops the remainder instead of hanging on a
 self-emitting request cycle. Backstop only, not the full bounded-scheduler
