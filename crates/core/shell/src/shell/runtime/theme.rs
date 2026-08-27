@@ -251,12 +251,16 @@ impl Shell {
         &mut self,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let snapshot = self.theme.active_snapshot().clone();
-        for runtime in &mut self.components {
-            runtime
-                .component
-                .theme_changed()
-                .map_err(ShellRunError::Component)?;
-            runtime.parent.force_full_present = true;
+        for component_index in 0..self.components.len() {
+            if self.component_is_quarantined(component_index) {
+                continue;
+            }
+            match self.components[component_index].component.theme_changed() {
+                Ok(()) => self.components[component_index].parent.force_full_present = true,
+                Err(error) => {
+                    self.contain_component_failure(component_index, "theme", &error);
+                }
+            }
         }
         // Broadcast event so script-side subscribers can react. Painter-level
         // invalidation is handled by `theme_changed()` above; the event is
@@ -658,19 +662,31 @@ impl Shell {
     pub(in crate::shell) fn apply_settings_to_components(&mut self) -> Result<(), ShellRunError> {
         let store = self.settings_store.clone();
         let mut role_changes = Vec::new();
-        for runtime in &mut self.components {
-            let changed = runtime
+        for component_index in 0..self.components.len() {
+            if self.component_is_quarantined(component_index) {
+                continue;
+            }
+            let result = self.components[component_index]
                 .component
-                .apply_settings(&store)
-                .map_err(ShellRunError::Component)?;
+                .apply_settings(&store);
+            let changed = match result {
+                Ok(changed) => changed,
+                Err(error) => {
+                    self.contain_component_failure(component_index, "settings", &error);
+                    continue;
+                }
+            };
             if changed {
                 tracing::info!(
                     "settings changed for component '{}'",
-                    runtime.component.id()
+                    self.components[component_index].component.id()
                 );
             }
-            if let Some(role) = runtime.component.pending_surface_role_change() {
-                role_changes.push((runtime.surface_id.clone(), role));
+            if let Some(role) = self.components[component_index]
+                .component
+                .pending_surface_role_change()
+            {
+                role_changes.push((self.components[component_index].surface_id.clone(), role));
             }
         }
         for (surface_id, role) in role_changes {
@@ -687,12 +703,19 @@ impl Shell {
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let locale = self.locale.clone();
         let locale_id = locale.current().to_string();
-        for runtime in &mut self.components {
-            runtime
+        for component_index in 0..self.components.len() {
+            if self.component_is_quarantined(component_index) {
+                continue;
+            }
+            match self.components[component_index]
                 .component
                 .locale_changed(&locale)
-                .map_err(ShellRunError::Component)?;
-            runtime.parent.force_full_present = true;
+            {
+                Ok(()) => self.components[component_index].parent.force_full_present = true,
+                Err(error) => {
+                    self.contain_component_failure(component_index, "locale", &error);
+                }
+            }
         }
         self.broadcast_core_event(CoreEvent::LocaleChanged { locale: locale_id })
     }

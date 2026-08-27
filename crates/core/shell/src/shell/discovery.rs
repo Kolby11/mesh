@@ -2333,12 +2333,13 @@ impl Shell {
         for index in indices.into_iter().rev() {
             let surface_id = self.components[index].surface_id.clone();
             let module_id = self.components[index].component.id().to_string();
-            if let Err(error) = self.components[index].component.unmount() {
+            if let Err(error) = self.components[index].unmount() {
                 tracing::warn!(
                     module_id,
                     error = %error,
                     "frontend deactivation unmount failed"
                 );
+                self.contain_component_failure(index, "unmount", &error);
             }
             if let Some(module) = self.modules.get_mut(&module_id)
                 && let Err(error) = module.mark_unloaded()
@@ -2383,14 +2384,17 @@ impl Shell {
 
     pub(super) fn unmount_components(&mut self) -> VecDeque<CoreRequest> {
         let mut requests = VecDeque::new();
-        for runtime in &mut self.components {
-            match runtime.unmount() {
+        for component_index in 0..self.components.len() {
+            match self.components[component_index].unmount() {
                 Ok(component_requests) => requests.extend(component_requests),
-                Err(error) => tracing::warn!(
-                    component_id = runtime.component.id(),
-                    error = %error,
-                    "frontend shutdown unmount failed"
-                ),
+                Err(error) => {
+                    tracing::warn!(
+                        component_id = self.components[component_index].component.id(),
+                        error = %error,
+                        "frontend shutdown unmount failed"
+                    );
+                    self.contain_component_failure(component_index, "unmount", &error);
+                }
             }
         }
         requests
@@ -2444,23 +2448,24 @@ impl Shell {
 
     pub(super) fn mount_components(&mut self) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let mut requests = VecDeque::new();
-        for runtime in &mut self.components {
-            let module_id = runtime.component.id().to_string();
+        for component_index in 0..self.components.len() {
+            let module_id = self.components[component_index].component.id().to_string();
             if let Some(module) = self.modules.get_mut(&module_id)
                 && let Err(error) = module.mark_loaded()
             {
                 tracing::warn!(module_id, "frontend mount did not load module: {error}");
             }
-            let diagnostics = self
-                .diagnostics
-                .register_instance(module_id.clone(), runtime.surface_id.clone());
+            let diagnostics = self.diagnostics.register_instance(
+                module_id.clone(),
+                self.components[component_index].surface_id.clone(),
+            );
             let ctx = ComponentContext {
                 component_id: module_id.clone(),
-                surface_id: runtime.surface_id.clone(),
+                surface_id: self.components[component_index].surface_id.clone(),
                 diagnostics,
             };
-            runtime.mounted = true;
-            match runtime.component.mount(ctx) {
+            self.components[component_index].mounted = true;
+            match self.components[component_index].component.mount(ctx) {
                 Ok(component_requests) => {
                     requests.extend(component_requests);
                     if let Some(module) = self.modules.get_mut(&module_id) {
@@ -2474,10 +2479,7 @@ impl Shell {
                     }
                 }
                 Err(error) => {
-                    if let Some(module) = self.modules.get_mut(&module_id) {
-                        let _ = module.mark_failed(error.to_string());
-                    }
-                    return Err(ShellRunError::Component(error));
+                    self.contain_component_failure(component_index, "mount", &error);
                 }
             }
         }

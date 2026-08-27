@@ -32,6 +32,11 @@ pub(super) enum TargetRef {
     Child(usize),
 }
 
+/// Repeated shell-boundary failures disable one component for the session,
+/// while allowing a later source reload or activation replacement to recover
+/// it.
+pub(super) const COMPONENT_FAILURES_BEFORE_QUARANTINE: u32 = 3;
+
 /// Per-surface render state. A component owns one of these for its parent
 /// surface plus one per auto-derived child surface (see [`ChildSurface`]).
 /// Splitting this out is what lets a single component VM drive N Wayland
@@ -157,6 +162,12 @@ pub(super) struct ComponentRuntime {
     /// the shell boundary makes repeated teardown paths idempotent even for a
     /// component implementation whose authored unmount is not a no-op.
     pub(super) mounted: bool,
+    /// Shell-boundary failures are counted independently of the component's
+    /// authored runtime so one broken callback cannot terminate sibling work.
+    /// Three repeated failures quarantine the component until a source reload
+    /// or explicit activation replacement succeeds.
+    pub(super) failure_count: u32,
+    pub(super) quarantined: bool,
 }
 
 #[derive(Debug)]
@@ -261,7 +272,27 @@ impl ComponentRuntime {
             component,
             source_paths,
             mounted: false,
+            failure_count: 0,
+            quarantined: false,
         }
+    }
+
+    pub(super) fn note_failure(&mut self) -> bool {
+        if self.quarantined {
+            return false;
+        }
+        self.failure_count = self.failure_count.saturating_add(1);
+        if self.failure_count >= COMPONENT_FAILURES_BEFORE_QUARANTINE {
+            self.quarantined = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(super) fn clear_failure_state(&mut self) {
+        self.failure_count = 0;
+        self.quarantined = false;
     }
 
     pub(super) fn unmount(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {

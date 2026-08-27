@@ -133,6 +133,9 @@ impl Shell {
                 );
                 continue;
             };
+            if self.component_is_quarantined(index) {
+                continue;
+            }
 
             let target_surface_id = route_surface_id;
             let target_is_popover = match target {
@@ -487,7 +490,7 @@ impl Shell {
                         component_surface_size.0,
                         component_surface_size.1,
                         input,
-                    )?,
+                    ),
                     TargetRef::Child(child_index) => {
                         let node_key = runtime.children[child_index].node_key.clone();
                         let content_padding = runtime.children[child_index].content_padding;
@@ -498,15 +501,21 @@ impl Shell {
                             component_surface_size.1,
                             (content_padding.0 as f32, content_padding.1 as f32),
                             input,
-                        )?
+                        )
                     }
                 };
                 let interactive = runtime.component.hovered_target_is_interactive();
                 self.presentation_engine
                     .set_pointer_interactive(interactive);
-                Ok(emitted)
-            }
-            .map_err(ShellRunError::Component)?;
+                emitted
+            };
+            let emitted = match emitted {
+                Ok(emitted) => emitted,
+                Err(error) => {
+                    self.contain_component_failure(index, "callback", &error);
+                    continue;
+                }
+            };
 
             self.sync_text_input_state()?;
 

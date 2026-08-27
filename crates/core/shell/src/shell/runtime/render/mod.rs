@@ -81,7 +81,7 @@ impl Shell {
 
         let mut components_want_render_after_frame = false;
         let mut any_component_presented = false;
-        for index in 0..self.components.len() {
+        'component: for index in 0..self.components.len() {
             let surface_id = self.components[index].surface_id.clone();
             // Ahead of the `wants_render` gate: a compositor state change is
             // precisely what makes an otherwise-quiet window want to render.
@@ -252,24 +252,32 @@ impl Shell {
             let mut paint_height = height;
             let mut parent_reconfigured = false;
             loop {
-                let surface = self
-                    .surfaces
-                    .get_mut(&surface_id)
-                    .ok_or_else(|| ShellRunError::MissingSurface(surface_id.clone()))?;
                 self.components[index]
                     .component
                     .set_profiling_enabled(profiling_enabled);
-                self.components[index]
-                    .component
-                    .render(surface)
-                    .map_err(ShellRunError::Component)?;
+                let render_result = {
+                    let surface = self
+                        .surfaces
+                        .get_mut(&surface_id)
+                        .ok_or_else(|| ShellRunError::MissingSurface(surface_id.clone()))?;
+                    self.components[index].component.render(surface)
+                };
+                if let Err(error) = render_result {
+                    self.contain_component_failure(index, "render", &error);
+                    continue 'component;
+                }
 
                 let visible = self
                     .core
                     .surfaces
                     .get(&surface_id)
                     .map(|state| state.visible)
-                    .unwrap_or(surface.visible);
+                    .or_else(|| {
+                        self.surfaces
+                            .get(&surface_id)
+                            .map(|surface| surface.visible)
+                    })
+                    .unwrap_or(true);
                 if !visible {
                     // Do not reconfigure hidden surfaces to synthetic 1x1/zero-margin
                     // geometry before detaching them. Some compositors can show that
@@ -296,6 +304,11 @@ impl Shell {
                 // path entirely — they are created/repositioned via
                 // configure_popup() after the content size is resolved below.
                 let is_popup = self.components[index].parent.popup_config.is_some();
+
+                let surface = self
+                    .surfaces
+                    .get_mut(&surface_id)
+                    .ok_or_else(|| ShellRunError::MissingSurface(surface_id.clone()))?;
 
                 // A never-before-configured layer surface has no retained
                 // widget tree yet, so `render()` (which measures content from
@@ -705,19 +718,21 @@ impl Shell {
                     // else marks the whole surface dirty.
                     runtime.parent.force_full_present = true;
                 }
-                runtime
-                    .component
-                    .paint(
-                        self.theme.active(),
-                        paint_extent,
-                        runtime
-                            .parent
-                            .paint_buffer
-                            .as_mut()
-                            .expect("paint buffer initialised"),
-                        scale,
-                    )
-                    .map_err(ShellRunError::Component)?;
+                let paint_result = runtime.component.paint(
+                    self.theme.active(),
+                    paint_extent,
+                    runtime
+                        .parent
+                        .paint_buffer
+                        .as_mut()
+                        .expect("paint buffer initialised"),
+                    scale,
+                );
+                if let Err(error) = paint_result {
+                    self.contain_component_failure(index, "build", &error);
+                    self.components[index].parent.force_full_present = true;
+                    continue 'component;
+                }
                 runtime.parent.last_paint_resource_revision =
                     Some(mesh_core_resources::resource_revision());
                 component_stage_records.extend(runtime.component.take_profiling_records());
@@ -806,13 +821,21 @@ impl Shell {
                     self.components[index].component.wants_render();
             }
 
-            let child_presented = self.reconcile_child_surface_requests(
+            let child_presented = match self.reconcile_child_surface_requests(
                 index,
                 component_id,
                 &surface_id,
                 scale,
                 total_render_started,
-            )?;
+            ) {
+                Ok(presented) => presented,
+                Err(ShellRunError::Component(error)) => {
+                    self.contain_component_failure(index, "build", &error);
+                    self.components[index].parent.force_full_present = true;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             any_component_presented |= child_presented;
             // Reconciliation can invalidate the component without presenting
             // a child yet (notably the staged first entrance paint).

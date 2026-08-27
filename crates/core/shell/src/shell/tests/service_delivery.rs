@@ -454,4 +454,31 @@ fn one_component_service_handler_failure_does_not_stop_delivery_to_others() {
         diagnosed,
         "the failing component's handler error must be recorded as a diagnosable issue"
     );
+
+    // Repeated boundary failures are contained and eventually quarantine only
+    // the broken component. A healthy sibling continues receiving updates.
+    for percent in [11.0, 12.0] {
+        let requests = shell
+            .broadcast_service_event(service_update(
+                "mesh.audio",
+                "@mesh/pipewire-audio",
+                serde_json::json!({ "available": true, "percent": percent }),
+            ))
+            .expect("repeated component failures must remain contained");
+        assert!(requests.is_empty());
+    }
+    assert!(shell.components[0].quarantined);
+    let healthy_before = healthy_state.lock().unwrap().handled.len();
+    shell
+        .broadcast_service_event(service_update(
+            "mesh.audio",
+            "@mesh/pipewire-audio",
+            serde_json::json!({ "available": true, "percent": 11.0 }),
+        ))
+        .expect("a quarantined component must not stop sibling delivery");
+    assert_eq!(
+        healthy_state.lock().unwrap().handled.len(),
+        healthy_before + 1,
+        "healthy sibling should continue after quarantine"
+    );
 }

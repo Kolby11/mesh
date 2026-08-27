@@ -141,6 +141,22 @@ impl ShellComponent for FrontendSurfaceComponent {
         Ok(self.record_frontend_host_effects(requests))
     }
 
+    fn isolate_runtime_failure(&mut self, phase: &str, message: &str) -> bool {
+        let message = self.record_frontend_runtime_issue(phase, self.root_instance_key(), message);
+        *self.runtime_failure.borrow_mut() = Some(message);
+        // A failed callback may have left state or a retained tree half
+        // updated. Force the next frame through the bounded placeholder path
+        // rather than presenting that partial effect batch.
+        self.invalidate_script_state();
+        true
+    }
+
+    fn clear_runtime_failure(&mut self) {
+        if self.runtime_failure.borrow_mut().take().is_some() {
+            self.invalidate_script_state();
+        }
+    }
+
     fn unmount(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
         self.unmount_runtimes()?;
         Ok(self.record_frontend_host_effects(Vec::new()))

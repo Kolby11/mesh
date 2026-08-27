@@ -1344,6 +1344,15 @@ pub trait ShellComponent: Send {
         None
     }
     fn mount(&mut self, ctx: ComponentContext) -> Result<Vec<CoreRequest>, ComponentError>;
+    /// Contain a failure raised at the shell/component boundary. Frontend
+    /// implementations can retain their last-known-good tree or install a
+    /// bounded placeholder; simpler components may leave this as a no-op while
+    /// the shell still records and supervises the failure.
+    fn isolate_runtime_failure(&mut self, _phase: &str, _message: &str) -> bool {
+        false
+    }
+    /// Clear a failure placeholder after a successful source replacement.
+    fn clear_runtime_failure(&mut self) {}
     /// Tear down this component and run authored frontend lifecycle cleanup.
     ///
     /// Implementations should make this idempotent: the shell may call it

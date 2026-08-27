@@ -519,6 +519,7 @@ impl Shell {
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         self.rebuild_service_delivery_index_if_needed();
         let mut requests = VecDeque::new();
+        let mut component_failures = Vec::new();
         match event {
             ServiceEvent::Updated { service, .. } => {
                 let service_name = crate::shell::service::service_name_from_interface_cow(service);
@@ -550,24 +551,20 @@ impl Shell {
                     let Some(runtime) = components.get_mut(component_index) else {
                         continue;
                     };
+                    if runtime.quarantined {
+                        continue;
+                    }
                     if component_epochs[component_index] == epoch {
                         continue;
                     }
                     component_epochs[component_index] = epoch;
                     if runtime.component.observes_service_event(event) {
-                        let module_id = runtime.component.id().to_string();
                         match runtime
                             .component
                             .handle_service_event_with_generation(event, generation)
                         {
                             Ok(emitted) => requests.extend(emitted),
-                            Err(error) => {
-                                self.diagnostics.record_lifecycle_error(
-                                    module_id,
-                                    "service_event_delivery",
-                                    error.to_string(),
-                                );
-                            }
+                            Err(error) => component_failures.push((component_index, error)),
                         };
                     } else {
                         runtime
@@ -580,21 +577,17 @@ impl Shell {
                         let Some(runtime) = components.get_mut(component_index) else {
                             continue;
                         };
+                        if runtime.quarantined {
+                            continue;
+                        }
                         if component_epochs[component_index] != epoch {
                             component_epochs[component_index] = epoch;
-                            let module_id = runtime.component.id().to_string();
                             match runtime
                                 .component
                                 .handle_service_event_with_generation(event, generation)
                             {
                                 Ok(emitted) => requests.extend(emitted),
-                                Err(error) => {
-                                    self.diagnostics.record_lifecycle_error(
-                                        module_id,
-                                        "service_event_delivery",
-                                        error.to_string(),
-                                    );
-                                }
+                                Err(error) => component_failures.push((component_index, error)),
                             };
                         }
                     }
@@ -607,6 +600,9 @@ impl Shell {
                         let Some(runtime) = components.get_mut(component_index) else {
                             continue;
                         };
+                        if runtime.quarantined {
+                            continue;
+                        }
                         if component_epochs[component_index] != epoch {
                             component_epochs[component_index] = epoch;
                             runtime
@@ -623,17 +619,13 @@ impl Shell {
                     let Some(runtime) = components.get_mut(component_index) else {
                         continue;
                     };
+                    if runtime.quarantined {
+                        continue;
+                    }
                     if runtime.component.observes_service_event(event) {
-                        let module_id = runtime.component.id().to_string();
                         match runtime.component.handle_service_event(event) {
                             Ok(emitted) => requests.extend(emitted),
-                            Err(error) => {
-                                self.diagnostics.record_lifecycle_error(
-                                    module_id,
-                                    "service_event_delivery",
-                                    error.to_string(),
-                                );
-                            }
+                            Err(error) => component_failures.push((component_index, error)),
                         }
                     }
                 }
@@ -646,20 +638,19 @@ impl Shell {
                         let Some(runtime) = components.get_mut(component_index) else {
                             continue;
                         };
-                        let module_id = runtime.component.id().to_string();
+                        if runtime.quarantined {
+                            continue;
+                        }
                         match runtime.component.handle_service_event(event) {
                             Ok(emitted) => requests.extend(emitted),
-                            Err(error) => {
-                                self.diagnostics.record_lifecycle_error(
-                                    module_id,
-                                    "service_event_delivery",
-                                    error.to_string(),
-                                );
-                            }
+                            Err(error) => component_failures.push((component_index, error)),
                         }
                     }
                 }
             }
+        }
+        for (component_index, error) in component_failures {
+            self.contain_component_failure(component_index, "service_event_delivery", error);
         }
         Ok(requests)
     }

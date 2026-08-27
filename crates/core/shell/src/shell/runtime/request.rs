@@ -643,13 +643,19 @@ impl Shell {
         event: CoreEvent,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let mut requests = VecDeque::new();
-        for runtime in &mut self.components {
-            requests.extend(
-                runtime
-                    .component
-                    .handle_core_event(&event)
-                    .map_err(ShellRunError::Component)?,
-            );
+        for component_index in 0..self.components.len() {
+            if self.component_is_quarantined(component_index) {
+                continue;
+            }
+            match self.components[component_index]
+                .component
+                .handle_core_event(&event)
+            {
+                Ok(component_requests) => requests.extend(component_requests),
+                Err(error) => {
+                    self.contain_component_failure(component_index, "callback", &error);
+                }
+            }
         }
         Ok(requests)
     }
@@ -2249,6 +2255,9 @@ impl Shell {
         else {
             return Ok(None);
         };
+        if self.component_is_quarantined(index) {
+            return Ok(None);
+        }
         if self.components[index].children[child_index].kind
             != crate::shell::types::ChildSurfaceKind::Popover
             || self.components[index].children[child_index]
@@ -2288,17 +2297,20 @@ impl Shell {
             .target_mut(crate::shell::types::TargetRef::Child(child_index))
             .known_surface_size = Some(target_surface_size);
 
-        let emitted = self.components[index]
-            .component
-            .handle_child_surface_input(
-                &node_key,
-                self.theme.active(),
-                component_surface_size.0,
-                component_surface_size.1,
-                (content_padding.0 as f32, content_padding.1 as f32),
-                ComponentInput::PointerLeave,
-            )
-            .map_err(ShellRunError::Component)?;
+        let emitted = match self.components[index].component.handle_child_surface_input(
+            &node_key,
+            self.theme.active(),
+            component_surface_size.0,
+            component_surface_size.1,
+            (content_padding.0 as f32, content_padding.1 as f32),
+            ComponentInput::PointerLeave,
+        ) {
+            Ok(emitted) => emitted,
+            Err(error) => {
+                self.contain_component_failure(index, "callback", &error);
+                return Ok(None);
+            }
+        };
         Ok(Some(VecDeque::from(emitted)))
     }
 

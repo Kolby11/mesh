@@ -19,49 +19,53 @@ impl Shell {
             };
 
         for component_index in 0..self.components.len() {
-            let reloaded = {
-                let runtime = &mut self.components[component_index];
-                if runtime.source_paths.is_empty() {
-                    continue;
-                }
-
-                let changed_path_index = runtime
-                    .source_paths
-                    .iter()
-                    .position(|(path, last_mtime)| watched_source_mtime(path) != *last_mtime);
-                let Some(trigger_index) = changed_path_index else {
-                    continue;
-                };
-                let trigger_display = runtime.source_paths[trigger_index].0.display().to_string();
-                let reloaded = runtime
-                    .component
-                    .reload_source()
-                    .map_err(ShellRunError::Component)?;
-
-                // Re-read the watched-paths list from the component because
-                // imports may have changed between compilations, and refresh
-                // every entry's mtime so we don't immediately reload again.
-                runtime.source_paths = runtime
-                    .component
-                    .watched_source_paths()
-                    .into_iter()
-                    .map(|path| {
-                        let mtime = watched_source_mtime(&path);
-                        (path, mtime)
-                    })
-                    .collect();
-
-                if reloaded {
-                    tracing::info!(
-                        "recompiled frontend component '{}' (triggered by change in {})",
-                        runtime.component.id(),
-                        trigger_display
-                    );
-                }
-                reloaded
+            let Some(trigger_index) = self.components[component_index]
+                .source_paths
+                .iter()
+                .position(|(path, last_mtime)| watched_source_mtime(path) != *last_mtime)
+            else {
+                continue;
             };
-            if reloaded {
-                self.sync_frontend_catalog_components();
+            let trigger_display = self.components[component_index].source_paths[trigger_index]
+                .0
+                .display()
+                .to_string();
+            let reload_result = self.components[component_index].component.reload_source();
+            match reload_result {
+                Ok(reloaded) => {
+                    let runtime = &mut self.components[component_index];
+                    runtime.source_paths = runtime
+                        .component
+                        .watched_source_paths()
+                        .into_iter()
+                        .map(|path| {
+                            let mtime = watched_source_mtime(&path);
+                            (path, mtime)
+                        })
+                        .collect();
+                    if reloaded {
+                        tracing::info!(
+                            "recompiled frontend component '{}' (triggered by change in {})",
+                            runtime.component.id(),
+                            trigger_display
+                        );
+                        self.clear_component_failure(component_index);
+                        self.sync_frontend_catalog_components();
+                    }
+                }
+                Err(error) => {
+                    let trigger_mtime = watched_source_mtime(
+                        &self.components[component_index].source_paths[trigger_index].0,
+                    );
+                    self.contain_component_failure(component_index, "reload", &error);
+                    // A quarantined component waits for a new source edit or
+                    // activation replacement instead of retrying the same
+                    // broken source on every polling interval.
+                    if self.component_is_quarantined(component_index) {
+                        self.components[component_index].source_paths[trigger_index].1 =
+                            trigger_mtime;
+                    }
+                }
             }
         }
 
@@ -72,11 +76,20 @@ impl Shell {
         &mut self,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let mut requests = VecDeque::new();
-        for runtime in &mut self.components {
-            if !runtime.component.wants_tick() {
+        for component_index in 0..self.components.len() {
+            if self.component_is_quarantined(component_index) {
                 continue;
             }
-            requests.extend(runtime.component.tick().map_err(ShellRunError::Component)?);
+            let wants_tick = self.components[component_index].component.wants_tick();
+            if !wants_tick {
+                continue;
+            }
+            match self.components[component_index].component.tick() {
+                Ok(component_requests) => requests.extend(component_requests),
+                Err(error) => {
+                    self.contain_component_failure(component_index, "tick", &error);
+                }
+            }
         }
         Ok(requests)
     }

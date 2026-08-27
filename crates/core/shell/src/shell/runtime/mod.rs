@@ -1,3 +1,4 @@
+use super::types::COMPONENT_FAILURES_BEFORE_QUARANTINE;
 use super::*;
 
 use rustix::event::EventfdFlags;
@@ -17,6 +18,105 @@ const DEV_WINDOW_POLL_SLEEP: Duration = Duration::from_millis(16);
 pub(in crate::shell) const FILE_WATCHER_RELOAD_PARK: Duration = Duration::from_secs(24 * 60 * 60);
 
 impl Shell {
+    /// Contain one component's failure at the shell boundary. Component
+    /// effects are only appended after a successful callback, so an error
+    /// discards the failed batch while sibling components continue running.
+    pub(in crate::shell) fn contain_component_failure(
+        &mut self,
+        index: usize,
+        phase: &str,
+        error: impl std::fmt::Display,
+    ) {
+        let message = error.to_string();
+        let Some((module_id, instance_id, was_quarantined, newly_quarantined, component_recorded)) =
+            self.components.get_mut(index).map(|runtime| {
+                let module_id = runtime.component.id().to_string();
+                let instance_id = runtime.surface_id.clone();
+                let was_quarantined = runtime.quarantined;
+                let newly_quarantined = runtime.note_failure();
+                let component_recorded = runtime.component.isolate_runtime_failure(phase, &message);
+                (
+                    module_id,
+                    instance_id,
+                    was_quarantined,
+                    newly_quarantined,
+                    component_recorded,
+                )
+            })
+        else {
+            return;
+        };
+
+        if !component_recorded {
+            self.diagnostics.record_component_runtime_error(
+                module_id.clone(),
+                instance_id.clone(),
+                phase,
+                message.clone(),
+            );
+        }
+        if let Some(module) = self.modules.get_mut(&module_id) {
+            if !was_quarantined {
+                let _ = module.mark_failed(message.clone());
+            }
+            if newly_quarantined {
+                let quarantine_message = format!(
+                    "component instance '{instance_id}' failed {COMPONENT_FAILURES_BEFORE_QUARANTINE} supervised runtime operations; quarantined until source or activation recovery"
+                );
+                let _ = module.mark_quarantined(quarantine_message.clone());
+                self.diagnostics.record_component_runtime_error(
+                    module_id.clone(),
+                    instance_id.clone(),
+                    "quarantine",
+                    quarantine_message,
+                );
+            }
+        } else if newly_quarantined {
+            let quarantine_message = format!(
+                "component instance '{instance_id}' failed {COMPONENT_FAILURES_BEFORE_QUARANTINE} supervised runtime operations; quarantined until source or activation recovery"
+            );
+            self.diagnostics.record_component_runtime_error(
+                module_id.clone(),
+                instance_id.clone(),
+                "quarantine",
+                quarantine_message,
+            );
+        }
+
+        if newly_quarantined {
+            tracing::warn!(
+                component_id = %module_id,
+                instance_id = %instance_id,
+                "quarantined frontend component after repeated runtime failures"
+            );
+            self.destroy_all_child_surfaces(index);
+            self.components[index].parent.force_full_present = true;
+        }
+    }
+
+    pub(in crate::shell) fn clear_component_failure(&mut self, index: usize) {
+        let Some(runtime) = self.components.get_mut(index) else {
+            return;
+        };
+        let module_id = runtime.component.id().to_string();
+        let was_unhealthy = runtime.quarantined || runtime.failure_count != 0;
+        runtime.clear_failure_state();
+        runtime.component.clear_runtime_failure();
+        if was_unhealthy {
+            if let Some(module) = self.modules.get_mut(&module_id) {
+                module.clear_quarantine();
+                let _ = module.mark_running();
+            }
+            tracing::info!(component_id = %module_id, "component runtime recovered");
+        }
+    }
+
+    pub(in crate::shell) fn component_is_quarantined(&self, index: usize) -> bool {
+        self.components
+            .get(index)
+            .is_some_and(|runtime| runtime.quarantined)
+    }
+
     /// Presentation reports the compositor-facing buffer size. Parent layer
     /// surfaces may include transparent tooltip reserve in that size, while
     /// component layout and input always use the content rectangle.
@@ -169,7 +269,7 @@ impl Shell {
             if !self.surface_is_effectively_visible(runtime.surface_id.as_str()) {
                 continue;
             }
-            if !runtime.component.wants_tick() {
+            if runtime.quarantined || !runtime.component.wants_tick() {
                 continue;
             }
             let Some(tick_deadline) = runtime.component.next_tick_deadline() else {

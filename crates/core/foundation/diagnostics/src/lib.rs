@@ -546,6 +546,38 @@ impl DiagnosticsCollector {
         diagnostics.record_lifecycle_error(provider_id, stage, message)
     }
 
+    /// Record a shell-supervised component/runtime failure against the exact
+    /// mounted instance. Unlike the legacy lifecycle helper this keeps the
+    /// diagnostic category and wording about component execution rather than
+    /// implying that a backend provider failed.
+    pub fn record_component_runtime_error(
+        &mut self,
+        module_id: impl Into<String>,
+        instance_id: impl Into<String>,
+        phase: impl Into<String>,
+        message: impl Into<String>,
+    ) -> bool {
+        let module_id = module_id.into();
+        let instance_id = instance_id.into();
+        let phase = phase.into();
+        let diagnostics = self
+            .modules
+            .get(&(module_id.clone(), instance_id.clone()))
+            .cloned()
+            .unwrap_or_else(|| self.register_instance(module_id.clone(), instance_id.clone()));
+        diagnostics.record_issue_with_source(
+            format!("component-runtime:{module_id}:{instance_id}:{phase}"),
+            DiagnosticCategory::Runtime,
+            IssueSeverity::Error,
+            format!(
+                "component runtime '{phase}' failed for module '{module_id}' instance '{instance_id}': {}; the failed work was contained",
+                message.into()
+            ),
+            None,
+            None,
+        )
+    }
+
     pub fn resolve_lifecycle_errors(&self, provider_id: &str) -> usize {
         self.modules
             .iter()
