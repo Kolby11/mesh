@@ -484,6 +484,10 @@ pub struct Shell {
     pending_backend_runtimes: HashMap<String, PendingBackendRuntime>,
     pending_resource_preparation: Option<profile::PendingResourcePreparation>,
     pending_profile_switch: Option<profile::PendingProfileSwitch>,
+    /// Monotonic identity of the last committed activation plan.
+    activation_generation: u64,
+    /// The immutable runtime-generation record swapped at activation commit.
+    active_generation: Option<Arc<profile::RuntimeGeneration>>,
     deferred_requests: VecDeque<CoreRequest>,
     backend_runtime_statuses: BackendRuntimeStatusMap,
     backend_supervision: HashMap<String, backend::BackendSupervisionState>,

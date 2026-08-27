@@ -92,7 +92,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/15-shell-core-and-orchestration/improvements.md)
 
-- [ ] Replace split profile/runtime mutation with one immutable activation plan and atomic runtime-generation commit.
 - [ ] Reconcile backend enable/disable and every graph delta through the same activation coordinator.
 - [ ] Tag backend tasks, bridges, messages, events, results, and restart deadlines with activation generations and provider epochs.
 - [ ] Make frontend/backend stop, unmount, storage flush, worker join, and shutdown cleanup explicit and idempotent.

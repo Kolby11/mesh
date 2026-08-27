@@ -1,5 +1,6 @@
 use super::backend::{
-    BackendRuntimeStatus, backend_launch_candidates_from_graph_with_capabilities,
+    BackendLaunchCandidate, BackendRuntimeStatus,
+    backend_launch_candidates_from_graph_with_capabilities,
 };
 use super::component::{FrontendCatalog, FrontendCatalogHandle, FrontendSurfaceComponent};
 use super::*;
@@ -171,16 +172,39 @@ mod tests {
     }
 }
 
+/// The complete, immutable input to one live activation.
+///
+/// Runtime objects are deliberately not part of this value: they are
+/// prepared against these snapshots and become visible only when the plan is
+/// committed. Keeping the plan behind an `Arc` prevents the readiness path
+/// from mutating the candidate that the commit path will publish.
+pub(super) struct ActivationPlan {
+    pub(super) generation: u64,
+    pub(super) profile_id: String,
+    pub(super) graph: InstalledModuleGraph,
+    pub(super) interface_catalog: Arc<mesh_core_service::InterfaceCatalog>,
+    pub(super) locale: LocaleEngine,
+    pub(super) settings: Arc<SettingsStore>,
+    pub(super) resources: super::discovery::PreparedResourceSnapshot,
+    pub(super) prepared_theme: Option<(mesh_core_theme::Theme, ThemeWatchState)>,
+    pub(super) catalog: FrontendCatalog,
+    pub(super) effective_capabilities: Arc<HashMap<String, EffectiveCapabilities>>,
+    pub(super) desired_surfaces: HashSet<String>,
+    pub(super) desired_providers: HashMap<String, String>,
+    pub(super) provider_candidates: Vec<BackendLaunchCandidate>,
+}
+
+/// Runtime identity for a committed activation. The plan is immutable and
+/// retained so all readers can associate the live mirrors with one coherent
+/// graph/settings/catalog/resource view.
+pub(super) struct RuntimeGeneration {
+    pub(super) id: u64,
+    pub(super) plan: Arc<ActivationPlan>,
+    pub(super) initial_states: Arc<HashMap<String, serde_json::Value>>,
+}
+
 pub(super) struct PendingProfileSwitch {
-    profile_id: String,
-    graph: InstalledModuleGraph,
-    locale: LocaleEngine,
-    settings: Arc<SettingsStore>,
-    resources: super::discovery::PreparedResourceSnapshot,
-    prepared_theme: Option<(mesh_core_theme::Theme, ThemeWatchState)>,
-    catalog: FrontendCatalog,
-    desired_surfaces: HashSet<String>,
-    desired_providers: HashMap<String, String>,
+    plan: Arc<ActivationPlan>,
     prepared_frontends: Vec<PreparedProfileFrontend>,
     candidate_backends: HashMap<String, BackendRuntimeSlot>,
     waiting_backends: HashSet<String>,
@@ -195,6 +219,90 @@ pub(super) struct PendingResourcePreparation {
     locale: LocaleEngine,
     settings: Arc<SettingsStore>,
     resource_job: super::discovery::ResourcePreparationJob,
+}
+
+fn candidate_interface_catalog(
+    live: &mesh_core_service::InterfaceCatalog,
+    graph: &InstalledModuleGraph,
+) -> Result<mesh_core_service::InterfaceCatalog, ShellRunError> {
+    let mut catalog = live.clone();
+    let graph_interfaces = graph
+        .declared_interfaces()
+        .into_iter()
+        .map(|interface| mesh_core_service::canonical_interface_name(&interface.name))
+        .collect::<HashSet<_>>();
+
+    // Graph-owned contracts and providers replace the previous graph view;
+    // core-owned providers/contracts remain in the catalog. This makes the
+    // candidate self-contained even when the mutable live registry has seen
+    // several prior graph reloads.
+    for interface in &graph_interfaces {
+        catalog.contracts.remove(interface);
+        catalog.providers.remove(interface);
+    }
+    for (interface, contract) in graph.interface_contracts() {
+        let compiled = contract
+            .compile(mesh_core_service::DeclarationProvenance::new(
+                "graph", interface,
+            ))
+            .map_err(|error| ShellRunError::FrontendComposition {
+                message: format!("candidate interface '{interface}' is invalid: {error}"),
+            })?;
+        catalog
+            .contracts
+            .insert(compiled.interface.clone(), vec![Arc::new(compiled)]);
+    }
+
+    let mut providers = HashMap::<String, Vec<mesh_core_service::InterfaceProvider>>::new();
+    for provider in graph.backend_provider_contributions() {
+        let interface = mesh_core_service::canonical_interface_name(&provider.interface);
+        providers.entry(interface.clone()).or_default().push(
+            mesh_core_service::InterfaceProvider {
+                interface,
+                version: provider.version.clone(),
+                base_module: provider.base_module.clone(),
+                provider_module: provider.module_id.clone(),
+                backend_name: provider
+                    .provider
+                    .clone()
+                    .unwrap_or_else(|| provider.module_id.clone()),
+                priority: provider.priority,
+            },
+        );
+    }
+    for interface in graph_interfaces {
+        catalog.providers.insert(
+            interface.clone(),
+            providers.remove(&interface).unwrap_or_default(),
+        );
+    }
+    for (interface, providers) in providers {
+        catalog.providers.insert(interface, providers);
+    }
+    catalog.generation = catalog.generation.saturating_add(1);
+    Ok(catalog)
+}
+
+fn candidate_capabilities(
+    policy: &CapabilityPolicy,
+    graph: &InstalledModuleGraph,
+    modules: &HashMap<String, ModuleInstance>,
+) -> Result<Arc<HashMap<String, EffectiveCapabilities>>, ShellRunError> {
+    let mut effective = HashMap::with_capacity(modules.len());
+    for (module_id, module) in modules {
+        if !graph.module(module_id).is_some_and(|node| node.enabled) {
+            continue;
+        }
+        effective.insert(
+            module_id.clone(),
+            policy.resolve(
+                module_id,
+                &module.manifest.capabilities.required,
+                &module.manifest.capabilities.optional,
+            )?,
+        );
+    }
+    Ok(Arc::new(effective))
 }
 
 impl Shell {
@@ -692,6 +800,23 @@ impl Shell {
         settings: Arc<SettingsStore>,
         resources: super::discovery::PreparedResourceSnapshot,
     ) -> VecDeque<CoreRequest> {
+        let interface_catalog =
+            match candidate_interface_catalog(&self.interfaces.resolved_catalog(), &graph) {
+                Ok(catalog) => Arc::new(catalog),
+                Err(error) => {
+                    self.reject_profile_switch(&profile_id, error.to_string());
+                    return VecDeque::new();
+                }
+            };
+        let candidate_interfaces = InterfaceRegistry::from_catalog((*interface_catalog).clone());
+        let effective_capabilities =
+            match candidate_capabilities(&self.capability_policy, &graph, &self.modules) {
+                Ok(capabilities) => capabilities,
+                Err(error) => {
+                    self.reject_profile_switch(&profile_id, error.to_string());
+                    return VecDeque::new();
+                }
+            };
         let resolved_shell_settings =
             mesh_core_config::resolve_shell_locale_settings(settings.shell());
         let previous_catalog = self.frontend_catalog.snapshot().catalog;
@@ -747,10 +872,10 @@ impl Shell {
                 entry.compiled.clone(),
                 entry.module_dir.clone(),
                 temporary_catalog.clone(),
-                Arc::new(self.interfaces.resolved_catalog()),
+                interface_catalog.clone(),
                 settings.clone(),
             )
-            .with_effective_capabilities(self.effective_capabilities.clone())
+            .with_effective_capabilities(effective_capabilities.clone())
             .with_instance_id(instance_id)
             .with_locale_catalog_snapshot(locale.catalog_snapshot());
             let diagnostics = self
@@ -797,8 +922,8 @@ impl Shell {
             &graph,
             &self.modules,
             &settings,
-            &self.interfaces,
-            Some(&self.effective_capabilities),
+            &candidate_interfaces,
+            Some(&effective_capabilities),
         );
         if let Some(status) = statuses.iter().find(|status| {
             !matches!(
@@ -810,7 +935,8 @@ impl Shell {
             return VecDeque::new();
         }
         let theme_changed = self.settings.theme != settings.shell().theme
-            || self.settings.fonts != settings.shell().fonts;
+            || self.settings.fonts != settings.shell().fonts
+            || self.font_registry.revision() != resources.font_registry.revision();
         let prepared_theme = if theme_changed {
             if graph.theme_catalog().is_empty() {
                 let (engine, watch) = load_active_theme(settings.shell());
@@ -870,8 +996,31 @@ impl Shell {
                     .collect::<HashMap<_, _>>()
             })
             .unwrap_or_default();
-        let changed = candidates
-            .into_iter()
+        // Font bindings are part of the prepared theme, not a side effect of
+        // the later resource commit. The plan therefore contains the exact
+        // theme that will be published with its resource snapshot.
+        let mut prepared_theme = prepared_theme;
+        if let Some((theme, _)) = prepared_theme.as_mut() {
+            super::discovery::apply_font_registry_tokens(theme, &resources.font_registry);
+        }
+        let plan = Arc::new(ActivationPlan {
+            generation: self.activation_generation.saturating_add(1),
+            profile_id: profile_id.clone(),
+            graph,
+            interface_catalog,
+            locale,
+            settings,
+            resources,
+            prepared_theme,
+            catalog,
+            effective_capabilities,
+            desired_surfaces,
+            desired_providers,
+            provider_candidates: candidates,
+        });
+        let changed = plan
+            .provider_candidates
+            .iter()
             .filter(|candidate| {
                 let running_matches = self
                     .backend_runtimes
@@ -884,18 +1033,10 @@ impl Shell {
                 );
                 !(running_matches && config_matches)
             })
+            .cloned()
             .collect::<Vec<_>>();
-
         let mut pending = PendingProfileSwitch {
-            profile_id: profile_id.clone(),
-            graph,
-            locale,
-            settings,
-            resources,
-            prepared_theme,
-            catalog,
-            desired_surfaces,
-            desired_providers,
+            plan: plan.clone(),
             prepared_frontends,
             candidate_backends: HashMap::new(),
             waiting_backends: HashSet::new(),
@@ -1043,6 +1184,7 @@ impl Shell {
         let Some(mut pending) = self.pending_profile_switch.take() else {
             return VecDeque::new();
         };
+        let plan = pending.plan.clone();
         let paths = match ProfilePaths::from_root_graph(&self.installed_module_graph_path()) {
             Ok(paths) => paths,
             Err(error) => {
@@ -1061,11 +1203,16 @@ impl Shell {
                 return VecDeque::new();
             }
         };
-        if let Err(error) = paths.set_active(&pending.profile_id) {
+        if let Err(error) = paths.set_active(&plan.profile_id) {
             self.abort_profile_candidate(pending, error.to_string());
             return VecDeque::new();
         }
-        if let Err(error) = self.commit_resource_snapshot(&pending.resources) {
+        let old_font_registry_revision = self.font_registry.revision();
+        if let Err(error) = self.commit_resource_snapshot_for_settings(
+            &plan.resources,
+            plan.settings.shell().icons.default_pack.clone(),
+            false,
+        ) {
             if let Err(restore_error) = paths.restore_active(previous_active.as_deref()) {
                 tracing::error!(
                     "failed to restore previous active-profile pointer after an aborted \
@@ -1077,19 +1224,32 @@ impl Shell {
             return VecDeque::new();
         }
 
-        self.frontend_catalog.replace(pending.catalog, None);
+        self.frontend_catalog.replace(plan.catalog.clone(), None);
         for prepared in &mut pending.prepared_frontends {
             prepared
                 .component
                 .adopt_frontend_catalog(self.frontend_catalog.clone());
         }
+        let initial_states = Arc::new(std::mem::take(&mut pending.candidate_initial_states));
+        // All fallible candidate work is complete. From this point on the
+        // coordinator only swaps prepared values and retires old runtime
+        // objects. Publish one immutable generation identity before any
+        // newly committed state can emit follow-up work.
+        self.interfaces
+            .replace_catalog((*plan.interface_catalog).clone());
+        self.activation_generation = plan.generation;
+        self.active_generation = Some(Arc::new(RuntimeGeneration {
+            id: plan.generation,
+            plan: plan.clone(),
+            initial_states: initial_states.clone(),
+        }));
         let prepared_surfaces = pending
             .prepared_frontends
             .iter()
             .map(|prepared| prepared.component.surface_id().to_string())
             .collect::<HashSet<_>>();
         for index in (0..self.components.len()).rev() {
-            if !pending
+            if !plan
                 .desired_surfaces
                 .contains(&self.components[index].surface_id)
                 || prepared_surfaces.contains(&self.components[index].surface_id)
@@ -1102,14 +1262,13 @@ impl Shell {
             requests.extend(prepared.requests);
             self.register_component(Box::new(prepared.component));
         }
-        let initial_states = std::mem::take(&mut pending.candidate_initial_states);
         let mut prepared_states = Vec::new();
         let mut ready_providers = Vec::new();
 
         let obsolete = self
             .backend_runtimes
             .keys()
-            .filter(|interface| !pending.desired_providers.contains_key(*interface))
+            .filter(|interface| !plan.desired_providers.contains_key(*interface))
             .cloned()
             .collect::<Vec<_>>();
         for interface in obsolete {
@@ -1135,13 +1294,16 @@ impl Shell {
         let old_fonts = self.settings.fonts.clone();
         let old_locale = self.settings.i18n.clone();
         let old_locale_catalog_revision = self.locale.catalog_snapshot().revision();
-        let prepared_theme = pending.prepared_theme.take();
-        self.settings_store = pending.settings;
+        let prepared_theme = plan.prepared_theme.clone();
+        self.settings_store = plan.settings.clone();
         self.settings =
             mesh_core_config::resolve_shell_locale_settings(self.settings_store.shell());
         mesh_core_icon::set_default_shell_pack(self.settings.icons.default_pack.clone());
         mesh_core_render::set_blur_quality(blur_quality_from_settings(&self.settings.render.blur));
-        if old_theme != self.settings.theme || old_fonts != self.settings.fonts {
+        if old_theme != self.settings.theme
+            || old_fonts != self.settings.fonts
+            || old_font_registry_revision != self.font_registry.revision()
+        {
             let (theme, watch) = prepared_theme
                 .map(|(theme, watch)| (self.theme.with_active(theme), watch))
                 .unwrap_or_else(|| {
@@ -1165,7 +1327,7 @@ impl Shell {
                             "profile '{}' committed but a component rejected the new theme; the \
                              shell is now on the new generation with stale component theme state: \
                              {error}",
-                            pending.profile_id
+                            plan.profile_id
                         ),
                     );
                 }
@@ -1174,7 +1336,7 @@ impl Shell {
                 requests.extend(next);
             }
         }
-        self.locale = pending.locale;
+        self.locale = plan.locale.clone();
         if old_locale.locale != self.settings.i18n.locale
             || old_locale.fallback_locale != self.settings.i18n.fallback_locale
             || old_locale.policy != self.settings.i18n.policy
@@ -1191,7 +1353,7 @@ impl Shell {
                             "profile '{}' committed but a component rejected the new locale; the \
                              shell is now on the new generation with stale component locale state: \
                              {error}",
-                            pending.profile_id
+                            plan.profile_id
                         ),
                     );
                 }
@@ -1208,19 +1370,13 @@ impl Shell {
                 format!(
                     "profile '{}' committed but applying its settings to a component failed; the \
                      shell is now on the new generation with stale component settings: {error}",
-                    pending.profile_id
+                    plan.profile_id
                 ),
             );
         }
 
-        self.installed_module_graph = Some(pending.graph);
-        self.active_profile_id = Some(pending.profile_id.clone());
-        let active_graph = self
-            .installed_module_graph
-            .as_ref()
-            .expect("candidate graph was installed")
-            .clone();
-        self.register_interfaces_from_graph(&active_graph);
+        self.installed_module_graph = Some(plan.graph.clone());
+        self.active_profile_id = Some(plan.profile_id.clone());
         for (interface, provider_id, payload) in prepared_states {
             let event = ServiceEvent::Updated {
                 service: interface,
@@ -1250,10 +1406,7 @@ impl Shell {
         }
         self.sync_frontend_catalog_components();
         self.components_want_render = true;
-        tracing::info!(
-            profile_id = pending.profile_id,
-            "switched shell profile live"
-        );
+        tracing::info!(profile_id = plan.profile_id, "switched shell profile live");
         requests
     }
 
@@ -1289,13 +1442,13 @@ impl Shell {
     }
 
     fn abort_profile_candidate(&mut self, pending: PendingProfileSwitch, message: String) {
-        if let Some(lease) = pending.resources.resource_lease.as_ref() {
+        if let Some(lease) = pending.plan.resources.resource_lease.as_ref() {
             lease.retire();
         }
         for slot in pending.candidate_backends.into_values() {
             slot.task.abort();
         }
-        self.reject_profile_switch(&pending.profile_id, message);
+        self.reject_profile_switch(&pending.plan.profile_id, message);
     }
 
     fn reject_profile_switch(&mut self, profile_id: &str, message: String) {

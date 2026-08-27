@@ -68,6 +68,28 @@ impl InterfaceRegistry {
         Self::default()
     }
 
+    /// Build a registration boundary from one immutable catalog view.
+    ///
+    /// Activation preparation uses this to resolve every candidate against
+    /// the same catalog that will be published at commit time, rather than
+    /// reading the shell's mutable live registry midway through preparation.
+    pub fn from_catalog(catalog: InterfaceCatalog) -> Self {
+        let registry = Self::new();
+        registry.replace_catalog(catalog);
+        registry
+    }
+
+    /// Replace the registry's view as one lock-protected catalog update.
+    /// Registration remains the mutable authoring boundary; this operation is
+    /// the runtime hand-off for a fully prepared activation generation.
+    pub fn replace_catalog(&self, catalog: InterfaceCatalog) {
+        let mut snapshot = self.snapshot.write().unwrap();
+        snapshot.generation = catalog.generation;
+        snapshot.contracts = catalog.contracts;
+        snapshot.providers = catalog.providers;
+        snapshot.provider_features = catalog.provider_features;
+    }
+
     pub fn register_contract(&self, contract: InterfaceContract) {
         let _ = self.try_register_contract(contract);
     }
@@ -673,6 +695,56 @@ mod tests {
         assert_eq!(
             registry
                 .resolve("mesh.audio", None)
+                .provider
+                .unwrap()
+                .provider_module,
+            "@mesh/audio-new"
+        );
+    }
+
+    #[test]
+    fn catalog_can_be_prepared_and_committed_without_mutating_the_source_view() {
+        let live = InterfaceRegistry::new();
+        live.register(InterfaceProvider {
+            interface: "mesh.audio".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider_module: "@mesh/audio-old".into(),
+            backend_name: "old".into(),
+            priority: 100,
+        });
+        let source = live.resolved_catalog();
+
+        let candidate = InterfaceRegistry::from_catalog(source.clone());
+        candidate.register(InterfaceProvider {
+            interface: "mesh.audio".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider_module: "@mesh/audio-new".into(),
+            backend_name: "new".into(),
+            priority: 200,
+        });
+
+        assert_eq!(
+            source
+                .resolve("mesh.audio", None)
+                .provider
+                .unwrap()
+                .provider_module,
+            "@mesh/audio-old"
+        );
+        assert_eq!(
+            candidate
+                .resolve("mesh.audio", None)
+                .provider
+                .unwrap()
+                .provider_module,
+            "@mesh/audio-new"
+        );
+
+        live.replace_catalog(candidate.resolved_catalog());
+        assert_eq!(
+            live.resolve("mesh.audio", None)
                 .provider
                 .unwrap()
                 .provider_module,

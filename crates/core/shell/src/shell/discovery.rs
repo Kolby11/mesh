@@ -898,6 +898,19 @@ impl Shell {
         &mut self,
         prepared: &PreparedResourceSnapshot,
     ) -> Result<(), ShellRunError> {
+        self.commit_resource_snapshot_for_settings(
+            prepared,
+            self.settings.icons.default_pack.clone(),
+            true,
+        )
+    }
+
+    pub(in crate::shell) fn commit_resource_snapshot_for_settings(
+        &mut self,
+        prepared: &PreparedResourceSnapshot,
+        default_icon_pack: Option<String>,
+        publish_theme_effects: bool,
+    ) -> Result<(), ShellRunError> {
         let current = prepared.resource_lease.as_ref().map_or_else(
             || self.resource_preparation.is_current(prepared.generation),
             mesh_core_resources::ResourcePreparationLease::is_current,
@@ -915,7 +928,7 @@ impl Shell {
         mesh_core_icon::replace_default_bindings(
             prepared.icon_packs.clone(),
             prepared.frontends.clone(),
-            self.settings.icons.default_pack.clone(),
+            default_icon_pack,
         )
         .map_err(|error| ShellRunError::FrontendComposition {
             message: format!("failed to publish resource snapshot: {error}"),
@@ -928,7 +941,7 @@ impl Shell {
             apply_font_registry_tokens(theme, font_registry);
         });
         self.theme_watch.revision = self.theme.active_snapshot().revision;
-        if font_revision_changed {
+        if font_revision_changed && publish_theme_effects {
             // `commit_resource_snapshot` and its callers (`resolve_modules`,
             // profile activation) do not thread effects up the stack; queue
             // any script effects from the font-token `ThemeChanged` broadcast
@@ -1720,6 +1733,8 @@ impl Shell {
             pending_backend_runtimes: HashMap::new(),
             pending_resource_preparation: None,
             pending_profile_switch: None,
+            activation_generation: 0,
+            active_generation: None,
             deferred_requests: VecDeque::new(),
             backend_runtime_statuses: HashMap::new(),
             backend_supervision: HashMap::new(),
