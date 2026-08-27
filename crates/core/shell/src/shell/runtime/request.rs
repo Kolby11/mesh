@@ -9,6 +9,8 @@ use mesh_core_presentation::{
     PopupConstraint, PopupGravity, PopupPlacement, SurfaceConfig,
     SurfaceExtent as ConfiguredSurfaceExtent, SurfacePadding,
 };
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::{Hash, Hasher};
 
 /// Coalescable commands fire on the leading edge; further calls within the
 /// interval park as `pending` and are flushed on the trailing edge. This is
@@ -22,14 +24,354 @@ const SERVICE_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_mill
 const MAX_COALESCED_COMMAND_KEYS: usize = 256;
 const POPOVER_HOVER_BRIDGE_DELAY: std::time::Duration = std::time::Duration::from_millis(180);
 const DEBUG_INSPECTOR_SURFACE_ID: &str = "@mesh/debug-inspector";
-/// Hard ceiling on requests processed by one `drain_requests` call. Nothing
-/// bounds how many `CoreRequest`s one applied request can emit in turn — a
-/// component reacting to a service snapshot by re-requesting the same change
-/// (e.g. `mesh.theme`'s `SetTheme` republishing its own state) can otherwise
-/// grow the queue without bound and hang the shell loop before presentation.
-/// This does not detect *which* source is cycling; it only guarantees the
-/// loop always terminates.
-const MAX_DRAINED_REQUESTS_PER_BATCH: usize = 4096;
+const MAX_EFFECTS_PER_FRAME: usize = 512;
+const MAX_EFFECT_BYTES_PER_FRAME: usize = 512 * 1024;
+const MAX_EFFECTS_PER_SOURCE_PER_FRAME: usize = 64;
+const MAX_EFFECT_BYTES_PER_SOURCE_PER_FRAME: usize = 64 * 1024;
+const MAX_EFFECTS_PER_TRANSACTION: usize = 256;
+const MAX_REPEATED_CAUSAL_EFFECTS: usize = 4;
+const MAX_SOURCE_BUDGET_VIOLATIONS: u32 = 3;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(in crate::shell) struct EffectSource {
+    module_id: String,
+    runtime_id: String,
+    generation: u64,
+}
+
+#[derive(Debug, Clone)]
+struct EffectContext {
+    source: EffectSource,
+    transaction_id: u64,
+    depth: u16,
+}
+
+#[derive(Debug, Clone)]
+struct ScheduledEffect {
+    request: CoreRequest,
+    context: EffectContext,
+    fingerprint: u64,
+}
+
+#[derive(Debug, Default)]
+struct EffectFrameBudget {
+    processed: usize,
+    bytes: usize,
+    source_counts: HashMap<EffectSource, usize>,
+    source_bytes: HashMap<EffectSource, usize>,
+}
+
+#[derive(Debug, Default)]
+pub(in crate::shell) struct EffectSchedulerReport {
+    deferred: usize,
+    dropped: usize,
+    cycle_breaks: usize,
+    transaction_budget_exceeded: usize,
+    source_budget_exceeded: usize,
+    quarantined_sources: Vec<EffectSource>,
+}
+
+#[derive(Debug)]
+pub(in crate::shell) struct EffectScheduler {
+    queues: HashMap<EffectSource, VecDeque<ScheduledEffect>>,
+    ready_sources: VecDeque<EffectSource>,
+    deferred: VecDeque<ScheduledEffect>,
+    next_transaction_id: u64,
+    transaction_counts: HashMap<u64, usize>,
+    causal_counts: HashMap<(u64, EffectSource, u64), usize>,
+    source_budget_violations: HashMap<EffectSource, u32>,
+    quarantined_sources: HashSet<EffectSource>,
+    blocked_causal_chains: HashSet<(u64, EffectSource)>,
+    active_context: Option<EffectContext>,
+    frame: Option<EffectFrameBudget>,
+    report: EffectSchedulerReport,
+}
+
+impl Default for EffectScheduler {
+    fn default() -> Self {
+        Self {
+            queues: HashMap::new(),
+            ready_sources: VecDeque::new(),
+            deferred: VecDeque::new(),
+            next_transaction_id: 1,
+            transaction_counts: HashMap::new(),
+            causal_counts: HashMap::new(),
+            source_budget_violations: HashMap::new(),
+            quarantined_sources: HashSet::new(),
+            blocked_causal_chains: HashSet::new(),
+            active_context: None,
+            frame: None,
+            report: EffectSchedulerReport::default(),
+        }
+    }
+}
+
+impl EffectScheduler {
+    fn next_transaction_id(&mut self) -> u64 {
+        let transaction_id = self.next_transaction_id;
+        self.next_transaction_id = self.next_transaction_id.wrapping_add(1).max(1);
+        transaction_id
+    }
+
+    fn enqueue_batch(&mut self, effects: impl IntoIterator<Item = (CoreRequest, EffectSource)>) {
+        let transaction_id = self.next_transaction_id();
+        for (request, source) in effects {
+            self.enqueue_with_context(ScheduledEffect {
+                fingerprint: effect_fingerprint(&request),
+                request,
+                context: EffectContext {
+                    source,
+                    transaction_id,
+                    depth: 0,
+                },
+            });
+        }
+    }
+
+    fn enqueue_followups(&mut self, requests: impl IntoIterator<Item = CoreRequest>) {
+        let Some(context) = self.active_context.clone() else {
+            return;
+        };
+        let mut followup_context = context;
+        followup_context.depth = followup_context.depth.saturating_add(1);
+        for request in requests {
+            self.enqueue_with_context(ScheduledEffect {
+                fingerprint: effect_fingerprint(&request),
+                request,
+                context: followup_context.clone(),
+            });
+        }
+    }
+
+    fn enqueue_with_context(&mut self, effect: ScheduledEffect) {
+        let source = effect.context.source.clone();
+        if self.quarantined_sources.contains(&source)
+            || self
+                .blocked_causal_chains
+                .contains(&(effect.context.transaction_id, source.clone()))
+        {
+            self.report.dropped = self.report.dropped.saturating_add(1);
+            return;
+        }
+        let queue = self.queues.entry(source.clone()).or_default();
+        let was_empty = queue.is_empty();
+        queue.push_back(effect);
+        if was_empty {
+            self.ready_sources.push_back(source);
+        }
+    }
+
+    fn begin_frame(&mut self) {
+        self.frame = Some(EffectFrameBudget::default());
+        self.report = EffectSchedulerReport::default();
+        let deferred = std::mem::take(&mut self.deferred);
+        for effect in deferred {
+            self.enqueue_with_context(effect);
+        }
+    }
+
+    fn next_effect(&mut self) -> Option<ScheduledEffect> {
+        loop {
+            let source = self.ready_sources.pop_front()?;
+            let Some(mut queue) = self.queues.remove(&source) else {
+                continue;
+            };
+            let Some(effect) = queue.pop_front() else {
+                continue;
+            };
+            if !queue.is_empty() {
+                self.ready_sources.push_back(source.clone());
+                self.queues.insert(source.clone(), queue);
+            }
+
+            let weight = effect_weight(&effect.request);
+            let frame = self.frame.as_mut().expect("scheduler frame must be active");
+            if frame.processed >= MAX_EFFECTS_PER_FRAME {
+                self.deferred.push_back(effect);
+                self.defer_ready_queues();
+                self.report.deferred = self.deferred.len();
+                return None;
+            }
+            if weight > MAX_EFFECT_BYTES_PER_FRAME {
+                self.drop_causal_chain(&effect.context);
+                self.report.dropped = self.report.dropped.saturating_add(1);
+                continue;
+            }
+            if frame.bytes.saturating_add(weight) > MAX_EFFECT_BYTES_PER_FRAME {
+                self.deferred.push_back(effect);
+                self.defer_ready_queues();
+                self.report.deferred = self.deferred.len();
+                return None;
+            }
+
+            let source_count = frame
+                .source_counts
+                .get(&source)
+                .copied()
+                .unwrap_or_default();
+            let source_bytes = frame.source_bytes.get(&source).copied().unwrap_or_default();
+            if source_count >= MAX_EFFECTS_PER_SOURCE_PER_FRAME
+                || source_bytes.saturating_add(weight) > MAX_EFFECT_BYTES_PER_SOURCE_PER_FRAME
+            {
+                self.deferred.push_back(effect);
+                self.defer_source(&source);
+                self.report.source_budget_exceeded =
+                    self.report.source_budget_exceeded.saturating_add(1);
+                let violations = self
+                    .source_budget_violations
+                    .entry(source.clone())
+                    .or_default();
+                *violations = violations.saturating_add(1);
+                if *violations >= MAX_SOURCE_BUDGET_VIOLATIONS
+                    && self.quarantined_sources.insert(source.clone())
+                {
+                    self.report.quarantined_sources.push(source.clone());
+                    self.drop_source(&source);
+                }
+                self.report.deferred = self.deferred.len();
+                continue;
+            }
+
+            let transaction_count = self
+                .transaction_counts
+                .entry(effect.context.transaction_id)
+                .or_default();
+            if *transaction_count >= MAX_EFFECTS_PER_TRANSACTION {
+                self.drop_causal_chain(&effect.context);
+                self.report.transaction_budget_exceeded =
+                    self.report.transaction_budget_exceeded.saturating_add(1);
+                self.report.dropped = self.report.dropped.saturating_add(1);
+                continue;
+            }
+
+            if effect.context.depth > 0 {
+                let causal_key = (
+                    effect.context.transaction_id,
+                    effect.context.source.clone(),
+                    effect.fingerprint,
+                );
+                let causal_count = self.causal_counts.entry(causal_key).or_default();
+                *causal_count = causal_count.saturating_add(1);
+                if *causal_count > MAX_REPEATED_CAUSAL_EFFECTS {
+                    self.drop_causal_chain(&effect.context);
+                    self.blocked_causal_chains
+                        .insert((effect.context.transaction_id, effect.context.source.clone()));
+                    self.report.cycle_breaks = self.report.cycle_breaks.saturating_add(1);
+                    self.report.dropped = self.report.dropped.saturating_add(1);
+                    continue;
+                }
+            }
+
+            *frame.source_counts.entry(source.clone()).or_default() += 1;
+            *frame.source_bytes.entry(source).or_default() += weight;
+            *transaction_count += 1;
+            frame.processed += 1;
+            frame.bytes = frame.bytes.saturating_add(weight);
+            return Some(effect);
+        }
+    }
+
+    fn finish_frame(&mut self) -> EffectSchedulerReport {
+        self.report.deferred = self.deferred.len();
+        let live_transactions = self
+            .queues
+            .values()
+            .chain(std::iter::once(&self.deferred))
+            .flat_map(|queue| queue.iter().map(|effect| effect.context.transaction_id))
+            .collect::<HashSet<_>>();
+        self.transaction_counts
+            .retain(|transaction_id, _| live_transactions.contains(transaction_id));
+        self.causal_counts
+            .retain(|(transaction_id, _, _), _| live_transactions.contains(transaction_id));
+        self.frame = None;
+        std::mem::take(&mut self.report)
+    }
+
+    fn active_context(&self) -> Option<EffectContext> {
+        self.active_context.clone()
+    }
+
+    fn set_active_context(&mut self, context: EffectContext) {
+        self.active_context = Some(context);
+    }
+
+    fn clear_active_context(&mut self) {
+        self.active_context = None;
+    }
+
+    fn defer_ready_queues(&mut self) {
+        while let Some(source) = self.ready_sources.pop_front() {
+            if let Some(queue) = self.queues.remove(&source) {
+                self.deferred.extend(queue);
+            }
+        }
+    }
+
+    fn defer_source(&mut self, source: &EffectSource) {
+        self.ready_sources.retain(|queued| queued != source);
+        if let Some(queue) = self.queues.remove(source) {
+            self.deferred.extend(queue);
+        }
+    }
+
+    fn drop_source(&mut self, source: &EffectSource) {
+        self.ready_sources.retain(|queued| queued != source);
+        self.queues.remove(source);
+        self.deferred
+            .retain(|effect| &effect.context.source != source);
+    }
+
+    fn drop_causal_chain(&mut self, context: &EffectContext) {
+        self.ready_sources
+            .retain(|source| source != &context.source);
+        if let Some(queue) = self.queues.remove(&context.source) {
+            self.report.dropped = self.report.dropped.saturating_add(
+                queue
+                    .iter()
+                    .filter(|effect| effect.context.transaction_id == context.transaction_id)
+                    .count(),
+            );
+            self.deferred.extend(
+                queue
+                    .into_iter()
+                    .filter(|effect| effect.context.transaction_id != context.transaction_id),
+            );
+            if self
+                .deferred
+                .iter()
+                .any(|effect| effect.context.source == context.source)
+            {
+                self.ready_sources.push_back(context.source.clone());
+            }
+        }
+        self.deferred.retain(|effect| {
+            effect.context.transaction_id != context.transaction_id
+                || effect.context.source != context.source
+        });
+    }
+
+    fn pending_len(&self) -> usize {
+        self.queues.values().map(VecDeque::len).sum::<usize>() + self.deferred.len()
+    }
+
+    fn discard_pending(&mut self) -> usize {
+        let count = self.pending_len();
+        self.queues.clear();
+        self.ready_sources.clear();
+        self.deferred.clear();
+        count
+    }
+}
+
+fn effect_fingerprint(request: &CoreRequest) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    format!("{request:?}").hash(&mut hasher);
+    hasher.finish()
+}
+
+fn effect_weight(request: &CoreRequest) -> usize {
+    64usize.saturating_add(format!("{request:?}").len())
+}
 
 /// Canonical failure payload when a service command cannot be delivered (no
 /// backend channel, send failure, or unregistered interface).
@@ -79,6 +421,165 @@ enum ServiceCommandSendError {
 }
 
 impl Shell {
+    fn effect_source_for_surface(&mut self, surface_id: &str) -> (String, String) {
+        self.component_index_for_surface(surface_id)
+            .map(|index| {
+                (
+                    self.components[index].component.id().to_string(),
+                    surface_id.to_string(),
+                )
+            })
+            .unwrap_or_else(|| ("@mesh/shell".to_string(), surface_id.to_string()))
+    }
+
+    fn effect_source_for_request(&mut self, request: &CoreRequest) -> EffectSource {
+        let (module_id, runtime_id) = match request {
+            CoreRequest::ToggleSurface { surface_id }
+            | CoreRequest::ShowSurface { surface_id }
+            | CoreRequest::HideSurface { surface_id }
+            | CoreRequest::HidePopover { surface_id, .. }
+            | CoreRequest::SetSurfaceRole { surface_id, .. }
+            | CoreRequest::ToggleSurfaceRole { surface_id }
+            | CoreRequest::SetChildSurfaceRole { surface_id, .. }
+            | CoreRequest::PositionSurface { surface_id, .. }
+            | CoreRequest::ActivatePopover { surface_id, .. } => {
+                self.effect_source_for_surface(surface_id)
+            }
+            CoreRequest::TransferTabFocus { from_surface, .. } => {
+                self.effect_source_for_surface(from_surface)
+            }
+            CoreRequest::ServiceCommand {
+                source_module_id, ..
+            } => (source_module_id.clone(), source_module_id.clone()),
+            CoreRequest::ServiceCall {
+                source_module_id,
+                source_instance_id,
+                ..
+            }
+            | CoreRequest::CancelServiceCall {
+                source_module_id,
+                source_instance_id,
+                ..
+            } => (source_module_id.clone(), source_instance_id.clone()),
+            _ => ("@mesh/shell".to_string(), "shell".to_string()),
+        };
+        EffectSource {
+            module_id,
+            runtime_id,
+            generation: self.activation_generation,
+        }
+    }
+
+    pub(in crate::shell) fn enqueue_effects(
+        &mut self,
+        requests: impl IntoIterator<Item = CoreRequest>,
+    ) {
+        let requests = requests.into_iter().collect::<Vec<_>>();
+        if requests.is_empty() {
+            return;
+        }
+        if self.effect_scheduler.active_context().is_some() {
+            self.effect_scheduler.enqueue_followups(requests);
+            return;
+        }
+        let sourced = requests
+            .into_iter()
+            .map(|request| {
+                let source = self.effect_source_for_request(&request);
+                (request, source)
+            })
+            .collect::<Vec<_>>();
+        self.effect_scheduler.enqueue_batch(sourced);
+    }
+
+    pub(in crate::shell) fn process_effects(
+        &mut self,
+    ) -> Result<EffectSchedulerReport, ShellRunError> {
+        self.effect_scheduler.begin_frame();
+        while let Some(effect) = self.effect_scheduler.next_effect() {
+            let context = effect.context.clone();
+            self.effect_scheduler.set_active_context(context);
+            let result = self.apply_request(effect.request);
+            match result {
+                Ok(followups) => {
+                    self.effect_scheduler.enqueue_followups(followups);
+                    self.effect_scheduler.clear_active_context();
+                }
+                Err(error) => {
+                    self.effect_scheduler.clear_active_context();
+                    let report = self.effect_scheduler.finish_frame();
+                    self.report_effect_scheduler(&report);
+                    return Err(error);
+                }
+            }
+        }
+        let report = self.effect_scheduler.finish_frame();
+        self.report_effect_scheduler(&report);
+        Ok(report)
+    }
+
+    fn report_effect_scheduler(&mut self, report: &EffectSchedulerReport) {
+        if report.deferred > 0 {
+            tracing::debug!(count = report.deferred, "deferred residual shell effects");
+        }
+        if report.cycle_breaks > 0 {
+            self.diagnostics.record_lifecycle_error(
+                "@mesh/shell",
+                "effect_scheduler_cycle_detected",
+                format!(
+                    "stopped {} repeated causal shell effect cycle(s)",
+                    report.cycle_breaks
+                ),
+            );
+        }
+        if report.transaction_budget_exceeded > 0 {
+            self.diagnostics.record_lifecycle_error(
+                "@mesh/shell",
+                "effect_scheduler_transaction_budget_exceeded",
+                format!(
+                    "dropped {} shell effect causal chain(s) after exceeding the transaction budget",
+                    report.transaction_budget_exceeded
+                ),
+            );
+        }
+        if report.source_budget_exceeded > 0 {
+            self.diagnostics.record_lifecycle_error(
+                "@mesh/shell",
+                "effect_scheduler_source_budget_exceeded",
+                format!(
+                    "deferred shell effects from {} source(s) after exceeding the per-frame budget",
+                    report.source_budget_exceeded
+                ),
+            );
+        }
+        for source in &report.quarantined_sources {
+            let message = format!(
+                "quarantined effect producer '{}' ({}) after repeated scheduler budget violations",
+                source.module_id, source.runtime_id
+            );
+            self.diagnostics.record_lifecycle_error(
+                source.module_id.clone(),
+                "effect_scheduler_quarantined",
+                message.clone(),
+            );
+            if let Some(index) = self.components.iter().position(|runtime| {
+                runtime.component.id() == source.module_id
+                    || runtime.surface_id == source.runtime_id
+            }) {
+                while !self.components[index].quarantined {
+                    self.components[index].note_failure();
+                }
+                self.components[index]
+                    .component
+                    .isolate_runtime_failure("effect_scheduler", &message);
+            }
+        }
+    }
+
+    fn discard_scheduled_effects(&mut self) -> usize {
+        self.effect_scheduler.discard_pending()
+    }
+
     fn apply_set_module_enabled(
         &mut self,
         module_id: &str,
@@ -664,27 +1165,23 @@ impl Shell {
         &mut self,
         requests: &mut VecDeque<CoreRequest>,
     ) -> Result<(), ShellRunError> {
-        let mut processed = 0usize;
-        while let Some(request) = requests.pop_front() {
-            processed += 1;
-            if processed > MAX_DRAINED_REQUESTS_PER_BATCH {
-                let dropped = requests.len() + 1;
-                requests.clear();
-                let message = format!(
-                    "dropped {dropped} pending shell requests after exceeding the \
-                     {MAX_DRAINED_REQUESTS_PER_BATCH}-request drain budget; a component or \
-                     backend is likely emitting a repeating request cycle"
-                );
-                tracing::error!("{message}");
-                self.diagnostics.record_lifecycle_error(
-                    "@mesh/shell".to_string(),
-                    "request_drain_budget_exceeded",
-                    message,
-                );
-                return Ok(());
-            }
-            let emitted = self.apply_request(request)?;
-            requests.extend(emitted);
+        self.enqueue_effects(std::mem::take(requests));
+        let report = self.process_effects()?;
+        if report.deferred > 0
+            || report.cycle_breaks > 0
+            || report.transaction_budget_exceeded > 0
+            || report.source_budget_exceeded > 0
+        {
+            let dropped = self.discard_scheduled_effects();
+            let message = format!(
+                "dropped {dropped} shell effects from a direct drain after exceeding scheduler policy"
+            );
+            tracing::error!("{message}");
+            self.diagnostics.record_lifecycle_error(
+                "@mesh/shell",
+                "request_drain_budget_exceeded",
+                message,
+            );
         }
         Ok(())
     }
@@ -693,8 +1190,8 @@ impl Shell {
         &mut self,
         request: CoreRequest,
     ) -> Result<(), ShellRunError> {
-        let mut emitted = self.apply_request(request)?;
-        self.drain_requests(&mut emitted)
+        self.enqueue_effects(std::iter::once(request));
+        self.process_effects().map(|_| ())
     }
 
     pub(in crate::shell) fn apply_request(
@@ -1320,11 +1817,16 @@ impl Shell {
         let mut dispatch_result = if let Some(request) =
             core_service_request(interface_canonical.as_ref(), command, payload)
         {
-            match self.apply_request(request) {
+            let result = if self.effect_scheduler.active_context().is_some() {
+                self.effect_scheduler
+                    .enqueue_followups(std::iter::once(request));
+                Ok(VecDeque::new())
+            } else {
+                self.apply_request(request)
+            };
+            match result {
                 Ok(follow_ups) => {
-                    // Drained into `pending` at the top of the next frame, the
-                    // same path a profile switch already uses.
-                    self.deferred_requests.extend(follow_ups);
+                    self.enqueue_effects(follow_ups);
                     serde_json::json!({ "ok": true, "status": "applied" })
                 }
                 Err(error) => {
@@ -2432,8 +2934,7 @@ impl Shell {
         let mut emitted = VecDeque::new();
         for surface_id in due_popovers {
             self.pending_popover_hides.remove(&surface_id);
-            if let Some(mut requests) = self.child_popover_pointer_leave_requests(&surface_id)? {
-                self.drain_requests(&mut requests)?;
+            if let Some(requests) = self.child_popover_pointer_leave_requests(&surface_id)? {
                 emitted.extend(requests);
             } else {
                 emitted.extend(self.set_surface_visibility(surface_id, false)?);
@@ -2683,5 +3184,93 @@ mod tests {
             CoreRequest::UninstallModule { module_id, force }
                 if module_id == "@example/module" && force
         ));
+    }
+
+    fn scheduler_source(module_id: &str, runtime_id: &str) -> EffectSource {
+        EffectSource {
+            module_id: module_id.to_string(),
+            runtime_id: runtime_id.to_string(),
+            generation: 4,
+        }
+    }
+
+    fn position_request(surface_id: &str) -> CoreRequest {
+        CoreRequest::PositionSurface {
+            surface_id: surface_id.to_string(),
+            margin_top: 0,
+            margin_left: 0,
+        }
+    }
+
+    #[test]
+    fn effect_scheduler_round_robins_sources() {
+        let mut scheduler = EffectScheduler::default();
+        let source_a = scheduler_source("@test/a", "a");
+        let source_b = scheduler_source("@test/b", "b");
+        scheduler.enqueue_batch([
+            (position_request("a-1"), source_a.clone()),
+            (position_request("a-2"), source_a.clone()),
+            (position_request("a-3"), source_a),
+            (position_request("b-1"), source_b.clone()),
+            (position_request("b-2"), source_b.clone()),
+            (position_request("b-3"), source_b),
+        ]);
+        scheduler.begin_frame();
+
+        let order = (0..6)
+            .map(|_| scheduler.next_effect().unwrap().context.source.module_id)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            order,
+            vec![
+                "@test/a", "@test/b", "@test/a", "@test/b", "@test/a", "@test/b"
+            ]
+        );
+        assert_eq!(scheduler.finish_frame().deferred, 0);
+    }
+
+    #[test]
+    fn effect_scheduler_defers_residual_work_after_source_budget() {
+        let mut scheduler = EffectScheduler::default();
+        let source_a = scheduler_source("@test/a", "a");
+        let source_b = scheduler_source("@test/b", "b");
+        scheduler.enqueue_batch(
+            (0..100)
+                .map(|index| (position_request(&format!("a-{index}")), source_a.clone()))
+                .chain(
+                    (0..100)
+                        .map(|index| (position_request(&format!("b-{index}")), source_b.clone())),
+                ),
+        );
+        scheduler.begin_frame();
+
+        let mut processed = 0;
+        while scheduler.next_effect().is_some() {
+            processed += 1;
+        }
+        let report = scheduler.finish_frame();
+
+        assert_eq!(processed, MAX_EFFECTS_PER_SOURCE_PER_FRAME * 2);
+        assert_eq!(report.deferred, 200 - processed);
+        assert_eq!(scheduler.pending_len(), report.deferred);
+    }
+
+    #[test]
+    fn effect_scheduler_breaks_repeated_causal_effects() {
+        let mut scheduler = EffectScheduler::default();
+        let source = scheduler_source("@test/cycle", "cycle");
+        scheduler.enqueue_batch([(position_request("cycle"), source)]);
+        scheduler.begin_frame();
+
+        while let Some(effect) = scheduler.next_effect() {
+            scheduler.set_active_context(effect.context.clone());
+            scheduler.enqueue_followups(std::iter::once(effect.request));
+            scheduler.clear_active_context();
+        }
+        let report = scheduler.finish_frame();
+
+        assert_eq!(report.cycle_breaks, 1);
+        assert_eq!(scheduler.pending_len(), 0);
     }
 }

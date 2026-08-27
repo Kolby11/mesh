@@ -1332,7 +1332,7 @@ impl Shell {
             }
             if pending.waiting_backends.is_empty() {
                 let requests = self.commit_pending_profile_switch();
-                self.deferred_requests.extend(requests);
+                self.enqueue_effects(requests);
             }
         } else if matches!(
             status,
@@ -1412,7 +1412,7 @@ impl Shell {
         };
         if should_commit {
             let requests = self.commit_pending_profile_switch();
-            self.deferred_requests.extend(requests);
+            self.enqueue_effects(requests);
         }
         tracing::debug!(interface, provider_id, "buffered prepared profile snapshot");
         true

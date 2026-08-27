@@ -950,7 +950,7 @@ impl Shell {
             // any script effects from the font-token `ThemeChanged` broadcast
             // for the next loop drain instead of discarding them.
             let effects = self.mark_components_theme_changed()?;
-            self.deferred_requests.extend(effects);
+            self.enqueue_effects(effects);
         }
         if let Some(lease) = prepared.resource_lease.as_ref() {
             lease.retire();
@@ -1744,7 +1744,7 @@ impl Shell {
             activation_generation: 0,
             active_generation: None,
             backend_provider_epochs: HashMap::new(),
-            deferred_requests: VecDeque::new(),
+            effect_scheduler: EffectScheduler::default(),
             backend_runtime_statuses: HashMap::new(),
             backend_supervision: HashMap::new(),
             backend_respawn: None,

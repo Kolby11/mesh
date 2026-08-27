@@ -92,7 +92,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/15-shell-core-and-orchestration/improvements.md)
 
-- [ ] Process CoreRequest effects through one fair bounded scheduler with causal budgets and cycle detection.
 - [ ] Publish provider unavailable/recovery transitions from committed provider generations.
 - [ ] Route control-plane writes through declared durable revisions and ordered settings/theme/locale effect batches.
 - [ ] Distinguish intentional legacy/no-profile operation from invalid configured graph/profile recovery.

@@ -447,7 +447,7 @@ impl Shell {
             );
             if deliver && state_changed {
                 match self.deliver_service_event(&event) {
-                    Ok(requests) => self.deferred_requests.extend(requests),
+                    Ok(requests) => self.enqueue_effects(requests),
                     Err(error) => tracing::warn!(
                         interface,
                         provider_id,
@@ -473,7 +473,7 @@ impl Shell {
             .insert(interface.to_string(), health_event.clone());
         if deliver {
             match self.deliver_service_event(&health_event) {
-                Ok(requests) => self.deferred_requests.extend(requests),
+                Ok(requests) => self.enqueue_effects(requests),
                 Err(error) => tracing::warn!(
                     interface,
                     provider_id,
@@ -1032,7 +1032,7 @@ impl Shell {
         };
         if self.record_latest_service_state(&event) {
             match self.deliver_service_event(&event) {
-                Ok(requests) => self.deferred_requests.extend(requests),
+                Ok(requests) => self.enqueue_effects(requests),
                 Err(error) => tracing::warn!(
                     interface,
                     provider_id,

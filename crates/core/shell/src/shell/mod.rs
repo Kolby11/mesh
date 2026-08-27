@@ -58,6 +58,7 @@ use mesh_core_presentation::{
     PresentationEngine, WindowEvent, WindowKeyEvent, coalesce_input_events,
 };
 use mesh_core_render::{DebugOverlay, PixelBuffer};
+use runtime::EffectScheduler;
 use sounds::{SoundKind, shell_sound_request};
 use surface_layout::{
     apply_font_family, default_surface_visibility, load_active_theme, prepare_theme_for_graph,
@@ -515,7 +516,7 @@ pub struct Shell {
     /// Monotonic provider epochs prevent delayed output from an older runtime
     /// for the same provider id from crossing a replacement boundary.
     backend_provider_epochs: HashMap<String, u64>,
-    deferred_requests: VecDeque<CoreRequest>,
+    effect_scheduler: EffectScheduler,
     backend_runtime_statuses: BackendRuntimeStatusMap,
     backend_supervision: HashMap<String, backend::BackendSupervisionState>,
     backend_respawn: Option<backend::BackendRespawnContext>,

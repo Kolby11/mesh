@@ -43,6 +43,11 @@ pub(super) fn revisioned_surface_config(
 
 impl Shell {
     pub(in crate::shell) fn render_components(&mut self) -> Result<(), ShellRunError> {
+        self.render_components_inner()?;
+        self.process_effects().map(|_| ())
+    }
+
+    pub(in crate::shell) fn render_components_inner(&mut self) -> Result<(), ShellRunError> {
         let backdrop_policy = if self.presentation_engine.supports_compositor_backdrop_blur() {
             BackdropBlurPolicy::CompositorRegion
         } else if mesh_core_render::paint_backend_supports_backdrop_blur() {
@@ -76,7 +81,7 @@ impl Shell {
 
         if self.debug.enabled {
             let mut debug_requests = self.publish_debug_snapshot()?;
-            self.drain_requests(&mut debug_requests)?;
+            self.enqueue_effects(std::mem::take(&mut debug_requests));
         }
 
         let mut components_want_render_after_frame = false;
@@ -867,16 +872,17 @@ impl Shell {
                     .node_key
                     .clone();
                 tracing::info!(surface_id, %node_key, "embedded widget window close requested; demoting widget");
-                self.set_child_surface_role(
+                let effects = self.set_child_surface_role(
                     self.components[index].surface_id.clone(),
                     node_key,
                     SurfaceRole::Layer,
                 )?;
+                self.enqueue_effects(effects);
                 continue;
             }
             tracing::info!(surface_id, "window close requested; hiding surface");
-            let mut pending = self.set_surface_visibility_now(surface_id, false)?;
-            self.drain_requests(&mut pending)?;
+            let effects = self.set_surface_visibility_now(surface_id, false)?;
+            self.enqueue_effects(effects);
         }
         Ok(())
     }
@@ -919,8 +925,8 @@ impl Shell {
                                     Some((_, TargetRef::Parent))
                                 )
                             {
-                                let mut requests =
-                                    self.apply_request(CoreRequest::TransferTabFocus {
+                                self.enqueue_effects(std::iter::once(
+                                    CoreRequest::TransferTabFocus {
                                         from_surface: surface_id.clone(),
                                         to_surface: relationship.trigger_surface_id,
                                         target: TabFocusTarget::AtKey(
@@ -929,16 +935,16 @@ impl Shell {
                                         return_target: None,
                                         target_closes_on_leave: false,
                                         close_source: None,
-                                    })?;
-                                self.drain_requests(&mut requests)?;
+                                    },
+                                ));
                             }
                         }
                         Some((index, TargetRef::Parent))
                             if self.components[index].parent.popup_parent_surface.is_some() =>
                         {
                             self.pending_popover_hides.remove(&surface_id);
-                            let mut pending = self.set_surface_visibility_now(surface_id, false)?;
-                            self.drain_requests(&mut pending)?;
+                            let effects = self.set_surface_visibility_now(surface_id, false)?;
+                            self.enqueue_effects(effects);
                         }
                         _ => {}
                     }

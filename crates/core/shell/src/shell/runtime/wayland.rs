@@ -69,6 +69,11 @@ impl Shell {
     }
 
     pub(in crate::shell) fn dispatch_wayland(&mut self) -> Result<(), ShellRunError> {
+        self.dispatch_wayland_inner()?;
+        self.process_effects().map(|_| ())
+    }
+
+    pub(in crate::shell) fn dispatch_wayland_inner(&mut self) -> Result<(), ShellRunError> {
         self.begin_wayland_input_generation();
         let events = match self.presentation_engine.poll_events() {
             Ok(events) => coalesce_input_events(events),
@@ -180,10 +185,10 @@ impl Shell {
                     self.cancel_pending_child_popover_hides_at(target_surface_id, *x, *y);
                 }
             } else if matches!(event, RoutedWindowEvent::PointerLeave) && target_is_popover {
-                self.drain_request(CoreRequest::HidePopover {
+                self.enqueue_effects(std::iter::once(CoreRequest::HidePopover {
                     surface_id: target_surface_id.to_string(),
                     defer_for_hover_bridge: true,
-                })?;
+                }));
             } else if matches!(event, RoutedWindowEvent::PointerLeave)
                 && matches!(target, TargetRef::Parent)
             {
@@ -252,7 +257,7 @@ impl Shell {
                 if let Some(request) =
                     shell_global_shortcut_request(key, mods.ctrl, mods.shift, self.debug.enabled)
                 {
-                    self.drain_request(request)?;
+                    self.enqueue_effects(std::iter::once(request));
                     continue;
                 }
             }
@@ -530,8 +535,7 @@ impl Shell {
                 );
             }
             if !emitted.is_empty() {
-                let mut pending = VecDeque::from(emitted);
-                self.drain_requests(&mut pending)?;
+                self.enqueue_effects(emitted);
             }
         }
 

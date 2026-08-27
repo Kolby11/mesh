@@ -13,6 +13,8 @@ mod service_state;
 mod theme;
 mod wayland;
 
+pub(in crate::shell) use request::EffectScheduler;
+
 const MAX_SHELL_MESSAGE_DRAIN_PER_FRAME: usize = 256;
 const DEV_WINDOW_POLL_SLEEP: Duration = Duration::from_millis(16);
 
@@ -408,6 +410,7 @@ impl Shell {
             if let Some(request) = shell_sound_request(SoundKind::Startup, &self.settings.sounds) {
                 pending.push_back(request);
             }
+            self.enqueue_effects(std::mem::take(&mut pending));
 
             tracing::info!(
                 "MESH shell core is running with {} frontend component(s)",
@@ -419,7 +422,7 @@ impl Shell {
                 pending.extend(self.reload_theme_if_changed()?);
                 pending.extend(self.reload_locale_if_settings_changed()?);
                 self.reload_frontend_components_if_changed()?;
-                self.dispatch_wayland()?;
+                self.dispatch_wayland_inner()?;
 
                 let mut shell_messages = CoalescedShellMessages::default();
                 let mut drained_shell_message_count = 0;
@@ -440,16 +443,15 @@ impl Shell {
                 }
 
                 pending.extend(self.tick_components()?);
-                pending.extend(std::mem::take(&mut self.deferred_requests));
                 pending.extend(self.complete_due_surface_transitions()?);
+                pending.extend(self.poll_pending_resource_preparation());
                 if !pending.is_empty() {
                     self.presented_last_frame = true;
                 }
-                self.drain_requests(&mut pending)?;
-                pending.extend(self.poll_pending_resource_preparation());
-                self.drain_requests(&mut pending)?;
+                self.enqueue_effects(std::mem::take(&mut pending));
+                self.process_effects()?;
                 self.flush_throttled_commands();
-                self.render_components()?;
+                self.render_components_inner()?;
                 self.presentation_engine
                     .finish_frame()
                     .map_err(ShellRunError::Presentation)?;
@@ -540,18 +542,17 @@ impl Shell {
         self.file_watcher_active = false;
 
         let mut first_error = None;
-        let mut shutdown_requests = match self.broadcast_core_event(CoreEvent::ShuttingDown) {
+        let shutdown_requests = match self.broadcast_core_event(CoreEvent::ShuttingDown) {
             Ok(requests) => requests,
             Err(error) => {
                 first_error = Some(error);
                 VecDeque::new()
             }
         };
-        if let Err(error) = self.drain_requests(&mut shutdown_requests) {
-            first_error.get_or_insert(error);
-        }
-        let mut unmount_requests = self.unmount_components();
-        if let Err(error) = self.drain_requests(&mut unmount_requests) {
+        self.enqueue_effects(shutdown_requests);
+        let unmount_requests = self.unmount_components();
+        self.enqueue_effects(unmount_requests);
+        if let Err(error) = self.process_effects() {
             first_error.get_or_insert(error);
         }
 
