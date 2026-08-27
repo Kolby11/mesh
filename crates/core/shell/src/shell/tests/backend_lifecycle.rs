@@ -813,6 +813,44 @@ fn frontend_module_deactivation_removes_runtime_and_destroys_surface() {
 }
 
 #[test]
+fn legacy_graph_delta_uses_the_activation_coordinator_commit_boundary() {
+    let mut shell = Shell::new();
+    shell.active_profile_id = None;
+    let graph = graph_from_json(
+        r#"{
+              "schemaVersion": 1,
+              "modulesDir": "modules",
+              "modules": {},
+              "providers": {}
+            }"#,
+        Vec::new(),
+    );
+
+    shell.activate_graph_candidate(graph.clone());
+    for _ in 0..500 {
+        if shell.pending_resource_preparation.is_none() && shell.pending_profile_switch.is_none() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        shell.poll_pending_resource_preparation();
+    }
+
+    assert!(shell.pending_resource_preparation.is_none());
+    assert!(shell.pending_profile_switch.is_none());
+    assert_eq!(
+        shell.installed_module_graph.as_ref().unwrap().diff(&graph),
+        Default::default()
+    );
+    assert_eq!(
+        shell
+            .active_generation
+            .as_ref()
+            .map(|generation| generation.id),
+        Some(1)
+    );
+}
+
+#[test]
 fn newly_active_backend_interfaces_spawns_only_the_active_unrunning_provider() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();

@@ -199,7 +199,6 @@ impl Shell {
         let node = graph
             .module(module_id)
             .ok_or_else(|| package_error(format!("module {module_id} is not installed")))?;
-        let module_kind = node.kind;
         transaction
             .protect_package_state(&graph_path, &config_dir.join(&root.modules_dir))
             .map_err(|error| package_error(error.to_string()))?;
@@ -285,19 +284,6 @@ impl Shell {
         }
 
         if force {
-            for interface in graph
-                .backend_provider_contributions()
-                .into_iter()
-                .filter(|provider| provider.module_id == module_id)
-                .filter_map(|provider| {
-                    graph
-                        .active_provider(&provider.interface)
-                        .is_some_and(|active| active.module_id == module_id)
-                        .then_some(provider.interface.clone())
-                })
-            {
-                self.stop_backend_runtime(&interface);
-            }
             if root
                 .layout
                 .as_ref()
@@ -351,13 +337,15 @@ impl Shell {
         self.resolve_modules()?;
         self.register_interfaces_from_graph(&new_graph);
 
-        if active_profile.is_none() && module_kind == ModuleKind::Frontend {
-            requests.extend(self.deactivate_frontend_module(module_id, Some(&new_graph))?);
-        }
-
         if active_profile_changed {
             requests
                 .extend(self.apply_switch_profile(active_profile.as_deref().unwrap_or_default()));
+        } else if active_profile.is_none() {
+            // Uninstall changes the resolved graph even when the removed
+            // module was not a frontend. Reconcile the complete legacy graph
+            // so backend providers, resources, contributions, and surfaces
+            // all retire through the same activation coordinator.
+            requests.extend(self.activate_graph_candidate(new_graph.clone()));
         } else {
             let previous_catalog = self.frontend_catalog.snapshot().catalog;
             let catalog = FrontendCatalog::from_modules_reusing(
@@ -450,7 +438,7 @@ impl Shell {
                         .load_installed_module_graph_cached()
                         .map_err(|error| package_error(error.to_string()))?
                         .clone();
-                    return self.activate_frontend_module(&manifest.name, &graph);
+                    return Ok(self.activate_graph_candidate(graph));
                 };
                 let mut profile = paths
                     .load_or_default(&profile_id)
@@ -479,6 +467,13 @@ impl Shell {
                 } else {
                     Ok(VecDeque::new())
                 }
+            }
+            _ if selected_profile.is_none() => {
+                let graph = self
+                    .load_installed_module_graph_cached()
+                    .map_err(|error| package_error(error.to_string()))?
+                    .clone();
+                Ok(self.activate_graph_candidate(graph))
             }
             _ => Ok(VecDeque::new()),
         }

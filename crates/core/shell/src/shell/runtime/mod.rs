@@ -559,6 +559,7 @@ impl Shell {
             }
             ShellMessage::FilesystemChanged => {
                 self.schedule_reload_checks_now();
+                pending.extend(self.reconcile_installed_graph());
             }
             ShellMessage::FileWatcherStopped => {
                 // Reload checks were parked at FILE_WATCHER_RELOAD_PARK
@@ -592,6 +593,13 @@ impl Shell {
         let mut paths = Vec::new();
         paths.push(self.theme_watch.path.clone());
         paths.push(self.settings_watch.path.clone());
+        // Graph and profile edits are activation inputs, not just ordinary
+        // source reloads. Watching their containing directories also catches
+        // atomic replacement of the graph/profile files and creation of a
+        // newly installed module directory.
+        paths.push(self.installed_module_graph_path());
+        paths.extend(self.module_dirs.iter().cloned());
+        paths.extend(self.modules.values().map(|module| module.path.clone()));
         for runtime in &self.components {
             paths.extend(runtime.source_paths.iter().map(|(path, _)| path.clone()));
         }

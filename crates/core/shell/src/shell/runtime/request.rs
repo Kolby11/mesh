@@ -93,11 +93,12 @@ impl Shell {
             return VecDeque::new();
         }
         let graph_path = self.installed_module_graph_path();
-        let uses_profile = mesh_core_module::package::ProfilePaths::from_root_graph(&graph_path)
-            .and_then(|paths| paths.active_profile_id())
-            .ok()
-            .flatten()
-            .is_some();
+        let active_profile_id =
+            mesh_core_module::package::ProfilePaths::from_root_graph(&graph_path)
+                .and_then(|paths| paths.active_profile_id())
+                .ok()
+                .flatten();
+        let uses_profile = active_profile_id.is_some();
         if !enabled
             && self
                 .pending_backend_runtimes
@@ -189,7 +190,13 @@ impl Shell {
             }
         };
 
-        let previous_graph = self.installed_module_graph.clone();
+        if let Some(profile_id) = active_profile_id {
+            // Profile-owned enablement changes are graph deltas too. Let the
+            // profile coordinator rebuild the composition closure and stage
+            // every affected root/provider before commit.
+            return self.begin_profile_activation(&profile_id, Some(rollback));
+        }
+
         let graph = match self.load_installed_module_graph_candidate() {
             Ok(graph) => graph,
             Err(error) => {
@@ -209,74 +216,7 @@ impl Shell {
                 return VecDeque::new();
             }
         };
-        let locale = match self.prepare_locale_for_graph(&graph) {
-            Ok(locale) => locale,
-            Err(error) => {
-                let restore_error = rollback.restore().err();
-                let message = format!(
-                    "module {module_id} update produced an invalid locale catalog candidate: {error}{}",
-                    restore_error
-                        .map(|error| format!("; rollback also failed: {error}"))
-                        .unwrap_or_default()
-                );
-                tracing::warn!(module_id, enabled, "{message}");
-                self.diagnostics.record_lifecycle_error(
-                    "@mesh/settings",
-                    "module_enabled_locale_reload_failed",
-                    message,
-                );
-                return VecDeque::new();
-            }
-        };
-        self.register_interfaces_from_graph(&graph);
-        let runtime_result = if module_kind == ModuleKind::Frontend {
-            if enabled {
-                self.activate_frontend_module_with_locale(module_id, &graph, locale.clone())
-            } else {
-                self.deactivate_frontend_module(module_id, Some(&graph))
-            }
-        } else {
-            Ok(VecDeque::new())
-        };
-        match runtime_result {
-            Ok(requests) => {
-                // Enabling a backend-kind module only ever persists the graph
-                // decision and reloads it; nothing actually starts the
-                // process. A module that becomes the graph's active provider
-                // for an interface here (the sole/selected compatible
-                // provider under the just-committed graph) must be spawned
-                // the same way startup and profile switches do, or "enable"
-                // silently no-ops until the next restart.
-                let backends_to_spawn = if module_kind != ModuleKind::Frontend && enabled {
-                    self.newly_active_backend_interfaces(&graph, module_id)
-                } else {
-                    Vec::new()
-                };
-                self.commit_installed_module_graph_with_locale(graph, locale);
-                for interface in backends_to_spawn {
-                    self.spawn_newly_enabled_backend_provider(&interface, module_id);
-                }
-                tracing::info!(module_id, enabled, "applied module enabled state live");
-                requests
-            }
-            Err(error) => {
-                let restore_error = rollback.restore().err();
-                self.installed_module_graph = previous_graph;
-                let message = format!(
-                    "failed to apply module {module_id} live: {error}{}",
-                    restore_error
-                        .map(|error| format!("; rollback also failed: {error}"))
-                        .unwrap_or_default()
-                );
-                tracing::warn!(module_id, enabled, "{message}");
-                self.diagnostics.record_lifecycle_error(
-                    "@mesh/settings".to_string(),
-                    "module_enabled_runtime_apply_failed",
-                    message,
-                );
-                VecDeque::new()
-            }
-        }
+        self.begin_legacy_graph_activation(graph, Some(rollback))
     }
 
     /// Interfaces where `module_id` is the graph's active provider but has no
@@ -304,67 +244,6 @@ impl Shell {
                     .is_some_and(|slot| slot.provider_id == module_id)
             })
             .collect()
-    }
-
-    /// Start a backend provider that just became active (via
-    /// `apply_set_module_enabled`) but was not already running. Reuses the
-    /// same staged-activation path as startup (`spawn_backend_candidate`):
-    /// the runtime is spawned immediately and only published as the active
-    /// command handler once it reports `Running` (and, where required, a
-    /// valid initial service snapshot), through the normal
-    /// `handle_backend_lifecycle` -> `complete_backend_runtime_switch` flow.
-    fn spawn_newly_enabled_backend_provider(&mut self, interface: &str, provider_id: &str) {
-        let Some(ctx) = self.backend_respawn.clone() else {
-            tracing::warn!(
-                interface,
-                provider_id,
-                "cannot start newly enabled backend provider: backend runtime is unavailable"
-            );
-            return;
-        };
-        let Some(graph) = self.installed_module_graph.clone() else {
-            return;
-        };
-        let Some(provider) = graph
-            .backend_providers_for_interface(interface)
-            .iter()
-            .find(|provider| provider.module_id == provider_id)
-            .cloned()
-        else {
-            return;
-        };
-        let mut candidate =
-            match crate::shell::backend::launch_candidate_for_provider_with_capabilities(
-                &graph,
-                &self.modules,
-                &self.settings_store,
-                &self.interfaces,
-                &provider,
-                Some(&self.effective_capabilities),
-            ) {
-                Ok(candidate) => candidate,
-                Err(status) => {
-                    self.record_backend_runtime_status(
-                        status.interface.clone(),
-                        status
-                            .provider_id
-                            .clone()
-                            .unwrap_or_else(|| provider_id.to_string()),
-                        BackendRuntimeStatus::from_str(status.status),
-                        status.message.clone(),
-                    );
-                    tracing::warn!(
-                        interface,
-                        provider_id,
-                        "newly enabled backend provider rejected: {}",
-                        status.message
-                    );
-                    return;
-                }
-            };
-        self.apply_shell_runtime_settings(&mut candidate);
-        self.spawn_backend_candidate(&ctx.handle, ctx.tx.clone(), candidate, ctx.eventfd_fd);
-        tracing::info!(interface, provider_id, "starting newly enabled backend provider");
     }
 
     fn apply_set_provider(&mut self, interface: &str, provider_id: &str) {

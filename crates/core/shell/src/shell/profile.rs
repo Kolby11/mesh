@@ -5,8 +5,8 @@ use super::backend::{
 use super::component::{FrontendCatalog, FrontendCatalogHandle, FrontendSurfaceComponent};
 use super::*;
 use mesh_core_module::package::{
-    ComponentPlacement, InstalledModuleGraph, NodeSlotOverride, ProfilePaths, ShellProfile,
-    load_installed_module_graph_for_profile,
+    ComponentPlacement, InstalledModuleGraph, NodeSlotOverride, ProfilePaths, ProfileRootInstance,
+    ShellProfile, load_installed_module_graph_for_profile,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -210,6 +210,8 @@ pub(super) struct PendingProfileSwitch {
     waiting_backends: HashSet<String>,
     candidate_started: HashSet<String>,
     candidate_initial_states: HashMap<String, serde_json::Value>,
+    persist_active_profile: bool,
+    rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
 }
 
 pub(super) struct PendingResourcePreparation {
@@ -219,7 +221,14 @@ pub(super) struct PendingResourcePreparation {
     locale: LocaleEngine,
     settings: Arc<SettingsStore>,
     resource_job: super::discovery::ResourcePreparationJob,
+    /// Legacy graph activation has no durable profile pointer to update.
+    /// Keeping this bit with the pending work makes the same coordinator safe
+    /// for both profile and no-profile graph deltas.
+    persist_active_profile: bool,
+    rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
 }
+
+const LEGACY_ACTIVATION_ID: &str = "@mesh/legacy-graph";
 
 fn candidate_interface_catalog(
     live: &mesh_core_service::InterfaceCatalog,
@@ -306,6 +315,217 @@ fn candidate_capabilities(
 }
 
 impl Shell {
+    /// Route a validated installed-graph replacement through the activation
+    /// coordinator. Profile mode reloads the active composition, while the
+    /// migration-era no-profile mode derives the legacy root set from the
+    /// candidate graph. Both modes prepare resources, frontends, interfaces,
+    /// and backend providers before one commit point.
+    pub(in crate::shell) fn activate_graph_candidate(
+        &mut self,
+        graph: InstalledModuleGraph,
+    ) -> VecDeque<CoreRequest> {
+        if self.profile_transition_pending() {
+            tracing::warn!("graph activation rejected while another activation is pending");
+            return VecDeque::new();
+        }
+        if !self.pending_backend_runtimes.is_empty() {
+            tracing::warn!("graph activation rejected while a provider switch is pending");
+            return VecDeque::new();
+        }
+
+        if let Some(profile_id) = self.active_profile_id.clone() {
+            return self.apply_switch_profile(&profile_id);
+        }
+
+        self.begin_legacy_graph_activation(graph, None)
+    }
+
+    /// Re-read the installed graph and activate it only when its normalized
+    /// graph state changed. Source-only changes remain on the frontend reload
+    /// path; module, provider, contribution, and resource deltas all enter the
+    /// same activation coordinator.
+    pub(in crate::shell) fn reconcile_installed_graph(&mut self) -> VecDeque<CoreRequest> {
+        let candidate = if let Some(profile_id) = self.active_profile_id.clone() {
+            let graph_path = self.installed_module_graph_path();
+            ProfilePaths::from_root_graph(&graph_path)
+                .and_then(|paths| paths.load(&profile_id))
+                .and_then(|profile| load_installed_module_graph_for_profile(&graph_path, &profile))
+        } else {
+            self.load_installed_module_graph_candidate()
+        };
+        let Ok(candidate) = candidate else {
+            tracing::warn!("installed graph change could not be loaded; retaining active graph");
+            return VecDeque::new();
+        };
+        if self
+            .installed_module_graph
+            .as_ref()
+            .is_some_and(|active| active.diff(&candidate).is_empty())
+        {
+            return VecDeque::new();
+        }
+        self.activate_graph_candidate(candidate)
+    }
+
+    pub(in crate::shell) fn begin_legacy_graph_activation(
+        &mut self,
+        graph: InstalledModuleGraph,
+        mut rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
+    ) -> VecDeque<CoreRequest> {
+        if !self.pending_backend_runtimes.is_empty() {
+            if let Some(rollback) = rollback {
+                let _ = rollback.restore();
+            }
+            self.reject_profile_switch(
+                LEGACY_ACTIVATION_ID,
+                "a provider switch is already being prepared".into(),
+            );
+            return VecDeque::new();
+        }
+        let settings = self.settings_store.clone();
+        let locale = match self.prepare_locale_for_graph(&graph) {
+            Ok(locale) => locale,
+            Err(error) => {
+                if let Some(rollback) = rollback.take() {
+                    let _ = rollback.restore();
+                }
+                self.reject_profile_switch(LEGACY_ACTIVATION_ID, error.to_string());
+                return VecDeque::new();
+            }
+        };
+        let resource_job = match self.start_resource_preparation_job(&graph, &settings) {
+            Ok(job) => job,
+            Err(error) => {
+                if let Some(rollback) = rollback {
+                    let _ = rollback.restore();
+                }
+                self.reject_profile_switch(LEGACY_ACTIVATION_ID, error.to_string());
+                return VecDeque::new();
+            }
+        };
+        self.pending_resource_preparation = Some(PendingResourcePreparation {
+            profile_id: LEGACY_ACTIVATION_ID.to_string(),
+            profile: ShellProfile::new(),
+            graph,
+            locale,
+            settings,
+            resource_job,
+            persist_active_profile: false,
+            rollback: rollback.take(),
+        });
+        self.poll_pending_resource_preparation()
+    }
+
+    pub(in crate::shell) fn begin_profile_activation(
+        &mut self,
+        profile_id: &str,
+        rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
+    ) -> VecDeque<CoreRequest> {
+        if !self.pending_backend_runtimes.is_empty() {
+            if let Some(rollback) = rollback {
+                let _ = rollback.restore();
+            }
+            self.reject_profile_switch(
+                profile_id,
+                "a provider switch is already being prepared".into(),
+            );
+            return VecDeque::new();
+        }
+        let graph_path = self.installed_module_graph_path();
+        let paths = match ProfilePaths::from_root_graph(&graph_path) {
+            Ok(paths) => paths,
+            Err(error) => {
+                if let Some(rollback) = rollback {
+                    let _ = rollback.restore();
+                }
+                self.reject_profile_switch(profile_id, error.to_string());
+                return VecDeque::new();
+            }
+        };
+        let profile = match paths.load(profile_id) {
+            Ok(profile) => profile,
+            Err(error) => {
+                if let Some(rollback) = rollback {
+                    let _ = rollback.restore();
+                }
+                self.reject_profile_switch(profile_id, error.to_string());
+                return VecDeque::new();
+            }
+        };
+        let graph = match load_installed_module_graph_for_profile(&graph_path, &profile) {
+            Ok(graph) => graph,
+            Err(error) => {
+                if let Some(rollback) = rollback {
+                    let _ = rollback.restore();
+                }
+                self.reject_profile_switch(profile_id, error.to_string());
+                return VecDeque::new();
+            }
+        };
+        let shared = match SettingsStore::load() {
+            Ok(settings) => settings,
+            Err(error) => {
+                if let Some(rollback) = rollback {
+                    let _ = rollback.restore();
+                }
+                self.reject_profile_switch(profile_id, error.to_string());
+                return VecDeque::new();
+            }
+        };
+        let settings = match super::discovery::effective_profile_settings(shared, Some(&profile)) {
+            Ok(mut settings) => {
+                if let Err(error) =
+                    super::discovery::register_graph_settings_schemas(&mut settings, &graph)
+                {
+                    if let Some(rollback) = rollback {
+                        let _ = rollback.restore();
+                    }
+                    self.reject_profile_switch(profile_id, error.to_string());
+                    return VecDeque::new();
+                }
+                Arc::new(settings)
+            }
+            Err(error) => {
+                if let Some(rollback) = rollback {
+                    let _ = rollback.restore();
+                }
+                self.reject_profile_switch(profile_id, error.to_string());
+                return VecDeque::new();
+            }
+        };
+        let locale = match self.prepare_locale_for_settings(settings.shell(), &graph) {
+            Ok(locale) => locale,
+            Err(error) => {
+                if let Some(rollback) = rollback {
+                    let _ = rollback.restore();
+                }
+                self.reject_profile_switch(profile_id, error.to_string());
+                return VecDeque::new();
+            }
+        };
+        let resource_job = match self.start_resource_preparation_job(&graph, &settings) {
+            Ok(job) => job,
+            Err(error) => {
+                if let Some(rollback) = rollback {
+                    let _ = rollback.restore();
+                }
+                self.reject_profile_switch(profile_id, error.to_string());
+                return VecDeque::new();
+            }
+        };
+        self.pending_resource_preparation = Some(PendingResourcePreparation {
+            profile_id: profile_id.to_string(),
+            profile,
+            graph,
+            locale,
+            settings,
+            resource_job,
+            persist_active_profile: true,
+            rollback,
+        });
+        self.poll_pending_resource_preparation()
+    }
+
     pub(in crate::shell) fn profile_transition_pending(&self) -> bool {
         self.pending_resource_preparation.is_some() || self.pending_profile_switch.is_some()
     }
@@ -646,6 +866,9 @@ impl Shell {
         }
         if let Some(pending) = self.pending_resource_preparation.take() {
             pending.resource_job.cancel();
+            if let Some(rollback) = pending.rollback {
+                let _ = rollback.restore();
+            }
             self.reject_profile_switch(
                 &pending.profile_id,
                 format!("profile switch was superseded by '{profile_id}'"),
@@ -658,84 +881,7 @@ impl Shell {
             );
             return VecDeque::new();
         }
-
-        let graph_path = self.installed_module_graph_path();
-        let paths = match ProfilePaths::from_root_graph(&graph_path) {
-            Ok(paths) => paths,
-            Err(error) => {
-                self.reject_profile_switch(profile_id, error.to_string());
-                return VecDeque::new();
-            }
-        };
-        let profile = match paths.load(profile_id) {
-            Ok(profile) => profile,
-            Err(error) => {
-                self.reject_profile_switch(profile_id, error.to_string());
-                return VecDeque::new();
-            }
-        };
-        let graph = match load_installed_module_graph_for_profile(&graph_path, &profile) {
-            Ok(graph) => graph,
-            Err(error) => {
-                self.reject_profile_switch(profile_id, error.to_string());
-                return VecDeque::new();
-            }
-        };
-        let shared = match SettingsStore::load() {
-            Ok(settings) => settings,
-            Err(error) => {
-                self.reject_profile_switch(profile_id, error.to_string());
-                return VecDeque::new();
-            }
-        };
-        let settings = match super::discovery::effective_profile_settings(shared, Some(&profile)) {
-            Ok(mut settings) => {
-                if let Err(error) =
-                    super::discovery::register_graph_settings_schemas(&mut settings, &graph)
-                {
-                    self.reject_profile_switch(
-                        profile_id,
-                        format!("failed to register candidate settings schemas: {error}"),
-                    );
-                    return VecDeque::new();
-                }
-                Arc::new(settings)
-            }
-            Err(error) => {
-                self.reject_profile_switch(profile_id, error.to_string());
-                return VecDeque::new();
-            }
-        };
-
-        let locale = match self.prepare_locale_for_settings(settings.shell(), &graph) {
-            Ok(locale) => locale,
-            Err(error) => {
-                self.reject_profile_switch(
-                    profile_id,
-                    format!("candidate locale catalogs are invalid: {error}"),
-                );
-                return VecDeque::new();
-            }
-        };
-        let resource_job = match self.start_resource_preparation_job(&graph, &settings) {
-            Ok(job) => job,
-            Err(error) => {
-                self.reject_profile_switch(
-                    profile_id,
-                    format!("candidate resources are invalid: {error}"),
-                );
-                return VecDeque::new();
-            }
-        };
-        self.pending_resource_preparation = Some(PendingResourcePreparation {
-            profile_id: profile_id.to_string(),
-            profile,
-            graph,
-            locale,
-            settings,
-            resource_job,
-        });
-        self.poll_pending_resource_preparation()
+        self.begin_profile_activation(profile_id, None)
     }
 
     pub(in crate::shell) fn poll_pending_resource_preparation(&mut self) -> VecDeque<CoreRequest> {
@@ -749,6 +895,8 @@ impl Shell {
             locale,
             settings,
             mut resource_job,
+            persist_active_profile,
+            rollback,
         } = pending;
         let Some(result) = resource_job.try_wait() else {
             self.pending_resource_preparation = Some(PendingResourcePreparation {
@@ -758,6 +906,8 @@ impl Shell {
                 locale,
                 settings,
                 resource_job,
+                persist_active_profile,
+                rollback,
             });
             return VecDeque::new();
         };
@@ -769,11 +919,21 @@ impl Shell {
                     .is_some_and(mesh_core_resources::ResourcePreparationLease::is_current) =>
             {
                 self.continue_profile_switch(
-                    profile_id, profile, graph, locale, settings, resources,
+                    profile_id,
+                    profile,
+                    graph,
+                    locale,
+                    settings,
+                    resources,
+                    persist_active_profile,
+                    rollback,
                 )
             }
             Ok(_) => {
                 resource_job.retire();
+                if let Some(rollback) = rollback {
+                    let _ = rollback.restore();
+                }
                 self.reject_profile_switch(
                     &profile_id,
                     "candidate resources were superseded".into(),
@@ -782,6 +942,9 @@ impl Shell {
             }
             Err(error) => {
                 resource_job.retire();
+                if let Some(rollback) = rollback {
+                    let _ = rollback.restore();
+                }
                 self.reject_profile_switch(
                     &profile_id,
                     format!("candidate resources are invalid: {error}"),
@@ -799,13 +962,23 @@ impl Shell {
         locale: LocaleEngine,
         settings: Arc<SettingsStore>,
         resources: super::discovery::PreparedResourceSnapshot,
+        persist_active_profile: bool,
+        mut rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
     ) -> VecDeque<CoreRequest> {
+        macro_rules! reject_candidate {
+            ($message:expr) => {{
+                if let Some(rollback) = rollback.take() {
+                    let _ = rollback.restore();
+                }
+                self.reject_profile_switch(&profile_id, $message.into());
+                return VecDeque::new();
+            }};
+        }
         let interface_catalog =
             match candidate_interface_catalog(&self.interfaces.resolved_catalog(), &graph) {
                 Ok(catalog) => Arc::new(catalog),
                 Err(error) => {
-                    self.reject_profile_switch(&profile_id, error.to_string());
-                    return VecDeque::new();
+                    reject_candidate!(error.to_string());
                 }
             };
         let candidate_interfaces = InterfaceRegistry::from_catalog((*interface_catalog).clone());
@@ -813,8 +986,7 @@ impl Shell {
             match candidate_capabilities(&self.capability_policy, &graph, &self.modules) {
                 Ok(capabilities) => capabilities,
                 Err(error) => {
-                    self.reject_profile_switch(&profile_id, error.to_string());
-                    return VecDeque::new();
+                    reject_candidate!(error.to_string());
                 }
             };
         let resolved_shell_settings =
@@ -827,8 +999,7 @@ impl Shell {
         ) {
             Ok(catalog) => catalog,
             Err(error) => {
-                self.reject_profile_switch(&profile_id, error.to_string());
-                return VecDeque::new();
+                reject_candidate!(error.to_string());
             }
         };
         let temporary_catalog = FrontendCatalogHandle::from(catalog.clone());
@@ -837,6 +1008,21 @@ impl Shell {
             .into_iter()
             .map(|entry| (entry.compiled.manifest.package.id.clone(), entry))
             .collect::<HashMap<_, _>>();
+        let mut profile = profile;
+        if !persist_active_profile {
+            for entry in catalog.top_level_surfaces() {
+                let module_id = entry.compiled.manifest.package.id.clone();
+                profile.roots.insert(
+                    entry.compiled.surface_id().to_string(),
+                    ProfileRootInstance {
+                        module: module_id,
+                        entrypoint: "main".into(),
+                        active: true,
+                        surface: None,
+                    },
+                );
+            }
+        }
         let desired_surfaces = profile
             .roots
             .iter()
@@ -862,11 +1048,9 @@ impl Shell {
                 continue;
             }
             let Some(entry) = entries.get(&root.module) else {
-                self.reject_profile_switch(
-                    &profile_id,
-                    format!("profile root {instance_id} has no mountable frontend entrypoint"),
-                );
-                return VecDeque::new();
+                reject_candidate!(format!(
+                    "profile root {instance_id} has no mountable frontend entrypoint"
+                ));
             };
             let mut component = FrontendSurfaceComponent::new(
                 entry.compiled.clone(),
@@ -888,13 +1072,11 @@ impl Shell {
             }) {
                 Ok(requests) => VecDeque::from(requests),
                 Err(error) => {
-                    self.reject_profile_switch(&profile_id, error.to_string());
-                    return VecDeque::new();
+                    reject_candidate!(error.to_string());
                 }
             };
             if let Err(error) = component.locale_changed(&locale) {
-                self.reject_profile_switch(&profile_id, error.to_string());
-                return VecDeque::new();
+                reject_candidate!(error.to_string());
             }
             for state in self.latest_service_state.values() {
                 let event = ServiceEvent::Updated {
@@ -906,8 +1088,7 @@ impl Shell {
                     match component.handle_service_event_with_generation(&event, state.generation) {
                         Ok(next) => requests.extend(next),
                         Err(error) => {
-                            self.reject_profile_switch(&profile_id, error.to_string());
-                            return VecDeque::new();
+                            reject_candidate!(error.to_string());
                         }
                     }
                 }
@@ -931,8 +1112,7 @@ impl Shell {
                 "optional_backend_unavailable" | "optional_backend_inactive"
             )
         }) {
-            self.reject_profile_switch(&profile_id, status.message.clone());
-            return VecDeque::new();
+            reject_candidate!(status.message.clone());
         }
         let theme_changed = self.settings.theme != settings.shell().theme
             || self.settings.fonts != settings.shell().fonts
@@ -945,11 +1125,7 @@ impl Shell {
                 match prepare_theme_for_graph(settings.shell(), &graph) {
                     Ok(prepared) => Some(prepared),
                     Err(error) => {
-                        self.reject_profile_switch(
-                            &profile_id,
-                            format!("candidate theme is invalid: {error}"),
-                        );
-                        return VecDeque::new();
+                        reject_candidate!(format!("candidate theme is invalid: {error}"));
                     }
                 }
             }
@@ -1042,15 +1218,14 @@ impl Shell {
             waiting_backends: HashSet::new(),
             candidate_started: HashSet::new(),
             candidate_initial_states: HashMap::new(),
+            persist_active_profile,
+            rollback: rollback.take(),
         };
         if !changed.is_empty() {
             let Some(ctx) = self.backend_respawn.clone() else {
-                self.reject_profile_switch(
-                    &profile_id,
+                reject_candidate!(
                     "backend runtime is unavailable while candidate providers need preparation"
-                        .into(),
                 );
-                return VecDeque::new();
             };
             for candidate in changed {
                 let interface = candidate.interface.clone();
@@ -1192,18 +1367,23 @@ impl Shell {
                 return VecDeque::new();
             }
         };
-        // Capture the pointer this candidate is about to overwrite so a
-        // failure in a later, still-fallible commit step (resource snapshot)
-        // can restore it instead of leaving the durable pointer advanced to
-        // a candidate the running shell aborted and never actually adopted.
-        let previous_active = match paths.active_profile_id() {
-            Ok(previous) => previous,
-            Err(error) => {
-                self.abort_profile_candidate(pending, error.to_string());
-                return VecDeque::new();
+        // Capture and update the durable active-profile pointer only for a
+        // profile activation. Legacy graph activation uses this same commit
+        // boundary but has no profile pointer to mutate.
+        let previous_active = if pending.persist_active_profile {
+            match paths.active_profile_id() {
+                Ok(previous) => previous,
+                Err(error) => {
+                    self.abort_profile_candidate(pending, error.to_string());
+                    return VecDeque::new();
+                }
             }
+        } else {
+            None
         };
-        if let Err(error) = paths.set_active(&plan.profile_id) {
+        if pending.persist_active_profile
+            && let Err(error) = paths.set_active(&plan.profile_id)
+        {
             self.abort_profile_candidate(pending, error.to_string());
             return VecDeque::new();
         }
@@ -1213,7 +1393,9 @@ impl Shell {
             plan.settings.shell().icons.default_pack.clone(),
             false,
         ) {
-            if let Err(restore_error) = paths.restore_active(previous_active.as_deref()) {
+            if pending.persist_active_profile
+                && let Err(restore_error) = paths.restore_active(previous_active.as_deref())
+            {
                 tracing::error!(
                     "failed to restore previous active-profile pointer after an aborted \
                      profile switch; the durable pointer may now name a profile the running \
@@ -1376,7 +1558,9 @@ impl Shell {
         }
 
         self.installed_module_graph = Some(plan.graph.clone());
-        self.active_profile_id = Some(plan.profile_id.clone());
+        if pending.persist_active_profile {
+            self.active_profile_id = Some(plan.profile_id.clone());
+        }
         for (interface, provider_id, payload) in prepared_states {
             let event = ServiceEvent::Updated {
                 service: interface,
@@ -1447,6 +1631,11 @@ impl Shell {
         }
         for slot in pending.candidate_backends.into_values() {
             slot.task.abort();
+        }
+        if let Some(rollback) = pending.rollback {
+            if let Err(error) = rollback.restore() {
+                tracing::error!("failed to restore graph activation decision: {error}");
+            }
         }
         self.reject_profile_switch(&pending.plan.profile_id, message);
     }
