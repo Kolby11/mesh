@@ -1152,6 +1152,15 @@ impl Shell {
             self.theme_watch.revision = self.theme.active_snapshot().revision;
             if let Err(error) = self.mark_components_theme_changed() {
                 tracing::warn!("profile theme refresh failed after commit: {error}");
+                self.diagnostics.record_lifecycle_error(
+                    "@mesh/shell",
+                    "profile_post_commit_theme_refresh_failed",
+                    format!(
+                        "profile '{}' committed but a component rejected the new theme; the shell \
+                         is now on the new generation with stale component theme state: {error}",
+                        pending.profile_id
+                    ),
+                );
             }
             if let Ok(next) = self.sync_theme_service_state() {
                 requests.extend(next);
@@ -1165,6 +1174,15 @@ impl Shell {
         {
             if let Err(error) = self.mark_components_locale_changed() {
                 tracing::warn!("profile locale refresh failed after commit: {error}");
+                self.diagnostics.record_lifecycle_error(
+                    "@mesh/shell",
+                    "profile_post_commit_locale_refresh_failed",
+                    format!(
+                        "profile '{}' committed but a component rejected the new locale; the shell \
+                         is now on the new generation with stale component locale state: {error}",
+                        pending.profile_id
+                    ),
+                );
             }
             if let Ok(next) = self.sync_locale_service_state() {
                 requests.extend(next);
@@ -1172,6 +1190,15 @@ impl Shell {
         }
         if let Err(error) = self.apply_settings_to_components() {
             tracing::warn!("profile settings refresh failed after commit: {error}");
+            self.diagnostics.record_lifecycle_error(
+                "@mesh/shell",
+                "profile_post_commit_settings_refresh_failed",
+                format!(
+                    "profile '{}' committed but applying its settings to a component failed; the \
+                     shell is now on the new generation with stale component settings: {error}",
+                    pending.profile_id
+                ),
+            );
         }
 
         self.installed_module_graph = Some(pending.graph);

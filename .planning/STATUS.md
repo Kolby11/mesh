@@ -4,6 +4,17 @@
 
 ## Now
 
+Section 15 finding #1 (profile activation atomicity), two more standalone
+gaps closed. `ShellProfile::validate()` now rejects any profile root whose
+`entrypoint` is not `"main"` — the field was read nowhere, so a non-default
+value silently mounted `main`; honoring it is a multi-entrypoint catalog
+feature, so per the audit it is rejected until then. And the three
+post-commit refresh failures in `commit_pending_profile_switch`
+(theme/locale/settings) now record `profile_post_commit_*_refresh_failed`
+lifecycle diagnostics instead of only `tracing::warn!`. The immutable
+`ActivationPlan`/`ActiveSnapshot` redesign (Section 15 item 13) is still
+open. See [`.planning/log/2026-08.md`](log/2026-08.md).
+
 Closed the "Service contracts (open)" backlog item: graph-supplied
 interface contracts now go through `try_register_contract` and are logged +
 diagnosed on compile failure instead of silently dropped from the catalog.

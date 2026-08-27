@@ -190,6 +190,15 @@ impl ShellProfile {
                     "profile root {instance_id} has an empty entrypoint"
                 )));
             }
+            if instance.entrypoint != "main" {
+                return Err(ModuleManifestError::Validation(format!(
+                    "profile root {instance_id} requests entrypoint '{}', but a module exposes only \
+                     its primary component and multiple entrypoints per module are not implemented; \
+                     the shell would silently mount 'main' instead, so this value is rejected rather \
+                     than honored",
+                    instance.entrypoint
+                )));
+            }
         }
         if let Some(from) = &self.from {
             validate_module_ids([&from.module].into_iter(), "from")?;
@@ -902,6 +911,23 @@ mod tests {
         let root = &profile.roots["@me/panel#top"];
         assert_eq!(root.module, "@me/panel");
         assert!(!root.active);
+    }
+
+    #[test]
+    fn profile_root_with_a_non_main_entrypoint_is_rejected_rather_than_silently_ignored() {
+        let error = ShellProfile::from_json_str(
+            r#"{"schemaVersion":3,"roots":{"@me/panel#top":{"module":"@me/panel","entrypoint":"sidebar"}}}"#,
+        )
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("entrypoint 'sidebar'"), "{message}");
+        assert!(message.contains("not implemented"), "{message}");
+
+        // The default entrypoint still loads.
+        ShellProfile::from_json_str(
+            r#"{"schemaVersion":3,"roots":{"@me/panel#top":{"module":"@me/panel","entrypoint":"main"}}}"#,
+        )
+        .unwrap();
     }
 
     #[test]
