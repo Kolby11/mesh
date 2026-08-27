@@ -5,16 +5,58 @@ use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 use tokio::runtime::Runtime;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
+use tokio::task::{JoinHandle, JoinSet};
 
 const MAX_IPC_COMMAND_BYTES: usize = 4096;
+const IPC_SHUTDOWN_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
+
+#[derive(Debug)]
+pub(super) struct IpcServerHandle {
+    shutdown: Option<oneshot::Sender<()>>,
+    join: Option<JoinHandle<()>>,
+}
+
+impl IpcServerHandle {
+    pub(super) async fn shutdown(mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        let Some(mut join) = self.join.take() else {
+            return;
+        };
+        tokio::select! {
+            result = &mut join => {
+                if let Err(error) = result {
+                    tracing::debug!("ipc server ended during shutdown: {error}");
+                }
+            }
+            _ = tokio::time::sleep(IPC_SHUTDOWN_DEADLINE) => {
+                tracing::warn!("ipc server exceeded shutdown deadline; aborting");
+                join.abort();
+                let _ = join.await;
+            }
+        }
+    }
+}
+
+impl Drop for IpcServerHandle {
+    fn drop(&mut self) {
+        if let Some(join) = self.join.as_ref() {
+            join.abort();
+        }
+        // Dropping the server's JoinSet also aborts all in-flight clients.
+        // The shell keeps the wake fd alive until this handle is gone.
+        self.shutdown.take();
+    }
+}
 
 pub(super) fn spawn_ipc_server(
     runtime: &Runtime,
     socket_path: PathBuf,
     tx: mpsc::UnboundedSender<ShellMessage>,
     eventfd_fd: std::os::unix::io::RawFd,
-) -> Result<(), std::io::Error> {
+) -> Result<IpcServerHandle, std::io::Error> {
     if let Some(parent) = socket_path.parent() {
         prepare_ipc_parent(parent)?;
     }
@@ -38,26 +80,40 @@ pub(super) fn spawn_ipc_server(
     std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))?;
     tracing::info!("listening for ipc commands on {}", socket_path.display());
 
-    runtime.spawn(async move {
+    let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+    let join = runtime.spawn(async move {
+        let mut clients = JoinSet::new();
         loop {
-            let (stream, _) = match listener.accept().await {
-                Ok(stream) => stream,
-                Err(err) => {
-                    tracing::warn!("ipc accept failed: {err}");
-                    continue;
+            tokio::select! {
+                _ = &mut shutdown_rx => {
+                    clients.abort_all();
+                    while clients.join_next().await.is_some() {}
+                    break;
                 }
-            };
+                accepted = listener.accept() => {
+                    let (stream, _) = match accepted {
+                        Ok(stream) => stream,
+                        Err(err) => {
+                            tracing::warn!("ipc accept failed: {err}");
+                            continue;
+                        }
+                    };
 
-            let tx = tx.clone();
-            tokio::spawn(async move {
-                if let Err(err) = handle_ipc_client(stream, tx, eventfd_fd).await {
-                    tracing::warn!("ipc client failed: {err}");
+                    let tx = tx.clone();
+                    clients.spawn(async move {
+                        if let Err(err) = handle_ipc_client(stream, tx, eventfd_fd).await {
+                            tracing::warn!("ipc client failed: {err}");
+                        }
+                    });
                 }
-            });
+            }
         }
     });
 
-    Ok(())
+    Ok(IpcServerHandle {
+        shutdown: Some(shutdown_tx),
+        join: Some(join),
+    })
 }
 
 fn prepare_ipc_parent(parent: &std::path::Path) -> Result<(), std::io::Error> {

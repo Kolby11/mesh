@@ -358,6 +358,7 @@ pub(super) fn backend_runtime_slot(
             generation: 0,
             command_tx,
             task: task.abort_handle(),
+            tasks: None,
         },
         command_rx,
     )

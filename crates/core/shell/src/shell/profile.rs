@@ -206,7 +206,7 @@ pub(super) struct RuntimeGeneration {
 pub(super) struct PendingProfileSwitch {
     plan: Arc<ActivationPlan>,
     prepared_frontends: Vec<PreparedProfileFrontend>,
-    candidate_backends: HashMap<String, BackendRuntimeSlot>,
+    pub(in crate::shell) candidate_backends: HashMap<String, BackendRuntimeSlot>,
     waiting_backends: HashSet<String>,
     candidate_started: HashSet<String>,
     candidate_initial_states: HashMap<String, serde_json::Value>,
@@ -220,12 +220,12 @@ pub(super) struct PendingResourcePreparation {
     graph: InstalledModuleGraph,
     locale: LocaleEngine,
     settings: Arc<SettingsStore>,
-    resource_job: super::discovery::ResourcePreparationJob,
+    pub(in crate::shell) resource_job: super::discovery::ResourcePreparationJob,
     /// Legacy graph activation has no durable profile pointer to update.
     /// Keeping this bit with the pending work makes the same coordinator safe
     /// for both profile and no-profile graph deltas.
     persist_active_profile: bool,
-    rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
+    pub(in crate::shell) rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
 }
 
 const LEGACY_ACTIVATION_ID: &str = "@mesh/legacy-graph";
@@ -1661,7 +1661,7 @@ impl Shell {
     fn remove_profile_component(&mut self, index: usize) {
         let surface_id = self.components[index].surface_id.clone();
         let module_id = self.components[index].component.id().to_string();
-        if let Err(error) = self.components[index].component.unmount() {
+        if let Err(error) = self.components[index].unmount() {
             tracing::warn!(
                 module_id,
                 error = %error,
@@ -1694,7 +1694,7 @@ impl Shell {
             lease.retire();
         }
         for slot in pending.candidate_backends.into_values() {
-            slot.task.abort();
+            self.retire_backend_runtime_slot(slot);
         }
         if let Some(rollback) = pending.rollback {
             if let Err(error) = rollback.restore() {

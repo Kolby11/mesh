@@ -27,12 +27,12 @@ use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
-use tokio::task::AbortHandle;
+use tokio::task::{AbortHandle, JoinHandle};
 
 mod backend;
 mod component;
@@ -461,7 +461,8 @@ pub struct Shell {
     surfaces: HashMap<SurfaceId, StubSurface>,
     clipboard: Box<dyn ClipboardWriter>,
     presentation_engine: PresentationEngine,
-    eventfd_fd: Option<std::os::unix::io::OwnedFd>,
+    ipc_server: Option<ipc::IpcServerHandle>,
+    file_watcher: Option<file_watch::FileWatcherHandle>,
     theme_watch: ThemeWatchState,
     settings_watch: SettingsWatchState,
     next_theme_reload_check: std::time::Instant,
@@ -495,6 +496,10 @@ pub struct Shell {
     backend_runtime_statuses: BackendRuntimeStatusMap,
     backend_supervision: HashMap<String, backend::BackendSupervisionState>,
     backend_respawn: Option<backend::BackendRespawnContext>,
+    retiring_backend_runtimes: Vec<BackendRuntimeTasks>,
+    backend_restart_tasks: Vec<AbortHandle>,
+    shutdown_started: bool,
+    shutdown_complete: bool,
     latest_service_state: HashMap<String, LatestServiceState>,
     /// Last committed provider health event, replayed when a consumer mounts
     /// after a graph/runtime transition.
@@ -511,6 +516,28 @@ pub struct Shell {
     pending_service_call_routes: HashMap<u64, ServiceCallRoute>,
     pending_popover_hides: HashMap<SurfaceId, std::time::Instant>,
     profiling: runtime::profiling::ProfilingRuntimeState,
+    /// Kept after every worker handle so raw-fd users are stopped before the
+    /// wake fd is finally closed, including the defensive `Drop` path.
+    eventfd_fd: Option<std::os::unix::io::OwnedFd>,
+}
+
+impl Drop for Shell {
+    fn drop(&mut self) {
+        self.unmount_components();
+        self.backend_respawn = None;
+        for task in self.backend_restart_tasks.drain(..) {
+            task.abort();
+        }
+        self.service_handlers.clear();
+        self.backend_runtimes.clear();
+        self.pending_backend_runtimes.clear();
+        self.pending_profile_switch = None;
+        self.retiring_backend_runtimes.clear();
+        self.ipc_server.take();
+        if let Some(file_watcher) = self.file_watcher.take() {
+            file_watcher.stop_and_join();
+        }
+    }
 }
 
 impl Shell {
@@ -552,6 +579,48 @@ struct BackendRuntimeSlot {
     generation: u64,
     command_tx: mpsc::Sender<ServiceCommandMsg>,
     task: AbortHandle,
+    tasks: Option<BackendRuntimeTasks>,
+}
+
+/// Retained handles for the service and event bridge tasks belonging to one
+/// backend. Dropping a command sender requests the authored stop hook; these
+/// handles keep the shell responsible for joining both tasks afterwards.
+#[derive(Debug, Clone)]
+struct BackendRuntimeTasks {
+    service: Arc<Mutex<Option<JoinHandle<()>>>>,
+    bridge: Arc<Mutex<Option<JoinHandle<()>>>>,
+}
+
+impl BackendRuntimeTasks {
+    fn new(service: JoinHandle<()>, bridge: JoinHandle<()>) -> Self {
+        Self {
+            service: Arc::new(Mutex::new(Some(service))),
+            bridge: Arc::new(Mutex::new(Some(bridge))),
+        }
+    }
+
+    fn abort(&self) {
+        if let Some(task) = self.service.lock().unwrap().as_ref() {
+            task.abort();
+        }
+        if let Some(task) = self.bridge.lock().unwrap().as_ref() {
+            task.abort();
+        }
+    }
+
+    fn take_service(&self) -> Option<JoinHandle<()>> {
+        self.service.lock().unwrap().take()
+    }
+
+    fn take_bridge(&self) -> Option<JoinHandle<()>> {
+        self.bridge.lock().unwrap().take()
+    }
+}
+
+impl Drop for BackendRuntimeTasks {
+    fn drop(&mut self) {
+        self.abort();
+    }
 }
 
 #[derive(Debug, Clone)]

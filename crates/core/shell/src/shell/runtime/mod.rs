@@ -216,6 +216,9 @@ impl Shell {
     }
 
     pub fn run(&mut self) -> Result<(), ShellRunError> {
+        if self.shutdown_complete {
+            return Ok(());
+        }
         self.discover_modules();
         if let Some(graph) = self.installed_module_graph.as_ref() {
             for descriptor in graph.theme_catalog().iter() {
@@ -275,8 +278,9 @@ impl Shell {
         let eventfd_raw = eventfd.as_raw_fd();
         self.eventfd_fd = Some(eventfd);
 
-        self.file_watcher_active =
+        self.file_watcher =
             file_watch::spawn_file_watcher(self.file_watch_paths(), tx.clone(), eventfd_raw);
+        self.file_watcher_active = self.file_watcher.is_some();
         self.backend_respawn = Some(backend::BackendRespawnContext {
             handle: runtime.handle().clone(),
             tx: tx.clone(),
@@ -284,112 +288,180 @@ impl Shell {
         });
         self.spawn_backend_modules(runtime.handle(), tx.clone(), eventfd_raw);
         let ipc_socket_path = default_ipc_socket_path();
-        spawn_ipc_server(&runtime, ipc_socket_path.clone(), tx, eventfd_raw).map_err(|source| {
-            ShellRunError::IpcInit {
-                path: ipc_socket_path.clone(),
-                source,
-            }
-        })?;
+        let run_result = (|| -> Result<(), ShellRunError> {
+            self.ipc_server = Some(
+                spawn_ipc_server(&runtime, ipc_socket_path.clone(), tx, eventfd_raw).map_err(
+                    |source| ShellRunError::IpcInit {
+                        path: ipc_socket_path.clone(),
+                        source,
+                    },
+                )?,
+            );
 
-        let mut pending = VecDeque::new();
-        pending.extend(self.mount_components()?);
-        pending.extend(self.replay_cached_service_events()?);
-        pending.extend(self.sync_theme_service_state()?);
-        pending.extend(self.mark_components_locale_changed()?);
-        pending.extend(self.sync_locale_service_state()?);
-        pending.extend(self.broadcast_core_event(CoreEvent::Started)?);
-        if let Some(request) = shell_sound_request(SoundKind::Startup, &self.settings.sounds) {
-            pending.push_back(request);
-        }
-
-        tracing::info!(
-            "MESH shell core is running with {} frontend component(s)",
-            self.components.len()
-        );
-
-        while !self.core.shutting_down {
-            pending.extend(self.reload_theme_if_changed()?);
-            pending.extend(self.reload_locale_if_settings_changed()?);
-            self.reload_frontend_components_if_changed()?;
-            self.dispatch_wayland()?;
-
-            let mut shell_messages = CoalescedShellMessages::default();
-            let mut drained_shell_message_count = 0;
-            for _ in 0..MAX_SHELL_MESSAGE_DRAIN_PER_FRAME {
-                let Ok(message) = rx.try_recv() else {
-                    break;
-                };
-                drained_shell_message_count += 1;
-                shell_messages.push(message);
-            }
-            let shell_message_backlog_likely =
-                drained_shell_message_count == MAX_SHELL_MESSAGE_DRAIN_PER_FRAME;
-            if drained_shell_message_count > 0 {
-                self.presented_last_frame = true;
-            }
-            for message in shell_messages.into_vec() {
-                self.handle_shell_message(&mut pending, message)?;
+            let mut pending = VecDeque::new();
+            pending.extend(self.mount_components()?);
+            pending.extend(self.replay_cached_service_events()?);
+            pending.extend(self.sync_theme_service_state()?);
+            pending.extend(self.mark_components_locale_changed()?);
+            pending.extend(self.sync_locale_service_state()?);
+            pending.extend(self.broadcast_core_event(CoreEvent::Started)?);
+            if let Some(request) = shell_sound_request(SoundKind::Startup, &self.settings.sounds) {
+                pending.push_back(request);
             }
 
-            pending.extend(self.tick_components()?);
-            pending.extend(std::mem::take(&mut self.deferred_requests));
-            pending.extend(self.complete_due_surface_transitions()?);
-            if !pending.is_empty() {
-                self.presented_last_frame = true;
-            }
-            self.drain_requests(&mut pending)?;
-            pending.extend(self.poll_pending_resource_preparation());
-            self.drain_requests(&mut pending)?;
-            self.flush_throttled_commands();
-            self.render_components()?;
-            self.presentation_engine
-                .finish_frame()
-                .map_err(ShellRunError::Presentation)?;
-            self.flush_wayland()?;
+            tracing::info!(
+                "MESH shell core is running with {} frontend component(s)",
+                self.components.len()
+            );
 
-            let deadline = self.next_runtime_sleep(shell_message_backlog_likely);
-            if self.presentation_engine.supports_blocking_dispatch() {
-                let wait_started = self.profiling_enabled().then(std::time::Instant::now);
-                let eventfd_borrowed = self
-                    .eventfd_fd
-                    .as_ref()
-                    .expect("eventfd must be created before shell loop")
-                    .as_fd();
-                let result = self
-                    .presentation_engine
-                    .wait_for_events(deadline, eventfd_borrowed)
-                    .map_err(ShellRunError::Presentation)?;
-                if let Some(started) = wait_started {
-                    self.record_shell_profiling_stage(
-                        mesh_core_debug::ProfilingStage::SchedulerIdle,
-                        started.elapsed(),
-                        Some(result.reason.as_str()),
-                    );
+            while !self.core.shutting_down {
+                pending.extend(self.reload_theme_if_changed()?);
+                pending.extend(self.reload_locale_if_settings_changed()?);
+                self.reload_frontend_components_if_changed()?;
+                self.dispatch_wayland()?;
+
+                let mut shell_messages = CoalescedShellMessages::default();
+                let mut drained_shell_message_count = 0;
+                for _ in 0..MAX_SHELL_MESSAGE_DRAIN_PER_FRAME {
+                    let Ok(message) = rx.try_recv() else {
+                        break;
+                    };
+                    drained_shell_message_count += 1;
+                    shell_messages.push(message);
                 }
-            } else {
-                let sleep_for = if deadline.is_zero() {
-                    DEV_WINDOW_POLL_SLEEP
-                } else if self.presentation_engine.needs_polling_dispatch() {
-                    deadline.min(DEV_WINDOW_POLL_SLEEP)
+                let shell_message_backlog_likely =
+                    drained_shell_message_count == MAX_SHELL_MESSAGE_DRAIN_PER_FRAME;
+                if drained_shell_message_count > 0 {
+                    self.presented_last_frame = true;
+                }
+                for message in shell_messages.into_vec() {
+                    self.handle_shell_message(&mut pending, message)?;
+                }
+
+                pending.extend(self.tick_components()?);
+                pending.extend(std::mem::take(&mut self.deferred_requests));
+                pending.extend(self.complete_due_surface_transitions()?);
+                if !pending.is_empty() {
+                    self.presented_last_frame = true;
+                }
+                self.drain_requests(&mut pending)?;
+                pending.extend(self.poll_pending_resource_preparation());
+                self.drain_requests(&mut pending)?;
+                self.flush_throttled_commands();
+                self.render_components()?;
+                self.presentation_engine
+                    .finish_frame()
+                    .map_err(ShellRunError::Presentation)?;
+                self.flush_wayland()?;
+
+                let deadline = self.next_runtime_sleep(shell_message_backlog_likely);
+                if self.presentation_engine.supports_blocking_dispatch() {
+                    let wait_started = self.profiling_enabled().then(std::time::Instant::now);
+                    let eventfd_borrowed = self
+                        .eventfd_fd
+                        .as_ref()
+                        .expect("eventfd must be created before shell loop")
+                        .as_fd();
+                    let result = self
+                        .presentation_engine
+                        .wait_for_events(deadline, eventfd_borrowed)
+                        .map_err(ShellRunError::Presentation)?;
+                    if let Some(started) = wait_started {
+                        self.record_shell_profiling_stage(
+                            mesh_core_debug::ProfilingStage::SchedulerIdle,
+                            started.elapsed(),
+                            Some(result.reason.as_str()),
+                        );
+                    }
                 } else {
-                    deadline
-                };
-                let eventfd_borrowed = self
-                    .eventfd_fd
-                    .as_ref()
-                    .expect("eventfd must be created before shell loop")
-                    .as_fd();
-                wait_for_eventfd(sleep_for, eventfd_borrowed);
+                    let sleep_for = if deadline.is_zero() {
+                        DEV_WINDOW_POLL_SLEEP
+                    } else if self.presentation_engine.needs_polling_dispatch() {
+                        deadline.min(DEV_WINDOW_POLL_SLEEP)
+                    } else {
+                        deadline
+                    };
+                    let eventfd_borrowed = self
+                        .eventfd_fd
+                        .as_ref()
+                        .expect("eventfd must be created before shell loop")
+                        .as_fd();
+                    wait_for_eventfd(sleep_for, eventfd_borrowed);
+                }
             }
+            Ok(())
+        })();
+
+        let shutdown_result = self.shutdown_runtime(&runtime, &ipc_socket_path);
+        match (run_result, shutdown_result) {
+            (Err(error), _) => Err(error),
+            (Ok(()), Err(error)) => Err(error),
+            (Ok(()), Ok(())) => Ok(()),
+        }
+    }
+
+    /// Execute the one teardown path for normal shutdown and every setup or
+    /// event-loop error. Each phase is safe to repeat, and later phases still
+    /// run after an earlier phase reports an error.
+    fn shutdown_runtime(
+        &mut self,
+        runtime: &Runtime,
+        ipc_socket_path: &std::path::Path,
+    ) -> Result<(), ShellRunError> {
+        if self.shutdown_complete {
+            return Ok(());
+        }
+        self.shutdown_started = true;
+        self.core.shutting_down = true;
+        self.backend_respawn = None;
+        for task in self.backend_restart_tasks.drain(..) {
+            task.abort();
+        }
+        for state in self.backend_supervision.values_mut() {
+            state.invalidate_pending_restart();
         }
 
-        let mut shutdown_requests = self.broadcast_core_event(CoreEvent::ShuttingDown)?;
-        self.drain_requests(&mut shutdown_requests)?;
+        if let Some(ipc_server) = self.ipc_server.take() {
+            runtime.block_on(ipc_server.shutdown());
+        }
+        if let Some(file_watcher) = self.file_watcher.take() {
+            file_watcher.stop_and_join();
+        }
+        self.file_watcher_active = false;
+
+        let mut first_error = None;
+        let mut shutdown_requests = match self.broadcast_core_event(CoreEvent::ShuttingDown) {
+            Ok(requests) => requests,
+            Err(error) => {
+                first_error = Some(error);
+                VecDeque::new()
+            }
+        };
+        if let Err(error) = self.drain_requests(&mut shutdown_requests) {
+            first_error.get_or_insert(error);
+        }
         let mut unmount_requests = self.unmount_components();
-        self.drain_requests(&mut unmount_requests)?;
-        let _ = std::fs::remove_file(&ipc_socket_path);
+        if let Err(error) = self.drain_requests(&mut unmount_requests) {
+            first_error.get_or_insert(error);
+        }
+
+        if let Some(mut pending) = self.pending_resource_preparation.take() {
+            pending.resource_job.cancel();
+            if let Err(error) = pending.resource_job.wait() {
+                tracing::warn!("resource preparation cleanup failed: {error}");
+            }
+            if let Some(rollback) = pending.rollback {
+                let _ = rollback.restore();
+            }
+        }
+        self.shutdown_backend_runtimes(runtime);
+        self.pending_profile_switch = None;
+        self.backend_supervision.clear();
+        self.eventfd_fd.take();
+        let _ = std::fs::remove_file(ipc_socket_path);
+        self.shutdown_complete = true;
         tracing::info!("shell event loop stopped");
-        Ok(())
+        first_error.map_or(Ok(()), Err)
     }
 
     pub(in crate::shell) fn handle_shell_message(

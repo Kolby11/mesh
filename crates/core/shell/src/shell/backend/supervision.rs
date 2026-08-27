@@ -145,6 +145,9 @@ impl Shell {
         identity: mesh_core_backend::BackendIdentity,
         delay: Duration,
     ) {
+        if self.shutdown_started || self.shutdown_complete {
+            return;
+        }
         let Some(ctx) = self.backend_respawn.clone() else {
             tracing::debug!(interface, "no respawn context; skipping supervised restart");
             return;
@@ -160,7 +163,7 @@ impl Shell {
         };
         let interface = interface.to_string();
         let provider_id = provider_id.to_string();
-        ctx.handle.spawn(async move {
+        let task = ctx.handle.spawn(async move {
             tokio::time::sleep(delay).await;
             let _ = ctx.tx.send(ShellMessage::BackendRestartDue {
                 interface,
@@ -171,6 +174,7 @@ impl Shell {
             let evfd = unsafe { BorrowedFd::borrow_raw(ctx.eventfd_fd) };
             let _ = rustix::io::write(&evfd, &1u64.to_ne_bytes());
         });
+        self.backend_restart_tasks.push(task.abort_handle());
     }
 
     /// A supervised restart came due: pick the best non-quarantined provider

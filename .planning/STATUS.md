@@ -11,6 +11,6 @@ the commit point. Backend enable/disable, package graph changes, and installed
 graph filesystem deltas now enter that same staged activation coordinator.
 Backend tasks, bridges, messages, events, results, and restart deadlines now
 carry activation generations and provider epochs, with stale identities
-rejected at the shell boundary. The next open item is making frontend/backend
-stop, unmount, storage flush, worker join, and shutdown cleanup explicit and
-idempotent. See [`.planning/log/2026-08.md`](log/2026-08.md).
+rejected at the shell boundary. The next open item is giving detached workers
+owned wake handles and lifecycle guards that outlive the eventfd until join.
+See [`.planning/log/2026-08.md`](log/2026-08.md).

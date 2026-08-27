@@ -1,8 +1,50 @@
 use super::super::*;
 use super::{BackendRuntimeStatus, BackendRuntimeStatusEntry};
 use mesh_core_module::manifest::ModuleType;
+use std::time::Duration;
+use tokio::task::JoinHandle;
+
+const BACKEND_STOP_DEADLINE: Duration = Duration::from_secs(2);
 
 impl Shell {
+    /// Request every live backend to stop through its command channel and
+    /// synchronously join the service and bridge tasks. The command sender is
+    /// dropped before waiting so the backend guard can invoke authored `stop`,
+    /// flush storage, and publish its terminal lifecycle event.
+    pub(in crate::shell) fn shutdown_backend_runtimes(&mut self, runtime: &Runtime) {
+        self.service_handlers.clear();
+
+        let mut slots = self
+            .backend_runtimes
+            .drain()
+            .map(|(_, slot)| slot)
+            .collect::<Vec<_>>();
+        slots.extend(
+            self.pending_backend_runtimes
+                .drain()
+                .map(|(_, pending)| pending.slot),
+        );
+        if let Some(pending) = self.pending_profile_switch.take() {
+            slots.extend(pending.candidate_backends.into_values());
+        }
+        for slot in slots {
+            self.settle_stopped_backend_generation(&slot);
+            self.retire_backend_runtime_slot(slot);
+        }
+
+        let tasks = std::mem::take(&mut self.retiring_backend_runtimes);
+        runtime.block_on(async move {
+            for tasks in tasks {
+                if let Some(service) = tasks.take_service() {
+                    await_backend_task(service, "service").await;
+                }
+                if let Some(bridge) = tasks.take_bridge() {
+                    await_backend_task(bridge, "event bridge").await;
+                }
+            }
+        });
+    }
+
     pub(in crate::shell) fn backend_identity_for_interface(
         &self,
         interface: &str,
@@ -445,6 +487,23 @@ impl Shell {
         self.stop_backend_runtime_with_health(interface, true);
     }
 
+    /// Close a backend's command ingress and retain both runtime task handles
+    /// for the shutdown join. Closing the command channel lets the backend
+    /// lifecycle guard run the authored stop hook and flush durable storage;
+    /// abort is reserved for the bounded final cleanup path.
+    pub(in crate::shell) fn retire_backend_runtime_slot(&mut self, slot: BackendRuntimeSlot) {
+        if slot.tasks.is_none() {
+            // Test and legacy slots may not carry retained join handles; do
+            // not leave their synthetic task detached after the sender closes.
+            slot.task.abort();
+        }
+        let tasks = slot.tasks;
+        drop(slot.command_tx);
+        if let Some(tasks) = tasks {
+            self.retiring_backend_runtimes.push(tasks);
+        }
+    }
+
     fn stop_backend_runtime_with_health(&mut self, interface: &str, publish_health: bool) {
         self.service_handlers.remove(interface);
         if let Some(slot) = self.backend_runtimes.remove(interface) {
@@ -453,10 +512,12 @@ impl Shell {
                 .read()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             self.settle_stopped_backend_generation(&slot);
-            slot.task.abort();
-            self.rollback_bound_service_states_for_provider(&slot.interface, &slot.provider_id);
+            let interface_name = slot.interface.clone();
+            let provider_id = slot.provider_id.clone();
+            self.retire_backend_runtime_slot(slot);
+            self.rollback_bound_service_states_for_provider(&interface_name, &provider_id);
             let terminal_failure_already_recorded = self
-                .backend_runtime_status(&slot.interface, &slot.provider_id)
+                .backend_runtime_status(&interface_name, &provider_id)
                 .map(|entry| {
                     matches!(
                         entry.status,
@@ -466,8 +527,8 @@ impl Shell {
                 .unwrap_or(false);
             if !terminal_failure_already_recorded {
                 self.record_backend_runtime_status_with_identity(
-                    slot.interface,
-                    slot.provider_id,
+                    interface_name,
+                    provider_id,
                     identity,
                     BackendRuntimeStatus::Stopped,
                     "runtime stopped".to_string(),
@@ -608,10 +669,12 @@ impl Shell {
                 .identity
                 .read()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            previous.slot.task.abort();
+            let previous_interface = previous.slot.interface.clone();
+            let previous_provider = previous.slot.provider_id.clone();
+            self.retire_backend_runtime_slot(previous.slot);
             self.record_backend_runtime_status_at_identity(
-                previous.slot.interface,
-                previous.slot.provider_id,
+                previous_interface,
+                previous_provider,
                 identity,
                 BackendRuntimeStatus::Stopped,
                 "superseded by a newer provider switch".to_string(),
@@ -641,7 +704,7 @@ impl Shell {
                 interface,
                 provider_id,
             ) {
-                pending.slot.task.abort();
+                self.retire_backend_runtime_slot(pending.slot);
                 let message = format!(
                     "provider {provider_id} became ready for {interface}, but its selection could not be saved: {error}"
                 );
@@ -663,7 +726,7 @@ impl Shell {
             let candidate_graph = match self.load_installed_module_graph_candidate() {
                 Ok(graph) => graph,
                 Err(error) => {
-                    pending.slot.task.abort();
+                    self.retire_backend_runtime_slot(pending.slot);
                     let message = format!(
                         "provider selection was saved but the candidate graph could not be refreshed: {error}"
                     );
@@ -677,7 +740,7 @@ impl Shell {
                 }
             };
             if let Err(error) = self.commit_installed_module_graph(candidate_graph) {
-                pending.slot.task.abort();
+                self.retire_backend_runtime_slot(pending.slot);
                 let message = format!(
                     "provider selection was saved but locale catalogs could not be committed: {error}"
                 );
@@ -825,7 +888,7 @@ impl Shell {
                     | BackendRuntimeStatus::Stopped
             ) && let Some(pending) = self.pending_backend_runtimes.remove(&interface)
             {
-                pending.slot.task.abort();
+                self.retire_backend_runtime_slot(pending.slot);
                 tracing::warn!(
                     interface,
                     provider_id,
@@ -945,7 +1008,7 @@ impl Shell {
             .identity
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        pending.slot.task.abort();
+        self.retire_backend_runtime_slot(pending.slot);
         self.record_backend_runtime_status_at_identity(
             interface.to_string(),
             provider_id.to_string(),
@@ -976,6 +1039,22 @@ impl Shell {
                     "failed to deliver prepared provider snapshot: {error}"
                 ),
             }
+        }
+    }
+}
+
+async fn await_backend_task(task: JoinHandle<()>, role: &str) {
+    let mut task = task;
+    tokio::select! {
+        result = &mut task => {
+            if let Err(error) = result {
+                tracing::debug!(role, "backend {role} task ended during shutdown: {error}");
+            }
+        }
+        _ = tokio::time::sleep(BACKEND_STOP_DEADLINE) => {
+            tracing::warn!(role, "backend {role} task exceeded shutdown deadline; aborting");
+            task.abort();
+            let _ = task.await;
         }
     }
 }

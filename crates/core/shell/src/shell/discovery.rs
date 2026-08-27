@@ -475,6 +475,9 @@ impl Drop for ResourcePreparationJob {
         if self.worker.is_some() {
             self.cancel();
         }
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
         if let Some(lease) = self.lease.as_ref() {
             lease.retire();
         }
@@ -1714,6 +1717,8 @@ impl Shell {
             clipboard: Box::new(WaylandClipboard::default()),
             presentation_engine: PresentationEngine::select(),
             eventfd_fd: None,
+            ipc_server: None,
+            file_watcher: None,
             theme_watch,
             settings_watch,
             next_theme_reload_check: now,
@@ -1740,6 +1745,10 @@ impl Shell {
             backend_runtime_statuses: HashMap::new(),
             backend_supervision: HashMap::new(),
             backend_respawn: None,
+            retiring_backend_runtimes: Vec::new(),
+            backend_restart_tasks: Vec::new(),
+            shutdown_started: false,
+            shutdown_complete: false,
             latest_service_state: HashMap::new(),
             latest_service_health: HashMap::new(),
             service_contract_validation: HashMap::new(),
@@ -2374,7 +2383,7 @@ impl Shell {
     pub(super) fn unmount_components(&mut self) -> VecDeque<CoreRequest> {
         let mut requests = VecDeque::new();
         for runtime in &mut self.components {
-            match runtime.component.unmount() {
+            match runtime.unmount() {
                 Ok(component_requests) => requests.extend(component_requests),
                 Err(error) => tracing::warn!(
                     component_id = runtime.component.id(),
@@ -2449,6 +2458,7 @@ impl Shell {
                 surface_id: runtime.surface_id.clone(),
                 diagnostics,
             };
+            runtime.mounted = true;
             match runtime.component.mount(ctx) {
                 Ok(component_requests) => {
                     requests.extend(component_requests);

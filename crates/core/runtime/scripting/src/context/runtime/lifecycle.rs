@@ -157,42 +157,48 @@ impl ScriptContext {
 
     /// Call a named event handler.
     pub fn call_handler(&mut self, name: &str, args: &[Value]) -> Result<(), ScriptError> {
-        self.ensure_initialized()?;
-        let _budget = self.realm_policy.begin_callback();
-        let handler = self
-            .env()
-            .get::<Function>(name)
-            .map_err(|_| ScriptError::HandlerNotFound(name.to_string()))?;
-        tracing::debug!("calling handler {name}() for {}", self.module_id);
-        if is_lifecycle_handler(name) {
-            let mut lifecycle_args = mlua::MultiValue::new();
-            lifecycle_args.push_back(LuaValue::Table(self.current_self_table()?));
-            for arg in args {
-                lifecycle_args.push_back(self.lua().to_value(arg).map_err(lua_err)?);
-            }
-            handler.call::<()>(lifecycle_args).map_err(map_lua_error)?;
-        } else {
-            match args.len() {
-                0 => handler.call::<()>(()).map_err(map_lua_error)?,
-                1 => {
-                    let arg = self.lua().to_value(&args[0]).map_err(lua_err)?;
-                    handler.call::<()>(arg).map_err(map_lua_error)?;
+        let result = (|| {
+            self.ensure_initialized()?;
+            let _budget = self.realm_policy.begin_callback();
+            let handler = self
+                .env()
+                .get::<Function>(name)
+                .map_err(|_| ScriptError::HandlerNotFound(name.to_string()))?;
+            tracing::debug!("calling handler {name}() for {}", self.module_id);
+            if is_lifecycle_handler(name) {
+                let mut lifecycle_args = mlua::MultiValue::new();
+                lifecycle_args.push_back(LuaValue::Table(self.current_self_table()?));
+                for arg in args {
+                    lifecycle_args.push_back(self.lua().to_value(arg).map_err(lua_err)?);
                 }
-                _ => {
-                    let mut multi_args = mlua::MultiValue::new();
-                    for arg in args {
-                        multi_args.push_back(self.lua().to_value(arg).map_err(lua_err)?);
+                handler.call::<()>(lifecycle_args).map_err(map_lua_error)?;
+            } else {
+                match args.len() {
+                    0 => handler.call::<()>(()).map_err(map_lua_error)?,
+                    1 => {
+                        let arg = self.lua().to_value(&args[0]).map_err(lua_err)?;
+                        handler.call::<()>(arg).map_err(map_lua_error)?;
                     }
-                    handler.call::<()>(multi_args).map_err(map_lua_error)?;
+                    _ => {
+                        let mut multi_args = mlua::MultiValue::new();
+                        for arg in args {
+                            multi_args.push_back(self.lua().to_value(arg).map_err(lua_err)?);
+                        }
+                        handler.call::<()>(multi_args).map_err(map_lua_error)?;
+                    }
                 }
             }
-        }
-        self.sync_state_from_lua();
-        self.sync_side_channels();
+            self.sync_state_from_lua();
+            self.sync_side_channels();
+            Ok(())
+        })();
         if name == "unmount" {
+            // Storage must be durable even when authored teardown fails part
+            // way through. The outer shell also invokes this explicitly so
+            // every frontend implementation gets the same guarantee.
             self.flush_storage();
         }
-        Ok(())
+        result
     }
 
     /// Call the canonical `render(self)` lifecycle handler if present.

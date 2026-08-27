@@ -153,6 +153,10 @@ pub(super) struct ComponentRuntime {
     /// Newly requested child nodes waiting for one parent repaint with the
     /// scoped entrance class before their popup surface is mapped.
     pub(super) entering_child_node_keys: HashSet<String>,
+    /// Whether the component has an outstanding mount. Keeping this state at
+    /// the shell boundary makes repeated teardown paths idempotent even for a
+    /// component implementation whose authored unmount is not a no-op.
+    pub(super) mounted: bool,
 }
 
 #[derive(Debug)]
@@ -256,7 +260,16 @@ impl ComponentRuntime {
             surface_id,
             component,
             source_paths,
+            mounted: false,
         }
+    }
+
+    pub(super) fn unmount(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
+        if !self.mounted {
+            return Ok(Vec::new());
+        }
+        self.mounted = false;
+        self.component.unmount()
     }
 
     /// Iterate every surface target this component owns: parent first, then

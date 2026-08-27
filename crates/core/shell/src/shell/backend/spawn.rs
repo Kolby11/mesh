@@ -178,7 +178,7 @@ impl Shell {
             mpsc::channel::<BackendServiceEvent>(mesh_core_backend::BACKEND_EVENT_QUEUE_CAPACITY);
         let bridge_interface = interface.clone();
         let bridge_provider_id = provider_id.clone();
-        runtime.spawn(async move {
+        let bridge_task = runtime.spawn(async move {
             while let Some(event) = backend_rx.recv().await {
                 let current_event_provider_id = bridge_event_provider_id
                     .read()
@@ -375,6 +375,7 @@ impl Shell {
             generation,
             command_tx: cmd_tx,
             task: task.abort_handle(),
+            tasks: Some(BackendRuntimeTasks::new(task, bridge_task)),
         }
     }
 }

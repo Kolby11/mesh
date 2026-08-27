@@ -53,6 +53,35 @@ end
 }
 
 #[test]
+fn frontend_storage_flushes_when_unmount_hook_fails() {
+    let root = temp_storage_root("frontend-flush-error");
+    let caps = CapabilitySet::new();
+    let mut writer =
+        ScriptContext::new_with_storage_root("@mesh/storage-lifecycle-error", caps.clone(), &root)
+            .unwrap();
+    writer
+        .load_script(
+            r#"
+function unmount(self)
+    self.storage.counter = 7
+    error("cleanup failed")
+end
+"#,
+        )
+        .unwrap();
+
+    assert!(writer.call_handler("unmount", &[]).is_err());
+
+    let mut reader =
+        ScriptContext::new_with_storage_root("@mesh/storage-lifecycle-error", caps, &root).unwrap();
+    reader
+        .load_script("function init(self) loaded = self.storage.counter end")
+        .unwrap();
+    reader.call_init().unwrap();
+    assert_eq!(reader.state.get("loaded"), Some(serde_json::json!(7)));
+}
+
+#[test]
 fn frontend_storage_is_isolated_by_component_instance() {
     let root = temp_storage_root("frontend-instance-scope");
     let caps = CapabilitySet::new();

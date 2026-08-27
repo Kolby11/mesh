@@ -310,10 +310,12 @@ impl Shell {
             .is_some_and(|slot| slot.provider_id == provider_id)
         {
             if let Some(pending) = self.pending_backend_runtimes.remove(interface) {
-                pending.slot.task.abort();
+                let interface_name = pending.slot.interface.clone();
+                let provider_name = pending.slot.provider_id.clone();
+                self.retire_backend_runtime_slot(pending.slot);
                 self.record_backend_runtime_status(
-                    pending.slot.interface,
-                    pending.slot.provider_id,
+                    interface_name,
+                    provider_name,
                     BackendRuntimeStatus::Stopped,
                     "provider switch cancelled".to_string(),
                 );
