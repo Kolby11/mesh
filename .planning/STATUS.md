@@ -4,6 +4,11 @@
 
 ## Now
 
+Section 15 finding #2: enabling a backend-kind module now actually spawns it
+live (`apply_set_module_enabled` was frontend-only), reusing the existing
+provider-switch staged-activation path. Disable side needed no fix — already
+guarded. See [`.planning/log/2026-08.md`](log/2026-08.md).
+
 Started Section 15 finding #1 (profile activation atomicity). Fixed one
 concrete gap: `commit_pending_profile_switch` now restores the durable
 `active-profile` pointer if `commit_resource_snapshot` fails after

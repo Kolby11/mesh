@@ -813,6 +813,84 @@ fn frontend_module_deactivation_removes_runtime_and_destroys_surface() {
 }
 
 #[test]
+fn newly_active_backend_interfaces_spawns_only_the_active_unrunning_provider() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    let graph = graph_from_json(
+        r#"{
+              "schemaVersion": 1,
+              "modulesDir": "modules",
+              "modules": {
+                "@mesh/selected": { "kind": "backend", "path": "@mesh/selected", "enabled": true },
+                "@mesh/fallback": { "kind": "backend", "path": "@mesh/fallback", "enabled": true },
+                "@mesh/other": { "kind": "backend", "path": "@mesh/other", "enabled": true }
+              },
+              "providers": {
+                "mesh.example": "@mesh/selected",
+                "mesh.other": "@mesh/other"
+              }
+            }"#,
+        vec![
+            r#"{
+                  "name": "@mesh/selected",
+                  "version": "0.1.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "backend",
+                    "entrypoints": { "main": "src/main.luau" },
+                    "implements": [{ "interface": "mesh.example", "provider": "selected" }]
+                  }
+                }"#,
+            r#"{
+                  "name": "@mesh/fallback",
+                  "version": "0.1.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "backend",
+                    "entrypoints": { "main": "src/main.luau" },
+                    "implements": [{ "interface": "mesh.example", "provider": "fallback" }]
+                  }
+                }"#,
+            r#"{
+                  "name": "@mesh/other",
+                  "version": "0.1.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "backend",
+                    "entrypoints": { "main": "src/main.luau" },
+                    "implements": [{ "interface": "mesh.other", "provider": "other" }]
+                  }
+                }"#,
+        ],
+    );
+
+    // `@mesh/fallback` implements `mesh.example` but is not the graph's
+    // selected provider: enabling it must never spawn anything.
+    assert!(
+        shell
+            .newly_active_backend_interfaces(&graph, "@mesh/fallback")
+            .is_empty()
+    );
+
+    // `@mesh/other` is the active provider for `mesh.other`, but a runtime is
+    // already live for it: enabling it again must not respawn it.
+    let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.other", "@mesh/other");
+    shell.replace_backend_runtime("mesh.other".to_string(), slot);
+    assert!(
+        shell
+            .newly_active_backend_interfaces(&graph, "@mesh/other")
+            .is_empty()
+    );
+
+    // `@mesh/selected` is the active provider for `mesh.example` and has no
+    // live runtime: enabling it must report that interface to spawn.
+    assert_eq!(
+        shell.newly_active_backend_interfaces(&graph, "@mesh/selected"),
+        vec!["mesh.example".to_string()]
+    );
+}
+
+#[test]
 fn frontend_module_activation_mounts_shipped_surface_live() {
     let mut shell = Shell::new();
     shell.presentation_engine =
