@@ -416,20 +416,14 @@ impl Shell {
             "available": available,
             "system_resources": system_resources_json(&self.settings),
         });
-        // The renderer owns this snapshot. The backend receives a mirror for
-        // compatibility and side effects, but it cannot replace render facts.
+        // The renderer owns this snapshot; a provider mirror is delivered
+        // through the normal `mesh.theme` state channel below, not an
+        // internal `"set-current"` command the contract never declared. A
+        // module implementing `mesh.theme` would otherwise receive a
+        // command outside its own contract's method set.
         let source_module = "@mesh/shell";
-        if mesh_core_backend::validate_command_payload(&payload).is_ok() {
-            if let Some(tx) = self.service_handlers.get("mesh.theme") {
-                let _ = tx.send(ServiceCommandMsg {
-                    call_id: mesh_core_backend::CallId::next(),
-                    command: "set-current".to_string(),
-                    payload: payload.clone(),
-                    coalesce: true,
-                });
-            }
-        } else {
-            tracing::warn!("theme service snapshot exceeded backend command JSON budget");
+        if let Err(error) = mesh_core_backend::validate_command_payload(&payload) {
+            tracing::warn!("theme service snapshot exceeded backend command JSON budget: {error}");
         }
         let mut requests = self.broadcast_service_event(ServiceEvent::Updated {
             service: "mesh.theme".into(),

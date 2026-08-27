@@ -4,6 +4,16 @@
 
 ## Now
 
+Section 15 finding #10 (one sub-bullet): removed the internal, undeclared
+`"set-current"` command the shell sent directly to any module implementing
+`mesh.theme` as a backend — confirmed dead in the shipped module set, but a
+real contract violation. The other two sub-findings (settings republish,
+discarded CoreRequests) are untouched. See
+[`.planning/log/2026-08.md`](log/2026-08.md).
+
+Disk note: `target/` hit 69G and filled the sandbox disk mid-session; freed
+with `rm -rf target`. Watch disk usage in long sessions like this.
+
 Section 15 finding #7: a dead file-watcher thread now tells the shell loop
 (`ShellMessage::FileWatcherStopped`) instead of silently vanishing, so
 polling falls back immediately instead of staying parked for 24h. Watch
