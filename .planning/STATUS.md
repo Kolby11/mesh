@@ -4,7 +4,7 @@
 
 ## Now
 
-Section 15's first five items are complete. Profile activation now prepares one
+Section 15's first six items are complete. Profile activation now prepares one
 immutable `ActivationPlan`, resolves candidate components and backends against
 its interface/capability snapshots, and publishes one `RuntimeGeneration` at
 the commit point. Backend enable/disable, package graph changes, and installed
@@ -16,6 +16,6 @@ workers now own safe wake handles and lifecycle guards that remain valid until
 their worker is stopped or joined. Component/runtime callback, tick, build,
 render, reload, mount, and unmount failures now receive bounded placeholders,
 diagnostics, sibling isolation, and repeated-failure quarantine. The next open
-item is replacing static startup watching with a managed generation-aware watch
-set and bounded polling fallback.
+item is processing CoreRequest effects through one fair bounded scheduler with
+causal budgets and cycle detection.
 See [`.planning/log/2026-08.md`](log/2026-08.md).

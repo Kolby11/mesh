@@ -15,7 +15,6 @@ mod wayland;
 
 const MAX_SHELL_MESSAGE_DRAIN_PER_FRAME: usize = 256;
 const DEV_WINDOW_POLL_SLEEP: Duration = Duration::from_millis(16);
-pub(in crate::shell) const FILE_WATCHER_RELOAD_PARK: Duration = Duration::from_secs(24 * 60 * 60);
 
 impl Shell {
     /// Contain one component's failure at the shell boundary. Component
@@ -380,9 +379,8 @@ impl Shell {
         self.eventfd_fd = Some(eventfd);
         self.wake_handle = Some(wake.clone());
 
-        self.file_watcher =
-            file_watch::spawn_file_watcher(self.file_watch_paths(), tx.clone(), wake.clone());
-        self.file_watcher_active = self.file_watcher.is_some();
+        self.file_watcher_tx = Some(tx.clone());
+        self.reconcile_file_watcher();
         self.backend_respawn = Some(backend::BackendRespawnContext {
             handle: runtime.handle().clone(),
             tx: tx.clone(),
@@ -417,6 +415,7 @@ impl Shell {
             );
 
             while !self.core.shutting_down {
+                self.reconcile_file_watcher();
                 pending.extend(self.reload_theme_if_changed()?);
                 pending.extend(self.reload_locale_if_settings_changed()?);
                 self.reload_frontend_components_if_changed()?;
@@ -537,6 +536,7 @@ impl Shell {
         if let Some(file_watcher) = self.file_watcher.take() {
             file_watcher.stop_and_join();
         }
+        self.file_watcher_tx = None;
         self.file_watcher_active = false;
 
         let mut first_error = None;
@@ -587,8 +587,9 @@ impl Shell {
             ShellMessage::BackendCommandResult { .. } => "backend_command_result",
             ShellMessage::BackendInterfaceEvent { .. } => "backend_interface_event",
             ShellMessage::BackendRestartDue { .. } => "backend_restart_due",
-            ShellMessage::FilesystemChanged => "filesystem_changed",
-            ShellMessage::FileWatcherStopped => "file_watcher_stopped",
+            ShellMessage::FilesystemChanged { .. } => "filesystem_changed",
+            ShellMessage::FileWatcherStatus { .. } => "file_watcher_status",
+            ShellMessage::FileWatcherStopped { .. } => "file_watcher_stopped",
             ShellMessage::Ipc(_) => "ipc",
         };
         match message {
@@ -789,22 +790,60 @@ impl Shell {
                     restart_generation,
                 );
             }
-            ShellMessage::FilesystemChanged => {
-                self.schedule_reload_checks_now();
-                pending.extend(self.reconcile_installed_graph());
+            ShellMessage::FilesystemChanged { generation } => {
+                if generation != self.file_watch_set.generation {
+                    tracing::debug!(
+                        generation,
+                        current_generation = self.file_watch_set.generation,
+                        "ignored filesystem event from retired watch generation"
+                    );
+                } else {
+                    self.schedule_reload_checks_now();
+                    pending.extend(self.reconcile_installed_graph());
+                }
             }
-            ShellMessage::FileWatcherStopped => {
-                // Reload checks were parked at FILE_WATCHER_RELOAD_PARK
-                // (24h) on the assumption inotify would report every
-                // change. With the thread gone that assumption is false;
-                // fall back to short-interval polling starting now instead
-                // of leaving the shell blind until the park expires.
-                if self.file_watcher_active {
+            ShellMessage::FileWatcherStatus {
+                generation,
+                active,
+                watched_paths,
+            } => {
+                if generation == self.file_watch_set.generation {
+                    self.file_watcher_active = active;
+                    if active {
+                        self.diagnostics
+                            .resolve_lifecycle_error("@mesh/shell", "file_watcher");
+                        tracing::debug!(generation, watched_paths, "file watcher is healthy");
+                    } else {
+                        let message = format!(
+                            "watch generation {generation} has no existing directories; bounded metadata polling is active"
+                        );
+                        self.diagnostics.record_lifecycle_error(
+                            "@mesh/shell",
+                            "file_watcher",
+                            message,
+                        );
+                        tracing::warn!(generation, "file watcher has no active directories");
+                    }
+                }
+            }
+            ShellMessage::FileWatcherStopped { generation } => {
+                if generation == self.file_watch_set.generation {
+                    let was_active = self.file_watcher_active;
                     tracing::warn!(
-                        "file watcher stopped; falling back to short-interval reload polling"
+                        generation,
+                        "file watcher stopped; bounded reload polling remains active"
                     );
                     self.file_watcher_active = false;
-                    self.schedule_reload_checks_now();
+                    self.diagnostics.record_lifecycle_error(
+                        "@mesh/shell",
+                        "file_watcher",
+                        format!(
+                            "watch generation {generation} stopped; using bounded metadata polling"
+                        ),
+                    );
+                    if was_active {
+                        self.schedule_reload_checks_now();
+                    }
                 }
             }
             ShellMessage::Ipc(request) => {
@@ -823,19 +862,164 @@ impl Shell {
 
     fn file_watch_paths(&self) -> Vec<PathBuf> {
         let mut paths = Vec::new();
-        paths.push(self.theme_watch.path.clone());
-        paths.push(self.settings_watch.path.clone());
-        // Graph and profile edits are activation inputs, not just ordinary
-        // source reloads. Watching their containing directories also catches
-        // atomic replacement of the graph/profile files and creation of a
-        // newly installed module directory.
-        paths.push(self.installed_module_graph_path());
-        paths.extend(self.module_dirs.iter().cloned());
-        paths.extend(self.modules.values().map(|module| module.path.clone()));
+        let mut push_path = |path: PathBuf| paths.push(path);
+
+        let graph_path = self.installed_module_graph_path();
+        push_path(graph_path.clone());
+        push_path(graph_path.with_file_name("mesh.lock"));
+        if let Ok(profile_paths) =
+            mesh_core_module::package::ProfilePaths::from_root_graph(&graph_path)
+        {
+            push_path(profile_paths.active_profile_path());
+            push_path(profile_paths.profiles_dir());
+            if let Some(profile_id) = &self.active_profile_id
+                && let Ok(path) = profile_paths.profile_path(profile_id)
+            {
+                push_path(path);
+            }
+        }
+        push_path(self.theme_watch.path.clone());
+        push_path(self.settings_watch.path.clone());
+        for path in &self.module_dirs {
+            push_path(path.clone());
+        }
+        for module in self.modules.values() {
+            push_path(module.path.clone());
+            push_path(module.manifest_path.clone());
+        }
         for runtime in &self.components {
-            paths.extend(runtime.source_paths.iter().map(|(path, _)| path.clone()));
+            for (path, _) in &runtime.source_paths {
+                push_path(path.clone());
+            }
+        }
+
+        if let Some(graph) = &self.installed_module_graph {
+            for module in graph.modules() {
+                push_path(PathBuf::from(&module.path));
+                push_path(module.manifest_path.clone());
+            }
+            for theme in graph.theme_catalog().iter() {
+                for mode in theme.modes.values() {
+                    push_path(mode.source.candidate_path());
+                }
+            }
+            for resource in graph
+                .contributed_icons()
+                .iter()
+                .chain(graph.contributed_fonts())
+            {
+                push_path(resource.source.manifest_path.clone());
+                if let Some(root) = resource.source.manifest_path.parent() {
+                    push_path(root.join(&resource.path));
+                }
+            }
+            for catalog in graph.contributed_i18n() {
+                push_path(catalog.source.manifest_path.clone());
+                if let Some(root) = catalog.source.manifest_path.parent() {
+                    push_path(root.join(&catalog.path));
+                }
+            }
+            for schema in graph.settings_schemas() {
+                push_path(schema.source.manifest_path.clone());
+                if let Some(entry) = &schema.settings_page
+                    && let Some(root) = schema.source.manifest_path.parent()
+                {
+                    push_path(root.join(entry));
+                }
+            }
+            for source in graph
+                .frontend_entrypoints()
+                .iter()
+                .map(|entry| (&entry.source, entry.path.as_str()))
+                .chain(
+                    graph
+                        .frontend_surfaces()
+                        .iter()
+                        .map(|surface| (&surface.source, surface.path.as_str())),
+                )
+                .chain(
+                    graph
+                        .contributed_layouts()
+                        .iter()
+                        .map(|layout| (&layout.source, layout.path.as_str())),
+                )
+                .chain(
+                    graph
+                        .contributed_libraries()
+                        .iter()
+                        .map(|library| (&library.source, library.path.as_str())),
+                )
+            {
+                push_path(source.0.manifest_path.clone());
+                if let Some(root) = source.0.manifest_path.parent() {
+                    push_path(root.join(source.1));
+                }
+            }
+            if let Ok((catalogs, _)) = graph.locale_catalog_sources() {
+                for catalog in catalogs {
+                    push_path(catalog.path);
+                }
+            }
+        }
+
+        for asset in self
+            .resource_snapshot
+            .icon_assets
+            .iter()
+            .chain(self.resource_snapshot.font_assets.iter())
+        {
+            push_path(asset.handle.candidate_path());
         }
         paths
+    }
+
+    /// Reconcile the worker with the inputs of the latest active catalog,
+    /// profile, resource snapshot, theme, and mounted component graph. The
+    /// worker owns the inotify descriptors; this shell-side generation is the
+    /// authority used to reject delayed events from a retired set.
+    pub(in crate::shell) fn reconcile_file_watcher(&mut self) {
+        let paths = file_watch::WatchSet::new(0, self.file_watch_paths()).paths;
+        let paths_changed = self.file_watch_set.paths != paths;
+        let generation = if !paths_changed {
+            self.file_watch_set.generation
+        } else {
+            self.file_watch_set.generation.saturating_add(1)
+        };
+        let watch_set = file_watch::WatchSet::new(generation, paths);
+        let Some(tx) = self.file_watcher_tx.clone() else {
+            self.file_watch_set = watch_set;
+            return;
+        };
+        let Some(wake) = self.wake_handle.clone() else {
+            self.file_watch_set = watch_set;
+            return;
+        };
+
+        if !paths_changed {
+            return;
+        }
+
+        self.file_watch_set = watch_set.clone();
+        self.file_watcher_active = false;
+        if paths_changed
+            && let Some(watcher) = self.file_watcher.as_ref()
+            && watcher.replace(watch_set.clone())
+        {
+            self.schedule_reload_checks_now();
+            return;
+        }
+        if let Some(watcher) = self.file_watcher.take() {
+            watcher.stop_and_join();
+        }
+        self.file_watcher = file_watch::spawn_file_watcher(watch_set, tx, wake);
+        if self.file_watcher.is_none() {
+            self.diagnostics.record_lifecycle_error(
+                "@mesh/shell",
+                "file_watcher",
+                "could not start managed file watcher; using bounded metadata polling",
+            );
+        }
+        self.schedule_reload_checks_now();
     }
 
     fn schedule_reload_checks_now(&mut self) {
@@ -875,16 +1059,15 @@ fn wait_for_eventfd(timeout: Duration, eventfd_fd: std::os::unix::io::BorrowedFd
 struct CoalescedShellMessages {
     messages: Vec<ShellMessage>,
     backend_update_index: HashMap<String, HashMap<String, usize>>,
-    has_filesystem_changed: bool,
+    filesystem_change_generations: std::collections::HashSet<u64>,
 }
 
 impl CoalescedShellMessages {
     fn push(&mut self, message: ShellMessage) {
-        if matches!(message, ShellMessage::FilesystemChanged) {
-            if self.has_filesystem_changed {
+        if let ShellMessage::FilesystemChanged { generation } = &message {
+            if !self.filesystem_change_generations.insert(*generation) {
                 return;
             }
-            self.has_filesystem_changed = true;
         }
 
         if let ShellMessage::BackendServiceUpdate {
@@ -966,12 +1149,15 @@ mod tests {
     #[test]
     fn coalesced_shell_messages_keep_single_filesystem_change() {
         let mut coalesced = CoalescedShellMessages::default();
-        coalesced.push(ShellMessage::FilesystemChanged);
-        coalesced.push(ShellMessage::FilesystemChanged);
+        coalesced.push(ShellMessage::FilesystemChanged { generation: 1 });
+        coalesced.push(ShellMessage::FilesystemChanged { generation: 1 });
 
         let messages = coalesced.into_vec();
         assert_eq!(messages.len(), 1);
-        assert!(matches!(messages[0], ShellMessage::FilesystemChanged));
+        assert!(matches!(
+            messages[0],
+            ShellMessage::FilesystemChanged { generation: 1 }
+        ));
     }
 
     #[test]

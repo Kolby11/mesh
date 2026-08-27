@@ -1720,6 +1720,8 @@ impl Shell {
             eventfd_fd: None,
             ipc_server: None,
             file_watcher: None,
+            file_watcher_tx: None,
+            file_watch_set: file_watch::WatchSet::new(0, Vec::new()),
             theme_watch,
             settings_watch,
             next_theme_reload_check: now,

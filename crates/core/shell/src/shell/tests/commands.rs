@@ -577,7 +577,10 @@ fn file_watcher_stopped_message_clears_active_flag_and_forces_immediate_reload_c
 
     let mut pending = VecDeque::new();
     shell
-        .handle_shell_message(&mut pending, super::types::ShellMessage::FileWatcherStopped)
+        .handle_shell_message(
+            &mut pending,
+            super::types::ShellMessage::FileWatcherStopped { generation: 0 },
+        )
         .unwrap();
 
     assert!(
@@ -599,11 +602,69 @@ fn file_watcher_stopped_message_is_a_noop_when_the_watcher_was_never_active() {
 
     let mut pending = VecDeque::new();
     shell
-        .handle_shell_message(&mut pending, super::types::ShellMessage::FileWatcherStopped)
+        .handle_shell_message(
+            &mut pending,
+            super::types::ShellMessage::FileWatcherStopped { generation: 0 },
+        )
         .unwrap();
 
     assert_eq!(
         shell.next_theme_reload_check, far_future,
         "an already-inactive watcher must not disturb existing poll scheduling"
     );
+}
+
+#[test]
+fn retired_file_watch_generation_cannot_trigger_a_reload() {
+    let mut shell = Shell::new();
+    shell.file_watch_set = crate::shell::file_watch::WatchSet::new(2, Vec::new());
+    let far_future = std::time::Instant::now() + std::time::Duration::from_secs(3600);
+    shell.next_theme_reload_check = far_future;
+    shell.next_shell_settings_reload_check = far_future;
+    shell.next_frontend_reload_check = far_future;
+
+    let mut pending = VecDeque::new();
+    shell
+        .handle_shell_message(
+            &mut pending,
+            super::types::ShellMessage::FilesystemChanged { generation: 1 },
+        )
+        .unwrap();
+
+    assert_eq!(shell.next_theme_reload_check, far_future);
+    assert_eq!(shell.next_shell_settings_reload_check, far_future);
+    assert_eq!(shell.next_frontend_reload_check, far_future);
+    assert!(pending.is_empty());
+}
+
+#[test]
+fn file_watcher_status_is_generation_scoped() {
+    let mut shell = Shell::new();
+    shell.file_watch_set = crate::shell::file_watch::WatchSet::new(2, Vec::new());
+    shell.file_watcher_active = true;
+
+    let mut pending = VecDeque::new();
+    shell
+        .handle_shell_message(
+            &mut pending,
+            super::types::ShellMessage::FileWatcherStatus {
+                generation: 1,
+                active: false,
+                watched_paths: 0,
+            },
+        )
+        .unwrap();
+    assert!(shell.file_watcher_active);
+
+    shell
+        .handle_shell_message(
+            &mut pending,
+            super::types::ShellMessage::FileWatcherStatus {
+                generation: 2,
+                active: false,
+                watched_paths: 0,
+            },
+        )
+        .unwrap();
+    assert!(!shell.file_watcher_active);
 }

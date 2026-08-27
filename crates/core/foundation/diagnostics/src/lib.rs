@@ -586,6 +586,16 @@ impl DiagnosticsCollector {
             .sum()
     }
 
+    /// Resolve one lifecycle stage without clearing unrelated failures owned by
+    /// the same module. Supervisors that publish independent health domains
+    /// (for example the shell's file watcher) use this for recovery.
+    pub fn resolve_lifecycle_error(&self, provider_id: &str, stage: &str) -> bool {
+        self.modules
+            .iter()
+            .filter(|((module_id, _), _)| module_id == provider_id)
+            .any(|(_, diagnostics)| diagnostics.resolve_lifecycle_error(provider_id, stage))
+    }
+
     /// Return deterministic module aggregates with instance issue detail.
     pub fn snapshot(&self) -> Vec<DiagnosticModuleSnapshot> {
         let mut modules = BTreeMap::<String, Vec<&Diagnostics>>::new();

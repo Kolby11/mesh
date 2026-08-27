@@ -484,6 +484,8 @@ pub struct Shell {
     presentation_engine: PresentationEngine,
     ipc_server: Option<ipc::IpcServerHandle>,
     file_watcher: Option<file_watch::FileWatcherHandle>,
+    file_watcher_tx: Option<mpsc::UnboundedSender<ShellMessage>>,
+    file_watch_set: file_watch::WatchSet,
     theme_watch: ThemeWatchState,
     settings_watch: SettingsWatchState,
     next_theme_reload_check: std::time::Instant,
@@ -556,6 +558,7 @@ impl Drop for Shell {
         self.pending_profile_switch = None;
         self.retiring_backend_runtimes.clear();
         self.ipc_server.take();
+        self.file_watcher_tx = None;
         if let Some(file_watcher) = self.file_watcher.take() {
             file_watcher.stop_and_join();
         }

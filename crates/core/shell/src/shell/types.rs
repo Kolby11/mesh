@@ -478,12 +478,24 @@ pub(super) enum ShellMessage {
         identity: BackendIdentity,
         restart_generation: u64,
     },
-    FilesystemChanged,
-    /// The inotify watch thread exited (setup or read failure). Without this,
-    /// `file_watcher_active` never reverts to false after the watcher dies,
-    /// leaving reload polling parked for `FILE_WATCHER_RELOAD_PARK` (24h)
-    /// even though nothing is watching anymore.
-    FileWatcherStopped,
+    FilesystemChanged {
+        /// Watch-set generation that observed the event. The shell ignores
+        /// events from a retired activation/catalog watch set.
+        generation: u64,
+    },
+    /// The managed inotify worker reconciled its directory bindings. `active`
+    /// is false when the desired inputs have no existing directories; the
+    /// manager remains alive so a later generation can bind them.
+    FileWatcherStatus {
+        generation: u64,
+        active: bool,
+        watched_paths: usize,
+    },
+    /// The managed inotify worker exited (setup or read failure). Polling stays
+    /// bounded until a later watch-set change can start a fresh worker.
+    FileWatcherStopped {
+        generation: u64,
+    },
     Ipc(CoreRequest),
 }
 

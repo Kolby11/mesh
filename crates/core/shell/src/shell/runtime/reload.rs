@@ -11,12 +11,10 @@ impl Shell {
         if now < self.next_frontend_reload_check {
             return Ok(());
         }
-        self.next_frontend_reload_check = now
-            + if self.file_watcher_active {
-                super::FILE_WATCHER_RELOAD_PARK
-            } else {
-                FRONTEND_RELOAD_POLL_INTERVAL
-            };
+        // inotify is an acceleration path, not the correctness boundary. A
+        // bounded metadata poll keeps reloads live when a watch is unavailable
+        // or an event is lost during an atomic replacement.
+        self.next_frontend_reload_check = now + FRONTEND_RELOAD_POLL_INTERVAL;
 
         for component_index in 0..self.components.len() {
             let Some(trigger_index) = self.components[component_index]
