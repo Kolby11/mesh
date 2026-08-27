@@ -1,5 +1,6 @@
 use super::common::*;
 use super::*;
+use mesh_core_backend::BackendIdentity;
 
 #[test]
 fn profiling_session_reset_discards_previous_samples() {
@@ -377,6 +378,7 @@ fn profiling_disabled_backend_paths_do_not_fabricate_snapshots() {
             super::types::ShellMessage::BackendServiceUpdate {
                 interface: "mesh.audio".to_string(),
                 provider_id: "@mesh/pipewire-audio".to_string(),
+                identity: BackendIdentity::default(),
                 event: service_update(
                     "mesh.audio",
                     "@mesh/pipewire-audio",
@@ -520,6 +522,7 @@ fn profiling_snapshot_groups_backend_stage_proof_under_expected_provider_identit
             super::types::ShellMessage::BackendServiceUpdate {
                 interface: "mesh.audio".to_string(),
                 provider_id: "@mesh/pipewire-audio".to_string(),
+                identity: BackendIdentity::default(),
                 event: service_update(
                     "mesh.audio",
                     "@mesh/pipewire-audio",

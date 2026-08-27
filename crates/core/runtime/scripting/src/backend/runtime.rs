@@ -26,7 +26,7 @@ use serde_json::Value as JsonValue;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{
-    Arc, Mutex,
+    Arc, Mutex, RwLock,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
@@ -70,6 +70,7 @@ pub struct BackendScriptContext {
     command_registry: Option<BackendCommandRegistry>,
     event_registry: Option<BackendEventRegistry>,
     generation: u64,
+    backend_identity: Arc<RwLock<mesh_core_runtime::BackendIdentity>>,
     session: RuntimeSession,
 }
 
@@ -78,6 +79,7 @@ pub struct BackendScriptEvent {
     pub name: String,
     pub payload: JsonValue,
     pub generation: u64,
+    pub identity: mesh_core_runtime::BackendIdentity,
 }
 
 impl BackendScriptEvent {
@@ -219,6 +221,7 @@ impl BackendScriptContext {
             command_registry: None,
             event_registry: None,
             generation: 0,
+            backend_identity: Arc::new(RwLock::new(mesh_core_runtime::BackendIdentity::default())),
             session,
         }
     }
@@ -248,6 +251,28 @@ impl BackendScriptContext {
     pub fn set_generation(&mut self, generation: u64) {
         self.generation = generation;
         self.session.set_generation(generation);
+    }
+
+    /// Set the activation/provider identity used by provider-owned event
+    /// channels. The handle is shared with the backend task bridge so a
+    /// retained provider can move into a new activation without being
+    /// restarted, while already-queued events retain their original tag.
+    pub fn set_backend_identity_handle(
+        &mut self,
+        identity: Arc<RwLock<mesh_core_runtime::BackendIdentity>>,
+    ) {
+        self.backend_identity = identity;
+    }
+
+    pub fn backend_identity(&self) -> mesh_core_runtime::BackendIdentity {
+        *self
+            .backend_identity
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub fn backend_identity_handle(&self) -> Arc<RwLock<mesh_core_runtime::BackendIdentity>> {
+        Arc::clone(&self.backend_identity)
     }
 
     /// The module-owned session that coordinates realm, host identity,
@@ -1306,6 +1331,7 @@ impl BackendScriptContext {
         let runtime = Arc::clone(&self.runtime);
         let resources = self.policy.budget();
         let generation = self.generation;
+        let backend_identity = Arc::clone(&self.backend_identity);
         let self_events_meta = self.lua_ref()?.create_table()?;
         let event_registry = self.event_registry.clone();
         let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
@@ -1326,6 +1352,7 @@ impl BackendScriptContext {
                         resources.clone(),
                         event_registry.clone(),
                         generation,
+                        Arc::clone(&backend_identity),
                         Arc::clone(&host_side_effects_enabled),
                     )?;
                     table.set(key.as_str(), channel.clone())?;
@@ -1414,6 +1441,7 @@ fn create_backend_event_channel(
     resources: crate::policy::ResourceBudget,
     event_registry: Option<BackendEventRegistry>,
     generation: u64,
+    backend_identity: Arc<RwLock<mesh_core_runtime::BackendIdentity>>,
     host_side_effects_enabled: Arc<AtomicBool>,
 ) -> mlua::Result<Table> {
     let channel = lua.create_table()?;
@@ -1476,6 +1504,9 @@ fn create_backend_event_channel(
                     name: fire_event_name.clone(),
                     payload,
                     generation,
+                    identity: *backend_identity
+                        .read()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()),
                 });
             Ok(())
         })?,

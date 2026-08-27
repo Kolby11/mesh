@@ -1,5 +1,6 @@
 use super::common::*;
 use super::*;
+use mesh_core_backend::BackendIdentity;
 
 #[test]
 fn service_contract_provider_declaration_requires_provider_pair() {
@@ -320,6 +321,7 @@ fn backend_command_result_records_debug_method_result() {
             super::types::ShellMessage::BackendCommandResult {
                 interface: "mesh.audio".to_string(),
                 provider_id: "@mesh/pipewire-audio".to_string(),
+                identity: BackendIdentity::default(),
                 generation: 0,
                 call_id: mesh_core_backend::CallId::from_raw(0),
                 command: "set_volume".to_string(),
@@ -357,6 +359,7 @@ fn backend_command_result_rejects_invalid_contract_output() {
             super::types::ShellMessage::BackendCommandResult {
                 interface: "mesh.audio".to_string(),
                 provider_id: "@mesh/pipewire-audio".to_string(),
+                identity: BackendIdentity::default(),
                 generation: 0,
                 call_id: mesh_core_backend::CallId::from_raw(0),
                 command: "set_volume".to_string(),

@@ -1,3 +1,4 @@
+pub use mesh_core_runtime::BackendIdentity;
 use mesh_core_scripting::{
     BackendScriptContext, BackendScriptError, StreamEvent, StreamEventKind, StreamHandle,
 };
@@ -21,6 +22,14 @@ static NEXT_RUNTIME_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 pub fn next_runtime_generation() -> u64 {
     NEXT_RUNTIME_GENERATION.fetch_add(1, Ordering::Relaxed)
+}
+
+fn backend_identity(
+    identity_handle: &std::sync::Arc<std::sync::RwLock<mesh_core_runtime::BackendIdentity>>,
+) -> mesh_core_runtime::BackendIdentity {
+    *identity_handle
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Correlates one service invocation with every transport hop and its terminal
@@ -51,6 +60,7 @@ pub enum BackendCommandOutcome {
     TimedOut,
     Cancelled,
     StaleGeneration,
+    StaleProviderEpoch,
     QueueFull,
 }
 
@@ -63,6 +73,7 @@ impl BackendCommandOutcome {
             Self::TimedOut => "timed_out",
             Self::Cancelled => "cancelled",
             Self::StaleGeneration => "stale_generation",
+            Self::StaleProviderEpoch => "stale_provider_epoch",
             Self::QueueFull => "queue_full",
         }
     }
@@ -73,6 +84,7 @@ struct CallControl {
     deadline: Instant,
     cancelled: bool,
     generation: u64,
+    identity: mesh_core_runtime::BackendIdentity,
 }
 
 fn call_controls() -> &'static Mutex<HashMap<CallId, CallControl>> {
@@ -86,12 +98,27 @@ pub fn register_call(call_id: CallId, timeout: Duration) {
 }
 
 pub fn register_call_for_generation(call_id: CallId, timeout: Duration, generation: u64) {
+    register_call_for_generation_and_identity(
+        call_id,
+        timeout,
+        generation,
+        mesh_core_runtime::BackendIdentity::default(),
+    );
+}
+
+pub fn register_call_for_generation_and_identity(
+    call_id: CallId,
+    timeout: Duration,
+    generation: u64,
+    identity: mesh_core_runtime::BackendIdentity,
+) {
     call_controls().lock().unwrap().insert(
         call_id,
         CallControl {
             deadline: Instant::now() + timeout,
             cancelled: false,
             generation,
+            identity,
         },
     );
 }
@@ -103,6 +130,19 @@ fn call_generation(call_id: CallId, fallback: u64) -> u64 {
         .get(&call_id)
         .map(|control| control.generation)
         .filter(|generation| *generation != 0)
+        .unwrap_or(fallback)
+}
+
+fn call_identity(
+    call_id: CallId,
+    fallback: mesh_core_runtime::BackendIdentity,
+) -> mesh_core_runtime::BackendIdentity {
+    call_controls()
+        .lock()
+        .unwrap()
+        .get(&call_id)
+        .map(|control| control.identity)
+        .filter(|identity| *identity != mesh_core_runtime::BackendIdentity::default())
         .unwrap_or(fallback)
 }
 
@@ -178,8 +218,9 @@ fn coalescing_key(msg: &BackendServiceCommand) -> String {
             .collect::<std::collections::BTreeMap<_, _>>()
     });
     format!(
-        "{}:{}",
+        "{}:{:?}:{}",
         msg.command,
+        call_identity(msg.call_id, mesh_core_runtime::BackendIdentity::default()),
         serde_json::to_string(&identity.unwrap_or_default()).unwrap_or_default()
     )
 }
@@ -220,6 +261,7 @@ pub struct BackendServiceUpdate {
     pub service: Arc<str>,
     pub source_module: Arc<str>,
     pub payload: serde_json::Value,
+    pub identity: mesh_core_runtime::BackendIdentity,
 }
 
 #[derive(Debug, Clone)]
@@ -231,6 +273,7 @@ pub struct BackendCommandResult {
     pub result: serde_json::Value,
     pub outcome: BackendCommandOutcome,
     pub generation: u64,
+    pub identity: mesh_core_runtime::BackendIdentity,
 }
 
 #[derive(Debug, Clone)]
@@ -240,6 +283,7 @@ pub struct BackendInterfaceEvent {
     pub name: String,
     pub payload: serde_json::Value,
     pub generation: u64,
+    pub identity: mesh_core_runtime::BackendIdentity,
 }
 
 #[derive(Debug, Clone)]
@@ -247,30 +291,35 @@ pub enum BackendServiceEvent {
     Started {
         service: Arc<str>,
         source_module: Arc<str>,
+        identity: mesh_core_runtime::BackendIdentity,
     },
     Update(BackendServiceUpdate),
     InitFailed {
         service: Arc<str>,
         source_module: Arc<str>,
         message: String,
+        identity: mesh_core_runtime::BackendIdentity,
     },
     PollFailed {
         service: Arc<str>,
         source_module: Arc<str>,
         count: u32,
         message: String,
+        identity: mesh_core_runtime::BackendIdentity,
     },
     Failed {
         service: Arc<str>,
         source_module: Arc<str>,
         stage: String,
         message: String,
+        identity: mesh_core_runtime::BackendIdentity,
     },
     CommandResult(BackendCommandResult),
     InterfaceEvent(BackendInterfaceEvent),
     Stopped {
         service: Arc<str>,
         source_module: Arc<str>,
+        identity: mesh_core_runtime::BackendIdentity,
     },
 }
 
@@ -313,6 +362,10 @@ pub async fn spawn_backend_service(
         None,
         None,
         0,
+        mesh_core_runtime::BackendIdentity::default(),
+        std::sync::Arc::new(std::sync::RwLock::new(
+            mesh_core_runtime::BackendIdentity::default(),
+        )),
     )
     .await;
 }
@@ -371,6 +424,10 @@ pub async fn spawn_backend_service_bounded_with_events(
         command_registry,
         event_registry,
         generation,
+        mesh_core_runtime::BackendIdentity::default(),
+        std::sync::Arc::new(std::sync::RwLock::new(
+            mesh_core_runtime::BackendIdentity::default(),
+        )),
     )
     .await;
 }
@@ -390,6 +447,43 @@ pub async fn spawn_backend_service_bounded_with_events_and_queue(
     event_registry: Option<mesh_core_scripting::BackendEventRegistry>,
     generation: u64,
 ) {
+    spawn_backend_service_bounded_with_events_and_queue_with_identity(
+        module_id,
+        service_name,
+        capabilities,
+        settings,
+        script_source,
+        tx,
+        cmd_rx,
+        command_registry,
+        event_registry,
+        generation,
+        mesh_core_runtime::BackendIdentity::default(),
+        std::sync::Arc::new(std::sync::RwLock::new(
+            mesh_core_runtime::BackendIdentity::default(),
+        )),
+    )
+    .await;
+}
+
+/// Production backend entrypoint with a shared activation/provider identity.
+/// The shell updates the handle when an unchanged provider is retained across
+/// activation generations; queued output remains tagged with the identity it
+/// had when it was produced.
+pub async fn spawn_backend_service_bounded_with_events_and_queue_with_identity(
+    module_id: String,
+    service_name: String,
+    capabilities: Vec<String>,
+    settings: JsonValue,
+    script_source: String,
+    tx: mpsc::Sender<BackendServiceEvent>,
+    cmd_rx: mpsc::Receiver<BackendServiceCommand>,
+    command_registry: Option<mesh_core_scripting::BackendCommandRegistry>,
+    event_registry: Option<mesh_core_scripting::BackendEventRegistry>,
+    generation: u64,
+    identity: mesh_core_runtime::BackendIdentity,
+    identity_handle: std::sync::Arc<std::sync::RwLock<mesh_core_runtime::BackendIdentity>>,
+) {
     spawn_backend_service_inner(
         module_id,
         service_name,
@@ -401,6 +495,8 @@ pub async fn spawn_backend_service_bounded_with_events_and_queue(
         command_registry,
         event_registry,
         generation,
+        identity,
+        identity_handle,
     )
     .await;
 }
@@ -437,6 +533,8 @@ async fn spawn_backend_service_inner(
     command_registry: Option<mesh_core_scripting::BackendCommandRegistry>,
     event_registry: Option<mesh_core_scripting::BackendEventRegistry>,
     generation: u64,
+    identity: mesh_core_runtime::BackendIdentity,
+    identity_handle: std::sync::Arc<std::sync::RwLock<mesh_core_runtime::BackendIdentity>>,
 ) {
     let module_id: Arc<str> = Arc::from(module_id);
     let service_name: Arc<str> = Arc::from(service_name);
@@ -447,6 +545,7 @@ async fn spawn_backend_service_inner(
         Arc::clone(&service_name),
         Arc::clone(&module_id),
         tx.clone(),
+        identity_handle.clone(),
     );
     let mut ctx = BackendScriptContext::new_with_settings_and_capabilities(
         module_id.as_ref(),
@@ -454,6 +553,10 @@ async fn spawn_backend_service_inner(
         capabilities,
     );
     ctx.set_generation(generation);
+    ctx.set_backend_identity_handle(identity_handle.clone());
+    *identity_handle
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = identity;
     if let Some(registry) = command_registry {
         ctx.set_command_registry(registry);
     }
@@ -468,6 +571,7 @@ async fn spawn_backend_service_inner(
         tx,
         cmd_rx,
         generation,
+        identity_handle,
     )
     .await;
     lifecycle.finish(&mut ctx).await;
@@ -477,15 +581,22 @@ struct BackendLifecycleGuard {
     service: Arc<str>,
     source_module: Arc<str>,
     tx: BackendEventSender,
+    identity_handle: std::sync::Arc<std::sync::RwLock<mesh_core_runtime::BackendIdentity>>,
     terminal_sent: bool,
 }
 
 impl BackendLifecycleGuard {
-    fn new(service: Arc<str>, source_module: Arc<str>, tx: BackendEventSender) -> Self {
+    fn new(
+        service: Arc<str>,
+        source_module: Arc<str>,
+        tx: BackendEventSender,
+        identity_handle: std::sync::Arc<std::sync::RwLock<mesh_core_runtime::BackendIdentity>>,
+    ) -> Self {
         Self {
             service,
             source_module,
             tx,
+            identity_handle,
             terminal_sent: false,
         }
     }
@@ -497,6 +608,10 @@ impl BackendLifecycleGuard {
                 source_module: Arc::clone(&self.source_module),
                 stage: "stop".to_string(),
                 message: err.to_string(),
+                identity: *self
+                    .identity_handle
+                    .read()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()),
             });
         }
         ctx.shutdown_exec();
@@ -512,6 +627,10 @@ impl BackendLifecycleGuard {
         let _ = self.tx.send(BackendServiceEvent::Stopped {
             service: Arc::clone(&self.service),
             source_module: Arc::clone(&self.source_module),
+            identity: *self
+                .identity_handle
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
         });
     }
 }
@@ -533,6 +652,7 @@ async fn run_backend_service(
     tx: BackendEventSender,
     mut cmd_rx: CommandReceiver,
     generation: u64,
+    identity_handle: std::sync::Arc<std::sync::RwLock<mesh_core_runtime::BackendIdentity>>,
 ) {
     if let Err(e) = ctx.load_script(&script_source) {
         tracing::error!("{} failed to load backend script: {e}", module_id.as_ref());
@@ -541,6 +661,7 @@ async fn run_backend_service(
             source_module: module_id,
             stage: "load".to_string(),
             message: e.to_string(),
+            identity: backend_identity(&identity_handle),
         });
         return;
     }
@@ -555,6 +676,7 @@ async fn run_backend_service(
                 service: service_name,
                 source_module: module_id,
                 message: e.to_string(),
+                identity: backend_identity(&identity_handle),
             });
             return;
         }
@@ -572,7 +694,14 @@ async fn run_backend_service(
         // following lifecycle record as provider readiness. Keep the update
         // and readiness records ordered on the backend channel so consumers
         // cannot observe a provider as ready before its initial state.
-        if !publish_changed_update(&tx, &service_name, &module_id, &mut last_payload, payload) {
+        if !publish_changed_update(
+            &tx,
+            &service_name,
+            &module_id,
+            &mut last_payload,
+            payload,
+            &identity_handle,
+        ) {
             return;
         }
     }
@@ -580,12 +709,19 @@ async fn run_backend_service(
         .send(BackendServiceEvent::Started {
             service: service_name.clone(),
             source_module: module_id.clone(),
+            identity: backend_identity(&identity_handle),
         })
         .is_err()
     {
         return;
     }
-    if !publish_script_events(&tx, &service_name, &module_id, ctx.drain_events()) {
+    if !publish_script_events(
+        &tx,
+        &service_name,
+        &module_id,
+        ctx.drain_events(),
+        &identity_handle,
+    ) {
         return;
     }
 
@@ -599,6 +735,7 @@ async fn run_backend_service(
                     &tx,
                     &service_name,
                     &module_id,
+                    &identity_handle,
                     &mut last_payload,
                     &mut interval_ms,
                     &mut tick,
@@ -620,6 +757,7 @@ async fn run_backend_service(
                             source_module: module_id.clone(),
                             count: consecutive_poll_failures,
                             message: message.clone(),
+                            identity: backend_identity(&identity_handle),
                         });
                         if consecutive_poll_failures >= MAX_CONSECUTIVE_POLL_FAILURES {
                             let _ = tx.send(BackendServiceEvent::Failed {
@@ -627,6 +765,7 @@ async fn run_backend_service(
                                 source_module: module_id.clone(),
                                 stage: "poll".to_string(),
                                 message,
+                                identity: backend_identity(&identity_handle),
                             });
                             break;
                         }
@@ -636,7 +775,13 @@ async fn run_backend_service(
                 };
                 refresh_interval(&ctx, &mut interval_ms, &mut tick);
                 let Some(payload) = payload else {
-                    if !publish_script_events(&tx, &service_name, &module_id, ctx.drain_events()) {
+                    if !publish_script_events(
+                        &tx,
+                        &service_name,
+                        &module_id,
+                        ctx.drain_events(),
+                        &identity_handle,
+                    ) {
                         break;
                     }
                     continue;
@@ -647,10 +792,17 @@ async fn run_backend_service(
                     &module_id,
                     &mut last_payload,
                     payload,
+                    &identity_handle,
                 ) {
                     break;
                 }
-                if !publish_script_events(&tx, &service_name, &module_id, ctx.drain_events()) {
+                if !publish_script_events(
+                    &tx,
+                    &service_name,
+                    &module_id,
+                    ctx.drain_events(),
+                    &identity_handle,
+                ) {
                     break;
                 }
             }
@@ -676,6 +828,10 @@ async fn run_backend_service(
                             .iter()
                             .any(|retained| retained.call_id == candidate.call_id)
                 }) {
+                    let identity = call_identity(
+                        superseded.call_id,
+                        backend_identity(&identity_handle),
+                    );
                     finish_call(superseded.call_id);
                     if tx.send(BackendServiceEvent::CommandResult(BackendCommandResult {
                         call_id: superseded.call_id,
@@ -689,6 +845,7 @@ async fn run_backend_service(
                         }),
                         outcome: BackendCommandOutcome::Superseded,
                         generation,
+                        identity,
                     })).is_err() {
                         return;
                     }
@@ -698,9 +855,23 @@ async fn run_backend_service(
                     let call_id = msg.call_id;
                     let command = msg.command.clone();
                     let command_generation = call_generation(call_id, generation);
-                    if generation != 0
+                    let current_identity = backend_identity(&identity_handle);
+                    let command_identity = call_identity(call_id, current_identity);
+                    let identity_mismatch = command_identity
+                        != mesh_core_runtime::BackendIdentity::default()
+                        && command_identity != current_identity;
+                    let generation_mismatch = generation != 0
                         && command_generation != 0
-                        && command_generation != generation
+                        && command_generation != generation;
+                    let stale_outcome = if generation_mismatch
+                        || command_identity.activation_generation
+                            != current_identity.activation_generation
+                    {
+                        BackendCommandOutcome::StaleGeneration
+                    } else {
+                        BackendCommandOutcome::StaleProviderEpoch
+                    };
+                    if generation_mismatch || identity_mismatch
                     {
                         finish_call(call_id);
                         if tx
@@ -711,11 +882,12 @@ async fn run_backend_service(
                                 command,
                                 result: serde_json::json!({
                                     "ok": false,
-                                    "status": "stale_generation",
-                                    "error": "backend generation is no longer active",
+                                    "status": stale_outcome.as_str(),
+                                    "error": "backend activation or provider epoch is no longer active",
                                 }),
-                                outcome: BackendCommandOutcome::StaleGeneration,
+                                outcome: stale_outcome,
                                 generation: command_generation,
+                                identity: command_identity,
                             }))
                             .is_err()
                         {
@@ -739,6 +911,7 @@ async fn run_backend_service(
                                 }),
                                 outcome: BackendCommandOutcome::Failed,
                                 generation,
+                                identity: command_identity,
                             }))
                             .is_err()
                         {
@@ -762,6 +935,7 @@ async fn run_backend_service(
                                 }),
                                 outcome,
                                 generation,
+                                identity: command_identity,
                             }))
                             .is_err()
                         {
@@ -793,6 +967,7 @@ async fn run_backend_service(
                                 result: outcome.result,
                                 outcome: terminal_outcome,
                                 generation,
+                                identity: command_identity,
                             })).is_err() {
                                 stop = true;
                                 break;
@@ -804,6 +979,7 @@ async fn run_backend_service(
                                     &module_id,
                                     &mut last_payload,
                                     payload,
+                                    &identity_handle,
                                 ) {
                                     stop = true;
                                     break;
@@ -814,6 +990,7 @@ async fn run_backend_service(
                                 &service_name,
                                 &module_id,
                                 ctx.drain_events(),
+                                &identity_handle,
                             ) {
                                 stop = true;
                             }
@@ -832,6 +1009,7 @@ async fn run_backend_service(
                                 }),
                                 outcome: BackendCommandOutcome::Failed,
                                 generation,
+                                identity: command_identity,
                             }));
                             refresh_interval(&ctx, &mut interval_ms, &mut tick);
                         }
@@ -843,6 +1021,7 @@ async fn run_backend_service(
     }
     while let Some(pending) = cmd_rx.try_recv() {
         let pending_generation = call_generation(pending.call_id, generation);
+        let pending_identity = call_identity(pending.call_id, backend_identity(&identity_handle));
         finish_call(pending.call_id);
         let _ = tx.send(BackendServiceEvent::CommandResult(BackendCommandResult {
             call_id: pending.call_id,
@@ -856,6 +1035,7 @@ async fn run_backend_service(
             }),
             outcome: BackendCommandOutcome::StaleGeneration,
             generation: pending_generation,
+            identity: pending_identity,
         }));
     }
 }
@@ -866,6 +1046,7 @@ fn dispatch_stream_events(
     tx: &BackendEventSender,
     service_name: &Arc<str>,
     module_id: &Arc<str>,
+    identity_handle: &std::sync::Arc<std::sync::RwLock<mesh_core_runtime::BackendIdentity>>,
     last_payload: &mut Option<serde_json::Value>,
     active_interval_ms: &mut u64,
     tick: &mut tokio::time::Interval,
@@ -885,6 +1066,7 @@ fn dispatch_stream_events(
                 ctx,
                 active_interval_ms,
                 tick,
+                &identity_handle,
             ) {
                 return false;
             }
@@ -914,6 +1096,7 @@ fn dispatch_stream_events(
                             ctx,
                             active_interval_ms,
                             tick,
+                            &identity_handle,
                         ) {
                             return false;
                         }
@@ -936,6 +1119,7 @@ fn dispatch_stream_events(
                         ctx,
                         active_interval_ms,
                         tick,
+                        &identity_handle,
                     ) {
                         return false;
                     }
@@ -953,6 +1137,7 @@ fn dispatch_stream_events(
             ctx,
             active_interval_ms,
             tick,
+            &identity_handle,
         ) {
             return false;
         }
@@ -969,19 +1154,39 @@ fn publish_stream_callback_result(
     ctx: &mut BackendScriptContext,
     active_interval_ms: &mut u64,
     tick: &mut tokio::time::Interval,
+    identity_handle: &std::sync::Arc<std::sync::RwLock<mesh_core_runtime::BackendIdentity>>,
 ) -> bool {
     let keep_running = match result {
         Ok(Some(payload)) => {
-            publish_changed_update(tx, service_name, module_id, last_payload, payload)
-                && publish_script_events(tx, service_name, module_id, ctx.drain_events())
+            publish_changed_update(
+                tx,
+                service_name,
+                module_id,
+                last_payload,
+                payload,
+                identity_handle,
+            ) && publish_script_events(
+                tx,
+                service_name,
+                module_id,
+                ctx.drain_events(),
+                identity_handle,
+            )
         }
-        Ok(None) => publish_script_events(tx, service_name, module_id, ctx.drain_events()),
+        Ok(None) => publish_script_events(
+            tx,
+            service_name,
+            module_id,
+            ctx.drain_events(),
+            identity_handle,
+        ),
         Err(err) => {
             let _ = tx.send(BackendServiceEvent::Failed {
                 service: service_name.clone(),
                 source_module: module_id.clone(),
                 stage: "stream".to_string(),
                 message: err.to_string(),
+                identity: backend_identity(identity_handle),
             });
             true
         }
@@ -998,8 +1203,10 @@ fn publish_script_events(
     service_name: &Arc<str>,
     module_id: &Arc<str>,
     events: Vec<mesh_core_scripting::BackendScriptEvent>,
+    _identity_handle: &std::sync::Arc<std::sync::RwLock<mesh_core_runtime::BackendIdentity>>,
 ) -> bool {
     for event in events {
+        let event_identity = event.identity;
         if let Err(message) = mesh_core_runtime::validate_json(
             &event.payload,
             MAX_COMMAND_PAYLOAD_BYTES,
@@ -1011,6 +1218,7 @@ fn publish_script_events(
                 source_module: Arc::clone(module_id),
                 stage: "event".to_string(),
                 message,
+                identity: event_identity,
             });
             return false;
         }
@@ -1021,6 +1229,7 @@ fn publish_script_events(
                 name: event.name,
                 payload: event.payload,
                 generation: event.generation,
+                identity: event.identity,
             }))
             .is_err()
         {
@@ -1036,6 +1245,7 @@ fn publish_changed_update(
     module_id: &Arc<str>,
     last_payload: &mut Option<serde_json::Value>,
     payload: serde_json::Value,
+    identity_handle: &std::sync::Arc<std::sync::RwLock<mesh_core_runtime::BackendIdentity>>,
 ) -> bool {
     if Some(&payload) == last_payload.as_ref() {
         return true;
@@ -1051,6 +1261,7 @@ fn publish_changed_update(
             source_module: Arc::clone(module_id),
             stage: "state".to_string(),
             message,
+            identity: backend_identity(identity_handle),
         });
         return false;
     }
@@ -1059,6 +1270,7 @@ fn publish_changed_update(
         service: Arc::clone(service_name),
         source_module: Arc::clone(module_id),
         payload,
+        identity: backend_identity(identity_handle),
     }))
     .is_ok()
 }
@@ -1203,6 +1415,7 @@ mod tests {
         let event = BackendServiceEvent::Started {
             service: Arc::from("test"),
             source_module: Arc::from("test"),
+            identity: BackendIdentity::default(),
         };
         assert!(sender.send(event.clone()).is_ok());
         assert!(sender.send(event).is_err());
@@ -1267,6 +1480,59 @@ mod tests {
             .await
             .expect("bounded backend task should exit")
             .expect("bounded backend task should not panic");
+    }
+
+    #[tokio::test]
+    async fn bounded_backend_tags_updates_and_lifecycle_with_backend_identity() {
+        let (event_tx, mut event_rx) = mpsc::channel(BACKEND_EVENT_QUEUE_CAPACITY);
+        let (cmd_tx, cmd_rx) = mpsc::channel(BACKEND_COMMAND_QUEUE_CAPACITY);
+        let identity = BackendIdentity::new(12, 4);
+        let identity_handle = std::sync::Arc::new(std::sync::RwLock::new(identity));
+        let task = tokio::spawn(
+            spawn_backend_service_bounded_with_events_and_queue_with_identity(
+                "@test/identity".to_string(),
+                "audio".to_string(),
+                Vec::new(),
+                serde_json::json!({}),
+                "state = { available = true }\nfunction start()\nend".to_string(),
+                event_tx,
+                cmd_rx,
+                None,
+                None,
+                17,
+                identity,
+                identity_handle,
+            ),
+        );
+
+        let update = loop {
+            let event = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+                .await
+                .expect("identity update should be published")
+                .expect("backend event channel should stay open");
+            if let BackendServiceEvent::Update(update) = event {
+                break update;
+            }
+        };
+        assert_eq!(update.identity, identity);
+        let started = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+            .await
+            .expect("lifecycle event should be published")
+            .expect("backend event channel should stay open");
+        match started {
+            BackendServiceEvent::Started {
+                identity: started_identity,
+                ..
+            } => assert_eq!(started_identity, identity),
+            other => panic!("expected started lifecycle event, got {other:?}"),
+        }
+
+        drop(cmd_tx);
+        drop(event_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit")
+            .expect("backend task should not panic");
     }
 
     fn bundled_backend_script_path(module_slug: &str) -> PathBuf {

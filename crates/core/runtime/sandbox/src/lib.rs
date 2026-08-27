@@ -8,6 +8,25 @@ use mesh_core_capability::CapabilitySet;
 pub const DEFAULT_JSON_MAX_BYTES: usize = 64 * 1024;
 pub const DEFAULT_JSON_MAX_DEPTH: usize = 32;
 
+/// Identity shared by every backend transport hop belonging to one provider
+/// incarnation. Activation generations identify the committed shell graph;
+/// provider epochs distinguish successive runtime incarnations of one
+/// interface, including two starts of the same provider module.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct BackendIdentity {
+    pub activation_generation: u64,
+    pub provider_epoch: u64,
+}
+
+impl BackendIdentity {
+    pub const fn new(activation_generation: u64, provider_epoch: u64) -> Self {
+        Self {
+            activation_generation,
+            provider_epoch,
+        }
+    }
+}
+
 /// Return the serialized size of a JSON value after enforcing the shared
 /// ingress/egress depth and byte policy.
 pub fn validate_json(

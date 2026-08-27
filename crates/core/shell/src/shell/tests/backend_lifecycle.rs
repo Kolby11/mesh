@@ -1,6 +1,7 @@
 use super::common::*;
 use super::*;
 use crate::shell::backend::BackendSupervisionState;
+use mesh_core_backend::BackendIdentity;
 use mesh_core_module::{ModuleHealthState, ModuleState};
 
 #[test]
@@ -147,6 +148,7 @@ fn stale_restart_deadline_cannot_clear_or_run_a_newer_supervision_token() {
             restart_count: 1,
             restart_pending: true,
             pending_provider_id: Some("@mesh/old-audio".to_string()),
+            pending_identity: BackendIdentity::default(),
             restart_generation: 7,
             running_since: None,
             quarantined_providers: std::collections::HashSet::new(),
@@ -629,6 +631,7 @@ fn stateful_provider_waits_for_valid_initial_snapshot_before_activation() {
             super::types::ShellMessage::BackendServiceUpdate {
                 interface: "mesh.audio".to_string(),
                 provider_id: "@mesh/new-audio".to_string(),
+                identity: BackendIdentity::default(),
                 event: service_update(
                     "mesh.audio",
                     "@mesh/new-audio",
@@ -681,6 +684,7 @@ fn invalid_prepared_snapshot_keeps_current_provider_active() {
             super::types::ShellMessage::BackendServiceUpdate {
                 interface: "mesh.audio".to_string(),
                 provider_id: "@mesh/new-audio".to_string(),
+                identity: BackendIdentity::default(),
                 event: service_update(
                     "mesh.audio",
                     "@mesh/new-audio",
@@ -1064,6 +1068,94 @@ fn stale_backend_lifecycle_event_does_not_stop_current_provider() {
             .map(|entry| entry.status.as_str()),
         Some("failed")
     );
+}
+
+#[test]
+fn stale_provider_epoch_update_is_rejected_for_same_provider_id() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    let old_identity = BackendIdentity::new(3, 1);
+    let current_identity = BackendIdentity::new(3, 2);
+
+    let (old_slot, _old_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/audio");
+    *old_slot
+        .identity
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = old_identity;
+    shell.replace_backend_runtime("mesh.audio".to_string(), old_slot);
+
+    let (current_slot, _current_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/audio");
+    *current_slot
+        .identity
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = current_identity;
+    shell.replace_backend_runtime("mesh.audio".to_string(), current_slot);
+
+    shell
+        .handle_shell_message(
+            &mut VecDeque::new(),
+            super::types::ShellMessage::BackendServiceUpdate {
+                interface: "mesh.audio".to_string(),
+                provider_id: "@mesh/audio".to_string(),
+                identity: current_identity,
+                event: service_update(
+                    "mesh.audio",
+                    "@mesh/audio",
+                    serde_json::json!({ "available": true, "percent": 90.0 }),
+                ),
+            },
+        )
+        .unwrap();
+    shell
+        .handle_shell_message(
+            &mut VecDeque::new(),
+            super::types::ShellMessage::BackendServiceUpdate {
+                interface: "mesh.audio".to_string(),
+                provider_id: "@mesh/audio".to_string(),
+                identity: old_identity,
+                event: service_update(
+                    "mesh.audio",
+                    "@mesh/audio",
+                    serde_json::json!({ "available": true, "percent": 10.0 }),
+                ),
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        shell.latest_service_state["mesh.audio"].state["percent"],
+        serde_json::json!(90.0)
+    );
+}
+
+#[test]
+fn stale_provider_epoch_restart_deadline_cannot_restart_same_provider() {
+    let mut shell = Shell::new();
+    shell.activation_generation = 5;
+    shell.backend_supervision.insert(
+        "mesh.audio".to_string(),
+        BackendSupervisionState {
+            restart_count: 1,
+            restart_pending: true,
+            pending_provider_id: Some("@mesh/audio".to_string()),
+            pending_identity: BackendIdentity::new(5, 2),
+            restart_generation: 7,
+            running_since: None,
+            quarantined_providers: std::collections::HashSet::new(),
+        },
+    );
+
+    shell.handle_backend_restart_due_at_identity(
+        "mesh.audio",
+        "@mesh/audio",
+        BackendIdentity::new(5, 1),
+        7,
+    );
+
+    let state = shell.backend_supervision.get("mesh.audio").unwrap();
+    assert!(state.restart_pending);
+    assert_eq!(state.pending_provider_id.as_deref(), Some("@mesh/audio"));
+    assert_eq!(state.pending_identity, BackendIdentity::new(5, 2));
 }
 
 #[test]

@@ -119,6 +119,19 @@ impl Shell {
     }
 
     pub(in crate::shell) fn record_latest_service_state(&mut self, event: &ServiceEvent) -> bool {
+        let interface = match event {
+            ServiceEvent::Updated { service, .. } => canonical_interface_name_cow(service),
+            _ => return true,
+        };
+        let identity = self.backend_identity_for_interface(interface.as_ref());
+        self.record_latest_service_state_at_identity(event, identity)
+    }
+
+    pub(in crate::shell) fn record_latest_service_state_at_identity(
+        &mut self,
+        event: &ServiceEvent,
+        identity: mesh_core_backend::BackendIdentity,
+    ) -> bool {
         let ServiceEvent::Updated {
             service,
             source_module,
@@ -140,7 +153,14 @@ impl Shell {
         if !shell_theme_snapshot {
             if let Some(slot) = self.backend_runtimes.get(interface.as_ref()) {
                 if slot.provider_id != *source_module
-                    || !self.backend_provider_is_active(interface.as_ref(), source_module)
+                    || (identity != BackendIdentity::default()
+                        && !self.backend_provider_is_active_at_identity(
+                            interface.as_ref(),
+                            source_module,
+                            identity,
+                        ))
+                    || (identity == BackendIdentity::default()
+                        && !self.backend_provider_is_active(interface.as_ref(), source_module))
                 {
                     tracing::debug!(
                         interface = interface.as_ref(),
@@ -150,9 +170,10 @@ impl Shell {
                     );
                     return false;
                 }
-            } else if self
-                .backend_runtime_status(interface.as_ref(), source_module)
-                .is_some_and(|entry| entry.status.rejects_provider_messages())
+            } else if identity != BackendIdentity::default()
+                || self
+                    .backend_runtime_status(interface.as_ref(), source_module)
+                    .is_some_and(|entry| entry.status.rejects_provider_messages())
             {
                 tracing::debug!(
                     interface = interface.as_ref(),
@@ -183,10 +204,11 @@ impl Shell {
             .map_or(1, |latest| latest.generation.saturating_add(1));
         self.latest_service_state.insert(
             interface.clone(),
-            LatestServiceState::new(
+            LatestServiceState::new_with_identity(
                 interface,
                 source_module.clone(),
                 generation,
+                identity,
                 payload.clone(),
             ),
         );
@@ -214,6 +236,21 @@ impl Shell {
                     .map(|latest| latest.provider_id.clone())
             })
             .unwrap_or_else(|| "@mesh/shell".to_string());
+        let identity = self
+            .backend_runtimes
+            .get(&interface)
+            .map(|slot| {
+                *slot
+                    .identity
+                    .read()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+            })
+            .or_else(|| {
+                self.latest_service_state
+                    .get(&interface)
+                    .map(|latest| latest.identity)
+            })
+            .unwrap_or_default();
         let mut payload = self
             .latest_service_state
             .get(&interface)
@@ -231,6 +268,7 @@ impl Shell {
                 interface: interface.clone(),
                 field: field.to_string(),
                 provider_id: provider_id.clone(),
+                identity,
                 previous_call_id,
                 previous,
                 optimistic: value.clone(),
@@ -242,13 +280,14 @@ impl Shell {
                 .insert(call_id, pending);
         }
         payload[field] = value;
-        self.publish_bound_service_state(interface, provider_id, payload);
+        self.publish_bound_service_state(interface, provider_id, identity, payload);
     }
 
     fn publish_bound_service_state(
         &mut self,
         interface: String,
         provider_id: String,
+        identity: mesh_core_backend::BackendIdentity,
         payload: serde_json::Value,
     ) {
         let generation = self
@@ -257,10 +296,11 @@ impl Shell {
             .map_or(1, |latest| latest.generation.saturating_add(1));
         self.latest_service_state.insert(
             interface.clone(),
-            LatestServiceState::new(
+            LatestServiceState::new_with_identity(
                 interface.clone(),
                 provider_id.clone(),
                 generation,
+                identity,
                 payload.clone(),
             ),
         );
@@ -416,7 +456,8 @@ impl Shell {
         } else if let Some(object) = payload.as_object_mut() {
             object.remove(field);
         }
-        self.publish_bound_service_state(interface, provider_id, payload);
+        let identity = self.backend_identity_for_interface(&interface);
+        self.publish_bound_service_state(interface, provider_id, identity, payload);
     }
 
     fn restore_bound_service_state_value(
@@ -433,7 +474,8 @@ impl Shell {
             .map(|latest| latest.state.clone())
             .unwrap_or_else(|| serde_json::json!({ "available": true }));
         payload[field] = value;
-        self.publish_bound_service_state(interface, provider_id, payload);
+        let identity = self.backend_identity_for_interface(&interface);
+        self.publish_bound_service_state(interface, provider_id, identity, payload);
     }
 
     fn is_failed_bound_service_status(status: &str) -> bool {
@@ -747,6 +789,26 @@ impl Shell {
         payload: serde_json::Value,
         generation: u64,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let identity = self.backend_identity_for_interface(&interface);
+        self.broadcast_backend_interface_event_at_identity(
+            interface,
+            provider_id,
+            identity,
+            name,
+            payload,
+            generation,
+        )
+    }
+
+    pub(in crate::shell) fn broadcast_backend_interface_event_at_identity(
+        &mut self,
+        interface: String,
+        provider_id: String,
+        identity: mesh_core_backend::BackendIdentity,
+        name: String,
+        payload: serde_json::Value,
+        generation: u64,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         if generation != 0
             && !self
                 .backend_runtimes
@@ -762,7 +824,12 @@ impl Shell {
             );
             return Ok(VecDeque::new());
         }
-        if !self.backend_provider_is_active(&interface, &provider_id) {
+        let provider_is_active = if identity == BackendIdentity::default() {
+            self.backend_provider_is_active(&interface, &provider_id)
+        } else {
+            self.backend_provider_is_active_at_identity(&interface, &provider_id, identity)
+        };
+        if !provider_is_active {
             tracing::debug!(
                 interface,
                 provider_id,

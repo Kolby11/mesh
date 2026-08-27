@@ -1,3 +1,4 @@
+pub(super) use mesh_core_backend::BackendIdentity;
 pub use mesh_core_frontend_host::{
     ChildSurfaceDiagnostic, ChildSurfaceKind, ChildSurfaceRequest, ComponentContext,
     ComponentError, ComponentInput, ComponentProfilingRecord, CoreEvent, CoreRequest,
@@ -308,6 +309,7 @@ pub(super) struct PendingBoundServiceState {
     pub(super) interface: String,
     pub(super) field: String,
     pub(super) provider_id: String,
+    pub(super) identity: BackendIdentity,
     pub(super) previous_call_id: Option<mesh_core_backend::CallId>,
     pub(super) previous: Option<serde_json::Value>,
     pub(super) optimistic: serde_json::Value,
@@ -320,6 +322,7 @@ pub(super) struct ServiceCallRoute {
     pub(super) instance_id: String,
     pub(super) module_id: String,
     pub(super) generation: u64,
+    pub(super) identity: BackendIdentity,
 }
 
 /// Per-(interface, command) leading+trailing throttle state for coalescable
@@ -337,6 +340,7 @@ pub(super) struct LatestServiceState {
     pub(super) interface: String,
     pub(super) provider_id: String,
     pub(super) generation: u64,
+    pub(super) identity: BackendIdentity,
     pub(super) state: serde_json::Value,
 }
 
@@ -351,6 +355,23 @@ impl LatestServiceState {
             interface,
             provider_id,
             generation,
+            identity: BackendIdentity::default(),
+            state,
+        }
+    }
+
+    pub(super) fn new_with_identity(
+        interface: String,
+        provider_id: String,
+        generation: u64,
+        identity: BackendIdentity,
+        state: serde_json::Value,
+    ) -> Self {
+        Self {
+            interface,
+            provider_id,
+            generation,
+            identity,
             state,
         }
     }
@@ -376,11 +397,13 @@ pub(super) enum ShellMessage {
     BackendServiceUpdate {
         interface: String,
         provider_id: String,
+        identity: BackendIdentity,
         event: ServiceEvent,
     },
     BackendLifecycle {
         interface: String,
         provider_id: String,
+        identity: BackendIdentity,
         stage: String,
         status: String,
         message: String,
@@ -388,6 +411,7 @@ pub(super) enum ShellMessage {
     BackendCommandResult {
         interface: String,
         provider_id: String,
+        identity: BackendIdentity,
         generation: u64,
         call_id: mesh_core_backend::CallId,
         command: String,
@@ -397,6 +421,7 @@ pub(super) enum ShellMessage {
     BackendInterfaceEvent {
         interface: String,
         provider_id: String,
+        identity: BackendIdentity,
         name: String,
         payload: serde_json::Value,
         generation: u64,
@@ -406,6 +431,7 @@ pub(super) enum ShellMessage {
     BackendRestartDue {
         interface: String,
         provider_id: String,
+        identity: BackendIdentity,
         restart_generation: u64,
     },
     FilesystemChanged,

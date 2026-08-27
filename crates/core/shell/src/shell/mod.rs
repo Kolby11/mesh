@@ -27,7 +27,7 @@ use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use tokio::runtime::Runtime;
@@ -62,6 +62,12 @@ use surface_layout::{
     apply_font_family, default_surface_visibility, load_active_theme, prepare_theme_for_graph,
     selected_theme_mode,
 };
+use types::{
+    BackendIdentity, CommandThrottleState, CompiledContractField, ComponentRuntime,
+    ContractValidationCache, LatestServiceState, PendingBoundServiceState, PendingServiceCommand,
+    ServiceCallRoute, ServiceCommandMsg, ServiceDeliveryIndex, SettingsWatchState, ShellCoreState,
+    ShellMessage, SurfaceState, TargetRef, ThemeWatchState,
+};
 pub use types::{
     ChildSurfaceDiagnostic, ComponentContext, ComponentError, ComponentInput, CoreEvent,
     CoreRequest, FrontendEffectRevision, FrontendFrame, FrontendFrameEffects, FrontendFrameError,
@@ -69,12 +75,6 @@ pub use types::{
     FrontendServiceSnapshot, KeyModifiers, PopoverSurfaceRelationship, PopoverTriggerReference,
     ServiceEvent, ServiceInterfaceEventSubscription, ServiceObservationSummary, ShellComponent,
     SurfaceExtent, SurfaceId, TabFocusTarget,
-};
-use types::{
-    CommandThrottleState, CompiledContractField, ComponentRuntime, ContractValidationCache,
-    LatestServiceState, PendingBoundServiceState, PendingServiceCommand, ServiceCallRoute,
-    ServiceCommandMsg, ServiceDeliveryIndex, SettingsWatchState, ShellCoreState, ShellMessage,
-    SurfaceState, TargetRef, ThemeWatchState,
 };
 
 use service::{service_capabilities, service_name_from_interface};
@@ -488,6 +488,9 @@ pub struct Shell {
     activation_generation: u64,
     /// The immutable runtime-generation record swapped at activation commit.
     active_generation: Option<Arc<profile::RuntimeGeneration>>,
+    /// Monotonic provider epochs prevent delayed output from an older runtime
+    /// for the same provider id from crossing a replacement boundary.
+    backend_provider_epochs: HashMap<String, u64>,
     deferred_requests: VecDeque<CoreRequest>,
     backend_runtime_statuses: BackendRuntimeStatusMap,
     backend_supervision: HashMap<String, backend::BackendSupervisionState>,
@@ -545,6 +548,7 @@ struct BackendRuntimeSlot {
     /// Identity carried by events from this particular runtime generation.
     /// Candidate generations use a private value until they are committed.
     event_provider_id: Arc<std::sync::RwLock<String>>,
+    identity: Arc<RwLock<mesh_core_backend::BackendIdentity>>,
     generation: u64,
     command_tx: mpsc::Sender<ServiceCommandMsg>,
     task: AbortHandle,

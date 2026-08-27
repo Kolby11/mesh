@@ -1735,6 +1735,7 @@ impl Shell {
             pending_profile_switch: None,
             activation_generation: 0,
             active_generation: None,
+            backend_provider_epochs: HashMap::new(),
             deferred_requests: VecDeque::new(),
             backend_runtime_statuses: HashMap::new(),
             backend_supervision: HashMap::new(),

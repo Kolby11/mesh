@@ -1,5 +1,6 @@
 use super::common::*;
 use super::*;
+use mesh_core_backend::BackendIdentity;
 
 #[test]
 fn set_muted_command_broadcasts_bound_audio_state_until_backend_confirms() {
@@ -195,6 +196,7 @@ fn set_volume_updates_canonical_audio_percent_until_backend_confirms() {
             super::types::ShellMessage::BackendServiceUpdate {
                 interface: "mesh.audio".to_string(),
                 provider_id: "@mesh/pipewire-audio".to_string(),
+                identity: BackendIdentity::default(),
                 event: service_update(
                     "mesh.audio",
                     "@mesh/pipewire-audio",
@@ -215,6 +217,7 @@ fn set_volume_updates_canonical_audio_percent_until_backend_confirms() {
             super::types::ShellMessage::BackendServiceUpdate {
                 interface: "mesh.audio".to_string(),
                 provider_id: "@mesh/pipewire-audio".to_string(),
+                identity: BackendIdentity::default(),
                 event: service_update(
                     "mesh.audio",
                     "@mesh/pipewire-audio",
@@ -292,6 +295,7 @@ fn failed_bound_write_rolls_back_and_older_failure_cannot_override_newer_write()
             super::types::ShellMessage::BackendCommandResult {
                 interface: "mesh.audio".to_string(),
                 provider_id: "@mesh/pipewire-audio".to_string(),
+                identity: BackendIdentity::default(),
                 generation: 0,
                 call_id: first_command.call_id,
                 command: "set_volume".to_string(),
@@ -316,6 +320,7 @@ fn failed_bound_write_rolls_back_and_older_failure_cannot_override_newer_write()
             super::types::ShellMessage::BackendCommandResult {
                 interface: "mesh.audio".to_string(),
                 provider_id: "@mesh/pipewire-audio".to_string(),
+                identity: BackendIdentity::default(),
                 generation: 0,
                 call_id: second_command.call_id,
                 command: "set_volume".to_string(),

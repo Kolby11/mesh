@@ -26,6 +26,7 @@ pub(in crate::shell) struct BackendSupervisionState {
     /// delayed task is not allowed to resurrect a provider after a graph or
     /// runtime replacement has superseded it.
     pub(in crate::shell) pending_provider_id: Option<String>,
+    pub(in crate::shell) pending_identity: mesh_core_backend::BackendIdentity,
     pub(in crate::shell) restart_generation: u64,
     /// When the current provider last reported `running`.
     pub(in crate::shell) running_since: Option<Instant>,
@@ -37,6 +38,7 @@ impl BackendSupervisionState {
     pub(in crate::shell) fn invalidate_pending_restart(&mut self) {
         self.restart_pending = false;
         self.pending_provider_id = None;
+        self.pending_identity = mesh_core_backend::BackendIdentity::default();
         self.restart_generation = self.restart_generation.saturating_add(1);
     }
 }
@@ -69,6 +71,16 @@ impl Shell {
         interface: &str,
         provider_id: &str,
     ) {
+        let identity = self.backend_identity_for_interface(interface);
+        self.supervise_backend_failure_at_identity(interface, provider_id, identity);
+    }
+
+    pub(in crate::shell) fn supervise_backend_failure_at_identity(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        identity: mesh_core_backend::BackendIdentity,
+    ) {
         let state = self
             .backend_supervision
             .entry(interface.to_string())
@@ -91,13 +103,19 @@ impl Shell {
                 "backend provider {provider_id} for {interface} failed {MAX_RESTART_CYCLES} supervised restarts; quarantined for this session, failing over"
             );
             tracing::warn!(interface, provider_id, "{message}");
-            self.record_backend_runtime_status(
+            self.record_backend_runtime_status_at_identity(
                 interface.to_string(),
                 provider_id.to_string(),
+                identity,
                 BackendRuntimeStatus::Quarantined,
                 message,
             );
-            self.schedule_backend_restart(interface, provider_id, RESTART_BASE_DELAY);
+            self.schedule_backend_restart_at_identity(
+                interface,
+                provider_id,
+                identity,
+                RESTART_BASE_DELAY,
+            );
             return;
         }
 
@@ -117,10 +135,16 @@ impl Shell {
             delay_ms = delay.as_millis() as u64,
             "scheduling supervised backend restart"
         );
-        self.schedule_backend_restart(interface, provider_id, delay);
+        self.schedule_backend_restart_at_identity(interface, provider_id, identity, delay);
     }
 
-    fn schedule_backend_restart(&mut self, interface: &str, provider_id: &str, delay: Duration) {
+    fn schedule_backend_restart_at_identity(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        identity: mesh_core_backend::BackendIdentity,
+        delay: Duration,
+    ) {
         let Some(ctx) = self.backend_respawn.clone() else {
             tracing::debug!(interface, "no respawn context; skipping supervised restart");
             return;
@@ -128,6 +152,7 @@ impl Shell {
         let restart_generation = if let Some(state) = self.backend_supervision.get_mut(interface) {
             state.restart_pending = true;
             state.pending_provider_id = Some(provider_id.to_string());
+            state.pending_identity = identity;
             state.restart_generation = state.restart_generation.saturating_add(1);
             state.restart_generation
         } else {
@@ -140,6 +165,7 @@ impl Shell {
             let _ = ctx.tx.send(ShellMessage::BackendRestartDue {
                 interface,
                 provider_id,
+                identity,
                 restart_generation,
             });
             let evfd = unsafe { BorrowedFd::borrow_raw(ctx.eventfd_fd) };
@@ -157,12 +183,31 @@ impl Shell {
         provider_id: &str,
         restart_generation: u64,
     ) {
+        self.handle_backend_restart_due_at_identity(
+            interface,
+            provider_id,
+            mesh_core_backend::BackendIdentity::default(),
+            restart_generation,
+        );
+    }
+
+    pub(in crate::shell) fn handle_backend_restart_due_at_identity(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        identity: mesh_core_backend::BackendIdentity,
+        restart_generation: u64,
+    ) {
         let Some(state) = self.backend_supervision.get_mut(interface) else {
             return;
         };
         if !state.restart_pending
             || state.restart_generation != restart_generation
             || state.pending_provider_id.as_deref() != Some(provider_id)
+            || (identity != mesh_core_backend::BackendIdentity::default()
+                && state.pending_identity != identity)
+            || (identity != mesh_core_backend::BackendIdentity::default()
+                && self.activation_generation != identity.activation_generation)
         {
             tracing::debug!(
                 interface,
@@ -174,6 +219,7 @@ impl Shell {
         }
         state.restart_pending = false;
         state.pending_provider_id = None;
+        state.pending_identity = mesh_core_backend::BackendIdentity::default();
         let Some(ctx) = self.backend_respawn.clone() else {
             return;
         };

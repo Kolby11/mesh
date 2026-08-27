@@ -797,11 +797,13 @@ impl Shell {
                     .get(interface_canonical.as_ref())
                     .map(|slot| slot.generation)
                     .unwrap_or(0);
+                let identity = self.backend_identity_for_interface(interface_canonical.as_ref());
                 let route = ServiceCallRoute {
                     interface: interface_canonical.into_owned(),
                     instance_id: source_instance_id,
                     module_id: source_module_id.clone(),
                     generation,
+                    identity,
                 };
                 self.pending_service_call_routes.insert(call_id, route);
                 let result = self.dispatch_service_command_with_call_id(
@@ -1594,16 +1596,31 @@ impl Shell {
         call_id: mesh_core_backend::CallId,
     ) -> Option<Result<(), ServiceCommandSendError>> {
         let tx = self.service_handlers.get(interface).cloned()?;
-        let active_provider = self
-            .backend_runtimes
-            .get(interface)
-            .map(|slot| (slot.provider_id.clone(), slot.generation));
+        let active_provider = self.backend_runtimes.get(interface).map(|slot| {
+            (
+                slot.provider_id.clone(),
+                slot.generation,
+                *slot
+                    .identity
+                    .read()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()),
+            )
+        });
         let generation = active_provider
             .as_ref()
-            .map(|(_, generation)| *generation)
+            .map(|(_, generation, _)| *generation)
             .unwrap_or(0);
-        mesh_core_backend::register_call_for_generation(call_id, SERVICE_CALL_TIMEOUT, generation);
-        let active_provider_id = active_provider.map(|(provider_id, _)| provider_id);
+        let identity = active_provider
+            .as_ref()
+            .map(|(_, _, identity)| *identity)
+            .unwrap_or_default();
+        mesh_core_backend::register_call_for_generation_and_identity(
+            call_id,
+            SERVICE_CALL_TIMEOUT,
+            generation,
+            identity,
+        );
+        let active_provider_id = active_provider.map(|(provider_id, _, _)| provider_id);
         let profiling_started = (self.profiling_enabled() && active_provider_id.is_some())
             .then(std::time::Instant::now);
         let result = tx

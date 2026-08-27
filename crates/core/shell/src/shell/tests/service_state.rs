@@ -1,5 +1,6 @@
 use super::common::*;
 use super::*;
+use mesh_core_backend::BackendIdentity;
 
 #[test]
 fn latest_service_state_tracks_provider_metadata_separately() {
@@ -198,6 +199,7 @@ fn profiling_backend_poll_update_attributes_accepted_backend_messages() {
             super::types::ShellMessage::BackendServiceUpdate {
                 interface: "mesh.audio".to_string(),
                 provider_id: "@mesh/pipewire-audio".to_string(),
+                identity: BackendIdentity::default(),
                 event: service_update(
                     "mesh.audio",
                     "@mesh/pipewire-audio",
@@ -251,6 +253,7 @@ fn profiling_backend_poll_update_ignores_stale_backend_messages() {
             super::types::ShellMessage::BackendServiceUpdate {
                 interface: "mesh.audio".to_string(),
                 provider_id: "@mesh/old-audio".to_string(),
+                identity: BackendIdentity::default(),
                 event: service_update(
                     "mesh.audio",
                     "@mesh/old-audio",

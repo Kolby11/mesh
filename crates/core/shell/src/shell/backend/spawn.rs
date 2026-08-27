@@ -4,6 +4,19 @@ use super::{BackendLaunchCandidate, BackendRuntimeStatus};
 use rustix::fd::BorrowedFd;
 
 impl Shell {
+    pub(in crate::shell) fn next_backend_identity(
+        &mut self,
+        interface: &str,
+        activation_generation: u64,
+    ) -> mesh_core_backend::BackendIdentity {
+        let epoch = self
+            .backend_provider_epochs
+            .entry(interface.to_string())
+            .and_modify(|epoch| *epoch = epoch.saturating_add(1).max(1))
+            .or_insert(1);
+        mesh_core_backend::BackendIdentity::new(activation_generation, *epoch)
+    }
+
     pub(in crate::shell) fn spawn_backend_modules(
         &mut self,
         runtime: &tokio::runtime::Handle,
@@ -122,12 +135,14 @@ impl Shell {
         eventfd_fd: std::os::unix::io::RawFd,
     ) -> BackendRuntimeSlot {
         let event_provider_id = candidate.module_id.clone();
+        let identity = self.next_backend_identity(&candidate.interface, self.activation_generation);
         self.start_backend_candidate_with_event_id(
             runtime,
             tx,
             candidate,
             eventfd_fd,
             event_provider_id,
+            identity,
         )
     }
 
@@ -138,6 +153,7 @@ impl Shell {
         candidate: BackendLaunchCandidate,
         eventfd_fd: std::os::unix::io::RawFd,
         initial_event_provider_id: String,
+        identity: mesh_core_backend::BackendIdentity,
     ) -> BackendRuntimeSlot {
         if let Some(module) = self.modules.get_mut(&candidate.module_id) {
             module.clear_quarantine();
@@ -156,6 +172,8 @@ impl Shell {
         let provider_id = candidate.module_id.clone();
         let event_provider_id = Arc::new(std::sync::RwLock::new(initial_event_provider_id));
         let bridge_event_provider_id = event_provider_id.clone();
+        let identity_handle = Arc::new(RwLock::new(identity));
+        let bridge_identity_handle = identity_handle.clone();
         let (backend_tx, mut backend_rx) =
             mpsc::channel::<BackendServiceEvent>(mesh_core_backend::BACKEND_EVENT_QUEUE_CAPACITY);
         let bridge_interface = interface.clone();
@@ -172,6 +190,7 @@ impl Shell {
                             .send(ShellMessage::BackendServiceUpdate {
                                 interface: bridge_interface.clone(),
                                 provider_id: current_event_provider_id.clone(),
+                                identity: update.identity,
                                 event: ServiceEvent::Updated {
                                     service: update.service.to_string(),
                                     source_module: update.source_module.to_string(),
@@ -191,6 +210,7 @@ impl Shell {
                         let payload = result.result;
                         let outcome = result.outcome;
                         let generation = result.generation;
+                        let identity = result.identity;
                         tracing::debug!(
                             interface = bridge_interface.as_str(),
                             provider_id = bridge_provider_id.as_str(),
@@ -201,6 +221,7 @@ impl Shell {
                         let _ = shell_tx.send(ShellMessage::BackendCommandResult {
                             interface: bridge_interface.clone(),
                             provider_id: current_event_provider_id.clone(),
+                            identity,
                             generation,
                             call_id,
                             command,
@@ -214,6 +235,7 @@ impl Shell {
                         let name = event.name;
                         let payload = event.payload;
                         let generation = event.generation;
+                        let identity = event.identity;
                         tracing::debug!(
                             interface = bridge_interface.as_str(),
                             provider_id = bridge_provider_id.as_str(),
@@ -224,6 +246,7 @@ impl Shell {
                         let _ = shell_tx.send(ShellMessage::BackendInterfaceEvent {
                             interface: bridge_interface.clone(),
                             provider_id: current_event_provider_id.clone(),
+                            identity,
                             name,
                             payload,
                             generation,
@@ -231,10 +254,11 @@ impl Shell {
                         let evfd = unsafe { BorrowedFd::borrow_raw(eventfd_fd) };
                         let _ = rustix::io::write(&evfd, &1u64.to_ne_bytes());
                     }
-                    BackendServiceEvent::Started { .. } => {
+                    BackendServiceEvent::Started { identity, .. } => {
                         let _ = shell_tx.send(ShellMessage::BackendLifecycle {
                             interface: bridge_interface.clone(),
                             provider_id: current_event_provider_id.clone(),
+                            identity,
                             stage: "runtime".to_string(),
                             status: "running".to_string(),
                             message: "backend runtime started".to_string(),
@@ -247,10 +271,13 @@ impl Shell {
                             "backend runtime started"
                         );
                     }
-                    BackendServiceEvent::InitFailed { message, .. } => {
+                    BackendServiceEvent::InitFailed {
+                        message, identity, ..
+                    } => {
                         let _ = shell_tx.send(ShellMessage::BackendLifecycle {
                             interface: bridge_interface.clone(),
                             provider_id: current_event_provider_id.clone(),
+                            identity,
                             stage: "init".to_string(),
                             status: "init_failed".to_string(),
                             message: message.clone(),
@@ -263,10 +290,13 @@ impl Shell {
                             "{message}"
                         );
                     }
-                    BackendServiceEvent::PollFailed { message, .. } => {
+                    BackendServiceEvent::PollFailed {
+                        message, identity, ..
+                    } => {
                         let _ = shell_tx.send(ShellMessage::BackendLifecycle {
                             interface: bridge_interface.clone(),
                             provider_id: current_event_provider_id.clone(),
+                            identity,
                             stage: "poll".to_string(),
                             status: "poll_failed".to_string(),
                             message: message.clone(),
@@ -279,10 +309,16 @@ impl Shell {
                             "{message}"
                         );
                     }
-                    BackendServiceEvent::Failed { stage, message, .. } => {
+                    BackendServiceEvent::Failed {
+                        stage,
+                        message,
+                        identity,
+                        ..
+                    } => {
                         let _ = shell_tx.send(ShellMessage::BackendLifecycle {
                             interface: bridge_interface.clone(),
                             provider_id: current_event_provider_id.clone(),
+                            identity,
                             stage,
                             status: "failed".to_string(),
                             message: message.clone(),
@@ -295,10 +331,11 @@ impl Shell {
                             "{message}"
                         );
                     }
-                    BackendServiceEvent::Stopped { .. } => {
+                    BackendServiceEvent::Stopped { identity, .. } => {
                         let _ = shell_tx.send(ShellMessage::BackendLifecycle {
                             interface: bridge_interface.clone(),
                             provider_id: current_event_provider_id.clone(),
+                            identity,
                             stage: "runtime".to_string(),
                             status: "stopped".to_string(),
                             message: "backend runtime stopped".to_string(),
@@ -315,7 +352,7 @@ impl Shell {
             }
         });
         let task = runtime.spawn(
-            mesh_core_backend::spawn_backend_service_bounded_with_events_and_queue(
+            mesh_core_backend::spawn_backend_service_bounded_with_events_and_queue_with_identity(
                 candidate.module_id,
                 candidate.service_name,
                 candidate.capabilities,
@@ -326,12 +363,15 @@ impl Shell {
                 candidate.command_registry,
                 candidate.event_registry,
                 generation,
+                identity,
+                identity_handle,
             ),
         );
         BackendRuntimeSlot {
             interface,
             provider_id,
             event_provider_id,
+            identity: bridge_identity_handle,
             generation,
             command_tx: cmd_tx,
             task: task.abort_handle(),

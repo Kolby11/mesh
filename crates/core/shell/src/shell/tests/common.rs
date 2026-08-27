@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_backend::BackendIdentity;
 
 pub(super) static SETTINGS_ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -353,6 +354,7 @@ pub(super) fn backend_runtime_slot(
             interface: interface.to_string(),
             provider_id: provider_id.to_string(),
             event_provider_id: Arc::new(std::sync::RwLock::new(provider_id.to_string())),
+            identity: Arc::new(std::sync::RwLock::new(BackendIdentity::default())),
             generation: 0,
             command_tx,
             task: task.abort_handle(),

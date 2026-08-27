@@ -94,6 +94,7 @@ pub(in crate::shell) struct BackendRuntimeStatusEntry {
     pub(in crate::shell) provider_id: String,
     pub(in crate::shell) status: BackendRuntimeStatus,
     pub(in crate::shell) message: String,
+    pub(in crate::shell) identity: mesh_core_backend::BackendIdentity,
     /// Cumulative number of failure-category status updates recorded for this entry.
     pub(in crate::shell) failure_count: u64,
 }

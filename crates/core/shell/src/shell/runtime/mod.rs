@@ -412,14 +412,27 @@ impl Shell {
             ShellMessage::BackendServiceUpdate {
                 interface,
                 provider_id,
+                identity,
                 event,
             } => {
-                if self.capture_pending_backend_update(&interface, &provider_id, event.clone())
-                    || self.capture_profile_backend_update(&interface, &provider_id, event.clone())
-                {
+                if self.capture_pending_backend_update_at_identity(
+                    &interface,
+                    &provider_id,
+                    identity,
+                    event.clone(),
+                ) || self.capture_profile_backend_update_at_identity(
+                    &interface,
+                    &provider_id,
+                    identity,
+                    event.clone(),
+                ) {
                     return Ok(());
                 }
-                let provider_is_active = self.backend_provider_is_active(&interface, &provider_id);
+                let provider_is_active = if identity == BackendIdentity::default() {
+                    self.backend_provider_is_active(&interface, &provider_id)
+                } else {
+                    self.backend_provider_is_active_at_identity(&interface, &provider_id, identity)
+                };
                 if !provider_is_active {
                     tracing::debug!(
                         interface,
@@ -430,7 +443,7 @@ impl Shell {
                 }
                 let profiling_started = self.profiling_enabled().then(std::time::Instant::now);
                 let event = self.normalize_service_event(event);
-                if self.record_latest_service_state(&event) {
+                if self.record_latest_service_state_at_identity(&event, identity) {
                     pending.extend(self.deliver_service_event(&event)?);
                     if let Some(started) = profiling_started {
                         self.record_backend_profiling_stage(
@@ -446,24 +459,36 @@ impl Shell {
             ShellMessage::BackendLifecycle {
                 interface,
                 provider_id,
+                identity,
                 stage,
                 status,
                 message,
-            } => self.handle_backend_lifecycle(interface, provider_id, stage, status, message),
+            } => self.handle_backend_lifecycle_at_identity(
+                interface,
+                provider_id,
+                identity,
+                stage,
+                status,
+                message,
+            ),
             ShellMessage::BackendCommandResult {
                 interface,
                 provider_id,
+                identity,
                 generation,
                 call_id,
                 command,
                 result,
                 outcome,
             } => {
-                let provider_is_active = self.backend_provider_is_active(&interface, &provider_id)
-                    && self
-                        .backend_runtimes
-                        .get(&interface)
-                        .is_some_and(|slot| slot.generation == generation);
+                let provider_is_active = (if identity == BackendIdentity::default() {
+                    self.backend_provider_is_active(&interface, &provider_id)
+                } else {
+                    self.backend_provider_is_active_at_identity(&interface, &provider_id, identity)
+                }) && self
+                    .backend_runtimes
+                    .get(&interface)
+                    .is_some_and(|slot| slot.generation == generation);
                 if provider_is_active {
                     let contract = self.interfaces.resolve(&interface, None).contract;
                     let warnings = contract.as_ref().map_or_else(Vec::new, |contract| {
@@ -521,6 +546,22 @@ impl Shell {
                         .is_some_and(|slot| slot.generation != generation)
                     {
                         "stale_generation"
+                    } else if self.backend_runtimes.get(&interface).is_some_and(|slot| {
+                        slot.identity
+                            .read()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .activation_generation
+                            != identity.activation_generation
+                    }) {
+                        "stale_activation_generation"
+                    } else if self.backend_runtimes.get(&interface).is_some_and(|slot| {
+                        slot.identity
+                            .read()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .provider_epoch
+                            != identity.provider_epoch
+                    }) {
+                        "stale_provider_epoch"
                     } else {
                         "stale_provider"
                     };
@@ -530,7 +571,7 @@ impl Shell {
                         &serde_json::json!({
                             "ok": false,
                             "status": stale_status,
-                            "error": "provider generation is no longer active",
+                            "error": "backend activation or provider epoch is no longer active",
                         }),
                     );
                 }
@@ -538,13 +579,15 @@ impl Shell {
             ShellMessage::BackendInterfaceEvent {
                 interface,
                 provider_id,
+                identity,
                 name,
                 payload,
                 generation,
             } => {
-                pending.extend(self.broadcast_backend_interface_event_at_generation(
+                pending.extend(self.broadcast_backend_interface_event_at_identity(
                     interface,
                     provider_id,
+                    identity,
                     name,
                     payload,
                     generation,
@@ -553,9 +596,15 @@ impl Shell {
             ShellMessage::BackendRestartDue {
                 interface,
                 provider_id,
+                identity,
                 restart_generation,
             } => {
-                self.handle_backend_restart_due(&interface, &provider_id, restart_generation);
+                self.handle_backend_restart_due_at_identity(
+                    &interface,
+                    &provider_id,
+                    identity,
+                    restart_generation,
+                );
             }
             ShellMessage::FilesystemChanged => {
                 self.schedule_reload_checks_now();
@@ -658,13 +707,15 @@ impl CoalescedShellMessages {
         if let ShellMessage::BackendServiceUpdate {
             interface,
             provider_id,
+            identity,
             ..
         } = &message
         {
+            let provider_key = format!("{provider_id}:{identity:?}");
             if let Some(index) = self
                 .backend_update_index
                 .get(interface.as_str())
-                .and_then(|providers| providers.get(provider_id.as_str()))
+                .and_then(|providers| providers.get(&provider_key))
                 .copied()
             {
                 self.messages[index] = message;
@@ -673,7 +724,7 @@ impl CoalescedShellMessages {
             self.backend_update_index
                 .entry(interface.clone())
                 .or_default()
-                .insert(provider_id.clone(), self.messages.len());
+                .insert(provider_key, self.messages.len());
         } else {
             // Lifecycle, command-result, named interface-event, IPC, and
             // filesystem messages are ordering barriers. Updates after one
@@ -699,6 +750,7 @@ mod tests {
         ShellMessage::BackendServiceUpdate {
             interface: interface.to_string(),
             provider_id: provider_id.to_string(),
+            identity: BackendIdentity::default(),
             event: ServiceEvent::Updated {
                 service: interface.to_string(),
                 source_module: provider_id.to_string(),
@@ -746,6 +798,7 @@ mod tests {
         coalesced.push(ShellMessage::BackendInterfaceEvent {
             interface: "mesh.audio".to_string(),
             provider_id: "@mesh/pipewire-audio".to_string(),
+            identity: BackendIdentity::default(),
             name: "VolumeChanged".to_string(),
             payload: serde_json::json!({ "value": 1 }),
             generation: 0,

@@ -535,6 +535,19 @@ impl Shell {
         interface: &str,
         provider_id: &str,
     ) -> bool {
+        self.profile_candidate_is_pending_at_identity(
+            interface,
+            provider_id,
+            mesh_core_backend::BackendIdentity::default(),
+        )
+    }
+
+    pub(in crate::shell) fn profile_candidate_is_pending_at_identity(
+        &self,
+        interface: &str,
+        provider_id: &str,
+        identity: mesh_core_backend::BackendIdentity,
+    ) -> bool {
         self.pending_profile_switch
             .as_ref()
             .and_then(|pending| pending.candidate_backends.get(interface))
@@ -544,6 +557,12 @@ impl Shell {
                     .read()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     == provider_id
+                    && (identity == mesh_core_backend::BackendIdentity::default()
+                        || *slot
+                            .identity
+                            .read()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            == identity)
             })
     }
 
@@ -1233,12 +1252,14 @@ impl Shell {
                     "@mesh/profile-candidate/{}/{}/{}",
                     profile_id, interface, candidate.module_id
                 );
+                let identity = self.next_backend_identity(&interface, plan.generation);
                 let slot = self.start_backend_candidate_with_event_id(
                     &ctx.handle,
                     ctx.tx.clone(),
                     candidate,
                     ctx.eventfd_fd,
                     event_provider_id,
+                    identity,
                 );
                 pending.waiting_backends.insert(interface.clone());
                 pending.candidate_backends.insert(interface, slot);
@@ -1266,6 +1287,21 @@ impl Shell {
         provider_id: &str,
         status: BackendRuntimeStatus,
     ) -> bool {
+        self.handle_profile_backend_lifecycle_at_identity(
+            interface,
+            provider_id,
+            mesh_core_backend::BackendIdentity::default(),
+            status,
+        )
+    }
+
+    pub(in crate::shell) fn handle_profile_backend_lifecycle_at_identity(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        identity: mesh_core_backend::BackendIdentity,
+        status: BackendRuntimeStatus,
+    ) -> bool {
         let needs_initial_state = self.service_requires_initial_state(interface);
         let Some(pending) = self.pending_profile_switch.as_mut() else {
             return false;
@@ -1279,6 +1315,12 @@ impl Shell {
                     .read()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     == provider_id
+                    && (identity == mesh_core_backend::BackendIdentity::default()
+                        || *slot
+                            .identity
+                            .read()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            == identity)
             });
         if !is_candidate {
             return false;
@@ -1311,6 +1353,21 @@ impl Shell {
         provider_id: &str,
         event: ServiceEvent,
     ) -> bool {
+        self.capture_profile_backend_update_at_identity(
+            interface,
+            provider_id,
+            mesh_core_backend::BackendIdentity::default(),
+            event,
+        )
+    }
+
+    pub(in crate::shell) fn capture_profile_backend_update_at_identity(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        identity: mesh_core_backend::BackendIdentity,
+        event: ServiceEvent,
+    ) -> bool {
         let Some(pending) = self.pending_profile_switch.as_ref() else {
             return false;
         };
@@ -1323,7 +1380,13 @@ impl Shell {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .as_str()
             == provider_id;
-        if !is_candidate {
+        let identity_matches = identity == mesh_core_backend::BackendIdentity::default()
+            || *candidate
+                .identity
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                == identity;
+        if !is_candidate || !identity_matches {
             return false;
         }
         let actual_provider_id = candidate.provider_id.clone();
@@ -1471,6 +1534,7 @@ impl Shell {
                 prepared_states.push((interface, provider_id, payload));
             }
         }
+        self.retag_backend_runtimes_for_activation(plan.generation);
 
         let old_theme = self.settings.theme.clone();
         let old_fonts = self.settings.fonts.clone();
