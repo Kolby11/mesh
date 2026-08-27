@@ -101,6 +101,29 @@ pub use types::{
 
 use service::{service_capabilities, service_name_from_interface};
 
+/// The durable revision that identifies one effective control-plane snapshot.
+/// Shared settings and profile settings are separate files, so the revision
+/// carries both counters instead of manufacturing a content hash that cannot
+/// be checked against either persistence boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(in crate::shell) struct DurableControlPlaneRevision {
+    pub(in crate::shell) shared: u64,
+    pub(in crate::shell) profile: Option<u64>,
+}
+
+impl DurableControlPlaneRevision {
+    pub(in crate::shell) fn new(shared: u64, profile: Option<u64>) -> Self {
+        Self { shared, profile }
+    }
+
+    pub(in crate::shell) fn as_string(self) -> String {
+        match self.profile {
+            Some(profile) => format!("shared:{};profile:{profile}", self.shared),
+            None => format!("shared:{}", self.shared),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct PendingPopupGrab {
     identity: mesh_core_presentation::PointerButtonIdentity,
@@ -449,6 +472,9 @@ pub struct Shell {
     /// Every user decision in the shell, in one document. Shared with each
     /// component so they read the same snapshot the shell does.
     pub settings_store: Arc<SettingsStore>,
+    /// Revision of the exact shared/profile settings snapshot currently
+    /// visible to the shell and all mounted components.
+    control_plane_revision: DurableControlPlaneRevision,
     pub theme: ThemeEngine,
     pub locale: LocaleEngine,
     pub diagnostics: DiagnosticsCollector,

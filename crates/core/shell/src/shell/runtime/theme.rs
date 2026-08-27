@@ -1,9 +1,28 @@
 use super::super::*;
-use std::hash::{Hash, Hasher};
 
 const THEME_RELOAD_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
 const SHELL_SETTINGS_RELOAD_POLL_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(500);
+
+/// A validated settings candidate that has not crossed its durable commit
+/// boundary yet. Theme and locale preparation consume this value before any
+/// live shell state changes, so a rejected candidate cannot leave persistence
+/// and runtime state divergent.
+pub(in crate::shell) struct ControlPlaneSettingsCandidate {
+    pub(in crate::shell) store: SettingsStore,
+    pub(in crate::shell) shared_revision: u64,
+    pub(in crate::shell) profile_commit: Option<(
+        mesh_core_module::package::ProfilePaths,
+        String,
+        mesh_core_module::package::ShellProfile,
+        u64,
+    )>,
+}
+
+pub(in crate::shell) struct ControlPlaneSettingsCommit {
+    pub(in crate::shell) store: SettingsStore,
+    pub(in crate::shell) revision: DurableControlPlaneRevision,
+}
 
 fn theme_source_fingerprint(shell: &Shell) -> Result<u64, mesh_core_theme::ThemeError> {
     if let Some(graph) = shell.installed_module_graph.as_ref().filter(|graph| {
@@ -82,31 +101,100 @@ fn system_resources_json(settings: &ShellSettings) -> serde_json::Value {
 }
 
 impl Shell {
-    fn persist_shell_appearance_override(&mut self, patch: serde_json::Value) {
-        // Keep the live effective store in sync immediately, then persist the
-        // same sparse override to the shared store. Profile-owned overrides
-        // remain a separate composition concern; this is the global picker.
-        let mut effective = self.settings_store.as_ref().clone();
-        effective.merge_namespace(mesh_core_config::SHELL_NAMESPACE, &patch);
-        self.settings_store = Arc::new(effective);
+    /// Prepare a shared or active-profile settings candidate. The closure
+    /// receives the shared candidate when no profile is active, otherwise it
+    /// receives the sparse profile override that owns the write.
+    pub(in crate::shell) fn prepare_control_plane_settings<F>(
+        &self,
+        mutate: F,
+    ) -> Result<ControlPlaneSettingsCandidate, ShellRunError>
+    where
+        F: FnOnce(
+            &mut SettingsStore,
+            Option<&mut mesh_core_module::package::ShellProfile>,
+        ) -> Result<(), ShellRunError>,
+    {
+        let shared_path = self.settings_watch.path.clone();
+        let mut shared = SettingsStore::load_from(&shared_path)
+            .map_err(|error| ShellRunError::Package(format!("failed to load settings: {error}")))?;
+        let shared_revision = shared.revision();
+        let mut profile_commit = if let Some(profile_id) = self.active_profile_id.clone() {
+            let paths = mesh_core_module::package::ProfilePaths::from_root_graph(
+                &self.installed_module_graph_path(),
+            )
+            .map_err(|error| ShellRunError::Package(error.to_string()))?;
+            let profile = paths
+                .load(&profile_id)
+                .map_err(|error| ShellRunError::Package(error.to_string()))?;
+            Some((paths, profile_id, profile))
+        } else {
+            None
+        };
 
-        let path = self.settings_watch.path.clone();
-        let result = SettingsStore::load_from(&path).and_then(|mut shared| {
-            let expected_revision = shared.revision();
-            shared.merge_namespace(mesh_core_config::SHELL_NAMESPACE, &patch);
-            shared.save_if_revision(expected_revision)
-        });
-        match result {
-            Ok(()) => {
-                self.settings_watch.modified_at = std::fs::metadata(&path)
-                    .ok()
-                    .and_then(|metadata| metadata.modified().ok());
-            }
-            Err(error) => tracing::warn!(
-                "failed to persist shell appearance setting to {}: {error}",
-                path.display()
-            ),
+        mutate(
+            &mut shared,
+            profile_commit.as_mut().map(|(_, _, profile)| profile),
+        )?;
+
+        let (mut store, profile_commit) = if let Some((paths, profile_id, profile)) = profile_commit
+        {
+            let store =
+                super::super::discovery::effective_profile_settings(shared.clone(), Some(&profile))
+                    .map_err(|error| ShellRunError::Package(error.to_string()))?;
+            let expected_revision = profile.revision;
+            (store, Some((paths, profile_id, profile, expected_revision)))
+        } else {
+            (shared, None)
+        };
+
+        if let Some(graph) = self.installed_module_graph.as_ref() {
+            super::super::discovery::register_graph_settings_schemas(&mut store, graph)
+                .map_err(|error| ShellRunError::Package(error.to_string()))?;
         }
+
+        Ok(ControlPlaneSettingsCandidate {
+            store,
+            shared_revision,
+            profile_commit,
+        })
+    }
+
+    /// Commit a prepared candidate through the owning file's revision check.
+    /// No live state is changed until the atomic persistence operation returns.
+    pub(in crate::shell) fn commit_control_plane_settings(
+        &mut self,
+        candidate: ControlPlaneSettingsCandidate,
+    ) -> Result<ControlPlaneSettingsCommit, ShellRunError> {
+        let ControlPlaneSettingsCandidate {
+            mut store,
+            shared_revision,
+            profile_commit,
+        } = candidate;
+        let shared_path = self.settings_watch.path.clone();
+        let shared = SettingsStore::load_from(&shared_path).map_err(|error| {
+            ShellRunError::Package(format!("failed to reload settings: {error}"))
+        })?;
+        shared
+            .check_revision(shared_revision)
+            .map_err(|error| ShellRunError::Package(error.to_string()))?;
+
+        let revision = if let Some((paths, profile_id, profile, expected_revision)) = profile_commit
+        {
+            let committed = paths
+                .save_if_revision(&profile_id, &profile, expected_revision)
+                .map_err(|error| ShellRunError::Package(error.to_string()))?;
+            DurableControlPlaneRevision::new(shared_revision, Some(committed.revision))
+        } else {
+            store
+                .save_if_revision(shared_revision)
+                .map_err(|error| ShellRunError::Package(error.to_string()))?;
+            DurableControlPlaneRevision::new(store.revision(), None)
+        };
+
+        self.settings_watch.modified_at = std::fs::metadata(&shared_path)
+            .ok()
+            .and_then(|metadata| metadata.modified().ok());
+        Ok(ControlPlaneSettingsCommit { store, revision })
     }
 
     /// Publish the effective settings snapshot through the ordinary interface
@@ -116,10 +204,10 @@ impl Shell {
         &mut self,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let namespaces = self.settings_store.to_value();
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        namespaces.to_string().hash(&mut hasher);
+        let revision = self.control_plane_revision.as_string();
         let payload = serde_json::json!({
-            "revision": format!("{:016x}", hasher.finish()),
+            "revision": revision.clone(),
+            "durable_revision": revision,
             "namespaces": namespaces,
         });
         self.broadcast_service_event(ServiceEvent::Updated {
@@ -127,6 +215,50 @@ impl Shell {
             source_module: self.active_service_provider_or("mesh.settings", "@mesh/shell"),
             payload,
         })
+    }
+
+    /// Publish one committed control-plane snapshot in a fixed order. All
+    /// three runtime snapshots are installed before component callbacks run;
+    /// callbacks and service observers then see settings, theme, and locale in
+    /// that order and receive effects in the same batch.
+    pub(in crate::shell) fn commit_control_plane_batch(
+        &mut self,
+        commit: ControlPlaneSettingsCommit,
+        theme: Option<(ThemeEngine, ThemeWatchState)>,
+        locale: Option<LocaleEngine>,
+        theme_effect: bool,
+        locale_effect: bool,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        self.settings_store = Arc::new(commit.store);
+        self.settings =
+            mesh_core_config::resolve_shell_locale_settings(self.settings_store.shell());
+        self.control_plane_revision = commit.revision;
+
+        if let Some((theme, watch)) = theme {
+            self.theme = theme;
+            self.theme_watch = watch;
+        }
+        if let Some(locale) = locale {
+            self.locale = locale;
+        }
+
+        mesh_core_icon::set_default_shell_pack(self.settings.icons.default_pack.clone());
+        mesh_core_render::set_blur_quality(blur_quality_from_settings(&self.settings.render.blur));
+
+        let mut requests = VecDeque::new();
+        // This is intentionally the first effect phase: settings-dependent
+        // component state is ready before the appearance and locale signals.
+        self.apply_settings_to_components()?;
+        requests.extend(self.sync_settings_service_state()?);
+        if theme_effect {
+            requests.extend(self.mark_components_theme_changed()?);
+            requests.extend(self.sync_theme_service_state()?);
+        }
+        if locale_effect {
+            requests.extend(self.mark_components_locale_changed()?);
+            requests.extend(self.sync_locale_service_state()?);
+        }
+        Ok(requests)
     }
 
     pub(in crate::shell) fn reload_theme_if_changed(
@@ -286,11 +418,24 @@ impl Shell {
             );
             return Ok(VecDeque::new());
         };
-        let mut candidate_settings = self.settings.clone();
-        candidate_settings.theme.active = theme_id.to_string();
-        // A mode is scoped to its pack; switching packs starts at the
-        // descriptor's validated default instead of reusing a stale mode.
-        candidate_settings.theme.mode = None;
+        let theme_id = theme_id.to_owned();
+        let candidate = self.prepare_control_plane_settings(|shared, profile| {
+            let patch = serde_json::json!({
+                "theme": { "active": theme_id, "mode": null }
+            });
+            if let Some(profile) = profile {
+                let target = profile
+                    .settings
+                    .entry(mesh_core_config::SHELL_NAMESPACE.to_string())
+                    .or_insert_with(|| serde_json::json!({}));
+                mesh_core_config::merge_json(target, &patch);
+            } else {
+                shared.merge_namespace(mesh_core_config::SHELL_NAMESPACE, &patch);
+            }
+            Ok(())
+        })?;
+        let candidate_settings =
+            mesh_core_config::resolve_shell_locale_settings(candidate.store.shell());
         let (theme, watch) = match prepare_theme_for_graph(&candidate_settings, &graph) {
             Ok(candidate) => candidate,
             Err(error) => {
@@ -300,18 +445,15 @@ impl Shell {
         };
         let mut theme = theme;
         crate::shell::discovery::apply_font_registry_tokens(&mut theme, &self.font_registry);
-        self.theme.replace_active(theme);
-        self.theme_watch = watch;
+        let commit = self.commit_control_plane_settings(candidate)?;
         tracing::info!("active theme changed to '{theme_id}'");
-        self.settings.theme.active = theme_id.to_string();
-        self.settings.theme.mode = None;
-        self.persist_shell_appearance_override(serde_json::json!({
-            "theme": { "active": theme_id, "mode": null }
-        }));
-        let mut requests = self.mark_components_theme_changed()?;
-        requests.extend(self.sync_theme_service_state()?);
-        requests.extend(self.sync_settings_service_state()?);
-        Ok(requests)
+        self.commit_control_plane_batch(
+            commit,
+            Some((self.theme.with_active(theme), watch)),
+            None,
+            true,
+            false,
+        )
     }
 
     pub(in crate::shell) fn apply_set_icon_theme(
@@ -334,15 +476,22 @@ impl Shell {
             tracing::warn!("cannot select unavailable icon resource '{theme_id}'");
             return Ok(VecDeque::new());
         }
-        self.settings.icons.default_pack = Some(theme_id.to_owned());
-        self.persist_shell_appearance_override(serde_json::json!({
-            "icons": { "default_pack": theme_id }
-        }));
-        mesh_core_icon::set_default_shell_pack(Some(theme_id.to_owned()));
-        let mut requests = self.mark_components_theme_changed()?;
-        requests.extend(self.sync_theme_service_state()?);
-        requests.extend(self.sync_settings_service_state()?);
-        Ok(requests)
+        let theme_id = theme_id.to_owned();
+        let candidate = self.prepare_control_plane_settings(|shared, profile| {
+            let patch = serde_json::json!({ "icons": { "default_pack": theme_id } });
+            if let Some(profile) = profile {
+                let target = profile
+                    .settings
+                    .entry(mesh_core_config::SHELL_NAMESPACE.to_string())
+                    .or_insert_with(|| serde_json::json!({}));
+                mesh_core_config::merge_json(target, &patch);
+            } else {
+                shared.merge_namespace(mesh_core_config::SHELL_NAMESPACE, &patch);
+            }
+            Ok(())
+        })?;
+        let commit = self.commit_control_plane_settings(candidate)?;
+        self.commit_control_plane_batch(commit, None, None, true, false)
     }
 
     pub(in crate::shell) fn apply_set_font_family(
@@ -358,17 +507,26 @@ impl Shell {
             tracing::warn!("cannot select unavailable system font family '{family}'");
             return Ok(VecDeque::new());
         }
-        self.settings.fonts.ui_family = Some(family.to_owned());
-        self.persist_shell_appearance_override(serde_json::json!({
-            "fonts": { "ui_family": family }
-        }));
-        self.theme
-            .update_active(|theme| apply_font_family(theme, Some(family)));
-        self.theme_watch.revision = self.theme.active_snapshot().revision;
-        let mut requests = self.mark_components_theme_changed()?;
-        requests.extend(self.sync_theme_service_state()?);
-        requests.extend(self.sync_settings_service_state()?);
-        Ok(requests)
+        let family = family.to_owned();
+        let candidate = self.prepare_control_plane_settings(|shared, profile| {
+            let patch = serde_json::json!({ "fonts": { "ui_family": family } });
+            if let Some(profile) = profile {
+                let target = profile
+                    .settings
+                    .entry(mesh_core_config::SHELL_NAMESPACE.to_string())
+                    .or_insert_with(|| serde_json::json!({}));
+                mesh_core_config::merge_json(target, &patch);
+            } else {
+                shared.merge_namespace(mesh_core_config::SHELL_NAMESPACE, &patch);
+            }
+            Ok(())
+        })?;
+        let mut theme = self.theme.clone();
+        theme.update_active(|active| apply_font_family(active, Some(&family)));
+        let mut watch = self.theme_watch.clone();
+        watch.revision = theme.active_snapshot().revision;
+        let commit = self.commit_control_plane_settings(candidate)?;
+        self.commit_control_plane_batch(commit, Some((theme, watch)), None, true, false)
     }
 
     pub(in crate::shell) fn sync_theme_service_state(
@@ -411,6 +569,7 @@ impl Shell {
             .filter_map(|theme| theme["id"].as_str())
             .map(str::to_owned)
             .collect::<Vec<_>>();
+        let durable_revision = self.control_plane_revision.as_string();
         let payload = serde_json::json!({
             "current": snapshot.id.clone(),
             "theme_id": snapshot.id.clone(),
@@ -421,6 +580,7 @@ impl Shell {
             "tokens": snapshot.tokens.clone(),
             "provenance": snapshot.provenance.clone(),
             "revision": format!("{:016x}", snapshot.revision),
+            "durable_revision": durable_revision.clone(),
             "fingerprint": self.theme_watch.fingerprint,
             "is_dark": is_dark,
             "themes": themes,
@@ -467,6 +627,7 @@ impl Shell {
                     "color_scheme": snapshot.color_scheme.clone(),
                     "contrast": snapshot.contrast.clone(),
                     "revision": revision.clone(),
+                    "durable_revision": durable_revision.clone(),
                     "tokens": snapshot.tokens.clone(),
                     "provenance": snapshot.provenance.clone(),
                     "changed_tokens": changed_tokens,
@@ -484,6 +645,7 @@ impl Shell {
                             "value": snapshot.tokens.get(&name),
                             "provenance": snapshot.provenance.get(&name),
                             "revision": revision.clone(),
+                            "durable_revision": durable_revision.clone(),
                         }),
                     )?);
                 }
@@ -496,7 +658,7 @@ impl Shell {
     pub(in crate::shell) fn reload_locale_if_settings_changed(
         &mut self,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
-        let mut requests = VecDeque::new();
+        let requests = VecDeque::new();
         let now = std::time::Instant::now();
         if now < self.next_shell_settings_reload_check {
             return Ok(requests);
@@ -518,17 +680,20 @@ impl Shell {
 
         self.settings_watch.modified_at = Some(modified_at);
 
-        let store = match SettingsStore::load().and_then(|shared| {
-            let profile = self.active_profile_id.as_ref().and_then(|profile_id| {
-                mesh_core_module::package::ProfilePaths::from_root_graph(
-                    &self.installed_module_graph_path(),
-                )
-                .and_then(|paths| paths.load(profile_id))
-                .ok()
-            });
-            super::super::discovery::effective_profile_settings(shared, profile.as_ref())
-        }) {
-            Ok(mut store) => {
+        let (store, profile_revision) = match SettingsStore::load_from(&self.settings_watch.path)
+            .and_then(|shared| {
+                let profile = self.active_profile_id.as_ref().and_then(|profile_id| {
+                    mesh_core_module::package::ProfilePaths::from_root_graph(
+                        &self.installed_module_graph_path(),
+                    )
+                    .and_then(|paths| paths.load(profile_id))
+                    .ok()
+                });
+                let profile_revision = profile.as_ref().map(|profile| profile.revision);
+                super::super::discovery::effective_profile_settings(shared, profile.as_ref())
+                    .map(|store| (store, profile_revision))
+            }) {
+            Ok((mut store, profile_revision)) => {
                 if let Some(graph) = self.installed_module_graph.as_ref()
                     && let Err(error) =
                         super::super::discovery::register_graph_settings_schemas(&mut store, graph)
@@ -538,7 +703,7 @@ impl Shell {
                     );
                     return Ok(requests);
                 }
-                Arc::new(store)
+                (store, profile_revision)
             }
             Err(e) => {
                 tracing::warn!("failed to reload settings: {e}");
@@ -587,7 +752,7 @@ impl Shell {
         };
 
         let theme_changed = old_theme != new_settings.theme || old_fonts != new_settings.fonts;
-        if theme_changed {
+        let prepared_theme = if theme_changed {
             let (theme, theme_watch) = if let Some(graph) =
                 self.installed_module_graph.as_ref().filter(|graph| {
                     graph
@@ -616,18 +781,11 @@ impl Shell {
                 old_theme.active,
                 active_theme_id
             );
-            self.theme = theme;
-            self.theme_watch = theme_watch;
-            requests.extend(self.mark_components_theme_changed()?);
-            requests.extend(self.sync_theme_service_state()?);
-        }
-
-        if old_icons != new_settings.icons {
-            mesh_core_icon::set_default_shell_pack(new_settings.icons.default_pack.clone());
-            if !theme_changed {
-                requests.extend(self.mark_components_theme_changed()?);
-            }
-        }
+            Some((theme, theme_watch))
+        } else {
+            None
+        };
+        let icon_changed = old_icons != new_settings.icons;
 
         if locale_changed {
             tracing::info!(
@@ -637,19 +795,21 @@ impl Shell {
                 new_i18n.locale,
                 new_i18n.fallback_locale,
             );
-            self.locale =
-                prepared_locale.expect("locale candidate was prepared when settings changed");
-            requests.extend(self.mark_components_locale_changed()?);
-            requests.extend(self.sync_locale_service_state()?);
+            // The locale candidate is committed together with settings below.
         }
 
-        mesh_core_render::set_blur_quality(blur_quality_from_settings(&new_settings.render.blur));
-        self.settings = new_settings;
-        self.settings_store = store;
-        self.apply_settings_to_components()?;
-        requests.extend(self.sync_settings_service_state()?);
-
-        Ok(requests)
+        let shared_revision = store.revision();
+        let commit = ControlPlaneSettingsCommit {
+            store,
+            revision: DurableControlPlaneRevision::new(shared_revision, profile_revision),
+        };
+        self.commit_control_plane_batch(
+            commit,
+            prepared_theme,
+            prepared_locale,
+            theme_changed || icon_changed,
+            locale_changed,
+        )
     }
 
     /// Hand the reloaded store to every component.
@@ -738,21 +898,13 @@ impl Shell {
                 return self.sync_locale_service_state();
             }
         };
-        let Some((settings, locale)) = candidate else {
+        let Some((candidate, locale)) = candidate else {
             return self.sync_locale_service_state();
         };
 
         tracing::info!("active locale changed to '{}'", locale.current());
-        self.settings_store = Arc::new(settings);
-        self.settings =
-            mesh_core_config::resolve_shell_locale_settings(self.settings_store.shell());
-        self.locale = locale;
-        self.settings_watch.modified_at = std::fs::metadata(&self.settings_watch.path)
-            .ok()
-            .and_then(|metadata| metadata.modified().ok());
-        let mut requests = self.mark_components_locale_changed()?;
-        requests.extend(self.sync_locale_service_state()?);
-        Ok(requests)
+        let commit = self.commit_control_plane_settings(candidate)?;
+        self.commit_control_plane_batch(commit, None, Some(locale), false, true)
     }
 
     /// Prepare the normalized locale and complete catalog before committing a
@@ -762,120 +914,44 @@ impl Shell {
     fn prepare_and_persist_locale_change(
         &self,
         requested_locale: &str,
-    ) -> Result<Option<(SettingsStore, LocaleEngine)>, ShellRunError> {
-        let graph = self.installed_module_graph.as_ref();
-        let shared_path = self.settings_store.path().to_path_buf();
-        let shared = SettingsStore::load_from(&shared_path).map_err(|error| {
-            ShellRunError::Package(format!("failed to load locale settings: {error}"))
+    ) -> Result<Option<(ControlPlaneSettingsCandidate, LocaleEngine)>, ShellRunError> {
+        let normalized = mesh_core_locale::LocaleSelection::try_new(
+            requested_locale,
+            self.settings.i18n.fallback_locale.clone(),
+            0,
+        )
+        .map_err(|error| ShellRunError::LocaleCatalog(error.to_string()))?;
+        if normalized.active() == self.locale.current()
+            && normalized.fallback() == self.locale.fallback_locale()
+            && self.settings.i18n.policy == mesh_core_config::LocalePolicy::Manual
+        {
+            return Ok(None);
+        }
+
+        let active = normalized.active().to_owned();
+        let fallback = normalized.fallback().to_owned();
+        let candidate = self.prepare_control_plane_settings(|shared, profile| {
+            let patch = serde_json::json!({
+                "i18n": {
+                    "policy": "manual",
+                    "locale": active,
+                    "fallback_locale": fallback,
+                }
+            });
+            if let Some(profile) = profile {
+                let target = profile
+                    .settings
+                    .entry(mesh_core_config::SHELL_NAMESPACE.to_string())
+                    .or_insert_with(|| serde_json::json!({}));
+                mesh_core_config::merge_json(target, &patch);
+            } else {
+                shared.merge_namespace(mesh_core_config::SHELL_NAMESPACE, &patch);
+            }
+            Ok(())
         })?;
-        let profile_id = self.active_profile_id.clone();
-
-        let shared_revision = shared.revision();
-        let (mut candidate, profile_commit) = if let Some(profile_id) = profile_id {
-            let paths = mesh_core_module::package::ProfilePaths::from_root_graph(
-                &self.installed_module_graph_path(),
-            )
-            .map_err(|error| ShellRunError::Package(error.to_string()))?;
-            let mut profile = paths
-                .load(&profile_id)
-                .map_err(|error| ShellRunError::Package(error.to_string()))?;
-            let expected_revision = profile.revision;
-            let effective_before =
-                super::super::discovery::effective_profile_settings(shared.clone(), Some(&profile))
-                    .map_err(|error| ShellRunError::Package(error.to_string()))?;
-            let normalized = mesh_core_locale::LocaleSelection::try_new(
-                requested_locale,
-                effective_before.shell().i18n.fallback_locale.clone(),
-                0,
-            )
-            .map_err(|error| ShellRunError::LocaleCatalog(error.to_string()))?;
-            if normalized.active() == self.locale.current()
-                && normalized.fallback() == self.locale.fallback_locale()
-                && self.settings.i18n.policy == mesh_core_config::LocalePolicy::Manual
-            {
-                return Ok(None);
-            }
-
-            let shell = profile
-                .settings
-                .entry(mesh_core_config::SHELL_NAMESPACE.to_string())
-                .or_insert_with(|| serde_json::json!({}));
-            mesh_core_config::merge_json(
-                shell,
-                &serde_json::json!({
-                    "i18n": {
-                        "policy": "manual",
-                        "locale": normalized.active(),
-                        "fallback_locale": normalized.fallback(),
-                    }
-                }),
-            );
-            let candidate =
-                super::super::discovery::effective_profile_settings(shared, Some(&profile))
-                    .map_err(|error| ShellRunError::Package(error.to_string()))?;
-            (
-                candidate,
-                Some((paths, profile_id, profile, expected_revision)),
-            )
-        } else {
-            let normalized = mesh_core_locale::LocaleSelection::try_new(
-                requested_locale,
-                shared.shell().i18n.fallback_locale.clone(),
-                0,
-            )
-            .map_err(|error| ShellRunError::LocaleCatalog(error.to_string()))?;
-            if normalized.active() == self.locale.current()
-                && normalized.fallback() == self.locale.fallback_locale()
-                && self.settings.i18n.policy == mesh_core_config::LocalePolicy::Manual
-            {
-                return Ok(None);
-            }
-            let mut candidate = shared;
-            candidate.merge_namespace(
-                mesh_core_config::SHELL_NAMESPACE,
-                &serde_json::json!({
-                    "i18n": {
-                        "policy": "manual",
-                        "locale": normalized.active(),
-                        "fallback_locale": normalized.fallback(),
-                    }
-                }),
-            );
-            (
-                candidate,
-                None::<(
-                    mesh_core_module::package::ProfilePaths,
-                    String,
-                    mesh_core_module::package::ShellProfile,
-                    u64,
-                )>,
-            )
-        };
-
-        if let Some(graph) = graph {
-            super::super::discovery::register_graph_settings_schemas(&mut candidate, graph)
-                .map_err(|error| ShellRunError::Package(error.to_string()))?;
-        }
-        // The active graph and its complete immutable catalog snapshot are
-        // unchanged by this durable selection transaction. Recompilation is
-        // reserved for graph/profile activation, where catalog sources can
-        // actually differ.
-        let locale = self.prepare_locale_selection_for_settings(candidate.shell())?;
-
-        if let Some((paths, profile_id, profile, expected_revision)) = profile_commit {
-            SettingsStore::load_from(&shared_path)
-                .map_err(|error| ShellRunError::Package(error.to_string()))?
-                .check_revision(shared_revision)
-                .map_err(|error| ShellRunError::Package(error.to_string()))?;
-            paths
-                .save_if_revision(&profile_id, &profile, expected_revision)
-                .map_err(|error| ShellRunError::Package(error.to_string()))?;
-        } else {
-            let expected_revision = candidate.revision();
-            candidate
-                .save_if_revision(expected_revision)
-                .map_err(|error| ShellRunError::Package(error.to_string()))?;
-        }
+        // The active graph and its immutable catalog snapshot are unchanged by
+        // this selection write, so only the normalized selection is prepared.
+        let locale = self.prepare_locale_selection_for_settings(candidate.store.shell())?;
         Ok(Some((candidate, locale)))
     }
 
@@ -888,6 +964,7 @@ impl Shell {
         let direction = selection.direction().as_str();
         let policy = self.settings.i18n.policy.as_str();
         let revision = selection.revision().to_string();
+        let durable_revision = self.control_plane_revision.as_string();
         // As with theme, the shell supplies the host-derived snapshot while
         // the selected provider owns the interface state observed by modules.
         let source_module = self.active_service_provider_or("mesh.locale", "@mesh/shell");
@@ -901,6 +978,7 @@ impl Shell {
                 "direction": direction,
                 "policy": policy,
                 "revision": revision,
+                "durable_revision": durable_revision,
             }),
         })
     }

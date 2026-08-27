@@ -444,6 +444,7 @@ fn shell_registers_theme_provider_for_frontend_theme_proxy() {
             "tokens",
             "provenance",
             "revision",
+            "durable_revision",
             "fingerprint",
             "is_dark",
             "themes",

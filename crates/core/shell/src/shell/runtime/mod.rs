@@ -14,6 +14,7 @@ mod theme;
 mod wayland;
 
 pub(in crate::shell) use request::EffectScheduler;
+pub(in crate::shell) use theme::ControlPlaneSettingsCommit;
 
 const MAX_SHELL_MESSAGE_DRAIN_PER_FRAME: usize = 256;
 const DEV_WINDOW_POLL_SLEEP: Duration = Duration::from_millis(16);

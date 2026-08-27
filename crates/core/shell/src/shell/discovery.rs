@@ -1413,6 +1413,10 @@ impl Shell {
                 SettingsStore::default()
             }),
         );
+        let control_plane_revision = DurableControlPlaneRevision::new(
+            settings_store.revision(),
+            active_profile.as_ref().map(|(_, profile)| profile.revision),
+        );
         // A hand-edited file is the whole point of the store, so a bad value in
         // it is reported and skipped, never fatal: the shell starts on declared
         // defaults with the reason on stderr.
@@ -1467,6 +1471,7 @@ impl Shell {
                 ("tokens", "object?"),
                 ("provenance", "object?"),
                 ("revision", "string"),
+                ("durable_revision", "string"),
                 ("fingerprint", "int?"),
                 ("is_dark", "boolean"),
                 ("themes", "object[]"),
@@ -1489,6 +1494,7 @@ impl Shell {
                     ("color_scheme", "string"),
                     ("contrast", "string"),
                     ("revision", "string"),
+                    ("durable_revision", "string"),
                     ("tokens", "object"),
                     ("provenance", "object"),
                     ("changed_tokens", "object[]"),
@@ -1509,6 +1515,7 @@ impl Shell {
                     ("value", "any?"),
                     ("provenance", "any?"),
                     ("revision", "string"),
+                    ("durable_revision", "string"),
                 ]
                 .into_iter()
                 .map(|(name, arg_type)| mesh_core_service::InterfaceArgument {
@@ -1533,6 +1540,7 @@ impl Shell {
                     ("direction", "string"),
                     ("policy", "string"),
                     ("revision", "string"),
+                    ("durable_revision", "string"),
                 ],
             ),
         );
@@ -1540,7 +1548,11 @@ impl Shell {
             &interfaces,
             builtin_contract(
                 "mesh.settings",
-                &[("revision", "string"), ("namespaces", "object")],
+                &[
+                    ("revision", "string"),
+                    ("durable_revision", "string"),
+                    ("namespaces", "object"),
+                ],
                 &[
                     (
                         "set_prop",
@@ -1688,6 +1700,7 @@ impl Shell {
             config,
             settings,
             settings_store,
+            control_plane_revision,
             theme,
             locale,
             diagnostics: DiagnosticsCollector::new(),

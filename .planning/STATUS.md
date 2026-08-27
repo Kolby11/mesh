@@ -1,10 +1,10 @@
 # Status
 
-**Updated:** 2026-08-27
+**Updated:** 2026-08-28
 
 ## Now
 
-Section 15's first eight items are complete. Profile activation now prepares one
+Section 15's first nine items are complete. Profile activation now prepares one
 immutable `ActivationPlan`, resolves candidate components and backends against
 its interface/capability snapshots, and publishes one `RuntimeGeneration` at
 the commit point. Backend enable/disable, package graph changes, and installed
@@ -19,6 +19,9 @@ diagnostics, sibling isolation, and repeated-failure quarantine. Provider
 availability and recovery transitions now publish only from committed provider
 generations, with stale candidate and retired-generation health suppressed.
 CoreRequest effects now run through a fair bounded scheduler with causal budgets
-and cycle detection. The next open item is routing control-plane writes through
-declared durable revisions and ordered settings/theme/locale effect batches.
+and cycle detection. Control-plane writes now stage shared or profile-owned
+settings, commit through revision-checked durable boundaries, and publish one
+declared settings/theme/locale effect batch in order. The next open item is
+distinguishing intentional legacy/no-profile operation from invalid configured
+graph/profile recovery.
 See [`.planning/log/2026-08.md`](log/2026-08.md).

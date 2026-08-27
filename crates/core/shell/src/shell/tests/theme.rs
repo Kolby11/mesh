@@ -232,6 +232,57 @@ fn manual_locale_change_commits_the_shared_settings_revision_before_broadcast() 
     assert_eq!(persisted.revision(), 1);
     assert_eq!(persisted.shell().i18n.locale, "sk-SK");
     assert_eq!(persisted.shell().i18n.fallback_locale, "en");
+    assert_eq!(
+        shell.latest_service_state["mesh.settings"].state["durable_revision"],
+        serde_json::json!("shared:1")
+    );
+    assert_eq!(
+        shell.latest_service_state["mesh.locale"].state["durable_revision"],
+        serde_json::json!("shared:1")
+    );
+}
+
+#[test]
+fn manual_locale_change_commits_the_active_profile_revision_before_broadcast() {
+    let _env_lock = settings_env_lock();
+    let dir = tempfile::tempdir().unwrap();
+    let settings_path = dir.path().join("settings.json");
+    let graph_path = dir.path().join("module.json");
+    let profiles_dir = dir.path().join("profiles");
+    fs::create_dir_all(&profiles_dir).unwrap();
+    fs::write(&settings_path, "{}").unwrap();
+    fs::write(&graph_path, "{}").unwrap();
+    fs::write(
+        profiles_dir.join("default.json"),
+        r#"{"schemaVersion":3,"roots":{},"settings":{}}"#,
+    )
+    .unwrap();
+    fs::write(dir.path().join("active-profile"), "default\n").unwrap();
+    let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
+    let _graph_path = EnvGuard::set("MESH_MODULE_GRAPH_PATH", &graph_path);
+    let mut shell = Shell::new();
+
+    shell.apply_set_locale("sk-SK").unwrap();
+
+    let shared = mesh_core_config::SettingsStore::load_from(&settings_path).unwrap();
+    let profile = mesh_core_module::package::ProfilePaths::from_root_graph(&graph_path)
+        .unwrap()
+        .load("default")
+        .unwrap();
+    assert_eq!(shared.revision(), 0);
+    assert_eq!(profile.revision, 1);
+    assert_eq!(
+        profile.settings["shell"]["i18n"]["locale"],
+        serde_json::json!("sk-SK")
+    );
+    assert_eq!(
+        shell.latest_service_state["mesh.settings"].state["durable_revision"],
+        serde_json::json!("shared:0;profile:1")
+    );
+    assert_eq!(
+        shell.latest_service_state["mesh.locale"].state["durable_revision"],
+        serde_json::json!("shared:0;profile:1")
+    );
 }
 
 #[test]
@@ -548,6 +599,78 @@ fn set_theme_loads_css_package_and_updates_runtime_setting() {
     assert!(
         shell.theme_watch.path.ends_with("theme.css"),
         "theme watcher should follow the active CSS package"
+    );
+    let persisted =
+        mesh_core_config::SettingsStore::load_from(&dir.path().join("settings.json")).unwrap();
+    assert_eq!(persisted.revision(), 1);
+    assert_eq!(
+        persisted.shell().theme.active,
+        "@mesh/test-theme:mesh-default-light"
+    );
+    assert_eq!(
+        shell.latest_service_state["mesh.settings"].state["durable_revision"],
+        serde_json::json!("shared:1")
+    );
+    assert_eq!(
+        shell.latest_service_state["mesh.theme"].state["durable_revision"],
+        serde_json::json!("shared:1")
+    );
+}
+
+#[test]
+fn settings_reload_delivers_one_ordered_control_plane_batch() {
+    let _env_lock = settings_env_lock();
+    let dir = tempfile::tempdir().unwrap();
+    let settings_path = dir.path().join("settings.json");
+    fs::write(&settings_path, "{}").unwrap();
+    let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
+    let mut shell = Shell::new();
+    let seen_events = Arc::new(Mutex::new(Vec::new()));
+    shell
+        .components
+        .push(super::types::ComponentRuntime::new(Box::new(
+            RecordingComponent::new(seen_events.clone()),
+        )));
+    fs::write(
+        dir.path().join("theme.css"),
+        ":root { --color-surface: #123456; }",
+    )
+    .unwrap();
+    shell.installed_module_graph = Some(graph_with_theme_source(
+        dir.path(),
+        "control-plane-theme",
+        "theme.css",
+    ));
+    fs::write(
+        &settings_path,
+        r#"{"revision":1,"shell":{"theme":{"active":"@mesh/test-theme:control-plane-theme"},"i18n":{"locale":"sk-SK","fallback_locale":"en"}}}"#,
+    )
+    .unwrap();
+    shell.settings_watch.modified_at = None;
+    shell.next_shell_settings_reload_check = std::time::Instant::now();
+
+    shell.reload_locale_if_settings_changed().unwrap();
+
+    let events = seen_events.lock().unwrap();
+    let updates = events
+        .iter()
+        .filter_map(|event| match event {
+            ServiceEvent::Updated { service, .. } => Some(service.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(updates, ["mesh.settings", "mesh.theme", "mesh.locale"]);
+    assert_eq!(
+        shell.latest_service_state["mesh.settings"].state["durable_revision"],
+        serde_json::json!("shared:1")
+    );
+    assert_eq!(
+        shell.latest_service_state["mesh.theme"].state["durable_revision"],
+        serde_json::json!("shared:1")
+    );
+    assert_eq!(
+        shell.latest_service_state["mesh.locale"].state["durable_revision"],
+        serde_json::json!("shared:1")
     );
 }
 

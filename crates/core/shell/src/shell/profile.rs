@@ -181,6 +181,7 @@ mod tests {
 pub(super) struct ActivationPlan {
     pub(super) generation: u64,
     pub(super) profile_id: String,
+    pub(super) profile_revision: Option<u64>,
     pub(super) graph: InstalledModuleGraph,
     pub(super) interface_catalog: Arc<mesh_core_service::InterfaceCatalog>,
     pub(super) locale: LocaleEngine,
@@ -810,66 +811,26 @@ impl Shell {
             })?;
         }
 
-        let effective = if let Some(profile_id) = self.active_profile_id.clone() {
-            let paths = ProfilePaths::from_root_graph(&self.installed_module_graph_path())?;
-            let mut profile = paths.load(&profile_id)?;
-            let expected_revision = profile.revision;
-            let namespace = profile
-                .settings
-                .entry(module_id.to_string())
-                .or_insert_with(|| serde_json::json!({}));
-            update_module_prop_override(namespace, instance_id, prop, value);
-            if namespace.as_object().is_some_and(serde_json::Map::is_empty) {
-                profile.settings.remove(module_id);
+        let candidate = self.prepare_control_plane_settings(|shared, profile| {
+            if let Some(profile) = profile {
+                let namespace = profile
+                    .settings
+                    .entry(module_id.to_string())
+                    .or_insert_with(|| serde_json::json!({}));
+                update_module_prop_override(namespace, instance_id, prop, value);
+                if namespace.as_object().is_some_and(serde_json::Map::is_empty) {
+                    profile.settings.remove(module_id);
+                }
+            } else {
+                let mut namespace = shared.namespace(module_id);
+                update_module_prop_override(&mut namespace, instance_id, prop, value);
+                shared.set_namespace(module_id, namespace);
             }
-            paths.save_if_revision(&profile_id, &profile, expected_revision)?;
-            let shared =
-                SettingsStore::load().map_err(|error| ShellRunError::FrontendComposition {
-                    message: format!("failed to reload shared settings: {error}"),
-                })?;
-            super::discovery::effective_profile_settings(shared, Some(&profile)).map_err(
-                |error| ShellRunError::FrontendComposition {
-                    message: format!("failed to resolve updated profile settings: {error}"),
-                },
-            )?
-        } else {
-            let mut shared =
-                SettingsStore::load().map_err(|error| ShellRunError::FrontendComposition {
-                    message: format!("failed to load settings for update: {error}"),
-                })?;
-            let expected_revision = shared.revision();
-            let mut namespace = shared.namespace(module_id);
-            update_module_prop_override(&mut namespace, instance_id, prop, value);
-            shared.set_namespace(module_id, namespace);
-            shared
-                .save_if_revision(expected_revision)
-                .map_err(|error| ShellRunError::FrontendComposition {
-                    message: format!("failed to save settings: {error}"),
-                })?;
-            shared
-        };
-
-        let mut effective = effective;
-        if let Some(graph) = self.installed_module_graph.as_ref() {
-            super::discovery::register_graph_settings_schemas(&mut effective, graph).map_err(
-                |error| ShellRunError::FrontendComposition {
-                    message: format!("failed to register settings schemas: {error}"),
-                },
-            )?;
-        }
-        self.settings_store = Arc::new(effective);
-        self.settings =
-            mesh_core_config::resolve_shell_locale_settings(self.settings_store.shell());
-        self.settings_watch.modified_at = std::fs::metadata(&self.settings_watch.path)
-            .ok()
-            .and_then(|metadata| metadata.modified().ok());
-        self.apply_settings_to_components()?;
+            Ok(())
+        })?;
+        let commit = self.commit_control_plane_settings(candidate)?;
         self.components_want_render = true;
-        // Republish the effective settings snapshot so `mesh.settings`
-        // observers advance past the revision this write just superseded;
-        // applying the store to components alone leaves the interface value
-        // stale.
-        self.sync_settings_service_state()
+        self.commit_control_plane_batch(commit, None, None, false, false)
     }
 
     pub(in crate::shell) fn apply_switch_profile(
@@ -1201,6 +1162,7 @@ impl Shell {
         let plan = Arc::new(ActivationPlan {
             generation: self.activation_generation.saturating_add(1),
             profile_id: profile_id.clone(),
+            profile_revision: persist_active_profile.then_some(profile.revision),
             graph,
             interface_catalog,
             locale,
@@ -1540,85 +1502,57 @@ impl Shell {
         let old_fonts = self.settings.fonts.clone();
         let old_locale = self.settings.i18n.clone();
         let old_locale_catalog_revision = self.locale.catalog_snapshot().revision();
-        let prepared_theme = plan.prepared_theme.clone();
-        self.settings_store = plan.settings.clone();
-        self.settings =
-            mesh_core_config::resolve_shell_locale_settings(self.settings_store.shell());
-        mesh_core_icon::set_default_shell_pack(self.settings.icons.default_pack.clone());
-        mesh_core_render::set_blur_quality(blur_quality_from_settings(&self.settings.render.blur));
-        if old_theme != self.settings.theme
-            || old_fonts != self.settings.fonts
-            || old_font_registry_revision != self.font_registry.revision()
-        {
-            let (theme, watch) = prepared_theme
+        let settings = mesh_core_config::resolve_shell_locale_settings(plan.settings.shell());
+        let theme_changed = old_theme != settings.theme
+            || old_fonts != settings.fonts
+            || old_font_registry_revision != self.font_registry.revision();
+        let prepared_theme = if theme_changed {
+            let (theme, watch) = plan
+                .prepared_theme
+                .clone()
                 .map(|(theme, watch)| (self.theme.with_active(theme), watch))
-                .unwrap_or_else(|| {
-                    let (theme, watch) = load_active_theme(&self.settings);
-                    (theme, watch)
-                });
-            self.theme = theme;
-            self.theme_watch = watch;
-            self.theme.update_active(|active| {
+                .unwrap_or_else(|| load_active_theme(&settings));
+            let mut theme = theme;
+            theme.update_active(|active| {
                 super::discovery::apply_font_registry_tokens(active, &self.font_registry);
             });
-            self.theme_watch.revision = self.theme.active_snapshot().revision;
-            match self.mark_components_theme_changed() {
-                Ok(effects) => requests.extend(effects),
-                Err(error) => {
-                    tracing::warn!("profile theme refresh failed after commit: {error}");
-                    self.diagnostics.record_lifecycle_error(
-                        "@mesh/shell",
-                        "profile_post_commit_theme_refresh_failed",
-                        format!(
-                            "profile '{}' committed but a component rejected the new theme; the \
-                             shell is now on the new generation with stale component theme state: \
-                             {error}",
-                            plan.profile_id
-                        ),
-                    );
-                }
+            let mut watch = watch;
+            watch.revision = theme.active_snapshot().revision;
+            Some((theme, watch))
+        } else {
+            None
+        };
+        let locale_changed = old_locale.locale != settings.i18n.locale
+            || old_locale.fallback_locale != settings.i18n.fallback_locale
+            || old_locale.policy != settings.i18n.policy
+            || old_locale_catalog_revision != plan.locale.catalog_snapshot().revision();
+        let control_plane = super::runtime::ControlPlaneSettingsCommit {
+            store: (*plan.settings).clone(),
+            revision: DurableControlPlaneRevision::new(
+                plan.settings.revision(),
+                plan.profile_revision,
+            ),
+        };
+        match self.commit_control_plane_batch(
+            control_plane,
+            prepared_theme,
+            Some(plan.locale.clone()),
+            theme_changed,
+            locale_changed,
+        ) {
+            Ok(effects) => requests.extend(effects),
+            Err(error) => {
+                tracing::warn!("profile control-plane refresh failed after commit: {error}");
+                self.diagnostics.record_lifecycle_error(
+                    "@mesh/shell",
+                    "profile_post_commit_control_plane_refresh_failed",
+                    format!(
+                        "profile '{}' committed but its settings/theme/locale effect batch \
+                         failed: {error}",
+                        plan.profile_id
+                    ),
+                );
             }
-            if let Ok(next) = self.sync_theme_service_state() {
-                requests.extend(next);
-            }
-        }
-        self.locale = plan.locale.clone();
-        if old_locale.locale != self.settings.i18n.locale
-            || old_locale.fallback_locale != self.settings.i18n.fallback_locale
-            || old_locale.policy != self.settings.i18n.policy
-            || old_locale_catalog_revision != self.locale.catalog_snapshot().revision()
-        {
-            match self.mark_components_locale_changed() {
-                Ok(effects) => requests.extend(effects),
-                Err(error) => {
-                    tracing::warn!("profile locale refresh failed after commit: {error}");
-                    self.diagnostics.record_lifecycle_error(
-                        "@mesh/shell",
-                        "profile_post_commit_locale_refresh_failed",
-                        format!(
-                            "profile '{}' committed but a component rejected the new locale; the \
-                             shell is now on the new generation with stale component locale state: \
-                             {error}",
-                            plan.profile_id
-                        ),
-                    );
-                }
-            }
-            if let Ok(next) = self.sync_locale_service_state() {
-                requests.extend(next);
-            }
-        }
-        if let Err(error) = self.apply_settings_to_components() {
-            tracing::warn!("profile settings refresh failed after commit: {error}");
-            self.diagnostics.record_lifecycle_error(
-                "@mesh/shell",
-                "profile_post_commit_settings_refresh_failed",
-                format!(
-                    "profile '{}' committed but applying its settings to a component failed; the \
-                     shell is now on the new generation with stale component settings: {error}",
-                    plan.profile_id
-                ),
-            );
         }
 
         self.installed_module_graph = Some(plan.graph.clone());
