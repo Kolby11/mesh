@@ -91,6 +91,7 @@ impl WakeHandle {
         let _ = rustix::io::write(self.fd.as_fd(), &1u64.to_ne_bytes());
     }
 }
+pub use profile::{ActiveSnapshot, CandidatePreview, CandidatePreviewSurface};
 pub use types::{
     ChildSurfaceDiagnostic, ComponentContext, ComponentError, ComponentInput, CoreEvent,
     CoreRequest, FrontendEffectRevision, FrontendFrame, FrontendFrameEffects, FrontendFrameError,
@@ -99,6 +100,31 @@ pub use types::{
     ServiceEvent, ServiceInterfaceEventSubscription, ServiceObservationSummary, ShellComponent,
     SurfaceExtent, SurfaceId, TabFocusTarget,
 };
+
+/// Ordered lifecycle phases for shutting down the shell. Quiescing is the
+/// admission boundary: once entered, new external work is rejected while
+/// already accepted component teardown is allowed to settle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ShellShutdownPhase {
+    Running,
+    Quiescing,
+    StoppingComponents,
+    StoppingProviders,
+    DestroyingPresentation,
+    StoppingWorkers,
+    Flushing,
+    Stopped,
+}
+
+impl ShellShutdownPhase {
+    pub const fn accepts_external_work(self) -> bool {
+        matches!(self, Self::Running)
+    }
+
+    pub const fn is_stopped(self) -> bool {
+        matches!(self, Self::Stopped)
+    }
+}
 
 use service::{service_capabilities, service_name_from_interface};
 
@@ -571,10 +597,13 @@ pub struct Shell {
     pending_backend_runtimes: HashMap<String, PendingBackendRuntime>,
     pending_resource_preparation: Option<profile::PendingResourcePreparation>,
     pending_profile_switch: Option<profile::PendingProfileSwitch>,
+    /// Prepared activation surfaces remain isolated from the live presentation
+    /// maps until their candidate becomes the active snapshot.
+    candidate_preview: Option<Arc<profile::CandidatePreview>>,
     /// Monotonic identity of the last committed activation plan.
     activation_generation: u64,
-    /// The immutable runtime-generation record swapped at activation commit.
-    active_generation: Option<Arc<profile::RuntimeGeneration>>,
+    /// The immutable runtime snapshot swapped at activation commit.
+    active_snapshot: Option<Arc<profile::ActiveSnapshot>>,
     /// Monotonic provider epochs prevent delayed output from an older runtime
     /// for the same provider id from crossing a replacement boundary.
     backend_provider_epochs: HashMap<String, u64>,
@@ -588,6 +617,10 @@ pub struct Shell {
     backend_respawn: Option<backend::BackendRespawnContext>,
     retiring_backend_runtimes: Vec<BackendRuntimeTasks>,
     backend_restart_tasks: Vec<JoinHandle<()>>,
+    shutdown_phase: ShellShutdownPhase,
+    /// Shutdown broadcasts/unmounts are internal bounded work and remain
+    /// admissible while external requests are rejected after quiescing.
+    shutdown_effects_allowed: bool,
     shutdown_started: bool,
     shutdown_complete: bool,
     latest_service_state: HashMap<String, LatestServiceState>,
@@ -625,6 +658,7 @@ impl Drop for Shell {
         self.service_handlers.clear();
         self.backend_runtimes.clear();
         self.pending_backend_runtimes.clear();
+        self.candidate_preview = None;
         self.pending_profile_switch = None;
         self.retiring_backend_runtimes.clear();
         self.ipc_server.take();
@@ -634,10 +668,68 @@ impl Drop for Shell {
         }
         self.wake_handle.take();
         self.eventfd_fd.take();
+        self.shutdown_phase = ShellShutdownPhase::Stopped;
+        self.shutdown_started = true;
+        self.shutdown_complete = true;
     }
 }
 
 impl Shell {
+    /// Return the last coherent runtime activation. The snapshot is swapped
+    /// only after candidate resources, providers, components, and control
+    /// plane state have crossed the activation commit boundary.
+    pub fn active_snapshot(&self) -> Option<Arc<ActiveSnapshot>> {
+        self.active_snapshot.clone()
+    }
+
+    /// Return the currently prepared activation candidate, if any. Candidate
+    /// surfaces are always hidden and remain outside the live presentation
+    /// maps until the candidate commits.
+    pub fn candidate_preview(&self) -> Option<Arc<CandidatePreview>> {
+        self.candidate_preview.clone()
+    }
+
+    pub fn shutdown_phase(&self) -> ShellShutdownPhase {
+        self.shutdown_phase
+    }
+
+    pub(in crate::shell) fn begin_shutdown(&mut self) -> bool {
+        if !self.shutdown_phase.accepts_external_work() {
+            return false;
+        }
+        self.shutdown_phase = ShellShutdownPhase::Quiescing;
+        self.shutdown_started = true;
+        self.core.shutting_down = true;
+        tracing::info!(phase = ?self.shutdown_phase, "shell entered shutdown quiescing");
+        true
+    }
+
+    pub(in crate::shell) fn advance_shutdown_phase(&mut self, phase: ShellShutdownPhase) {
+        if self.shutdown_phase == phase || self.shutdown_phase.is_stopped() {
+            return;
+        }
+        debug_assert!(phase > self.shutdown_phase);
+        self.shutdown_phase = phase;
+        tracing::debug!(phase = ?self.shutdown_phase, "shell shutdown phase advanced");
+    }
+
+    pub(in crate::shell) fn clear_candidate_preview(&mut self, generation: u64) {
+        if self
+            .candidate_preview
+            .as_ref()
+            .is_some_and(|preview| preview.generation() == generation)
+        {
+            self.candidate_preview = None;
+        }
+    }
+
+    pub(in crate::shell) fn mark_candidate_backend_ready(&mut self, interface: &str) {
+        let Some(preview) = self.candidate_preview.as_ref() else {
+            return;
+        };
+        self.candidate_preview = Some(Arc::new(preview.with_backend_ready(interface)));
+    }
+
     /// Return the live trigger-to-popup relationships retained by promoted
     /// popovers. The relationship is deliberately exposed at the shell
     /// boundary so focus, dismissal, accessibility, and debug integrations

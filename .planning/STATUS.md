@@ -4,9 +4,9 @@
 
 ## Now
 
-Section 15's first eleven items are complete. Profile activation now prepares one
+Section 15's first twelve items are complete. Profile activation now prepares one
 immutable `ActivationPlan`, resolves candidate components and backends against
-its interface/capability snapshots, and publishes one `RuntimeGeneration` at
+its interface/capability snapshots, and publishes one `ActiveSnapshot` at
 the commit point. Backend enable/disable, package graph changes, and installed
 graph filesystem deltas now enter that same staged activation coordinator.
 Backend tasks, bridges, messages, events, results, and restart deadlines now
@@ -21,7 +21,9 @@ generations, with stale candidate and retired-generation health suppressed.
 CoreRequest effects now run through a fair bounded scheduler with causal budgets
 and cycle detection. Control-plane writes now stage shared or profile-owned
 settings, commit through revision-checked durable boundaries, and publish one
-declared settings/theme/locale effect batch in order. The next open item is
-introducing `ActiveSnapshot` with candidate preview in hidden surfaces and an
-explicit quiescing-to-stopped shutdown state machine.
+declared settings/theme/locale effect batch in order. The active runtime now
+publishes an immutable `ActiveSnapshot`, prepared frontends remain available as
+hidden candidate previews until commit, and shutdown advances through explicit
+quiescing, component/provider/presentation/worker teardown, flushing, and
+stopped phases. The next open item is Section 16's path-safe uninstall.
 See [`.planning/log/2026-08.md`](log/2026-08.md).

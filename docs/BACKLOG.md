@@ -92,8 +92,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/15-shell-core-and-orchestration/improvements.md)
 
-- [ ] Introduce `ActiveSnapshot` with candidate preview in hidden surfaces and an explicit quiescing-to-stopped shutdown state machine.
-
 ### 16. Developer and authoring tools
 
 [Audit](../.planning/log/sections/16-developer-and-authoring-tools/improvements.md)

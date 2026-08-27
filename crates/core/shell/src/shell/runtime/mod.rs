@@ -530,37 +530,15 @@ impl Shell {
         runtime: &Runtime,
         ipc_socket_path: &std::path::Path,
     ) -> Result<(), ShellRunError> {
-        if self.shutdown_complete {
+        if self.shutdown_complete || self.shutdown_phase.is_stopped() {
             return Ok(());
         }
-        self.shutdown_started = true;
-        self.core.shutting_down = true;
-        self.backend_respawn = None;
-        let restart_tasks = self.backend_restart_tasks.drain(..).collect::<Vec<_>>();
-        for task in &restart_tasks {
-            task.abort();
-        }
-        for state in self.backend_supervision.values_mut() {
-            state.invalidate_pending_restart();
-        }
-        if !restart_tasks.is_empty() {
-            runtime.block_on(async move {
-                for task in restart_tasks {
-                    let _ = task.await;
-                }
-            });
-        }
-
-        if let Some(ipc_server) = self.ipc_server.take() {
-            runtime.block_on(ipc_server.shutdown());
-        }
-        if let Some(file_watcher) = self.file_watcher.take() {
-            file_watcher.stop_and_join();
-        }
-        self.file_watcher_tx = None;
-        self.file_watcher_active = false;
-
+        self.begin_shutdown();
         let mut first_error = None;
+        let discarded_before_shutdown = self.discard_scheduled_effects();
+
+        self.advance_shutdown_phase(ShellShutdownPhase::StoppingComponents);
+        self.shutdown_effects_allowed = true;
         let shutdown_requests = match self.broadcast_core_event(CoreEvent::ShuttingDown) {
             Ok(requests) => requests,
             Err(error) => {
@@ -574,6 +552,7 @@ impl Shell {
         if let Err(error) = self.process_effects() {
             first_error.get_or_insert(error);
         }
+        self.shutdown_effects_allowed = false;
 
         if let Some(mut pending) = self.pending_resource_preparation.take() {
             pending.resource_job.cancel();
@@ -592,14 +571,88 @@ impl Shell {
         if let Some(pending) = self.pending_profile_switch.take() {
             self.abort_profile_candidate(pending, "shell runtime is shutting down".into());
         }
+
+        self.advance_shutdown_phase(ShellShutdownPhase::StoppingProviders);
         self.shutdown_backend_runtimes(runtime);
         self.backend_supervision.clear();
+
+        self.advance_shutdown_phase(ShellShutdownPhase::DestroyingPresentation);
+        self.destroy_presentation_surfaces();
+
+        self.advance_shutdown_phase(ShellShutdownPhase::StoppingWorkers);
+        self.backend_respawn = None;
+        let restart_tasks = self.backend_restart_tasks.drain(..).collect::<Vec<_>>();
+        for task in &restart_tasks {
+            task.abort();
+        }
+        for state in self.backend_supervision.values_mut() {
+            state.invalidate_pending_restart();
+        }
+        if !restart_tasks.is_empty() {
+            runtime.block_on(async move {
+                for task in restart_tasks {
+                    let _ = task.await;
+                }
+            });
+        }
+        if let Some(ipc_server) = self.ipc_server.take() {
+            runtime.block_on(ipc_server.shutdown());
+        }
+        if let Some(file_watcher) = self.file_watcher.take() {
+            file_watcher.stop_and_join();
+        }
+        self.file_watcher_tx = None;
+        self.file_watcher_active = false;
+
+        self.advance_shutdown_phase(ShellShutdownPhase::Flushing);
+        let dropped_effects =
+            discarded_before_shutdown.saturating_add(self.discard_scheduled_effects());
+        if dropped_effects > 0 {
+            self.diagnostics.record_lifecycle_error(
+                "@mesh/shell",
+                "shutdown_effects_discarded",
+                format!(
+                    "discarded {dropped_effects} shell effects after shutdown entered quiescing"
+                ),
+            );
+        }
+        self.pending_service_call_routes.clear();
+        self.pending_bound_service_state.clear();
+        self.bound_service_state_transactions.clear();
+        self.command_throttle.clear();
+        self.candidate_preview = None;
         self.wake_handle.take();
         self.eventfd_fd.take();
         let _ = std::fs::remove_file(ipc_socket_path);
+        self.advance_shutdown_phase(ShellShutdownPhase::Stopped);
         self.shutdown_complete = true;
         tracing::info!("shell event loop stopped");
         first_error.map_or(Ok(()), Err)
+    }
+
+    fn destroy_presentation_surfaces(&mut self) {
+        for index in (0..self.components.len()).rev() {
+            self.destroy_all_child_surfaces(index);
+            let surface_id = self.components[index].surface_id.clone();
+            let module_id = self.components[index].component.id().to_string();
+            self.presentation_engine.destroy_surface(&surface_id);
+            self.diagnostics.unregister(&module_id, &surface_id);
+            self.core.surfaces.remove(&surface_id);
+            self.surfaces.remove(&surface_id);
+            self.pending_popover_hides.remove(&surface_id);
+            self.transfer_owned_keyboard_modes.remove(&surface_id);
+        }
+        for surface_id in self.core.surfaces.keys().cloned().collect::<Vec<_>>() {
+            self.presentation_engine.destroy_surface(&surface_id);
+        }
+        self.components.clear();
+        self.component_by_surface.clear();
+        self.core.surfaces.clear();
+        self.surfaces.clear();
+        self.pending_popover_hides.clear();
+        self.transfer_owned_keyboard_modes.clear();
+        self.keyboard_focus_surface = None;
+        self.service_delivery_index.mark_dirty();
     }
 
     pub(in crate::shell) fn handle_shell_message(
@@ -607,6 +660,10 @@ impl Shell {
         pending: &mut VecDeque<CoreRequest>,
         message: ShellMessage,
     ) -> Result<(), ShellRunError> {
+        if !self.shutdown_phase.accepts_external_work() {
+            tracing::debug!(phase = ?self.shutdown_phase, "rejected shell work after shutdown quiescing");
+            return Ok(());
+        }
         let message_started = self.profiling_enabled().then(std::time::Instant::now);
         let trigger_kind = match &message {
             ShellMessage::BackendServiceUpdate { .. } => "backend_service_update",
@@ -1233,6 +1290,41 @@ mod tests {
             panic!("expected state update");
         };
         assert_eq!(payload["value"], serde_json::json!(999));
+    }
+
+    #[test]
+    fn shutdown_quiescing_rejects_new_messages_and_requests() {
+        let mut shell = Shell::new();
+        assert_eq!(shell.shutdown_phase(), ShellShutdownPhase::Running);
+        assert!(shell.begin_shutdown());
+        assert_eq!(shell.shutdown_phase(), ShellShutdownPhase::Quiescing);
+        assert!(!shell.begin_shutdown());
+
+        let mut pending = VecDeque::new();
+        shell
+            .handle_shell_message(
+                &mut pending,
+                ShellMessage::Ipc(CoreRequest::ToggleDebugOverlay),
+            )
+            .unwrap();
+        assert!(pending.is_empty());
+        shell
+            .apply_request(CoreRequest::ToggleDebugOverlay)
+            .unwrap();
+    }
+
+    #[test]
+    fn shutdown_runtime_advances_all_phases_and_is_idempotent() {
+        let mut shell = Shell::new();
+        let runtime = Runtime::new().unwrap();
+        let socket_path =
+            std::env::temp_dir().join(format!("mesh-shell-shutdown-test-{}", std::process::id()));
+
+        shell.shutdown_runtime(&runtime, &socket_path).unwrap();
+        assert_eq!(shell.shutdown_phase(), ShellShutdownPhase::Stopped);
+        assert!(shell.shutdown_complete);
+        shell.shutdown_runtime(&runtime, &socket_path).unwrap();
+        assert_eq!(shell.shutdown_phase(), ShellShutdownPhase::Stopped);
     }
 
     // cargo test -p mesh-core-shell --release -- wake_coalescing_beats_repeated_shell_delivery --ignored --nocapture

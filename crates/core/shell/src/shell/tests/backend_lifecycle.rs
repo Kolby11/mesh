@@ -1007,9 +1007,9 @@ fn legacy_graph_delta_uses_the_activation_coordinator_commit_boundary() {
     );
     assert_eq!(
         shell
-            .active_generation
+            .active_snapshot()
             .as_ref()
-            .map(|generation| generation.id),
+            .map(|snapshot| snapshot.generation()),
         Some(1)
     );
 }

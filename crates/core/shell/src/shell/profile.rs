@@ -62,9 +62,10 @@ pub(super) struct PreparedProfileFrontend {
 #[cfg(test)]
 mod tests {
     use super::super::discovery::effective_profile_settings;
-    use super::update_module_prop_override;
+    use super::{CandidatePreview, CandidatePreviewSurface, update_module_prop_override};
     use mesh_core_config::SettingsStore;
     use mesh_core_module::package::ShellProfile;
+    use std::sync::Arc;
 
     #[test]
     fn profile_preferences_layer_over_shared_settings_without_mutating_them() {
@@ -172,6 +173,34 @@ mod tests {
             "top"
         );
     }
+
+    #[test]
+    fn candidate_preview_keeps_surfaces_hidden_until_all_backends_are_ready() {
+        let preview = CandidatePreview {
+            generation: 7,
+            profile_id: "work".into(),
+            surfaces: Arc::new(vec![CandidatePreviewSurface {
+                surface_id: "@test/panel".into(),
+                component_id: "@test/panel".into(),
+                hidden: true,
+            }]),
+            required_backends: Arc::new(vec!["mesh.audio".into(), "mesh.network".into()]),
+            ready_backends: Arc::new(Vec::new()),
+            diagnostics: Arc::new(Vec::new()),
+        };
+
+        assert!(!preview.ready());
+        assert!(
+            preview
+                .surfaces()
+                .iter()
+                .all(CandidatePreviewSurface::hidden)
+        );
+        let preview = preview.with_backend_ready("mesh.audio");
+        assert!(!preview.ready());
+        let preview = preview.with_backend_ready("mesh.network");
+        assert!(preview.ready());
+    }
 }
 
 /// The complete, immutable input to one live activation.
@@ -193,17 +222,200 @@ pub(super) struct ActivationPlan {
     pub(super) catalog: FrontendCatalog,
     pub(super) effective_capabilities: Arc<HashMap<String, EffectiveCapabilities>>,
     pub(super) desired_surfaces: HashSet<String>,
+    pub(super) root_modules: HashMap<String, String>,
     pub(super) desired_providers: HashMap<String, String>,
     pub(super) provider_candidates: Vec<BackendLaunchCandidate>,
 }
 
-/// Runtime identity for a committed activation. The plan is immutable and
-/// retained so all readers can associate the live mirrors with one coherent
-/// graph/settings/catalog/resource view.
-pub(super) struct RuntimeGeneration {
-    pub(super) id: u64,
-    pub(super) plan: Arc<ActivationPlan>,
-    pub(super) initial_states: Arc<HashMap<String, serde_json::Value>>,
+/// A frontend surface prepared for an activation candidate. Candidate
+/// components are mounted and can be inspected by the coordinator, but are
+/// deliberately not registered in the live component/presentation maps until
+/// the candidate commits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CandidatePreviewSurface {
+    surface_id: String,
+    component_id: String,
+    hidden: bool,
+}
+
+impl CandidatePreviewSurface {
+    pub fn surface_id(&self) -> &str {
+        &self.surface_id
+    }
+
+    pub fn component_id(&self) -> &str {
+        &self.component_id
+    }
+
+    pub fn hidden(&self) -> bool {
+        self.hidden
+    }
+}
+
+/// Read-only health/identity view of the prepared activation. It represents
+/// shell-side hidden surfaces: no candidate surface is mapped or exposed to
+/// the compositor before the active snapshot swap.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CandidatePreview {
+    generation: u64,
+    profile_id: String,
+    surfaces: Arc<Vec<CandidatePreviewSurface>>,
+    required_backends: Arc<Vec<String>>,
+    ready_backends: Arc<Vec<String>>,
+    diagnostics: Arc<Vec<String>>,
+}
+
+impl CandidatePreview {
+    fn from_plan(plan: &ActivationPlan, required_backends: Vec<String>) -> Self {
+        let mut surfaces = plan
+            .root_modules
+            .iter()
+            .map(|(surface_id, component_id)| CandidatePreviewSurface {
+                surface_id: surface_id.clone(),
+                component_id: component_id.clone(),
+                hidden: true,
+            })
+            .collect::<Vec<_>>();
+        surfaces.sort_by(|left, right| left.surface_id.cmp(&right.surface_id));
+        Self {
+            generation: plan.generation,
+            profile_id: plan.profile_id.clone(),
+            surfaces: Arc::new(surfaces),
+            required_backends: Arc::new(required_backends),
+            ready_backends: Arc::new(Vec::new()),
+            diagnostics: Arc::new(Vec::new()),
+        }
+    }
+
+    pub(super) fn with_backend_ready(&self, interface: &str) -> Self {
+        if self.ready_backends.iter().any(|ready| ready == interface) {
+            return self.clone();
+        }
+        let mut ready_backends = (*self.ready_backends).clone();
+        ready_backends.push(interface.to_string());
+        Self {
+            ready_backends: Arc::new(ready_backends),
+            ..self.clone()
+        }
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub fn profile_id(&self) -> &str {
+        &self.profile_id
+    }
+
+    pub fn surfaces(&self) -> &[CandidatePreviewSurface] {
+        self.surfaces.as_slice()
+    }
+
+    pub fn required_backends(&self) -> &[String] {
+        self.required_backends.as_slice()
+    }
+
+    pub fn ready_backends(&self) -> &[String] {
+        self.ready_backends.as_slice()
+    }
+
+    pub fn diagnostics(&self) -> &[String] {
+        self.diagnostics.as_slice()
+    }
+
+    pub fn ready(&self) -> bool {
+        self.required_backends
+            .iter()
+            .all(|interface| self.ready_backends.iter().any(|ready| ready == interface))
+    }
+}
+
+/// Immutable runtime identity for a committed activation. All generation
+/// owned mirrors are retained together so consumers cannot combine a graph
+/// from one activation with providers, settings, or presentation metadata from
+/// another.
+pub struct ActiveSnapshot {
+    generation: u64,
+    profile_id: Option<String>,
+    profile_revision: Option<u64>,
+    plan: Arc<ActivationPlan>,
+    initial_states: Arc<HashMap<String, serde_json::Value>>,
+    settings: Arc<SettingsStore>,
+    roots: Arc<HashMap<String, String>>,
+    providers: Arc<HashMap<String, mesh_core_backend::BackendIdentity>>,
+    frontend_catalog_revision: u64,
+    settings_revision: u64,
+    theme_revision: u64,
+    locale_revision: u64,
+    resource_generation: u64,
+    watch_generation: u64,
+    presentation_generations: Arc<HashMap<String, u64>>,
+}
+
+impl ActiveSnapshot {
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub fn profile_id(&self) -> Option<&str> {
+        self.profile_id.as_deref()
+    }
+
+    pub fn profile_revision(&self) -> Option<u64> {
+        self.profile_revision
+    }
+
+    pub fn roots(&self) -> &HashMap<String, String> {
+        &self.roots
+    }
+
+    pub fn graph(&self) -> &InstalledModuleGraph {
+        &self.plan.graph
+    }
+
+    pub fn interface_catalog(&self) -> Arc<mesh_core_service::InterfaceCatalog> {
+        self.plan.interface_catalog.clone()
+    }
+
+    pub fn settings(&self) -> &SettingsStore {
+        &self.settings
+    }
+
+    pub fn providers(&self) -> &HashMap<String, mesh_core_backend::BackendIdentity> {
+        &self.providers
+    }
+
+    pub fn initial_state(&self, interface: &str) -> Option<&serde_json::Value> {
+        self.initial_states.get(interface)
+    }
+
+    pub fn frontend_catalog_revision(&self) -> u64 {
+        self.frontend_catalog_revision
+    }
+
+    pub fn settings_revision(&self) -> u64 {
+        self.settings_revision
+    }
+
+    pub fn theme_revision(&self) -> u64 {
+        self.theme_revision
+    }
+
+    pub fn locale_revision(&self) -> u64 {
+        self.locale_revision
+    }
+
+    pub fn resource_generation(&self) -> u64 {
+        self.resource_generation
+    }
+
+    pub fn watch_generation(&self) -> u64 {
+        self.watch_generation
+    }
+
+    pub fn presentation_generation(&self, surface_id: &str) -> Option<u64> {
+        self.presentation_generations.get(surface_id).copied()
+    }
 }
 
 pub(super) struct PendingProfileSwitch {
@@ -1254,6 +1466,12 @@ impl Shell {
             .filter(|(_, root)| root.active)
             .map(|(instance_id, _)| instance_id.clone())
             .collect::<HashSet<_>>();
+        let root_modules = profile
+            .roots
+            .iter()
+            .filter(|(_, root)| root.active)
+            .map(|(instance_id, root)| (instance_id.clone(), root.module.clone()))
+            .collect::<HashMap<_, _>>();
         let existing_surface_modules = self
             .components
             .iter()
@@ -1417,6 +1635,7 @@ impl Shell {
             catalog,
             effective_capabilities,
             desired_surfaces,
+            root_modules,
             desired_providers,
             provider_candidates: candidates,
         });
@@ -1437,6 +1656,11 @@ impl Shell {
             })
             .cloned()
             .collect::<Vec<_>>();
+        let required_backends = changed
+            .iter()
+            .map(|candidate| candidate.interface.clone())
+            .collect::<Vec<_>>();
+        let candidate_preview = CandidatePreview::from_plan(&plan, required_backends);
         let mut pending = PendingProfileSwitch {
             plan: plan.clone(),
             prepared_frontends,
@@ -1475,6 +1699,7 @@ impl Shell {
             }
         }
 
+        self.candidate_preview = Some(Arc::new(candidate_preview));
         self.pending_profile_switch = Some(pending);
         if self
             .pending_profile_switch
@@ -1534,12 +1759,18 @@ impl Shell {
         if !is_candidate {
             return false;
         }
-        if status == BackendRuntimeStatus::Running {
+        let should_commit = if status == BackendRuntimeStatus::Running {
             pending.candidate_started.insert(interface.to_string());
             if !needs_initial_state || pending.candidate_initial_states.contains_key(interface) {
                 pending.waiting_backends.remove(interface);
             }
-            if pending.waiting_backends.is_empty() {
+            pending.waiting_backends.is_empty()
+        } else {
+            false
+        };
+        if status == BackendRuntimeStatus::Running {
+            self.mark_candidate_backend_ready(interface);
+            if should_commit {
                 let requests = self.commit_pending_profile_switch();
                 self.enqueue_effects(requests);
             }
@@ -1699,16 +1930,11 @@ impl Shell {
         let initial_states = Arc::new(std::mem::take(&mut pending.candidate_initial_states));
         // All fallible candidate work is complete. From this point on the
         // coordinator only swaps prepared values and retires old runtime
-        // objects. Publish one immutable generation identity before any
-        // newly committed state can emit follow-up work.
+        // objects. The immutable ActiveSnapshot is published after those
+        // swaps, before any newly committed state can emit follow-up work.
         self.interfaces
             .replace_catalog((*plan.interface_catalog).clone());
-        self.activation_generation = plan.generation;
-        self.active_generation = Some(Arc::new(RuntimeGeneration {
-            id: plan.generation,
-            plan: plan.clone(),
-            initial_states: initial_states.clone(),
-        }));
+        self.clear_candidate_preview(plan.generation);
         let prepared_surfaces = pending
             .prepared_frontends
             .iter()
@@ -1824,6 +2050,49 @@ impl Shell {
             self.active_profile_id = None;
             self.composition_mode = ShellCompositionMode::LegacyNoProfile;
         }
+
+        // Reconcile the active watch inputs after the graph and mounted
+        // surfaces have been swapped. The resulting generation is part of the
+        // same immutable snapshot exposed to observers.
+        self.reconcile_file_watcher();
+        let providers = self
+            .backend_runtimes
+            .iter()
+            .map(|(interface, slot)| {
+                (
+                    interface.clone(),
+                    *slot
+                        .identity
+                        .read()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let presentation_generations = plan
+            .desired_surfaces
+            .iter()
+            .map(|surface_id| (surface_id.clone(), plan.generation))
+            .collect::<HashMap<_, _>>();
+        self.activation_generation = plan.generation;
+        self.active_snapshot = Some(Arc::new(ActiveSnapshot {
+            generation: plan.generation,
+            profile_id: pending
+                .persist_active_profile
+                .then(|| plan.profile_id.clone()),
+            profile_revision: plan.profile_revision,
+            plan: plan.clone(),
+            initial_states: initial_states.clone(),
+            settings: plan.settings.clone(),
+            roots: Arc::new(plan.root_modules.clone()),
+            providers: Arc::new(providers),
+            frontend_catalog_revision: self.frontend_catalog.snapshot().version,
+            settings_revision: plan.settings.revision(),
+            theme_revision: self.theme.active_snapshot().revision,
+            locale_revision: self.locale.revision(),
+            resource_generation: plan.resources.generation,
+            watch_generation: self.file_watch_set.generation,
+            presentation_generations: Arc::new(presentation_generations),
+        }));
         for (interface, provider_id, payload) in prepared_states {
             let event = ServiceEvent::Updated {
                 service: interface,
@@ -1893,6 +2162,7 @@ impl Shell {
         pending: PendingProfileSwitch,
         message: String,
     ) {
+        self.clear_candidate_preview(pending.plan.generation);
         if let Some(lease) = pending.plan.resources.resource_lease.as_ref() {
             lease.retire();
         }

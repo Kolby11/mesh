@@ -10,8 +10,9 @@ static TEST_ALLOCATOR: mesh_core_debug::allocation::CountingAllocator<std::alloc
 pub mod shell;
 
 pub use shell::{
-    ComponentContext, ComponentError, CoreEvent, CoreRequest, FrontendEffectRevision,
-    FrontendFrame, FrontendFrameEffects, FrontendFrameError, FrontendFrameRevision,
-    FrontendFrameRevisions, FrontendInvalidation, FrontendPaintMetadata, FrontendServiceSnapshot,
-    ServiceEvent, Shell, ShellComponent, ShellRunError, SurfaceId, default_ipc_socket_path,
+    ActiveSnapshot, CandidatePreview, CandidatePreviewSurface, ComponentContext, ComponentError,
+    CoreEvent, CoreRequest, FrontendEffectRevision, FrontendFrame, FrontendFrameEffects,
+    FrontendFrameError, FrontendFrameRevision, FrontendFrameRevisions, FrontendInvalidation,
+    FrontendPaintMetadata, FrontendServiceSnapshot, ServiceEvent, Shell, ShellComponent,
+    ShellRunError, ShellShutdownPhase, SurfaceId, default_ipc_socket_path,
 };

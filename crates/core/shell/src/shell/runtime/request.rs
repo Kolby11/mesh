@@ -576,7 +576,7 @@ impl Shell {
         }
     }
 
-    fn discard_scheduled_effects(&mut self) -> usize {
+    pub(in crate::shell) fn discard_scheduled_effects(&mut self) -> usize {
         self.effect_scheduler.discard_pending()
     }
 
@@ -1210,6 +1210,13 @@ impl Shell {
         &mut self,
         request: CoreRequest,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        if !self.shutdown_phase.accepts_external_work()
+            && !self.shutdown_effects_allowed
+            && !matches!(&request, CoreRequest::Shutdown)
+        {
+            tracing::debug!(phase = ?self.shutdown_phase, "rejected request after shutdown quiescing");
+            return Ok(VecDeque::new());
+        }
         let trigger_kind = profiling_trigger_for_request(&request);
         let profiling_started = self.profiling_enabled().then(std::time::Instant::now);
         let result = match request {
@@ -1629,7 +1636,7 @@ impl Shell {
                 Ok(VecDeque::new())
             }
             CoreRequest::Shutdown => {
-                self.core.shutting_down = true;
+                self.begin_shutdown();
                 Ok(VecDeque::new())
             }
         };
