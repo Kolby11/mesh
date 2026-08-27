@@ -295,7 +295,7 @@ impl Shell {
         pending.extend(self.mount_components()?);
         pending.extend(self.replay_cached_service_events()?);
         pending.extend(self.sync_theme_service_state()?);
-        self.mark_components_locale_changed()?;
+        pending.extend(self.mark_components_locale_changed()?);
         pending.extend(self.sync_locale_service_state()?);
         pending.extend(self.broadcast_core_event(CoreEvent::Started)?);
         if let Some(request) = shell_sound_request(SoundKind::Startup, &self.settings.sounds) {

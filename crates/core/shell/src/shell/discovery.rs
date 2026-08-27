@@ -929,7 +929,12 @@ impl Shell {
         });
         self.theme_watch.revision = self.theme.active_snapshot().revision;
         if font_revision_changed {
-            self.mark_components_theme_changed()?;
+            // `commit_resource_snapshot` and its callers (`resolve_modules`,
+            // profile activation) do not thread effects up the stack; queue
+            // any script effects from the font-token `ThemeChanged` broadcast
+            // for the next loop drain instead of discarding them.
+            let effects = self.mark_components_theme_changed()?;
+            self.deferred_requests.extend(effects);
         }
         if let Some(lease) = prepared.resource_lease.as_ref() {
             lease.retire();

@@ -4,6 +4,17 @@
 
 ## Now
 
+Section 15 finding #10, remaining two shell-seam sub-bullets closed.
+`apply_set_module_prop` now republishes `mesh.settings` (was returning an
+empty request set, leaving observers on the pre-write revision).
+`mark_components_theme_changed` / `mark_components_locale_changed` now return
+`VecDeque<CoreRequest>` instead of `let _ = broadcast_core_event(...)?`, and
+all ~13 call sites thread the script effects (accumulator extend, or
+`deferred_requests` where the caller chain can't). Backlog line 104 stays
+open — its "declared durable revisions" half (theme/locale writes are
+live-only here) is owned by the Section 4/5 shared settings/profile
+transaction. See [`.planning/log/2026-08.md`](log/2026-08.md).
+
 Section 15 finding #1 (profile activation atomicity), two more standalone
 gaps closed. `ShellProfile::validate()` now rejects any profile root whose
 `entrypoint` is not `"main"` — the field was read nowhere, so a non-default

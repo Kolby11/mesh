@@ -518,7 +518,11 @@ impl Shell {
             .and_then(|metadata| metadata.modified().ok());
         self.apply_settings_to_components()?;
         self.components_want_render = true;
-        Ok(VecDeque::new())
+        // Republish the effective settings snapshot so `mesh.settings`
+        // observers advance past the revision this write just superseded;
+        // applying the store to components alone leaves the interface value
+        // stale.
+        self.sync_settings_service_state()
     }
 
     pub(in crate::shell) fn apply_switch_profile(
@@ -1150,17 +1154,21 @@ impl Shell {
                 super::discovery::apply_font_registry_tokens(active, &self.font_registry);
             });
             self.theme_watch.revision = self.theme.active_snapshot().revision;
-            if let Err(error) = self.mark_components_theme_changed() {
-                tracing::warn!("profile theme refresh failed after commit: {error}");
-                self.diagnostics.record_lifecycle_error(
-                    "@mesh/shell",
-                    "profile_post_commit_theme_refresh_failed",
-                    format!(
-                        "profile '{}' committed but a component rejected the new theme; the shell \
-                         is now on the new generation with stale component theme state: {error}",
-                        pending.profile_id
-                    ),
-                );
+            match self.mark_components_theme_changed() {
+                Ok(effects) => requests.extend(effects),
+                Err(error) => {
+                    tracing::warn!("profile theme refresh failed after commit: {error}");
+                    self.diagnostics.record_lifecycle_error(
+                        "@mesh/shell",
+                        "profile_post_commit_theme_refresh_failed",
+                        format!(
+                            "profile '{}' committed but a component rejected the new theme; the \
+                             shell is now on the new generation with stale component theme state: \
+                             {error}",
+                            pending.profile_id
+                        ),
+                    );
+                }
             }
             if let Ok(next) = self.sync_theme_service_state() {
                 requests.extend(next);
@@ -1172,17 +1180,21 @@ impl Shell {
             || old_locale.policy != self.settings.i18n.policy
             || old_locale_catalog_revision != self.locale.catalog_snapshot().revision()
         {
-            if let Err(error) = self.mark_components_locale_changed() {
-                tracing::warn!("profile locale refresh failed after commit: {error}");
-                self.diagnostics.record_lifecycle_error(
-                    "@mesh/shell",
-                    "profile_post_commit_locale_refresh_failed",
-                    format!(
-                        "profile '{}' committed but a component rejected the new locale; the shell \
-                         is now on the new generation with stale component locale state: {error}",
-                        pending.profile_id
-                    ),
-                );
+            match self.mark_components_locale_changed() {
+                Ok(effects) => requests.extend(effects),
+                Err(error) => {
+                    tracing::warn!("profile locale refresh failed after commit: {error}");
+                    self.diagnostics.record_lifecycle_error(
+                        "@mesh/shell",
+                        "profile_post_commit_locale_refresh_failed",
+                        format!(
+                            "profile '{}' committed but a component rejected the new locale; the \
+                             shell is now on the new generation with stale component locale state: \
+                             {error}",
+                            pending.profile_id
+                        ),
+                    );
+                }
             }
             if let Ok(next) = self.sync_locale_service_state() {
                 requests.extend(next);

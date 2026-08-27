@@ -219,19 +219,23 @@ impl Shell {
         let previous_watch = self.theme_watch.clone();
         self.theme.replace_active(theme);
         self.theme_watch = candidate_watch;
-        if let Err(error) = self.mark_components_theme_changed() {
-            self.theme.replace_active(previous_theme);
-            self.theme_watch = previous_watch;
-            self.record_theme_reload_failure(&error);
-            return Ok(VecDeque::new());
-        }
+        let mut requests = match self.mark_components_theme_changed() {
+            Ok(requests) => requests,
+            Err(error) => {
+                self.theme.replace_active(previous_theme);
+                self.theme_watch = previous_watch;
+                self.record_theme_reload_failure(&error);
+                return Ok(VecDeque::new());
+            }
+        };
         let new_theme_id = self.theme.active().id.clone();
         if new_theme_id != old_theme_id {
             tracing::info!(
                 "theme identity changed during reload: {old_theme_id} -> {new_theme_id}"
             );
         }
-        self.sync_theme_service_state()
+        requests.extend(self.sync_theme_service_state()?);
+        Ok(requests)
     }
 
     fn record_theme_reload_failure(&mut self, error: &dyn std::fmt::Display) {
@@ -243,7 +247,9 @@ impl Shell {
         tracing::warn!("retaining last-known-good theme after reload failure: {error}");
     }
 
-    pub(in crate::shell) fn mark_components_theme_changed(&mut self) -> Result<(), ShellRunError> {
+    pub(in crate::shell) fn mark_components_theme_changed(
+        &mut self,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let snapshot = self.theme.active_snapshot().clone();
         for runtime in &mut self.components {
             runtime
@@ -256,8 +262,9 @@ impl Shell {
         // invalidation is handled by `theme_changed()` above; the event is
         // additive — components that opt in via `handle_core_event` can use it
         // for non-visual derived state (e.g. icon name based on dark mode).
-        let _ = self.broadcast_core_event(CoreEvent::ThemeChanged { snapshot })?;
-        Ok(())
+        // Effects the subscribers emit in response are returned to the caller
+        // rather than dropped.
+        self.broadcast_core_event(CoreEvent::ThemeChanged { snapshot })
     }
 
     pub(in crate::shell) fn apply_set_theme(
@@ -297,8 +304,8 @@ impl Shell {
         self.persist_shell_appearance_override(serde_json::json!({
             "theme": { "active": theme_id, "mode": null }
         }));
-        self.mark_components_theme_changed()?;
-        let mut requests = self.sync_theme_service_state()?;
+        let mut requests = self.mark_components_theme_changed()?;
+        requests.extend(self.sync_theme_service_state()?);
         requests.extend(self.sync_settings_service_state()?);
         Ok(requests)
     }
@@ -328,8 +335,8 @@ impl Shell {
             "icons": { "default_pack": theme_id }
         }));
         mesh_core_icon::set_default_shell_pack(Some(theme_id.to_owned()));
-        self.mark_components_theme_changed()?;
-        let mut requests = self.sync_theme_service_state()?;
+        let mut requests = self.mark_components_theme_changed()?;
+        requests.extend(self.sync_theme_service_state()?);
         requests.extend(self.sync_settings_service_state()?);
         Ok(requests)
     }
@@ -354,8 +361,8 @@ impl Shell {
         self.theme
             .update_active(|theme| apply_font_family(theme, Some(family)));
         self.theme_watch.revision = self.theme.active_snapshot().revision;
-        self.mark_components_theme_changed()?;
-        let mut requests = self.sync_theme_service_state()?;
+        let mut requests = self.mark_components_theme_changed()?;
+        requests.extend(self.sync_theme_service_state()?);
         requests.extend(self.sync_settings_service_state()?);
         Ok(requests)
     }
@@ -610,14 +617,14 @@ impl Shell {
             );
             self.theme = theme;
             self.theme_watch = theme_watch;
-            self.mark_components_theme_changed()?;
+            requests.extend(self.mark_components_theme_changed()?);
             requests.extend(self.sync_theme_service_state()?);
         }
 
         if old_icons != new_settings.icons {
             mesh_core_icon::set_default_shell_pack(new_settings.icons.default_pack.clone());
             if !theme_changed {
-                self.mark_components_theme_changed()?;
+                requests.extend(self.mark_components_theme_changed()?);
             }
         }
 
@@ -631,7 +638,7 @@ impl Shell {
             );
             self.locale =
                 prepared_locale.expect("locale candidate was prepared when settings changed");
-            self.mark_components_locale_changed()?;
+            requests.extend(self.mark_components_locale_changed()?);
             requests.extend(self.sync_locale_service_state()?);
         }
 
@@ -675,7 +682,9 @@ impl Shell {
         Ok(())
     }
 
-    pub(in crate::shell) fn mark_components_locale_changed(&mut self) -> Result<(), ShellRunError> {
+    pub(in crate::shell) fn mark_components_locale_changed(
+        &mut self,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let locale = self.locale.clone();
         let locale_id = locale.current().to_string();
         for runtime in &mut self.components {
@@ -685,8 +694,7 @@ impl Shell {
                 .map_err(ShellRunError::Component)?;
             runtime.parent.force_full_present = true;
         }
-        let _ = self.broadcast_core_event(CoreEvent::LocaleChanged { locale: locale_id })?;
-        Ok(())
+        self.broadcast_core_event(CoreEvent::LocaleChanged { locale: locale_id })
     }
 
     pub(in crate::shell) fn apply_set_locale(
@@ -722,8 +730,9 @@ impl Shell {
         self.settings_watch.modified_at = std::fs::metadata(&self.settings_watch.path)
             .ok()
             .and_then(|metadata| metadata.modified().ok());
-        self.mark_components_locale_changed()?;
-        self.sync_locale_service_state()
+        let mut requests = self.mark_components_locale_changed()?;
+        requests.extend(self.sync_locale_service_state()?);
+        Ok(requests)
     }
 
     /// Prepare the normalized locale and complete catalog before committing a
