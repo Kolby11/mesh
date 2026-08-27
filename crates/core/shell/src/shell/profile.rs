@@ -1046,11 +1046,29 @@ impl Shell {
                 return VecDeque::new();
             }
         };
+        // Capture the pointer this candidate is about to overwrite so a
+        // failure in a later, still-fallible commit step (resource snapshot)
+        // can restore it instead of leaving the durable pointer advanced to
+        // a candidate the running shell aborted and never actually adopted.
+        let previous_active = match paths.active_profile_id() {
+            Ok(previous) => previous,
+            Err(error) => {
+                self.abort_profile_candidate(pending, error.to_string());
+                return VecDeque::new();
+            }
+        };
         if let Err(error) = paths.set_active(&pending.profile_id) {
             self.abort_profile_candidate(pending, error.to_string());
             return VecDeque::new();
         }
         if let Err(error) = self.commit_resource_snapshot(&pending.resources) {
+            if let Err(restore_error) = paths.restore_active(previous_active.as_deref()) {
+                tracing::error!(
+                    "failed to restore previous active-profile pointer after an aborted \
+                     profile switch; the durable pointer may now name a profile the running \
+                     shell never adopted: {restore_error}"
+                );
+            }
             self.abort_profile_candidate(pending, error.to_string());
             return VecDeque::new();
         }

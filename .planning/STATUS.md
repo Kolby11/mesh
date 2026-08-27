@@ -4,6 +4,16 @@
 
 ## Now
 
+Started Section 15 finding #1 (profile activation atomicity). Fixed one
+concrete gap: `commit_pending_profile_switch` now restores the durable
+`active-profile` pointer if `commit_resource_snapshot` fails after
+`paths.set_active` already advanced it, instead of leaving disk pointed at a
+candidate the running shell rejected. The rest of the finding (candidate
+interface snapshot use, entrypoint-aware root retention, rollback of
+theme/locale/settings refresh failures after commit) remains open — see
+[`.planning/log/2026-08.md`](log/2026-08.md) for the full assessment against
+current source, which has moved substantially since the 2026-08-20 audit.
+
 The backlog's Section 14 umbrella item ("build the transactional,
 capability-aware presentation engine...") is closed and deleted from
 `docs/BACKLOG.md`: all 12 audit findings were verified already shipped in the

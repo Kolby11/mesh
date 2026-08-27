@@ -635,6 +635,26 @@ impl ProfilePaths {
         Ok(committed)
     }
 
+    /// Restore the active-profile pointer to a previously observed value.
+    /// Used to roll back a partially-committed profile switch when a later
+    /// transaction step fails after the pointer was already advanced to the
+    /// candidate: `None` restores the pre-switch legacy/no-profile state by
+    /// removing the pointer file rather than leaving it pointed at a
+    /// candidate the running shell never actually adopted.
+    pub fn restore_active(&self, profile_id: Option<&str>) -> Result<(), ModuleManifestError> {
+        match profile_id {
+            Some(profile_id) => self.set_active(profile_id),
+            None => {
+                let path = self.active_profile_path();
+                match fs::remove_file(&path) {
+                    Ok(()) => Ok(()),
+                    Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                    Err(source) => Err(ModuleManifestError::Io { path, source }),
+                }
+            }
+        }
+    }
+
     pub fn set_active(&self, profile_id: &str) -> Result<(), ModuleManifestError> {
         let profile_path = self.profile_path(profile_id)?;
         if !profile_path.exists() {
@@ -1064,6 +1084,58 @@ mod tests {
             .expect_err("stale profile locale writes must not overwrite a newer choice");
         assert!(error.to_string().contains("profile revision conflict"));
         assert_eq!(paths.load("work").unwrap().revision, 2);
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn restore_active_reverts_to_a_previous_profile() {
+        let root = std::env::temp_dir().join(format!(
+            "mesh-profile-restore-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let graph_path = root.join("module.json");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&graph_path, "{}").unwrap();
+        let paths = ProfilePaths::from_root_graph(&graph_path).unwrap();
+
+        paths.save_if_revision("old", &ShellProfile::new(), 0).unwrap();
+        paths.save_if_revision("new", &ShellProfile::new(), 0).unwrap();
+        paths.set_active("old").unwrap();
+        assert_eq!(paths.active_profile_id().unwrap().as_deref(), Some("old"));
+
+        paths.set_active("new").unwrap();
+        assert_eq!(paths.active_profile_id().unwrap().as_deref(), Some("new"));
+
+        paths.restore_active(Some("old")).unwrap();
+        assert_eq!(paths.active_profile_id().unwrap().as_deref(), Some("old"));
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn restore_active_clears_the_pointer_when_there_was_no_prior_profile() {
+        let root = std::env::temp_dir().join(format!(
+            "mesh-profile-restore-none-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let graph_path = root.join("module.json");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&graph_path, "{}").unwrap();
+        let paths = ProfilePaths::from_root_graph(&graph_path).unwrap();
+
+        // Restoring `None` before any pointer exists must not error.
+        paths.restore_active(None).unwrap();
+        assert_eq!(paths.active_profile_id().unwrap(), None);
+
+        paths.save_if_revision("new", &ShellProfile::new(), 0).unwrap();
+        paths.set_active("new").unwrap();
+        assert_eq!(paths.active_profile_id().unwrap().as_deref(), Some("new"));
+
+        paths.restore_active(None).unwrap();
+        assert_eq!(paths.active_profile_id().unwrap(), None);
+
         std::fs::remove_dir_all(root).ok();
     }
 }
