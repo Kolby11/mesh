@@ -684,3 +684,77 @@ fn debug_overlay_toggle_controls_mesh_debug_inspector_visibility_without_enablin
     assert!(!inspector.visible);
     assert!(!shell.debug.profiling_enabled);
 }
+
+#[test]
+fn malformed_graph_interface_contract_is_diagnosed_not_silently_dropped() {
+    let interface_dir = tempfile::tempdir().unwrap();
+    let root = RootModuleGraphManifest::from_json_str(
+        r#"{
+              "name": "@mesh/test-config",
+              "version": "0.1.0",
+              "mesh": {
+                "schemaVersion": 1,
+                "modulesDir": "modules",
+                "modules": {
+                  "@mesh/broken-interface": { "kind": "interface", "path": "@mesh/broken-interface", "enabled": true }
+                }
+              }
+            }"#,
+    )
+    .unwrap();
+    // Two methods sharing the name "read" is an InvalidDeclaration at
+    // compile time (duplicate declaration), simulating a malformed
+    // module-supplied contract.
+    let interface = LoadedModuleManifest {
+        manifest: ModuleManifest::from_json_str(
+            r#"{
+                  "name": "@mesh/broken-interface",
+                  "version": "1.0.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "interface",
+                    "interface": {
+                      "name": "mesh.broken",
+                      "version": "1.0",
+                      "domain": "broken",
+                      "relationship": "base",
+                      "contract": {
+                        "methods": [
+                          { "name": "read", "returns": "boolean" },
+                          { "name": "read", "returns": "string" }
+                        ]
+                      }
+                    }
+                  }
+                }"#,
+        )
+        .unwrap(),
+        path: interface_dir.path().join("module.json"),
+        source: ModuleManifestSource::CanonicalModuleJson,
+        diagnostics: Vec::new(),
+    };
+    let graph = InstalledModuleGraph::from_parts(root, vec![interface]).unwrap();
+    let mut shell = Shell::new();
+
+    shell.register_interfaces_from_graph(&graph);
+
+    assert!(
+        shell.interfaces.contracts_for("mesh.broken").is_empty(),
+        "a malformed contract must not silently install a half-broken interface"
+    );
+    let diagnosed = shell
+        .diagnostics
+        .snapshot()
+        .iter()
+        .flat_map(|module| module.instances.iter())
+        .flat_map(|instance| instance.issues.iter())
+        .any(|issue| {
+            issue
+                .issue_code
+                .contains("graph_interface_contract_compile_failed")
+        });
+    assert!(
+        diagnosed,
+        "a malformed graph-supplied interface contract must be diagnosable, not silently dropped"
+    );
+}

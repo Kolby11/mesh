@@ -4,6 +4,11 @@
 
 ## Now
 
+Closed the "Service contracts (open)" backlog item: graph-supplied
+interface contracts now go through `try_register_contract` and are logged +
+diagnosed on compile failure instead of silently dropped from the catalog.
+See [`.planning/log/2026-08.md`](log/2026-08.md).
+
 Section 15 finding #10 (one sub-bullet): removed the internal, undeclared
 `"set-current"` command the shell sent directly to any module implementing
 `mesh.theme` as a backend — confirmed dead in the shipped module set, but a

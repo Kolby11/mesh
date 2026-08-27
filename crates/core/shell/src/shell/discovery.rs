@@ -1961,7 +1961,24 @@ impl Shell {
             ),
         }
         for contract in graph.interface_contracts().values() {
-            self.interfaces.register_contract(contract.clone());
+            let interface = contract.interface.clone();
+            if let Err(error) = self.interfaces.try_register_contract(contract.clone()) {
+                // `register_contract` used to discard this silently: one bad
+                // field type on a module-supplied contract removed the whole
+                // interface from the catalog, and every method on it then
+                // rejected as an unknown channel with no signal pointing back
+                // at the actual cause. Surface it loudly instead of asserting
+                // — unlike a built-in contract, a graph-supplied one can be
+                // legitimately malformed third-party content.
+                tracing::error!(
+                    "graph-supplied interface '{interface}' was rejected and is unavailable: {error}"
+                );
+                self.diagnostics.record_lifecycle_error(
+                    interface,
+                    "graph_interface_contract_compile_failed",
+                    error.to_string(),
+                );
+            }
         }
 
         for provider in graph.backend_provider_contributions() {
