@@ -140,6 +140,166 @@ fn backend_failure_delivers_unavailable_state_and_health_event() {
 }
 
 #[test]
+fn committed_provider_generation_publishes_recovery_and_rejects_stale_failure() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    let seen_events = Arc::new(Mutex::new(Vec::new()));
+    shell.register_component(Box::new(RecordingComponent::new(Arc::clone(&seen_events))));
+
+    let old_identity = BackendIdentity::new(7, 1);
+    let (old_slot, _old_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/audio");
+    *old_slot
+        .identity
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = old_identity;
+    shell.replace_backend_runtime("mesh.audio".to_string(), old_slot);
+    shell.record_latest_service_state_at_identity(
+        &service_update(
+            "mesh.audio",
+            "@mesh/audio",
+            serde_json::json!({ "available": true, "percent": 75 }),
+        ),
+        old_identity,
+    );
+
+    shell.handle_backend_lifecycle_at_identity(
+        "mesh.audio".to_string(),
+        "@mesh/audio".to_string(),
+        old_identity,
+        "poll".to_string(),
+        "failed".to_string(),
+        "provider stopped".to_string(),
+    );
+    let failure_events = seen_events.lock().unwrap().clone();
+    assert!(failure_events.iter().any(|event| {
+        matches!(
+            event,
+            ServiceEvent::InterfaceEvent { name, payload, .. }
+                if name == "health" && payload["state"] == "unavailable"
+        )
+    }));
+    seen_events.lock().unwrap().clear();
+
+    let new_identity = BackendIdentity::new(8, 2);
+    let (new_slot, _new_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/audio");
+    *new_slot
+        .identity
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = new_identity;
+    shell.replace_backend_runtime("mesh.audio".to_string(), new_slot);
+    shell.record_latest_service_state_at_identity(
+        &service_update(
+            "mesh.audio",
+            "@mesh/audio",
+            serde_json::json!({ "percent": 80 }),
+        ),
+        new_identity,
+    );
+    shell.publish_backend_health_at_identity(
+        "mesh.audio",
+        "@mesh/audio",
+        new_identity,
+        BackendRuntimeStatus::Running,
+        "provider recovered",
+        true,
+    );
+
+    let recovery_events = seen_events.lock().unwrap().clone();
+    assert!(recovery_events.iter().any(|event| {
+        matches!(
+            event,
+            ServiceEvent::Updated { source_module, payload, .. }
+                if source_module == "@mesh/audio"
+                    && payload["available"] == true
+                    && payload["percent"] == 80
+                    && payload.get("availability_reason").is_none()
+        )
+    }));
+    assert!(recovery_events.iter().any(|event| {
+        matches!(
+            event,
+                ServiceEvent::InterfaceEvent { source_module, name, payload, .. }
+                if source_module == "@mesh/audio"
+                    && name == "health"
+                    && payload["state"] == "healthy"
+        )
+    }));
+    assert_eq!(
+        shell.latest_service_health_identities["mesh.audio"],
+        new_identity
+    );
+    let recovery_event_count = recovery_events.len();
+    shell.publish_backend_health_at_identity(
+        "mesh.audio",
+        "@mesh/audio",
+        new_identity,
+        BackendRuntimeStatus::Running,
+        "same generation heartbeat",
+        true,
+    );
+    assert_eq!(
+        seen_events.lock().unwrap().len(),
+        recovery_event_count,
+        "repeated health status from one committed generation is not a transition"
+    );
+
+    seen_events.lock().unwrap().clear();
+    shell.handle_backend_lifecycle_at_identity(
+        "mesh.audio".to_string(),
+        "@mesh/audio".to_string(),
+        old_identity,
+        "poll".to_string(),
+        "failed".to_string(),
+        "stale provider stopped".to_string(),
+    );
+    assert!(seen_events.lock().unwrap().is_empty());
+    let latest_health = shell.latest_service_health.get("mesh.audio").unwrap();
+    assert!(matches!(
+        latest_health,
+        ServiceEvent::InterfaceEvent { source_module, payload, .. }
+            if source_module == "@mesh/audio" && payload["state"] == "healthy"
+    ));
+}
+
+#[test]
+fn uncommitted_provider_failure_does_not_publish_availability() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    let seen_events = Arc::new(Mutex::new(Vec::new()));
+    shell.register_component(Box::new(RecordingComponent::new(Arc::clone(&seen_events))));
+
+    let identity = BackendIdentity::new(11, 1);
+    let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/candidate");
+    *slot
+        .identity
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = identity;
+    shell.stage_backend_runtime_activation("mesh.audio".to_string(), slot);
+    shell.handle_backend_lifecycle_at_identity(
+        "mesh.audio".to_string(),
+        "@mesh/candidate".to_string(),
+        identity,
+        "init".to_string(),
+        "failed".to_string(),
+        "candidate failed before commit".to_string(),
+    );
+
+    // A status record can outlive the candidate slot during cleanup. Its
+    // identity alone must not make that uncommitted generation observable.
+    shell.record_backend_runtime_status_at_identity(
+        "mesh.audio".to_string(),
+        "@mesh/candidate".to_string(),
+        identity,
+        BackendRuntimeStatus::Failed,
+        "late candidate failure".to_string(),
+    );
+
+    assert!(seen_events.lock().unwrap().is_empty());
+    assert!(!shell.latest_service_state.contains_key("mesh.audio"));
+    assert!(!shell.latest_service_health.contains_key("mesh.audio"));
+}
+
+#[test]
 fn stale_restart_deadline_cannot_clear_or_run_a_newer_supervision_token() {
     let mut shell = Shell::new();
     shell.backend_supervision.insert(

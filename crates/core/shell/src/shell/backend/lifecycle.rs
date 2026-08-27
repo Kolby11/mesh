@@ -281,6 +281,51 @@ impl Shell {
         }
     }
 
+    fn committed_provider_generation_matches(
+        &self,
+        interface: &str,
+        provider_id: &str,
+        identity: mesh_core_backend::BackendIdentity,
+        include_retired: bool,
+    ) -> bool {
+        self.committed_provider_generations
+            .get(interface)
+            .is_some_and(|generation| {
+                generation.provider_id == provider_id
+                    && generation.identity == identity
+                    && (include_retired || !generation.retired)
+            })
+    }
+
+    fn commit_backend_provider_generation(&mut self, slot: &BackendRuntimeSlot) {
+        let identity = *slot
+            .identity
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.committed_provider_generations.insert(
+            slot.interface.clone(),
+            CommittedProviderGeneration {
+                provider_id: slot.provider_id.clone(),
+                identity,
+                retired: false,
+            },
+        );
+    }
+
+    fn retire_backend_provider_generation(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        identity: mesh_core_backend::BackendIdentity,
+    ) {
+        if let Some(generation) = self.committed_provider_generations.get_mut(interface)
+            && generation.provider_id == provider_id
+            && generation.identity == identity
+        {
+            generation.retired = true;
+        }
+    }
+
     /// Publish one authoritative availability transition to both ordinary
     /// service observers and subscribers of the reserved `health` event. The
     /// provider cache is updated before delivery, so a newly mounted runtime
@@ -313,29 +358,45 @@ impl Shell {
         message: &str,
         deliver: bool,
     ) {
-        let identity_matches = self.backend_runtimes.get(interface).is_some_and(|slot| {
+        let active_identity_matches = self.backend_runtimes.get(interface).is_some_and(|slot| {
             slot.provider_id == provider_id
                 && *slot
                     .identity
                     .read()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     == identity
-        }) || self.pending_backend_runtimes.get(interface).is_some_and(
-            |pending| {
-                pending.slot.provider_id == provider_id
-                    && *pending
-                        .slot
-                        .identity
-                        .read()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
-                        == identity
-            },
-        ) || self.profile_candidate_is_pending(interface, provider_id)
-            && identity == self.backend_identity_for_interface(interface)
-            || self
-                .backend_runtime_status(interface, provider_id)
-                .is_some_and(|entry| entry.identity == identity);
-        if identity != mesh_core_backend::BackendIdentity::default() && !identity_matches {
+        });
+        let pending_identity_matches =
+            self.pending_backend_runtimes
+                .get(interface)
+                .is_some_and(|pending| {
+                    pending.slot.provider_id == provider_id
+                        && *pending
+                            .slot
+                            .identity
+                            .read()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            == identity
+                });
+        let profile_candidate_is_pending =
+            self.profile_candidate_is_pending_at_identity(interface, provider_id, identity);
+        if pending_identity_matches || profile_candidate_is_pending {
+            tracing::debug!(
+                interface,
+                provider_id,
+                "kept candidate provider health private until activation commit"
+            );
+            return;
+        }
+        let retired_stop_matches = status == BackendRuntimeStatus::Stopped
+            && self.committed_provider_generation_matches(interface, provider_id, identity, true);
+        let committed_identity_matches =
+            self.committed_provider_generation_matches(interface, provider_id, identity, false);
+        if identity != mesh_core_backend::BackendIdentity::default()
+            && !active_identity_matches
+            && !committed_identity_matches
+            && !retired_stop_matches
+        {
             tracing::debug!(
                 interface,
                 provider_id,
@@ -352,33 +413,8 @@ impl Shell {
                     .get(interface)
                     .map(|pending| pending.slot.provider_id.as_str())
             });
-        let pending_is_not_active =
-            self.pending_backend_runtimes
-                .get(interface)
-                .is_some_and(|pending| {
-                    pending.slot.provider_id == provider_id
-                        && !self
-                            .backend_runtimes
-                            .get(interface)
-                            .is_some_and(|slot| slot.provider_id == provider_id)
-                });
-        let profile_candidate_is_not_active =
-            self.profile_candidate_is_pending(interface, provider_id);
-        if pending_is_not_active || profile_candidate_is_not_active {
-            tracing::debug!(
-                interface,
-                provider_id,
-                "kept candidate provider health private until activation commit"
-            );
-            return;
-        }
         if current_provider.is_some_and(|current| current != provider_id)
-            || current_provider.is_none()
-                && provider_id != "<none>"
-                && self
-                    .latest_service_state
-                    .get(interface)
-                    .is_some_and(|latest| latest.provider_id != provider_id)
+            || current_provider.is_none() && provider_id != "<none>" && !retired_stop_matches
         {
             tracing::debug!(
                 interface,
@@ -420,6 +456,8 @@ impl Shell {
                         "availability_reason".to_string(),
                         serde_json::Value::String(message.to_string()),
                     );
+                } else {
+                    object.remove("availability_reason");
                 }
             }
             let state_changed = self
@@ -469,9 +507,20 @@ impl Shell {
                 "recoverable": recoverable,
             }),
         };
+        let health_transition_changed =
+            self.latest_service_health
+                .get(interface)
+                .is_none_or(|previous| {
+                    self.latest_service_health_identities
+                        .get(interface)
+                        .is_none_or(|previous_identity| *previous_identity != identity)
+                        || backend_health_transition_changed(previous, &health_event)
+                });
         self.latest_service_health
             .insert(interface.to_string(), health_event.clone());
-        if deliver {
+        self.latest_service_health_identities
+            .insert(interface.to_string(), identity);
+        if deliver && health_transition_changed {
             match self.deliver_service_event(&health_event) {
                 Ok(requests) => self.enqueue_effects(requests),
                 Err(error) => tracing::warn!(
@@ -527,14 +576,15 @@ impl Shell {
                 .unwrap_or(false);
             if !terminal_failure_already_recorded {
                 self.record_backend_runtime_status_with_identity(
-                    interface_name,
-                    provider_id,
+                    interface_name.clone(),
+                    provider_id.clone(),
                     identity,
                     BackendRuntimeStatus::Stopped,
                     "runtime stopped".to_string(),
                     publish_health,
                 );
             }
+            self.retire_backend_provider_generation(&interface_name, &provider_id, identity);
         }
     }
 
@@ -585,6 +635,7 @@ impl Shell {
         self.stop_backend_runtime_with_health(&interface, false);
         self.service_handlers
             .insert(interface.clone(), slot.command_tx.clone());
+        self.commit_backend_provider_generation(&slot);
         self.backend_runtimes.insert(interface, slot);
     }
 
@@ -623,6 +674,19 @@ impl Shell {
                 && latest.provider_id == provider_id
             {
                 latest.identity = identity;
+            }
+            if let Some(ServiceEvent::InterfaceEvent { source_module, .. }) =
+                self.latest_service_health.get(&interface)
+                && source_module == &provider_id
+            {
+                self.latest_service_health_identities
+                    .insert(interface.clone(), identity);
+            }
+            if let Some(generation) = self.committed_provider_generations.get_mut(&interface)
+                && generation.provider_id == provider_id
+            {
+                generation.identity = identity;
+                generation.retired = false;
             }
         }
     }
@@ -1041,6 +1105,32 @@ impl Shell {
             }
         }
     }
+}
+
+fn backend_health_transition_changed(previous: &ServiceEvent, next: &ServiceEvent) -> bool {
+    let (
+        ServiceEvent::InterfaceEvent {
+            service: previous_service,
+            source_module: previous_source,
+            name: previous_name,
+            payload: previous_payload,
+        },
+        ServiceEvent::InterfaceEvent {
+            service: next_service,
+            source_module: next_source,
+            name: next_name,
+            payload: next_payload,
+        },
+    ) = (previous, next)
+    else {
+        return true;
+    };
+
+    previous_service != next_service
+        || previous_source != next_source
+        || previous_name != next_name
+        || previous_payload.get("state") != next_payload.get("state")
+        || previous_payload.get("recoverable") != next_payload.get("recoverable")
 }
 
 async fn await_backend_task(task: JoinHandle<()>, role: &str) {

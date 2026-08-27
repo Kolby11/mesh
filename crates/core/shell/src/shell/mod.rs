@@ -518,6 +518,10 @@ pub struct Shell {
     backend_provider_epochs: HashMap<String, u64>,
     effect_scheduler: EffectScheduler,
     backend_runtime_statuses: BackendRuntimeStatusMap,
+    /// The latest provider generation that crossed an activation commit. A
+    /// candidate may have an identity before commit, but it must not publish
+    /// availability until it is recorded here.
+    committed_provider_generations: HashMap<String, CommittedProviderGeneration>,
     backend_supervision: HashMap<String, backend::BackendSupervisionState>,
     backend_respawn: Option<backend::BackendRespawnContext>,
     retiring_backend_runtimes: Vec<BackendRuntimeTasks>,
@@ -528,6 +532,9 @@ pub struct Shell {
     /// Last committed provider health event, replayed when a consumer mounts
     /// after a graph/runtime transition.
     latest_service_health: HashMap<String, ServiceEvent>,
+    /// Identity for the cached health event; kept separate from the public
+    /// event payload so generation metadata does not leak into service state.
+    latest_service_health_identities: HashMap<String, BackendIdentity>,
     service_contract_validation: HashMap<String, ContractValidationCache>,
     /// Command-bound service state awaiting provider confirmation, keyed by
     /// (interface, state field). Replacing an entry makes the newer CallId the
@@ -595,6 +602,13 @@ impl Shell {
 }
 
 type BackendRuntimeStatusMap = HashMap<String, HashMap<String, BackendRuntimeStatusEntry>>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CommittedProviderGeneration {
+    provider_id: String,
+    identity: BackendIdentity,
+    retired: bool,
+}
 
 #[derive(Debug, Clone)]
 struct BackendRuntimeSlot {
