@@ -32,9 +32,9 @@ shutdown advances through explicit quiescing, teardown, flushing, and stopped
 phases. Module activation now rejects unsatisfied required dependency closures,
 incompatible module/interface versions, invalid composition pins, and duplicate
 contract identities before runtime contributions are indexed. The next open
-item is making the canonical `module.json` loader the only production path;
-legacy manifests remain migration diagnostics, never runnable compatibility
-inputs.
+item is making module lifecycle and health authoritative across graph,
+frontend, and backend states, including explicit unload/recovery/quarantine and
+service unavailability delivery.
 `aspect-ratio` is now part of the bounded style profile, and the shipped
 navigation bar derives its control sizing from the bar root through it rather
 than restating px sizes per component. That exposed the next surface item:

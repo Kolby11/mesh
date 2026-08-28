@@ -884,6 +884,29 @@ fn module_manifest_loader_rejects_legacy_module_json() {
 }
 
 #[test]
+fn module_manifest_loader_rejects_mixed_legacy_and_canonical_module_json() {
+    let dir = temp_dir("mixed-legacy-canonical-module");
+    fs::write(
+        dir.join("module.json"),
+        r#"{"name":"@mesh/module","id":"@mesh/old-module","version":"1.0.0","type":"surface","mesh":{"apiVersion":"0.1","kind":"frontend"}}"#,
+    )
+    .unwrap();
+
+    let err = load_module_manifest(&dir).unwrap_err();
+    let ModuleManifestError::Diagnostic { diagnostic } = err else {
+        panic!("expected migration diagnostic for mixed manifest shape");
+    };
+    assert_eq!(diagnostic.severity, ModuleManifestDiagnosticSeverity::Error);
+    assert_eq!(diagnostic.module_id.as_deref(), Some("@mesh/module"));
+    assert_eq!(diagnostic.field_path.as_deref(), Some("id"));
+    assert!(diagnostic.message.contains("legacy module manifest field"));
+    assert_eq!(
+        diagnostic.suggested_action,
+        "replace legacy module.json fields with canonical name/version/mesh"
+    );
+}
+
+#[test]
 fn module_manifest_loader_rejects_legacy_mesh_toml() {
     let dir = temp_dir("legacy-mesh-toml");
     fs::write(

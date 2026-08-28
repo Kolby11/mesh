@@ -1,8 +1,7 @@
-#![allow(dead_code)] // Legacy manifest discovery helpers remain for migration tests.
-
 use super::component::{FrontendCatalog, FrontendCatalogHandle, FrontendSurfaceComponent};
 use super::*;
 use mesh_core_module::ModuleHealthRecord;
+#[cfg(test)]
 use rayon::prelude::*;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -1130,6 +1129,7 @@ fn builtin_contract(
     }
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 pub(super) struct DiscoveredModuleManifest {
     pub(super) dir: PathBuf,
@@ -1137,6 +1137,7 @@ pub(super) struct DiscoveredModuleManifest {
         Result<mesh_core_module::LoadedManifest, mesh_core_module::manifest::ManifestError>,
 }
 
+#[cfg(test)]
 pub(super) fn discover_shell_module_manifest_dirs(module_dirs: &[PathBuf]) -> Vec<PathBuf> {
     let mut discovered = Vec::new();
     for dir in module_dirs {
@@ -1161,6 +1162,7 @@ pub(super) fn discover_shell_module_manifest_dirs(module_dirs: &[PathBuf]) -> Ve
     discovered
 }
 
+#[cfg(test)]
 fn discover_shell_module_manifest_dirs_under(
     dir: &Path,
     root: &Path,
@@ -1204,12 +1206,14 @@ fn discover_shell_module_manifest_dirs_under(
     }
 }
 
+#[cfg(test)]
 fn shell_module_manifest_exists(dir: &Path) -> bool {
     dir.join("package.json").exists()
         || dir.join("module.json").exists()
         || dir.join("mesh.toml").exists()
 }
 
+#[cfg(test)]
 pub(super) fn load_shell_module_manifests(
     module_dirs: &[PathBuf],
 ) -> Vec<DiscoveredModuleManifest> {

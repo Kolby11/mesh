@@ -105,9 +105,6 @@ The 2026-06-18 redesign largely shipped: canonical `module.json` with
 `mesh.uses` / `mesh.provides` / `mesh.implements`, the graph as single source of
 truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
-- [ ] Make the canonical `module.json` loader the only production path; legacy
-      manifests remain migration diagnostics, never runnable compatibility
-      inputs.
 - [ ] Make module lifecycle and health authoritative across graph, frontend, and
       backend states, including explicit unload/recovery/quarantine and service
       unavailability delivery.

@@ -400,12 +400,35 @@ pub fn load_module_manifest(
             });
         }
 
+        let document: serde_json::Value =
+            serde_json::from_str(&content).map_err(|source| ModuleManifestError::Json {
+                path: module_json.clone(),
+                source,
+            })?;
+        let module_id = document
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned);
+        let legacy_field = ["id", "type", "api_version"]
+            .into_iter()
+            .find(|field| document.get(field).is_some());
+        let (field_path, message) = if let Some(field) = legacy_field {
+            (
+                Some(field.to_string()),
+                format!("top-level {field} is a legacy module manifest field and is not supported"),
+            )
+        } else {
+            (
+                Some("$".into()),
+                "legacy module.json shape uses id/type/api_version fields".into(),
+            )
+        };
         return Err(ModuleManifestError::Diagnostic {
             diagnostic: ModuleManifestDiagnostic::error(
                 &module_json,
-                None,
-                Some("$".into()),
-                "legacy module.json shape uses id/type/api_version fields",
+                module_id,
+                field_path,
+                message,
                 "replace legacy module.json fields with canonical name/version/mesh",
             ),
         });

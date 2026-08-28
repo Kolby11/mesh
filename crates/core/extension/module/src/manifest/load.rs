@@ -36,5 +36,12 @@ pub fn load_canonical_manifest(module_dir: &Path) -> Result<LoadedManifest, Mani
 /// migration diagnostic instead of being interpreted as compatibility input.
 pub(crate) fn is_canonical_module_json(content: &str) -> Result<bool, serde_json::Error> {
     let value: serde_json::Value = serde_json::from_str(content)?;
-    Ok(value.get("name").is_some() && value.get("mesh").is_some())
+    Ok(value.get("name").is_some()
+        && value.get("mesh").is_some()
+        // A document that mixes the old top-level shape with the canonical
+        // one must stay on the migration-diagnostic path. Serde otherwise
+        // ignores these fields and would make the legacy input runnable.
+        && ["id", "type", "api_version"]
+            .into_iter()
+            .all(|field| value.get(field).is_none()))
 }

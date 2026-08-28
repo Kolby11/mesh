@@ -21,6 +21,7 @@ pub struct ModuleManifest {
 impl ModuleManifest {
     pub fn from_json_str(input: &str) -> Result<Self, ModuleManifestError> {
         let path = PathBuf::from("<inline>");
+        reject_legacy_top_level_fields(input, &path)?;
         reject_legacy_surface_layout(input, &path)?;
         let mut parsed: Self = serde_json::from_str(input)
             .map_err(|source| ModuleManifestError::Json { path, source })?;
@@ -35,6 +36,7 @@ impl ModuleManifest {
             path: path.to_path_buf(),
             source,
         })?;
+        reject_legacy_top_level_fields(&content, path)?;
         reject_legacy_surface_layout(&content, path)?;
         let mut parsed: Self =
             serde_json::from_str(&content).map_err(|source| ModuleManifestError::Json {
@@ -261,6 +263,36 @@ pub struct MeshModuleSection {
     pub surface_layout: Option<manifest::SurfaceLayoutSection>,
     #[serde(default)]
     pub experimental: serde_json::Value,
+}
+
+fn reject_legacy_top_level_fields(input: &str, path: &Path) -> Result<(), ModuleManifestError> {
+    let document: serde_json::Value =
+        serde_json::from_str(input).map_err(|source| ModuleManifestError::Json {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let Some(object) = document.as_object() else {
+        return Ok(());
+    };
+    let Some(field) = ["id", "type", "api_version"]
+        .into_iter()
+        .find(|field| object.contains_key(*field))
+    else {
+        return Ok(());
+    };
+    let module_id = document
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    Err(ModuleManifestError::Diagnostic {
+        diagnostic: ModuleManifestDiagnostic::error(
+            path,
+            module_id,
+            Some(field.into()),
+            format!("top-level {field} is a legacy module manifest field and is not supported"),
+            "replace legacy module.json fields with canonical name/version/mesh",
+        ),
+    })
 }
 
 fn reject_legacy_surface_layout(input: &str, path: &Path) -> Result<(), ModuleManifestError> {
