@@ -8,13 +8,17 @@
 //! mutation, and restores those snapshots if the operation fails or the next
 //! package operation finds an unfinished journal.
 
-use super::{ModuleManifestError, contained_path, validate_module_tree};
+use super::{
+    LockedModule, MeshLock, ModuleManifest, ModuleManifestError, ModuleSource, ProfilePaths,
+    RootModuleGraphManifest, ShellProfile, contained_path, validate_module_tree,
+};
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use std::cell::RefCell;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
+use std::process::Command;
 
 const JOURNAL_SCHEMA_VERSION: u32 = 2;
 const JOURNAL_FILE: &str = ".mesh-package-transaction.json";
@@ -59,6 +63,36 @@ pub enum PackageOperation {
     Update,
     Rollback,
     Uninstall,
+}
+
+/// A validated module source staged by the shared package engine.
+///
+/// Both the CLI and the running shell accept the same local-directory/Git
+/// source syntax. Keeping the materialized source here makes it impossible
+/// for one consumer to put a checkout in the discoverable module tree while
+/// the other stages it privately.
+#[derive(Debug, Clone)]
+pub struct StagedModuleSource {
+    path: PathBuf,
+    source: ModuleSource,
+    revision: Option<String>,
+}
+
+impl StagedModuleSource {
+    /// The private, validated candidate tree.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// The source provenance to record in `mesh.lock`.
+    pub fn source(&self) -> &ModuleSource {
+        &self.source
+    }
+
+    /// The resolved Git revision, if this source came from a repository.
+    pub fn revision(&self) -> Option<&str> {
+        self.revision.as_deref()
+    }
 }
 
 impl PackageOperation {
@@ -250,6 +284,292 @@ impl PackageTransaction {
         self.workspace.join("staging")
     }
 
+    /// Materialize a local directory or Git source below the transaction
+    /// workspace. The returned tree is validated before it can be installed.
+    pub fn stage_module_source(
+        &self,
+        source: &str,
+    ) -> Result<StagedModuleSource, ModuleManifestError> {
+        let local = PathBuf::from(source);
+        if fs::symlink_metadata(&local)
+            .map(|metadata| metadata.is_dir())
+            .unwrap_or(false)
+        {
+            validate_module_tree(&local)?;
+            let staged = self
+                .staging_dir()
+                .join(format!("source-{}", monotonic_nonce()));
+            let metadata =
+                fs::symlink_metadata(&local).map_err(|source| ModuleManifestError::Io {
+                    path: local.clone(),
+                    source,
+                })?;
+            copy_path(&local, &staged, &metadata)?;
+            validate_module_tree(&staged)?;
+            return Ok(StagedModuleSource {
+                path: staged,
+                source: ModuleSource::Path {
+                    path: local.display().to_string(),
+                },
+                revision: None,
+            });
+        }
+
+        let (url, reference) = parse_git_source(source)?;
+        let staged = self
+            .staging_dir()
+            .join(format!("source-{}", monotonic_nonce()));
+        let revision = self.stage_git_revision(&url, reference.as_deref(), &staged)?;
+        Ok(StagedModuleSource {
+            path: staged,
+            source: ModuleSource::Git { url, reference },
+            revision: Some(revision),
+        })
+    }
+
+    /// Stage a locked module at an exact revision or path for rollback.
+    pub fn stage_locked_module(
+        &self,
+        entry: &LockedModule,
+        installed_at: &Path,
+        destination: &Path,
+    ) -> Result<PathBuf, ModuleManifestError> {
+        if let Some(revision) = &entry.revision {
+            let source = match &entry.source {
+                ModuleSource::Git { url, .. } if !installed_at.exists() => url.clone(),
+                _ if installed_at.exists() => installed_at.display().to_string(),
+                ModuleSource::Git { url, .. } => url.clone(),
+                ModuleSource::Path { .. } => {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "cannot materialize rollback entry without a Git source: {}",
+                        installed_at.display()
+                    )));
+                }
+            };
+            self.stage_git_revision(&source, Some(revision), destination)?;
+            return Ok(destination.to_path_buf());
+        }
+
+        let ModuleSource::Path { path } = &entry.source else {
+            return Err(ModuleManifestError::Validation(format!(
+                "cannot materialize rollback entry without a revision: {}",
+                installed_at.display()
+            )));
+        };
+        let source = Path::new(path);
+        let source = if source.is_absolute() {
+            source.to_path_buf()
+        } else {
+            self.config_dir.join(source)
+        };
+        let metadata =
+            fs::symlink_metadata(&source).map_err(|source_error| ModuleManifestError::Io {
+                path: source.clone(),
+                source: source_error,
+            })?;
+        copy_path(&source, destination, &metadata)?;
+        validate_module_tree(destination)?;
+        Ok(destination.to_path_buf())
+    }
+
+    /// Move a fully validated staged module into the live module tree.
+    pub fn place_staged_module(
+        &mut self,
+        source: &StagedModuleSource,
+        destination: &Path,
+    ) -> Result<(), ModuleManifestError> {
+        validate_module_tree(&source.path)?;
+        self.replace_with(destination, &source.path)
+    }
+
+    /// Copy a regular file or directory into the private staging area.
+    pub fn copy_to_staging(
+        &self,
+        source: &Path,
+        destination: &Path,
+    ) -> Result<PathBuf, ModuleManifestError> {
+        validate_staged_path(&self.workspace, destination)?;
+        let metadata =
+            fs::symlink_metadata(source).map_err(|source_error| ModuleManifestError::Io {
+                path: source.to_path_buf(),
+                source: source_error,
+            })?;
+        copy_path(source, destination, &metadata)?;
+        Ok(destination.to_path_buf())
+    }
+
+    /// Persist root graph state through this transaction's journal.
+    pub fn save_root(
+        &mut self,
+        path: &Path,
+        root: &RootModuleGraphManifest,
+    ) -> Result<(), ModuleManifestError> {
+        self.protect(path)?;
+        root.save(path)
+    }
+
+    /// Persist a profile through this transaction's journal.
+    pub fn save_profile(
+        &mut self,
+        paths: &ProfilePaths,
+        profile_id: &str,
+        profile: &ShellProfile,
+    ) -> Result<(), ModuleManifestError> {
+        let path = paths.profile_path(profile_id)?;
+        self.protect(&path)?;
+        paths.save(profile_id, profile)
+    }
+
+    /// Persist a profile only if no other package/profile writer changed its
+    /// revision while the candidate was being prepared.
+    pub fn save_profile_if_revision(
+        &mut self,
+        paths: &ProfilePaths,
+        profile_id: &str,
+        profile: &ShellProfile,
+        expected_revision: u64,
+    ) -> Result<ShellProfile, ModuleManifestError> {
+        let path = paths.profile_path(profile_id)?;
+        self.protect(&path)?;
+        paths.save_if_revision(profile_id, profile, expected_revision)
+    }
+
+    /// Persist the active profile pointer through this transaction's journal.
+    pub fn set_active_profile(
+        &mut self,
+        paths: &ProfilePaths,
+        profile_id: &str,
+    ) -> Result<(), ModuleManifestError> {
+        self.protect(&paths.active_profile_path())?;
+        paths.set_active(profile_id)
+    }
+
+    /// Archive and persist the next lock generation as part of this package
+    /// transaction. The store snapshot is published before the lock bytes,
+    /// and the transaction keeps the old durable state recoverable on error.
+    pub fn save_lock(
+        &mut self,
+        lock: &mut MeshLock,
+        modules_dir: &Path,
+    ) -> Result<(), ModuleManifestError> {
+        let lock_path = self.config_dir.join("mesh.lock");
+        self.protect(&lock_path)?;
+        self.protect(&self.config_dir.join("lock-history"))?;
+        self.protect(&self.config_dir.join(".mesh-store/active-generation"))?;
+        MeshLock::archive(&lock_path, &self.config_dir.join("lock-history"))?;
+        lock.save_with_store(
+            &lock_path,
+            modules_dir,
+            &self.config_dir.join(".mesh-store"),
+        )
+    }
+
+    /// Persist a selected lock generation without advancing it, as required by
+    /// rollback.
+    pub fn save_exact_lock(
+        &mut self,
+        lock: &MeshLock,
+        modules_dir: &Path,
+    ) -> Result<(), ModuleManifestError> {
+        let lock_path = self.config_dir.join("mesh.lock");
+        self.protect(&lock_path)?;
+        self.protect(&self.config_dir.join("lock-history"))?;
+        self.protect(&self.config_dir.join(".mesh-store/active-generation"))?;
+        MeshLock::archive(&lock_path, &self.config_dir.join("lock-history"))?;
+        lock.save_exact_with_store(
+            &lock_path,
+            modules_dir,
+            &self.config_dir.join(".mesh-store"),
+        )
+    }
+
+    /// Update and persist the lock entry for one newly installed module.
+    pub fn record_module_lock(
+        &mut self,
+        manifest: &ModuleManifest,
+        installed_at: &Path,
+        modules_dir: &Path,
+        source: &ModuleSource,
+        revision: Option<&str>,
+        installed_manifests: &[ModuleManifest],
+        activate_composition: bool,
+    ) -> Result<(), ModuleManifestError> {
+        let lock_path = self.config_dir.join("mesh.lock");
+        let mut lock = MeshLock::load_or_default(&lock_path)?;
+        lock.upsert_module(
+            manifest,
+            installed_at,
+            source,
+            revision,
+            installed_manifests,
+            activate_composition,
+        )?;
+        self.save_lock(&mut lock, modules_dir)
+    }
+
+    pub fn stage_git_revision(
+        &self,
+        source: &str,
+        reference: Option<&str>,
+        destination: &Path,
+    ) -> Result<String, ModuleManifestError> {
+        validate_staged_path(&self.workspace, destination)?;
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|source| ModuleManifestError::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        let clone = Command::new("git")
+            .args(["clone", "--quiet", "--no-hardlinks", source])
+            .arg(destination)
+            .output()
+            .map_err(|source_error| ModuleManifestError::Io {
+                path: destination.to_path_buf(),
+                source: source_error,
+            })?;
+        if !clone.status.success() {
+            return Err(ModuleManifestError::Validation(format!(
+                "git clone failed: {}",
+                command_error(&clone)
+            )));
+        }
+        if let Some(reference) = reference {
+            let checkout = Command::new("git")
+                .args(["-C"])
+                .arg(destination)
+                .args(["checkout", "--quiet", reference])
+                .output()
+                .map_err(|source_error| ModuleManifestError::Io {
+                    path: destination.to_path_buf(),
+                    source: source_error,
+                })?;
+            if !checkout.status.success() {
+                return Err(ModuleManifestError::Validation(format!(
+                    "git checkout of {reference:?} failed: {}",
+                    command_error(&checkout)
+                )));
+            }
+        }
+        let revision = Command::new("git")
+            .args(["-C"])
+            .arg(destination)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .map_err(|source_error| ModuleManifestError::Io {
+                path: destination.to_path_buf(),
+                source: source_error,
+            })?;
+        if !revision.status.success() {
+            return Err(ModuleManifestError::Validation(format!(
+                "git rev-parse failed: {}",
+                command_error(&revision)
+            )));
+        }
+        validate_module_tree(destination)?;
+        Ok(String::from_utf8_lossy(&revision.stdout).trim().to_string())
+    }
+
     /// Protect a file or directory before the caller mutates it.
     ///
     /// Protection is idempotent so callers can conservatively protect a whole
@@ -365,7 +685,14 @@ impl PackageTransaction {
         maybe_inject_failure("commit.before")?;
         self.sync_targets()?;
         self.journal.phase = JournalPhase::Committed;
-        self.persist_journal()?;
+        if let Err(error) = self.persist_journal() {
+            // The journal may have been replaced before its final sync or
+            // failure-injection hook returned an error. Keep the in-memory
+            // phase abortable so Drop restores the protected state instead
+            // of treating a failed commit as an already-published success.
+            self.journal.phase = JournalPhase::Applying;
+            return Err(error);
+        }
         self.finished = true;
         cleanup_workspace(&self.journal_path, &self.workspace)
     }
@@ -905,6 +1232,33 @@ fn monotonic_nonce() -> u128 {
         .as_nanos()
 }
 
+pub fn parse_git_source(source: &str) -> Result<(String, Option<String>), ModuleManifestError> {
+    let (url, reference) = match source.rsplit_once('#') {
+        Some((url, reference)) if !reference.is_empty() => (url, Some(reference.to_string())),
+        Some(_) => {
+            return Err(ModuleManifestError::Validation(
+                "Git source has an empty ref after '#'; omit '#' or provide a ref".into(),
+            ));
+        }
+        None => (source, None),
+    };
+    if url.trim().is_empty() {
+        return Err(ModuleManifestError::Validation(
+            "Git source URL cannot be empty".into(),
+        ));
+    }
+    Ok((url.to_string(), reference))
+}
+
+fn command_error(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if stderr.is_empty() {
+        format!("exit status {}", output.status)
+    } else {
+        stderr
+    }
+}
+
 #[cfg(unix)]
 fn lock_exclusive(file: &File) -> std::io::Result<()> {
     let result = unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(file), libc::LOCK_EX) };
@@ -960,6 +1314,50 @@ mod tests {
         assert_eq!(journal["operation"], "install");
         transaction.commit().unwrap();
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn local_sources_are_staged_outside_the_live_module_tree() {
+        let root = temp_dir("source-stage");
+        let source = root.join("authoring");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(
+            source.join("module.json"),
+            r#"{"name":"@mesh/example","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"component","entry":"main.mesh"}}"#,
+        )
+        .unwrap();
+        fs::write(source.join("main.mesh"), "<template><box/></template>").unwrap();
+        let destination = root.join("modules/mesh/example");
+
+        let mut transaction =
+            PackageTransaction::begin(&root, PackageOwner::Cli, PackageOperation::Install).unwrap();
+        let staged = transaction
+            .stage_module_source(source.to_str().unwrap())
+            .unwrap();
+        assert!(staged.path().starts_with(transaction.staging_dir()));
+        assert_ne!(staged.path(), source.as_path());
+        transaction
+            .place_staged_module(&staged, &destination)
+            .unwrap();
+        assert!(destination.join("module.json").exists());
+        assert!(source.join("module.json").exists());
+        transaction.abort().unwrap();
+        assert!(!destination.exists());
+        assert!(source.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn git_source_splits_an_optional_ref() {
+        assert_eq!(
+            parse_git_source("https://example.test/mesh.git#v1").unwrap(),
+            ("https://example.test/mesh.git".into(), Some("v1".into()))
+        );
+        assert_eq!(
+            parse_git_source("git@example.test:group/mesh.git").unwrap(),
+            ("git@example.test:group/mesh.git".into(), None)
+        );
+        assert!(parse_git_source("https://example.test/mesh.git#").is_err());
     }
 
     #[test]
@@ -1054,8 +1452,27 @@ mod tests {
     }
 
     #[test]
-    fn injected_commit_failure_aborts_and_restores() {
+    fn injected_commit_journal_failure_aborts_and_restores() {
         let root = temp_dir("commit-failure");
+        let graph = root.join("module.json");
+        fs::write(&graph, "before").unwrap();
+        let mut transaction =
+            PackageTransaction::begin(&root, PackageOwner::Cli, PackageOperation::Update).unwrap();
+        transaction.protect(&graph).unwrap();
+        fs::write(&graph, "after").unwrap();
+
+        let failure = inject_failure_at("journal.write.after");
+        assert!(transaction.commit().is_err());
+        drop(failure);
+
+        assert_eq!(fs::read_to_string(&graph).unwrap(), "before");
+        assert!(!root.join(JOURNAL_FILE).exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn injected_commit_failure_aborts_and_restores() {
+        let root = temp_dir("commit-before-failure");
         let graph = root.join("module.json");
         fs::write(&graph, "before").unwrap();
         let mut transaction =

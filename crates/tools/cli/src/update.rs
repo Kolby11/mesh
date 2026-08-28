@@ -16,9 +16,9 @@ use mesh_core_capability::{
 };
 use mesh_core_module::package::{
     InstalledModuleGraph, LockedModule, MeshLock, ModuleGraphDiff, ModuleId, ModuleManifest,
-    ModuleSource, PackageTransaction, RootModuleGraphManifest, TrustTier, has_local_edits,
-    load_authoring_snapshot, load_module_signature, module_install_path, module_tree_digest,
-    validate_module_tree,
+    ModuleSource, PackageTransaction, ProfilePaths, RootModuleGraphManifest, TrustTier,
+    has_local_edits, load_authoring_snapshot, load_module_signature, module_install_path,
+    module_tree_digest, validate_module_tree,
 };
 use mesh_core_service::{CompatibilityClass, diff_contracts, parse_interface_contract};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -568,11 +568,6 @@ fn stage_candidate_graph(
             "candidate module path",
         )
         .map_err(|error| error.to_string())?;
-        if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|error| format!("failed to create candidate module parent: {error}"))?;
-        }
-
         if let Some((source, revision, unchanged)) = candidate_by_id.get(&module_id)
             && (!unchanged || plan.replaced.contains(&module_id))
         {
@@ -582,14 +577,15 @@ fn stage_candidate_graph(
             let ModuleSource::Git { url, .. } = source else {
                 return Err(format!("candidate {module_id} is not a Git source"));
             };
-            stage_git_revision(url, revision, &destination)?;
+            transaction
+                .stage_git_revision(url, Some(revision), &destination)
+                .map_err(|error| error.to_string())?;
             plan.staged_paths
                 .insert(module_id.clone(), destination.clone());
         } else {
-            let metadata = fs::symlink_metadata(&live).map_err(|error| {
-                format!("failed to inspect installed module {module_id}: {error}")
-            })?;
-            copy_module_tree(&live, &destination, &metadata)?;
+            transaction
+                .copy_to_staging(&live, &destination)
+                .map_err(|error| error.to_string())?;
             validate_module_tree(&destination).map_err(|error| error.to_string())?;
         }
     }
@@ -615,17 +611,9 @@ fn stage_candidate_graph(
             continue;
         }
         let destination = candidate_root_dir.join(name);
-        let metadata = fs::symlink_metadata(&source)
-            .map_err(|error| format!("failed to inspect {name}: {error}"))?;
-        if metadata.is_dir() {
-            copy_module_tree(&source, &destination, &metadata)?;
-        } else if metadata.is_file() {
-            copy_module_tree(&source, &destination, &metadata)?;
-        } else {
-            return Err(format!(
-                "candidate graph support path {name} is not a file or directory"
-            ));
-        }
+        transaction
+            .copy_to_staging(&source, &destination)
+            .map_err(|error| error.to_string())?;
     }
     Ok(candidate_root_path)
 }
@@ -825,7 +813,6 @@ fn classify_capability_changes(
 /// record.
 pub fn commit_update(
     modules_dir: &Path,
-    config_dir: &Path,
     lock: &mut MeshLock,
     plan: &UpdatePlan,
     transaction: &mut PackageTransaction,
@@ -901,15 +888,9 @@ pub fn commit_update(
         .collect::<Result<Vec<_>, _>>()?;
     lock.refresh_metadata(manifests.iter());
 
-    let lock_path = config_dir.join("mesh.lock");
-    let history = config_dir.join("lock-history");
-    MeshLock::archive(&lock_path, &history).map_err(|error| error.to_string())?;
-    lock.save_with_store(
-        &lock_path,
-        modules_dir,
-        &mesh_core_module::package::module_store_dir(config_dir),
-    )
-    .map_err(|error| error.to_string())?;
+    transaction
+        .save_lock(lock, modules_dir)
+        .map_err(|error| error.to_string())?;
     Ok(updated)
 }
 
@@ -918,6 +899,7 @@ pub fn commit_update(
 /// Trees are re-fetched by revision rather than archived: git is
 /// content-addressed, so the revision is an exact and cheap way back.
 pub fn rollback(
+    root_path: &Path,
     modules_dir: &Path,
     config_dir: &Path,
     generation: Option<u64>,
@@ -945,12 +927,13 @@ pub fn rollback(
     for (index, (module_id, entry)) in target.modules.iter().enumerate() {
         let installed_at =
             module_install_path(modules_dir, module_id).map_err(|error| error.to_string())?;
-        let staged = stage_lock_entry(
-            entry,
-            &installed_at,
-            config_dir,
-            &transaction.staging_dir().join(format!("rollback-{index}")),
-        )?;
+        let staged = transaction
+            .stage_locked_module(
+                entry,
+                &installed_at,
+                &transaction.staging_dir().join(format!("rollback-{index}")),
+            )
+            .map_err(|error| error.to_string())?;
         transaction
             .replace_with(&installed_at, &staged)
             .map_err(|error| error.to_string())?;
@@ -970,149 +953,80 @@ pub fn rollback(
         }
     }
 
-    MeshLock::archive(&lock_path, &history).map_err(|error| error.to_string())?;
-    target
-        .save_exact_with_store(
-            &lock_path,
-            modules_dir,
-            &mesh_core_module::package::module_store_dir(config_dir),
-        )
+    // The lock is not the only durable description of the installed graph.
+    // Reconcile the explicit root inventory and every profile before the
+    // target lock is published, so a rollback cannot leave references to
+    // modules that it just removed.
+    let mut root = RootModuleGraphManifest::from_path(root_path)
+        .map_err(|error| format!("failed to read root graph for rollback: {error}"))?;
+    let explicit_inventory = !root.modules.is_empty();
+    let target_ids = target.modules.keys().cloned().collect::<BTreeSet<_>>();
+    for module_id in current.modules.keys() {
+        if !target_ids.contains(module_id) {
+            root.remove_module_references(module_id);
+        }
+    }
+    if explicit_inventory {
+        root.modules
+            .retain(|module_id, _| target_ids.contains(module_id));
+        for module_id in &target_ids {
+            let installed =
+                module_install_path(modules_dir, module_id).map_err(|error| error.to_string())?;
+            let manifest =
+                ModuleManifest::from_path(&installed.join("module.json")).map_err(|error| {
+                    format!("failed to read rolled-back module {module_id}: {error}")
+                })?;
+            let enabled = root
+                .modules
+                .get(module_id)
+                .map(|entry| entry.enabled)
+                .unwrap_or(true);
+            let relative = installed
+                .strip_prefix(modules_dir)
+                .map_err(|_| format!("rolled-back module {module_id} escaped modules directory"))?
+                .to_string_lossy()
+                .replace('\\', "/");
+            root.modules.insert(
+                module_id.clone(),
+                mesh_core_module::package::InstalledModuleEntry {
+                    kind: manifest.mesh.kind,
+                    path: relative,
+                    enabled,
+                },
+            );
+        }
+    }
+    transaction
+        .save_root(root_path, &root)
+        .map_err(|error| error.to_string())?;
+
+    let paths = ProfilePaths::from_root_graph(root_path).map_err(|error| error.to_string())?;
+    for profile_id in paths.list().map_err(|error| error.to_string())? {
+        let mut profile = paths.load(&profile_id).map_err(|error| error.to_string())?;
+        let removed = current
+            .modules
+            .keys()
+            .filter(|module_id| !target_ids.contains(*module_id))
+            .filter(|module_id| profile.references_module(module_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        if removed.is_empty() {
+            continue;
+        }
+        let expected_revision = profile.revision;
+        for module_id in removed {
+            profile.remove_module_references(&module_id);
+        }
+        transaction
+            .save_profile_if_revision(&paths, &profile_id, &profile, expected_revision)
+            .map_err(|error| error.to_string())?;
+    }
+
+    transaction
+        .save_exact_lock(&target, modules_dir)
         .map_err(|error| error.to_string())?;
     restored.push(format!("lock restored to generation {target_generation}"));
     Ok(restored)
-}
-
-fn stage_git_revision(source: &str, revision: &str, destination: &Path) -> Result<PathBuf, String> {
-    if let Some(parent) = destination.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("failed to create update staging directory: {error}"))?;
-    }
-    let clone = std::process::Command::new("git")
-        .args(["clone", "--quiet", "--no-hardlinks"])
-        .arg(source)
-        .arg(destination)
-        .output()
-        .map_err(|error| format!("failed to stage Git revision: {error}"))?;
-    if !clone.status.success() {
-        return Err(format!(
-            "staging {source} failed: {}",
-            String::from_utf8_lossy(&clone.stderr).trim()
-        ));
-    }
-    let checkout = std::process::Command::new("git")
-        .args(["-C"])
-        .arg(destination)
-        .args(["checkout", "--quiet", revision])
-        .output()
-        .map_err(|error| format!("failed to stage Git checkout: {error}"))?;
-    if !checkout.status.success() {
-        return Err(format!(
-            "checking out {revision} failed: {}",
-            String::from_utf8_lossy(&checkout.stderr).trim()
-        ));
-    }
-    validate_module_tree(destination).map_err(|error| error.to_string())?;
-    Ok(destination.to_path_buf())
-}
-
-fn stage_lock_entry(
-    entry: &LockedModule,
-    installed_at: &Path,
-    config_dir: &Path,
-    destination: &Path,
-) -> Result<PathBuf, String> {
-    if let Some(revision) = &entry.revision {
-        if installed_at.exists() {
-            return stage_git_revision(&installed_at.display().to_string(), revision, destination);
-        }
-        if let ModuleSource::Git { url, .. } = &entry.source {
-            if let Some(parent) = destination.parent() {
-                fs::create_dir_all(parent).map_err(|error| {
-                    format!("failed to create rollback staging directory: {error}")
-                })?;
-            }
-            let clone = std::process::Command::new("git")
-                .args(["clone", "--quiet", url])
-                .arg(destination)
-                .output()
-                .map_err(|error| format!("failed to fetch rollback source: {error}"))?;
-            if !clone.status.success() {
-                return Err(format!(
-                    "fetching rollback source failed: {}",
-                    String::from_utf8_lossy(&clone.stderr).trim()
-                ));
-            }
-            let checkout = std::process::Command::new("git")
-                .args(["-C"])
-                .arg(destination)
-                .args(["checkout", "--quiet", revision])
-                .output()
-                .map_err(|error| format!("failed to restore rollback revision: {error}"))?;
-            if !checkout.status.success() {
-                return Err(format!(
-                    "restoring {revision} failed: {}",
-                    String::from_utf8_lossy(&checkout.stderr).trim()
-                ));
-            }
-            validate_module_tree(destination).map_err(|error| error.to_string())?;
-            return Ok(destination.to_path_buf());
-        }
-    }
-    let ModuleSource::Path { path } = &entry.source else {
-        return Err(format!(
-            "cannot materialize rollback entry without a revision: {}",
-            installed_at.display()
-        ));
-    };
-    let source = Path::new(path);
-    let source = if source.is_absolute() {
-        source.to_path_buf()
-    } else {
-        config_dir.join(source)
-    };
-    let metadata = fs::symlink_metadata(&source).map_err(|error| {
-        format!(
-            "failed to read rollback source {}: {error}",
-            source.display()
-        )
-    })?;
-    copy_module_tree(&source, destination, &metadata)?;
-    validate_module_tree(destination).map_err(|error| error.to_string())?;
-    Ok(destination.to_path_buf())
-}
-
-fn copy_module_tree(
-    source: &Path,
-    destination: &Path,
-    metadata: &fs::Metadata,
-) -> Result<(), String> {
-    if metadata.file_type().is_symlink() {
-        return Err(format!(
-            "rollback source {} contains a symlink",
-            source.display()
-        ));
-    }
-    if metadata.is_dir() {
-        fs::create_dir_all(destination).map_err(|error| error.to_string())?;
-        for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
-            let entry = entry.map_err(|error| error.to_string())?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
-            copy_module_tree(&path, &destination.join(entry.file_name()), &metadata)?;
-        }
-    } else if metadata.is_file() {
-        if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        fs::copy(source, destination).map_err(|error| error.to_string())?;
-    } else {
-        return Err(format!(
-            "rollback source {} is not a file or directory",
-            source.display()
-        ));
-    }
-    fs::set_permissions(destination, metadata.permissions()).map_err(|error| error.to_string())?;
-    Ok(())
 }
 
 /// Recompute every digest and report which modules the user has edited.
@@ -1651,7 +1565,7 @@ mod tests {
         assert_eq!(plan.replaced, BTreeSet::from(["@me/audio".to_string()]));
         assert_eq!(plan.changed().count(), 1);
         assert!(!plan.is_refused());
-        commit_update(&modules_dir, config, &mut lock, &plan, &mut transaction).unwrap();
+        commit_update(&modules_dir, &mut lock, &plan, &mut transaction).unwrap();
         transaction.commit().unwrap();
 
         assert!(!installed.join("local-only.txt").exists());

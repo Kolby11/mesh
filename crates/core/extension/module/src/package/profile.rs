@@ -306,6 +306,44 @@ impl ShellProfile {
         self.roots.remove(instance_id).is_some()
     }
 
+    /// Whether any profile-owned root, provider, service, resource, or
+    /// composition reference points at a module.
+    pub fn references_module(&self, module_id: &str) -> bool {
+        self.from
+            .as_ref()
+            .is_some_and(|from| from.module == module_id)
+            || self.roots.values().any(|root| root.module == module_id)
+            || self.background_services.contains(module_id)
+            || self
+                .providers
+                .values()
+                .any(|provider| provider == module_id)
+            || self.resources.theme.as_deref() == Some(module_id)
+            || self.resources.icons.iter().any(|id| id == module_id)
+            || self.resources.fonts.iter().any(|id| id == module_id)
+            || self.resources.languages.iter().any(|id| id == module_id)
+    }
+
+    /// Remove all profile-owned references to a forcibly uninstalled module.
+    pub fn remove_module_references(&mut self, module_id: &str) {
+        if self
+            .from
+            .as_ref()
+            .is_some_and(|from| from.module == module_id)
+        {
+            self.from = None;
+        }
+        self.roots.retain(|_, root| root.module != module_id);
+        self.background_services.remove(module_id);
+        self.providers.retain(|_, provider| provider != module_id);
+        if self.resources.theme.as_deref() == Some(module_id) {
+            self.resources.theme = None;
+        }
+        self.resources.icons.retain(|id| id != module_id);
+        self.resources.fonts.retain(|id| id != module_id);
+        self.resources.languages.retain(|id| id != module_id);
+    }
+
     /// Resolve the modules needed by this profile. Roots are explicit; declared
     /// module/resource dependencies and sole interface providers are inferred.
     pub fn active_module_ids<'a>(
@@ -1127,8 +1165,12 @@ mod tests {
         std::fs::write(&graph_path, "{}").unwrap();
         let paths = ProfilePaths::from_root_graph(&graph_path).unwrap();
 
-        paths.save_if_revision("old", &ShellProfile::new(), 0).unwrap();
-        paths.save_if_revision("new", &ShellProfile::new(), 0).unwrap();
+        paths
+            .save_if_revision("old", &ShellProfile::new(), 0)
+            .unwrap();
+        paths
+            .save_if_revision("new", &ShellProfile::new(), 0)
+            .unwrap();
         paths.set_active("old").unwrap();
         assert_eq!(paths.active_profile_id().unwrap().as_deref(), Some("old"));
 
@@ -1157,7 +1199,9 @@ mod tests {
         paths.restore_active(None).unwrap();
         assert_eq!(paths.active_profile_id().unwrap(), None);
 
-        paths.save_if_revision("new", &ShellProfile::new(), 0).unwrap();
+        paths
+            .save_if_revision("new", &ShellProfile::new(), 0)
+            .unwrap();
         paths.set_active("new").unwrap();
         assert_eq!(paths.active_profile_id().unwrap().as_deref(), Some("new"));
 
@@ -1165,5 +1209,32 @@ mod tests {
         assert_eq!(paths.active_profile_id().unwrap(), None);
 
         std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn module_reference_cleanup_covers_all_profile_owned_state() {
+        let mut profile = ShellProfile::new();
+        profile.from = Some(crate::package::CompositionRef {
+            module: "@mesh/desktop".into(),
+            version: None,
+        });
+        profile.roots.insert(
+            "@mesh/panel#default".into(),
+            ProfileRootInstance {
+                module: "@mesh/panel".into(),
+                ..Default::default()
+            },
+        );
+        profile.background_services.insert("@mesh/audio".into());
+        profile
+            .providers
+            .insert("mesh.audio".into(), "@mesh/audio".into());
+        profile.resources.theme = Some("@mesh/theme".into());
+        profile.resources.icons.push("@mesh/icons".into());
+
+        assert!(profile.references_module("@mesh/audio"));
+        profile.remove_module_references("@mesh/audio");
+        assert!(!profile.references_module("@mesh/audio"));
+        assert!(profile.references_module("@mesh/desktop"));
     }
 }

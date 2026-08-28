@@ -105,9 +105,6 @@ The 2026-06-18 redesign largely shipped: canonical `module.json` with
 `mesh.uses` / `mesh.provides` / `mesh.implements`, the graph as single source of
 truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
-- [ ] Replace the duplicate CLI/shell package implementations with one locked,
-      journaled transaction engine covering source, root, lock, profiles, and
-      runtime preparation/commit/rollback. [Audit](../.planning/log/sections/02-module-system-and-installation/improvements.md).
 - [ ] Enforce required/optional module dependencies, module/interface version
       ranges, composition pins/closure, and duplicate contract/contribution IDs
       before activation rather than leaving conflicts diagnostic-only.

@@ -5,13 +5,11 @@ use mesh_core_capability::{CapabilityCatalog, PrivilegeLevel};
 use mesh_core_module::package::{
     InstalledModuleEntry, MeshLock, ModuleId, ModuleKind, ModuleManifest, ModuleSource,
     PackageOperation, PackageOwner, PackageTransaction, ProfilePaths, RootModuleGraphManifest,
-    ShellProfile, TrustTier, contained_path, load_authoring_snapshot, load_module_signature,
-    module_install_path, module_store_dir, module_tree_digest, validate_module_tree,
+    TrustTier, contained_path, load_authoring_snapshot, load_module_signature, module_install_path,
+    module_tree_digest,
 };
 use std::collections::VecDeque;
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// The package service starts the on-disk transaction, while the activation
 /// coordinator owns it until the candidate is live. The CLI uses the same
@@ -45,7 +43,9 @@ impl Shell {
         transaction
             .protect_package_state(&graph_path, &modules_dir)
             .map_err(|error| package_error(error.to_string()))?;
-        let mut staged = stage_module_source(source, &transaction.staging_dir())?;
+        let staged = transaction
+            .stage_module_source(source)
+            .map_err(|error| package_error(error.to_string()))?;
         let manifest = ModuleManifest::from_path(&staged.path().join("module.json"))
             .map_err(|error| package_error(error.to_string()))?;
         check_install_capabilities(&manifest, allow_elevated, allow_high)?;
@@ -58,7 +58,7 @@ impl Shell {
         } else {
             TrustTier::for_source(
                 &manifest.name,
-                matches!(&staged, StagedModuleSource::Git { .. }),
+                matches!(staged.source(), ModuleSource::Git { .. }),
             )
         };
         if let Err(error) = root.trust_policy.validate_candidate(
@@ -92,7 +92,9 @@ impl Shell {
         transaction
             .protect(&destination)
             .map_err(|error| package_error(error.to_string()))?;
-        staged.place_at(&destination)?;
+        transaction
+            .place_staged_module(&staged, &destination)
+            .map_err(|error| package_error(error.to_string()))?;
 
         let previous_capability_approvals = root.capability_approvals.clone();
         let mut updated_root = root;
@@ -104,7 +106,7 @@ impl Shell {
                 .map_err(|_| package_error("installed module escaped the modules directory"))?
                 .to_string_lossy()
                 .replace('\\', "/");
-            updated_root.modules.insert(
+            updated_root.record_installed_module(
                 manifest.name.clone(),
                 InstalledModuleEntry {
                     kind: manifest.mesh.kind,
@@ -116,7 +118,7 @@ impl Shell {
         let root_changed = explicit_inventory
             || updated_root.capability_approvals != previous_capability_approvals;
         if root_changed {
-            if let Err(error) = updated_root.save(&graph_path) {
+            if let Err(error) = transaction.save_root(&graph_path, &updated_root) {
                 return Err(package_error(error.to_string()));
             }
         }
@@ -143,15 +145,17 @@ impl Shell {
             .into_iter()
             .map(|module| module.manifest.clone())
             .collect::<Vec<_>>();
-        record_lock_entry(
-            config_dir,
-            &manifest,
-            &destination,
-            &modules_dir,
-            &staged,
-            &installed_manifests,
-            !available_only,
-        )?;
+        transaction
+            .record_module_lock(
+                &manifest,
+                &destination,
+                &modules_dir,
+                staged.source(),
+                staged.revision(),
+                &installed_manifests,
+                !available_only,
+            )
+            .map_err(|error| package_error(error.to_string()))?;
 
         if !self
             .module_dirs
@@ -280,7 +284,7 @@ impl Shell {
                 .load(&profile_id)
                 .map_err(|error| package_error(error.to_string()))?;
             let expected_revision = profile.revision;
-            if !profile_references_module(&profile, module_id) {
+            if !profile.references_module(module_id) {
                 continue;
             }
             if !force {
@@ -288,38 +292,24 @@ impl Shell {
                     "{module_id} is referenced by profile {profile_id}; remove it from that profile or repeat with force"
                 )));
             }
-            remove_module_from_profile(&mut profile, module_id);
-            paths
-                .save_if_revision(&profile_id, &profile, expected_revision)
+            profile.remove_module_references(module_id);
+            transaction
+                .save_profile_if_revision(&paths, &profile_id, &profile, expected_revision)
                 .map_err(|error| package_error(error.to_string()))?;
             changed_profiles.push(profile_id);
         }
 
+        let explicit_inventory = !root.modules.is_empty();
         if force {
-            if root
-                .layout
-                .as_ref()
-                .and_then(|layout| layout.entrypoint.split(':').next())
-                == Some(module_id)
-            {
-                root.layout = None;
-            }
-            root.disabled.retain(|disabled| disabled != module_id);
-            root.capability_approvals.remove(module_id);
-            root.providers.retain(|_, provider| provider != module_id);
-            if root
-                .theme
-                .as_ref()
-                .is_some_and(|theme| theme.active == module_id)
-            {
-                root.theme = None;
-            }
+            root.remove_module_references(module_id);
         }
 
-        let explicit_inventory = !root.modules.is_empty();
-        root.modules.remove(module_id);
+        if !force {
+            root.modules.remove(module_id);
+        }
         if explicit_inventory {
-            root.save(&graph_path)
+            transaction
+                .save_root(&graph_path, &root)
                 .map_err(|error| package_error(error.to_string()))?;
         }
 
@@ -389,19 +379,11 @@ impl Shell {
             .collect::<Vec<_>>();
         lock.refresh_metadata(remaining_manifests.iter());
         if lock_changed || lock_path.exists() {
-            if let Err(error) = MeshLock::archive(&lock_path, &config_dir.join("lock-history")) {
-                super::profile::abort_package_transaction(
-                    transaction.take(),
-                    package_rollback.take(),
-                    self,
-                );
-                return Err(package_error(error.to_string()));
-            }
-            if let Err(error) = lock.save_with_store(
-                &lock_path,
-                &config_dir.join(&root.modules_dir),
-                &module_store_dir(config_dir),
-            ) {
+            if let Err(error) = transaction
+                .as_mut()
+                .expect("package transaction is retained until lock persistence")
+                .save_lock(&mut lock, &config_dir.join(&root.modules_dir))
+            {
                 super::profile::abort_package_transaction(
                     transaction.take(),
                     package_rollback.take(),
@@ -518,7 +500,7 @@ impl Shell {
         manifest: &ModuleManifest,
         profile_id: Option<&str>,
         available_only: bool,
-        transaction: PackageTransaction,
+        mut transaction: PackageTransaction,
         package_rollback: PackageRuntimeRollback,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         macro_rules! package_try {
@@ -566,8 +548,8 @@ impl Shell {
                     version: Some(manifest.version.clone()),
                 });
                 package_try!(
-                    paths
-                        .save_if_revision(&profile_id, &profile, expected_revision)
+                    transaction
+                        .save_profile_if_revision(&paths, &profile_id, &profile, expected_revision)
                         .map_err(|error| package_error(error.to_string()))
                 );
                 if self.active_profile_id.as_deref() == Some(profile_id.as_str())
@@ -640,8 +622,8 @@ impl Shell {
                         .map_err(|error| package_error(error.to_string()))
                 );
                 package_try!(
-                    paths
-                        .save_if_revision(&profile_id, &profile, expected_revision)
+                    transaction
+                        .save_profile_if_revision(&paths, &profile_id, &profile, expected_revision)
                         .map_err(|error| package_error(error.to_string()))
                 );
                 if self.active_profile_id.as_deref() == Some(profile_id.as_str())
@@ -748,318 +730,4 @@ fn approve_required_capabilities(root: &mut RootModuleGraphManifest, manifest: &
     }
     approvals.sort();
     approvals.dedup();
-}
-
-fn record_lock_entry(
-    config_dir: &Path,
-    manifest: &ModuleManifest,
-    installed_at: &Path,
-    modules_dir: &Path,
-    source: &StagedModuleSource,
-    installed_manifests: &[ModuleManifest],
-    activate_composition: bool,
-) -> Result<(), ShellRunError> {
-    let lock_path = config_dir.join("mesh.lock");
-    let mut lock =
-        MeshLock::load_or_default(&lock_path).map_err(|error| package_error(error.to_string()))?;
-    let digest =
-        module_tree_digest(installed_at).map_err(|error| package_error(error.to_string()))?;
-    let (module_source, revision) = match source {
-        StagedModuleSource::Local(path) => (
-            ModuleSource::Path {
-                path: path.display().to_string(),
-            },
-            None,
-        ),
-        StagedModuleSource::Git {
-            url,
-            reference,
-            revision,
-            ..
-        } => (
-            ModuleSource::Git {
-                url: url.clone(),
-                reference: reference.clone(),
-            },
-            Some(revision.clone()),
-        ),
-    };
-    let signature =
-        load_module_signature(installed_at).map_err(|error| package_error(error.to_string()))?;
-    let trust = if signature.is_some() {
-        TrustTier::Verified
-    } else {
-        TrustTier::for_source(
-            &manifest.name,
-            matches!(&module_source, ModuleSource::Git { .. }),
-        )
-    };
-    lock.modules.insert(
-        manifest.name.clone(),
-        mesh_core_module::package::LockedModule {
-            version: manifest.version.clone(),
-            source: module_source,
-            revision,
-            digest,
-            trust,
-            signature,
-            dependencies: Default::default(),
-            requested_by: Default::default(),
-        },
-    );
-    if activate_composition && manifest.mesh.kind == ModuleKind::Composition {
-        lock.composition = Some(mesh_core_module::package::LockedComposition {
-            module: manifest.name.clone(),
-            version: manifest.version.clone(),
-        });
-    }
-    lock.refresh_metadata(installed_manifests.iter());
-    MeshLock::archive(&lock_path, &config_dir.join("lock-history"))
-        .map_err(|error| package_error(error.to_string()))?;
-    lock.save_with_store(&lock_path, modules_dir, &module_store_dir(config_dir))
-        .map_err(|error| package_error(error.to_string()))
-}
-
-enum StagedModuleSource {
-    Local(PathBuf),
-    Git {
-        checkout: PathBuf,
-        url: String,
-        reference: Option<String>,
-        revision: String,
-    },
-}
-
-impl StagedModuleSource {
-    fn path(&self) -> &Path {
-        match self {
-            Self::Local(path) => path,
-            Self::Git { checkout, .. } => checkout,
-        }
-    }
-
-    fn place_at(&mut self, destination: &Path) -> Result<(), ShellRunError> {
-        validate_module_tree(self.path()).map_err(|error| package_error(error.to_string()))?;
-        match self {
-            Self::Local(path) => copy_module_tree(path, destination)
-                .map_err(|error| package_error(error.to_string())),
-            Self::Git { checkout, .. } => fs::rename(&*checkout, destination).map_err(|error| {
-                package_error(format!("failed to move staged Git checkout: {error}"))
-            }),
-        }
-    }
-}
-
-impl Drop for StagedModuleSource {
-    fn drop(&mut self) {
-        if let Self::Git { checkout, .. } = self {
-            let _ = fs::remove_dir_all(checkout);
-        }
-    }
-}
-
-fn stage_module_source(
-    source: &str,
-    modules_dir: &Path,
-) -> Result<StagedModuleSource, ShellRunError> {
-    let local = PathBuf::from(source);
-    if fs::symlink_metadata(&local)
-        .map(|metadata| metadata.is_dir())
-        .unwrap_or(false)
-    {
-        validate_module_tree(&local).map_err(|error| package_error(error.to_string()))?;
-        return Ok(StagedModuleSource::Local(local));
-    }
-
-    let (url, reference) = parse_git_source(source)?;
-    fs::create_dir_all(modules_dir).map_err(|error| {
-        package_error(format!(
-            "failed to create {}: {error}",
-            modules_dir.display()
-        ))
-    })?;
-    let checkout_name = format!(
-        ".mesh-install-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    );
-    let checkout = contained_path(modules_dir, &checkout_name, "staged module path")
-        .map_err(|error| package_error(error.to_string()))?;
-    let clone = Command::new("git")
-        .args(["clone", "--quiet", &url])
-        .arg(&checkout)
-        .output()
-        .map_err(|error| package_error(format!("failed to run git clone: {error}")))?;
-    if !clone.status.success() {
-        let _ = fs::remove_dir_all(&checkout);
-        return Err(package_error(format!(
-            "git clone failed: {}",
-            command_error(&clone)
-        )));
-    }
-    if let Some(reference) = &reference {
-        let checkout_result = Command::new("git")
-            .args(["-C"])
-            .arg(&checkout)
-            .args(["checkout", "--quiet", reference])
-            .output()
-            .map_err(|error| package_error(format!("failed to run git checkout: {error}")))?;
-        if !checkout_result.status.success() {
-            let _ = fs::remove_dir_all(&checkout);
-            return Err(package_error(format!(
-                "git checkout of {reference:?} failed: {}",
-                command_error(&checkout_result)
-            )));
-        }
-    }
-    let revision = Command::new("git")
-        .args(["-C"])
-        .arg(&checkout)
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .map_err(|error| package_error(format!("failed to read cloned revision: {error}")))?;
-    if !revision.status.success() {
-        let _ = fs::remove_dir_all(&checkout);
-        return Err(package_error(format!(
-            "git rev-parse failed: {}",
-            command_error(&revision)
-        )));
-    }
-    Ok(StagedModuleSource::Git {
-        checkout,
-        url,
-        reference,
-        revision: String::from_utf8_lossy(&revision.stdout).trim().to_string(),
-    })
-}
-
-fn parse_git_source(source: &str) -> Result<(String, Option<String>), ShellRunError> {
-    let (url, reference) = match source.rsplit_once('#') {
-        Some((url, reference)) if !reference.is_empty() => (url, Some(reference.to_string())),
-        Some(_) => {
-            return Err(package_error(
-                "Git source has an empty ref after '#'; omit '#' or provide a ref",
-            ));
-        }
-        None => (source, None),
-    };
-    if url.trim().is_empty() {
-        return Err(package_error("Git source URL cannot be empty"));
-    }
-    Ok((url.to_string(), reference))
-}
-
-fn command_error(output: &std::process::Output) -> String {
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    if stderr.is_empty() {
-        format!("exit status {}", output.status)
-    } else {
-        stderr
-    }
-}
-
-fn copy_module_tree(source: &Path, destination: &Path) -> std::io::Result<()> {
-    fs::create_dir_all(destination)?;
-    for entry in fs::read_dir(source)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let target = destination.join(entry.file_name());
-        if file_type.is_symlink() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!(
-                    "module contains unsupported symlink {}",
-                    entry.path().display()
-                ),
-            ));
-        }
-        if file_type.is_dir() {
-            copy_module_tree(&entry.path(), &target)?;
-        } else if file_type.is_file() {
-            fs::copy(entry.path(), target)?;
-        }
-    }
-    Ok(())
-}
-
-fn profile_references_module(profile: &ShellProfile, module_id: &str) -> bool {
-    profile
-        .from
-        .as_ref()
-        .is_some_and(|from| from.module == module_id)
-        || profile.roots.values().any(|root| root.module == module_id)
-        || profile.background_services.contains(module_id)
-        || profile
-            .providers
-            .values()
-            .any(|provider| provider == module_id)
-        || profile.resources.theme.as_deref() == Some(module_id)
-        || profile.resources.icons.iter().any(|id| id == module_id)
-        || profile.resources.fonts.iter().any(|id| id == module_id)
-        || profile.resources.languages.iter().any(|id| id == module_id)
-}
-
-fn remove_module_from_profile(profile: &mut ShellProfile, module_id: &str) {
-    if profile
-        .from
-        .as_ref()
-        .is_some_and(|from| from.module == module_id)
-    {
-        profile.from = None;
-    }
-    profile.roots.retain(|_, root| root.module != module_id);
-    profile.background_services.remove(module_id);
-    profile
-        .providers
-        .retain(|_, provider| provider != module_id);
-    if profile.resources.theme.as_deref() == Some(module_id) {
-        profile.resources.theme = None;
-    }
-    profile.resources.icons.retain(|id| id != module_id);
-    profile.resources.fonts.retain(|id| id != module_id);
-    profile.resources.languages.retain(|id| id != module_id);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn profile_reference_cleanup_removes_all_module_uses() {
-        let mut profile = ShellProfile::new();
-        profile.from = Some(mesh_core_module::package::CompositionRef {
-            module: "@mesh/desktop".into(),
-            version: None,
-        });
-        profile.roots.insert(
-            "@mesh/panel#default".into(),
-            mesh_core_module::package::ProfileRootInstance {
-                module: "@mesh/panel".into(),
-                ..Default::default()
-            },
-        );
-        profile.background_services.insert("@mesh/audio".into());
-        profile
-            .providers
-            .insert("mesh.audio".into(), "@mesh/audio".into());
-        profile.resources.theme = Some("@mesh/theme".into());
-        profile.resources.icons.push("@mesh/icons".into());
-
-        assert!(profile_references_module(&profile, "@mesh/audio"));
-        remove_module_from_profile(&mut profile, "@mesh/audio");
-        assert!(!profile_references_module(&profile, "@mesh/audio"));
-        assert!(profile_references_module(&profile, "@mesh/desktop"));
-    }
-
-    #[test]
-    fn parse_git_source_keeps_optional_ref() {
-        assert_eq!(
-            parse_git_source("https://example.test/mesh.git#v1").unwrap(),
-            ("https://example.test/mesh.git".into(), Some("v1".into()))
-        );
-        assert!(parse_git_source("https://example.test/mesh.git#").is_err());
-    }
 }

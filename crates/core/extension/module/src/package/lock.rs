@@ -127,6 +127,47 @@ impl MeshLock {
         Self::default()
     }
 
+    /// Add or replace one installed module using the same provenance and
+    /// dependency bookkeeping for every package client.
+    pub fn upsert_module(
+        &mut self,
+        manifest: &ModuleManifest,
+        installed_at: &Path,
+        source: &ModuleSource,
+        revision: Option<&str>,
+        installed_manifests: &[ModuleManifest],
+        activate_composition: bool,
+    ) -> Result<(), ModuleManifestError> {
+        let digest = module_tree_digest(installed_at)?;
+        let signature = super::load_module_signature(installed_at)?;
+        let trust = if signature.is_some() {
+            TrustTier::Verified
+        } else {
+            TrustTier::for_source(&manifest.name, matches!(source, ModuleSource::Git { .. }))
+        };
+        self.modules.insert(
+            manifest.name.clone(),
+            LockedModule {
+                version: manifest.version.clone(),
+                source: source.clone(),
+                revision: revision.map(str::to_owned),
+                digest,
+                trust,
+                signature,
+                dependencies: Default::default(),
+                requested_by: Default::default(),
+            },
+        );
+        if activate_composition && manifest.mesh.kind == ModuleKind::Composition {
+            self.composition = Some(LockedComposition {
+                module: manifest.name.clone(),
+                version: manifest.version.clone(),
+            });
+        }
+        self.refresh_metadata(installed_manifests.iter());
+        Ok(())
+    }
+
     /// Recompute lock provenance from the installed module set.
     ///
     /// Installers historically inserted every entry with an empty

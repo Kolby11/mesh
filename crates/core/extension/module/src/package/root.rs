@@ -102,6 +102,38 @@ impl RootModuleGraphManifest {
         Ok(())
     }
 
+    /// Add an installed module to an explicit root inventory. Auto-discovered
+    /// roots intentionally remain empty; package clients use this helper so
+    /// they cannot disagree about when an installed source becomes visible.
+    pub fn record_installed_module(&mut self, module_id: String, entry: InstalledModuleEntry) {
+        if !self.modules.is_empty() {
+            self.modules.insert(module_id, entry);
+        }
+    }
+
+    /// Remove every root-graph reference owned by a forcibly uninstalled
+    /// module. This is shared by the CLI and shell package authorities.
+    pub fn remove_module_references(&mut self, module_id: &str) {
+        if self
+            .layout
+            .as_ref()
+            .is_some_and(|layout| layout.entrypoint.split(':').next() == Some(module_id))
+        {
+            self.layout = None;
+        }
+        self.disabled.retain(|disabled| disabled != module_id);
+        self.capability_approvals.remove(module_id);
+        self.providers.retain(|_, provider| provider != module_id);
+        if self
+            .theme
+            .as_ref()
+            .is_some_and(|theme| theme.active == module_id)
+        {
+            self.theme = None;
+        }
+        self.modules.remove(module_id);
+    }
+
     /// Persist the inventory portion of the root graph while preserving the
     /// document's top-level metadata. The loader accepts a canonical
     /// `module.json` envelope, so writing the derived struct directly would

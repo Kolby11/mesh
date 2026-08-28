@@ -2,10 +2,9 @@ mod update;
 
 use mesh_core_module::ModuleType;
 use mesh_core_shell::{Shell, default_ipc_socket_path};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
-use std::process::Command;
 
 #[cfg(all(feature = "perf-tracy", feature = "allocation-profiling"))]
 compile_error!("perf-tracy and allocation-profiling use different global allocators; enable one");
@@ -947,7 +946,8 @@ fn cmd_install(args: &[String]) {
         .unwrap_or_else(|error| exit_error(error));
     std::fs::create_dir_all(&modules_dir)
         .unwrap_or_else(|error| exit_error(format!("failed to create modules directory: {error}")));
-    let source = install_source(source_arg, &transaction.staging_dir())
+    let source = transaction
+        .stage_module_source(source_arg)
         .unwrap_or_else(|error| exit_error(error));
     let source_path = source.path();
     let manifest_path = source_path.join("module.json");
@@ -963,7 +963,10 @@ fn cmd_install(args: &[String]) {
     } else {
         mesh_core_module::package::TrustTier::for_source(
             &manifest.name,
-            matches!(&source, InstallSource::Git { .. }),
+            matches!(
+                source.source(),
+                mesh_core_module::package::ModuleSource::Git { .. }
+            ),
         )
     };
     if let Err(error) = root.trust_policy.validate_candidate(
@@ -1020,7 +1023,7 @@ fn cmd_install(args: &[String]) {
         .protect(&destination)
         .unwrap_or_else(|error| exit_error(error));
 
-    if let Err(error) = source.place_at(&destination) {
+    if let Err(error) = transaction.place_staged_module(&source, &destination) {
         let _ = transaction.abort();
         exit_error(format!("failed to install {}: {error}", manifest.name));
     }
@@ -1036,7 +1039,22 @@ fn cmd_install(args: &[String]) {
     }
     approvals.sort();
     approvals.dedup();
-    if let Err(error) = root.save(&root_path) {
+    if !root.modules.is_empty() {
+        let relative = destination
+            .strip_prefix(&modules_dir)
+            .unwrap_or_else(|_| exit_error("installed module escaped the modules directory"))
+            .to_string_lossy()
+            .replace('\\', "/");
+        root.record_installed_module(
+            manifest.name.clone(),
+            mesh_core_module::package::InstalledModuleEntry {
+                kind: manifest.mesh.kind,
+                path: relative,
+                enabled: true,
+            },
+        );
+    }
+    if let Err(error) = transaction.save_root(&root_path, &root) {
         let _ = transaction.abort();
         exit_error(error);
     }
@@ -1078,31 +1096,29 @@ fn cmd_install(args: &[String]) {
                 module: manifest.name.clone(),
                 version: Some(manifest.version.clone()),
             });
-            paths
-                .save(&profile_id, &profile)
+            transaction
+                .save_profile(&paths, &profile_id, &profile)
                 .map_err(|error| error.to_string())?;
             if paths
                 .active_profile_id()
                 .map_err(|error| error.to_string())?
                 .is_none()
             {
-                paths
-                    .set_active(&profile_id)
+                transaction
+                    .set_active_profile(&paths, &profile_id)
                     .map_err(|error| error.to_string())?;
             }
-            record_lock_entry(
-                &config_dir,
-                &manifest.name,
-                &manifest.version,
-                &destination,
-                &modules_dir,
-                &source,
-                &installed_manifests,
-                Some(mesh_core_module::package::LockedComposition {
-                    module: manifest.name.clone(),
-                    version: manifest.version.clone(),
-                }),
-            )?;
+            transaction
+                .record_module_lock(
+                    &manifest,
+                    &destination,
+                    &modules_dir,
+                    source.source(),
+                    source.revision(),
+                    &installed_manifests,
+                    true,
+                )
+                .map_err(|error| error.to_string())?;
             return Ok(Some(format!(
                 "composition {} in profile {profile_id}",
                 manifest.name
@@ -1112,16 +1128,17 @@ fn cmd_install(args: &[String]) {
         if args.iter().any(|arg| arg == "--available-only")
             || manifest.mesh.kind != ModuleKind::Frontend
         {
-            record_lock_entry(
-                &config_dir,
-                &manifest.name,
-                &manifest.version,
-                &destination,
-                &modules_dir,
-                &source,
-                &installed_manifests,
-                None,
-            )?;
+            transaction
+                .record_module_lock(
+                    &manifest,
+                    &destination,
+                    &modules_dir,
+                    source.source(),
+                    source.revision(),
+                    &installed_manifests,
+                    false,
+                )
+                .map_err(|error| error.to_string())?;
             return Ok(None);
         }
 
@@ -1134,16 +1151,17 @@ fn cmd_install(args: &[String]) {
         let profile_id = explicit_profile.or_else(|| paths.active_profile_id().ok().flatten());
         let Some(profile_id) = profile_id else {
             // Legacy auto-discovery already activates new modules by default.
-            record_lock_entry(
-                &config_dir,
-                &manifest.name,
-                &manifest.version,
-                &destination,
-                &modules_dir,
-                &source,
-                &installed_manifests,
-                None,
-            )?;
+            transaction
+                .record_module_lock(
+                    &manifest,
+                    &destination,
+                    &modules_dir,
+                    source.source(),
+                    source.revision(),
+                    &installed_manifests,
+                    false,
+                )
+                .map_err(|error| error.to_string())?;
             return Ok(Some("legacy root graph (auto-enabled)".into()));
         };
         let mut profile = paths
@@ -1160,40 +1178,29 @@ fn cmd_install(args: &[String]) {
         profile
             .active_module_ids(manifests)
             .map_err(|error| error.to_string())?;
-        let profile_path = paths
-            .profile_path(&profile_id)
-            .map_err(|error| error.to_string())?;
-        let previous_profile = std::fs::read(&profile_path).ok();
-        paths
-            .save(&profile_id, &profile)
+        transaction
+            .save_profile(&paths, &profile_id, &profile)
             .map_err(|error| error.to_string())?;
         if paths
             .active_profile_id()
             .map_err(|error| error.to_string())?
             .is_none()
         {
-            if let Err(error) = paths.set_active(&profile_id) {
-                match previous_profile {
-                    Some(content) => {
-                        let _ = std::fs::write(&profile_path, content);
-                    }
-                    None => {
-                        let _ = std::fs::remove_file(&profile_path);
-                    }
-                }
-                return Err(error.to_string());
-            }
+            transaction
+                .set_active_profile(&paths, &profile_id)
+                .map_err(|error| error.to_string())?;
         }
-        record_lock_entry(
-            &config_dir,
-            &manifest.name,
-            &manifest.version,
-            &destination,
-            &modules_dir,
-            &source,
-            &installed_manifests,
-            None,
-        )?;
+        transaction
+            .record_module_lock(
+                &manifest,
+                &destination,
+                &modules_dir,
+                source.source(),
+                source.revision(),
+                &installed_manifests,
+                false,
+            )
+            .map_err(|error| error.to_string())?;
         Ok(Some(format!("{instance_id} in profile {profile_id}")))
     })();
 
@@ -1220,269 +1227,6 @@ fn cmd_install(args: &[String]) {
     transaction
         .commit()
         .unwrap_or_else(|error| exit_error(format!("failed to commit installation: {error}")));
-}
-
-fn copy_module_tree(
-    source: &std::path::Path,
-    destination: &std::path::Path,
-) -> std::io::Result<()> {
-    std::fs::create_dir_all(destination)?;
-    for entry in std::fs::read_dir(source)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let target = destination.join(entry.file_name());
-        if file_type.is_symlink() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!(
-                    "module contains unsupported symlink {}",
-                    entry.path().display()
-                ),
-            ));
-        }
-        if file_type.is_dir() {
-            copy_module_tree(&entry.path(), &target)?;
-        } else if file_type.is_file() {
-            std::fs::copy(entry.path(), target)?;
-        }
-    }
-    Ok(())
-}
-
-/// A local directory or a staged checkout. Git sources are cloned outside the
-/// installed tree, validated exactly like local sources, then renamed into
-/// place so a failed clone or manifest check never leaves a partial module.
-enum InstallSource {
-    Local(std::path::PathBuf),
-    Git {
-        checkout: std::path::PathBuf,
-        provenance: GitProvenance,
-    },
-}
-
-impl InstallSource {
-    fn path(&self) -> &std::path::Path {
-        match self {
-            Self::Local(path) => path,
-            Self::Git { checkout, .. } => checkout,
-        }
-    }
-
-    fn place_at(&self, destination: &std::path::Path) -> Result<(), String> {
-        mesh_core_module::package::validate_module_tree(self.path())
-            .map_err(|error| error.to_string())?;
-        match self {
-            Self::Local(path) => {
-                copy_module_tree(path, destination).map_err(|error| error.to_string())
-            }
-            Self::Git { checkout, .. } => std::fs::rename(checkout, destination)
-                .map_err(|error| format!("failed to move staged Git checkout into place: {error}")),
-        }
-    }
-}
-
-impl Drop for InstallSource {
-    fn drop(&mut self) {
-        // A successful Git install renames this path, so this is a no-op on
-        // success. Every early return instead removes only its private stage.
-        if let Self::Git { checkout, .. } = self {
-            let _ = std::fs::remove_dir_all(checkout);
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GitProvenance {
-    source: String,
-    requested_ref: Option<String>,
-    revision: String,
-}
-
-fn install_source(source: &str, modules_dir: &std::path::Path) -> Result<InstallSource, String> {
-    let local = std::path::PathBuf::from(source);
-    if std::fs::symlink_metadata(&local)
-        .map(|metadata| metadata.is_dir())
-        .unwrap_or(false)
-    {
-        mesh_core_module::package::validate_module_tree(&local)
-            .map_err(|error| error.to_string())?;
-        return Ok(InstallSource::Local(local));
-    }
-
-    let (url, requested_ref) = parse_git_source(source)?;
-    std::fs::create_dir_all(modules_dir).map_err(|error| {
-        format!(
-            "failed to create module directory {}: {error}",
-            modules_dir.display()
-        )
-    })?;
-    let checkout_name = format!(
-        ".mesh-install-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    );
-    let checkout = mesh_core_module::package::contained_path(
-        modules_dir,
-        &checkout_name,
-        "staged module path",
-    )
-    .map_err(|error| error.to_string())?;
-    let cleanup = |message: String| {
-        let _ = std::fs::remove_dir_all(&checkout);
-        Err(message)
-    };
-    let clone = Command::new("git")
-        .args(["clone", "--quiet", &url])
-        .arg(&checkout)
-        .output()
-        .map_err(|error| format!("failed to run git clone: {error}"))?;
-    if !clone.status.success() {
-        return cleanup(format!("git clone failed: {}", command_error(&clone)));
-    }
-    if let Some(reference) = &requested_ref {
-        let checkout_ref = Command::new("git")
-            .args(["-C"])
-            .arg(&checkout)
-            .args(["checkout", "--quiet", reference])
-            .output();
-        let checkout_ref = match checkout_ref {
-            Ok(output) => output,
-            Err(error) => return cleanup(format!("failed to run git checkout: {error}")),
-        };
-        if !checkout_ref.status.success() {
-            return cleanup(format!(
-                "git checkout of {reference:?} failed: {}",
-                command_error(&checkout_ref)
-            ));
-        }
-    }
-    let revision = Command::new("git")
-        .args(["-C"])
-        .arg(&checkout)
-        .args(["rev-parse", "HEAD"])
-        .output();
-    let revision = match revision {
-        Ok(output) => output,
-        Err(error) => return cleanup(format!("failed to read cloned revision: {error}")),
-    };
-    if !revision.status.success() {
-        return cleanup(format!(
-            "git rev-parse failed: {}",
-            command_error(&revision)
-        ));
-    }
-    Ok(InstallSource::Git {
-        checkout,
-        provenance: GitProvenance {
-            source: url,
-            requested_ref,
-            revision: String::from_utf8_lossy(&revision.stdout).trim().to_string(),
-        },
-    })
-}
-
-fn parse_git_source(source: &str) -> Result<(String, Option<String>), String> {
-    let (url, requested_ref) = match source.rsplit_once('#') {
-        Some((url, reference)) if !reference.is_empty() => (url, Some(reference.to_string())),
-        Some(_) => {
-            return Err("Git source has an empty ref after '#'; omit '#' or provide a ref".into());
-        }
-        None => (source, None),
-    };
-    if url.trim().is_empty() {
-        return Err("Git source URL cannot be empty".into());
-    }
-    Ok((url.to_string(), requested_ref))
-}
-
-fn command_error(output: &std::process::Output) -> String {
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    if stderr.is_empty() {
-        format!("exit status {}", output.status)
-    } else {
-        stderr
-    }
-}
-
-/// Record an installed module in `mesh.lock`.
-///
-/// The lock is the rollback record, so a write failure fails the install rather
-/// than being reported as a warning after the fact.
-fn record_lock_entry(
-    config_dir: &std::path::Path,
-    module_id: &str,
-    version: &str,
-    installed_at: &std::path::Path,
-    modules_dir: &std::path::Path,
-    source: &InstallSource,
-    installed_manifests: &[mesh_core_module::package::ModuleManifest],
-    composition: Option<mesh_core_module::package::LockedComposition>,
-) -> Result<(), String> {
-    use mesh_core_module::package::{
-        LockedModule, MeshLock, ModuleSource, TrustTier, module_tree_digest,
-    };
-
-    let path = config_dir.join("mesh.lock");
-    let history = lock_history_dir(config_dir);
-    let mut lock = MeshLock::load_or_default(&path).map_err(|error| error.to_string())?;
-    let digest = module_tree_digest(installed_at).map_err(|error| error.to_string())?;
-    let (module_source, revision) = match source {
-        InstallSource::Local(path) => (
-            ModuleSource::Path {
-                path: path.display().to_string(),
-            },
-            None,
-        ),
-        InstallSource::Git { provenance, .. } => (
-            ModuleSource::Git {
-                url: provenance.source.clone(),
-                reference: provenance.requested_ref.clone(),
-            },
-            Some(provenance.revision.clone()),
-        ),
-    };
-    let signature = mesh_core_module::package::load_module_signature(installed_at)
-        .map_err(|error| error.to_string())?;
-    let trust = if signature.is_some() {
-        TrustTier::Verified
-    } else {
-        TrustTier::for_source(
-            module_id,
-            matches!(&module_source, ModuleSource::Git { .. }),
-        )
-    };
-    lock.modules.insert(
-        module_id.to_string(),
-        LockedModule {
-            version: version.to_string(),
-            source: module_source,
-            revision,
-            digest,
-            trust,
-            signature,
-            dependencies: Default::default(),
-            requested_by: Default::default(),
-        },
-    );
-    if composition.is_some() {
-        lock.composition = composition;
-    }
-    lock.refresh_metadata(installed_manifests.iter());
-    MeshLock::archive(&path, &history).map_err(|error| error.to_string())?;
-    lock.save_with_store(
-        &path,
-        modules_dir,
-        &mesh_core_module::package::module_store_dir(config_dir),
-    )
-    .map_err(|error| error.to_string())
-}
-
-fn lock_history_dir(config_dir: &std::path::Path) -> std::path::PathBuf {
-    config_dir.join("lock-history")
 }
 
 /// Resolve `(root graph path, config dir, modules dir)` for lock-aware commands.
@@ -1605,13 +1349,7 @@ fn cmd_update(args: &[String]) {
         return;
     }
 
-    let updated = match update::commit_update(
-        &modules_dir,
-        &config_dir,
-        &mut lock,
-        &plan,
-        &mut transaction,
-    ) {
+    let updated = match update::commit_update(&modules_dir, &mut lock, &plan, &mut transaction) {
         Ok(updated) => updated,
         Err(error) => {
             let _ = transaction.abort();
@@ -1674,7 +1412,13 @@ fn cmd_rollback(args: &[String]) {
         .protect_package_state(&root_path, &modules_dir)
         .unwrap_or_else(|error| exit_error(error));
     let generation = args.first().and_then(|arg| arg.parse::<u64>().ok());
-    let restored = match update::rollback(&modules_dir, &config_dir, generation, &mut transaction) {
+    let restored = match update::rollback(
+        &root_path,
+        &modules_dir,
+        &config_dir,
+        generation,
+        &mut transaction,
+    ) {
         Ok(restored) => restored,
         Err(error) => {
             let _ = transaction.abort();
@@ -1703,7 +1447,7 @@ fn cmd_uninstall(args: &[String]) {
         mesh_core_module::package::PackageOperation::Uninstall,
     )
     .unwrap_or_else(|error| exit_error(error));
-    let root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
+    let mut root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
         .unwrap_or_else(|error| exit_error(error));
     let modules_dir = config_dir.join(&root.modules_dir);
     transaction
@@ -1712,15 +1456,52 @@ fn cmd_uninstall(args: &[String]) {
     let lock_path = config_dir.join("mesh.lock");
     let mut lock = mesh_core_module::package::MeshLock::load_or_default(&lock_path)
         .unwrap_or_else(|error| exit_error(error));
+    let force = args.iter().any(|arg| arg == "--force");
 
     let dependents = update::dependents(module_id, &lock);
-    if !dependents.is_empty() && !args.iter().any(|arg| arg == "--force") {
+    if !dependents.is_empty() && !force {
         exit_error(format!(
             "{module_id} is still required by {}; remove those first or repeat with --force",
             dependents.join(", ")
         ));
     }
 
+    if !force
+        && root
+            .layout
+            .as_ref()
+            .is_some_and(|layout| layout.entrypoint.split(':').next() == Some(module_id))
+    {
+        exit_error(format!(
+            "{module_id} is the active layout module; select another layout or repeat with --force"
+        ));
+    }
+    if !force
+        && root
+            .providers
+            .values()
+            .any(|provider| provider == module_id)
+    {
+        exit_error(format!(
+            "{module_id} provides an active backend; select another provider or repeat with --force"
+        ));
+    }
+
+    let paths = mesh_core_module::package::ProfilePaths::from_root_graph(&root_path)
+        .unwrap_or_else(|error| exit_error(error));
+    let profile_ids = paths.list().unwrap_or_else(|error| exit_error(error));
+    for profile_id in &profile_ids {
+        let profile = paths
+            .load(profile_id)
+            .unwrap_or_else(|error| exit_error(error));
+        if profile.references_module(module_id) && !force {
+            exit_error(format!(
+                "{module_id} is referenced by profile {profile_id}; remove it from that profile or repeat with --force"
+            ));
+        }
+    }
+
+    let explicit_inventory = !root.modules.is_empty();
     let installed_at = match root.modules.get(module_id) {
         Some(entry) => mesh_core_module::package::contained_path(
             &modules_dir,
@@ -1731,6 +1512,39 @@ fn cmd_uninstall(args: &[String]) {
         None => mesh_core_module::package::module_install_path(&modules_dir, module_id)
             .unwrap_or_else(|error| exit_error(error)),
     };
+
+    if force {
+        root.remove_module_references(module_id);
+    } else {
+        root.modules.remove(module_id);
+    }
+    if explicit_inventory {
+        if let Err(error) = transaction.save_root(&root_path, &root) {
+            let _ = transaction.abort();
+            exit_error(error);
+        }
+    }
+    if force {
+        for profile_id in profile_ids {
+            let mut profile = paths
+                .load(&profile_id)
+                .unwrap_or_else(|error| exit_error(error));
+            if !profile.references_module(module_id) {
+                continue;
+            }
+            let expected_revision = profile.revision;
+            profile.remove_module_references(module_id);
+            if let Err(error) = transaction.save_profile_if_revision(
+                &paths,
+                &profile_id,
+                &profile,
+                expected_revision,
+            ) {
+                let _ = transaction.abort();
+                exit_error(error);
+            }
+        }
+    }
     if let Err(error) = transaction.remove(&installed_at) {
         let _ = transaction.abort();
         exit_error(format!(
@@ -1748,16 +1562,7 @@ fn cmd_uninstall(args: &[String]) {
     }
     let remaining_manifests = installed_manifests(&root_path);
     lock.refresh_metadata(remaining_manifests.values());
-    let history = config_dir.join("lock-history");
-    if let Err(error) = mesh_core_module::package::MeshLock::archive(&lock_path, &history) {
-        let _ = transaction.abort();
-        exit_error(error);
-    }
-    if let Err(error) = lock.save_with_store(
-        &lock_path,
-        &modules_dir,
-        &mesh_core_module::package::module_store_dir(&config_dir),
-    ) {
+    if let Err(error) = transaction.save_lock(&mut lock, &modules_dir) {
         let _ = transaction.abort();
         exit_error(error);
     }
@@ -2169,17 +1974,23 @@ mod tests {
     #[test]
     fn git_source_splits_an_optional_ref() {
         assert_eq!(
-            parse_git_source("https://example.invalid/widgets.git#v1.2.3").unwrap(),
+            mesh_core_module::package::parse_git_source(
+                "https://example.invalid/widgets.git#v1.2.3",
+            )
+            .unwrap(),
             (
                 "https://example.invalid/widgets.git".to_string(),
                 Some("v1.2.3".to_string())
             )
         );
         assert_eq!(
-            parse_git_source("git@host:group/widgets.git").unwrap(),
+            mesh_core_module::package::parse_git_source("git@host:group/widgets.git").unwrap(),
             ("git@host:group/widgets.git".to_string(), None)
         );
-        assert!(parse_git_source("https://example.invalid/widgets.git#").is_err());
+        assert!(
+            mesh_core_module::package::parse_git_source("https://example.invalid/widgets.git#")
+                .is_err()
+        );
     }
 
     #[test]
@@ -2235,7 +2046,10 @@ mod tests {
 
     #[test]
     fn installing_records_version_source_and_digest_in_the_lock() {
-        use mesh_core_module::package::{MeshLock, ModuleSource};
+        use mesh_core_module::package::{
+            MeshLock, ModuleManifest, ModuleSource, PackageOperation, PackageOwner,
+            PackageTransaction,
+        };
 
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -2251,25 +2065,26 @@ mod tests {
         .unwrap();
         std::fs::write(installed.join("main.mesh"), "<template><box/></template>").unwrap();
 
-        let source = InstallSource::Git {
-            checkout: installed.clone(),
-            provenance: GitProvenance {
-                source: "https://example.invalid/widgets.git".to_string(),
-                requested_ref: Some("main".to_string()),
-                revision: "abc123".to_string(),
-            },
+        let manifest = ModuleManifest::from_path(&installed.join("module.json")).unwrap();
+        let source = ModuleSource::Git {
+            url: "https://example.invalid/widgets.git".to_string(),
+            reference: Some("main".to_string()),
         };
-        record_lock_entry(
-            &config_dir,
-            "@example/widget",
-            "1.2.3",
-            &installed,
-            &config_dir.join("modules"),
-            &source,
-            &[],
-            None,
-        )
-        .unwrap();
+        let mut transaction =
+            PackageTransaction::begin(&config_dir, PackageOwner::Cli, PackageOperation::Install)
+                .unwrap();
+        transaction
+            .record_module_lock(
+                &manifest,
+                &installed,
+                &config_dir.join("modules"),
+                &source,
+                Some("abc123"),
+                &[],
+                false,
+            )
+            .unwrap();
+        transaction.commit().unwrap();
 
         let lock = MeshLock::from_path(&config_dir.join("mesh.lock")).unwrap();
         let entry = &lock.modules["@example/widget"];
