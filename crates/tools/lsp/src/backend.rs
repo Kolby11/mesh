@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use tokio::sync::RwLock;
 use tower_lsp::{Client, LanguageServer, jsonrpc::Result, lsp_types::*};
@@ -15,6 +15,7 @@ pub struct Backend {
     manifests: Arc<RwLock<HashMap<Url, ManifestDocument>>>,
     settings: Arc<RwLock<HashMap<Url, SettingsDocument>>>,
     registry: Arc<RwLock<ModuleRegistry>>,
+    workspace_root: Arc<RwLock<Option<PathBuf>>>,
 }
 
 impl Backend {
@@ -25,6 +26,7 @@ impl Backend {
             manifests: Arc::new(RwLock::new(HashMap::new())),
             settings: Arc::new(RwLock::new(HashMap::new())),
             registry: Arc::new(RwLock::new(ModuleRegistry::empty())),
+            workspace_root: Arc::new(RwLock::new(None)),
         }
     }
 }
@@ -39,13 +41,8 @@ impl LanguageServer for Backend {
             .and_then(|uri| uri.to_file_path().ok());
 
         if let Some(root) = workspace_root {
-            let registry = ModuleRegistry::discover(&root);
-            tracing::info!(
-                modules = registry.manifests.len(),
-                services = registry.interface_fields.len(),
-                "module registry built"
-            );
-            *self.registry.write().await = registry;
+            *self.workspace_root.write().await = Some(root);
+            self.refresh_registry().await;
         }
 
         Ok(InitializeResult {
@@ -54,8 +51,13 @@ impl LanguageServer for Backend {
                 version: Some(env!("CARGO_PKG_VERSION").to_string()),
             }),
             capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
+                text_document_sync: Some(TextDocumentSyncCapability::Options(
+                    TextDocumentSyncOptions {
+                        open_close: Some(true),
+                        change: Some(TextDocumentSyncKind::FULL),
+                        save: Some(TextDocumentSyncSaveOptions::Supported(true)),
+                        ..Default::default()
+                    },
                 )),
                 completion_provider: Some(CompletionOptions {
                     trigger_characters: Some(vec![
@@ -89,15 +91,21 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         let source = params.text_document.text;
+        self.refresh_registry().await;
         self.update_document(uri, source).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
+        self.refresh_registry().await;
         // Full sync — use the first (only) change which contains the complete text.
         if let Some(change) = params.content_changes.into_iter().next() {
             self.update_document(uri, change.text).await;
         }
+    }
+
+    async fn did_save(&self, _: DidSaveTextDocumentParams) {
+        self.refresh_registry().await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -237,6 +245,30 @@ impl LanguageServer for Backend {
 }
 
 impl Backend {
+    async fn refresh_registry(&self) {
+        let root = self.workspace_root.read().await.clone();
+        let Some(root) = root else {
+            return;
+        };
+        match ModuleRegistry::try_discover(&root) {
+            Ok(registry) => {
+                tracing::info!(
+                    modules = registry.manifests.len(),
+                    services = registry.interface_fields.len(),
+                    revision = ?registry.snapshot_revision(),
+                    "canonical authoring snapshot refreshed"
+                );
+                *self.registry.write().await = registry;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    workspace = %root.display(),
+                    "keeping previous authoring snapshot after refresh failure: {error}"
+                );
+            }
+        }
+    }
+
     async fn update_document(&self, uri: Url, source: String) {
         if manifest::is_manifest_uri(&uri) {
             let doc = ManifestDocument::new(uri.clone(), source);

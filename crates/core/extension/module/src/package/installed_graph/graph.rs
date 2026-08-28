@@ -12,6 +12,7 @@ use mesh_core_service::{
     InterfaceContract, parse_contract_version, parse_interface_contract, parse_version_req,
 };
 use mesh_core_theme::{ThemeCatalog, ThemeMetadata, ThemePackDescriptor};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
@@ -281,8 +282,20 @@ pub enum ModuleManifestSource {
     CanonicalModuleJson,
 }
 
+impl std::fmt::Display for ModuleManifestSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CanonicalModuleJson => write!(f, "module.json"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct InstalledModuleGraph {
+    /// Stable identity of this normalized graph and its canonical module
+    /// inputs. Runtime and authoring consumers use it to avoid mixing data
+    /// from different graph generations.
+    revision: u64,
     modules: HashMap<String, InstalledModuleNode>,
     trust_policy: TrustPolicy,
     backend_providers: HashMap<String, Vec<BackendProviderNode>>,
@@ -1046,8 +1059,10 @@ impl InstalledModuleGraph {
             &frontend_requirements,
             &diagnostics,
         );
+        let revision = graph_revision(&graph_modules, &diagnostics);
 
         Ok(Self {
+            revision,
             modules: graph_modules,
             trust_policy,
             backend_providers,
@@ -1072,6 +1087,16 @@ impl InstalledModuleGraph {
 
     pub fn module(&self, id: &str) -> Option<&InstalledModuleNode> {
         self.modules.get(id)
+    }
+
+    /// Stable content identity for this normalized graph snapshot.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub(crate) fn with_revision(mut self, revision: u64) -> Self {
+        self.revision = revision.max(1);
+        self
     }
 
     pub fn trust_policy(&self) -> &TrustPolicy {
@@ -1602,6 +1627,34 @@ impl InstalledModuleGraph {
         });
         providers
     }
+}
+
+fn graph_revision(
+    modules: &HashMap<String, InstalledModuleNode>,
+    diagnostics: &[ModuleGraphDiagnostic],
+) -> u64 {
+    let mut hasher = Sha256::new();
+    let mut module_ids = modules.keys().collect::<Vec<_>>();
+    module_ids.sort();
+    for module_id in module_ids {
+        let module = &modules[module_id];
+        hasher.update(module.id.as_bytes());
+        hasher.update(format!("{:?}", module.kind).as_bytes());
+        hasher.update(module.path.as_bytes());
+        hasher.update([module.enabled as u8]);
+        hasher.update(format!("{:?}", module.trust).as_bytes());
+        hasher.update(module.manifest_path.to_string_lossy().as_bytes());
+        if let Ok(manifest) = serde_json::to_vec(&module.manifest) {
+            hasher.update(manifest);
+        }
+    }
+    for diagnostic in diagnostics {
+        hasher.update(diagnostic.module_id.as_bytes());
+        hasher.update(diagnostic.status.as_bytes());
+        hasher.update(diagnostic.message.as_bytes());
+    }
+    let digest = hasher.finalize();
+    u64::from_be_bytes(digest[..8].try_into().expect("sha256 has enough bytes")).max(1)
 }
 
 fn catalog_source(

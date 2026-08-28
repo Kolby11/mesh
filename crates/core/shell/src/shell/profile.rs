@@ -8,7 +8,7 @@ use super::component::{
 use super::*;
 use mesh_core_module::package::{
     ComponentPlacement, InstalledModuleGraph, NodeSlotOverride, PackageTransaction, ProfilePaths,
-    ProfileRootInstance, ShellProfile, load_installed_module_graph_for_profile,
+    ProfileRootInstance, ShellProfile, load_authoring_snapshot_for_profile,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -934,7 +934,7 @@ impl Shell {
                 return VecDeque::new();
             }
         };
-        let graph = match load_installed_module_graph_for_profile(&graph_path, &profile) {
+        let graph = match load_authoring_snapshot_for_profile(&graph_path, &profile) {
             Ok(graph) => graph,
             Err(error) => {
                 abort_package_transaction(package_transaction, package_rollback, self);
@@ -1127,7 +1127,7 @@ impl Shell {
             }
         }
         profile.validate()?;
-        let candidate = load_installed_module_graph_for_profile(&graph_path, &profile)?;
+        let candidate = load_authoring_snapshot_for_profile(&graph_path, &profile)?;
         let previous_catalog = self.frontend_catalog.snapshot().catalog;
         FrontendCatalog::from_modules_reusing(
             &self.modules,

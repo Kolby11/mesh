@@ -1508,7 +1508,7 @@ mod performance_tests {
     #[test]
     fn contributed_settings_pages_mount_through_the_extension_point() {
         let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
-        let graph = mesh_core_module::package::load_installed_module_graph(
+        let graph = mesh_core_module::package::load_authoring_snapshot(
             &workspace_root.join("config/module.json"),
         )
         .expect("shipped graph loads");
@@ -1571,7 +1571,7 @@ local Settings = require("@mesh/settings")
         settings_source: &str,
     ) -> (tempfile::TempDir, FrontendCatalog) {
         let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
-        let graph = mesh_core_module::package::load_installed_module_graph(
+        let graph = mesh_core_module::package::load_authoring_snapshot(
             &workspace_root.join("config/module.json"),
         )
         .expect("shipped graph loads");

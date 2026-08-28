@@ -17,7 +17,7 @@ use mesh_core_capability::{
 use mesh_core_module::package::{
     InstalledModuleGraph, LockedModule, MeshLock, ModuleGraphDiff, ModuleManifest, ModuleSource,
     PackageTransaction, RootModuleGraphManifest, TrustTier, has_local_edits,
-    load_installed_module_graph, load_module_signature, module_install_path, module_tree_digest,
+    load_authoring_snapshot, load_module_signature, module_install_path, module_tree_digest,
     validate_module_tree,
 };
 use mesh_core_service::{CompatibilityClass, diff_contracts, parse_interface_contract};
@@ -359,12 +359,12 @@ pub fn plan_update_from_staged_graph(
     approvals: &BTreeMap<String, Vec<String>>,
     transaction: &mut PackageTransaction,
 ) -> Result<UpdatePlan, String> {
-    let installed_graph = load_installed_module_graph(root_path)
+    let installed_graph = load_authoring_snapshot(root_path)
         .map_err(|error| format!("installed graph validation failed: {error}"))?;
     let mut plan = collect_update_candidates(modules_dir, lock, only, policy)?;
     let candidate_root =
         stage_candidate_graph(root_path, modules_dir, installed, &mut plan, transaction)?;
-    let candidate_graph = load_installed_module_graph(&candidate_root)
+    let candidate_graph = load_authoring_snapshot(&candidate_root)
         .map_err(|error| format!("candidate graph validation failed: {error}"))?;
     plan.graph_diff = Some(installed_graph.diff(&candidate_graph));
 
@@ -1388,7 +1388,7 @@ mod tests {
                 requested_by: BTreeSet::new(),
             },
         );
-        let installed_graph = load_installed_module_graph(&root_path).unwrap();
+        let installed_graph = load_authoring_snapshot(&root_path).unwrap();
         let installed_manifests = installed_graph
             .modules()
             .into_iter()

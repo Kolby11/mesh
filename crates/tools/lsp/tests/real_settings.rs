@@ -53,6 +53,17 @@ fn shipped_settings_validate_cleanly() {
 }
 
 #[test]
+fn registry_exposes_the_canonical_graph_snapshot() {
+    let registry = registry();
+    let snapshot = registry
+        .snapshot
+        .as_ref()
+        .expect("LSP registry should retain its canonical graph snapshot");
+    assert_ne!(snapshot.revision(), 0);
+    assert_eq!(snapshot.modules().len(), registry.manifests.len());
+}
+
+#[test]
 fn discovers_the_shipped_themes() {
     let registry = registry();
     assert!(

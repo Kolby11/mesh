@@ -22,7 +22,7 @@ pub(in crate::shell) fn installed_module_graph_path() -> PathBuf {
 fn load_installed_module_graph_candidate(
     root_module_graph_path: &Path,
 ) -> Result<InstalledModuleGraph, mesh_core_module::package::ModuleManifestError> {
-    load_installed_module_graph(root_module_graph_path)
+    mesh_core_module::package::load_authoring_snapshot(root_module_graph_path)
 }
 
 pub(in crate::shell) fn graph_i18n_catalog_sources(

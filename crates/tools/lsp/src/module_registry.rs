@@ -1,11 +1,15 @@
 use mesh_core_component::parse_luau_script;
-use mesh_core_config::{default_config_path, load_config, resolve_discovery_paths};
-use mesh_core_module::manifest::{Manifest, ModuleType, load_canonical_manifest};
+#[cfg(test)]
+use mesh_core_module::manifest::load_canonical_manifest;
+use mesh_core_module::manifest::{Manifest, ModuleType};
+use mesh_core_module::package::{AuthoringSnapshot, ModuleKind, ModuleManifestError};
 use mesh_core_resources::{
     ResourceAssetExplanation, ResourceExplanationSnapshot, ResourceMappingExplanation,
     ResourcePackExplanation,
 };
-use mesh_core_service::{InterfaceContract, canonical_interface_name, parse_interface_contract};
+#[cfg(test)]
+use mesh_core_service::parse_interface_contract;
+use mesh_core_service::{InterfaceContract, canonical_interface_name};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -20,6 +24,10 @@ pub struct InterfaceShape {
 
 /// A discovered and indexed view of all modules available in the workspace.
 pub struct ModuleRegistry {
+    /// The canonical graph snapshot from which every module-owned index below
+    /// is derived. Keeping it here lets LSP consumers observe the same graph
+    /// revision as CLI, doctor, and the runtime.
+    pub snapshot: Option<AuthoringSnapshot>,
     /// Maps module-id → Manifest for all discovered modules.
     pub manifests: HashMap<String, Manifest>,
     /// Maps module-id → directory containing its manifest.
@@ -52,6 +60,7 @@ pub struct ModuleRegistry {
 impl ModuleRegistry {
     pub fn empty() -> Self {
         Self {
+            snapshot: None,
             manifests: HashMap::new(),
             module_dirs: HashMap::new(),
             module_entrypoints: HashMap::new(),
@@ -67,55 +76,127 @@ impl ModuleRegistry {
 
     /// Discover modules from the workspace root and standard system paths.
     pub fn discover(workspace_root: &Path) -> Self {
+        match Self::try_discover(workspace_root) {
+            Ok(registry) => registry,
+            Err(error) => {
+                tracing::warn!(
+                    workspace = %workspace_root.display(),
+                    "failed to load canonical authoring snapshot: {error}"
+                );
+                Self::empty()
+            }
+        }
+    }
+
+    /// Build all authoring indexes from one canonical graph snapshot.
+    pub fn try_discover(workspace_root: &Path) -> Result<Self, ModuleManifestError> {
+        let root_graph = root_graph_path(workspace_root);
+        let snapshot = mesh_core_module::package::load_authoring_snapshot(&root_graph)?;
+        let mut registry = Self::from_snapshot(workspace_root, &snapshot);
+        registry.snapshot = Some(snapshot);
+        Ok(registry)
+    }
+
+    /// Replace the registry only after the next canonical snapshot has loaded
+    /// successfully. Callers can therefore keep serving the last-known-good
+    /// authoring state when a manifest is temporarily being edited.
+    pub fn refresh(&mut self, workspace_root: &Path) -> Result<(), ModuleManifestError> {
+        let next = Self::try_discover(workspace_root)?;
+        *self = next;
+        Ok(())
+    }
+
+    pub fn snapshot_revision(&self) -> Option<u64> {
+        self.snapshot.as_ref().map(AuthoringSnapshot::revision)
+    }
+
+    fn from_snapshot(workspace_root: &Path, snapshot: &AuthoringSnapshot) -> Self {
         let mut registry = Self::empty();
 
-        let search_roots = search_paths(workspace_root);
-        for root in search_roots {
-            registry.scan_dir(&root);
+        for module in snapshot.modules() {
+            let manifest = module.manifest.clone().into_runtime_manifest();
+            let module_id = module.id.clone();
+            let module_dir = module
+                .manifest_path
+                .parent()
+                .unwrap_or(workspace_root)
+                .to_path_buf();
+
+            if let Some(tag) = manifest.exported_component_tag() {
+                registry
+                    .exported_tags
+                    .insert(tag.to_string(), module_id.clone());
+            }
+            if let Some(entry) = &module.manifest.mesh.entrypoints.main {
+                registry
+                    .module_entrypoints
+                    .insert(module_id.clone(), module_dir.join(entry));
+            }
+            registry
+                .module_dirs
+                .insert(module_id.clone(), module_dir.clone());
+            registry.manifests.insert(module_id, manifest);
         }
 
-        registry.themes = discover_themes(workspace_root, &registry);
-        registry.locales = discover_locales(workspace_root);
-        registry.resource_snapshot = discover_resources(workspace_root);
+        for declaration in snapshot.declared_interfaces() {
+            let fields = snapshot
+                .interface_contract(&declaration.name)
+                .map(|contract| {
+                    contract
+                        .state_fields
+                        .iter()
+                        .map(|field| field.name.clone())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            registry
+                .interface_fields
+                .entry(declaration.name.clone())
+                .or_insert(fields);
+        }
+        registry.interface_contracts = snapshot.interface_contracts().clone();
 
+        // Providers and their canonical declarations are indexed from the
+        // graph, while implementation shapes still come from the source file
+        // named by that same canonical manifest.
+        let mut analyzed = HashMap::<String, InterfaceShape>::new();
+        for provider in snapshot.backend_provider_contributions() {
+            registry
+                .interface_fields
+                .entry(provider.interface.clone())
+                .or_default();
+            let Some(module) = snapshot.module(&provider.module_id) else {
+                continue;
+            };
+            let Some(entry) = &module.manifest.mesh.entrypoints.main else {
+                continue;
+            };
+            let script_path = module
+                .manifest_path
+                .parent()
+                .unwrap_or(workspace_root)
+                .join(entry);
+            let Ok(source) = std::fs::read_to_string(script_path) else {
+                continue;
+            };
+            let shape = analyzed
+                .entry(provider.module_id.clone())
+                .or_insert_with(|| analyze_backend_script(&source))
+                .clone();
+            registry
+                .interface_shapes
+                .entry(provider.interface.clone())
+                .and_modify(|existing| merge_shape(existing, &shape))
+                .or_insert(shape);
+        }
+
+        registry.themes = discover_themes(workspace_root, snapshot);
+        registry.locales = discover_locales(snapshot);
+        registry.resource_snapshot = discover_resources(workspace_root, snapshot);
         registry
     }
 
-    fn scan_dir(&mut self, root: &Path) {
-        let Ok(entries) = std::fs::read_dir(root) else {
-            return;
-        };
-
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            // Try direct module dir (e.g. packages/modules/backend/core/pipewire-audio)
-            self.try_load_module(&path);
-            // Recurse one level (e.g. packages/modules/frontend/core/<name>)
-            let Ok(sub) = std::fs::read_dir(&path) else {
-                continue;
-            };
-            for sub_entry in sub.flatten() {
-                let sub_path = sub_entry.path();
-                if sub_path.is_dir() {
-                    self.try_load_module(&sub_path);
-                    // One more level (e.g. packages/modules/frontend/core/panel/src - skip)
-                    let Ok(sub2) = std::fs::read_dir(&sub_path) else {
-                        continue;
-                    };
-                    for sub2_entry in sub2.flatten() {
-                        let sub2_path = sub2_entry.path();
-                        if sub2_path.is_dir() {
-                            self.try_load_module(&sub2_path);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
+    #[cfg(test)]
     fn try_load_module(&mut self, dir: &Path) {
         let Ok(loaded) = load_canonical_manifest(dir) else {
             return;
@@ -287,16 +368,12 @@ impl ModuleRegistry {
     }
 }
 
-fn discover_resources(workspace_root: &Path) -> ResourceExplanationSnapshot {
+fn discover_resources(
+    workspace_root: &Path,
+    graph: &AuthoringSnapshot,
+) -> ResourceExplanationSnapshot {
     let catalog = mesh_core_resources::refresh_system_resource_catalog();
     let mut snapshot = ResourceExplanationSnapshot::from_catalog(&catalog);
-    let root_graph = std::env::var_os("MESH_MODULE_GRAPH_PATH")
-        .filter(|path| !path.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| workspace_root.join("config/module.json"));
-    let Ok(graph) = mesh_core_module::package::load_installed_module_graph(&root_graph) else {
-        return snapshot;
-    };
 
     snapshot.revision = mesh_core_resources::resource_revision();
     let icon_chain = graph.icon_pack_chain().to_vec();
@@ -471,7 +548,7 @@ fn resource_diagnostic(
 
 /// Theme ids the shell could activate: the theme packages and legacy `*.json`
 /// themes in the theme directory, plus modules of kind `theme`.
-fn discover_themes(workspace_root: &Path, registry: &ModuleRegistry) -> Vec<String> {
+fn discover_themes(workspace_root: &Path, graph: &AuthoringSnapshot) -> Vec<String> {
     let mut ids: Vec<String> =
         mesh_core_theme::load_themes_from_dir(&mesh_core_theme::theme_dir_path())
             .into_iter()
@@ -486,7 +563,17 @@ fn discover_themes(workspace_root: &Path, registry: &ModuleRegistry) -> Vec<Stri
             .map(|theme| theme.id),
     );
 
-    ids.extend(registry.module_ids_of_type(ModuleType::Theme));
+    ids.extend(
+        graph
+            .modules()
+            .into_iter()
+            .filter(|module| module.kind == ModuleKind::Theme)
+            .map(|module| module.id.clone()),
+    );
+    for descriptor in graph.theme_catalog().iter() {
+        ids.push(descriptor.id.clone());
+        ids.push(descriptor.local_id.clone());
+    }
     ids.sort();
     ids.dedup();
     ids
@@ -496,16 +583,8 @@ fn discover_themes(workspace_root: &Path, registry: &ModuleRegistry) -> Vec<Stri
 /// contained paths, so directory naming is not a source of truth for LSP
 /// completion. The graph also supplies enabled language-pack contributions and
 /// module defaults consistently with the runtime.
-fn discover_locales(workspace_root: &Path) -> Vec<String> {
+fn discover_locales(graph: &AuthoringSnapshot) -> Vec<String> {
     let mut locales: Vec<String> = Vec::new();
-
-    let root_graph = std::env::var_os("MESH_MODULE_GRAPH_PATH")
-        .filter(|path| !path.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| workspace_root.join("config/module.json"));
-    let Ok(graph) = mesh_core_module::package::load_installed_module_graph(&root_graph) else {
-        return locales;
-    };
     locales.extend(
         graph
             .contributed_i18n()
@@ -525,11 +604,24 @@ fn discover_locales(workspace_root: &Path) -> Vec<String> {
     locales
 }
 
-fn search_paths(workspace_root: &Path) -> Vec<PathBuf> {
-    let configured_paths = load_config(&default_config_path())
-        .map(|config| config.shell.discovery_paths)
-        .unwrap_or_default();
-    resolve_discovery_paths(workspace_root, &configured_paths)
+fn root_graph_path(workspace_root: &Path) -> PathBuf {
+    std::env::var_os("MESH_MODULE_GRAPH_PATH")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| workspace_root.join("config/module.json"))
+}
+
+fn merge_shape(existing: &mut InterfaceShape, incoming: &InterfaceShape) {
+    for field in &incoming.state_fields {
+        if !existing.state_fields.contains(field) {
+            existing.state_fields.push(field.clone());
+        }
+    }
+    for command in &incoming.commands {
+        if !existing.commands.contains(command) {
+            existing.commands.push(command.clone());
+        }
+    }
 }
 
 /// Analyze a backend Luau script to infer the service shape:

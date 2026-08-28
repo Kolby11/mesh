@@ -5,7 +5,7 @@ use mesh_core_capability::{CapabilityCatalog, PrivilegeLevel};
 use mesh_core_module::package::{
     InstalledModuleEntry, MeshLock, ModuleId, ModuleKind, ModuleManifest, ModuleSource,
     PackageOperation, PackageOwner, PackageTransaction, ProfilePaths, RootModuleGraphManifest,
-    ShellProfile, TrustTier, contained_path, load_installed_module_graph, load_module_signature,
+    ShellProfile, TrustTier, contained_path, load_authoring_snapshot, load_module_signature,
     module_install_path, module_store_dir, module_tree_digest, validate_module_tree,
 };
 use std::collections::VecDeque;
@@ -121,7 +121,7 @@ impl Shell {
             }
         }
 
-        let graph = match load_installed_module_graph(&graph_path) {
+        let graph = match load_authoring_snapshot(&graph_path) {
             Ok(graph) => graph,
             Err(error) => return Err(package_error(error.to_string())),
         };
@@ -206,7 +206,7 @@ impl Shell {
         let package_rollback = PackageRuntimeRollback::capture(self);
         let mut root = RootModuleGraphManifest::from_path(&graph_path)
             .map_err(|error| package_error(error.to_string()))?;
-        let graph = load_installed_module_graph(&graph_path)
+        let graph = load_authoring_snapshot(&graph_path)
             .map_err(|error| package_error(error.to_string()))?;
         let node = graph
             .module(module_id)
@@ -336,7 +336,7 @@ impl Shell {
         let mut transaction = Some(transaction);
         let mut package_rollback = Some(package_rollback);
 
-        let new_graph = match load_installed_module_graph(&graph_path) {
+        let new_graph = match load_authoring_snapshot(&graph_path) {
             Ok(graph) => graph,
             Err(error) => {
                 super::profile::abort_package_transaction(

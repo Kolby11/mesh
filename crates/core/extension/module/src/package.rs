@@ -1,3 +1,4 @@
+mod authoring;
 mod composition;
 mod content_store;
 mod error;
@@ -23,6 +24,7 @@ pub(crate) use util::{
     validate_modules_dir, validate_relative_path,
 };
 
+pub use authoring::*;
 pub use composition::*;
 pub use content_store::*;
 pub use error::*;

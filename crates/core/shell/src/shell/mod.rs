@@ -15,7 +15,6 @@ use mesh_core_module::DependencyGraphError;
 use mesh_core_module::lifecycle::{ModuleInstance, ModuleState};
 use mesh_core_module::package::{
     InstalledModuleGraph, ModuleKind, PackageTransaction, RootModuleGraphManifest, ShellProfile,
-    load_installed_module_graph,
 };
 use mesh_core_service::{
     InterfaceProvider, InterfaceRegistry, canonical_interface_name, canonical_interface_name_cow,
@@ -546,6 +545,9 @@ pub struct Shell {
     /// Effective grants for the current activation candidate. Runtime
     /// construction must consume this map rather than manifest declarations.
     effective_capabilities: Arc<HashMap<String, EffectiveCapabilities>>,
+    /// Graph portion of the canonical authoring snapshot currently committed
+    /// to runtime. Its revision remains available to runtime observers while
+    /// the shell keeps its prepared runtime mirrors alongside it.
     installed_module_graph: Option<InstalledModuleGraph>,
     resource_snapshot: Arc<discovery::ResourceSnapshot>,
     resource_explanation: Arc<mesh_core_resources::ResourceExplanationSnapshot>,

@@ -83,17 +83,13 @@ fn cmd_start() {
 }
 
 fn cmd_list() {
-    let mut shell = Shell::new();
-    shell.discover_modules();
-    if let Err(err) = shell.resolve_modules() {
-        eprintln!("failed to resolve modules: {err}");
-        std::process::exit(1);
-    }
+    let graph = load_authoring_snapshot();
     let mut count = 0;
-    for (id, _state) in shell.modules() {
-        let module = shell.module(id).unwrap();
-        let kind = module.manifest.package.module_type;
-        match (&kind, module.manifest.primary_service()) {
+    for module in graph.modules() {
+        let manifest = module.manifest.clone().into_runtime_manifest();
+        let id = &module.id;
+        let kind = manifest.package.module_type;
+        match (&kind, manifest.primary_service()) {
             (ModuleType::Backend, Some(svc)) => {
                 println!(
                     "{id}  ({kind}, provides: {}, backend: {}, manifest: {})",
@@ -113,23 +109,18 @@ fn cmd_list() {
 }
 
 fn cmd_services() {
-    let mut shell = Shell::new();
-    shell.discover_modules();
-    if let Err(err) = shell.resolve_modules() {
-        eprintln!("failed to resolve modules: {err}");
-        std::process::exit(1);
-    }
+    let graph = load_authoring_snapshot();
 
     // Group backends by service type.
     let mut by_service: std::collections::HashMap<String, Vec<(String, String, u32)>> =
         std::collections::HashMap::new();
 
-    for (id, _) in shell.modules() {
-        let module = shell.module(id).unwrap();
-        if module.manifest.package.module_type == ModuleType::Backend {
-            if let Some(svc) = module.manifest.primary_service() {
+    for module in graph.modules() {
+        let manifest = module.manifest.clone().into_runtime_manifest();
+        if manifest.package.module_type == ModuleType::Backend {
+            if let Some(svc) = manifest.primary_service() {
                 by_service.entry(svc.provides.clone()).or_default().push((
-                    id.to_string(),
+                    module.id.clone(),
                     svc.backend_name.clone(),
                     svc.priority,
                 ));
@@ -250,13 +241,12 @@ fn cmd_resources(args: &[String]) {
 }
 
 fn locale_read_model() -> (
-    mesh_core_module::package::InstalledModuleGraph,
+    mesh_core_module::package::AuthoringSnapshot,
     mesh_core_locale::LocaleEngine,
     Vec<mesh_core_locale::CatalogSourceDiagnostics>,
     mesh_core_config::LocalePolicy,
 ) {
-    let graph = mesh_core_module::package::load_installed_module_graph(&root_module_graph_path())
-        .unwrap_or_else(|error| exit_error(format!("failed to resolve locale graph: {error}")));
+    let graph = load_authoring_snapshot();
     let settings = mesh_core_config::load_shell_settings()
         .unwrap_or_else(|error| exit_error(format!("failed to load locale settings: {error}")));
     let policy = settings.i18n.policy;
@@ -280,11 +270,7 @@ fn locale_read_model() -> (
 fn cmd_locale(args: &[String]) {
     match args.first().map(String::as_str) {
         Some("list") | None => {
-            let graph =
-                mesh_core_module::package::load_installed_module_graph(&root_module_graph_path())
-                    .unwrap_or_else(|error| {
-                        exit_error(format!("failed to resolve locale graph: {error}"))
-                    });
+            let graph = load_authoring_snapshot();
             let (sources, defaults) = graph
                 .locale_catalog_sources()
                 .unwrap_or_else(|error| exit_error(error));
@@ -342,11 +328,7 @@ fn cmd_locale(args: &[String]) {
         }
         Some("extract") => {
             let module_id = required_arg(args, 1, "mesh-shell locale extract <module>");
-            let graph =
-                mesh_core_module::package::load_installed_module_graph(&root_module_graph_path())
-                    .unwrap_or_else(|error| {
-                        exit_error(format!("failed to resolve locale graph: {error}"))
-                    });
+            let graph = load_authoring_snapshot();
             let mut catalog = serde_json::Map::new();
             for key in graph.localized_keys(module_id) {
                 catalog.insert(key, serde_json::Value::String(String::new()));
@@ -450,8 +432,7 @@ fn cmd_locale_set_with_policy(requested: Option<String>, policy: mesh_core_confi
         settings.i18n.fallback_locale.clone(),
     )
     .unwrap_or_else(|error| exit_error(format!("invalid locale: {error}")));
-    let graph = mesh_core_module::package::load_installed_module_graph(&root_module_graph_path())
-        .unwrap_or_else(|error| exit_error(format!("failed to resolve locale graph: {error}")));
+    let graph = load_authoring_snapshot();
     let (sources, defaults) = graph
         .locale_catalog_sources()
         .unwrap_or_else(|error| exit_error(error));
@@ -679,6 +660,20 @@ fn root_module_graph_path() -> std::path::PathBuf {
         .join("config/module.json")
 }
 
+fn load_authoring_snapshot_at(
+    root_path: &std::path::Path,
+) -> Result<
+    mesh_core_module::package::AuthoringSnapshot,
+    mesh_core_module::package::ModuleManifestError,
+> {
+    mesh_core_module::package::load_authoring_snapshot(root_path)
+}
+
+fn load_authoring_snapshot() -> mesh_core_module::package::AuthoringSnapshot {
+    load_authoring_snapshot_at(&root_module_graph_path())
+        .unwrap_or_else(|error| exit_error(format!("failed to resolve authoring graph: {error}")))
+}
+
 fn profile_paths() -> mesh_core_module::package::ProfilePaths {
     mesh_core_module::package::ProfilePaths::from_root_graph(&root_module_graph_path())
         .unwrap_or_else(|error| exit_error(error.to_string()))
@@ -787,9 +782,7 @@ fn cmd_profile(args: &[String]) {
             let mut profile = paths
                 .load_or_default(profile_id)
                 .unwrap_or_else(|error| exit_error(error));
-            let graph =
-                mesh_core_module::package::load_installed_module_graph(&root_module_graph_path())
-                    .unwrap_or_else(|error| exit_error(error));
+            let graph = load_authoring_snapshot();
             let module = graph
                 .module(module_id)
                 .unwrap_or_else(|| exit_error(format!("module {module_id} is not installed")));
@@ -891,8 +884,8 @@ fn cmd_profile(args: &[String]) {
         Some("prune") => {
             let profile_id = required_arg(args, 1, "mesh-shell profile prune <profile>");
             let root_path = root_module_graph_path();
-            let graph = mesh_core_module::package::load_installed_module_graph(&root_path)
-                .unwrap_or_else(|error| exit_error(error));
+            let graph =
+                load_authoring_snapshot_at(&root_path).unwrap_or_else(|error| exit_error(error));
             let mut profile = paths
                 .load(profile_id)
                 .unwrap_or_else(|error| exit_error(error));
@@ -1049,8 +1042,7 @@ fn cmd_install(args: &[String]) {
     }
 
     let install_result = (|| -> Result<Option<String>, String> {
-        let graph = mesh_core_module::package::load_installed_module_graph(&root_path)
-            .map_err(|error| error.to_string())?;
+        let graph = load_authoring_snapshot_at(&root_path).map_err(|error| error.to_string())?;
         let installed = graph
             .module(&manifest.name)
             .ok_or_else(|| "installed module was not discovered".to_string())?;
@@ -1509,7 +1501,7 @@ fn lock_paths() -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) 
 fn installed_manifests(
     root_path: &std::path::Path,
 ) -> std::collections::BTreeMap<String, mesh_core_module::package::ModuleManifest> {
-    mesh_core_module::package::load_installed_module_graph(root_path)
+    load_authoring_snapshot_at(root_path)
         .map(|graph| {
             graph
                 .modules()
@@ -1893,14 +1885,7 @@ fn cmd_config_doctor() {
     // Module namespaces need manifests to validate against, so the module graph
     // is resolved here — no surfaces are created and no Wayland connection is
     // made.
-    let authoring_graph =
-        match mesh_core_module::package::load_installed_module_graph(&root_module_graph_path()) {
-            Ok(graph) => graph,
-            Err(err) => {
-                eprintln!("failed to resolve modules: {err}");
-                std::process::exit(1);
-            }
-        };
+    let authoring_graph = load_authoring_snapshot();
     let mut shell = Shell::new();
     shell.discover_modules();
     if let Err(err) = shell.resolve_modules() {
@@ -1911,7 +1896,7 @@ fn cmd_config_doctor() {
 
     for namespace in store.namespace_names() {
         let module_id = namespace.split('#').next().unwrap_or(namespace);
-        let Some(module) = shell.module(module_id) else {
+        let Some(module) = authoring_graph.module(module_id) else {
             if !module_id.starts_with('@') {
                 // An interface namespace (`mesh.audio`) is owned by a contract,
                 // not a module directory; nothing to check it against here.
@@ -1928,8 +1913,13 @@ fn cmd_config_doctor() {
             continue;
         };
 
-        let compiled = if mesh_core_frontend::is_frontend_module(&module.manifest) {
-            match mesh_core_frontend::compile_frontend_module(&module.manifest, &module.path) {
+        let manifest = module.manifest.clone().into_runtime_manifest();
+        let module_path = module
+            .manifest_path
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let compiled = if mesh_core_frontend::is_frontend_module(&manifest) {
+            match mesh_core_frontend::compile_frontend_module(&manifest, module_path) {
                 Ok(compiled) => Some(compiled),
                 Err(error) => {
                     diagnostics.push(mesh_core_config::SettingsDiagnostic::warning(
@@ -1948,7 +1938,7 @@ fn cmd_config_doctor() {
             mesh_core_surface_config::resolve_frontend_module_settings_with_props(
                 namespace,
                 store.namespace(namespace),
-                &module.manifest,
+                &manifest,
                 compiled
                     .as_ref()
                     .and_then(|compiled| compiled.component.props.as_ref()),
@@ -2045,22 +2035,21 @@ fn count(noun: &str, n: usize) -> String {
 /// writes are pinned: later changes to the module's own defaults no longer
 /// reach them.
 fn cmd_config_eject(module_id: &str) {
-    let mut shell = Shell::new();
-    shell.discover_modules();
-    if let Err(err) = shell.resolve_modules() {
-        eprintln!("failed to resolve modules: {err}");
-        std::process::exit(1);
-    }
-
-    let Some(module) = shell.module(module_id) else {
+    let graph = load_authoring_snapshot();
+    let Some(module) = graph.module(module_id) else {
         eprintln!("no such module: {module_id}");
         eprintln!("run 'mesh-shell list' to see discovered modules");
         std::process::exit(1);
     };
 
     let mut store = load_settings_store();
-    let compiled = if mesh_core_frontend::is_frontend_module(&module.manifest) {
-        match mesh_core_frontend::compile_frontend_module(&module.manifest, &module.path) {
+    let manifest = module.manifest.clone().into_runtime_manifest();
+    let module_path = module
+        .manifest_path
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+    let compiled = if mesh_core_frontend::is_frontend_module(&manifest) {
+        match mesh_core_frontend::compile_frontend_module(&manifest, module_path) {
             Ok(compiled) => Some(compiled),
             Err(error) => {
                 eprintln!("failed to load {module_id} component props: {error}");
@@ -2076,7 +2065,7 @@ fn cmd_config_eject(module_id: &str) {
     let resolved = mesh_core_surface_config::resolve_frontend_module_settings_with_props(
         module_id,
         store.namespace(module_id),
-        &module.manifest,
+        &manifest,
         props_block,
     );
     let surface =
