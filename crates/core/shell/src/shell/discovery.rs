@@ -2138,6 +2138,16 @@ impl Shell {
     fn sync_module_graph_health(&mut self, graph: &InstalledModuleGraph) {
         for (module_id, module) in &mut self.modules {
             let Some(node) = graph.module(module_id) else {
+                module.set_static_health(ModuleHealthRecord::unavailable(
+                    "module is not present in the installed graph",
+                    false,
+                ));
+                if let Err(error) = module.mark_unloaded() {
+                    tracing::debug!(
+                        module_id,
+                        "module absent from graph could not be unloaded: {error}"
+                    );
+                }
                 continue;
             };
             let diagnostics = graph
@@ -2180,6 +2190,15 @@ impl Shell {
                 ModuleHealthRecord::healthy()
             };
             module.set_static_health(health);
+            if !node.enabled {
+                if let Err(error) = module.mark_unloaded() {
+                    tracing::debug!(module_id, "disabled module could not be unloaded: {error}");
+                }
+            } else if module.state == ModuleState::Discovered
+                && let Err(error) = module.transition(ModuleState::Resolved)
+            {
+                tracing::debug!(module_id, "module could not enter resolved state: {error}");
+            }
         }
     }
 
@@ -2517,6 +2536,14 @@ impl Shell {
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
         if indices.is_empty() {
+            if let Some(module) = self.modules.get_mut(module_id)
+                && let Err(error) = module.mark_unloaded()
+            {
+                tracing::debug!(
+                    module_id,
+                    "frontend module without mounted instances could not be unloaded: {error}"
+                );
+            }
             self.locale = locale;
             return Ok(VecDeque::new());
         }
@@ -2575,6 +2602,11 @@ impl Shell {
 
     pub(super) fn unmount_components(&mut self) -> VecDeque<CoreRequest> {
         let mut requests = VecDeque::new();
+        let module_ids = self
+            .components
+            .iter()
+            .map(|runtime| runtime.component.id().to_string())
+            .collect::<HashSet<_>>();
         for component_index in 0..self.components.len() {
             match self.components[component_index].unmount() {
                 Ok(component_requests) => requests.extend(component_requests),
@@ -2586,6 +2618,16 @@ impl Shell {
                     );
                     self.contain_component_failure(component_index, "unmount", &error);
                 }
+            }
+        }
+        for module_id in module_ids {
+            if let Some(module) = self.modules.get_mut(&module_id)
+                && let Err(error) = module.mark_unloaded()
+            {
+                tracing::debug!(
+                    module_id,
+                    "frontend shutdown could not unload module: {error}"
+                );
             }
         }
         requests

@@ -105,9 +105,6 @@ The 2026-06-18 redesign largely shipped: canonical `module.json` with
 `mesh.uses` / `mesh.provides` / `mesh.implements`, the graph as single source of
 truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
-- [ ] Make module lifecycle and health authoritative across graph, frontend, and
-      backend states, including explicit unload/recovery/quarantine and service
-      unavailability delivery.
 - [ ] Align the lock schema with the specification and populate dependency and
       composition provenance so uninstall/update/rollback decisions operate on
       complete state.

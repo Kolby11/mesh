@@ -160,15 +160,6 @@ impl Shell {
         initial_event_provider_id: String,
         identity: mesh_core_backend::BackendIdentity,
     ) -> BackendRuntimeSlot {
-        if let Some(module) = self.modules.get_mut(&candidate.module_id) {
-            module.clear_quarantine();
-            if let Err(error) = module.mark_loaded() {
-                tracing::debug!(
-                    module_id = candidate.module_id.as_str(),
-                    "backend candidate did not enter loaded state: {error}"
-                );
-            }
-        }
         let generation = mesh_core_backend::next_runtime_generation();
         let (cmd_tx, cmd_rx) = mpsc::channel(mesh_core_backend::BACKEND_COMMAND_QUEUE_CAPACITY);
 

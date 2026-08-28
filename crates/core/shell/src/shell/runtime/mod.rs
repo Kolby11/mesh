@@ -105,7 +105,10 @@ impl Shell {
         runtime.clear_failure_state();
         runtime.component.clear_runtime_failure();
         if was_unhealthy {
-            if let Some(module) = self.modules.get_mut(&module_id) {
+            let another_instance_unhealthy = self.components.iter().any(|other| {
+                other.component.id() == module_id && (other.failure_count != 0 || other.quarantined)
+            });
+            if !another_instance_unhealthy && let Some(module) = self.modules.get_mut(&module_id) {
                 module.clear_quarantine();
                 let _ = module.mark_running();
             }

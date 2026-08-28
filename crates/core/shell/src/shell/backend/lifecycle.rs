@@ -14,6 +14,17 @@ impl Shell {
     pub(in crate::shell) fn shutdown_backend_runtimes(&mut self, runtime: &Runtime) {
         self.service_handlers.clear();
 
+        let active_modules = self
+            .backend_runtimes
+            .values()
+            .map(|slot| {
+                let identity = *slot
+                    .identity
+                    .read()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                (slot.interface.clone(), slot.provider_id.clone(), identity)
+            })
+            .collect::<Vec<_>>();
         let mut slots = self
             .backend_runtimes
             .drain()
@@ -26,6 +37,18 @@ impl Shell {
         );
         if let Some(pending) = self.pending_profile_switch.take() {
             slots.extend(pending.candidate_backends.into_values());
+        }
+        for (interface, provider_id, identity) in active_modules {
+            self.record_backend_runtime_status_with_identity_and_lifecycle(
+                interface.clone(),
+                provider_id.clone(),
+                identity,
+                BackendRuntimeStatus::Stopped,
+                "shell runtime stopped".to_string(),
+                false,
+                true,
+            );
+            self.retire_backend_provider_generation(&interface, &provider_id, identity);
         }
         for slot in slots {
             self.settle_stopped_backend_generation(&slot);
@@ -184,6 +207,27 @@ impl Shell {
         message: String,
         publish_health: bool,
     ) {
+        self.record_backend_runtime_status_with_identity_and_lifecycle(
+            interface,
+            provider_id,
+            identity,
+            status,
+            message,
+            publish_health,
+            true,
+        );
+    }
+
+    fn record_backend_runtime_status_with_identity_and_lifecycle(
+        &mut self,
+        interface: String,
+        provider_id: String,
+        identity: mesh_core_backend::BackendIdentity,
+        status: BackendRuntimeStatus,
+        message: String,
+        publish_health: bool,
+        update_module_lifecycle: bool,
+    ) {
         let is_failure = matches!(
             status,
             BackendRuntimeStatus::InvalidManifest
@@ -226,7 +270,16 @@ impl Shell {
                     failure_count,
                 },
             );
-        self.update_module_runtime_lifecycle(&provider_id, status, &message);
+        if update_module_lifecycle
+            && self.backend_runtime_status_is_authoritative(
+                &interface,
+                &provider_id,
+                identity,
+                status,
+            )
+        {
+            self.update_module_runtime_lifecycle(&provider_id, status, &message);
+        }
         self.publish_backend_health_at_identity(
             &interface,
             &provider_id,
@@ -237,7 +290,7 @@ impl Shell {
         );
     }
 
-    fn update_module_runtime_lifecycle(
+    pub(in crate::shell) fn update_module_runtime_lifecycle(
         &mut self,
         provider_id: &str,
         status: BackendRuntimeStatus,
@@ -279,6 +332,55 @@ impl Shell {
                 "module lifecycle state did not accept backend status: {error}"
             );
         }
+    }
+
+    fn backend_runtime_status_is_authoritative(
+        &self,
+        interface: &str,
+        provider_id: &str,
+        identity: mesh_core_backend::BackendIdentity,
+        status: BackendRuntimeStatus,
+    ) -> bool {
+        let pending_candidate =
+            self.pending_backend_runtimes
+                .get(interface)
+                .is_some_and(|pending| {
+                    pending.slot.provider_id == provider_id
+                        && (identity == mesh_core_backend::BackendIdentity::default()
+                            || *pending
+                                .slot
+                                .identity
+                                .read()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                                == identity)
+                })
+                || self.profile_candidate_is_pending_at_identity(interface, provider_id, identity);
+        if pending_candidate {
+            return false;
+        }
+
+        // The legacy, identity-less lifecycle channel is also used for
+        // startup validation failures before a runtime slot exists. Preserve
+        // that authoritative path; once an identity is present, require the
+        // live or committed generation to own the transition.
+        identity == mesh_core_backend::BackendIdentity::default()
+            || self.backend_runtimes.get(interface).is_some_and(|slot| {
+                slot.provider_id == provider_id
+                    && *slot
+                        .identity
+                        .read()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        == identity
+            })
+            || self.committed_provider_generation_matches(
+                interface,
+                provider_id,
+                identity,
+                matches!(
+                    status,
+                    BackendRuntimeStatus::Stopped | BackendRuntimeStatus::Quarantined
+                ),
+            )
     }
 
     fn committed_provider_generation_matches(
@@ -736,12 +838,14 @@ impl Shell {
             let previous_interface = previous.slot.interface.clone();
             let previous_provider = previous.slot.provider_id.clone();
             self.retire_backend_runtime_slot(previous.slot);
-            self.record_backend_runtime_status_at_identity(
+            self.record_backend_runtime_status_with_identity_and_lifecycle(
                 previous_interface,
                 previous_provider,
                 identity,
                 BackendRuntimeStatus::Stopped,
                 "superseded by a newer provider switch".to_string(),
+                true,
+                false,
             );
         }
         self.pending_backend_runtimes.insert(interface, pending);
@@ -772,12 +876,14 @@ impl Shell {
                 let message = format!(
                     "provider {provider_id} became ready for {interface}, but its selection could not be saved: {error}"
                 );
-                self.record_backend_runtime_status_at_identity(
+                self.record_backend_runtime_status_with_identity_and_lifecycle(
                     interface.to_string(),
                     provider_id.to_string(),
                     identity,
                     BackendRuntimeStatus::Failed,
                     message.clone(),
+                    true,
+                    false,
                 );
                 self.diagnostics.record_lifecycle_error(
                     "@mesh/settings".to_string(),
@@ -817,18 +923,26 @@ impl Shell {
             }
         }
         self.backend_supervision.remove(interface);
+        let identity = *pending
+            .slot
+            .identity
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let initial_state = pending.initial_state;
         self.replace_backend_runtime(interface.to_string(), pending.slot);
         self.note_backend_running(interface);
         if let Some(payload) = initial_state {
             self.publish_prepared_backend_state(interface, provider_id, payload);
         }
-        self.publish_backend_health(
-            interface,
-            provider_id,
+        if let Some(module) = self.modules.get_mut(provider_id) {
+            module.clear_quarantine();
+        }
+        self.record_backend_runtime_status_at_identity(
+            interface.to_string(),
+            provider_id.to_string(),
+            identity,
             BackendRuntimeStatus::Running,
-            "backend runtime ready",
-            true,
+            "backend runtime ready".to_string(),
         );
         tracing::info!(
             interface,
@@ -898,12 +1012,14 @@ impl Shell {
             );
             return;
         }
-        self.record_backend_runtime_status_at_identity(
+        self.record_backend_runtime_status_with_identity_and_lifecycle(
             interface.clone(),
             provider_id.clone(),
             identity,
             runtime_status,
-            message,
+            message.clone(),
+            true,
+            !is_prepared_provider,
         );
         if self.handle_profile_backend_lifecycle_at_identity(
             &interface,
@@ -952,7 +1068,12 @@ impl Shell {
                     | BackendRuntimeStatus::Stopped
             ) && let Some(pending) = self.pending_backend_runtimes.remove(&interface)
             {
+                let has_current_runtime = self.backend_runtimes.contains_key(&interface);
+                let module_id = pending.slot.provider_id.clone();
                 self.retire_backend_runtime_slot(pending.slot);
+                if !has_current_runtime {
+                    self.update_module_runtime_lifecycle(&module_id, runtime_status, &message);
+                }
                 tracing::warn!(
                     interface,
                     provider_id,
@@ -1067,19 +1188,26 @@ impl Shell {
         let Some(pending) = self.pending_backend_runtimes.remove(interface) else {
             return;
         };
+        let has_current_runtime = self.backend_runtimes.contains_key(interface);
+        let module_id = pending.slot.provider_id.clone();
         let identity = *pending
             .slot
             .identity
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         self.retire_backend_runtime_slot(pending.slot);
-        self.record_backend_runtime_status_at_identity(
+        self.record_backend_runtime_status_with_identity_and_lifecycle(
             interface.to_string(),
             provider_id.to_string(),
             identity,
             BackendRuntimeStatus::Failed,
             message.to_string(),
+            true,
+            false,
         );
+        if !has_current_runtime {
+            self.update_module_runtime_lifecycle(&module_id, BackendRuntimeStatus::Failed, message);
+        }
         tracing::warn!(interface, provider_id, "{message}");
     }
 

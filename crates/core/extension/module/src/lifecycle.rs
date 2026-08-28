@@ -161,6 +161,7 @@ impl ModuleInstance {
                 | (ModuleState::Loaded, ModuleState::Unloaded)
                 | (ModuleState::Initialized, ModuleState::Unloaded)
                 | (ModuleState::Resolved, ModuleState::Unloaded)
+                | (ModuleState::Discovered, ModuleState::Unloaded)
                 | (ModuleState::Errored, ModuleState::Unloaded)
                 | (ModuleState::Quarantined, ModuleState::Unloaded)
                 | (_, ModuleState::Quarantined)
@@ -181,26 +182,26 @@ impl ModuleInstance {
 
         if to == ModuleState::Errored {
             self.error_count += 1;
-            self.runtime_health = ModuleHealthRecord::unavailable(
+            self.set_runtime_health(ModuleHealthRecord::unavailable(
                 self.last_error
                     .clone()
                     .unwrap_or_else(|| "module runtime failed".to_string()),
                 true,
-            );
+            ));
         }
 
         if to == ModuleState::Quarantined {
             self.quarantined = true;
-            self.runtime_health = ModuleHealthRecord::unavailable(
+            self.set_runtime_health(ModuleHealthRecord::unavailable(
                 self.last_error
                     .clone()
                     .unwrap_or_else(|| "module runtime quarantined".to_string()),
                 false,
-            );
+            ));
         }
 
         if to == ModuleState::Unloaded {
-            self.runtime_health = ModuleHealthRecord::unavailable("module unloaded", true);
+            self.set_runtime_health(ModuleHealthRecord::unavailable("module unloaded", true));
         }
 
         self.state = to;
@@ -228,7 +229,7 @@ impl ModuleInstance {
     }
 
     pub fn set_static_health(&mut self, health: ModuleHealthRecord) {
-        self.static_health = health;
+        self.static_health = preserve_health_since(&self.static_health, health);
     }
 
     pub fn mark_loaded(&mut self) -> Result<(), LifecycleError> {
@@ -269,12 +270,12 @@ impl ModuleInstance {
         if self.state == ModuleState::Initialized || self.state == ModuleState::Suspended {
             self.transition(ModuleState::Running)?;
         }
-        self.runtime_health = ModuleHealthRecord::healthy();
+        self.set_runtime_health(ModuleHealthRecord::healthy());
         Ok(())
     }
 
     pub fn mark_degraded(&mut self, reason: impl Into<String>) {
-        self.runtime_health = ModuleHealthRecord::degraded(reason);
+        self.set_runtime_health(ModuleHealthRecord::degraded(reason));
     }
 
     pub fn mark_failed(&mut self, reason: impl Into<String>) -> Result<(), LifecycleError> {
@@ -284,7 +285,7 @@ impl ModuleInstance {
             self.transition(ModuleState::Errored)?;
         } else {
             self.error_count = self.error_count.saturating_add(1);
-            self.runtime_health = ModuleHealthRecord::unavailable(reason, true);
+            self.set_runtime_health(ModuleHealthRecord::unavailable(reason, true));
         }
         Ok(())
     }
@@ -299,7 +300,7 @@ impl ModuleInstance {
     pub fn mark_quarantined(&mut self, reason: impl Into<String>) -> Result<(), LifecycleError> {
         let reason = reason.into();
         self.last_error = Some(reason.clone());
-        self.runtime_health = ModuleHealthRecord::unavailable(reason, false);
+        self.set_runtime_health(ModuleHealthRecord::unavailable(reason, false));
         self.quarantined = true;
         if self.state != ModuleState::Quarantined {
             self.transition(ModuleState::Quarantined)?;
@@ -315,8 +316,22 @@ impl ModuleInstance {
         if self.state == ModuleState::Quarantined {
             self.state = ModuleState::Resolved;
         }
-        self.runtime_health = ModuleHealthRecord::healthy();
+        self.set_runtime_health(ModuleHealthRecord::healthy());
     }
+
+    fn set_runtime_health(&mut self, health: ModuleHealthRecord) {
+        self.runtime_health = preserve_health_since(&self.runtime_health, health);
+    }
+}
+
+fn preserve_health_since(
+    previous: &ModuleHealthRecord,
+    mut next: ModuleHealthRecord,
+) -> ModuleHealthRecord {
+    if previous.state == next.state {
+        next.since = previous.since;
+    }
+    next
 }
 
 #[derive(Debug, thiserror::Error)]

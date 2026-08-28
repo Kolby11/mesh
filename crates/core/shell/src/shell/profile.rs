@@ -1854,6 +1854,12 @@ impl Shell {
         if !is_candidate {
             return false;
         }
+        let candidate_module_id = pending
+            .candidate_backends
+            .get(interface)
+            .map(|slot| slot.provider_id.clone())
+            .expect("profile candidate was checked above");
+        let has_current_runtime = self.backend_runtimes.contains_key(interface);
         let should_commit = if status == BackendRuntimeStatus::Running {
             pending.candidate_started.insert(interface.to_string());
             if !needs_initial_state || pending.candidate_initial_states.contains_key(interface) {
@@ -1878,6 +1884,13 @@ impl Shell {
             self.abort_pending_profile_switch(format!(
                 "provider {provider_id} failed to initialize for {interface}"
             ));
+            if !has_current_runtime {
+                self.update_module_runtime_lifecycle(
+                    &candidate_module_id,
+                    BackendRuntimeStatus::Failed,
+                    "profile candidate failed to initialize",
+                );
+            }
         }
         true
     }
@@ -1929,9 +1942,17 @@ impl Shell {
             return true;
         };
         if !self.validate_service_state_shape(interface, &actual_provider_id, &payload) {
+            let has_current_runtime = self.backend_runtimes.contains_key(interface);
             self.abort_pending_profile_switch(format!(
                 "provider {actual_provider_id} emitted an invalid initial service snapshot for {interface}"
             ));
+            if !has_current_runtime {
+                self.update_module_runtime_lifecycle(
+                    &actual_provider_id,
+                    BackendRuntimeStatus::Failed,
+                    "provider emitted an invalid initial service snapshot",
+                );
+            }
             return true;
         }
         let should_commit = if let Some(pending) = self.pending_profile_switch.as_mut() {
@@ -2067,7 +2088,6 @@ impl Shell {
             self.register_component(Box::new(prepared.component));
         }
         let mut prepared_states = Vec::new();
-        let mut ready_providers = Vec::new();
 
         let obsolete = self
             .backend_runtimes
@@ -2081,6 +2101,10 @@ impl Shell {
         for (interface, slot) in pending.candidate_backends {
             let initial_state = initial_states.get(&interface).cloned();
             let provider_id = slot.provider_id.clone();
+            let identity = *slot
+                .identity
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             *slot
                 .event_provider_id
                 .write()
@@ -2088,7 +2112,16 @@ impl Shell {
             self.backend_supervision.remove(&interface);
             self.replace_backend_runtime(interface.clone(), slot);
             self.note_backend_running(&interface);
-            ready_providers.push((interface.clone(), provider_id.clone()));
+            if let Some(module) = self.modules.get_mut(&provider_id) {
+                module.clear_quarantine();
+            }
+            self.record_backend_runtime_status_at_identity(
+                interface.clone(),
+                provider_id.clone(),
+                identity,
+                BackendRuntimeStatus::Running,
+                "backend runtime ready".to_string(),
+            );
             if let Some(payload) = initial_state {
                 prepared_states.push((interface, provider_id, payload));
             }
@@ -2225,15 +2258,6 @@ impl Shell {
                     }
                 }
             }
-        }
-        for (interface, provider_id) in ready_providers {
-            self.publish_backend_health(
-                &interface,
-                &provider_id,
-                BackendRuntimeStatus::Running,
-                "backend runtime ready",
-                true,
-            );
         }
         if let Ok(next) = self.sync_composition_service_state() {
             requests.extend(next);

@@ -300,6 +300,104 @@ fn uncommitted_provider_failure_does_not_publish_availability() {
 }
 
 #[test]
+fn uncommitted_provider_failure_only_marks_a_module_failed_without_a_current_runtime() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    let (_dir, module) = module_instance("@mesh/candidate", Some("src/main.luau"));
+    shell.modules.insert("@mesh/candidate".to_string(), module);
+
+    let identity = BackendIdentity::new(11, 1);
+    let (candidate, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/candidate");
+    *candidate
+        .identity
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = identity;
+    shell.stage_backend_runtime_activation("mesh.audio".to_string(), candidate);
+
+    // Starting a candidate is not a module lifecycle transition. The graph
+    // and the live runtime remain authoritative until this candidate commits.
+    assert_eq!(
+        shell.module("@mesh/candidate").unwrap().state,
+        ModuleState::Discovered
+    );
+    shell.handle_backend_lifecycle_at_identity(
+        "mesh.audio".to_string(),
+        "@mesh/candidate".to_string(),
+        identity,
+        "init".to_string(),
+        "failed".to_string(),
+        "candidate failed before commit".to_string(),
+    );
+
+    let module = shell.module("@mesh/candidate").unwrap();
+    assert_eq!(module.state, ModuleState::Errored);
+    assert_eq!(module.health().state, ModuleHealthState::Unavailable);
+
+    // A late event from the retired candidate cannot recover the module.
+    shell.record_backend_runtime_status_at_identity(
+        "mesh.audio".to_string(),
+        "@mesh/candidate".to_string(),
+        identity,
+        BackendRuntimeStatus::Running,
+        "late candidate recovery".to_string(),
+    );
+    let module = shell.module("@mesh/candidate").unwrap();
+    assert_eq!(module.state, ModuleState::Errored);
+    assert_eq!(module.health().state, ModuleHealthState::Unavailable);
+}
+
+#[test]
+fn failed_provider_candidate_preserves_the_current_module_lifecycle() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    let (_dir, module) = module_instance("@mesh/audio", Some("src/main.luau"));
+    shell.modules.insert("@mesh/audio".to_string(), module);
+
+    let old_identity = BackendIdentity::new(10, 1);
+    let (old_slot, _old_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/audio");
+    *old_slot
+        .identity
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = old_identity;
+    shell.replace_backend_runtime("mesh.audio".to_string(), old_slot);
+    shell.handle_backend_lifecycle_at_identity(
+        "mesh.audio".to_string(),
+        "@mesh/audio".to_string(),
+        old_identity,
+        "runtime".to_string(),
+        "running".to_string(),
+        "current provider is ready".to_string(),
+    );
+
+    let candidate_identity = BackendIdentity::new(11, 2);
+    let (candidate, _candidate_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/audio");
+    *candidate
+        .identity
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = candidate_identity;
+    shell.stage_backend_runtime_activation("mesh.audio".to_string(), candidate);
+    shell.handle_backend_lifecycle_at_identity(
+        "mesh.audio".to_string(),
+        "@mesh/audio".to_string(),
+        candidate_identity,
+        "init".to_string(),
+        "failed".to_string(),
+        "replacement failed before commit".to_string(),
+    );
+
+    let module = shell.module("@mesh/audio").unwrap();
+    assert_eq!(module.state, ModuleState::Running);
+    assert_eq!(module.health().state, ModuleHealthState::Healthy);
+    assert_eq!(
+        shell
+            .backend_runtimes
+            .get("mesh.audio")
+            .map(|slot| slot.provider_id.as_str()),
+        Some("@mesh/audio")
+    );
+}
+
+#[test]
 fn stale_restart_deadline_cannot_clear_or_run_a_newer_supervision_token() {
     let mut shell = Shell::new();
     shell.backend_supervision.insert(
