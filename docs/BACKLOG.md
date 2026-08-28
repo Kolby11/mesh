@@ -105,9 +105,6 @@ The 2026-06-18 redesign largely shipped: canonical `module.json` with
 `mesh.uses` / `mesh.provides` / `mesh.implements`, the graph as single source of
 truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
-- [ ] Align the lock schema with the specification and populate dependency and
-      composition provenance so uninstall/update/rollback decisions operate on
-      complete state.
 - [ ] Move the remaining built-in debug and theme/locale service behavior
       behind generic providers. Startup sounds and backend profiling use the
       generic contract/runtime path; core-owned service state still branches.

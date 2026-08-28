@@ -20,6 +20,7 @@ use super::{
     SignedProvenance, TrustTier, atomic_write, dependency_spec_to_string, resolve_closure,
     validate_module_tree, validate_regular_file,
 };
+use mesh_core_service::{parse_contract_version, parse_version_req};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -111,6 +112,19 @@ fn default_lock_schema_version() -> u32 {
     LOCK_SCHEMA_VERSION
 }
 
+fn validate_locked_version(
+    kind: &str,
+    module_id: &str,
+    version: &str,
+) -> Result<(), ModuleManifestError> {
+    if parse_contract_version(version).is_none() {
+        return Err(ModuleManifestError::Validation(format!(
+            "mesh.lock {kind} '{module_id}' has invalid semantic version '{version}'"
+        )));
+    }
+    Ok(())
+}
+
 impl Default for MeshLock {
     fn default() -> Self {
         Self {
@@ -164,7 +178,15 @@ impl MeshLock {
                 version: manifest.version.clone(),
             });
         }
-        self.refresh_metadata(installed_manifests.iter());
+        // Callers normally pass the post-install graph, but keeping the
+        // module being upserted in this set makes the lock authoritative even
+        // when a package client supplies the pre-install inventory.
+        let mut manifests = installed_manifests
+            .iter()
+            .filter(|installed| installed.name != manifest.name)
+            .collect::<Vec<_>>();
+        manifests.push(manifest);
+        self.refresh_metadata(manifests);
         Ok(())
     }
 
@@ -241,6 +263,19 @@ impl MeshLock {
         }
         if let Some(composition) = &self.composition {
             ModuleId::parse(&composition.module)?;
+            validate_locked_version("composition", &composition.module, &composition.version)?;
+            let Some(entry) = self.modules.get(&composition.module) else {
+                return Err(ModuleManifestError::Validation(format!(
+                    "mesh.lock composition '{}' is not present in modules",
+                    composition.module
+                )));
+            };
+            if entry.version != composition.version {
+                return Err(ModuleManifestError::Validation(format!(
+                    "mesh.lock composition '{}' records version {}, but its module entry is {}",
+                    composition.module, composition.version, entry.version
+                )));
+            }
         }
         for (module_id, entry) in &self.modules {
             ModuleId::parse(module_id).map_err(|_| {
@@ -248,11 +283,19 @@ impl MeshLock {
                     "mesh.lock entry '{module_id}' must be a module id such as @scope/name"
                 ))
             })?;
+            validate_locked_version("module", module_id, &entry.version)?;
             for requester in &entry.requested_by {
                 ModuleId::parse(requester)?;
             }
             for dependency_id in entry.dependencies.keys() {
                 ModuleId::parse(dependency_id)?;
+            }
+            for (dependency_id, requirement) in &entry.dependencies {
+                if parse_version_req(requirement).is_none() {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "mesh.lock entry '{module_id}' dependency '{dependency_id}' has invalid version range '{requirement}'"
+                    )));
+                }
             }
             if !entry.digest.starts_with("sha256:") {
                 return Err(ModuleManifestError::Validation(format!(
@@ -293,6 +336,7 @@ impl MeshLock {
                     .collect();
                 if manifest.mesh.kind == ModuleKind::Composition
                     && let Some(extends) = &manifest.mesh.extends
+                    && !entry.dependencies.contains_key(extends)
                 {
                     entry.dependencies.insert(extends.clone(), "*".into());
                 }
@@ -790,6 +834,45 @@ mod tests {
     }
 
     #[test]
+    fn upsert_includes_the_new_module_when_inventory_is_pre_install() {
+        let dir = temp_dir("upsert-inventory");
+        let installed = dir.join("desk");
+        let module_json = r#"{"name":"@me/desk","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","entry":"main.mesh","dependencies":{"modules":{"@me/shared":"^1.0.0"}}}}"#;
+        write(&installed, "module.json", module_json);
+        write(&installed, "main.mesh", "<template><box/></template>");
+        let manifest = ModuleManifest::from_json_str(module_json).unwrap();
+        let shared = ModuleManifest::from_json_str(
+            r#"{"name":"@me/shared","version":"1.2.0","mesh":{"apiVersion":"0.1","kind":"library"}}"#,
+        )
+        .unwrap();
+        let mut lock = MeshLock::new();
+        lock.modules
+            .insert("@me/shared".into(), locked("sha256:shared"));
+
+        lock.upsert_module(
+            &manifest,
+            &installed,
+            &ModuleSource::Path {
+                path: "desk".into(),
+            },
+            None,
+            &[shared],
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(
+            lock.modules["@me/desk"].dependencies,
+            BTreeMap::from([("@me/shared".to_string(), "^1.0.0".to_string())])
+        );
+        assert_eq!(
+            lock.modules["@me/shared"].requested_by,
+            BTreeSet::from(["@me/desk".to_string()])
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn schema_v2_lock_is_migrated_to_the_authoritative_v3_format() {
         let dir = temp_dir("migrate-v2");
         let path = dir.join("mesh.lock");
@@ -820,7 +903,7 @@ mod tests {
     #[test]
     fn composition_extends_edges_are_locked_as_dependency_provenance() {
         let derived = ModuleManifest::from_json_str(
-            r#"{"name":"@me/derived","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"composition","extends":"@me/base","compose":{}}}"#,
+            r#"{"name":"@me/derived","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"composition","extends":"@me/base","dependencies":{"modules":{"@me/base":"^1.0.0"}},"compose":{}}}"#,
         )
         .unwrap();
         let base = ModuleManifest::from_json_str(
@@ -837,12 +920,27 @@ mod tests {
 
         assert_eq!(
             lock.modules["@me/derived"].dependencies,
-            BTreeMap::from([("@me/base".to_string(), "*".to_string())])
+            BTreeMap::from([("@me/base".to_string(), "^1.0.0".to_string())])
         );
         assert_eq!(
             lock.modules["@me/base"].requested_by,
             BTreeSet::from(["@me/derived".to_string()])
         );
+    }
+
+    #[test]
+    fn composition_provenance_must_match_a_locked_module_version() {
+        let mut lock = MeshLock::new();
+        lock.modules
+            .insert("@me/desk".into(), locked("sha256:desk"));
+        lock.composition = Some(LockedComposition {
+            module: "@me/desk".into(),
+            version: "2.0.0".into(),
+        });
+
+        let error = lock.validate().unwrap_err().to_string();
+
+        assert!(error.contains("records version 2.0.0"), "{error}");
     }
 
     #[test]

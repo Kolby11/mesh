@@ -920,7 +920,7 @@ pub fn rollback(
         None => generations.into_iter().next().expect("checked non-empty"),
     };
 
-    let target = MeshLock::from_path(&path).map_err(|error| error.to_string())?;
+    let mut target = MeshLock::from_path(&path).map_err(|error| error.to_string())?;
     let mut restored = Vec::new();
     fs::create_dir_all(modules_dir)
         .map_err(|error| format!("failed to create modules directory: {error}"))?;
@@ -1021,6 +1021,22 @@ pub fn rollback(
             .save_profile_if_revision(&paths, &profile_id, &profile, expected_revision)
             .map_err(|error| error.to_string())?;
     }
+
+    // A migrated or hand-authored historical lock may not carry the v3
+    // dependency metadata. Rebuild it from the exact trees just restored
+    // before publishing the selected generation so rollback cannot make a
+    // required module appear directly removable.
+    let manifests = target
+        .modules
+        .keys()
+        .map(|module_id| {
+            let installed =
+                module_install_path(modules_dir, module_id).map_err(|error| error.to_string())?;
+            ModuleManifest::from_path(&installed.join("module.json"))
+                .map_err(|error| format!("failed to read rolled-back module {module_id}: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    target.refresh_metadata(manifests.iter());
 
     transaction
         .save_exact_lock(&target, modules_dir)

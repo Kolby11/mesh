@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-08-28
+**Updated:** 2026-08-29
 
 ## Now
 
@@ -31,12 +31,14 @@ activation snapshots, prepared frontends remain hidden until commit, and
 shutdown advances through explicit quiescing, teardown, flushing, and stopped
 phases. Module activation now rejects unsatisfied required dependency closures,
 incompatible module/interface versions, invalid composition pins, and duplicate
-contract identities before runtime contributions are indexed. The next open
-Module lifecycle and health are now reconciled
+contract identities before runtime contributions are indexed. Module lifecycle
+and health are now reconciled
 at graph commit, frontend/backend activation, candidate failure, recovery,
-quarantine, and teardown boundaries. The next open item is aligning the lock
-schema with the specification and populating dependency and composition
-provenance.
+quarantine, and teardown boundaries. The module lock now uses schema v3 with
+validated versions, direct dependency requirements, reverse requesters,
+composition provenance, and rollback metadata rebuilt from restored manifests.
+The next open item is moving the remaining built-in debug and theme/locale
+service behavior behind generic providers.
 `aspect-ratio` is now part of the bounded style profile, and the shipped
 navigation bar derives its control sizing from the bar root through it rather
 than restating px sizes per component. That exposed the next surface item:
