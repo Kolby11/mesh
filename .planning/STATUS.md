@@ -6,7 +6,8 @@
 
 Section 15's first twelve items and Section 16's path-safe uninstall, atomic
 package mutation, typed live profile switching, shared CLI/shell package
-ownership contract, and canonical graph-authoring snapshot are complete.
+ownership contract, canonical graph-authoring snapshot, and typed update
+flags with clean replace behavior are complete.
 Package operations now share one core-owned typed owner/operation contract,
 locked durable transaction journal, fsynced snapshots, staged writes, startup
 recovery, and failure-injection regressions; the CLI and shell abort failed
@@ -21,5 +22,5 @@ canonical module and root runtime contracts as activation while retaining
 source-aware editor diagnostics. The active runtime publishes immutable
 activation snapshots, prepared frontends remain hidden until commit, and
 shutdown advances through explicit quiescing, teardown, flushing, and stopped
-phases. The next open item is Section 16's typed CLI flag behavior. See
+phases. The next open item is Section 16's syntax-aware LSP analysis. See
 [`.planning/log/2026-08.md`](log/2026-08.md).

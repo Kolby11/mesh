@@ -1513,7 +1513,7 @@ fn installed_manifests(
 }
 
 fn cmd_update(args: &[String]) {
-    use update::EditPolicy;
+    let options = update::UpdateOptions::parse(args).unwrap_or_else(|error| exit_error(error));
 
     let root_path = root_module_graph_path();
     let config_dir = root_path
@@ -1536,27 +1536,14 @@ fn cmd_update(args: &[String]) {
     let mut lock = mesh_core_module::package::MeshLock::load_or_default(&lock_path)
         .unwrap_or_else(|error| exit_error(error));
 
-    let policy = if args.iter().any(|arg| arg == "--replace") {
-        EditPolicy::Replace
-    } else if args.iter().any(|arg| arg == "--keep") {
-        EditPolicy::Keep
-    } else {
-        EditPolicy::Refuse
-    };
-    let dry_run = args.iter().any(|arg| arg == "--dry-run");
-    let only = args
-        .iter()
-        .find(|arg| arg.starts_with('@'))
-        .map(String::as_str);
-
     let installed = installed_manifests(&root_path);
     let approvals = root.capability_approvals;
     let plan = update::plan_update_from_staged_graph(
         &root_path,
         &modules_dir,
         &lock,
-        only,
-        policy,
+        options.only.as_deref(),
+        options.policy,
         &installed,
         &approvals,
         &mut transaction,
@@ -1585,7 +1572,12 @@ fn cmd_update(args: &[String]) {
     for module_id in &plan.edited {
         eprintln!(
             "{module_id} has local edits since it was installed; \
-             repeat with --merge to rebase them, --keep to pin it, or --replace to discard them"
+             repeat with --keep to pin it, or --replace to discard and reset the installed tree"
+        );
+    }
+    for module_id in &plan.replaced {
+        eprintln!(
+            "{module_id} has local edits; --replace will discard them and replace the entire installed tree"
         );
     }
     for breaking in &plan.breaking {
@@ -1605,7 +1597,7 @@ fn cmd_update(args: &[String]) {
         let _ = transaction.abort();
         exit_error("update refused; nothing was changed");
     }
-    if dry_run {
+    if options.dry_run {
         println!("dry run: no source, lock, or profile was changed");
         transaction.abort().unwrap_or_else(|error| {
             exit_error(format!("failed to close update transaction: {error}"))
@@ -2141,7 +2133,7 @@ fn cmd_help() {
     println!("            prune <profile>      drop overrides the composition no longer has");
     println!("  install   Install a module or composition from a path or git URL");
     println!("  update    Update locked modules to their source's current revision");
-    println!("            [<module-id>] [--dry-run] [--keep|--replace]");
+    println!("            [<module-id>|--all] [--dry-run] [--keep|--replace]");
     println!("  rollback  Restore the previous lock generation [<generation>]");
     println!("  uninstall Remove a module [--force]");
     println!("  lock      verify   recompute digests and report local edits");

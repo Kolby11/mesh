@@ -15,8 +15,8 @@ use mesh_core_capability::{
     Capability, CapabilityCatalog, CapabilityPolicy, EffectiveCapabilities, PrivilegeLevel,
 };
 use mesh_core_module::package::{
-    InstalledModuleGraph, LockedModule, MeshLock, ModuleGraphDiff, ModuleManifest, ModuleSource,
-    PackageTransaction, RootModuleGraphManifest, TrustTier, has_local_edits,
+    InstalledModuleGraph, LockedModule, MeshLock, ModuleGraphDiff, ModuleId, ModuleManifest,
+    ModuleSource, PackageTransaction, RootModuleGraphManifest, TrustTier, has_local_edits,
     load_authoring_snapshot, load_module_signature, module_install_path, module_tree_digest,
     validate_module_tree,
 };
@@ -35,6 +35,82 @@ pub enum EditPolicy {
     Keep,
     /// Discard local changes.
     Replace,
+}
+
+const UPDATE_USAGE: &str =
+    "usage: mesh-shell update [<module-id>|--all] [--dry-run] [--keep|--replace]";
+
+/// Typed arguments for the update command. Parsing happens before opening a
+/// package transaction so malformed invocations cannot create journals or
+/// touch the installed graph.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateOptions {
+    pub only: Option<String>,
+    pub policy: EditPolicy,
+    pub dry_run: bool,
+}
+
+impl UpdateOptions {
+    pub fn parse(args: &[String]) -> Result<Self, String> {
+        let mut target: Option<Option<String>> = None;
+        let mut policy: Option<EditPolicy> = None;
+        let mut dry_run = false;
+
+        for argument in args {
+            match argument.as_str() {
+                "--all" => {
+                    if target.is_some() {
+                        return Err(format!(
+                            "update accepts only one target; do not combine --all or multiple module ids\n{UPDATE_USAGE}"
+                        ));
+                    }
+                    target = Some(None);
+                }
+                "--dry-run" => {
+                    if dry_run {
+                        return Err(format!("duplicate --dry-run\n{UPDATE_USAGE}"));
+                    }
+                    dry_run = true;
+                }
+                "--keep" => {
+                    if policy.is_some() {
+                        return Err(format!(
+                            "update accepts only one of --keep and --replace\n{UPDATE_USAGE}"
+                        ));
+                    }
+                    policy = Some(EditPolicy::Keep);
+                }
+                "--replace" => {
+                    if policy.is_some() {
+                        return Err(format!(
+                            "update accepts only one of --keep and --replace\n{UPDATE_USAGE}"
+                        ));
+                    }
+                    policy = Some(EditPolicy::Replace);
+                }
+                value if value.starts_with('-') => {
+                    return Err(format!("unknown update option: {value}\n{UPDATE_USAGE}"));
+                }
+                value => {
+                    if target.is_some() {
+                        return Err(format!(
+                            "update accepts only one target; do not combine --all or multiple module ids\n{UPDATE_USAGE}"
+                        ));
+                    }
+                    let module_id = ModuleId::parse(value).map_err(|error| {
+                        format!("invalid update target: {error}\n{UPDATE_USAGE}")
+                    })?;
+                    target = Some(Some(module_id.as_str().to_owned()));
+                }
+            }
+        }
+
+        Ok(Self {
+            only: target.flatten(),
+            policy: policy.unwrap_or(EditPolicy::Refuse),
+            dry_run,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -65,6 +141,8 @@ pub struct UpdatePlan {
     pub capability_additions: Vec<(String, Capability, PrivilegeLevel)>,
     /// Modules with local edits, under `EditPolicy::Refuse`.
     pub edited: Vec<String>,
+    /// Modules whose local edits will be discarded by `EditPolicy::Replace`.
+    pub replaced: BTreeSet<String>,
     /// Required dependency/provider failures in the staged candidate graph.
     pub graph_breaking: Vec<String>,
     /// The exact capability decisions made for the staged graph.
@@ -87,9 +165,9 @@ impl UpdatePlan {
     }
 
     pub fn changed(&self) -> impl Iterator<Item = &CandidateModule> {
-        self.candidates
-            .iter()
-            .filter(|candidate| !candidate.is_unchanged())
+        self.candidates.iter().filter(|candidate| {
+            !candidate.is_unchanged() || self.replaced.contains(&candidate.module_id)
+        })
     }
 }
 
@@ -326,11 +404,13 @@ pub fn plan_update(
         if edited && policy == EditPolicy::Keep {
             continue;
         }
-
         let ModuleSource::Git { reference, .. } = &locked.source else {
             // Path installs have no upstream to poll; they update by reinstall.
             continue;
         };
+        if edited && policy == EditPolicy::Replace {
+            plan.replaced.insert(module_id.clone());
+        }
         let revision = resolve_revision(&installed_at, reference.as_deref())?;
         let candidate_manifest = manifest_at_revision(&installed_at, &revision)?;
         plan.candidates.push(CandidateModule {
@@ -416,10 +496,12 @@ fn collect_update_candidates(
         if edited && policy == EditPolicy::Keep {
             continue;
         }
-
         let ModuleSource::Git { .. } = &locked.source else {
             continue;
         };
+        if edited && policy == EditPolicy::Replace {
+            plan.replaced.insert(module_id.clone());
+        }
         let revision = resolve_candidate_revision(&installed_at, &locked.source)?;
         plan.candidates.push(CandidateModule {
             module_id: module_id.clone(),
@@ -492,7 +574,7 @@ fn stage_candidate_graph(
         }
 
         if let Some((source, revision, unchanged)) = candidate_by_id.get(&module_id)
-            && !unchanged
+            && (!unchanged || plan.replaced.contains(&module_id))
         {
             let Some(revision) = revision.as_deref() else {
                 return Err(format!("candidate {module_id} has no resolved revision"));
@@ -813,7 +895,9 @@ pub fn commit_update(
         .keys()
         .filter_map(|module_id| module_install_path(modules_dir, module_id).ok())
         .filter(|path| path.exists())
-        .map(|path| ModuleManifest::from_path(&path).map_err(|error| error.to_string()))
+        .map(|path| {
+            ModuleManifest::from_path(&path.join("module.json")).map_err(|error| error.to_string())
+        })
         .collect::<Result<Vec<_>, _>>()?;
     lock.refresh_metadata(manifests.iter());
 
@@ -1110,6 +1194,71 @@ mod tests {
         .unwrap()
     }
 
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    fn remove_test_workspace(path: &Path) {
+        let metadata = fs::symlink_metadata(path).unwrap();
+        let mut permissions = metadata.permissions();
+        permissions.set_readonly(false);
+        fs::set_permissions(path, permissions).unwrap();
+        if metadata.is_dir() {
+            for entry in fs::read_dir(path).unwrap() {
+                remove_test_workspace(&entry.unwrap().path());
+            }
+            fs::remove_dir(path).unwrap();
+        } else {
+            fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn update_options_parse_typed_targets_and_policies() {
+        assert_eq!(
+            UpdateOptions::parse(&args(&["@me/audio", "--dry-run", "--replace"])).unwrap(),
+            UpdateOptions {
+                only: Some("@me/audio".into()),
+                policy: EditPolicy::Replace,
+                dry_run: true,
+            }
+        );
+        assert_eq!(
+            UpdateOptions::parse(&args(&["--all", "--keep"])).unwrap(),
+            UpdateOptions {
+                only: None,
+                policy: EditPolicy::Keep,
+                dry_run: false,
+            }
+        );
+        assert_eq!(
+            UpdateOptions::parse(&[]).unwrap(),
+            UpdateOptions {
+                only: None,
+                policy: EditPolicy::Refuse,
+                dry_run: false,
+            }
+        );
+    }
+
+    #[test]
+    fn update_options_reject_unknown_duplicate_and_conflicting_arguments() {
+        for (values, expected) in [
+            (&["--merge"][..], "unknown update option: --merge"),
+            (
+                &["--keep", "--replace"][..],
+                "only one of --keep and --replace",
+            ),
+            (&["--all", "@me/audio"][..], "only one target"),
+            (&["--dry-run", "--dry-run"][..], "duplicate --dry-run"),
+            (&["not-a-module"][..], "invalid update target"),
+        ] {
+            let error = UpdateOptions::parse(&args(values)).unwrap_err();
+            assert!(error.contains(expected), "{error}");
+            assert!(error.contains("usage: mesh-shell update"), "{error}");
+        }
+    }
+
     const BASE_CONTRACT: &str = r#"{"state":[{"name":"percent","type":"float"}],
         "methods":[{"name":"set_volume","args":[{"name":"percent","type":"float"}],
         "returns":"Result"}],"events":[],"capabilities":{"required":["service.audio.read"]}}"#;
@@ -1303,7 +1452,8 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!("mesh-update-contract-{name}-{nonce}"));
+        let workspace = std::env::temp_dir().join(format!("mesh-update-contract-{name}-{nonce}"));
+        let root = workspace.join("source");
         std::fs::create_dir_all(root.join("contracts")).unwrap();
         git(&root, &["init", "--quiet", "--initial-branch=main"]);
         git(&root, &["config", "user.email", "test@example.invalid"]);
@@ -1447,6 +1597,71 @@ mod tests {
         );
         transaction.abort().unwrap();
         std::fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    fn replace_policy_cleans_local_edits_even_when_revision_is_unchanged() {
+        let (workspace, root_path, installed, mut lock, _) = staged_graph_fixture("replace");
+        git(&installed, &["checkout", "--quiet", "main"]);
+        let current_revision = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&installed)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let current_revision = String::from_utf8_lossy(&current_revision.stdout)
+            .trim()
+            .to_string();
+        let current_manifest = ModuleManifest::from_path(&installed.join("module.json")).unwrap();
+        let entry = lock.modules.get_mut("@me/audio").unwrap();
+        entry.version = current_manifest.version.clone();
+        entry.revision = Some(current_revision);
+        entry.digest = module_tree_digest(&installed).unwrap();
+        let installed_graph = load_authoring_snapshot(&root_path).unwrap();
+        let installed_manifests = installed_graph
+            .modules()
+            .into_iter()
+            .map(|module| (module.id.clone(), module.manifest.clone()))
+            .collect::<BTreeMap<_, _>>();
+        std::fs::write(installed.join("local-only.txt"), "discard me").unwrap();
+
+        let config = root_path.parent().unwrap();
+        let modules_dir = config.join("modules");
+        let approvals = BTreeMap::from([(
+            "@me/audio".to_string(),
+            vec!["service.audio.read".to_string()],
+        )]);
+        let mut transaction =
+            PackageTransaction::begin(config, PackageOwner::Cli, PackageOperation::Update).unwrap();
+        transaction
+            .protect_package_state(&root_path, &modules_dir)
+            .unwrap();
+        let plan = plan_update_from_staged_graph(
+            &root_path,
+            &modules_dir,
+            &lock,
+            None,
+            EditPolicy::Replace,
+            &installed_manifests,
+            &approvals,
+            &mut transaction,
+        )
+        .unwrap();
+
+        assert_eq!(plan.replaced, BTreeSet::from(["@me/audio".to_string()]));
+        assert_eq!(plan.changed().count(), 1);
+        assert!(!plan.is_refused());
+        commit_update(&modules_dir, config, &mut lock, &plan, &mut transaction).unwrap();
+        transaction.commit().unwrap();
+
+        assert!(!installed.join("local-only.txt").exists());
+        assert_eq!(
+            ModuleManifest::from_path(&installed.join("module.json"))
+                .unwrap()
+                .version,
+            current_manifest.version
+        );
+        remove_test_workspace(&workspace);
     }
 
     #[test]
