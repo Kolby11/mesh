@@ -62,7 +62,7 @@ pub(super) struct PreparedProfileFrontend {
 #[cfg(test)]
 mod tests {
     use super::super::discovery::effective_profile_settings;
-    use super::{CandidatePreview, CandidatePreviewSurface, update_module_prop_override};
+    use super::{CandidatePreview, CandidatePreviewSurface, Shell, update_module_prop_override};
     use mesh_core_config::SettingsStore;
     use mesh_core_module::package::ShellProfile;
     use std::sync::Arc;
@@ -96,6 +96,29 @@ mod tests {
             "compact"
         );
         assert_eq!(shared.shell().theme.active, "mesh-default-light");
+    }
+
+    #[test]
+    fn failed_profile_recovery_restores_only_the_candidate_active_pointer() {
+        let directory = tempfile::tempdir().unwrap();
+        let graph_path = directory.path().join("module.json");
+        std::fs::write(&graph_path, "{}").unwrap();
+        let paths = mesh_core_module::package::ProfilePaths::from_root_graph(&graph_path).unwrap();
+        paths
+            .save("old", &ShellProfile::new())
+            .expect("save old profile");
+        paths
+            .save("new", &ShellProfile::new())
+            .expect("save new profile");
+        paths.set_active("new").unwrap();
+
+        Shell::restore_active_profile_if_current(&paths, "new", Some("old")).unwrap();
+        assert_eq!(paths.active_profile_id().unwrap().as_deref(), Some("old"));
+
+        paths.set_active("old").unwrap();
+        let error = Shell::restore_active_profile_if_current(&paths, "new", None).unwrap_err();
+        assert!(error.contains("changed to 'old'"));
+        assert_eq!(paths.active_profile_id().unwrap().as_deref(), Some("old"));
     }
 
     #[test]
@@ -431,6 +454,7 @@ pub(super) struct PendingProfileSwitch {
     /// committed. Dropping it before that point restores the package state.
     pub(in crate::shell) package_transaction: Option<PackageTransaction>,
     pub(in crate::shell) package_rollback: Option<PackageRuntimeRollback>,
+    profile_switch_ack: Option<super::types::IpcProfileSwitchResponseSender>,
 }
 
 pub(super) struct PendingResourcePreparation {
@@ -449,6 +473,7 @@ pub(super) struct PendingResourcePreparation {
     /// the later runtime activation commit.
     pub(in crate::shell) package_transaction: Option<PackageTransaction>,
     pub(in crate::shell) package_rollback: Option<PackageRuntimeRollback>,
+    profile_switch_ack: Option<super::types::IpcProfileSwitchResponseSender>,
 }
 
 const LEGACY_ACTIVATION_ID: &str = "@mesh/legacy-graph";
@@ -829,6 +854,7 @@ impl Shell {
             rollback: rollback.take(),
             package_transaction,
             package_rollback,
+            profile_switch_ack: None,
         });
         self.poll_pending_resource_preparation()
     }
@@ -848,14 +874,32 @@ impl Shell {
         package_transaction: Option<PackageTransaction>,
         package_rollback: Option<PackageRuntimeRollback>,
     ) -> VecDeque<CoreRequest> {
+        self.begin_profile_activation_with_package_transaction_and_ack(
+            profile_id,
+            rollback,
+            package_transaction,
+            package_rollback,
+            None,
+        )
+    }
+
+    fn begin_profile_activation_with_package_transaction_and_ack(
+        &mut self,
+        profile_id: &str,
+        rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
+        package_transaction: Option<PackageTransaction>,
+        package_rollback: Option<PackageRuntimeRollback>,
+        mut profile_switch_ack: Option<super::types::IpcProfileSwitchResponseSender>,
+    ) -> VecDeque<CoreRequest> {
         if !self.pending_backend_runtimes.is_empty() {
             abort_package_transaction(package_transaction, package_rollback, self);
             if let Some(rollback) = rollback {
                 restore_module_config(rollback);
             }
-            self.reject_profile_switch(
+            self.reject_profile_switch_with_ack(
                 profile_id,
                 "a provider switch is already being prepared".into(),
+                profile_switch_ack.take(),
             );
             return VecDeque::new();
         }
@@ -867,7 +911,11 @@ impl Shell {
                 if let Some(rollback) = rollback {
                     restore_module_config(rollback);
                 }
-                self.reject_profile_switch(profile_id, error.to_string());
+                self.reject_profile_switch_with_ack(
+                    profile_id,
+                    error.to_string(),
+                    profile_switch_ack.take(),
+                );
                 return VecDeque::new();
             }
         };
@@ -878,7 +926,11 @@ impl Shell {
                 if let Some(rollback) = rollback {
                     restore_module_config(rollback);
                 }
-                self.reject_profile_switch(profile_id, error.to_string());
+                self.reject_profile_switch_with_ack(
+                    profile_id,
+                    error.to_string(),
+                    profile_switch_ack.take(),
+                );
                 return VecDeque::new();
             }
         };
@@ -889,7 +941,11 @@ impl Shell {
                 if let Some(rollback) = rollback {
                     restore_module_config(rollback);
                 }
-                self.reject_profile_switch(profile_id, error.to_string());
+                self.reject_profile_switch_with_ack(
+                    profile_id,
+                    error.to_string(),
+                    profile_switch_ack.take(),
+                );
                 return VecDeque::new();
             }
         };
@@ -900,7 +956,11 @@ impl Shell {
                 if let Some(rollback) = rollback {
                     restore_module_config(rollback);
                 }
-                self.reject_profile_switch(profile_id, error.to_string());
+                self.reject_profile_switch_with_ack(
+                    profile_id,
+                    error.to_string(),
+                    profile_switch_ack.take(),
+                );
                 return VecDeque::new();
             }
         };
@@ -913,7 +973,11 @@ impl Shell {
                     if let Some(rollback) = rollback {
                         restore_module_config(rollback);
                     }
-                    self.reject_profile_switch(profile_id, error.to_string());
+                    self.reject_profile_switch_with_ack(
+                        profile_id,
+                        error.to_string(),
+                        profile_switch_ack.take(),
+                    );
                     return VecDeque::new();
                 }
                 Arc::new(settings)
@@ -923,7 +987,11 @@ impl Shell {
                 if let Some(rollback) = rollback {
                     restore_module_config(rollback);
                 }
-                self.reject_profile_switch(profile_id, error.to_string());
+                self.reject_profile_switch_with_ack(
+                    profile_id,
+                    error.to_string(),
+                    profile_switch_ack.take(),
+                );
                 return VecDeque::new();
             }
         };
@@ -934,7 +1002,11 @@ impl Shell {
                 if let Some(rollback) = rollback {
                     restore_module_config(rollback);
                 }
-                self.reject_profile_switch(profile_id, error.to_string());
+                self.reject_profile_switch_with_ack(
+                    profile_id,
+                    error.to_string(),
+                    profile_switch_ack.take(),
+                );
                 return VecDeque::new();
             }
         };
@@ -945,7 +1017,11 @@ impl Shell {
                 if let Some(rollback) = rollback {
                     restore_module_config(rollback);
                 }
-                self.reject_profile_switch(profile_id, error.to_string());
+                self.reject_profile_switch_with_ack(
+                    profile_id,
+                    error.to_string(),
+                    profile_switch_ack.take(),
+                );
                 return VecDeque::new();
             }
         };
@@ -960,6 +1036,7 @@ impl Shell {
             rollback,
             package_transaction,
             package_rollback,
+            profile_switch_ack,
         });
         self.poll_pending_resource_preparation()
     }
@@ -1280,10 +1357,19 @@ impl Shell {
         &mut self,
         profile_id: &str,
     ) -> VecDeque<CoreRequest> {
+        self.apply_switch_profile_with_ack(profile_id, None)
+    }
+
+    pub(in crate::shell) fn apply_switch_profile_with_ack(
+        &mut self,
+        profile_id: &str,
+        profile_switch_ack: Option<super::types::IpcProfileSwitchResponseSender>,
+    ) -> VecDeque<CoreRequest> {
         if self.pending_profile_switch.is_some() {
-            self.reject_profile_switch(
+            self.reject_profile_switch_with_ack(
                 profile_id,
                 "another profile switch is already being prepared".into(),
+                profile_switch_ack,
             );
             return VecDeque::new();
         }
@@ -1291,19 +1377,27 @@ impl Shell {
             pending.resource_job.cancel();
             restore_module_config_if_present(pending.rollback);
             abort_package_transaction(pending.package_transaction, pending.package_rollback, self);
-            self.reject_profile_switch(
+            self.reject_profile_switch_with_ack(
                 &pending.profile_id,
                 format!("profile switch was superseded by '{profile_id}'"),
+                pending.profile_switch_ack,
             );
         }
         if !self.pending_backend_runtimes.is_empty() {
-            self.reject_profile_switch(
+            self.reject_profile_switch_with_ack(
                 profile_id,
                 "a provider switch is already being prepared".into(),
+                profile_switch_ack,
             );
             return VecDeque::new();
         }
-        self.begin_profile_activation(profile_id, None)
+        self.begin_profile_activation_with_package_transaction_and_ack(
+            profile_id,
+            None,
+            None,
+            None,
+            profile_switch_ack,
+        )
     }
 
     pub(in crate::shell) fn poll_pending_resource_preparation(&mut self) -> VecDeque<CoreRequest> {
@@ -1321,6 +1415,7 @@ impl Shell {
             rollback,
             package_transaction,
             package_rollback,
+            profile_switch_ack,
         } = pending;
         let Some(result) = resource_job.try_wait() else {
             self.pending_resource_preparation = Some(PendingResourcePreparation {
@@ -1334,6 +1429,7 @@ impl Shell {
                 rollback,
                 package_transaction,
                 package_rollback,
+                profile_switch_ack,
             });
             return VecDeque::new();
         };
@@ -1355,6 +1451,7 @@ impl Shell {
                     rollback,
                     package_transaction,
                     package_rollback,
+                    profile_switch_ack,
                 )
             }
             Ok(_) => {
@@ -1363,9 +1460,10 @@ impl Shell {
                 if let Some(rollback) = rollback {
                     let _ = rollback.restore();
                 }
-                self.reject_profile_switch(
+                self.reject_profile_switch_with_ack(
                     &profile_id,
                     "candidate resources were superseded".into(),
+                    profile_switch_ack,
                 );
                 VecDeque::new()
             }
@@ -1375,9 +1473,10 @@ impl Shell {
                 if let Some(rollback) = rollback {
                     let _ = rollback.restore();
                 }
-                self.reject_profile_switch(
+                self.reject_profile_switch_with_ack(
                     &profile_id,
                     format!("candidate resources are invalid: {error}"),
+                    profile_switch_ack,
                 );
                 VecDeque::new()
             }
@@ -1396,6 +1495,7 @@ impl Shell {
         mut rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
         mut package_transaction: Option<PackageTransaction>,
         mut package_rollback: Option<PackageRuntimeRollback>,
+        mut profile_switch_ack: Option<super::types::IpcProfileSwitchResponseSender>,
     ) -> VecDeque<CoreRequest> {
         macro_rules! reject_candidate {
             ($message:expr) => {{
@@ -1407,7 +1507,11 @@ impl Shell {
                     package_rollback.take(),
                     self,
                 );
-                self.reject_profile_switch(&profile_id, $message.into());
+                self.reject_profile_switch_with_ack(
+                    &profile_id,
+                    $message.into(),
+                    profile_switch_ack.take(),
+                );
                 return VecDeque::new();
             }};
         }
@@ -1672,12 +1776,25 @@ impl Shell {
             rollback: rollback.take(),
             package_transaction: package_transaction.take(),
             package_rollback: package_rollback.take(),
+            profile_switch_ack: profile_switch_ack.take(),
         };
         if !changed.is_empty() {
             let Some(ctx) = self.backend_respawn.clone() else {
-                reject_candidate!(
-                    "backend runtime is unavailable while candidate providers need preparation"
+                if let Some(rollback) = pending.rollback.take() {
+                    let _ = rollback.restore();
+                }
+                abort_package_transaction(
+                    pending.package_transaction.take(),
+                    pending.package_rollback.take(),
+                    self,
                 );
+                self.reject_profile_switch_with_ack(
+                    &profile_id,
+                    "backend runtime is unavailable while candidate providers need preparation"
+                        .into(),
+                    pending.profile_switch_ack.take(),
+                );
+                return VecDeque::new();
             };
             for candidate in changed {
                 let interface = candidate.interface.clone();
@@ -1897,7 +2014,11 @@ impl Shell {
             false,
         ) {
             if pending.persist_active_profile
-                && let Err(restore_error) = paths.restore_active(previous_active.as_deref())
+                && let Err(restore_error) = Self::restore_active_profile_if_current(
+                    &paths,
+                    &plan.profile_id,
+                    previous_active.as_deref(),
+                )
             {
                 tracing::error!(
                     "failed to restore previous active-profile pointer after an aborted \
@@ -1914,11 +2035,24 @@ impl Shell {
         // has been updated, but before publishing any replacement runtime
         // objects. A crash after this point reopens the same committed graph;
         // every failure before it drops the transaction and restores disk.
-        if let Some(package_transaction) = pending.package_transaction.take()
-            && let Err(error) = package_transaction.commit()
-        {
-            self.abort_profile_candidate(pending, error.to_string());
-            return VecDeque::new();
+        if let Some(package_transaction) = pending.package_transaction.take() {
+            if let Err(error) = package_transaction.commit() {
+                if pending.persist_active_profile
+                    && let Err(restore_error) = Self::restore_active_profile_if_current(
+                        &paths,
+                        &plan.profile_id,
+                        previous_active.as_deref(),
+                    )
+                {
+                    tracing::error!(
+                        "failed to restore previous active-profile pointer after package \
+                         transaction abort; the durable pointer may now name a profile the \
+                         running shell never adopted: {restore_error}"
+                    );
+                }
+                self.abort_profile_candidate(pending, error.to_string());
+                return VecDeque::new();
+            }
         }
 
         self.frontend_catalog.replace(plan.catalog.clone(), None);
@@ -2093,6 +2227,12 @@ impl Shell {
             watch_generation: self.file_watch_set.generation,
             presentation_generations: Arc::new(presentation_generations),
         }));
+        if let Some(response) = pending.profile_switch_ack.take() {
+            let _ = response.send(super::types::IpcProfileSwitchResponse::Committed {
+                profile_id: plan.profile_id.clone(),
+                generation: plan.generation,
+            });
+        }
         for (interface, provider_id, payload) in prepared_states {
             let event = ServiceEvent::Updated {
                 service: interface,
@@ -2162,6 +2302,8 @@ impl Shell {
         pending: PendingProfileSwitch,
         message: String,
     ) {
+        let profile_id = pending.plan.profile_id.clone();
+        let response = pending.profile_switch_ack;
         self.clear_candidate_preview(pending.plan.generation);
         if let Some(lease) = pending.plan.resources.resource_lease.as_ref() {
             lease.retire();
@@ -2171,7 +2313,32 @@ impl Shell {
         }
         restore_module_config_if_present(pending.rollback);
         abort_package_transaction(pending.package_transaction, pending.package_rollback, self);
-        self.reject_profile_switch(&pending.plan.profile_id, message);
+        self.reject_profile_switch_with_ack(&profile_id, message, response);
+    }
+
+    fn restore_active_profile_if_current(
+        paths: &ProfilePaths,
+        candidate_profile_id: &str,
+        previous_profile_id: Option<&str>,
+    ) -> Result<(), String> {
+        let current = paths
+            .active_profile_id()
+            .map_err(|error| error.to_string())?;
+        if current.as_deref() == previous_profile_id {
+            return Ok(());
+        }
+        match current {
+            Some(current) if current == candidate_profile_id => paths
+                .restore_active(previous_profile_id)
+                .map_err(|error| error.to_string()),
+            Some(current) => Err(format!(
+                "active profile pointer changed to '{current}' during recovery; refusing to overwrite it"
+            )),
+            None => Err(
+                "active profile pointer disappeared during recovery; refusing to overwrite it"
+                    .into(),
+            ),
+        }
     }
 
     fn reject_profile_switch(&mut self, profile_id: &str, message: String) {
@@ -2181,6 +2348,22 @@ impl Shell {
             "profile_switch_rejected",
             format!("profile {profile_id}: {message}"),
         );
+    }
+
+    fn reject_profile_switch_with_ack(
+        &mut self,
+        profile_id: &str,
+        message: String,
+        response: Option<super::types::IpcProfileSwitchResponseSender>,
+    ) {
+        self.reject_profile_switch(profile_id, message.clone());
+        if let Some(response) = response {
+            let _ = response.send(super::types::IpcProfileSwitchResponse::Rejected {
+                profile_id: profile_id.to_string(),
+                generation: self.activation_generation,
+                reason: message,
+            });
+        }
     }
 }
 

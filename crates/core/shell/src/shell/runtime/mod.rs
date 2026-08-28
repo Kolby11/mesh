@@ -662,6 +662,17 @@ impl Shell {
     ) -> Result<(), ShellRunError> {
         if !self.shutdown_phase.accepts_external_work() {
             tracing::debug!(phase = ?self.shutdown_phase, "rejected shell work after shutdown quiescing");
+            if let ShellMessage::IpcProfileSwitch {
+                profile_id,
+                response,
+            } = message
+            {
+                let _ = response.send(IpcProfileSwitchResponse::Rejected {
+                    profile_id,
+                    generation: self.activation_generation,
+                    reason: format!("shell is shutting down ({:?})", self.shutdown_phase),
+                });
+            }
             return Ok(());
         }
         let message_started = self.profiling_enabled().then(std::time::Instant::now);
@@ -675,6 +686,7 @@ impl Shell {
             ShellMessage::FileWatcherStatus { .. } => "file_watcher_status",
             ShellMessage::FileWatcherStopped { .. } => "file_watcher_stopped",
             ShellMessage::Ipc(_) => "ipc",
+            ShellMessage::IpcProfileSwitch { .. } => "ipc_profile_switch",
         };
         match message {
             ShellMessage::BackendServiceUpdate {
@@ -932,6 +944,12 @@ impl Shell {
             }
             ShellMessage::Ipc(request) => {
                 pending.push_back(request);
+            }
+            ShellMessage::IpcProfileSwitch {
+                profile_id,
+                response,
+            } => {
+                pending.extend(self.apply_switch_profile_with_ack(&profile_id, Some(response)));
             }
         }
         if let Some(started) = message_started {

@@ -1,5 +1,5 @@
 use super::WakeHandle;
-use super::types::{CoreRequest, ShellMessage};
+use super::types::{CoreRequest, IpcProfileSwitchResponse, ShellMessage};
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -176,6 +176,23 @@ async fn handle_ipc_client(
         }
 
         match parse_ipc_command(command) {
+            Some(CoreRequest::SwitchProfile { profile_id }) => {
+                let (response, acknowledged) = oneshot::channel();
+                tx.send(ShellMessage::IpcProfileSwitch {
+                    profile_id,
+                    response,
+                })
+                .map_err(|_| {
+                    std::io::Error::new(std::io::ErrorKind::BrokenPipe, "shell is not running")
+                })?;
+                wake.wake();
+                let response = acknowledged.await.map_err(|_| {
+                    std::io::Error::new(std::io::ErrorKind::BrokenPipe, "shell closed")
+                })?;
+                writer
+                    .write_all(profile_switch_response_line(&response).as_bytes())
+                    .await?;
+            }
             Some(request) => {
                 tx.send(ShellMessage::Ipc(request)).map_err(|_| {
                     std::io::Error::new(std::io::ErrorKind::BrokenPipe, "shell is not running")
@@ -192,6 +209,39 @@ async fn handle_ipc_client(
     }
 
     Ok(())
+}
+
+fn profile_switch_response_line(response: &IpcProfileSwitchResponse) -> String {
+    match response {
+        IpcProfileSwitchResponse::Committed {
+            profile_id,
+            generation,
+        } => {
+            serde_json::json!({
+                "ok": true,
+                "status": "committed",
+                "profile_id": profile_id,
+                "generation": generation,
+            })
+            .to_string()
+                + "\n"
+        }
+        IpcProfileSwitchResponse::Rejected {
+            profile_id,
+            generation,
+            reason,
+        } => {
+            serde_json::json!({
+                "ok": false,
+                "status": "rejected",
+                "profile_id": profile_id,
+                "generation": generation,
+                "reason": reason,
+            })
+            .to_string()
+                + "\n"
+        }
+    }
 }
 
 async fn read_ipc_command<R: tokio::io::AsyncRead + Unpin>(
@@ -443,6 +493,50 @@ mod tests {
             let mut counter = [0u8; 8];
             rustix::io::read(reader.as_fd(), &mut counter).unwrap();
             assert_eq!(u64::from_ne_bytes(counter), 1);
+        });
+    }
+
+    #[test]
+    fn profile_switch_ipc_waits_for_and_serializes_typed_acknowledgement() {
+        let runtime = Runtime::new().unwrap();
+        runtime.block_on(async {
+            let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            let task = tokio::spawn(handle_ipc_client(server, tx, test_wake_handle()));
+
+            client
+                .write_all(b"shell:switch_profile:work\n")
+                .await
+                .unwrap();
+            client.shutdown().await.unwrap();
+            let message = rx.recv().await.unwrap();
+            let ShellMessage::IpcProfileSwitch {
+                profile_id,
+                response,
+            } = message
+            else {
+                panic!("expected a profile switch IPC message");
+            };
+            assert_eq!(profile_id, "work");
+            response
+                .send(IpcProfileSwitchResponse::Committed {
+                    profile_id: "work".into(),
+                    generation: 42,
+                })
+                .unwrap();
+
+            let mut response = String::new();
+            client.read_to_string(&mut response).await.unwrap();
+            task.await.unwrap().unwrap();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(response.trim()).unwrap(),
+                serde_json::json!({
+                    "ok": true,
+                    "status": "committed",
+                    "profile_id": "work",
+                    "generation": 42,
+                })
+            );
         });
     }
 

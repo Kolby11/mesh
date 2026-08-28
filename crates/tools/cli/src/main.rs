@@ -3,7 +3,7 @@ mod update;
 use mesh_core_module::ModuleType;
 use mesh_core_shell::{Shell, default_ipc_socket_path};
 use serde::{Deserialize, Serialize};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::process::Command;
 
@@ -516,23 +516,101 @@ fn send_ipc_command(command: &str) {
     }
 }
 
-fn try_send_ipc_command(command: &str) -> Result<String, String> {
-    let socket_path = default_ipc_socket_path();
-    let mut stream = UnixStream::connect(&socket_path).map_err(|error| {
-        format!(
-            "failed to connect to shell ipc socket {}: {error}",
-            socket_path.display()
+#[derive(Debug)]
+enum IpcCommandError {
+    Connect {
+        socket_path: std::path::PathBuf,
+        source: io::Error,
+    },
+    Send(io::Error),
+    Receive(io::Error),
+    EmptyResponse,
+    Rejected(String),
+}
+
+impl IpcCommandError {
+    fn is_absent_shell(&self) -> bool {
+        matches!(
+            self,
+            Self::Connect { source, .. }
+                if matches!(
+                    source.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+                )
         )
-    })?;
-    writeln!(stream, "{command}")
-        .map_err(|error| format!("failed to send ipc command: {error}"))?;
+    }
+}
+
+impl std::fmt::Display for IpcCommandError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Connect {
+                socket_path,
+                source,
+            } => write!(
+                formatter,
+                "failed to connect to shell ipc socket {}: {source}",
+                socket_path.display()
+            ),
+            Self::Send(source) => write!(formatter, "failed to send ipc command: {source}"),
+            Self::Receive(source) => write!(formatter, "failed to read ipc response: {source}"),
+            Self::EmptyResponse => {
+                formatter.write_str("shell ipc socket closed without a response")
+            }
+            Self::Rejected(response) => formatter.write_str(response),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "status")]
+enum ProfileSwitchAck {
+    #[serde(rename = "committed")]
+    Committed { profile_id: String, generation: u64 },
+    #[serde(rename = "rejected")]
+    Rejected {
+        profile_id: String,
+        generation: u64,
+        reason: String,
+    },
+}
+
+fn parse_profile_switch_ack(
+    response: &str,
+    requested_profile_id: &str,
+) -> Result<ProfileSwitchAck, String> {
+    let ack: ProfileSwitchAck = serde_json::from_str(response.trim())
+        .map_err(|error| format!("expected a profile switch result, got invalid JSON: {error}"))?;
+    let acknowledged_profile_id = match &ack {
+        ProfileSwitchAck::Committed { profile_id, .. }
+        | ProfileSwitchAck::Rejected { profile_id, .. } => profile_id,
+    };
+    if acknowledged_profile_id != requested_profile_id {
+        return Err(format!(
+            "acknowledged profile '{acknowledged_profile_id}', expected '{requested_profile_id}'"
+        ));
+    }
+    Ok(ack)
+}
+
+fn try_send_ipc_command(command: &str) -> Result<String, IpcCommandError> {
+    let socket_path = default_ipc_socket_path();
+    let mut stream =
+        UnixStream::connect(&socket_path).map_err(|source| IpcCommandError::Connect {
+            socket_path: socket_path.clone(),
+            source,
+        })?;
+    writeln!(stream, "{command}").map_err(IpcCommandError::Send)?;
     let mut reader = BufReader::new(stream);
     let mut response = String::new();
-    reader
+    let read = reader
         .read_line(&mut response)
-        .map_err(|error| format!("failed to read ipc response: {error}"))?;
+        .map_err(IpcCommandError::Receive)?;
+    if read == 0 {
+        return Err(IpcCommandError::EmptyResponse);
+    }
     if response.starts_with("error ") {
-        return Err(response.trim().to_string());
+        return Err(IpcCommandError::Rejected(response.trim().to_string()));
     }
     Ok(response)
 }
@@ -653,13 +731,28 @@ fn cmd_profile(args: &[String]) {
                 .unwrap_or_else(|error| exit_error(error));
             let command = format!("shell:switch_profile:{profile_id}");
             match try_send_ipc_command(&command) {
-                Ok(_) => println!("profile switch requested live: {profile_id}"),
-                Err(_) => {
+                Ok(response) => match parse_profile_switch_ack(&response, profile_id) {
+                    Ok(ProfileSwitchAck::Committed { generation, .. }) => println!(
+                        "profile switched live: {profile_id} (activation generation {generation})"
+                    ),
+                    Ok(ProfileSwitchAck::Rejected {
+                        generation, reason, ..
+                    }) => exit_error(format!(
+                        "live profile switch rejected for {profile_id} at activation generation {generation}: {reason}; active profile unchanged"
+                    )),
+                    Err(error) => exit_error(format!(
+                        "live profile switch returned an invalid acknowledgement: {error}; active profile unchanged"
+                    )),
+                },
+                Err(error) if error.is_absent_shell() => {
                     paths
                         .set_active(profile_id)
                         .unwrap_or_else(|error| exit_error(error));
                     println!("active profile: {profile_id} (applies when the shell starts)");
                 }
+                Err(error) => exit_error(format!(
+                    "live profile switch failed: {error}; active profile unchanged"
+                )),
             }
         }
         Some("show") => {
@@ -2094,6 +2187,57 @@ mod tests {
             ("git@host:group/widgets.git".to_string(), None)
         );
         assert!(parse_git_source("https://example.invalid/widgets.git#").is_err());
+    }
+
+    #[test]
+    fn profile_switch_ack_requires_matching_committed_profile() {
+        let ack = parse_profile_switch_ack(
+            r#"{"ok":true,"status":"committed","profile_id":"work","generation":7}"#,
+            "work",
+        )
+        .unwrap();
+        assert!(matches!(
+            ack,
+            ProfileSwitchAck::Committed { generation: 7, .. }
+        ));
+    }
+
+    #[test]
+    fn profile_switch_rejection_is_not_a_restart_fallback() {
+        let ack = parse_profile_switch_ack(
+            r#"{"ok":false,"status":"rejected","profile_id":"work","generation":3,"reason":"invalid profile"}"#,
+            "work",
+        )
+        .unwrap();
+        assert!(matches!(
+            ack,
+            ProfileSwitchAck::Rejected { reason, .. } if reason == "invalid profile"
+        ));
+    }
+
+    #[test]
+    fn profile_switch_ack_rejects_a_different_profile_generation() {
+        let error = parse_profile_switch_ack(
+            r#"{"status":"committed","profile_id":"other","generation":9}"#,
+            "work",
+        )
+        .unwrap_err();
+        assert!(error.contains("acknowledged profile 'other'"));
+    }
+
+    #[test]
+    fn ipc_transport_only_classifies_missing_listener_as_absent_shell() {
+        assert!(
+            IpcCommandError::Connect {
+                socket_path: "/tmp/mesh.sock".into(),
+                source: io::Error::from(io::ErrorKind::NotFound),
+            }
+            .is_absent_shell()
+        );
+        assert!(!IpcCommandError::EmptyResponse.is_absent_shell());
+        assert!(
+            !IpcCommandError::Receive(io::Error::from(io::ErrorKind::BrokenPipe)).is_absent_shell()
+        );
     }
 
     #[test]

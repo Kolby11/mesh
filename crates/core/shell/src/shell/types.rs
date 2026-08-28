@@ -15,6 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
+use tokio::sync::oneshot;
 
 pub(super) fn watched_source_mtime(path: &Path) -> Option<SystemTime> {
     std::fs::symlink_metadata(path)
@@ -421,6 +422,21 @@ impl LatestServiceState {
     }
 }
 
+#[derive(Debug)]
+pub(super) enum IpcProfileSwitchResponse {
+    Committed {
+        profile_id: String,
+        generation: u64,
+    },
+    Rejected {
+        profile_id: String,
+        generation: u64,
+        reason: String,
+    },
+}
+
+pub(super) type IpcProfileSwitchResponseSender = oneshot::Sender<IpcProfileSwitchResponse>;
+
 #[derive(Debug, Clone)]
 pub(super) struct ThemeWatchState {
     pub(super) path: PathBuf,
@@ -497,6 +513,10 @@ pub(super) enum ShellMessage {
         generation: u64,
     },
     Ipc(CoreRequest),
+    IpcProfileSwitch {
+        profile_id: String,
+        response: IpcProfileSwitchResponseSender,
+    },
 }
 
 #[derive(Debug, Default)]

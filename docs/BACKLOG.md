@@ -96,7 +96,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/16-developer-and-authoring-tools/improvements.md)
 
-- [ ] Make live profile switching use typed acknowledgements and exact-generation recovery.
 - [ ] Make CLI and shell use one package ownership and transaction contract.
 - [ ] Refresh one canonical graph-authoring snapshot for CLI, doctor, LSP, and runtime consumers.
 - [ ] Generate LSP manifest/schema validation from runtime contracts instead of duplicated under-approximations.
