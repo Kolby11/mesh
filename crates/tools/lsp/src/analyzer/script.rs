@@ -233,6 +233,51 @@ fn complete_interface_proxy(
     items
 }
 
+pub(crate) fn service_member_markdown(
+    var_name: &str,
+    interface: &str,
+    member: &str,
+    registry: &ModuleRegistry,
+) -> Option<String> {
+    if let Some(contract) = registry.interface_contract(interface) {
+        if let Some(field) = contract
+            .state_fields
+            .iter()
+            .find(|field| field.name == member)
+        {
+            let ty = contract_type_to_luau(&field.field_type);
+            return Some(format!(
+                "**`{var_name}.{member}`**: `{ty}`{}",
+                field
+                    .description
+                    .as_deref()
+                    .map(|description| format!("\n\n{description}"))
+                    .unwrap_or_default()
+            ));
+        }
+        if let Some(method) = contract.methods.iter().find(|method| method.name == member) {
+            let signature = contract_method_signature(method);
+            return Some(format!(
+                "**`{var_name}.{member}`**\n\nTyped command declared by `{interface}`.\n\n```luau\n{signature}\n```"
+            ));
+        }
+        return None;
+    }
+
+    let shape = registry.interface_shape(interface)?;
+    if shape.state_fields.iter().any(|field| field == member) {
+        return Some(format!(
+            "**`{var_name}.{member}`**\n\nState field emitted by the `{interface}` backend service.\n\nRead as `{var_name}.{member}`."
+        ));
+    }
+    if shape.commands.iter().any(|command| command == member) {
+        return Some(format!(
+            "**`{var_name}.{member}`**\n\nSends the `{member}` command to the `{interface}` backend service.\n\nCall as `{var_name}.{member}()`."
+        ));
+    }
+    None
+}
+
 fn contract_state_item(
     interface: &str,
     field: &mesh_core_service::ContractStateField,

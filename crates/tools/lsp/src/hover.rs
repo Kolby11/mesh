@@ -1,14 +1,14 @@
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 
 use crate::{
-    analyzer::script::{element_field_markdown, element_ref_markdown},
+    analyzer::script::{element_field_markdown, element_ref_markdown, service_member_markdown},
     document::Document,
     knowledge::{css::CSS_PROPERTIES, mesh_api::MESH_API_ENTRIES, tags::TAG_DEFS},
     module_registry::ModuleRegistry,
     util::{Block, block_at_offset, block_content, position_to_offset},
 };
 
-pub fn hover(doc: &Document, position: Position, _registry: &ModuleRegistry) -> Option<Hover> {
+pub fn hover(doc: &Document, position: Position, registry: &ModuleRegistry) -> Option<Hover> {
     let offset = position_to_offset(&doc.source, position);
     let loc = block_at_offset(&doc.source, offset);
     let content = block_content(&doc.source, &loc.block);
@@ -16,7 +16,7 @@ pub fn hover(doc: &Document, position: Position, _registry: &ModuleRegistry) -> 
     let markdown = match &loc.block {
         Block::Template => hover_template(content, loc.offset_in_block)?,
         Block::Style => hover_style(doc, content, loc.offset_in_block)?,
-        Block::Script => hover_script(doc, content, loc.offset_in_block)?,
+        Block::Script => hover_script(doc, content, loc.offset_in_block, registry)?,
         _ => return None,
     };
 
@@ -119,7 +119,12 @@ fn hover_style(doc: &Document, content: &str, offset: usize) -> Option<String> {
     None
 }
 
-fn hover_script(doc: &Document, content: &str, offset: usize) -> Option<String> {
+fn hover_script(
+    doc: &Document,
+    content: &str,
+    offset: usize,
+    registry: &ModuleRegistry,
+) -> Option<String> {
     let before = &content[..offset.min(content.len())];
     let after = &content[offset.min(content.len())..];
 
@@ -162,6 +167,10 @@ fn hover_script(doc: &Document, content: &str, offset: usize) -> Option<String> 
         }
     }
 
+    if let Some(markdown) = hover_service_member(doc, &token, registry) {
+        return Some(markdown);
+    }
+
     if token.starts_with("mesh.") {
         let api_path = token.trim_start_matches("mesh.");
         if let Some(entry) = MESH_API_ENTRIES.iter().find(|e| e.path == api_path) {
@@ -181,9 +190,25 @@ fn hover_script(doc: &Document, content: &str, offset: usize) -> Option<String> 
     None
 }
 
+fn hover_service_member(doc: &Document, token: &str, registry: &ModuleRegistry) -> Option<String> {
+    let separator = token.find(['.', ':'])?;
+    let (var_name, member) = token.split_at(separator);
+    let member = member.strip_prefix(['.', ':'])?;
+    let interface = doc.interface_proxies.get(var_name)?;
+    service_member_markdown(var_name, interface, member, registry)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::hover_template;
+    use mesh_core_service::parse_interface_contract;
+    use tower_lsp::lsp_types::{HoverContents, Url};
+
+    use super::{hover, hover_template};
+    use crate::{
+        document::Document,
+        module_registry::{InterfaceShape, ModuleRegistry},
+        util::offset_to_position,
+    };
 
     #[test]
     fn gesture_and_touch_hover_uses_event_documentation() {
@@ -193,6 +218,90 @@ mod tests {
             assert!(markdown.contains(handler));
             assert!(markdown.contains("InteractiveElement"));
         }
+    }
+
+    #[test]
+    fn service_member_hover_uses_declared_contract_documentation() {
+        let source = r#"<template></template>
+
+<script lang="luau">
+local audio = require("mesh.audio")
+audio.percent
+audio.set_volume()
+</script>
+"#;
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source.into());
+        let mut registry = ModuleRegistry::empty();
+        let contract = parse_interface_contract(
+            "mesh.audio",
+            "1.0",
+            &serde_json::json!({
+                "state": {
+                    "percent": { "type": "float", "description": "Current volume." }
+                },
+                "methods": {
+                    "set_volume": {
+                        "args": [{ "name": "percent", "type": "float" }],
+                        "returns": "Result"
+                    }
+                },
+                "events": {},
+                "types": {}
+            }),
+        )
+        .unwrap();
+        registry
+            .interface_contracts
+            .insert("mesh.audio".into(), contract);
+
+        let field = hover_at(&doc, source.find("percent").unwrap(), &registry);
+        assert!(field.contains("audio.percent"));
+        assert!(field.contains("number"));
+        assert!(field.contains("Current volume."));
+
+        let command = hover_at(&doc, source.find("set_volume").unwrap(), &registry);
+        assert!(command.contains("audio.set_volume"));
+        assert!(command.contains("set_volume(percent: number): Result"));
+        assert!(command.contains("Typed command declared by `mesh.audio`."));
+    }
+
+    #[test]
+    fn service_member_hover_uses_inferred_backend_shape_when_contract_is_missing() {
+        let source = r#"<template></template>
+
+<script lang="luau">
+local power = require("mesh.power")
+power.available
+power.refresh()
+</script>
+"#;
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source.into());
+        let mut registry = ModuleRegistry::empty();
+        registry.interface_shapes.insert(
+            "mesh.power".into(),
+            InterfaceShape {
+                state_fields: vec!["available".into()],
+                commands: vec!["refresh".into()],
+            },
+        );
+
+        let field = hover_at(&doc, source.find("available").unwrap(), &registry);
+        assert!(field.contains("State field emitted by the `mesh.power` backend service."));
+        assert!(field.contains("Read as `power.available`."));
+
+        let command = hover_at(&doc, source.find("refresh").unwrap(), &registry);
+        assert!(
+            command.contains("Sends the `refresh` command to the `mesh.power` backend service.")
+        );
+        assert!(command.contains("Call as `power.refresh()`."));
+    }
+
+    fn hover_at(doc: &Document, offset: usize, registry: &ModuleRegistry) -> String {
+        let hover = hover(doc, offset_to_position(&doc.source, offset), registry).expect("hover");
+        let HoverContents::Markup(markdown) = hover.contents else {
+            panic!("expected markdown hover");
+        };
+        markdown.value
     }
 }
 

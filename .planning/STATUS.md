@@ -27,6 +27,7 @@ contexts use the full_moon token stream for comment- and string-safe recovery.
 The active runtime publishes immutable
 activation snapshots, prepared frontends remain hidden until commit, and
 shutdown advances through explicit quiescing, teardown, flushing, and stopped
-phases. The next open item is Section 16's registry-backed hover.
+phases. The next open item is Section 16's module-contained definition
+resolution.
 See
 [`.planning/log/2026-08.md`](log/2026-08.md).
