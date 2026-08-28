@@ -1534,6 +1534,7 @@ impl Shell {
         };
 
         let interfaces = InterfaceRegistry::new();
+        let core_service_providers = CoreServiceRegistry::builtin();
         let mut theme_contract = builtin_contract(
             "mesh.theme",
             &[
@@ -1616,6 +1617,22 @@ impl Shell {
                     ("policy", "string"),
                     ("revision", "string"),
                     ("durable_revision", "string"),
+                ],
+            ),
+        );
+        register_builtin_contract(
+            &interfaces,
+            builtin_contract(
+                mesh_core_debug::DEBUG_INTERFACE,
+                &[],
+                &[
+                    ("toggle_overlay", &[]),
+                    ("toggle_layout_bounds", &[]),
+                    ("toggle_element_picker", &[]),
+                    ("open_source", &[("path", "string"), ("line", "int?")]),
+                    ("toggle_profiling", &[]),
+                    ("run_benchmark", &[("scenario_id", "string")]),
+                    ("cycle_tab", &[]),
                 ],
             ),
         );
@@ -1722,54 +1739,9 @@ impl Shell {
                 ],
             ),
         );
-        interfaces.register(InterfaceProvider {
-            interface: mesh_core_debug::DEBUG_INTERFACE.to_string(),
-            version: Some("1.0".to_string()),
-            base_module: Some("@mesh/debug".to_string()),
-            provider_module: mesh_core_debug::DEBUG_SOURCE_MODULE_ID.to_string(),
-            backend_name: "Shell".to_string(),
-            priority: 100,
-        });
-        interfaces.register(InterfaceProvider {
-            interface: "mesh.theme".to_string(),
-            version: Some("1.0".to_string()),
-            base_module: Some("@mesh/theme-interface".to_string()),
-            provider_module: "@mesh/shell".to_string(),
-            backend_name: "Shell Theme".to_string(),
-            priority: 200,
-        });
-        interfaces.register(InterfaceProvider {
-            interface: "mesh.locale".to_string(),
-            version: Some("1.0".to_string()),
-            base_module: Some("@mesh/locale-interface".to_string()),
-            provider_module: "@mesh/shell".to_string(),
-            backend_name: "Shell Locale".to_string(),
-            priority: 200,
-        });
-        interfaces.register(InterfaceProvider {
-            interface: "mesh.settings".to_string(),
-            version: Some("1.0".to_string()),
-            base_module: Some("@mesh/settings-interface".to_string()),
-            provider_module: "@mesh/shell".to_string(),
-            backend_name: "Shell Settings Store".to_string(),
-            priority: 200,
-        });
-        interfaces.register(InterfaceProvider {
-            interface: "mesh.packages".to_string(),
-            version: Some("1.0".to_string()),
-            base_module: Some("@mesh/packages-interface".to_string()),
-            provider_module: "@mesh/shell".to_string(),
-            backend_name: "Shell Package Graph".to_string(),
-            priority: 200,
-        });
-        interfaces.register(InterfaceProvider {
-            interface: "mesh.composition".to_string(),
-            version: Some("1.0".to_string()),
-            base_module: Some("@mesh/composition-interface".to_string()),
-            provider_module: "@mesh/shell".to_string(),
-            backend_name: "Shell Composition".to_string(),
-            priority: 200,
-        });
+        for provider in core_service_providers.providers() {
+            interfaces.register(provider.interface_provider());
+        }
         let builtin_interface_catalog = interfaces.catalog();
 
         let now = std::time::Instant::now();
@@ -1792,6 +1764,7 @@ impl Shell {
             locale,
             diagnostics,
             interfaces,
+            core_service_providers,
             builtin_interface_catalog,
             capability_policy,
             effective_capabilities: Arc::new(HashMap::new()),

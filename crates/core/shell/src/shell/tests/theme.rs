@@ -2,7 +2,7 @@ use super::common::*;
 use super::*;
 
 #[test]
-fn provider_theme_update_is_ignored_when_shell_snapshot_is_authoritative() {
+fn provider_theme_update_is_accepted_through_the_generic_state_path() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();
     let seen_events = Arc::new(Mutex::new(Vec::new()));
@@ -14,20 +14,20 @@ fn provider_theme_update_is_ignored_when_shell_snapshot_is_authoritative() {
     let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.theme", "@mesh/shell-theme");
     shell.replace_backend_runtime("mesh.theme".to_string(), slot);
 
+    shell.sync_theme_service_state().unwrap();
+    let mut payload = shell.latest_service_state["mesh.theme"].state.clone();
+    payload["current"] = serde_json::json!("mesh-default-light");
+    payload["theme_id"] = serde_json::json!("mesh-default-light");
+    payload["is_dark"] = serde_json::json!(false);
     shell
-        .broadcast_service_event(service_update(
-            "mesh.theme",
-            "@mesh/shell-theme",
-            serde_json::json!({
-                "current": "mesh-default-light",
-                "theme_id": "mesh-default-light",
-                "is_dark": false,
-            }),
-        ))
+        .broadcast_service_event(service_update("mesh.theme", "@mesh/shell-theme", payload))
         .unwrap();
 
-    assert!(seen_events.lock().unwrap().is_empty());
-    assert!(!shell.latest_service_state.contains_key("mesh.theme"));
+    assert!(!seen_events.lock().unwrap().is_empty());
+    assert_eq!(
+        shell.latest_service_state["mesh.theme"].provider_id,
+        "@mesh/shell-theme"
+    );
 }
 
 #[test]
@@ -41,7 +41,7 @@ fn theme_snapshot_is_published_by_the_shell() {
 
     assert_eq!(
         shell.latest_service_state["mesh.theme"].provider_id,
-        "@mesh/shell"
+        "@mesh/shell-theme"
     );
 }
 

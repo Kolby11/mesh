@@ -507,7 +507,30 @@ pub(super) fn debug_catalog() -> InterfaceCatalog {
                 description: None,
             },
         ],
-        methods: Vec::new(),
+        methods: vec![
+            ("toggle_overlay", Vec::new()),
+            ("toggle_layout_bounds", Vec::new()),
+            ("toggle_element_picker", Vec::new()),
+            ("open_source", vec![("path", "string"), ("line", "int?")]),
+            ("toggle_profiling", Vec::new()),
+            ("run_benchmark", vec![("scenario_id", "string")]),
+            ("cycle_tab", Vec::new()),
+        ]
+        .into_iter()
+        .map(|(name, args)| InterfaceMethod {
+            name: name.into(),
+            args: args
+                .into_iter()
+                .map(|(name, arg_type)| InterfaceArgument {
+                    name: name.into(),
+                    arg_type: arg_type.into(),
+                })
+                .collect(),
+            returns: Some("Result".into()),
+            coalesce: false,
+            state_binding: None,
+        })
+        .collect(),
         events: Vec::new(),
         types: HashMap::new(),
         capabilities: ContractCapabilities::default(),

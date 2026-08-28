@@ -2,6 +2,7 @@
 
 use super::super::*;
 use super::{BackendLaunchCandidate, BackendLifecycleStatusRecord};
+use crate::shell::core_provider::CoreServiceRegistry;
 use mesh_core_capability::EffectiveCapabilities;
 use mesh_core_module::package::{BackendProviderNode, binary_available};
 
@@ -243,9 +244,9 @@ fn backend_requirement_statuses(
     graph: &InstalledModuleGraph,
     interfaces: &InterfaceRegistry,
 ) -> Vec<BackendLifecycleStatusRecord> {
+    let core_service_providers = CoreServiceRegistry::builtin();
     let is_core_provider = |provider: &mesh_core_service::InterfaceProvider| {
-        provider.provider_module == "@mesh/shell"
-            || provider.provider_module == mesh_core_debug::DEBUG_SOURCE_MODULE_ID
+        core_service_providers.is_provider(&provider.interface, &provider.provider_module)
     };
     let mut statuses = Vec::new();
     for frontend in graph.frontend_modules() {

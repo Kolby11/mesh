@@ -105,10 +105,6 @@ The 2026-06-18 redesign largely shipped: canonical `module.json` with
 `mesh.uses` / `mesh.provides` / `mesh.implements`, the graph as single source of
 truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
-- [ ] Move the remaining built-in debug and theme/locale service behavior
-      behind generic providers. Startup sounds and backend profiling use the
-      generic contract/runtime path; core-owned service state still branches.
-      _(detail: "Module system — remaining open follow-ups")_
 - [ ] **Deferred — unify the four contribution schemas.** Theme, icons, i18n,
       and keybinds under one `contributes` shape, only where they share honest
       structure. Revisit after profiles land. Capability inference and a

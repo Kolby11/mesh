@@ -16,8 +16,10 @@ use mesh_core_module::lifecycle::{ModuleInstance, ModuleState};
 use mesh_core_module::package::{
     InstalledModuleGraph, ModuleKind, PackageTransaction, RootModuleGraphManifest, ShellProfile,
 };
+#[cfg(test)]
+use mesh_core_service::InterfaceProvider;
 use mesh_core_service::{
-    InterfaceProvider, InterfaceRegistry, canonical_interface_name, canonical_interface_name_cow,
+    InterfaceRegistry, canonical_interface_name, canonical_interface_name_cow,
     canonical_interface_name_owned,
 };
 use mesh_core_theme::ThemeEngine;
@@ -37,6 +39,7 @@ use tokio::task::{AbortHandle, JoinHandle};
 
 mod backend;
 mod component;
+mod core_provider;
 mod discovery;
 mod file_watch;
 mod ipc;
@@ -52,6 +55,7 @@ mod types;
 #[cfg(test)]
 use backend::{BackendLaunchCandidate, backend_launch_candidates_from_graph};
 use backend::{BackendRuntimeStatus, BackendRuntimeStatusEntry};
+use core_provider::CoreServiceRegistry;
 use ipc::spawn_ipc_server;
 use mesh_core_backend::BackendServiceEvent;
 use mesh_core_presentation::{
@@ -540,6 +544,10 @@ pub struct Shell {
     pub locale: LocaleEngine,
     pub diagnostics: DiagnosticsCollector,
     pub interfaces: InterfaceRegistry,
+    /// Host-backed service providers use the same identity and command seam
+    /// as module-backed providers, even when their final action stays in the
+    /// shell process.
+    core_service_providers: CoreServiceRegistry,
     /// Immutable core-owned interface contracts and providers. Graph
     /// activation rebuilds its catalog from this baseline so a replacement
     /// cannot retain entries from an older graph generation.

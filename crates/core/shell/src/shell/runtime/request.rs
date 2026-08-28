@@ -1833,9 +1833,11 @@ impl Shell {
         // backend command queue. The capability check above already ran, so a
         // caller reaches this point exactly when it holds
         // `service.<name>.control` — no module id is consulted.
-        let mut dispatch_result = if let Some(request) =
-            core_service_request(interface_canonical.as_ref(), command, payload)
-        {
+        let core_request = self
+            .core_service_providers
+            .request(interface, command, payload)
+            .or_else(|| core_service_request(interface, command, payload));
+        let mut dispatch_result = if let Some(request) = core_request {
             let result = if self.effect_scheduler.active_context().is_some() {
                 self.effect_scheduler
                     .enqueue_followups(std::iter::once(request));
@@ -2966,8 +2968,10 @@ impl Shell {
     }
 }
 
-/// Translate a command on a shell-provided interface into the core request that
-/// performs it.
+/// Translate a command on one of the remaining shell-owned configuration
+/// interfaces into the core request that performs it. Debug, theme, and locale
+/// providers use [`CoreServiceRegistry`] so this compatibility adapter stays
+/// limited to the older settings/package/composition seam.
 ///
 /// Returns `None` for every interface a backend module owns, which is what
 /// routes those to the ordinary command queue instead. Argument extraction is
@@ -2994,15 +2998,6 @@ fn core_service_request(
     };
 
     match (interface, command) {
-        ("mesh.theme", "set_theme") => Some(CoreRequest::SetTheme {
-            theme_id: text("theme_id")?,
-        }),
-        ("mesh.theme", "set_icon_theme") => Some(CoreRequest::SetIconTheme {
-            theme_id: text("theme_id")?,
-        }),
-        ("mesh.theme", "set_font_family") => Some(CoreRequest::SetFontFamily {
-            family: text("family")?,
-        }),
         ("mesh.settings", "set_prop") => Some(CoreRequest::SetModuleProp {
             module_id: text("module_id")?,
             instance_id: optional_text("instance_id"),

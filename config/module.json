@@ -30,6 +30,7 @@
       ],
       "@mesh/debug-inspector": [
         "locale.read",
+        "service.debug.control",
         "service.debug.read",
         "shell.surface"
       ],

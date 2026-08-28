@@ -3,6 +3,27 @@ use super::*;
 use mesh_core_backend::BackendIdentity;
 
 #[test]
+fn a_core_debug_provider_command_is_applied_by_the_generic_dispatcher() {
+    let mut shell = Shell::new();
+    let mut capabilities = mesh_core_capability::CapabilitySet::new();
+    capabilities.grant(mesh_core_capability::Capability::new(
+        "service.debug.control",
+    ));
+
+    let result = shell.dispatch_service_command(
+        "mesh.debug",
+        "toggle_profiling",
+        &serde_json::json!({}),
+        "@mesh/debug-inspector",
+        &capabilities,
+    );
+
+    assert_eq!(result["ok"], serde_json::json!(true));
+    assert_eq!(result["status"], serde_json::json!("applied"));
+    assert!(shell.debug.profiling_enabled);
+}
+
+#[test]
 fn set_muted_command_broadcasts_bound_audio_state_until_backend_confirms() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();

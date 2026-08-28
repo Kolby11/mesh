@@ -141,47 +141,36 @@ impl Shell {
             return true;
         };
         let interface = canonical_interface_name_cow(service);
-        let shell_theme_snapshot =
-            interface.as_ref() == "mesh.theme" && source_module == "@mesh/shell";
-        if interface.as_ref() == "mesh.theme" && !shell_theme_snapshot {
-            tracing::debug!(
-                source_module,
-                "ignoring provider theme state because the rendered shell snapshot is authoritative"
-            );
-            return false;
-        }
-        if !shell_theme_snapshot {
-            if let Some(slot) = self.backend_runtimes.get(interface.as_ref()) {
-                if slot.provider_id != *source_module
-                    || (identity != BackendIdentity::default()
-                        && !self.backend_provider_is_active_at_identity(
-                            interface.as_ref(),
-                            source_module,
-                            identity,
-                        ))
-                    || (identity == BackendIdentity::default()
-                        && !self.backend_provider_is_active(interface.as_ref(), source_module))
-                {
-                    tracing::debug!(
-                        interface = interface.as_ref(),
+        if let Some(slot) = self.backend_runtimes.get(interface.as_ref()) {
+            if slot.provider_id != *source_module
+                || (identity != BackendIdentity::default()
+                    && !self.backend_provider_is_active_at_identity(
+                        interface.as_ref(),
                         source_module,
-                        active_provider = %slot.provider_id,
-                        "ignoring stale service update from inactive provider"
-                    );
-                    return false;
-                }
-            } else if identity != BackendIdentity::default()
-                || self
-                    .backend_runtime_status(interface.as_ref(), source_module)
-                    .is_some_and(|entry| entry.status.rejects_provider_messages())
+                        identity,
+                    ))
+                || (identity == BackendIdentity::default()
+                    && !self.backend_provider_is_active(interface.as_ref(), source_module))
             {
                 tracing::debug!(
                     interface = interface.as_ref(),
                     source_module,
-                    "ignoring service update from terminal backend provider"
+                    active_provider = %slot.provider_id,
+                    "ignoring stale service update from inactive provider"
                 );
                 return false;
             }
+        } else if identity != BackendIdentity::default()
+            || self
+                .backend_runtime_status(interface.as_ref(), source_module)
+                .is_some_and(|entry| entry.status.rejects_provider_messages())
+        {
+            tracing::debug!(
+                interface = interface.as_ref(),
+                source_module,
+                "ignoring service update from terminal backend provider"
+            );
+            return false;
         }
         if let Some(latest) = self.latest_service_state.get(interface.as_ref())
             && latest.provider_id == *source_module

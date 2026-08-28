@@ -592,7 +592,12 @@ impl Shell {
         // internal `"set-current"` command the contract never declared. A
         // module implementing `mesh.theme` would otherwise receive a
         // command outside its own contract's method set.
-        let source_module = "@mesh/shell";
+        let source_module = self.active_service_provider_or(
+            "mesh.theme",
+            self.core_service_providers
+                .provider_id("mesh.theme")
+                .unwrap_or("@mesh/shell"),
+        );
         if let Err(error) = mesh_core_backend::validate_command_payload(&payload) {
             tracing::warn!("theme service snapshot exceeded backend command JSON budget: {error}");
         }

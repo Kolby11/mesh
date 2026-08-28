@@ -815,15 +815,15 @@ function showBenchmark()
 end
 
 function onCloseInspector()
-    mesh.events.publish("shell.toggle-debug-overlay", {})
+    debug_service.toggle_overlay()
 end
 
 function onToggleProfiling()
-    mesh.events.publish("shell.toggle-debug-profiling", {})
+    debug_service.toggle_profiling()
 end
 
 function onToggleLayoutBounds()
-    mesh.events.publish("shell.toggle-debug-layout-bounds", {})
+    debug_service.toggle_layout_bounds()
 end
 
 function onToggleElementPicker()
@@ -831,7 +831,7 @@ function onToggleElementPicker()
         active_view = "elements"
         sync_view_state()
     end
-    mesh.events.publish("shell.toggle-debug-element-picker", {})
+    debug_service.toggle_element_picker()
 end
 
 function onOpenSelectedSource()
@@ -839,10 +839,10 @@ function onOpenSelectedSource()
     if type(selected) ~= "table" then
         return
     end
-    mesh.events.publish("shell.open-debug-source", {
-        path = tostring(selected.source_file or ""),
-        line = tonumber(selected.source_line) or 1,
-    })
+    debug_service.open_source(
+        tostring(selected.source_file or ""),
+        tonumber(selected.source_line) or 1
+    )
 end
 
 local function number_label(value)
@@ -942,10 +942,10 @@ end
 
 function runBenchmarkScenarioById(scenario_id)
     if not (debug_service and debug_service.profiling_enabled) then
-        mesh.events.publish("shell.toggle-debug-profiling", {})
+        debug_service.toggle_profiling()
         return
     end
-    mesh.events.publish("shell.run-debug-benchmark", { scenario_id = scenario_id })
+    debug_service.run_benchmark(scenario_id)
 end
 
 function render()

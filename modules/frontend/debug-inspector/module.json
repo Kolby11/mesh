@@ -12,6 +12,7 @@
       "capabilities": [
         "shell.surface",
         "service.debug.read",
+        "service.debug.control",
         "locale.read"
       ]
     },
