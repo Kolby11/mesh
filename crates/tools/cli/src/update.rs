@@ -1084,7 +1084,9 @@ pub fn dependents(module_id: &str, lock: &MeshLock) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mesh_core_module::package::{LockedModule, MeshLock, ModuleSource};
+    use mesh_core_module::package::{
+        LockedModule, MeshLock, ModuleSource, PackageOperation, PackageOwner,
+    };
     use std::collections::BTreeSet;
 
     fn manifest(
@@ -1405,7 +1407,8 @@ mod tests {
             "@me/audio".to_string(),
             vec!["service.audio.read".to_string()],
         )]);
-        let mut transaction = PackageTransaction::begin(config, "test-update").unwrap();
+        let mut transaction =
+            PackageTransaction::begin(config, PackageOwner::Cli, PackageOperation::Update).unwrap();
         transaction
             .protect_package_state(&root_path, &modules_dir)
             .unwrap();

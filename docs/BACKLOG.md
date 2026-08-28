@@ -96,7 +96,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/16-developer-and-authoring-tools/improvements.md)
 
-- [ ] Make CLI and shell use one package ownership and transaction contract.
 - [ ] Refresh one canonical graph-authoring snapshot for CLI, doctor, LSP, and runtime consumers.
 - [ ] Generate LSP manifest/schema validation from runtime contracts instead of duplicated under-approximations.
 - [ ] Convert all LSP positions to UTF-16 code units at the protocol boundary.

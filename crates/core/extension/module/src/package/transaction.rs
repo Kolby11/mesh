@@ -16,7 +16,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
-const JOURNAL_SCHEMA_VERSION: u32 = 1;
+const JOURNAL_SCHEMA_VERSION: u32 = 2;
 const JOURNAL_FILE: &str = ".mesh-package-transaction.json";
 const LOCK_FILE: &str = ".mesh-package.lock";
 const WORKSPACE_PREFIX: &str = ".mesh-package-transaction-";
@@ -35,6 +35,49 @@ enum JournalPhase {
     Aborted,
 }
 
+/// The package authority that owns a transaction.
+///
+/// Package mutations may be requested by more than one MESH entry point, but
+/// they all use the same durable transaction boundary. Recording the owner in
+/// the journal makes that boundary explicit and gives recovery diagnostics a
+/// stable source of provenance; it is not a second permission system.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PackageOwner {
+    /// The command-line/package-management client.
+    Cli,
+    /// The running shell's `mesh.packages` service.
+    Shell,
+    /// A diagnostic or repair client.
+    Doctor,
+}
+
+/// The package mutation represented by a transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackageOperation {
+    Install,
+    Update,
+    Rollback,
+    Uninstall,
+}
+
+impl PackageOperation {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Install => "install",
+            Self::Update => "update",
+            Self::Rollback => "rollback",
+            Self::Uninstall => "uninstall",
+        }
+    }
+}
+
+impl std::fmt::Display for PackageOperation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct JournalTarget {
@@ -50,6 +93,10 @@ struct JournalTarget {
 struct Journal {
     schema_version: u32,
     operation: String,
+    /// Optional for schema v1 journals so an interrupted pre-contract
+    /// operation can still be recovered safely.
+    #[serde(default)]
+    owner: Option<PackageOwner>,
     workspace: String,
     phase: JournalPhase,
     targets: Vec<JournalTarget>,
@@ -61,6 +108,8 @@ pub struct PackageTransaction {
     journal_path: PathBuf,
     workspace: PathBuf,
     journal: Journal,
+    owner: PackageOwner,
+    operation: PackageOperation,
     lock_file: File,
     finished: bool,
 }
@@ -87,7 +136,8 @@ impl PackageTransaction {
     /// directory.
     pub fn begin(
         config_dir: &Path,
-        operation: impl Into<String>,
+        owner: PackageOwner,
+        operation: PackageOperation,
     ) -> Result<Self, ModuleManifestError> {
         let config_dir = canonical_config_dir(config_dir)?;
         fs::create_dir_all(&config_dir).map_err(|source| ModuleManifestError::Io {
@@ -128,7 +178,8 @@ impl PackageTransaction {
 
         let journal = Journal {
             schema_version: JOURNAL_SCHEMA_VERSION,
-            operation: operation.into(),
+            operation: operation.as_str().to_string(),
+            owner: Some(owner),
             workspace: workspace_name,
             phase: JournalPhase::Prepared,
             targets: Vec::new(),
@@ -138,11 +189,23 @@ impl PackageTransaction {
             journal_path,
             workspace,
             journal,
+            owner,
+            operation,
             lock_file,
             finished: false,
         };
         transaction.persist_journal()?;
         Ok(transaction)
+    }
+
+    /// Which package authority opened this transaction.
+    pub fn owner(&self) -> PackageOwner {
+        self.owner
+    }
+
+    /// Which package mutation this transaction is applying.
+    pub fn operation(&self) -> PackageOperation {
+        self.operation
     }
 
     /// Recover an interrupted package transaction without starting a new one.
@@ -448,7 +511,7 @@ fn recover_journal(config_dir: &Path, journal_path: &Path) -> Result<(), ModuleM
             path: journal_path.to_path_buf(),
             source,
         })?;
-    if journal.schema_version != JOURNAL_SCHEMA_VERSION {
+    if journal.schema_version != 1 && journal.schema_version != JOURNAL_SCHEMA_VERSION {
         return Err(ModuleManifestError::Validation(format!(
             "unsupported package transaction journal schemaVersion {}",
             journal.schema_version
@@ -692,14 +755,14 @@ fn remove_path(path: &Path) -> Result<(), ModuleManifestError> {
             return Err(ModuleManifestError::Validation(format!(
                 "transaction path {} is not removable",
                 path.display()
-            )))
+            )));
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(source) => {
             return Err(ModuleManifestError::Io {
                 path: path.to_path_buf(),
                 source,
-            })
+            });
         }
     };
     sync_directory(path.parent()).map_err(|source| ModuleManifestError::Io {
@@ -883,6 +946,23 @@ mod tests {
     }
 
     #[test]
+    fn journal_records_the_shared_owner_and_operation_contract() {
+        let root = temp_dir("contract");
+        let transaction =
+            PackageTransaction::begin(&root, PackageOwner::Shell, PackageOperation::Install)
+                .unwrap();
+
+        assert_eq!(transaction.owner(), PackageOwner::Shell);
+        assert_eq!(transaction.operation(), PackageOperation::Install);
+        let journal: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(root.join(JOURNAL_FILE)).unwrap()).unwrap();
+        assert_eq!(journal["owner"], "shell");
+        assert_eq!(journal["operation"], "install");
+        transaction.commit().unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn failed_transaction_restores_files_and_directories() {
         let root = temp_dir("restore");
         let modules = root.join("modules");
@@ -892,7 +972,9 @@ mod tests {
         fs::write(&graph, "before").unwrap();
 
         {
-            let mut transaction = PackageTransaction::begin(&root, "install").unwrap();
+            let mut transaction =
+                PackageTransaction::begin(&root, PackageOwner::Cli, PackageOperation::Install)
+                    .unwrap();
             transaction.protect_package_state(&graph, &modules).unwrap();
             fs::write(&graph, "after").unwrap();
             fs::remove_dir_all(&modules).unwrap();
@@ -912,7 +994,8 @@ mod tests {
         let root = temp_dir("crash");
         let graph = root.join("module.json");
         fs::write(&graph, "before").unwrap();
-        let mut transaction = PackageTransaction::begin(&root, "update").unwrap();
+        let mut transaction =
+            PackageTransaction::begin(&root, PackageOwner::Cli, PackageOperation::Update).unwrap();
         transaction.protect(&graph).unwrap();
         fs::write(&graph, "after").unwrap();
         // Simulate a process dying after the mutation but before cleanup.  The
@@ -921,7 +1004,9 @@ mod tests {
         transaction.finished = true;
         drop(transaction);
 
-        let transaction = PackageTransaction::begin(&root, "rollback").unwrap();
+        let transaction =
+            PackageTransaction::begin(&root, PackageOwner::Cli, PackageOperation::Rollback)
+                .unwrap();
         assert_eq!(fs::read_to_string(&graph).unwrap(), "before");
         transaction.commit().unwrap();
         fs::remove_dir_all(root).unwrap();
@@ -932,7 +1017,8 @@ mod tests {
         let root = temp_dir("public-recover");
         let graph = root.join("module.json");
         fs::write(&graph, "before").unwrap();
-        let mut transaction = PackageTransaction::begin(&root, "update").unwrap();
+        let mut transaction =
+            PackageTransaction::begin(&root, PackageOwner::Cli, PackageOperation::Update).unwrap();
         transaction.protect(&graph).unwrap();
         fs::write(&graph, "after").unwrap();
         transaction.finished = true;
@@ -949,7 +1035,9 @@ mod tests {
     fn injected_journal_write_failure_leaves_no_live_transaction() {
         let root = temp_dir("journal-failure");
         let failure = inject_failure_at("journal.write.after");
-        assert!(PackageTransaction::begin(&root, "failure-test").is_err());
+        assert!(
+            PackageTransaction::begin(&root, PackageOwner::Cli, PackageOperation::Update,).is_err()
+        );
         drop(failure);
 
         assert!(!root.join(JOURNAL_FILE).exists());
@@ -970,7 +1058,8 @@ mod tests {
         let root = temp_dir("commit-failure");
         let graph = root.join("module.json");
         fs::write(&graph, "before").unwrap();
-        let mut transaction = PackageTransaction::begin(&root, "failure-test").unwrap();
+        let mut transaction =
+            PackageTransaction::begin(&root, PackageOwner::Cli, PackageOperation::Update).unwrap();
         transaction.protect(&graph).unwrap();
         fs::write(&graph, "after").unwrap();
 
@@ -1004,7 +1093,9 @@ mod tests {
             fs::write(&graph, "before").unwrap();
             fs::write(module.join("version"), "old").unwrap();
 
-            let mut transaction = PackageTransaction::begin(&root, "failure-test").unwrap();
+            let mut transaction =
+                PackageTransaction::begin(&root, PackageOwner::Shell, PackageOperation::Update)
+                    .unwrap();
             transaction.protect_package_state(&graph, &modules).unwrap();
             let staged = transaction.staging_dir().join("widget");
             fs::create_dir_all(&staged).unwrap();
@@ -1058,7 +1149,8 @@ mod tests {
         fs::create_dir_all(&target).unwrap();
         fs::write(target.join("version"), "old").unwrap();
 
-        let mut transaction = PackageTransaction::begin(&root, "update").unwrap();
+        let mut transaction =
+            PackageTransaction::begin(&root, PackageOwner::Cli, PackageOperation::Update).unwrap();
         transaction.protect(&root.join("modules")).unwrap();
         let staged = transaction.staging_dir().join("widget");
         fs::create_dir_all(&staged).unwrap();
@@ -1080,7 +1172,9 @@ mod tests {
         fs::write(&sentinel, "keep").unwrap();
 
         let traversal = modules.join("..").join("outside");
-        let mut transaction = PackageTransaction::begin(&root, "uninstall").unwrap();
+        let mut transaction =
+            PackageTransaction::begin(&root, PackageOwner::Shell, PackageOperation::Uninstall)
+                .unwrap();
         let error = transaction.remove(&traversal).unwrap_err();
 
         assert!(error.to_string().contains("contained"));
@@ -1098,7 +1192,9 @@ mod tests {
         fs::write(module.join("module.json"), "{}").unwrap();
         fs::write(module.join("src/main.mesh"), "<text />").unwrap();
 
-        let mut transaction = PackageTransaction::begin(&root, "uninstall").unwrap();
+        let mut transaction =
+            PackageTransaction::begin(&root, PackageOwner::Shell, PackageOperation::Uninstall)
+                .unwrap();
         transaction.remove(&module).unwrap();
 
         assert!(!module.exists());
@@ -1119,7 +1215,9 @@ mod tests {
         fs::write(&sentinel, "keep").unwrap();
         std::os::unix::fs::symlink(&outside, module.join("escape")).unwrap();
 
-        let mut transaction = PackageTransaction::begin(&root, "uninstall").unwrap();
+        let mut transaction =
+            PackageTransaction::begin(&root, PackageOwner::Shell, PackageOperation::Uninstall)
+                .unwrap();
         let error = transaction.remove(&module).unwrap_err();
 
         assert!(error.to_string().contains("symlink"));

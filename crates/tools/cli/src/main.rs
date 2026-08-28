@@ -940,9 +940,12 @@ fn cmd_install(args: &[String]) {
         .parent()
         .expect("root graph path has a parent directory")
         .to_path_buf();
-    let mut transaction =
-        mesh_core_module::package::PackageTransaction::begin(&config_dir, "install")
-            .unwrap_or_else(|error| exit_error(error));
+    let mut transaction = mesh_core_module::package::PackageTransaction::begin(
+        &config_dir,
+        mesh_core_module::package::PackageOwner::Cli,
+        mesh_core_module::package::PackageOperation::Install,
+    )
+    .unwrap_or_else(|error| exit_error(error));
     let mut root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
         .unwrap_or_else(|error| exit_error(error));
     let modules_dir = config_dir.join(&root.modules_dir);
@@ -1525,9 +1528,12 @@ fn cmd_update(args: &[String]) {
         .parent()
         .expect("root graph path has a parent directory")
         .to_path_buf();
-    let mut transaction =
-        mesh_core_module::package::PackageTransaction::begin(&config_dir, "update")
-            .unwrap_or_else(|error| exit_error(error));
+    let mut transaction = mesh_core_module::package::PackageTransaction::begin(
+        &config_dir,
+        mesh_core_module::package::PackageOwner::Cli,
+        mesh_core_module::package::PackageOperation::Update,
+    )
+    .unwrap_or_else(|error| exit_error(error));
     let root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
         .unwrap_or_else(|error| exit_error(error));
     let modules_dir = config_dir.join(&root.modules_dir);
@@ -1671,9 +1677,12 @@ fn cmd_rollback(args: &[String]) {
         .parent()
         .expect("root graph path has a parent directory")
         .to_path_buf();
-    let mut transaction =
-        mesh_core_module::package::PackageTransaction::begin(&config_dir, "rollback")
-            .unwrap_or_else(|error| exit_error(error));
+    let mut transaction = mesh_core_module::package::PackageTransaction::begin(
+        &config_dir,
+        mesh_core_module::package::PackageOwner::Cli,
+        mesh_core_module::package::PackageOperation::Rollback,
+    )
+    .unwrap_or_else(|error| exit_error(error));
     let root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
         .unwrap_or_else(|error| exit_error(error));
     let modules_dir = config_dir.join(&root.modules_dir);
@@ -1704,9 +1713,12 @@ fn cmd_uninstall(args: &[String]) {
         .parent()
         .expect("root graph path has a parent directory")
         .to_path_buf();
-    let mut transaction =
-        mesh_core_module::package::PackageTransaction::begin(&config_dir, "uninstall")
-            .unwrap_or_else(|error| exit_error(error));
+    let mut transaction = mesh_core_module::package::PackageTransaction::begin(
+        &config_dir,
+        mesh_core_module::package::PackageOwner::Cli,
+        mesh_core_module::package::PackageOperation::Uninstall,
+    )
+    .unwrap_or_else(|error| exit_error(error));
     let root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
         .unwrap_or_else(|error| exit_error(error));
     let modules_dir = config_dir.join(&root.modules_dir);

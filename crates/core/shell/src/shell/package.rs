@@ -4,9 +4,9 @@ use super::*;
 use mesh_core_capability::{CapabilityCatalog, PrivilegeLevel};
 use mesh_core_module::package::{
     InstalledModuleEntry, MeshLock, ModuleId, ModuleKind, ModuleManifest, ModuleSource,
-    PackageTransaction, ProfilePaths, RootModuleGraphManifest, ShellProfile, TrustTier,
-    contained_path, load_installed_module_graph, load_module_signature, module_install_path,
-    module_store_dir, module_tree_digest, validate_module_tree,
+    PackageOperation, PackageOwner, PackageTransaction, ProfilePaths, RootModuleGraphManifest,
+    ShellProfile, TrustTier, contained_path, load_installed_module_graph, load_module_signature,
+    module_install_path, module_store_dir, module_tree_digest, validate_module_tree,
 };
 use std::collections::VecDeque;
 use std::fs;
@@ -35,8 +35,9 @@ impl Shell {
         let config_dir = graph_path
             .parent()
             .ok_or_else(|| package_error("root module graph has no parent directory"))?;
-        let mut transaction = PackageTransaction::begin(config_dir, "install")
-            .map_err(|error| package_error(error.to_string()))?;
+        let mut transaction =
+            PackageTransaction::begin(config_dir, PackageOwner::Shell, PackageOperation::Install)
+                .map_err(|error| package_error(error.to_string()))?;
         let package_rollback = PackageRuntimeRollback::capture(self);
         let root = RootModuleGraphManifest::from_path(&graph_path)
             .map_err(|error| package_error(error.to_string()))?;
@@ -199,8 +200,9 @@ impl Shell {
         let config_dir = graph_path
             .parent()
             .ok_or_else(|| package_error("root module graph has no parent directory"))?;
-        let mut transaction = PackageTransaction::begin(config_dir, "uninstall")
-            .map_err(|error| package_error(error.to_string()))?;
+        let mut transaction =
+            PackageTransaction::begin(config_dir, PackageOwner::Shell, PackageOperation::Uninstall)
+                .map_err(|error| package_error(error.to_string()))?;
         let package_rollback = PackageRuntimeRollback::capture(self);
         let mut root = RootModuleGraphManifest::from_path(&graph_path)
             .map_err(|error| package_error(error.to_string()))?;
