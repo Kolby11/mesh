@@ -438,21 +438,13 @@ struct AbsoluteToken {
 
 struct TokenBuilder<'a> {
     source: &'a str,
-    line_starts: Vec<usize>,
     tokens: Vec<AbsoluteToken>,
 }
 
 impl<'a> TokenBuilder<'a> {
     fn new(source: &'a str) -> Self {
-        let mut line_starts = vec![0];
-        for (i, ch) in source.char_indices() {
-            if ch == '\n' {
-                line_starts.push(i + 1);
-            }
-        }
         Self {
             source,
-            line_starts,
             tokens: Vec::new(),
         }
     }
@@ -464,10 +456,17 @@ impl<'a> TokenBuilder<'a> {
         let Some((line, start)) = self.line_and_character(offset) else {
             return;
         };
+        let Some(token_source) = self.source.get(offset..offset.saturating_add(length)) else {
+            return;
+        };
+        let token_length = token_source.chars().map(|ch| ch.len_utf16() as u32).sum();
+        if token_length == 0 {
+            return;
+        }
         self.tokens.push(AbsoluteToken {
             line,
             start,
-            length: length as u32,
+            length: token_length,
             token_type,
             token_modifiers_bitset: modifiers,
         });
@@ -497,9 +496,8 @@ impl<'a> TokenBuilder<'a> {
     }
 
     fn line_and_character(&self, offset: usize) -> Option<(u32, u32)> {
-        let line = self.line_starts.partition_point(|start| *start <= offset) - 1;
-        let line_start = self.line_starts.get(line).copied()?;
-        Some((line as u32, (offset - line_start) as u32))
+        let position = crate::util::offset_to_position(self.source, offset);
+        Some((position.line, position.character))
     }
 }
 
@@ -545,6 +543,25 @@ import StatusPill from "./status-pill.mesh"
         assert_token(source, &absolute, "\"ready\"", TOKEN_STRING, 0);
     }
 
+    #[test]
+    fn unicode_semantic_tokens_use_utf16_start_and_length() {
+        let source = r#"<template>
+  <text title="😀" value={ "é😀" } />
+</template>
+"#;
+        let doc = Document::new(
+            tower_lsp::lsp_types::Url::parse("file:///test.mesh").unwrap(),
+            source.to_string(),
+        );
+
+        let SemanticTokensResult::Tokens(tokens) = full(&doc) else {
+            panic!("expected full semantic tokens");
+        };
+        let absolute = absolute_tokens(&tokens.data);
+
+        assert_token(source, &absolute, "\"é😀\"", TOKEN_STRING, 0);
+    }
+
     fn assert_token(
         source: &str,
         tokens: &[AbsoluteToken],
@@ -553,16 +570,19 @@ import StatusPill from "./status-pill.mesh"
         token_modifiers_bitset: u32,
     ) {
         let offset = source.find(text).expect("test fixture contains text");
-        let (line, start) = line_and_start(source, offset);
+        let position = crate::util::offset_to_position(source, offset);
+        let length = text.chars().map(|ch| ch.len_utf16() as u32).sum::<u32>();
         assert!(
             tokens.iter().any(|token| {
-                token.line == line
-                    && token.start == start
-                    && token.length == text.len() as u32
+                token.line == position.line
+                    && token.start == position.character
+                    && token.length == length
                     && token.token_type == token_type
                     && token.token_modifiers_bitset == token_modifiers_bitset
             }),
-            "missing token {text:?} at {line}:{start} with type {token_type}"
+            "missing token {text:?} at {}:{} with type {token_type}",
+            position.line,
+            position.character
         );
     }
 
@@ -587,20 +607,5 @@ import StatusPill from "./status-pill.mesh"
                 }
             })
             .collect()
-    }
-
-    fn line_and_start(source: &str, offset: usize) -> (u32, u32) {
-        let mut line = 0;
-        let mut line_start = 0;
-        for (i, ch) in source.char_indices() {
-            if i == offset {
-                break;
-            }
-            if ch == '\n' {
-                line += 1;
-                line_start = i + 1;
-            }
-        }
-        (line, (offset - line_start) as u32)
     }
 }

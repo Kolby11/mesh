@@ -249,13 +249,13 @@ mod tests {
     fn complete_at(src: &str) -> Vec<String> {
         let offset = src.find('|').expect("need a | cursor marker");
         let clean = src.replacen('|', "", 1);
-        let before = &clean[..offset];
-        let line = before.matches('\n').count() as u32;
-        let col = before.rsplit('\n').next().unwrap().chars().count() as u32;
-        complete(&doc(&clean), Position::new(line, col))
-            .into_iter()
-            .map(|i| i.label)
-            .collect()
+        complete(
+            &doc(&clean),
+            crate::util::offset_to_position(&clean, offset),
+        )
+        .into_iter()
+        .map(|i| i.label)
+        .collect()
     }
 
     #[test]

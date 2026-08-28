@@ -183,30 +183,9 @@ fn identifier_at(source: &str, offset: usize, allow_hyphen: bool) -> Option<Iden
 
 fn range_from_span(source: &str, span: ByteSpan) -> Range {
     Range::new(
-        offset_to_position(source, span.start),
-        offset_to_position(source, span.end),
+        crate::util::offset_to_position(source, span.start),
+        crate::util::offset_to_position(source, span.end),
     )
-}
-
-fn offset_to_position(source: &str, offset: usize) -> Position {
-    let mut line = 0u32;
-    let mut col = 0u32;
-    let mut seen = 0usize;
-
-    for ch in source.chars() {
-        if seen >= offset {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            col = 0;
-        } else {
-            col += ch.len_utf16() as u32;
-        }
-        seen += ch.len_utf8();
-    }
-
-    Position::new(line, col)
 }
 
 #[cfg(test)]
@@ -218,7 +197,7 @@ mod tests {
         let marker = "$0";
         let idx = source.find(marker).expect("cursor marker");
         let source = source.replacen(marker, "", 1);
-        let pos = offset_to_position(&source, idx);
+        let pos = crate::util::offset_to_position(&source, idx);
         (source, pos)
     }
 

@@ -21,5 +21,5 @@ canonical module and root runtime contracts as activation while retaining
 source-aware editor diagnostics. The active runtime publishes immutable
 activation snapshots, prepared frontends remain hidden until commit, and
 shutdown advances through explicit quiescing, teardown, flushing, and stopped
-phases. The next open item is Section 16's LSP UTF-16 position conversion. See
+phases. The next open item is Section 16's typed CLI flag behavior. See
 [`.planning/log/2026-08.md`](log/2026-08.md).

@@ -51,6 +51,9 @@ impl LanguageServer for Backend {
                 version: Some(env!("CARGO_PKG_VERSION").to_string()),
             }),
             capabilities: ServerCapabilities {
+                // Every source offset is translated to the LSP's UTF-16
+                // coordinate space at the protocol boundary.
+                position_encoding: Some(PositionEncodingKind::UTF16),
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
                     TextDocumentSyncOptions {
                         open_close: Some(true),
@@ -298,18 +301,21 @@ impl Backend {
 
 /// A range that spans the entire document, for whole-document replacement edits.
 fn full_document_range(source: &str) -> Range {
-    let mut last_line = 0u32;
-    let mut last_line_len = 0u32;
-    for ch in source.chars() {
-        if ch == '\n' {
-            last_line += 1;
-            last_line_len = 0;
-        } else {
-            last_line_len += ch.len_utf16() as u32;
-        }
-    }
-    Range {
-        start: Position::new(0, 0),
-        end: Position::new(last_line, last_line_len),
+    Range::new(
+        Position::new(0, 0),
+        crate::util::offset_to_position(source, source.len()),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn full_document_range_uses_utf16_end_position() {
+        assert_eq!(
+            full_document_range("é😀\nnext"),
+            Range::new(Position::new(0, 0), Position::new(1, 4))
+        );
     }
 }

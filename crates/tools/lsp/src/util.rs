@@ -134,6 +134,61 @@ pub fn position_to_offset(source: &str, pos: Position) -> usize {
     source.len()
 }
 
+/// Convert a UTF-8 byte offset into an LSP [`Position`] (0-based line and
+/// UTF-16 code-unit column).
+pub fn offset_to_position(source: &str, offset: usize) -> Position {
+    let offset = offset.min(source.len());
+    let mut line = 0u32;
+    let mut character = 0u32;
+
+    for (index, ch) in source.char_indices() {
+        let end = index + ch.len_utf8();
+        if end > offset {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            character = 0;
+        } else {
+            character += ch.len_utf16() as u32;
+        }
+    }
+
+    Position::new(line, character)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn converts_utf16_positions_to_utf8_offsets() {
+        let source = "é😀x\nnext";
+
+        assert_eq!(position_to_offset(source, Position::new(0, 0)), 0);
+        assert_eq!(position_to_offset(source, Position::new(0, 1)), 2);
+        assert_eq!(position_to_offset(source, Position::new(0, 3)), 6);
+        assert_eq!(position_to_offset(source, Position::new(0, 4)), 7);
+        assert_eq!(position_to_offset(source, Position::new(1, 0)), 8);
+    }
+
+    #[test]
+    fn converts_utf8_offsets_to_utf16_positions() {
+        let source = "é😀x\nnext";
+
+        assert_eq!(offset_to_position(source, 0), Position::new(0, 0));
+        assert_eq!(offset_to_position(source, 2), Position::new(0, 1));
+        assert_eq!(offset_to_position(source, 6), Position::new(0, 3));
+        assert_eq!(offset_to_position(source, 7), Position::new(0, 4));
+        assert_eq!(offset_to_position(source, 8), Position::new(1, 0));
+    }
+
+    #[test]
+    fn rounds_offsets_inside_a_utf8_codepoint_back_to_its_start() {
+        assert_eq!(offset_to_position("é", 1), Position::new(0, 0));
+    }
+}
+
 /// Determine which top-level block the cursor byte offset falls in.
 pub fn block_at_offset(source: &str, offset: usize) -> BlockLocation {
     const BLOCKS: &[(&str, Block)] = &[

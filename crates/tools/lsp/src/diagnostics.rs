@@ -1,6 +1,6 @@
 use mesh_core_component::parser::ParseError;
 use mesh_core_elements::{BASE_ELEMENT_FIELDS, element_contract_for_tag, element_type_for_tag};
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range};
 
 use crate::document::{Document, ElementRefAliasTarget, block_content_range, extract_block_text};
 
@@ -335,34 +335,15 @@ fn element_field_exists(tag: &str, field_name: &str) -> bool {
 
 fn byte_range_to_lsp_range(source: &str, start: usize, end: usize) -> Range {
     Range {
-        start: byte_offset_to_position(source, start),
-        end: byte_offset_to_position(source, end),
+        start: crate::util::offset_to_position(source, start),
+        end: crate::util::offset_to_position(source, end),
     }
-}
-
-fn byte_offset_to_position(source: &str, target: usize) -> Position {
-    let mut line = 0u32;
-    let mut character = 0u32;
-    let target = target.min(source.len());
-
-    for (index, ch) in source.char_indices() {
-        if index >= target {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            character = 0;
-        } else {
-            character += ch.len_utf16() as u32;
-        }
-    }
-
-    Position { line, character }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tower_lsp::lsp_types::Position;
     use tower_lsp::lsp_types::Url;
 
     #[test]

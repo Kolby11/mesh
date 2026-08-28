@@ -6,7 +6,7 @@
 
 use mesh_tools_lsp::module_registry::ModuleRegistry;
 use mesh_tools_lsp::settings::{self, SettingsDocument};
-use tower_lsp::lsp_types::{Position, Url};
+use tower_lsp::lsp_types::Url;
 
 fn workspace_root() -> std::path::PathBuf {
     std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../.."))
@@ -28,14 +28,15 @@ fn document() -> SettingsDocument {
 fn complete_at(src: &str, registry: &ModuleRegistry) -> Vec<String> {
     let offset = src.find('|').expect("need a | cursor marker");
     let clean = src.replacen('|', "", 1);
-    let before = &clean[..offset];
-    let line = before.matches('\n').count() as u32;
-    let col = before.rsplit('\n').next().unwrap().chars().count() as u32;
     let doc = SettingsDocument::new(Url::parse("file:///w/config/settings.json").unwrap(), clean);
-    settings::complete(&doc, Position::new(line, col), registry)
-        .into_iter()
-        .map(|item| item.label)
-        .collect()
+    settings::complete(
+        &doc,
+        mesh_tools_lsp::util::offset_to_position(&doc.source, offset),
+        registry,
+    )
+    .into_iter()
+    .map(|item| item.label)
+    .collect()
 }
 
 #[test]

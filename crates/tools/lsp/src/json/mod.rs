@@ -9,35 +9,15 @@
 //! `mesh_core_module`; [`crate::settings`] derives its tree from the runtime's
 //! own settings field tables.
 
-use tower_lsp::lsp_types::Position;
-
 pub mod complete;
 pub mod cursor;
 pub mod diagnostics;
 pub mod hover;
 pub mod schema;
 
-/// Convert a byte offset into an LSP [`Position`] (0-based line + column).
-/// Columns are counted in UTF-16 code units, matching the LSP spec.
-pub fn offset_to_position(source: &str, offset: usize) -> Position {
-    let offset = offset.min(source.len());
-    let mut line = 0u32;
-    let mut col = 0u32;
-    for (i, ch) in source.char_indices() {
-        if i >= offset {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            col = 0;
-        } else {
-            col += ch.len_utf16() as u32;
-        }
-    }
-    Position::new(line, col)
-}
+pub use crate::util::offset_to_position;
 
-/// Convert a 1-based line / 0-based column (as serde_json reports) to a byte
+/// Convert serde_json's 1-based line and 1-based UTF-8 byte column to a byte
 /// offset into `source`.
 pub fn line_col_to_offset(source: &str, line: usize, column: usize) -> usize {
     let mut current_line = 1usize;
@@ -53,4 +33,21 @@ pub fn line_col_to_offset(source: &str, line: usize, column: usize) -> usize {
         offset = i + ch.len_utf8();
     }
     offset.min(source.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use tower_lsp::lsp_types::Position;
+
+    use super::*;
+
+    #[test]
+    fn serde_json_byte_columns_become_utf16_diagnostic_positions() {
+        let source = r#"{ "é": }"#;
+        let error = serde_json::from_str::<serde_json::Value>(source).unwrap_err();
+        let offset = line_col_to_offset(source, error.line(), error.column());
+
+        assert_eq!(source.as_bytes()[offset], b'}');
+        assert_eq!(offset_to_position(source, offset), Position::new(0, 7));
+    }
 }

@@ -649,17 +649,7 @@ local ItemRow = require("./item-row.mesh")
         let marker = "$0";
         let offset = source.find(marker).expect("fixture has cursor marker");
         let source = source.replacen(marker, "", 1);
-        let mut line = 0;
-        let mut line_start = 0;
-        for (i, ch) in source.char_indices() {
-            if i == offset {
-                break;
-            }
-            if ch == '\n' {
-                line += 1;
-                line_start = i + 1;
-            }
-        }
-        (source, Position::new(line, (offset - line_start) as u32))
+        let position = crate::util::offset_to_position(&source, offset);
+        (source, position)
     }
 }
