@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tower_lsp::{Client, LanguageServer, jsonrpc::Result, lsp_types::*};
 
 use crate::{
@@ -16,6 +16,9 @@ pub struct Backend {
     settings: Arc<RwLock<HashMap<Url, SettingsDocument>>>,
     registry: Arc<RwLock<ModuleRegistry>>,
     workspace_root: Arc<RwLock<Option<PathBuf>>>,
+    refresh_generation: Arc<RwLock<u64>>,
+    document_versions: Arc<RwLock<HashMap<Url, i32>>>,
+    document_update_lock: Arc<Mutex<()>>,
 }
 
 impl Backend {
@@ -27,6 +30,9 @@ impl Backend {
             settings: Arc::new(RwLock::new(HashMap::new())),
             registry: Arc::new(RwLock::new(ModuleRegistry::empty())),
             workspace_root: Arc::new(RwLock::new(None)),
+            refresh_generation: Arc::new(RwLock::new(0)),
+            document_versions: Arc::new(RwLock::new(HashMap::new())),
+            document_update_lock: Arc::new(Mutex::new(())),
         }
     }
 }
@@ -34,15 +40,14 @@ impl Backend {
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        // Discover modules from the workspace root provided by the client.
-        let workspace_root = params
-            .root_uri
-            .as_ref()
-            .and_then(|uri| uri.to_file_path().ok());
+        // Prefer the legacy root URI when it is usable, but accept clients
+        // that provide only the current workspace-folder field.
+        let workspace_root = workspace_root_from_initialize(&params);
 
         if let Some(root) = workspace_root {
             *self.workspace_root.write().await = Some(root);
-            self.refresh_registry().await;
+            let generation = self.start_refresh_generation().await;
+            self.refresh_registry(generation).await;
         }
 
         Ok(InitializeResult {
@@ -94,28 +99,36 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         let source = params.text_document.text;
-        self.refresh_registry().await;
-        self.update_document(uri, source).await;
+        let version = params.text_document.version;
+        if let Some(generation) = self.update_document(uri, source, version).await {
+            self.refresh_registry(generation).await;
+        }
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
-        self.refresh_registry().await;
+        let version = params.text_document.version;
         // Full sync — use the first (only) change which contains the complete text.
         if let Some(change) = params.content_changes.into_iter().next() {
-            self.update_document(uri, change.text).await;
+            if let Some(generation) = self.update_document(uri, change.text, version).await {
+                self.refresh_registry(generation).await;
+            }
         }
     }
 
     async fn did_save(&self, _: DidSaveTextDocumentParams) {
-        self.refresh_registry().await;
+        let generation = self.start_refresh_generation().await;
+        self.refresh_registry(generation).await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
+        let _update_guard = self.document_update_lock.lock().await;
         self.documents.write().await.remove(&uri);
         self.manifests.write().await.remove(&uri);
         self.settings.write().await.remove(&uri);
+        self.document_versions.write().await.remove(&uri);
+        drop(_update_guard);
         // Clear diagnostics on close.
         self.client.publish_diagnostics(uri, vec![], None).await;
     }
@@ -248,7 +261,13 @@ impl LanguageServer for Backend {
 }
 
 impl Backend {
-    async fn refresh_registry(&self) {
+    async fn start_refresh_generation(&self) -> u64 {
+        let mut generation = self.refresh_generation.write().await;
+        *generation = generation.saturating_add(1);
+        *generation
+    }
+
+    async fn refresh_registry(&self, generation: u64) {
         let root = self.workspace_root.read().await.clone();
         let Some(root) = root else {
             return;
@@ -261,7 +280,9 @@ impl Backend {
                     revision = ?registry.snapshot_revision(),
                     "canonical authoring snapshot refreshed"
                 );
-                *self.registry.write().await = registry;
+                if !self.commit_registry(generation, registry).await {
+                    tracing::debug!(generation, "discarding stale authoring snapshot refresh");
+                }
             }
             Err(error) => {
                 tracing::warn!(
@@ -272,13 +293,33 @@ impl Backend {
         }
     }
 
-    async fn update_document(&self, uri: Url, source: String) {
+    async fn commit_registry(&self, generation: u64, next: ModuleRegistry) -> bool {
+        // Hold the generation read lock while taking the registry write lock.
+        // A newer notification cannot advance the generation between this
+        // check and the publication of `next`.
+        let current_generation = self.refresh_generation.read().await;
+        if *current_generation != generation {
+            return false;
+        }
+        *self.registry.write().await = next;
+        true
+    }
+
+    async fn update_document(&self, uri: Url, source: String, version: i32) -> Option<u64> {
         if manifest::is_manifest_uri(&uri) {
             let doc = ManifestDocument::new(uri.clone(), source);
             let diags = manifest::diagnostics(&doc);
+            let _update_guard = self.document_update_lock.lock().await;
+            if !self.commit_document_version(&uri, version).await {
+                return None;
+            }
             self.manifests.write().await.insert(uri.clone(), doc);
-            self.client.publish_diagnostics(uri, diags, None).await;
-            return;
+            drop(_update_guard);
+            let generation = self.start_refresh_generation().await;
+            self.client
+                .publish_diagnostics(uri, diags, Some(version))
+                .await;
+            return Some(generation);
         }
 
         if settings::is_settings_uri(&uri) {
@@ -287,16 +328,56 @@ impl Backend {
                 let registry = self.registry.read().await;
                 settings::diagnostics(&doc, &registry)
             };
+            let _update_guard = self.document_update_lock.lock().await;
+            if !self.commit_document_version(&uri, version).await {
+                return None;
+            }
             self.settings.write().await.insert(uri.clone(), doc);
-            self.client.publish_diagnostics(uri, diags, None).await;
-            return;
+            drop(_update_guard);
+            let generation = self.start_refresh_generation().await;
+            self.client
+                .publish_diagnostics(uri, diags, Some(version))
+                .await;
+            return Some(generation);
         }
 
         let doc = Document::new(uri.clone(), source);
         let diags = diagnostics::from_document(&doc);
+        let _update_guard = self.document_update_lock.lock().await;
+        if !self.commit_document_version(&uri, version).await {
+            return None;
+        }
         self.documents.write().await.insert(uri.clone(), doc);
-        self.client.publish_diagnostics(uri, diags, None).await;
+        drop(_update_guard);
+        let generation = self.start_refresh_generation().await;
+        self.client
+            .publish_diagnostics(uri, diags, Some(version))
+            .await;
+        Some(generation)
     }
+
+    async fn commit_document_version(&self, uri: &Url, version: i32) -> bool {
+        let mut versions = self.document_versions.write().await;
+        if versions.get(uri).is_some_and(|current| *current >= version) {
+            return false;
+        }
+        versions.insert(uri.clone(), version);
+        true
+    }
+}
+
+fn workspace_root_from_initialize(params: &InitializeParams) -> Option<PathBuf> {
+    params
+        .root_uri
+        .as_ref()
+        .and_then(|uri| uri.to_file_path().ok())
+        .or_else(|| {
+            params
+                .workspace_folders
+                .as_ref()?
+                .iter()
+                .find_map(|folder| folder.uri.to_file_path().ok())
+        })
 }
 
 /// A range that spans the entire document, for whole-document replacement edits.
@@ -310,6 +391,7 @@ fn full_document_range(source: &str) -> Range {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tower_lsp::LspService;
 
     #[test]
     fn full_document_range_uses_utf16_end_position() {
@@ -317,5 +399,70 @@ mod tests {
             full_document_range("é😀\nnext"),
             Range::new(Position::new(0, 0), Position::new(1, 4))
         );
+    }
+
+    #[test]
+    fn workspace_folder_is_used_when_root_uri_is_missing() {
+        let params = InitializeParams {
+            workspace_folders: Some(vec![WorkspaceFolder {
+                uri: Url::parse("file:///workspace").unwrap(),
+                name: "workspace".into(),
+            }]),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            workspace_root_from_initialize(&params),
+            Some(PathBuf::from("/workspace"))
+        );
+    }
+
+    #[test]
+    fn usable_root_uri_takes_precedence_over_workspace_folder() {
+        let params = InitializeParams {
+            root_uri: Some(Url::parse("file:///root").unwrap()),
+            workspace_folders: Some(vec![WorkspaceFolder {
+                uri: Url::parse("file:///workspace").unwrap(),
+                name: "workspace".into(),
+            }]),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            workspace_root_from_initialize(&params),
+            Some(PathBuf::from("/root"))
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_refresh_generation_cannot_replace_newer_registry() {
+        let (service, _) = LspService::new(Backend::new);
+        let backend = service.inner();
+        let first_generation = backend.start_refresh_generation().await;
+        let second_generation = backend.start_refresh_generation().await;
+
+        let mut stale = ModuleRegistry::empty();
+        stale.themes.push("stale".into());
+        assert!(!backend.commit_registry(first_generation, stale).await);
+
+        let mut current = ModuleRegistry::empty();
+        current.themes.push("current".into());
+        assert!(backend.commit_registry(second_generation, current).await);
+        assert_eq!(
+            backend.registry.read().await.themes,
+            vec!["current".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn older_document_versions_are_rejected() {
+        let (service, _) = LspService::new(Backend::new);
+        let backend = service.inner();
+        let uri = Url::parse("file:///workspace/main.mesh").unwrap();
+
+        assert!(backend.commit_document_version(&uri, 2).await);
+        assert!(!backend.commit_document_version(&uri, 1).await);
+        assert!(!backend.commit_document_version(&uri, 2).await);
+        assert!(backend.commit_document_version(&uri, 3).await);
     }
 }

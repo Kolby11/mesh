@@ -47,5 +47,9 @@ shipped `module.json` stops validating cleanly against either layer.
 The server is a generic stdio LSP. Point your editor's language client at the
 `mesh-tools-lsp` binary for `*.mesh` files and canonical `module.json` files in
 a MESH workspace. Legacy manifest filenames may receive migration diagnostics
-but are not public alternatives. The workspace root URI sent at `initialize`
-is used to discover modules and infer interface shapes.
+but are not public alternatives. The client-supplied workspace root URI is
+used to discover modules and infer interface shapes. Clients may omit
+`rootUri` and provide `workspaceFolders` instead; the first file-backed folder
+is used. Open-document versions and refresh generations keep rapid `didChange`
+notifications ordered, so an older snapshot or diagnostic cannot replace a
+newer one.
