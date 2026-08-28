@@ -4,7 +4,7 @@
       "default_locale": "sk"
     }
   },
-  "revision": 61,
+  "revision": 62,
   "schemaVersion": 1,
   "shell": {
     "fonts": {
@@ -25,7 +25,7 @@
       }
     },
     "theme": {
-      "active": "@mesh/solarized-dark:solarized-dark",
+      "active": "@mesh/tokyo-night:tokyo-night",
       "mode": null
     }
   }
