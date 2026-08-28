@@ -1608,6 +1608,7 @@ fn cmd_rollback(args: &[String]) {
 
 fn cmd_uninstall(args: &[String]) {
     let module_id = required_arg(args, 0, "mesh-shell uninstall <module-id>");
+    mesh_core_module::package::ModuleId::parse(module_id).unwrap_or_else(|error| exit_error(error));
     let root_path = root_module_graph_path();
     let config_dir = root_path
         .parent()
@@ -1622,7 +1623,6 @@ fn cmd_uninstall(args: &[String]) {
     transaction
         .protect_package_state(&root_path, &modules_dir)
         .unwrap_or_else(|error| exit_error(error));
-    mesh_core_module::package::ModuleId::parse(module_id).unwrap_or_else(|error| exit_error(error));
     let lock_path = config_dir.join("mesh.lock");
     let mut lock = mesh_core_module::package::MeshLock::load_or_default(&lock_path)
         .unwrap_or_else(|error| exit_error(error));
@@ -1645,16 +1645,12 @@ fn cmd_uninstall(args: &[String]) {
         None => mesh_core_module::package::module_install_path(&modules_dir, module_id)
             .unwrap_or_else(|error| exit_error(error)),
     };
-    if installed_at.exists() {
-        mesh_core_module::package::validate_module_tree(&installed_at)
-            .unwrap_or_else(|error| exit_error(error));
-        std::fs::remove_dir_all(&installed_at).unwrap_or_else(|error| {
-            exit_error(format!(
-                "failed to remove {}: {error}",
-                installed_at.display()
-            ))
-        });
-    }
+    transaction.remove(&installed_at).unwrap_or_else(|error| {
+        exit_error(format!(
+            "failed to remove {}: {error}",
+            installed_at.display()
+        ))
+    });
     lock.modules.remove(module_id);
     if lock
         .composition

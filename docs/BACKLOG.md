@@ -96,7 +96,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/16-developer-and-authoring-tools/improvements.md)
 
-- [ ] Make uninstall path-safe and reject traversal/symlink escapes before recursive deletion.
 - [ ] Make package mutations atomic, journaled, crash-recoverable, and failure-injection tested.
 - [ ] Make live profile switching use typed acknowledgements and exact-generation recovery.
 - [ ] Make CLI and shell use one package ownership and transaction contract.

@@ -332,6 +332,12 @@ impl Shell {
                 .map_err(|error| package_error(error.to_string()))?;
         }
 
+        transaction.remove(&installed_at).map_err(|error| {
+            package_error(format!(
+                "failed to remove {}: {error}",
+                installed_at.display()
+            ))
+        })?;
         let active_profile_changed = active_profile
             .as_deref()
             .is_some_and(|profile_id| changed_profiles.iter().any(|id| id == profile_id));
@@ -339,16 +345,6 @@ impl Shell {
         let mut transaction = Some(transaction);
         let mut package_rollback = Some(package_rollback);
 
-        if installed_at.exists() {
-            validate_module_tree(&installed_at)
-                .map_err(|error| package_error(error.to_string()))?;
-            fs::remove_dir_all(&installed_at).map_err(|error| {
-                package_error(format!(
-                    "failed to remove {}: {error}",
-                    installed_at.display()
-                ))
-            })?;
-        }
         let new_graph = load_installed_module_graph(&graph_path)
             .map_err(|error| package_error(error.to_string()))?;
         // Do not remove the in-memory module or its live runtime until the

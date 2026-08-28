@@ -8,7 +8,7 @@
 //! mutation, and restores those snapshots if the operation fails or the next
 //! package operation finds an unfinished journal.
 
-use super::{ModuleManifestError, contained_path};
+use super::{ModuleManifestError, contained_path, validate_module_tree};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
@@ -495,6 +495,11 @@ fn remove_path(path: &Path) -> Result<(), ModuleManifestError> {
             })
         }
         Ok(metadata) if metadata.is_dir() => {
+            // A package removal must reject the complete tree before invoking
+            // the recursive filesystem operation. This keeps symlinks and
+            // unsupported special files from turning an uninstall into an
+            // escape from the validated package path.
+            validate_module_tree(path)?;
             fs::remove_dir_all(path).map_err(|source| ModuleManifestError::Io {
                 path: path.to_path_buf(),
                 source,
@@ -641,6 +646,66 @@ mod tests {
         transaction.replace_with(&target, &staged).unwrap();
         assert_eq!(fs::read_to_string(target.join("version")).unwrap(), "new");
         transaction.commit().unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn removal_rejects_traversal_before_deleting_anything() {
+        let root = temp_dir("remove-traversal");
+        let modules = root.join("modules");
+        let outside = root.join("outside");
+        fs::create_dir_all(&modules).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        let sentinel = outside.join("keep.txt");
+        fs::write(&sentinel, "keep").unwrap();
+
+        let traversal = modules.join("..").join("outside");
+        let mut transaction = PackageTransaction::begin(&root, "uninstall").unwrap();
+        let error = transaction.remove(&traversal).unwrap_err();
+
+        assert!(error.to_string().contains("contained"));
+        assert_eq!(fs::read_to_string(sentinel).unwrap(), "keep");
+        drop(transaction);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn removal_deletes_a_valid_contained_module_tree() {
+        let root = temp_dir("remove-valid");
+        let modules = root.join("modules");
+        let module = modules.join("module");
+        fs::create_dir_all(module.join("src")).unwrap();
+        fs::write(module.join("module.json"), "{}").unwrap();
+        fs::write(module.join("src/main.mesh"), "<text />").unwrap();
+
+        let mut transaction = PackageTransaction::begin(&root, "uninstall").unwrap();
+        transaction.remove(&module).unwrap();
+
+        assert!(!module.exists());
+        transaction.commit().unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn removal_rejects_nested_symlink_before_recursive_deletion() {
+        let root = temp_dir("remove-symlink");
+        let modules = root.join("modules");
+        let outside = root.join("outside");
+        let module = modules.join("module");
+        fs::create_dir_all(&module).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        let sentinel = outside.join("keep.txt");
+        fs::write(&sentinel, "keep").unwrap();
+        std::os::unix::fs::symlink(&outside, module.join("escape")).unwrap();
+
+        let mut transaction = PackageTransaction::begin(&root, "uninstall").unwrap();
+        let error = transaction.remove(&module).unwrap_err();
+
+        assert!(error.to_string().contains("symlink"));
+        assert!(module.exists());
+        assert_eq!(fs::read_to_string(sentinel).unwrap(), "keep");
+        drop(transaction);
         fs::remove_dir_all(root).unwrap();
     }
 }
