@@ -1140,38 +1140,68 @@ pub(super) struct DiscoveredModuleManifest {
 pub(super) fn discover_shell_module_manifest_dirs(module_dirs: &[PathBuf]) -> Vec<PathBuf> {
     let mut discovered = Vec::new();
     for dir in module_dirs {
-        if !dir.exists() {
+        let Ok(metadata) = std::fs::symlink_metadata(dir) else {
             tracing::debug!("module directory does not exist: {}", dir.display());
             continue;
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            tracing::warn!(
+                "module directory is not a real directory: {}",
+                dir.display()
+            );
+            continue;
         }
-        discovered.extend(discover_shell_module_manifest_dirs_under(dir));
+        let Ok(root) = std::fs::canonicalize(dir) else {
+            tracing::warn!("failed to canonicalize module directory: {}", dir.display());
+            continue;
+        };
+        let mut visited = HashSet::new();
+        discover_shell_module_manifest_dirs_under(dir, &root, &mut visited, &mut discovered);
     }
     discovered
 }
 
-fn discover_shell_module_manifest_dirs_under(dir: &Path) -> Vec<PathBuf> {
+fn discover_shell_module_manifest_dirs_under(
+    dir: &Path,
+    root: &Path,
+    visited: &mut HashSet<PathBuf>,
+    discovered: &mut Vec<PathBuf>,
+) {
+    let Ok(metadata) = std::fs::symlink_metadata(dir) else {
+        return;
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return;
+    }
+    let Ok(canonical) = std::fs::canonicalize(dir) else {
+        return;
+    };
+    if !canonical.starts_with(root) || !visited.insert(canonical) {
+        return;
+    }
     if shell_module_manifest_exists(dir) {
-        return vec![dir.to_path_buf()];
+        discovered.push(dir.to_path_buf());
+        return;
     }
 
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(e) => {
             tracing::warn!("failed to read module directory {}: {e}", dir.display());
-            return Vec::new();
+            return;
         }
     };
     let mut child_dirs = entries
         .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
+        .filter_map(|entry| {
+            let file_type = entry.file_type().ok()?;
+            file_type.is_dir().then(|| entry.path())
+        })
         .collect::<Vec<_>>();
     child_dirs.sort();
-
-    child_dirs
-        .par_iter()
-        .flat_map(|path| discover_shell_module_manifest_dirs_under(path))
-        .collect()
+    for path in child_dirs {
+        discover_shell_module_manifest_dirs_under(&path, root, visited, discovered);
+    }
 }
 
 fn shell_module_manifest_exists(dir: &Path) -> bool {

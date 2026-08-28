@@ -36,6 +36,23 @@ fn shell_module_manifest_discovery_is_deterministic_and_stops_at_module_roots() 
     assert_eq!(relative, vec!["second/beta", "first/alpha", "first/zeta"]);
 }
 
+#[cfg(unix)]
+#[test]
+fn shell_module_manifest_discovery_does_not_follow_directory_symlinks() {
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    write_shell_discovery_manifest(&outside.path().join("outside"), "@test/outside", 0);
+    std::os::unix::fs::symlink(
+        outside.path().join("outside"),
+        root.path().join("linked-module"),
+    )
+    .unwrap();
+
+    let discovered = discover_shell_module_manifest_dirs(&[root.path().to_path_buf()]);
+
+    assert!(discovered.is_empty());
+}
+
 #[test]
 #[ignore = "release-only shell discovery manifest loading microbenchmark"]
 fn shell_module_manifest_parallel_loading_beats_serial_benchmark() {

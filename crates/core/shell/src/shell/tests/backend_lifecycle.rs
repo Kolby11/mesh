@@ -497,6 +497,98 @@ fn backend_lifecycle_rejects_missing_backend_entrypoint_before_launch() {
 }
 
 #[test]
+fn backend_lifecycle_rejects_escaping_backend_entrypoint_before_read() {
+    let graph = graph_from_json(
+        r#"{
+              "schemaVersion": 1,
+              "modulesDir": "modules",
+              "modules": {
+                "@mesh/backend": { "kind": "backend", "path": "@mesh/backend", "enabled": true }
+              },
+              "providers": { "mesh.audio": "@mesh/backend" }
+            }"#,
+        vec![
+            r#"{
+                  "name": "@mesh/backend",
+                  "version": "0.1.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "backend",
+                    "implements": [{ "interface": "mesh.audio", "provider": "test" }]
+                  }
+                }"#,
+        ],
+    );
+    let (_dir, mut module) = module_instance("@mesh/backend", None);
+    module.manifest.entrypoints.main = Some("../outside.luau".into());
+    let modules = HashMap::from([("@mesh/backend".to_string(), module)]);
+
+    let (candidates, statuses) = backend_launch_candidates_from_graph(
+        &graph,
+        &modules,
+        &test_settings(),
+        &InterfaceRegistry::new(),
+    );
+
+    assert!(candidates.is_empty());
+    assert!(statuses.iter().any(|status| {
+        status.status == "missing_entrypoint"
+            && status.provider_id.as_deref() == Some("@mesh/backend")
+            && status.message.contains("contained")
+    }));
+}
+
+#[cfg(unix)]
+#[test]
+fn backend_lifecycle_rejects_symlinked_backend_entrypoint_before_read() {
+    let graph = graph_from_json(
+        r#"{
+              "schemaVersion": 1,
+              "modulesDir": "modules",
+              "modules": {
+                "@mesh/backend": { "kind": "backend", "path": "@mesh/backend", "enabled": true }
+              },
+              "providers": { "mesh.audio": "@mesh/backend" }
+            }"#,
+        vec![
+            r#"{
+                  "name": "@mesh/backend",
+                  "version": "0.1.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "backend",
+                    "implements": [{ "interface": "mesh.audio", "provider": "test" }]
+                  }
+                }"#,
+        ],
+    );
+    let (_dir, mut module) = module_instance("@mesh/backend", None);
+    let outside = tempfile::tempdir().unwrap();
+    fs::write(outside.path().join("main.luau"), "return 'outside'").unwrap();
+    std::os::unix::fs::symlink(
+        outside.path().join("main.luau"),
+        module.path.join("escape.luau"),
+    )
+    .unwrap();
+    module.manifest.entrypoints.main = Some("escape.luau".into());
+    let modules = HashMap::from([("@mesh/backend".to_string(), module)]);
+
+    let (candidates, statuses) = backend_launch_candidates_from_graph(
+        &graph,
+        &modules,
+        &test_settings(),
+        &InterfaceRegistry::new(),
+    );
+
+    assert!(candidates.is_empty());
+    assert!(statuses.iter().any(|status| {
+        status.status == "missing_entrypoint"
+            && status.provider_id.as_deref() == Some("@mesh/backend")
+            && status.message.contains("symlink")
+    }));
+}
+
+#[test]
 fn backend_lifecycle_excludes_disabled_backend_modules() {
     let graph = graph_from_json(
         r#"{

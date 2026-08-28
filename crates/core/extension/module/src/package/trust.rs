@@ -253,8 +253,16 @@ pub fn load_module_signature(
     root: &Path,
 ) -> Result<Option<SignedProvenance>, super::ModuleManifestError> {
     let path = root.join(MODULE_SIGNATURE_FILE);
-    if !path.exists() {
-        return Ok(None);
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(super::ModuleManifestError::Io { path, source }),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(super::ModuleManifestError::Validation(format!(
+            "{} must be a regular, non-symlink file",
+            path.display()
+        )));
     }
     super::validate_regular_file(&path, MODULE_SIGNATURE_FILE)?;
     let content = fs::read_to_string(&path).map_err(|source| super::ModuleManifestError::Io {
@@ -462,5 +470,23 @@ mod tests {
             signature: "not base64".into(),
         };
         assert!(signature.validate().is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn module_signature_rejects_symlink_before_reading_provenance() {
+        let root = verification_directory().unwrap();
+        let outside = root
+            .parent()
+            .unwrap()
+            .join(format!("mesh-provenance-outside-{}", std::process::id()));
+        fs::write(&outside, "not provenance").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join(MODULE_SIGNATURE_FILE)).unwrap();
+
+        let error = load_module_signature(&root).unwrap_err();
+
+        assert!(error.to_string().contains("symlink"));
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_file(outside).unwrap();
     }
 }

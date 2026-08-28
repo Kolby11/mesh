@@ -251,13 +251,21 @@ impl ModuleStore {
 
     pub fn active_snapshot(&self) -> Result<Option<ActivationSnapshot>, ModuleManifestError> {
         let path = self.active_generation_path();
-        let content = match fs::read_to_string(&path) {
-            Ok(content) => content,
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(source) => {
-                return Err(ModuleManifestError::Io { path, source });
-            }
+            Err(source) => return Err(ModuleManifestError::Io { path, source }),
         };
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(ModuleManifestError::Validation(format!(
+                "active module generation {} must be a regular, non-symlink file",
+                path.display()
+            )));
+        }
+        let content = fs::read_to_string(&path).map_err(|source| ModuleManifestError::Io {
+            path: path.clone(),
+            source,
+        })?;
         let generation = content.trim().parse::<u64>().map_err(|_| {
             ModuleManifestError::Validation(format!(
                 "active module generation in {} is not numeric",
@@ -792,6 +800,21 @@ mod tests {
 
         let changed = ActivationSnapshot::new(7, BTreeMap::new(), None).unwrap();
         assert!(store.publish_snapshot(&changed).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn active_generation_rejects_symlink_before_reading_the_pointer() {
+        let root = temp_dir("active-generation-symlink");
+        let store = ModuleStore::new(root.join("store")).unwrap();
+        let outside = root.join("outside-generation");
+        fs::write(&outside, "7\n").unwrap();
+        std::os::unix::fs::symlink(&outside, store.root().join(ACTIVE_GENERATION)).unwrap();
+
+        let error = store.active_snapshot().unwrap_err();
+
+        assert!(error.to_string().contains("symlink"));
         fs::remove_dir_all(root).unwrap();
     }
 

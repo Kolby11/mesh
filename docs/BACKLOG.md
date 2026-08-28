@@ -105,9 +105,6 @@ The 2026-06-18 redesign largely shipped: canonical `module.json` with
 `mesh.uses` / `mesh.provides` / `mesh.implements`, the graph as single source of
 truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
-- [ ] Close module filesystem escapes before any package mutation or source
-      read: validate canonical module IDs, contain all entry/import/asset paths,
-      reject Git symlinks, and remove CLI uninstall traversal. [Audit](../.planning/log/sections/02-module-system-and-installation/improvements.md).
 - [ ] Make installed-graph activation fail closed and build catalogs/provider
       registries only from its enabled, compatible candidate set; preserve the
       last known-good runtime when graph validation fails. [Audit](../.planning/log/sections/02-module-system-and-installation/improvements.md).

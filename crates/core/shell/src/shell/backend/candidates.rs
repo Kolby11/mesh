@@ -160,7 +160,24 @@ pub(in crate::shell) fn launch_candidate_for_provider_with_capabilities(
         });
     };
 
-    let entrypoint_path = module.path.join(entrypoint);
+    let entrypoint_path = match mesh_core_module::package::resolve_contained_module_file(
+        &module.path,
+        entrypoint,
+        "backend entrypoint",
+    ) {
+        Ok(path) => path,
+        Err(error) => {
+            return Err(BackendLifecycleStatusRecord {
+                interface,
+                provider_id: Some(provider.module_id.clone()),
+                status: "missing_entrypoint",
+                message: format!(
+                    "backend provider {} entrypoint is invalid or unreadable: {error}",
+                    provider.module_id
+                ),
+            });
+        }
+    };
     let Ok(script_source) = std::fs::read_to_string(&entrypoint_path) else {
         return Err(BackendLifecycleStatusRecord {
             interface,
