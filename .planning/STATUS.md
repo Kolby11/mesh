@@ -16,8 +16,10 @@ profile switches now wait for a typed committed/rejected generation
 acknowledgement, and failed pre-commit activation restores the exact prior
 active-profile pointer without overwriting a newer external change. CLI,
 doctor, LSP, and runtime consumers now share the resolved canonical graph
-snapshot and its content revision. The active runtime publishes immutable
+snapshot and its content revision. LSP manifest diagnostics now run the same
+canonical module and root runtime contracts as activation while retaining
+source-aware editor diagnostics. The active runtime publishes immutable
 activation snapshots, prepared frontends remain hidden until commit, and
 shutdown advances through explicit quiescing, teardown, flushing, and stopped
-phases. The next open item is Section 16's LSP manifest/schema validation. See
+phases. The next open item is Section 16's LSP UTF-16 position conversion. See
 [`.planning/log/2026-08.md`](log/2026-08.md).

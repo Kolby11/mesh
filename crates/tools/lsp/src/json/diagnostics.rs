@@ -1,8 +1,8 @@
 //! Schema-driven diagnostics for JSON documents: syntax, unknown keys, enum
 //! violations, missing required fields, and structural type mismatches.
 //!
-//! Document-specific rules a schema tree cannot express (the root graph
-//! config's canonical validation, for instance) are layered on by the caller.
+//! Document-specific rules a schema tree cannot express, including canonical
+//! runtime validation for manifests, are layered on by the caller.
 
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Range};
 

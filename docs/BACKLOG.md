@@ -96,7 +96,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/16-developer-and-authoring-tools/improvements.md)
 
-- [ ] Generate LSP manifest/schema validation from runtime contracts instead of duplicated under-approximations.
 - [ ] Convert all LSP positions to UTF-16 code units at the protocol boundary.
 - [ ] Make `--replace` and CLI flags enforce their documented typed behavior.
 - [ ] Make LSP analysis syntax-aware with recoverable partial ASTs and useful mid-edit diagnostics.

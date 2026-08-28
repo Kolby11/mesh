@@ -1,10 +1,11 @@
-//! A small, hand-authored description of the canonical `module.json` schema.
+//! A small, hand-authored editor description of the canonical `module.json` schema.
 //!
 //! This mirrors the runtime structs in `mesh_core_module` (`ModuleManifest` /
 //! `MeshModuleSection` for per-module manifests and `RootModuleGraphManifest`
-//! for the workspace `config/module.json`). It is the single source of truth for
-//! manifest key completion, hover documentation, and unknown-key / enum
-//! diagnostics. When the runtime schema changes, update this tree to match.
+//! for the workspace `config/module.json`). It supplies key completion, hover
+//! documentation, and structural editor hints. Parse and semantic validation
+//! is performed by the runtime contracts in `manifest::diagnostics`, so this
+//! tree must not become a second runtime validation authority.
 
 use crate::json::schema::{Kind, Node, enumeration, field, obj, scalar};
 
@@ -933,8 +934,31 @@ fn mesh_contributes(doc: &'static str) -> Node {
                         vec![
                             field("id", true, scalar("Theme id.", "string")),
                             field("label", false, localized_text("Display label.")),
-                            field("defaultMode", false, scalar("Default mode id.", "string")),
+                            field("default_mode", false, scalar("Default mode id.", "string")),
                             field("modes", false, dependency_map("Mode id → token-set path.")),
+                            field(
+                                "mode_metadata",
+                                false,
+                                node(
+                                    "Rendering metadata for each theme mode.",
+                                    "object<string, mode-metadata>",
+                                    Kind::Map(Box::new(obj(
+                                        "Theme mode rendering metadata.",
+                                        vec![
+                                            field(
+                                                "color_scheme",
+                                                false,
+                                                scalar("Light or dark color scheme.", "string"),
+                                            ),
+                                            field(
+                                                "contrast",
+                                                false,
+                                                scalar("Contrast preference.", "string"),
+                                            ),
+                                        ],
+                                    ))),
+                                ),
+                            ),
                         ],
                     ))),
                 ),
@@ -1264,6 +1288,38 @@ fn contract_node() -> Node {
                             false,
                             scalar("Capabilities consumers may hold.", "array"),
                         ),
+                        field(
+                            "read",
+                            false,
+                            string_array(
+                                "Capabilities required for reading interface state.",
+                                "Capability id.",
+                            ),
+                        ),
+                        field(
+                            "events",
+                            false,
+                            node(
+                                "Capabilities required for named interface events.",
+                                "object<string, array<capability>>",
+                                Kind::Map(Box::new(string_array(
+                                    "Capabilities required by this event.",
+                                    "Capability id.",
+                                ))),
+                            ),
+                        ),
+                        field(
+                            "methods",
+                            false,
+                            node(
+                                "Capabilities required for named interface methods.",
+                                "object<string, array<capability>>",
+                                Kind::Map(Box::new(string_array(
+                                    "Capabilities required by this method.",
+                                    "Capability id.",
+                                ))),
+                            ),
+                        ),
                     ],
                 ),
             ),
@@ -1477,6 +1533,18 @@ fn root_config_root() -> Node {
                             "providers",
                             false,
                             dependency_map("Interface name → selected provider module id."),
+                        ),
+                        field(
+                            "capabilityApprovals",
+                            false,
+                            node(
+                                "Explicit capability approvals keyed by module id.",
+                                "object<module-id, array<capability>>",
+                                Kind::Map(Box::new(string_array(
+                                    "Capabilities approved for the module.",
+                                    "Capability id.",
+                                ))),
+                            ),
                         ),
                         field(
                             "layout",

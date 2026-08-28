@@ -1,7 +1,7 @@
 //! Regression guard: every `module.json` shipped in the workspace must validate
-//! cleanly against the LSP manifest schema. If this fails, either a real
-//! manifest drifted or the schema in `manifest::schema` fell out of sync with
-//! the runtime `mesh_core_module` structs.
+//! cleanly against the LSP editor metadata and canonical runtime manifest
+//! contract. If this fails, either a real manifest drifted or an authoring
+//! surface fell out of sync with `mesh_core_module`.
 
 use mesh_tools_lsp::manifest::{ManifestDocument, diagnostics};
 use tower_lsp::lsp_types::Url;

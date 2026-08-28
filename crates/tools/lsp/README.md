@@ -32,15 +32,15 @@ For both:
   (`mesh.kind`, surface `anchor` / `layer` / `keyboard_mode`, ...). Capabilities
   are offered as non-binding suggestions.
 - **Hover** documentation for every known key, including allowed enum values.
-- **Diagnostics**: JSON syntax errors, unknown properties, invalid enum values,
-  missing required properties, structural type mismatches, and the canonical
-  runtime validation rules for the root graph config.
+- **Diagnostics**: JSON syntax errors, editor-schema unknown properties and
+  enum/missing-property hints, structural type mismatches, and canonical
+  runtime validation for both per-module manifests and the root graph config.
 
-The manifest schema lives in `src/manifest/schema.rs` and mirrors the runtime
-structs in `mesh-core-module` (`ModuleManifest` / `MeshModuleSection` and
-`RootModuleGraphManifest`). Keep it in sync when those structs change — the
-`tests/real_manifests.rs` guard fails if any shipped `module.json` stops
-validating cleanly.
+`src/manifest/schema.rs` provides editor metadata for completion and hover;
+parse and semantic validation comes from the runtime contracts in
+`mesh-core-module` (`ModuleManifest` / `MeshModuleSection` and
+`RootModuleGraphManifest`). The `tests/real_manifests.rs` guard fails if any
+shipped `module.json` stops validating cleanly against either layer.
 
 ## Editor setup
 

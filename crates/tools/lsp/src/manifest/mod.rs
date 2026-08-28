@@ -6,7 +6,9 @@
 //! the generic [`crate::json`] engine serves diagnostics, completion, and
 //! hover from that description.
 
-use tower_lsp::lsp_types::{CompletionItem, Diagnostic, DiagnosticSeverity, Hover, Position, Url};
+use tower_lsp::lsp_types::{
+    CompletionItem, Diagnostic, DiagnosticSeverity, Hover, NumberOrString, Position, Range, Url,
+};
 
 use crate::json;
 
@@ -45,9 +47,10 @@ pub fn hover(doc: &ManifestDocument, position: Position) -> Option<Hover> {
     json::hover::hover(&schema::root(doc.flavor), &doc.source, position)
 }
 
-/// Schema diagnostics plus, for the root graph config, the canonical runtime
-/// validation (schemaVersion, entrypoint format, relative-path rules) that the
-/// schema tree cannot express.
+/// Editor-schema diagnostics plus canonical runtime validation for both
+/// manifest flavors. The schema tree supplies completion, hover, and useful
+/// structural feedback; the runtime contract remains the authority for
+/// semantic validation and serde shape errors.
 pub fn diagnostics(doc: &ManifestDocument) -> Vec<Diagnostic> {
     let source = &doc.source;
     let mut out = json::diagnostics::check(&schema::root(doc.flavor), source, "mesh-manifest");
@@ -57,23 +60,141 @@ pub fn diagnostics(doc: &ManifestDocument) -> Vec<Diagnostic> {
         .iter()
         .any(|d| d.message.starts_with("JSON syntax error"));
 
-    if doc.flavor == ManifestFlavor::RootConfig
-        && !has_syntax_error
-        && let Err(err) = mesh_core_module::package::RootModuleGraphManifest::from_json_str(source)
-    {
-        // Attach to the `mesh` key when we can find it, else the document start.
-        let range = json::diagnostics::find_key_range(source, "mesh")
-            .unwrap_or_else(|| json::diagnostics::range_at(source, 0, 1));
-        out.push(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            source: Some("mesh-manifest".into()),
-            message: format!("invalid root config: {err}"),
-            ..Default::default()
-        });
+    if !has_syntax_error && let Err(error) = canonical_validation(doc.flavor, source) {
+        out.push(canonical_diagnostic(source, doc.flavor, error));
     }
 
     out
+}
+
+fn canonical_validation(
+    flavor: ManifestFlavor,
+    source: &str,
+) -> Result<(), mesh_core_module::package::ModuleManifestError> {
+    match flavor {
+        ManifestFlavor::Module => {
+            mesh_core_module::package::ModuleManifest::from_json_str(source).map(|_| ())
+        }
+        ManifestFlavor::RootConfig => {
+            mesh_core_module::package::RootModuleGraphManifest::from_json_str(source).map(|_| ())
+        }
+    }
+}
+
+fn canonical_diagnostic(
+    source: &str,
+    flavor: ManifestFlavor,
+    error: mesh_core_module::package::ModuleManifestError,
+) -> Diagnostic {
+    let (severity, range, message) = match error {
+        mesh_core_module::package::ModuleManifestError::Json {
+            source: parse_error,
+            ..
+        } => {
+            let offset = json::line_col_to_offset(source, parse_error.line(), parse_error.column());
+            (
+                DiagnosticSeverity::ERROR,
+                json::diagnostics::range_at(source, offset, offset.saturating_add(1)),
+                format!("runtime manifest JSON error: {parse_error}"),
+            )
+        }
+        mesh_core_module::package::ModuleManifestError::Diagnostic { diagnostic } => {
+            let range = diagnostic
+                .field_path
+                .as_deref()
+                .and_then(|path| field_range(source, path))
+                .or_else(|| json::diagnostics::find_key_range(source, "mesh"))
+                .unwrap_or_else(|| json::diagnostics::range_at(source, 0, 1));
+            let message = if diagnostic.suggested_action.trim().is_empty() {
+                diagnostic.message
+            } else {
+                format!(
+                    "{}; suggested action: {}",
+                    diagnostic.message, diagnostic.suggested_action
+                )
+            };
+            let severity = match diagnostic.severity {
+                mesh_core_module::package::ModuleManifestDiagnosticSeverity::Warning => {
+                    DiagnosticSeverity::WARNING
+                }
+                mesh_core_module::package::ModuleManifestDiagnosticSeverity::Error => {
+                    DiagnosticSeverity::ERROR
+                }
+            };
+            (severity, range, format!("runtime manifest: {message}"))
+        }
+        mesh_core_module::package::ModuleManifestError::Validation(message) => {
+            let range = validation_range(source, &message);
+            (
+                DiagnosticSeverity::ERROR,
+                range,
+                format!("runtime manifest validation: {message}"),
+            )
+        }
+        error => (
+            DiagnosticSeverity::ERROR,
+            validation_range(source, ""),
+            format!("runtime manifest validation: {error}"),
+        ),
+    };
+
+    let flavor_code = match flavor {
+        ManifestFlavor::Module => "module",
+        ManifestFlavor::RootConfig => "root",
+    };
+    Diagnostic {
+        range,
+        severity: Some(severity),
+        source: Some("mesh-runtime".into()),
+        code: Some(NumberOrString::String(format!(
+            "mesh.manifest.runtime.{flavor_code}"
+        ))),
+        message,
+        ..Default::default()
+    }
+}
+
+fn field_range(source: &str, field_path: &str) -> Option<Range> {
+    let key = field_path
+        .rsplit(|character| character == '.' || character == '[')
+        .next()?
+        .trim_end_matches(']');
+    (!key.is_empty()).then(|| json::diagnostics::find_key_range(source, key))?
+}
+
+fn validation_range(source: &str, message: &str) -> Range {
+    if let Some(path) = message
+        .find("mesh.")
+        .map(|start| &message[start..])
+        .and_then(|path| {
+            let end = path.find(|character: char| {
+                character.is_whitespace() || matches!(character, '\'' | '"' | '`' | ':' | ',' | ')')
+            });
+            Some(&path[..end.unwrap_or(path.len())])
+        })
+        && let Some(range) = field_range(source, path)
+    {
+        return range;
+    }
+
+    for key in [
+        "schemaVersion",
+        "modulesDir",
+        "capabilityApprovals",
+        "trustPolicy",
+        "version",
+        "name",
+        "mesh",
+    ] {
+        if message.contains(key)
+            && let Some(range) = json::diagnostics::find_key_range(source, key)
+        {
+            return range;
+        }
+    }
+
+    json::diagnostics::find_key_range(source, "mesh")
+        .unwrap_or_else(|| json::diagnostics::range_at(source, 0, 1))
 }
 
 /// The markdown body of a hover, for tests.
@@ -213,6 +334,68 @@ mod tests {
         let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "frontend", "entry": "src/main.mesh" } }"#;
         let d = diagnostics(&doc(src));
         assert!(d.is_empty(), "expected no diagnostics, got {d:?}");
+    }
+
+    #[test]
+    fn reports_canonical_runtime_validation_for_module_manifests() {
+        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "frontend", "entry": "../outside.mesh" } }"#;
+        let d = diagnostics(&doc(src));
+        let runtime = d
+            .iter()
+            .find(|diagnostic| diagnostic.source.as_deref() == Some("mesh-runtime"))
+            .expect("canonical runtime diagnostic");
+        assert!(runtime.message.contains("relative path"));
+        assert_eq!(
+            runtime.range.start,
+            json::offset_to_position(src, src.find("\"entry\"").unwrap())
+        );
+    }
+
+    #[test]
+    fn reports_canonical_runtime_shape_errors() {
+        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "frontend", "entry": 7 } }"#;
+        let d = diagnostics(&doc(src));
+        let runtime = d
+            .iter()
+            .find(|diagnostic| diagnostic.source.as_deref() == Some("mesh-runtime"))
+            .expect("canonical runtime shape diagnostic");
+        assert!(runtime.message.contains("expected a string"));
+        assert!(runtime.range.start.character > src.find("\"entry\"").unwrap() as u32);
+    }
+
+    #[test]
+    fn reports_canonical_runtime_validation_for_root_configs() {
+        let src = r#"{ "mesh": { "schemaVersion": 2 } }"#;
+        let root = ManifestDocument::new(
+            Url::parse("file:///m/config/module.json").unwrap(),
+            src.to_string(),
+        );
+        let d = diagnostics(&root);
+        let runtime = d
+            .iter()
+            .find(|diagnostic| diagnostic.source.as_deref() == Some("mesh-runtime"))
+            .expect("canonical root runtime diagnostic");
+        assert!(runtime.message.contains("supported version is 1"));
+        assert_eq!(
+            runtime.range.start,
+            json::offset_to_position(src, src.find("\"schemaVersion\"").unwrap())
+        );
+    }
+
+    #[test]
+    fn preserves_runtime_migration_diagnostic_field_spans() {
+        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "frontend", "surfaceLayout": { "anchor": "top" } } }"#;
+        let d = diagnostics(&doc(src));
+        let runtime = d
+            .iter()
+            .find(|diagnostic| diagnostic.source.as_deref() == Some("mesh-runtime"))
+            .expect("canonical migration diagnostic");
+        assert!(runtime.message.contains("surfaceLayout"));
+        assert!(runtime.message.contains("suggested action"));
+        assert_eq!(
+            runtime.range.start,
+            json::offset_to_position(src, src.find("\"surfaceLayout\"").unwrap())
+        );
     }
 
     #[test]

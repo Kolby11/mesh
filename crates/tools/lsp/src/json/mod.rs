@@ -4,8 +4,9 @@
 //! and [`diagnostics`] read that tree. [`cursor`] locates the cursor inside
 //! JSON that may not parse, which is the normal state of a file being typed in.
 //!
-//! Callers supply the schema: [`crate::manifest`] hand-writes one mirroring
-//! `mesh_core_module`, and [`crate::settings`] derives one from the runtime's
+//! Callers supply editor metadata: [`crate::manifest`] uses a compact tree for
+//! completion and hover while canonical manifest validation stays in
+//! `mesh_core_module`; [`crate::settings`] derives its tree from the runtime's
 //! own settings field tables.
 
 use tower_lsp::lsp_types::Position;
