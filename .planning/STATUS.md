@@ -35,5 +35,15 @@ contract identities before runtime contributions are indexed. The next open
 item is making the canonical `module.json` loader the only production path;
 legacy manifests remain migration diagnostics, never runnable compatibility
 inputs.
+`aspect-ratio` is now part of the bounded style profile, and the shipped
+navigation bar derives its control sizing from the bar root through it rather
+than restating px sizes per component. That exposed the next surface item:
+`exclusive_zone` and `margins` are still authored numbers duplicating the root
+CSS box, tracked in the backlog with a design note.
+
+The transition animator now runs one in-flight instance per entry of a
+comma-separated `transition`, so entries with different durations, delays, and
+easings animate on independent timelines. The remaining gap there is the
+`transition-*` longhands, which still collapse into a single entry.
 See
 [`.planning/log/2026-08.md`](log/2026-08.md).

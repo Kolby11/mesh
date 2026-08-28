@@ -1011,6 +1011,10 @@ fn apply_declaration_with_context(
             style.max_height = resolver
                 .with_resolved_str(value, variables, |resolved| parse_size_constraint(resolved))
         }
+        "aspect-ratio" => {
+            style.aspect_ratio =
+                resolver.with_resolved_str(value, variables, |resolved| parse_aspect_ratio(resolved))
+        }
         "flex-grow" => style.flex_grow = resolver.resolve_number_with_variables(value, variables),
         "flex-shrink" => {
             style.flex_shrink = resolver.resolve_number_with_variables(value, variables)

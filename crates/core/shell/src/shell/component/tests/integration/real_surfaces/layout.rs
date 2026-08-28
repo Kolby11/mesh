@@ -162,7 +162,7 @@ fn navigation_bar_keeps_layer_width_dynamic_after_css_measurement() {
 /// compositor has not configured it and nothing has been measured. The shell
 /// hands `paint` a 1px stand-in for the buffer and marks the axis unknown in
 /// the extent. If that stand-in reaches layout as a definite surface box, the
-/// bar's 56px root shrinks into it, `render_layout` sends 1px to the
+/// bar's 40px root shrinks into it, `render_layout` sends 1px to the
 /// compositor as the bar's height, and it never recovers — a nonzero size
 /// stops being dynamic, so the compositor's size is never consulted again.
 /// Live symptom: a 1920x201 layer surface (1px of content plus the 200px
@@ -189,8 +189,8 @@ fn unmeasured_navigation_bar_measures_its_own_height_not_the_placeholder() {
     navigation.render_layout(&mut surface);
     let (_, height) = surface.size.expect("navigation layout sets a surface size");
     assert_eq!(
-        height, 56,
-        "an unmeasured bar must measure its declared 56px root, not collapse into the stand-in"
+        height, 40,
+        "an unmeasured bar must measure its declared 40px root, not collapse into the stand-in"
     );
 }
 

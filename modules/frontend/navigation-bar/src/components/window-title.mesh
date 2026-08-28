@@ -28,19 +28,18 @@ end
     min-width: 60px;
     max-width: 240px;
     flex-shrink: 1;
-    padding-inline: var(--spacing-sm);
-    height: 32px;
+    padding-inline: var(--spacing-xs);
+    height: 24px;
     border-radius: var(--radius-md);
-    background: var(--color-surface-container);
-    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    background: transparent;
 }
 
 .wt-text {
-    color: var(--color-on-surface);
+    color: var(--color-on-surface-variant);
     font-size: var(--typography-size-sm);
     font-weight: 500;
     text-wrap: none;
-    opacity: 0.85;
+    transition: color var(--animation-duration-medium) var(--animation-curves-bezier-standard);
 }
 
 @container (max-width: 900px) {

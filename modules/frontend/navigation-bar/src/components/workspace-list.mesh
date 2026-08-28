@@ -1,20 +1,21 @@
 <template>
-  <row class="workspace-list">
+  <row class="workspace-list" onpointerleave={onWorkspaceLeave}>
     <box class="ws-active-trail" style={trail_style} aria-hidden="true" />
+    <box class="{hover_class}" style={hover_style} aria-hidden="true" />
     <box class="ws-active-indicator" style={indicator_style} aria-hidden="true" />
-    <button class="{ws1_class}" onclick={onSwitch1} title="Workspace 1" aria-label="Workspace 1">
+    <button class="{ws1_class}" onclick={onSwitch1} onpointerenter={onWorkspaceEnter1} title="Workspace 1" aria-label="Workspace 1">
       <text class="ws-num">1</text>
     </button>
-    <button class="{ws2_class}" onclick={onSwitch2} title="Workspace 2" aria-label="Workspace 2">
+    <button class="{ws2_class}" onclick={onSwitch2} onpointerenter={onWorkspaceEnter2} title="Workspace 2" aria-label="Workspace 2">
       <text class="ws-num">2</text>
     </button>
-    <button class="{ws3_class}" onclick={onSwitch3} title="Workspace 3" aria-label="Workspace 3">
+    <button class="{ws3_class}" onclick={onSwitch3} onpointerenter={onWorkspaceEnter3} title="Workspace 3" aria-label="Workspace 3">
       <text class="ws-num">3</text>
     </button>
-    <button class="{ws4_class}" onclick={onSwitch4} title="Workspace 4" aria-label="Workspace 4">
+    <button class="{ws4_class}" onclick={onSwitch4} onpointerenter={onWorkspaceEnter4} title="Workspace 4" aria-label="Workspace 4">
       <text class="ws-num">4</text>
     </button>
-    <button class="{ws5_class}" onclick={onSwitch5} title="Workspace 5" aria-label="Workspace 5">
+    <button class="{ws5_class}" onclick={onSwitch5} onpointerenter={onWorkspaceEnter5} title="Workspace 5" aria-label="Workspace 5">
       <text class="ws-num">5</text>
     </button>
   </row>
@@ -29,6 +30,8 @@ ws4_class = "ws-btn"
 ws5_class = "ws-btn"
 indicator_style = "transform: translateX(0px);"
 trail_style = "transform: translateX(0px);"
+hover_style = "transform: translateX(0px);"
+hover_class = "ws-hover"
 
 local wm = require("mesh.wm")
 
@@ -39,11 +42,29 @@ local function get_wm_state()
     return nil
 end
 
+-- Pill width plus the row gap, kept in step with `.ws-btn` / `.workspace-list`.
+local WS_SLOT_STRIDE = 26
+
 local function sync_indicator()
     local slot = math.max(1, math.min(5, ws_active))
-    local offset = (slot - 1) * 28
+    local offset = (slot - 1) * WS_SLOT_STRIDE
     indicator_style = string.format("transform: translateX(%dpx);", offset)
     trail_style = string.format("transform: translateX(%dpx);", offset)
+end
+
+-- The hover pill stays mounted and only moves, so travelling between
+-- workspaces slides one shape across the row instead of fading two.
+local function sync_hover(slot)
+    if slot == nil then
+        hover_class = "ws-hover"
+        return
+    end
+    local clamped = math.max(1, math.min(5, slot))
+    hover_style = string.format(
+        "transform: translateX(%dpx);",
+        (clamped - 1) * WS_SLOT_STRIDE
+    )
+    hover_class = "ws-hover ws-hover-visible"
 end
 
 local function sync_classes()
@@ -76,6 +97,13 @@ local function switch_to(n)
     end
 end
 
+function onWorkspaceEnter1() sync_hover(1) end
+function onWorkspaceEnter2() sync_hover(2) end
+function onWorkspaceEnter3() sync_hover(3) end
+function onWorkspaceEnter4() sync_hover(4) end
+function onWorkspaceEnter5() sync_hover(5) end
+function onWorkspaceLeave() sync_hover(nil) end
+
 function onSwitch1() switch_to(1) end
 function onSwitch2() switch_to(2) end
 function onSwitch3() switch_to(3) end
@@ -84,64 +112,103 @@ function onSwitch5() switch_to(5) end
 </script>
 
 <style>
+/* The pills stay px, not container-derived: the sliding indicator is placed by
+a translateX the script computes, so its stride needs a number both sides
+agree on. `WS_SLOT_STRIDE` in the script is this width plus the gap. */
 .workspace-list {
     position: relative;
-    height: 26px;
+    height: 24px;
     align-items: center;
     gap: 2px;
     flex-shrink: 0;
+    /* The indicator and trail below are out of flow, so they neither size this
+    row nor stop at its edge. Clipping here is what actually keeps them inside
+    the workspace strip instead of painting over the next region. */
+    overflow-x: hidden;
+    overflow-y: hidden;
 }
 
 .ws-active-indicator {
     position: absolute;
-    top: 0px;
+    top: 2px;
     left: 0px;
-    width: 26px;
-    height: 26px;
+    width: 24px;
+    height: 24px;
     border-radius: var(--radius-full);
     background: var(--color-primary);
     z-index: 1;
-    transition: transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
+    transition: transform var(--animation-duration-medium) var(--animation-curves-bezier-emphasized-decelerate);
 }
 
 .ws-active-trail {
     position: absolute;
-    top: 0px;
+    top: 2px;
     left: 0px;
-    width: 26px;
-    height: 26px;
+    width: 24px;
+    height: 24px;
     border-radius: var(--radius-full);
     background: var(--color-primary);
     opacity: 0.28;
     z-index: 0;
-    transition: transform var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate), opacity var(--animation-duration-medium) var(--animation-curves-bezier-standard);
+    transition-property: transform, opacity;
+    transition-duration: var(--animation-duration-long);
+    transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
 }
 
 .ws-btn {
-    width: 26px;
-    height: 26px;
+    width: 24px;
+    height: 24px;
     justify-content: center;
     align-items: center;
     border-radius: var(--radius-full);
     background: transparent;
     color: var(--color-on-surface-variant);
-    border-width: 0;
+    border-width: 2px;
+    border-style: solid;
+    border-color: transparent;
+    transform: scale(1);
     z-index: 2;
-    transition: color var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    transition-property: color, border-color, transform;
+    transition-duration: var(--animation-duration-medium);
+    transition-timing-function: var(--animation-curves-bezier-standard);
+}
+
+/* Hover reads as the pill sliding under the number, not as the number itself
+changing, so the whole row feels like one moving surface. */
+.ws-hover {
+    position: absolute;
+    top: 2px;
+    left: 0px;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-full);
+    background: var(--color-primary);
+    opacity: 0;
+    z-index: 0;
+    transition-property: transform, opacity;
+    transition-duration: var(--animation-duration-medium);
+    transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+}
+
+.ws-hover-visible {
+    opacity: 0.16;
 }
 
 .ws-btn:hover {
-    background: var(--color-surface-container-high);
     color: var(--color-on-surface);
 }
 
-.ws-btn-active {
-    background: transparent;
-    color: var(--color-on-primary);
+.ws-btn:focus-visible {
+    color: var(--color-on-surface);
+    border-color: var(--color-primary);
 }
 
+.ws-btn:active {
+    transform: scale(0.9);
+}
+
+.ws-btn-active,
 .ws-btn-active:hover {
-    background: transparent;
     color: var(--color-on-primary);
 }
 

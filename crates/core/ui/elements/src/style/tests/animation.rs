@@ -415,3 +415,37 @@ fn pseudo_state_rules_still_apply_after_variable_support() {
 fn container_query_rules_still_apply_after_variable_support() {
     container_query_rules_apply_against_context();
 }
+
+#[test]
+fn transition_property_set_operations_expand_the_all_shorthand() {
+    let colour = TransitionProperties {
+        color: true,
+        ..TransitionProperties::none()
+    };
+    let transform = TransitionProperties {
+        transform: true,
+        ..TransitionProperties::none()
+    };
+
+    assert!(TransitionProperties::none().is_empty());
+    assert!(!colour.is_empty());
+    assert!(!TransitionProperties::all().is_empty());
+
+    let both = colour.union(transform);
+    assert!(both.animates_color());
+    assert!(both.animates_transform());
+    assert!(!both.animates_opacity());
+
+    // An entry that shares its only property with a later one runs nothing.
+    assert!(colour.difference(colour).is_empty());
+
+    // `all` is expanded before the subtraction, so removing one property leaves
+    // the rest rather than the shorthand re-enabling it.
+    let all_but_colour = TransitionProperties::all().difference(colour);
+    assert!(!all_but_colour.animates_color());
+    assert!(all_but_colour.animates_opacity());
+    assert!(all_but_colour.animates_transform());
+
+    // A later `all` claims everything, leaving nothing for earlier entries.
+    assert!(both.difference(TransitionProperties::all()).is_empty());
+}

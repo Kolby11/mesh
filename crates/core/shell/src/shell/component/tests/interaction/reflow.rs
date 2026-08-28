@@ -942,8 +942,6 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
         "__mesh_embed__::@mesh/navigation-bar/slot:end/default-2::onThemeToggle",
     )
     .expect("rendered theme button");
-    let button_sample_x = (theme_button.layout.x + 6.0).round() as u32;
-    let button_sample_y = (theme_button.layout.y + 6.0).round() as u32;
     let button_center_x = theme_button.layout.x + theme_button.layout.width * 0.5;
     let button_center_y = theme_button.layout.y + theme_button.layout.height * 0.5;
 
@@ -984,6 +982,18 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
         "pressing the theme button should leave transition state to invalidate"
     );
 
+    // Nav controls are bare glyphs with no fill in any state, so the button
+    // contributes no opaque pixel to sample. Its palette still has to follow
+    // the theme, which the resolved colour shows without depending on where a
+    // transition happens to be mid-flight.
+    let light_button_color = first_node_with_click_handler(
+        component.last_tree.as_ref().expect("tree after press"),
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-2::onThemeToggle",
+    )
+    .expect("theme button after press")
+    .computed_style
+    .color;
+
     component.theme_changed().unwrap();
     component
         .handle_service_event(&ServiceEvent::Updated {
@@ -1013,9 +1023,18 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
         [5, 4, 4, 92],
         "already-painted navigation shell should repaint to dark surface immediately"
     );
-    assert_eq!(
-        buffer_pixel(&buffer, button_sample_x, button_sample_y),
-        [0xa4, 0x50, 0x67, 0xff],
-        "theme button active state should repaint with the dark palette, not stale light colors"
+    let dark_button_color = first_node_with_click_handler(
+        component
+            .last_tree
+            .as_ref()
+            .expect("tree after dark repaint"),
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-2::onThemeToggle",
+    )
+    .expect("theme button after dark repaint")
+    .computed_style
+    .color;
+    assert_ne!(
+        dark_button_color, light_button_color,
+        "theme button should resolve against the dark palette, not stale light colors"
     );
 }

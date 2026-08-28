@@ -196,6 +196,7 @@ pub(super) fn taffy_style_for_node(
             FlexDirection::Column => taffy_style::FlexDirection::Column,
         },
         flex_basis: taffy_dimension(style.flex_basis),
+        aspect_ratio: style.aspect_ratio,
         flex_grow: style.flex_grow.max(0.0),
         flex_shrink: style.flex_shrink.max(0.0),
         ..Default::default()

@@ -108,48 +108,41 @@ end
 
 <style>
     .battery-widget {
-        height: 40px;
+        height: 28px;
         flex-shrink: 0;
         justify-content: center;
         align-items: center;
         gap: var(--spacing-xs);
-        padding-inline: var(--spacing-sm);
+        padding-inline: var(--spacing-xs);
         border-radius: var(--radius-full);
-        background: var(--color-surface-container);
-        color: var(--color-on-surface);
+        background: transparent;
+        color: var(--color-on-surface-variant);
         text-wrap: none;
-        transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-        color var(--animation-duration-short) var(--animation-curves-bezier-standard);
+        transition: color var(--animation-duration-medium) var(--animation-curves-bezier-standard);
     }
 
     .battery-widget:hover {
-        background: var(--color-secondary-container);
-        color: var(--color-on-secondary-container);
+        color: var(--color-on-surface);
     }
 
     .battery-glyph {
-        width: 24px;
-        height: 24px;
+        width: 18px;
+        height: 18px;
         justify-content: center;
         align-items: center;
         color: inherit;
-        transition: color var(--animation-duration-short) var(--animation-curves-bezier-standard);
+        transition: color var(--animation-duration-medium) var(--animation-curves-bezier-standard);
     }
 
     .battery-value {
         color: inherit;
-        font-size: var(--typography-size-sm);
+        font-size: var(--typography-size-xs);
         font-weight: 700;
     }
 
     @container (max-width: 720px) {
         .battery-value {
             display: none;
-        }
-
-        .battery-widget {
-            width: 44px;
-            padding-inline: var(--spacing-xs);
         }
     }
 </style>

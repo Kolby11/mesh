@@ -156,86 +156,66 @@ end
 
 <style>
     .nav-button-shell {
-        width: 40px;
-        height: 40px;
-        position: relative;
+        height: 28px;
+        width: 28px;
         flex-shrink: 0;
         justify-content: center;
         align-items: center;
+        position: relative;
         overflow: visible;
     }
 
     .language-trigger {
-        width: 40px;
-        height: 40px;
+        height: 28px;
+        width: 28px;
         flex-shrink: 0;
         justify-content: center;
         align-items: center;
-        padding: var(--spacing-xs);
+        padding: 0;
         border-radius: var(--radius-full);
-        background: var(--color-surface-container);
-        color: var(--color-on-surface);
+        background: transparent;
+        color: var(--color-on-surface-variant);
         border-width: 2px;
         border-style: solid;
         border-color: transparent;
+        transform: scale(1);
         text-wrap: none;
-        transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-        color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-        border-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-        transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
-    }
-
-    .language-trigger-open {
-        background: var(--color-surface-container);
-        color: var(--color-on-surface);
-        border-color: var(--color-primary);
+        transition-property: color, border-color, transform;
+        transition-duration: var(--animation-duration-medium);
+        transition-timing-function: var(--animation-curves-bezier-standard);
     }
 
     .language-trigger:hover {
-        background: var(--color-secondary-container);
-        color: var(--color-on-secondary-container);
+        color: var(--color-on-surface);
+        transform: scale(1.12);
     }
 
-    .language-trigger:focus,
+    /* Keyboard only. A pointer press on a button never sets `focus-visible`,
+    so clicking leaves no ring behind — only tabbing to the control does. */
     .language-trigger:focus-visible {
-        background: var(--color-tertiary-container);
-        color: var(--color-on-tertiary-container);
-    }
-
-    .language-trigger-open:hover,
-    .language-trigger-open:focus,
-    .language-trigger-open:focus-visible {
-        background: var(--color-surface-container);
         color: var(--color-on-surface);
         border-color: var(--color-primary);
     }
 
     .language-trigger:active {
-        background: var(--color-primary);
-        color: var(--color-on-primary);
-        border-color: var(--color-primary);
+        color: var(--color-primary);
+        transform: scale(0.9);
+    }
+
+    .language-trigger-open,
+    .language-trigger-open:hover,
+    .language-trigger-open:focus-visible {
+        color: var(--color-primary);
     }
 
     .language-label {
         color: inherit;
         /* A flag emoji, not a two-letter code: no tracking to add after the
         regional-indicator pair, and large enough to read at trigger size. */
-        font-size: var(--typography-size-lg);
+        font-size: var(--typography-size-md);
         font-weight: 700;
         line-height: 1;
         user-select: none;
-        transition: color var(--animation-duration-short) var(--animation-curves-bezier-standard);
-    }
-
-    @container (max-width: 720px) {
-        .nav-button-shell {
-            width: 36px;
-            height: 36px;
-        }
-
-        .language-trigger {
-            width: 36px;
-            height: 36px;
-        }
+        transition: color var(--animation-duration-medium) var(--animation-curves-bezier-standard);
     }
 </style>

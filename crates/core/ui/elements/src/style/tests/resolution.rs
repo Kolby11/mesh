@@ -4,6 +4,41 @@ use crate::tree::ElementState;
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
 
 #[test]
+fn aspect_ratio_resolves_from_a_number_a_fraction_and_auto() {
+    let theme = mesh_core_theme::default_theme();
+    let resolver = StyleResolver::new(&theme);
+
+    let resolve = |value: &str| {
+        let rules = vec![StyleRule {
+            selector: Selector::Tag("button".to_string()),
+            declarations: vec![mesh_core_component::style::Declaration {
+                property: "aspect-ratio".to_string(),
+                value: StyleValue::Literal(value.to_string()),
+            }],
+            container_query: None,
+        }];
+        resolver
+            .resolve_node_style(
+                &rules,
+                "button",
+                &[],
+                None,
+                StyleContext::default(),
+                ElementState::default(),
+            )
+            .aspect_ratio
+    };
+
+    assert_eq!(resolve("1"), Some(1.0));
+    assert_eq!(resolve("1 / 1"), Some(1.0));
+    assert_eq!(resolve("16 / 9"), Some(16.0 / 9.0));
+    assert_eq!(resolve("auto"), None);
+    // A malformed or degenerate ratio must not collapse the box.
+    assert_eq!(resolve("1 / 0"), None);
+    assert_eq!(resolve("wide"), None);
+}
+
+#[test]
 fn resolve_node_style_from_rules() {
     let theme = mesh_core_theme::default_theme();
     let resolver = StyleResolver::new(&theme);

@@ -40,31 +40,37 @@ end
 
 <style>
 .clock-btn {
-    height: 40px;
+    height: 28px;
     flex-shrink: 0;
     justify-content: center;
     align-items: center;
-    padding-inline: var(--spacing-md);
+    padding-inline: var(--spacing-sm);
     border-radius: var(--radius-md);
-    background: var(--color-surface-container);
-    color: var(--color-on-surface);
-    border-width: 0;
+    background: transparent;
+    color: var(--color-on-surface-variant);
+    border-width: 2px;
+    border-style: solid;
+    border-color: transparent;
+    transform: scale(1);
     text-wrap: none;
-    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                border-radius var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
+    transition-property: color, border-color, transform;
+    transition-duration: var(--animation-duration-medium);
+    transition-timing-function: var(--animation-curves-bezier-standard);
 }
 
 .clock-btn:hover {
-    background: var(--color-secondary-container);
-    color: var(--color-on-secondary-container);
-    border-radius: var(--radius-lg);
+    color: var(--color-on-surface);
+    transform: scale(1.05);
+}
+
+.clock-btn:focus-visible {
+    color: var(--color-on-surface);
+    border-color: var(--color-primary);
 }
 
 .clock-btn:active {
-    background: var(--color-primary);
-    color: var(--color-on-primary);
-    border-radius: var(--radius-full);
+    color: var(--color-primary);
+    transform: scale(0.96);
 }
 
 .clock-content {
@@ -74,7 +80,7 @@ end
 
 .clock-time {
     color: inherit;
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 700;
     text-wrap: none;
     line-height: 1.1;
@@ -82,7 +88,7 @@ end
 
 .clock-date {
     color: inherit;
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 500;
     text-wrap: none;
     opacity: 0.75;

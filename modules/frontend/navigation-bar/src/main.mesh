@@ -2,6 +2,7 @@
 blur_enabled:    { type: "bool", default: true, label: "Backdrop blur" }
 blur_radius:     { type: "size", default: "var(--effect-backdrop-blur-surface-radius)", label: "Blur radius" }
 blur_background: { type: "color", default: "var(--effect-backdrop-blur-surface-background)", label: "Frosted background" }
+corner_radius:   { type: "size", default: "var(--radius-lg)", label: "Corner radius" }
 </props>
 
 <template>
@@ -10,7 +11,9 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-surface-b
             <slot name="start" extension-point="mesh.navigation.item" mode="customizable" />
         </row>
 
-        <slot name="center" extension-point="mesh.navigation.item" mode="customizable" />
+        <row class="center-cluster">
+            <slot name="center" extension-point="mesh.navigation.item" mode="customizable" />
+        </row>
 
         <row ref="control-cluster" class="right-cluster">
             <slot name="end" extension-point="mesh.navigation.item" mode="customizable" />
@@ -26,40 +29,56 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-surface-b
 <style>
     .nav-shell {
         width: 100%;
-        height: 56px;
+        height: 40px;
         container-type: inline-size;
         justify-content: space-between;
         align-items: center;
         gap: var(--spacing-md);
         padding-inline: var(--spacing-lg);
+        /* The one place control size is decided: the block padding leaves the
+        cluster row its height, and every control derives from that. */
+        padding-block: 6px;
         overflow-x: hidden;
         overflow-y: hidden;
         background-color: prop(blur_background);
+        border-radius: prop(corner_radius);
         color: var(--color-on-surface);
-        transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-        color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-        gap var(--animation-duration-short) var(--animation-curves-bezier-standard);
+        transition-property: background-color, color, gap;
+        transition-duration: var(--animation-duration-medium);
+        transition-timing-function: var(--animation-curves-bezier-standard);
     }
 
     .nav-shell-blur {
         backdrop-filter: blur(prop(blur_radius));
     }
 
-    .status-cluster {
-        align-items: center;
-        gap: var(--spacing-sm);
+    /* Three equal regions, so the center one is the middle of the bar however
+    wide the side content gets. Without this the clock only lands in the middle
+    when both sides happen to measure the same. */
+    .status-cluster,
+    .center-cluster,
+    .right-cluster {
+        height: 100%;
+        flex-grow: 1;
+        flex-basis: 0;
         min-width: 0;
-        flex-shrink: 1;
-        transition: gap var(--animation-duration-short) var(--animation-curves-bezier-standard);
+        align-items: center;
+        transition: gap var(--animation-duration-medium) var(--animation-curves-bezier-standard);
+    }
+
+    .status-cluster {
+        justify-content: flex-start;
+        gap: var(--spacing-sm);
+    }
+
+    .center-cluster {
+        justify-content: center;
+        gap: var(--spacing-sm);
     }
 
     .right-cluster {
-        width: fit;
-        height: 40px;
-        flex-shrink: 0;
-        align-items: center;
+        justify-content: flex-end;
         gap: 2px;
-        transition: gap var(--animation-duration-short) var(--animation-curves-bezier-standard);
     }
 
     @container (max-width: 860px) {
@@ -75,7 +94,6 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-surface-b
         }
 
         .right-cluster {
-            height: 36px;
             gap: 1px;
         }
     }

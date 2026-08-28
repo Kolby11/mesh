@@ -1023,7 +1023,7 @@ fn navigation_bar_pointer_click_opens_settings_and_updates_focus_diagnostic() {
     let pressed_shell = first_node_with_class_token(pressed_tree, "nav-shell")
         .expect("navigation shell after pointer press");
     assert_eq!(pressed_shell.layout.width, width as f32);
-    assert_eq!(pressed_shell.layout.height, 56.0);
+    assert_eq!(pressed_shell.layout.height, 40.0);
     let pressed_controls = first_node_with_class_token(pressed_tree, "right-cluster")
         .expect("navigation controls after pointer press");
     assert!(pressed_controls.layout.width > 0.0);
@@ -1032,8 +1032,8 @@ fn navigation_bar_pointer_click_opens_settings_and_updates_focus_diagnostic() {
         "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onOpenSettings",
     )
     .expect("settings button after pointer press");
-    assert_eq!(pressed_settings.layout.width, 40.0);
-    assert_eq!(pressed_settings.layout.height, 40.0);
+    assert_eq!(pressed_settings.layout.width, 28.0);
+    assert_eq!(pressed_settings.layout.height, 28.0);
 
     let requests = component
         .handle_input(
@@ -1064,7 +1064,7 @@ fn navigation_bar_pointer_click_opens_settings_and_updates_focus_diagnostic() {
     let released_shell = first_node_with_class_token(released_tree, "nav-shell")
         .expect("navigation shell after pointer release");
     assert_eq!(released_shell.layout.width, width as f32);
-    assert_eq!(released_shell.layout.height, 56.0);
+    assert_eq!(released_shell.layout.height, 40.0);
     let released_controls = first_node_with_class_token(released_tree, "right-cluster")
         .expect("navigation controls after pointer release");
     assert!(released_controls.layout.width > 0.0);
@@ -1073,8 +1073,8 @@ fn navigation_bar_pointer_click_opens_settings_and_updates_focus_diagnostic() {
         "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onOpenSettings",
     )
     .expect("settings button after pointer release");
-    assert_eq!(released_settings.layout.width, 40.0);
-    assert_eq!(released_settings.layout.height, 40.0);
+    assert_eq!(released_settings.layout.width, 28.0);
+    assert_eq!(released_settings.layout.height, 28.0);
 
     assert!(matches!(
         requests.as_slice(),

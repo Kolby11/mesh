@@ -98,7 +98,13 @@
     "surface": {
       "anchor": "top",
       "layer": "top",
-      "exclusive_zone": 56,
+      "exclusive_zone": 48,
+      "margins": {
+        "top": 8,
+        "right": 8,
+        "bottom": 0,
+        "left": 8
+      },
       "keyboard_mode": "on_demand",
       "visible_on_start": true,
       "blur": true

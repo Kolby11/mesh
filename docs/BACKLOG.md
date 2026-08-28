@@ -202,6 +202,14 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 - [ ] Make the `<props>` contract one normalized typed value pipeline: reject
       invalid constraints/coercions and retain the highest valid precedence value
       when a later settings or instance override is invalid.
+- [ ] Derive surface geometry from the root component's measured CSS box and
+      delete the hand-written `mesh.surface.exclusive_zone` and
+      `mesh.surface.margins`, which duplicate it and drift silently.
+      [Design](../.planning/todos/pending/2026-08-28-css-derived-surface-geometry.md).
+- [ ] Make embedded contribution wrappers transparent to layout: the wrapper's
+      assigned root style is discarded before layout, and its auto cross size
+      makes a contributed root's percentage sizing collapse to content.
+      [Design](../.planning/todos/pending/2026-08-28-embedded-contribution-wrapper-layout.md).
 
 ## UI element core
 
@@ -226,6 +234,11 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 - [ ] Complete motion semantics: pause/resume, stable animation identity,
       cancellation/reversal, reduced-motion policy, discrete visibility timing,
       and per-keyframe easing propagation.
+- [ ] Give the `transition-*` longhands their own comma lists. The animator now
+      runs one instance per entry, but `transition-duration`, `-delay`, and
+      `-timing-function` still write a single value into entry 0 through
+      `first_transition_mut`, so longhand authors cannot give two properties
+      different timing the way the shorthand can.
 - [ ] Implement or safely gate the public `box-shadow` parser and add the
       Section 9 interaction/render/animation regression matrix.
 

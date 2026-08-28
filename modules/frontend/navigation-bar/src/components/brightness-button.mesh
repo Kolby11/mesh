@@ -81,27 +81,37 @@ end
 
 <style>
 .brightness-button {
-    width: 40px;
-    height: 40px;
+    height: 28px;
+    width: 28px;
     justify-content: center;
     align-items: center;
     flex-shrink: 0;
     padding: 0;
     border-radius: var(--radius-full);
-    background: var(--color-surface-container);
-    color: var(--color-on-surface);
-    border-width: 0;
-    transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                color var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    background: transparent;
+    color: var(--color-on-surface-variant);
+    border-width: 2px;
+    border-style: solid;
+    border-color: transparent;
+    transform: scale(1);
+    transition-property: color, border-color, transform;
+    transition-duration: var(--animation-duration-medium);
+    transition-timing-function: var(--animation-curves-bezier-standard);
 }
 
 .brightness-button:hover {
-    background: var(--color-surface-container-high);
+    color: var(--color-on-surface);
+    transform: scale(1.12);
+}
+
+.brightness-button:focus-visible {
+    color: var(--color-on-surface);
+    border-color: var(--color-primary);
 }
 
 .brightness-button:active {
-    background: var(--color-primary);
-    color: var(--color-on-primary);
+    color: var(--color-primary);
+    transform: scale(0.9);
 }
 
 .brightness-icon {

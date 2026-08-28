@@ -708,7 +708,7 @@ pub(super) fn prop_css_domain(property: &str) -> PropCssDomain {
     }
     if matches!(
         property,
-        "opacity" | "z-index" | "order" | "flex" | "flex-grow" | "flex-shrink"
+        "opacity" | "z-index" | "order" | "flex" | "flex-grow" | "flex-shrink" | "aspect-ratio"
     ) {
         return PropCssDomain::Number;
     }

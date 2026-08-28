@@ -267,6 +267,28 @@ fn percentage_max_width_clamps_a_fixed_root_to_its_container() {
 }
 
 #[test]
+fn aspect_ratio_squares_a_child_that_only_declares_its_height() {
+    // The nav-bar case: a control takes its height from the row and stays
+    // square, so button size follows the bar instead of being restated on
+    // both axes in every component.
+    let mut root = make_node("row", Dimension::Px(400.0), Dimension::Px(28.0));
+    root.computed_style.direction = FlexDirection::Row;
+
+    let mut square = make_node("button", Dimension::Auto, Dimension::Percent(100.0));
+    square.computed_style.aspect_ratio = Some(1.0);
+    let mut wide = make_node("button", Dimension::Auto, Dimension::Percent(100.0));
+    wide.computed_style.aspect_ratio = Some(2.0);
+    root.children = vec![square, wide].into();
+
+    LayoutEngine::compute(&mut root, 400.0, 28.0);
+
+    assert_eq!(root.children[0].layout.height, 28.0);
+    assert_eq!(root.children[0].layout.width, 28.0);
+    assert_eq!(root.children[1].layout.height, 28.0);
+    assert_eq!(root.children[1].layout.width, 56.0);
+}
+
+#[test]
 fn percentage_min_and_max_constrain_children_against_the_parent() {
     let mut root = make_node("row", Dimension::Px(400.0), Dimension::Px(100.0));
     root.computed_style.direction = FlexDirection::Row;

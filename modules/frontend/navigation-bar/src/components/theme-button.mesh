@@ -144,87 +144,69 @@ end
 
 <style>
     .nav-button-shell {
-        width: 40px;
-        height: 40px;
-        position: relative;
+        height: 28px;
+        width: 28px;
         flex-shrink: 0;
         justify-content: center;
         align-items: center;
+        position: relative;
         overflow: visible;
     }
 
     .theme-trigger {
-        width: 40px;
-        height: 40px;
-        position: relative;
-        z-index: 3;
+        height: 28px;
+        width: 28px;
         flex-shrink: 0;
         justify-content: center;
         align-items: center;
-        padding: var(--spacing-xs);
+        padding: 0;
         border-radius: var(--radius-full);
-        background: var(--color-surface-container);
-        color: var(--color-on-surface);
+        background: transparent;
+        color: var(--color-on-surface-variant);
         border-width: 2px;
         border-style: solid;
         border-color: transparent;
+        transform: scale(1);
         text-wrap: none;
-        transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-        color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-        border-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-        transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
-    }
-
-    .theme-trigger-open {
-        background: var(--color-surface-container);
-        color: var(--color-on-surface);
-        border-color: var(--color-primary);
+        position: relative;
+        z-index: 3;
+        transition-property: color, border-color, transform;
+        transition-duration: var(--animation-duration-medium);
+        transition-timing-function: var(--animation-curves-bezier-standard);
     }
 
     .theme-trigger:hover {
-        background: var(--color-secondary-container);
-        color: var(--color-on-secondary-container);
+        color: var(--color-on-surface);
+        transform: scale(1.12);
     }
 
-    .theme-trigger:focus,
+    /* Keyboard only. A pointer press on a button never sets `focus-visible`,
+    so clicking leaves no ring behind — only tabbing to the control does. */
     .theme-trigger:focus-visible {
-        background: var(--color-tertiary-container);
-        color: var(--color-on-tertiary-container);
-    }
-
-    .theme-trigger-open:hover,
-    .theme-trigger-open:focus,
-    .theme-trigger-open:focus-visible {
-        background: var(--color-surface-container);
         color: var(--color-on-surface);
         border-color: var(--color-primary);
     }
 
     .theme-trigger:active {
-        background: var(--color-primary);
-        color: var(--color-on-primary);
-        border-color: var(--color-primary);
+        color: var(--color-primary);
+        transform: scale(0.9);
+    }
+
+    /* Popover open reads through the glyph, not a ring: no border may appear
+    from a pointer interaction. */
+    .theme-trigger-open,
+    .theme-trigger-open:hover,
+    .theme-trigger-open:focus-visible {
+        color: var(--color-primary);
     }
 
     .theme-trigger-glyph {
-        width: 24px;
-        height: 24px;
+        width: 18px;
+        height: 18px;
         flex-shrink: 0;
         justify-content: center;
         align-items: center;
         color: inherit;
-        transition: color var(--animation-duration-short) var(--animation-curves-bezier-standard);
-    }
-
-    @container (max-width: 720px) {
-        .nav-button-shell {
-            width: 36px;
-            height: 36px;
-        }
-
-        .theme-trigger {
-            width: 36px;
-            height: 36px;
-        }
+        transition: color var(--animation-duration-medium) var(--animation-curves-bezier-standard);
     }
 </style>

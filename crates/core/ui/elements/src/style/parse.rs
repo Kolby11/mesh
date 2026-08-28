@@ -774,6 +774,27 @@ pub(super) fn parse_box_shadow(value: &str) -> BoxShadow {
     }
 }
 
+/// `aspect-ratio: auto | <number> | <number> / <number>`.
+///
+/// Returns `None` for `auto` and for any ratio that is not a usable positive
+/// finite number, so a malformed value leaves the box sized by its own axes
+/// rather than collapsing it.
+pub(super) fn parse_aspect_ratio(s: &str) -> Option<f32> {
+    let s = s.trim();
+    if s.is_empty() || s == "auto" {
+        return None;
+    }
+    let (width, height) = match s.split_once('/') {
+        Some((width, height)) => (
+            width.trim().parse::<f32>().ok()?,
+            height.trim().parse::<f32>().ok()?,
+        ),
+        None => (s.parse::<f32>().ok()?, 1.0),
+    };
+    let ratio = width / height;
+    (ratio.is_finite() && ratio > 0.0).then_some(ratio)
+}
+
 /// `min-*` / `max-*` accept every `width`/`height` value plus the CSS keyword
 /// `none`, which — like `auto` — means "no constraint".
 pub(super) fn parse_size_constraint(s: &str) -> Dimension {

@@ -229,6 +229,19 @@ impl AnimatableStyle {
         }
     }
 
+    /// Layer one entry's interpolated value onto a composed style: take the
+    /// properties `props` opts into from `overlay` and everything else,
+    /// including the discrete `visibility`, from `base`.
+    ///
+    /// Entries own disjoint property sets, so composing them in any order
+    /// yields the same style. `visibility` belongs to no entry's set and is
+    /// resolved separately by the caller.
+    pub fn overlay(base: Self, overlay: Self, props: TransitionProperties) -> Self {
+        let mut merged = Self::selective_from(overlay, base, props);
+        merged.visibility = base.visibility;
+        merged
+    }
+
     /// True if any property the transition opts into differs between `self` and
     /// `other`. Used to decide whether a transition needs to (re)start.
     pub fn differs(&self, other: &Self, props: TransitionProperties) -> bool {
@@ -338,7 +351,11 @@ fn lerp_visibility(from: Visibility, to: Visibility, progress: f32) -> Visibilit
     }
 }
 
-/// One in-flight transition for a single widget node.
+/// One in-flight transition instance: a single entry of one node's
+/// comma-separated `transition` list.
+///
+/// Entries carry independent timing, so each gets its own instance rather than
+/// the node sharing one.
 #[derive(Debug, Clone)]
 pub struct ActiveTransition {
     pub from: AnimatableStyle,
@@ -347,7 +364,10 @@ pub struct ActiveTransition {
     pub duration: Duration,
     pub delay: Duration,
     pub easing: Easing,
+    /// The authored entry, narrowed to the properties no later entry claims.
     pub source: TransitionStyle,
+    /// Position of this entry in the node's authored transition list.
+    pub entry: usize,
 }
 
 impl ActiveTransition {
@@ -367,18 +387,74 @@ impl ActiveTransition {
     pub fn finished(&self, now: Instant) -> bool {
         now.saturating_duration_since(self.started_at) >= self.delay + self.duration
     }
+
+    /// The instant this instance reaches its endpoint.
+    pub fn ends_at(&self) -> Instant {
+        self.started_at + self.delay + self.duration
+    }
+
+    /// How reconciling this instance against a removed or idle declaration is
+    /// classified: reaching the endpoint completes, anything earlier cancels.
+    fn ended_lifecycle(&self, now: Instant) -> AnimationLifecycle {
+        if self.finished(now) {
+            AnimationLifecycle::Completed
+        } else {
+            AnimationLifecycle::Cancelled
+        }
+    }
+}
+
+/// Rank used to summarise several per-entry lifecycles as one node-level
+/// decision. A declaration that started or changed target outranks one that
+/// merely continued, which outranks one that ended.
+fn lifecycle_rank(lifecycle: AnimationLifecycle) -> u8 {
+    match lifecycle {
+        AnimationLifecycle::Idle => 0,
+        AnimationLifecycle::Cancelled => 1,
+        AnimationLifecycle::Completed => 2,
+        AnimationLifecycle::Continued => 3,
+        AnimationLifecycle::Replaced => 4,
+        AnimationLifecycle::Reversed => 5,
+        AnimationLifecycle::Started => 6,
+    }
+}
+
+fn merge_lifecycle(current: AnimationLifecycle, next: AnimationLifecycle) -> AnimationLifecycle {
+    if lifecycle_rank(next) > lifecycle_rank(current) {
+        next
+    } else {
+        current
+    }
+}
+
+/// Every property claimed by an entry after `index`.
+///
+/// CSS gives the last declaration of a property the win, so an earlier entry
+/// only runs what nothing after it names. Transition lists hold a handful of
+/// entries, so the quadratic scan stays cheaper than building a mask table.
+fn claimed_after(entries: &[TransitionStyle], index: usize) -> TransitionProperties {
+    entries[index + 1..]
+        .iter()
+        .fold(TransitionProperties::none(), |claimed, later| {
+            claimed.union(later.properties)
+        })
 }
 
 /// Per-component transition controller.
 ///
 /// Owns the in-flight transitions keyed by retained widget identity
-/// (`NodeId`). Callers that drive transitions alongside other concerns
+/// (`NodeId`). Each node holds one instance per animating entry of its
+/// `transition` list, because entries carry independent duration, delay, and
+/// easing. Callers that drive transitions alongside other concerns
 /// (keyframes, theme restyle, dirty tracking) step nodes individually with
 /// [`TransitionAnimator::step_node`]; callers that only need transitions can
 /// walk a whole tree with [`TransitionAnimator::apply`].
+///
+/// A node is present in the map only while at least one of its entries is in
+/// flight, so `is_empty` stays an honest "nothing is animating".
 #[derive(Debug, Default)]
 pub struct TransitionAnimator {
-    active: HashMap<NodeId, ActiveTransition>,
+    active: HashMap<NodeId, Vec<ActiveTransition>>,
 }
 
 impl TransitionAnimator {
@@ -402,31 +478,49 @@ impl TransitionAnimator {
         self.active.remove(&key);
     }
 
-    /// Style currently displayed by an in-flight transition for `key`.
-    pub fn displayed_style(&self, key: NodeId, now: Instant) -> Option<AnimatableStyle> {
-        self.active
-            .get(&key)
-            .map(|transition| transition.current(now))
+    /// Style currently displayed for `key`: every in-flight entry's own
+    /// properties layered over `base`, which supplies the node's desired value
+    /// for everything no entry animates.
+    pub fn displayed_style(
+        &self,
+        key: NodeId,
+        now: Instant,
+        base: AnimatableStyle,
+    ) -> Option<AnimatableStyle> {
+        let instances = self.active.get(&key)?;
+        Some(compose(instances, base, now))
     }
 
-    /// The transition for `key` if it has not finished — used to classify the
-    /// active animation property bucket.
-    pub fn active_unfinished(&self, key: NodeId, now: Instant) -> Option<&ActiveTransition> {
+    /// The unfinished transition instances for `key` — used to classify the
+    /// active animation property bucket across every entry.
+    pub fn unfinished(
+        &self,
+        key: NodeId,
+        now: Instant,
+    ) -> impl Iterator<Item = &ActiveTransition> + '_ {
         self.active
             .get(&key)
-            .filter(|transition| !transition.finished(now))
+            .into_iter()
+            .flatten()
+            .filter(move |instance| !instance.finished(now))
     }
 
     /// Drop transitions whose key left the live set or that have finished.
     pub fn retain_live(&mut self, live: &HashSet<NodeId>, now: Instant) {
-        self.active
-            .retain(|key, transition| live.contains(key) && !transition.finished(now));
+        self.active.retain(|key, instances| {
+            if !live.contains(key) {
+                return false;
+            }
+            instances.retain(|instance| !instance.finished(now));
+            !instances.is_empty()
+        });
     }
 
     pub fn has_active(&self, now: Instant) -> bool {
         self.active
             .values()
-            .any(|transition| !transition.finished(now))
+            .flatten()
+            .any(|instance| !instance.finished(now))
     }
 
     /// Step a single keyed node toward the target described by its own
@@ -464,13 +558,17 @@ impl TransitionAnimator {
             .active
     }
 
-    /// Step a node and report the lifecycle decision made for its instance.
+    /// Step every entry of a node's `transition` list and report the lifecycle
+    /// decision summarising them.
     ///
-    /// A target that changes while a transition is running starts from the
-    /// currently displayed value. If the new target is the previous source,
-    /// the transition is explicitly classified as a reversal; unrelated
-    /// targets are replacements. Removing a transition before completion is a
-    /// cancellation, while reaching its endpoint is completion.
+    /// Each entry is reconciled against its own instance from the previous
+    /// frame, so a short colour fade and a long transform ease run on
+    /// independent timelines instead of the node sharing one. A target that
+    /// changes while an entry is running starts from the currently displayed
+    /// value. If the new target is that entry's previous source, it is
+    /// classified as a reversal; unrelated targets are replacements. Removing
+    /// an entry before completion is a cancellation, while reaching its
+    /// endpoint is completion.
     pub fn step_node_with_policy_state(
         &mut self,
         key: NodeId,
@@ -480,79 +578,115 @@ impl TransitionAnimator {
         policy: MotionPolicy,
     ) -> AnimationStep {
         let desired = AnimatableStyle::from_node(node);
-        let transition = node
-            .computed_style
-            .transitions
-            .first()
-            .copied()
-            .unwrap_or_default();
-        let props = transition.properties;
+        let entry_count = node.computed_style.transitions.len();
 
         // The clamped visual radius is authoritative whether or not the radius
         // itself animates, so push it onto the node before any interpolation.
-        if props.animates_border_radius() {
+        if node
+            .computed_style
+            .transitions
+            .iter()
+            .any(|entry| entry.properties.animates_border_radius())
+        {
             node.computed_style.border_radius = desired.border_radius;
         }
 
-        let duration = policy.duration(
-            Duration::from_millis(u64::from(transition.duration_ms)),
-            false,
-        );
-        let should_animate = !duration.is_zero() && previous_displayed.differs(&desired, props);
-        let existing = self.active.get(&key).cloned();
+        // Reusing last frame's vector keeps continued entries allocation-free.
+        let mut running = self.active.remove(&key).unwrap_or_default();
+        let mut lifecycle = AnimationLifecycle::Idle;
 
-        if !should_animate {
-            let lifecycle = match existing.as_ref() {
-                Some(active) if active.finished(now) => AnimationLifecycle::Completed,
-                Some(_) => AnimationLifecycle::Cancelled,
-                None => AnimationLifecycle::Idle,
+        for index in 0..entry_count {
+            let mut entry = node.computed_style.transitions[index];
+            entry.properties = entry
+                .properties
+                .difference(claimed_after(&node.computed_style.transitions, index));
+
+            let slot = running.iter().position(|instance| instance.entry == index);
+            let duration =
+                policy.duration(Duration::from_millis(u64::from(entry.duration_ms)), false);
+            let should_animate = !entry.properties.is_empty()
+                && !duration.is_zero()
+                && previous_displayed.differs(&desired, entry.properties);
+
+            if !should_animate {
+                if let Some(slot) = slot {
+                    lifecycle = merge_lifecycle(lifecycle, running[slot].ended_lifecycle(now));
+                    running.swap_remove(slot);
+                }
+                continue;
+            }
+
+            let entry_lifecycle = match slot.map(|slot| &running[slot]) {
+                Some(active)
+                    if !active.finished(now)
+                        && target_matches(active.to, desired, entry.properties)
+                        && active.source == entry =>
+                {
+                    AnimationLifecycle::Continued
+                }
+                Some(active) if target_matches(active.from, desired, entry.properties) => {
+                    AnimationLifecycle::Reversed
+                }
+                Some(_) => AnimationLifecycle::Replaced,
+                None => AnimationLifecycle::Started,
             };
-            self.active.remove(&key);
+            lifecycle = merge_lifecycle(lifecycle, entry_lifecycle);
+
+            if entry_lifecycle == AnimationLifecycle::Continued {
+                continue;
+            }
+
+            let instance = ActiveTransition {
+                from: AnimatableStyle::selective_from(
+                    previous_displayed,
+                    desired,
+                    entry.properties,
+                ),
+                to: desired,
+                started_at: now,
+                duration,
+                delay: Duration::from_millis(u64::from(entry.delay_ms)),
+                easing: entry.easing.into(),
+                source: entry,
+                entry: index,
+            };
+            match slot {
+                Some(slot) => running[slot] = instance,
+                None => running.push(instance),
+            }
+        }
+
+        // Instances whose entry left the declaration entirely.
+        running.retain(|instance| {
+            if instance.entry < entry_count {
+                return true;
+            }
+            lifecycle = merge_lifecycle(lifecycle, instance.ended_lifecycle(now));
+            false
+        });
+
+        if running.is_empty() {
             return AnimationStep {
                 lifecycle,
                 active: false,
             };
         }
 
-        let lifecycle = match existing.as_ref() {
-            Some(active)
-                if !active.finished(now) && active.to == desired && active.source == transition =>
-            {
-                AnimationLifecycle::Continued
-            }
-            Some(active) if active.from == desired => AnimationLifecycle::Reversed,
-            Some(_) => AnimationLifecycle::Replaced,
-            None => AnimationLifecycle::Started,
-        };
+        compose(&running, desired, now).apply_to_node(node);
 
-        if lifecycle != AnimationLifecycle::Continued {
-            let from = AnimatableStyle::selective_from(previous_displayed, desired, props);
-            self.active.insert(
-                key,
-                ActiveTransition {
-                    from,
-                    to: desired,
-                    started_at: now,
-                    duration,
-                    delay: Duration::from_millis(u64::from(transition.delay_ms)),
-                    easing: transition.easing.into(),
-                    source: transition,
-                },
-            );
-        }
-
-        let transition_in_flight = self
-            .active
-            .get(&key)
-            .expect("animation lifecycle inserted or continued");
-        transition_in_flight.current(now).apply_to_node(node);
-        if transition_in_flight.finished(now) {
-            self.active.remove(&key);
+        let before = running.len();
+        running.retain(|instance| !instance.finished(now));
+        if running.is_empty() {
             return AnimationStep {
                 lifecycle: AnimationLifecycle::Completed,
                 active: false,
             };
         }
+        if running.len() != before {
+            lifecycle = merge_lifecycle(lifecycle, AnimationLifecycle::Completed);
+        }
+
+        self.active.insert(key, running);
         AnimationStep {
             lifecycle,
             active: true,
@@ -580,9 +714,8 @@ impl TransitionAnimator {
         if node.mesh_key().is_some() {
             let key = node.id;
             live.insert(key);
-            let previous = self
-                .displayed_style(key, now)
-                .unwrap_or_else(|| AnimatableStyle::from_node(node));
+            let desired = AnimatableStyle::from_node(node);
+            let previous = self.displayed_style(key, now, desired).unwrap_or(desired);
             active |= self.step_node(key, node, previous, now);
         }
         for child in &mut node.children {
@@ -590,6 +723,45 @@ impl TransitionAnimator {
         }
         active
     }
+}
+
+/// Layer every in-flight entry's own properties onto `base`.
+///
+/// Entries own disjoint property sets, so this is order-independent for
+/// everything except `visibility`, which belongs to no set. The entry that
+/// finishes last carries it, so a node stays visible until its slowest exit
+/// transition is done.
+fn compose(instances: &[ActiveTransition], base: AnimatableStyle, now: Instant) -> AnimatableStyle {
+    let mut composed = base;
+    let mut visibility = None;
+    let mut latest_end: Option<Instant> = None;
+
+    for instance in instances {
+        let current = instance.current(now);
+        composed = AnimatableStyle::overlay(composed, current, instance.source.properties);
+        let ends_at = instance.ends_at();
+        if latest_end.is_none_or(|end| ends_at > end) {
+            latest_end = Some(ends_at);
+            visibility = Some(current.visibility);
+        }
+    }
+
+    if let Some(visibility) = visibility {
+        composed.visibility = visibility;
+    }
+    composed
+}
+
+/// True if `candidate` already holds `desired` for the properties one entry
+/// animates. `visibility` is compared too: it rides along with whichever
+/// entries are in flight instead of belonging to a property set, so a change
+/// to it re-targets every entry rather than being silently dropped.
+fn target_matches(
+    candidate: AnimatableStyle,
+    desired: AnimatableStyle,
+    props: TransitionProperties,
+) -> bool {
+    !candidate.differs(&desired, props) && candidate.visibility == desired.visibility
 }
 
 fn lerp_dimension(from: Dimension, to: Dimension, progress: f32) -> Dimension {
@@ -685,7 +857,9 @@ mod tests {
         // A fresh tree rebuild re-asserts the desired target (1.0) each frame.
         node.computed_style.opacity = 1.0;
         let done = start + Duration::from_millis(150);
-        let displayed = animator.displayed_style(key, done).expect("in flight");
+        let displayed = animator
+            .displayed_style(key, done, AnimatableStyle::from_node(&node))
+            .expect("in flight");
         let still_active = animator.step_node(key, &mut node, displayed, done);
         assert!(!still_active);
         assert!((node.computed_style.opacity - 1.0).abs() < 1e-4);
@@ -727,7 +901,7 @@ mod tests {
 
         let halfway = start + Duration::from_millis(50);
         let displayed = animator
-            .displayed_style(key, halfway)
+            .displayed_style(key, halfway, AnimatableStyle::from_node(&node))
             .expect("active transition");
         node.computed_style.opacity = 0.0;
         let step = animator.step_node_with_policy_state(
@@ -778,7 +952,7 @@ mod tests {
 
         let replacement_time = start + Duration::from_millis(20);
         let displayed = animator
-            .displayed_style(key, replacement_time)
+            .displayed_style(key, replacement_time, AnimatableStyle::from_node(&node))
             .expect("active transition");
         node.computed_style.opacity = 0.5;
         let replaced = animator.step_node_with_policy_state(
@@ -802,6 +976,165 @@ mod tests {
         assert_eq!(cancelled.lifecycle, AnimationLifecycle::Cancelled);
         assert!(!cancelled.active);
         assert!(!animator.contains_key(key));
+    }
+
+    fn entry(
+        duration_ms: u32,
+        properties: mesh_core_elements::TransitionProperties,
+    ) -> TransitionStyle {
+        TransitionStyle {
+            duration_ms,
+            properties,
+            ..TransitionStyle::default()
+        }
+    }
+
+    fn opacity_and_transform_node() -> WidgetNode {
+        let mut node = WidgetNode::new("box");
+        node.computed_style.transitions = vec![
+            entry(
+                100,
+                mesh_core_elements::TransitionProperties {
+                    opacity: true,
+                    ..mesh_core_elements::TransitionProperties::none()
+                },
+            ),
+            entry(
+                400,
+                mesh_core_elements::TransitionProperties {
+                    transform: true,
+                    ..mesh_core_elements::TransitionProperties::none()
+                },
+            ),
+        ];
+        node.computed_style.opacity = 1.0;
+        node.computed_style.transform = Transform2D {
+            translate_x: 100.0,
+            ..Transform2D::IDENTITY
+        };
+        node
+    }
+
+    #[test]
+    fn every_transition_entry_runs_on_its_own_timeline() {
+        let mut animator = TransitionAnimator::new();
+        let mut node = opacity_and_transform_node();
+        let key = node.id;
+        let desired = AnimatableStyle::from_node(&node);
+        let previous = AnimatableStyle {
+            opacity: 0.0,
+            transform: Transform2D::IDENTITY,
+            ..desired
+        };
+
+        let start = Instant::now();
+        assert!(animator.step_node(key, &mut node, previous, start));
+
+        // Halfway through the short entry and an eighth into the long one, both
+        // properties must be moving. Reading only the first entry left the
+        // transform pinned at its target from the very first frame.
+        node.computed_style = opacity_and_transform_node().computed_style;
+        let halfway = start + Duration::from_millis(50);
+        let displayed = animator
+            .displayed_style(key, halfway, AnimatableStyle::from_node(&node))
+            .expect("in flight");
+        assert!(displayed.opacity > 0.0 && displayed.opacity < 1.0);
+        assert!(displayed.transform.translate_x > 0.0);
+        assert!(displayed.transform.translate_x < 100.0);
+        assert!(displayed.transform.translate_x < displayed.opacity * 100.0);
+        assert!(animator.step_node(key, &mut node, displayed, halfway));
+
+        // The short entry completes on its own schedule while the long one keeps
+        // running.
+        node.computed_style = opacity_and_transform_node().computed_style;
+        let short_done = start + Duration::from_millis(100);
+        let displayed = animator
+            .displayed_style(key, short_done, AnimatableStyle::from_node(&node))
+            .expect("in flight");
+        assert!((displayed.opacity - 1.0).abs() < 1e-4);
+        assert!(displayed.transform.translate_x < 100.0);
+        assert!(animator.step_node(key, &mut node, displayed, short_done));
+        assert_eq!(animator.unfinished(key, short_done).count(), 1);
+
+        // The long entry reaches its own endpoint 300ms later.
+        node.computed_style = opacity_and_transform_node().computed_style;
+        let long_done = start + Duration::from_millis(400);
+        let displayed = animator
+            .displayed_style(key, long_done, AnimatableStyle::from_node(&node))
+            .expect("in flight");
+        assert!((displayed.transform.translate_x - 100.0).abs() < 1e-3);
+        assert!(!animator.step_node(key, &mut node, displayed, long_done));
+        assert!(!animator.contains_key(key));
+    }
+
+    #[test]
+    fn a_later_entry_wins_a_property_an_earlier_one_also_names() {
+        let colour = mesh_core_elements::TransitionProperties {
+            color: true,
+            ..mesh_core_elements::TransitionProperties::none()
+        };
+        let mut animator = TransitionAnimator::new();
+        let mut node = WidgetNode::new("box");
+        node.computed_style.transitions = vec![entry(400, colour), entry(100, colour)];
+        node.computed_style.color = Color::WHITE;
+
+        let desired = AnimatableStyle::from_node(&node);
+        let previous = AnimatableStyle {
+            color: Color::TRANSPARENT,
+            ..desired
+        };
+        let key = node.id;
+        let start = Instant::now();
+        assert!(animator.step_node(key, &mut node, previous, start));
+        // Only the winning entry is in flight; the shadowed one runs nothing.
+        assert_eq!(animator.unfinished(key, start).count(), 1);
+
+        node.computed_style.color = Color::WHITE;
+        let done = start + Duration::from_millis(100);
+        let displayed = animator
+            .displayed_style(key, done, AnimatableStyle::from_node(&node))
+            .expect("in flight");
+        assert_eq!(displayed.color, Color::WHITE);
+        assert!(!animator.step_node(key, &mut node, displayed, done));
+    }
+
+    #[test]
+    fn retargeting_one_entry_leaves_another_entrys_timeline_alone() {
+        let mut animator = TransitionAnimator::new();
+        let mut node = opacity_and_transform_node();
+        let key = node.id;
+        let desired = AnimatableStyle::from_node(&node);
+        let previous = AnimatableStyle {
+            opacity: 0.0,
+            transform: Transform2D::IDENTITY,
+            ..desired
+        };
+
+        let start = Instant::now();
+        assert!(animator.step_node(key, &mut node, previous, start));
+
+        // A new opacity target mid-flight retargets only the opacity entry.
+        node.computed_style = opacity_and_transform_node().computed_style;
+        node.computed_style.opacity = 0.25;
+        let halfway = start + Duration::from_millis(50);
+        let displayed = animator
+            .displayed_style(key, halfway, AnimatableStyle::from_node(&node))
+            .expect("in flight");
+        let step = animator.step_node_with_policy_state(
+            key,
+            &mut node,
+            displayed,
+            halfway,
+            MotionPolicy::default(),
+        );
+        assert_eq!(step.lifecycle, AnimationLifecycle::Replaced);
+
+        let transform_entry = animator
+            .unfinished(key, halfway)
+            .find(|instance| instance.entry == 1)
+            .expect("transform entry still running");
+        assert_eq!(transform_entry.started_at, start);
+        assert_eq!(transform_entry.to.transform.translate_x, 100.0);
     }
 
     #[test]
@@ -835,7 +1168,7 @@ mod tests {
         node.computed_style.visibility = Visibility::Hidden;
         let halfway = start + Duration::from_millis(50);
         let displayed = animator
-            .displayed_style(key, halfway)
+            .displayed_style(key, halfway, AnimatableStyle::from_node(&node))
             .expect("active transition");
         assert!(animator.step_node(key, &mut node, displayed, halfway));
         assert_eq!(node.computed_style.visibility, Visibility::Visible);
@@ -844,7 +1177,7 @@ mod tests {
         node.computed_style.visibility = Visibility::Hidden;
         let done = start + Duration::from_millis(100);
         let displayed = animator
-            .displayed_style(key, done)
+            .displayed_style(key, done, AnimatableStyle::from_node(&node))
             .expect("active transition");
         assert!(!animator.step_node(key, &mut node, displayed, done));
         assert_eq!(node.computed_style.visibility, Visibility::Hidden);

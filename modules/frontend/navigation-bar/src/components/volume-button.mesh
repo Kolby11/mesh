@@ -239,60 +239,60 @@ end
 
 <style>
     .nav-button-shell {
-        width: 40px;
-        height: 40px;
+        height: 28px;
+        width: 28px;
         flex-shrink: 0;
         justify-content: center;
         align-items: center;
     }
 
     .nav-button {
-        width: 40px;
-        height: 40px;
+        height: 28px;
+        width: 28px;
         flex-shrink: 0;
         justify-content: center;
         align-items: center;
-        padding: var(--spacing-xs);
+        padding: 0;
         border-radius: var(--radius-full);
-        background: var(--color-surface-container);
-        color: var(--color-on-surface);
+        background: transparent;
+        color: var(--color-on-surface-variant);
         border-width: 2px;
         border-style: solid;
         border-color: transparent;
+        transform: scale(1);
         text-wrap: none;
-        transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-        color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-        border-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-        transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
+        transition-property: color, border-color, transform;
+        transition-duration: var(--animation-duration-medium);
+        transition-timing-function: var(--animation-curves-bezier-standard);
     }
 
     .nav-button:hover {
-        background: var(--color-secondary-container);
-        color: var(--color-on-secondary-container);
+        color: var(--color-on-surface);
+        transform: scale(1.12);
     }
 
-    .nav-button:focus,
+    /* Keyboard only. A pointer press on a button never sets `focus-visible`,
+    so clicking leaves no ring behind — only tabbing to the control does. */
     .nav-button:focus-visible {
-        background: var(--color-tertiary-container);
-        color: var(--color-on-tertiary-container);
-    }
-
-    .nav-button:active {
-        background: var(--color-primary);
-        color: var(--color-on-primary);
+        color: var(--color-on-surface);
         border-color: var(--color-primary);
     }
 
+    .nav-button:active {
+        color: var(--color-primary);
+        transform: scale(0.9);
+    }
+
     .nav-button-glyph {
-        width: 24px;
-        height: 24px;
+        width: 18px;
+        height: 18px;
         flex-shrink: 0;
         justify-content: center;
         align-items: center;
         color: inherit;
         --icon-fill: 0;
         --icon-weight: 400;
-        transition: color var(--animation-duration-short) var(--animation-curves-bezier-standard);
+        transition: color var(--animation-duration-medium) var(--animation-curves-bezier-standard);
     }
 
     .nav-button:hover .nav-button-glyph {
@@ -303,17 +303,5 @@ end
     .nav-button:active .nav-button-glyph {
         --icon-fill: 1;
         --icon-weight: 600;
-    }
-
-    @container (max-width: 720px) {
-        .nav-button-shell {
-            width: 36px;
-            height: 36px;
-        }
-
-        .nav-button {
-            width: 36px;
-            height: 36px;
-        }
     }
 </style>

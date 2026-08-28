@@ -33,7 +33,7 @@ Unsupported properties produce style diagnostics or parser errors instead of hid
 | gradient | implemented | Compact two-color `linear-gradient(...)` values resolve into backend-neutral gradient data and painter commands. |
 | animation | implemented | `animation` and its longhands store constrained animation metadata. Keyframes are percentage-only and limited to transition-safe visual properties. |
 | transition | implemented | `transition` and its longhands store constrained transition metadata for supported visual properties. |
-| layout | implemented | `display`, `visibility`, flex properties, `gap`, `row-gap`, `column-gap`, `gap-x`, positioning, `inset`, and `z-index` feed retained layout/render state. |
+| layout | implemented | `display`, `visibility`, flex properties, `aspect-ratio`, `gap`, `row-gap`, `column-gap`, `gap-x`, positioning, `inset`, and `z-index` feed retained layout/render state. |
 | layout | out-of-scope | CSS Grid, floats, multicolumn layout, browser box model modes, full media queries, and arbitrary layout algorithms are not MESH shell CSS. |
 | font | implemented | `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `letter-spacing`, `text-align`, `text-overflow`, and text `direction` resolve into text style fields. |
 | font | out-of-scope | Browser text-flow controls such as `white-space`, `text-wrap`, and `word-break` are not part of the bounded profile. |
@@ -65,6 +65,8 @@ Shorthands are practical shell shorthands rather than full browser-compatible sh
 ```
 
 `transition-timing-function` accepts `linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out`, and `cubic-bezier(x1, y1, x2, y2)`.
+
+Every entry of a comma-separated `transition` runs on its own timeline, with its own duration, delay, and easing. Where two entries name the same property, the later one wins it. The `transition-*` longhands still describe a single entry, so use the shorthand when two properties need different timing.
 
 The current shell animator interpolates this practical visual set:
 

@@ -1592,11 +1592,11 @@ mod tests {
             "props".to_string(),
             serde_json::json!({ "blur_enabled": true }),
         )]));
-        let tree = compiled.build_preview_tree_with_state(&theme, 960, 56, Some(&state));
+        let tree = compiled.build_preview_tree_with_state(&theme, 960, 40, Some(&state));
         let nav_shell = first_node_with_class(&tree, "nav-shell").expect("nav-shell node");
 
         assert_eq!(tree.layout.width.round() as u32, 960);
-        assert_eq!(tree.layout.height.round() as u32, 56);
+        assert_eq!(tree.layout.height.round() as u32, 40);
         assert_eq!(
             nav_shell.layout.width.round() as u32,
             960,
@@ -1605,9 +1605,29 @@ mod tests {
         );
         assert_eq!(
             nav_shell.layout.height.round() as u32,
-            56,
+            40,
             "nav-shell should span the bar height, got {:?}",
             nav_shell.layout
+        );
+
+        // Control size is derived, not restated: the cluster row takes the bar
+        // height minus its block padding, and each control takes the row.
+        let cluster = first_node_with_class(&tree, "right-cluster").expect("right-cluster node");
+        assert_eq!(
+            cluster.layout.height.round() as u32,
+            28,
+            "control row should derive from bar height minus block padding, got {:?}",
+            cluster.layout
+        );
+
+        // The center region must be the middle of the bar whatever the side
+        // clusters measure, so the clock cannot drift with their content.
+        let center = first_node_with_class(&tree, "center-cluster").expect("center-cluster node");
+        assert_eq!(
+            (center.layout.x + center.layout.width / 2.0).round() as u32,
+            480,
+            "center cluster should be centred in the 960px bar, got {:?}",
+            center.layout
         );
     }
 

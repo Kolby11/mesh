@@ -167,6 +167,11 @@ const STYLE_PROFILE_PROPERTIES: &[StyleProfileProperty] = &[
         status: StyleProfileStatus::Implemented,
     },
     StyleProfileProperty {
+        property: "aspect-ratio",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
         property: "display",
         category: "layout",
         status: StyleProfileStatus::Implemented,
@@ -741,6 +746,10 @@ pub struct ComputedStyle {
     pub align_items: AlignItems,
     pub align_content: AlignContent,
     pub gap: f32,
+    /// `width / height` the box keeps when only one axis is determined, so a
+    /// square control can take its size from the container instead of pinning
+    /// both axes. `None` is CSS `aspect-ratio: auto`.
+    pub aspect_ratio: Option<f32>,
     pub flex_grow: f32,
     pub flex_shrink: f32,
     pub flex_basis: Dimension,
@@ -818,6 +827,7 @@ impl Default for ComputedStyle {
             align_items: AlignItems::Stretch,
             align_content: AlignContent::Stretch,
             gap: 0.0,
+            aspect_ratio: None,
             flex_grow: 0.0,
             flex_shrink: 1.0,
             flex_basis: Dimension::Auto,
@@ -946,6 +956,41 @@ pub struct StyleContext {
     pub container_height: f32,
 }
 
+/// Names every non-`all` field of [`TransitionProperties`] exactly once, so the
+/// set operations below cannot drift from the struct when a property is added.
+macro_rules! for_each_transition_property {
+    ($callback:ident) => {
+        $callback!(
+            border_radius,
+            border_width,
+            opacity,
+            background_color,
+            border_color,
+            color,
+            width,
+            height,
+            min_width,
+            max_width,
+            min_height,
+            max_height,
+            padding,
+            margin,
+            transform,
+            box_shadow,
+            filter,
+            backdrop_filter,
+            font_size,
+            letter_spacing,
+            line_height,
+            gap,
+            inset_top,
+            inset_right,
+            inset_bottom,
+            inset_left
+        )
+    };
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub struct TransitionProperties {
     pub all: bool,
@@ -1020,6 +1065,55 @@ impl TransitionProperties {
             inset_bottom: true,
             inset_left: true,
         }
+    }
+
+    /// No property animates under this mask.
+    pub fn is_empty(self) -> bool {
+        macro_rules! none_set {
+            ($($field:ident),*) => { !(self.all $(|| self.$field)*) };
+        }
+        for_each_transition_property!(none_set)
+    }
+
+    /// Replace the `all` shorthand with the individual flags it stands for, so
+    /// the mask can take part in set operations without `all` re-enabling a
+    /// property that was just removed.
+    fn expanded(self) -> Self {
+        if self.all {
+            Self {
+                all: false,
+                ..Self::all()
+            }
+        } else {
+            self
+        }
+    }
+
+    /// Every property named by either mask.
+    pub fn union(self, other: Self) -> Self {
+        if self.all || other.all {
+            return Self::all();
+        }
+        let other = other.expanded();
+        let mut merged = self.expanded();
+        macro_rules! merge {
+            ($($field:ident),*) => { $(merged.$field |= other.$field;)* };
+        }
+        for_each_transition_property!(merge);
+        merged
+    }
+
+    /// The properties this mask names that `other` does not.
+    pub fn difference(self, other: Self) -> Self {
+        if other.all {
+            return Self::none();
+        }
+        let mut remaining = self.expanded();
+        macro_rules! subtract {
+            ($($field:ident),*) => { $(remaining.$field &= !other.$field;)* };
+        }
+        for_each_transition_property!(subtract);
+        remaining
     }
 
     pub fn animates_border_radius(self) -> bool {

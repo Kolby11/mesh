@@ -245,7 +245,9 @@ impl FrontendSurfaceComponent {
                 )
             };
             let mut animation_is_live = false;
-            if let Some(transition) = self.transitions.active_unfinished(node_id, now) {
+            // Every entry runs on its own timeline, so the node's bucket is the
+            // strongest one any unfinished entry needs.
+            for transition in self.transitions.unfinished(node_id, now) {
                 animation_is_live = true;
                 *active_animation_bucket = merge_animation_bucket(
                     *active_animation_bucket,
@@ -322,7 +324,7 @@ impl FrontendSurfaceComponent {
         let desired = AnimatableStyle::from_node(node);
         let previous_displayed = self
             .transitions
-            .displayed_style(key, now)
+            .displayed_style(key, now, desired)
             .or_else(|| previous_styles.get(&key).copied())
             .unwrap_or(desired);
 
