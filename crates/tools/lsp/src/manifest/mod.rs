@@ -217,11 +217,9 @@ fn hover_text(hover: &Hover) -> String {
 /// defaults to the per-module flavor (the common case).
 fn detect_flavor(source: &str) -> ManifestFlavor {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(source) else {
-        // Fall back to a cheap textual heuristic when the JSON does not parse
-        // (e.g. mid-edit), so completion still targets the right schema.
-        if source.contains("\"schemaVersion\"") || source.contains("\"modulesDir\"") {
-            return ManifestFlavor::RootConfig;
-        }
+        // An incomplete document has no trustworthy object structure. Keep
+        // the common per-module default rather than treating quoted text or a
+        // key in an unrelated, malformed region as a root graph config.
         return ManifestFlavor::Module;
     };
 
@@ -427,6 +425,12 @@ mod tests {
         let d = diagnostics(&doc(src));
         assert_eq!(d.len(), 1);
         assert!(d[0].message.contains("syntax error"));
+    }
+
+    #[test]
+    fn malformed_text_does_not_select_root_flavor() {
+        let src = r#"{ "description": "schemaVersion""#;
+        assert_eq!(doc(src).flavor, ManifestFlavor::Module);
     }
 
     #[test]
