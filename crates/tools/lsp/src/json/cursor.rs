@@ -1,12 +1,14 @@
-//! A tolerant, single-pass scanner that determines the JSON "location" at a
-//! byte offset: the object-key path to the innermost container, whether the
-//! cursor is in a key or a value slot, and the partial token being typed.
+//! A tolerant JSON token stream that determines the JSON "location" at a byte
+//! offset: the object-key path to the innermost container, whether the cursor
+//! is in a key or a value slot, and the partial token being typed.
 //!
-//! Unlike a full parser this never fails — it is designed to run on mid-edit,
-//! syntactically invalid JSON, which is exactly the state of a document while
-//! the user is typing and asking for completion.
+//! The JSONC scanner supplies standards-aware token boundaries and decoded
+//! string values while retaining recovery for mid-edit, syntactically invalid
+//! documents. This is exactly the state of a document while the user is typing
+//! and asking for completion.
 
 use super::schema::ARRAY_ELEMENT;
+use jsonc_parser::{Scanner, ScannerOptions, tokens::Token};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
@@ -74,33 +76,71 @@ impl Frame {
 
 /// Compute the cursor context at `offset` (a byte offset into `source`).
 pub fn context_at(source: &str, offset: usize) -> CursorContext {
-    let bytes = source.as_bytes();
-    let offset = offset.min(bytes.len());
+    let offset = offset.min(source.len());
 
     let mut stack: Vec<Frame> = Vec::new();
     // The most recent string literal's decoded text and whether it was followed
     // by `:` (making it a key). Tracked so a string at offset can be classified.
     let mut last_string: Option<String> = None;
 
-    let mut i = 0usize;
-    while i < offset {
-        let c = bytes[i] as char;
-        match c {
-            '{' => {
+    let options = ScannerOptions {
+        allow_single_quoted_strings: false,
+        allow_hexadecimal_numbers: false,
+        allow_unary_plus_numbers: false,
+    };
+    let mut scanner = Scanner::new(source, &options);
+
+    loop {
+        let token = match scanner.scan() {
+            Ok(Some(token)) => token,
+            Ok(None) => break,
+            Err(error) => {
+                // An unfinished string is the common recovery case while
+                // completing a key or value. Decode its prefix with the same
+                // parser after supplying a synthetic closing quote.
+                let start = scanner.token_start();
+                if start < offset && source.as_bytes().get(start) == Some(&b'"') {
+                    if let Some(partial) = decode_string_prefix(source, start, offset) {
+                        let token = partial.clone();
+                        return classify_in_string(&stack, &partial, &token);
+                    }
+                }
+                let _ = error;
+                break;
+            }
+        };
+
+        let start = scanner.token_start();
+        let end = scanner.token_end();
+
+        if let Token::String(text) = &token {
+            if start < offset && offset < end {
+                let partial =
+                    decode_string_prefix(source, start, offset).unwrap_or_else(|| text.to_string());
+                return classify_in_string(&stack, &partial, text);
+            }
+        }
+
+        if start >= offset {
+            break;
+        }
+
+        match token {
+            Token::OpenBrace => {
                 let path_key = pending_path_key(&mut stack);
                 stack.push(Frame::new(FrameKind::Object, path_key));
                 last_string = None;
             }
-            '[' => {
+            Token::OpenBracket => {
                 let path_key = pending_path_key(&mut stack);
                 stack.push(Frame::new(FrameKind::Array, path_key));
                 last_string = None;
             }
-            '}' | ']' => {
+            Token::CloseBrace | Token::CloseBracket => {
                 stack.pop();
                 last_string = None;
             }
-            ':' => {
+            Token::Colon => {
                 if let Some(frame) = stack.last_mut() {
                     if matches!(frame.kind, FrameKind::Object) {
                         if let Some(key) = last_string.take() {
@@ -113,28 +153,21 @@ pub fn context_at(source: &str, offset: usize) -> CursorContext {
                     }
                 }
             }
-            ',' => {
+            Token::Comma => {
                 if let Some(frame) = stack.last_mut() {
                     frame.current_key = None;
                     frame.after_colon = false;
                 }
                 last_string = None;
             }
-            '"' => {
-                // Consume a string literal; stop early if it contains the cursor.
-                let (text, end, terminated) = scan_string(bytes, i, offset);
-                if end >= offset {
-                    // Cursor is inside this (possibly unterminated) string.
-                    let (token, _, _) = scan_string(bytes, i, bytes.len());
-                    return classify_in_string(&stack, &text, &token);
-                }
-                last_string = if terminated { Some(text) } else { None };
-                i = end;
-                continue;
-            }
-            _ => {}
+            Token::String(text) => last_string = Some(text.into_owned()),
+            Token::Word(_)
+            | Token::Boolean(_)
+            | Token::Number(_)
+            | Token::Null
+            | Token::CommentLine(_)
+            | Token::CommentBlock(_) => {}
         }
-        i += 1;
     }
 
     // Cursor is in whitespace / structural position (not inside a string).
@@ -153,34 +186,22 @@ fn pending_path_key(stack: &mut [Frame]) -> Option<String> {
     }
 }
 
-/// Scan a JSON string starting at `start` (the opening quote). Returns the
-/// decoded contents up to `limit` or the closing quote, the index just past the
-/// closing quote (or `limit`), and whether it was properly terminated before
-/// `limit`.
-fn scan_string(bytes: &[u8], start: usize, limit: usize) -> (String, usize, bool) {
-    let mut text = String::new();
-    let mut i = start + 1;
-    while i < bytes.len() {
-        let c = bytes[i] as char;
-        if c == '\\' {
-            // Keep the escaped char verbatim (good enough for key/partial use).
-            if i + 1 < bytes.len() {
-                text.push(bytes[i + 1] as char);
-            }
-            i += 2;
-            continue;
-        }
-        if c == '"' {
-            return (text, i + 1, true);
-        }
-        if i >= limit {
-            // Truncated at the cursor.
-            return (text, i, false);
-        }
-        text.push(c);
-        i += 1;
+fn decode_string_prefix(source: &str, start: usize, offset: usize) -> Option<String> {
+    let prefix = source.get(start..offset)?;
+    let mut repaired = String::with_capacity(prefix.len() + 1);
+    repaired.push_str(prefix);
+    repaired.push('"');
+
+    let options = ScannerOptions {
+        allow_single_quoted_strings: false,
+        allow_hexadecimal_numbers: false,
+        allow_unary_plus_numbers: false,
+    };
+    let mut scanner = Scanner::new(&repaired, &options);
+    match scanner.scan().ok()? {
+        Some(Token::String(text)) => Some(text.into_owned()),
+        _ => None,
     }
-    (text, i, false)
 }
 
 fn path_of(stack: &[Frame]) -> Vec<String> {
@@ -320,6 +341,14 @@ mod tests {
         assert_eq!(ctx.role, Role::Key);
         assert_eq!(ctx.path, vec!["mesh".to_string()]);
         assert_eq!(ctx.partial, "ki");
+    }
+
+    #[test]
+    fn unicode_escapes_are_decoded_for_string_completion() {
+        let ctx = at(r#"{ "\u006d|" }"#);
+        assert_eq!(ctx.role, Role::Key);
+        assert_eq!(ctx.partial, "m");
+        assert_eq!(ctx.token, "m");
     }
 
     #[test]

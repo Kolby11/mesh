@@ -309,6 +309,29 @@ mod tests {
     }
 
     #[test]
+    fn accepts_unicode_escaped_known_manifest_keys() {
+        let src = r#"{ "\u006eame": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "frontend" } }"#;
+        let d = diagnostics(&doc(src));
+        assert!(
+            !d.iter()
+                .any(|d| d.message.contains("unknown property `name`"))
+        );
+    }
+
+    #[test]
+    fn key_ranges_use_object_keys_instead_of_matching_string_values() {
+        let src = r#"{ "description": "mesh", "mesh": {} }"#;
+        let range = crate::json::diagnostics::find_key_range(src, "mesh").unwrap();
+        let key_start = src.find("\"mesh\":").unwrap();
+
+        assert_eq!(range.start, crate::json::offset_to_position(src, key_start));
+        assert_eq!(
+            range.end,
+            crate::json::offset_to_position(src, key_start + "\"mesh\"".len())
+        );
+    }
+
+    #[test]
     fn flags_bad_kind() {
         let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "frontnd" } }"#;
         let d = diagnostics(&doc(src));

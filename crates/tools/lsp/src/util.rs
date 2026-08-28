@@ -1,3 +1,7 @@
+use full_moon::{
+    LuaVersion,
+    tokenizer::{Lexer, LexerResult, Symbol, TokenType},
+};
 use tower_lsp::lsp_types::Position;
 
 use crate::document::block_content_range;
@@ -187,6 +191,43 @@ mod tests {
     fn rounds_offsets_inside_a_utf8_codepoint_back_to_its_start() {
         assert_eq!(offset_to_position("é", 1), Position::new(0, 0));
     }
+
+    #[test]
+    fn luau_tokens_retain_an_incomplete_member_path() {
+        let tokens = significant_lua_tokens("mesh.locale.");
+        assert_eq!(
+            trailing_lua_path(&tokens, "mesh.locale.".len()).as_deref(),
+            Some("mesh.locale.")
+        );
+        assert!(matches!(
+            script_context_at("mesh.locale.", "mesh.locale.".len()),
+            ScriptContext::MeshApi { prefix } if prefix == "locale."
+        ));
+    }
+
+    #[test]
+    fn script_context_handles_a_script_block_prefix() {
+        assert!(matches!(
+            script_context_at("\nmesh.locale.", "\nmesh.locale.".len()),
+            ScriptContext::MeshApi { prefix } if prefix == "locale."
+        ));
+    }
+
+    #[test]
+    fn luau_context_ignores_comments_and_string_contents() {
+        let source = "-- refs.fake.\nlocal text = \"mesh.fake.\"\nrefs.real.";
+        assert!(matches!(
+            script_context_at(source, source.len()),
+            ScriptContext::RefMember { ref_name, prefix }
+                if ref_name == "real" && prefix.is_empty()
+        ));
+
+        let source = "local text = \"refs.fake.\"";
+        assert!(matches!(
+            script_context_at(source, source.len()),
+            ScriptContext::General
+        ));
+    }
 }
 
 /// Determine which top-level block the cursor byte offset falls in.
@@ -363,43 +404,18 @@ pub fn style_context_at(block_content: &str, offset: usize) -> StyleContext {
 /// Classify the cursor position within a script block.
 pub fn script_context_at(block_content: &str, offset: usize) -> ScriptContext {
     let before = &block_content[..offset.min(block_content.len())];
-
-    if let Some(token) = current_lua_path_token(before) {
-        if let Some(prefix) = token.strip_prefix("event.current_target.") {
-            return ScriptContext::EventCurrentTarget {
-                prefix: prefix.to_string(),
-            };
-        }
-
-        if let Some(rest) = token.strip_prefix("refs.") {
-            if let Some((ref_name, prefix)) = rest.split_once(['.', ':']) {
-                return ScriptContext::RefMember {
-                    ref_name: ref_name.to_string(),
-                    prefix: prefix.to_string(),
-                };
-            }
-            return ScriptContext::Refs {
-                prefix: rest.to_string(),
-            };
-        }
-
-        if let Some(prefix) = token.strip_prefix("props.") {
-            return ScriptContext::Props {
-                prefix: prefix.to_string(),
-            };
-        }
-    }
+    let tokens = significant_lua_tokens(before);
 
     // Cursor inside a `require(...)` / `import(...)` string argument: the first
     // argument completes module specifiers; later `import` arguments complete the
     // named members of the already-typed specifier.
-    if let Some(cursor) = import_cursor(before) {
+    if let Some(cursor) = import_cursor(&tokens, before.len()) {
         if cursor.arg_string_index == 0 {
             return ScriptContext::ImportSpecifier {
                 prefix: cursor.prefix,
             };
         }
-        if cursor.func == "import" {
+        if cursor.callee == "import" {
             if let Some(specifier) = cursor.first_arg {
                 return ScriptContext::ImportMember {
                     specifier,
@@ -411,33 +427,45 @@ pub fn script_context_at(block_content: &str, offset: usize) -> ScriptContext {
         return ScriptContext::General;
     }
 
-    // Check for service binding context: mesh.service.bind(" or mesh.service.on("
-    for pattern in &[
-        "mesh.service.bind(\"",
-        "mesh.service.bind('",
-        "mesh.service.on(\"",
-        "mesh.service.on('",
-    ] {
-        if before.ends_with(pattern)
-            || (before.contains(pattern)
-                && !before[before.rfind(pattern).unwrap()..].contains(['\n', ')', ';']))
-        {
+    // Service names are string arguments, so identify the call from parsed
+    // tokens rather than looking for a textual `mesh.service.*("` suffix.
+    if let Some(cursor) = service_cursor(&tokens, before.len()) {
+        if cursor.arg_string_index == 0 {
             return ScriptContext::ServiceName;
         }
     }
 
-    // Check for mesh. API context
-    if let Some(mesh_pos) = before.rfind("mesh.") {
-        let after_mesh = &before[mesh_pos + 5..];
-        // Valid if no statement-terminating characters between mesh. and cursor
-        let is_continuation = !after_mesh.contains(['\n', ';', ')', '(']) || {
-            // Allow nested like mesh.state. if the parens belong to an outer call
-            after_mesh.chars().filter(|&c| c == '(').count()
-                == after_mesh.chars().filter(|&c| c == ')').count()
-        };
-        if is_continuation {
+    // Check for member contexts from the Luau token path.
+    if let Some(path) = trailing_lua_path(&tokens, before.len()) {
+        if let Some(prefix) = path.strip_prefix("event.current_target.") {
+            return ScriptContext::EventCurrentTarget {
+                prefix: prefix.to_string(),
+            };
+        }
+        if let Some(rest) = path.strip_prefix("refs.") {
+            if let Some((separator, _)) = rest
+                .char_indices()
+                .find(|(_, character)| matches!(character, '.' | ':'))
+            {
+                let (ref_name, prefix) = rest.split_at(separator);
+                let prefix = prefix.trim_start_matches(['.', ':']);
+                return ScriptContext::RefMember {
+                    ref_name: ref_name.to_string(),
+                    prefix: prefix.to_string(),
+                };
+            }
+            return ScriptContext::Refs {
+                prefix: rest.to_string(),
+            };
+        }
+        if let Some(prefix) = path.strip_prefix("props.") {
+            return ScriptContext::Props {
+                prefix: prefix.to_string(),
+            };
+        }
+        if let Some(prefix) = path.strip_prefix("mesh.") {
             return ScriptContext::MeshApi {
-                prefix: after_mesh.to_string(),
+                prefix: prefix.to_string(),
             };
         }
     }
@@ -445,98 +473,186 @@ pub fn script_context_at(block_content: &str, offset: usize) -> ScriptContext {
     ScriptContext::General
 }
 
-/// The cursor's position within an in-progress `require(...)` / `import(...)` call.
-struct ImportCursor {
-    /// Either `"require"` or `"import"`.
-    func: &'static str,
-    /// 0-based index of the string-literal argument the cursor is inside.
+#[derive(Debug, Clone)]
+struct LuaToken {
+    kind: TokenType,
+    start: usize,
+    end: usize,
+    recovered: bool,
+}
+
+fn significant_lua_tokens(source: &str) -> Vec<LuaToken> {
+    let mut lexer = Lexer::new(source, LuaVersion::new());
+    let mut tokens = Vec::new();
+
+    while let Some(result) = lexer.consume() {
+        let (reference, recovered) = match result {
+            LexerResult::Ok(reference) => (reference, false),
+            LexerResult::Recovered(reference, _) => (reference, true),
+            LexerResult::Fatal(_) => break,
+        };
+        let token = reference.token();
+        if matches!(token.token_type(), TokenType::Eof) {
+            break;
+        }
+        if token.token_type().is_trivia() {
+            continue;
+        }
+        tokens.push(LuaToken {
+            kind: token.token_type().clone(),
+            start: token.start_position().bytes(),
+            end: token.end_position().bytes(),
+            recovered,
+        });
+    }
+
+    tokens
+}
+
+fn is_symbol(token: &LuaToken, symbol: Symbol) -> bool {
+    matches!(
+        &token.kind,
+        TokenType::Symbol { symbol: actual } if *actual == symbol
+    )
+}
+
+fn identifier(token: &LuaToken) -> Option<&str> {
+    match &token.kind {
+        TokenType::Identifier { identifier } => Some(identifier.as_str()),
+        _ => None,
+    }
+}
+
+fn string_literal(token: &LuaToken) -> Option<&str> {
+    match &token.kind {
+        TokenType::StringLiteral { literal, .. } => Some(literal.as_str()),
+        _ => None,
+    }
+}
+
+/// Return the contiguous member path ending at `end`, where `end` is an
+/// exclusive token index. Every part is supplied by the Luau lexer, so the
+/// result cannot be sourced from a comment or another string literal.
+fn lua_path_before(tokens: &[LuaToken], end: usize) -> Option<String> {
+    let mut start = end;
+    while start > 0 {
+        let token = &tokens[start - 1];
+        if identifier(token).is_some()
+            || is_symbol(token, Symbol::Dot)
+            || is_symbol(token, Symbol::Colon)
+        {
+            start -= 1;
+        } else {
+            break;
+        }
+    }
+    if start == end || identifier(&tokens[start]).is_none() {
+        return None;
+    }
+
+    let mut path = String::new();
+    for token in &tokens[start..end] {
+        if let Some(name) = identifier(token) {
+            path.push_str(name);
+        } else if is_symbol(token, Symbol::Dot) {
+            path.push('.');
+        } else if is_symbol(token, Symbol::Colon) {
+            path.push(':');
+        } else {
+            return None;
+        }
+    }
+    Some(path)
+}
+
+fn trailing_lua_path(tokens: &[LuaToken], source_len: usize) -> Option<String> {
+    if tokens.last()?.end != source_len {
+        return None;
+    }
+    let path = lua_path_before(tokens, tokens.len())?;
+    path.contains('.').then_some(path)
+}
+
+struct CallCursor {
+    callee: String,
     arg_string_index: usize,
-    /// Text typed inside the current (still-open) string literal.
     prefix: String,
-    /// The first string argument, if it has already been completed (closed).
     first_arg: Option<String>,
 }
 
-/// Detect whether `before` ends inside an open string literal of a `require(`
-/// or `import(` call, and report which argument and what has been typed.
-fn import_cursor(before: &str) -> Option<ImportCursor> {
-    let require_pos = before.rfind("require(");
-    let import_pos = before.rfind("import(");
-    let (func, start) = match (require_pos, import_pos) {
-        (Some(r), Some(i)) => {
-            if i > r {
-                ("import", i + "import(".len())
-            } else {
-                ("require", r + "require(".len())
-            }
-        }
-        (Some(r), None) => ("require", r + "require(".len()),
-        (None, Some(i)) => ("import", i + "import(".len()),
-        (None, None) => return None,
-    };
-
-    let args = &before[start..];
-    // A closing paren or newline means the cursor is no longer inside this call.
-    if args.contains(')') || args.contains('\n') {
+fn open_call_cursor(tokens: &[LuaToken], source_len: usize) -> Option<CallCursor> {
+    let current = tokens.last()?;
+    if current.start >= current.end || current.end != source_len {
+        return None;
+    }
+    let prefix = string_literal(current)?.to_string();
+    if !current.recovered {
         return None;
     }
 
-    let mut completed: Vec<String> = Vec::new();
-    let mut current = String::new();
-    let mut in_string = false;
-    let mut quote = '"';
-    for ch in args.chars() {
-        if in_string {
-            if ch == quote {
-                in_string = false;
-                completed.push(std::mem::take(&mut current));
-            } else {
-                current.push(ch);
+    for open in (0..tokens.len().saturating_sub(1)).rev() {
+        if !is_symbol(&tokens[open], Symbol::LeftParen) {
+            continue;
+        }
+        let Some(callee) = lua_path_before(tokens, open) else {
+            continue;
+        };
+        let mut depth = 1usize;
+        let mut arg_string_index = 0usize;
+        let mut first_arg = None;
+        let mut current_is_top_level = false;
+
+        for (index, token) in tokens.iter().enumerate().skip(open + 1) {
+            if is_symbol(token, Symbol::LeftParen) {
+                depth += 1;
+                continue;
             }
-        } else if ch == '"' || ch == '\'' {
-            in_string = true;
-            quote = ch;
-            current.clear();
+            if is_symbol(token, Symbol::RightParen) {
+                if depth == 1 {
+                    break;
+                }
+                depth -= 1;
+                continue;
+            }
+            if depth != 1 {
+                continue;
+            }
+            if is_symbol(token, Symbol::Comma) {
+                arg_string_index += 1;
+                continue;
+            }
+            if let Some(value) = string_literal(token) {
+                if index == tokens.len() - 1 {
+                    current_is_top_level = true;
+                } else if arg_string_index == 0 && first_arg.is_none() {
+                    first_arg = Some(value.to_string());
+                }
+            }
+        }
+
+        if current_is_top_level {
+            return Some(CallCursor {
+                callee,
+                arg_string_index,
+                prefix,
+                first_arg,
+            });
         }
     }
 
-    // Only offer completion when the cursor sits inside an open string literal.
-    if !in_string {
-        return None;
-    }
-
-    Some(ImportCursor {
-        func,
-        arg_string_index: completed.len(),
-        prefix: current,
-        first_arg: completed.into_iter().next(),
-    })
+    None
 }
 
-fn current_lua_path_token(before: &str) -> Option<&str> {
-    let token = before
-        .rsplit(|c: char| {
-            c.is_whitespace()
-                || matches!(
-                    c,
-                    '(' | ')'
-                        | ','
-                        | ';'
-                        | '{'
-                        | '}'
-                        | '['
-                        | ']'
-                        | '"'
-                        | '\''
-                        | '+'
-                        | '-'
-                        | '*'
-                        | '/'
-                        | '='
-                )
-        })
-        .next()
-        .unwrap_or("");
+fn import_cursor(tokens: &[LuaToken], source_len: usize) -> Option<CallCursor> {
+    let cursor = open_call_cursor(tokens, source_len)?;
+    matches!(cursor.callee.as_str(), "require" | "import").then_some(cursor)
+}
 
-    if token.is_empty() { None } else { Some(token) }
+fn service_cursor(tokens: &[LuaToken], source_len: usize) -> Option<CallCursor> {
+    let cursor = open_call_cursor(tokens, source_len)?;
+    matches!(
+        cursor.callee.as_str(),
+        "mesh.service.bind" | "mesh.service.on"
+    )
+    .then_some(cursor)
 }

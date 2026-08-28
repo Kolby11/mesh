@@ -21,9 +21,12 @@ snapshot and its content revision. LSP manifest diagnostics now run the same
 canonical module and root runtime contracts as activation while retaining
 source-aware editor diagnostics; component tooling now retains partial
 template/script ASTs and reports parser-owned Luau member spans during edits.
+JSON authoring now uses standards-aware tokenization and strict parsed code
+maps for decoded values and source-accurate spans, while Luau completion
+contexts use the full_moon token stream for comment- and string-safe recovery.
 The active runtime publishes immutable
 activation snapshots, prepared frontends remain hidden until commit, and
 shutdown advances through explicit quiescing, teardown, flushing, and stopped
-phases. The next open item is Section 16's standards-compliant Luau/JSON
-scanner replacement. See
+phases. The next open item is Section 16's workspace-folder initialization and
+versioned refresh generations. See
 [`.planning/log/2026-08.md`](log/2026-08.md).

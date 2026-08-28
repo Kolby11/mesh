@@ -4,6 +4,7 @@
 //! Document-specific rules a schema tree cannot express, including canonical
 //! runtime validation for manifests, are layered on by the caller.
 
+use json_syntax::{CodeMap, Parse, Value as JsonValue, array::JsonArray};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Range};
 
 use super::schema::{Kind, Node};
@@ -42,9 +43,7 @@ fn check_node(source: &str, node: &JNode, schema: &Node, origin: &str, out: &mut
             for m in members {
                 match fields.iter().find(|f| f.name == m.key) {
                     Some(field) => {
-                        if let Some(v) = &m.value {
-                            check_node(source, v, &field.node, origin, out);
-                        }
+                        check_node(source, &m.value, &field.node, origin, out);
                     }
                     None => out.push(warn(
                         source,
@@ -72,20 +71,17 @@ fn check_node(source: &str, node: &JNode, schema: &Node, origin: &str, out: &mut
         // ids, interface ids), so they are described by `other`, not flagged.
         (JValue::Object(members), Kind::OpenObject { fields, other }) => {
             for m in members {
-                let Some(v) = &m.value else { continue };
                 let target = fields
                     .iter()
                     .find(|f| f.name == m.key)
                     .map(|f| &f.node)
                     .unwrap_or(other.as_ref());
-                check_node(source, v, target, origin, out);
+                check_node(source, &m.value, target, origin, out);
             }
         }
         (JValue::Object(members), Kind::Map(value)) => {
             for m in members {
-                if let Some(v) = &m.value {
-                    check_node(source, v, value, origin, out);
-                }
+                check_node(source, &m.value, value, origin, out);
             }
         }
         (JValue::Array(elements), Kind::Array(element)) => {
@@ -174,18 +170,18 @@ pub fn range_at(source: &str, start: usize, end: usize) -> Range {
     )
 }
 
-/// The range of the first `"key"` token in `source`, for diagnostics that
-/// belong to a section rather than to one value.
+/// The range of the first object key whose decoded value is `key`, for
+/// diagnostics that belong to a section rather than to one value.
 pub fn find_key_range(source: &str, key: &str) -> Option<Range> {
-    let needle = format!("\"{key}\"");
-    let start = source.find(&needle)?;
-    Some(range_at(source, start, start + needle.len()))
+    let (value, code_map) = JsonValue::parse_str(source).ok()?;
+    let span = find_key_span(&value, &code_map, 0, key)?;
+    Some(range_at(source, span.0, span.1))
 }
 
 // ---------------------------------------------------------------------------
-// A minimal strict span-recording JSON parser, used only for diagnostics on
-// input that serde_json already accepted. It records byte spans for values and
-// object keys so diagnostics can point at the exact token.
+// The strict parser is used only for diagnostics on input that serde_json
+// already accepted. Its code map records byte spans for every value and key,
+// so decoded strings and source ranges stay separate.
 // ---------------------------------------------------------------------------
 
 type Span = (usize, usize);
@@ -206,152 +202,74 @@ enum JValue {
 struct Member {
     key: String,
     key_span: Span,
-    value: Option<JNode>,
-}
-
-struct Parser<'a> {
-    bytes: &'a [u8],
-    pos: usize,
+    value: JNode,
 }
 
 impl JNode {
     fn parse(source: &str) -> Option<JNode> {
-        let mut p = Parser {
-            bytes: source.as_bytes(),
-            pos: 0,
-        };
-        p.skip_ws();
-        p.parse_value()
+        let (value, code_map) = JsonValue::parse_str(source).ok()?;
+        Some(from_json_value(&value, &code_map, 0))
     }
 }
 
-impl Parser<'_> {
-    fn skip_ws(&mut self) {
-        while self.pos < self.bytes.len() {
-            match self.bytes[self.pos] {
-                b' ' | b'\t' | b'\r' | b'\n' => self.pos += 1,
-                _ => break,
-            }
-        }
-    }
+fn source_span(code_map: &CodeMap, offset: usize) -> Span {
+    let span = code_map[offset].span;
+    (span.start(), span.end())
+}
 
-    fn peek(&self) -> Option<u8> {
-        self.bytes.get(self.pos).copied()
-    }
-
-    fn parse_value(&mut self) -> Option<JNode> {
-        self.skip_ws();
-        match self.peek()? {
-            b'{' => self.parse_object(),
-            b'[' => self.parse_array(),
-            b'"' => {
-                let start = self.pos;
-                let s = self.parse_string()?;
-                Some(JNode {
-                    span: (start, self.pos),
-                    value: JValue::String(s),
+fn from_json_value(value: &JsonValue, code_map: &CodeMap, offset: usize) -> JNode {
+    let span = source_span(code_map, offset);
+    let value = match value {
+        JsonValue::Object(object) => JValue::Object(
+            object
+                .iter_mapped(code_map, offset)
+                .map(|mapped| Member {
+                    key: mapped.value.key.value.to_string(),
+                    key_span: source_span(code_map, mapped.value.key.offset),
+                    value: from_json_value(
+                        mapped.value.value.value,
+                        code_map,
+                        mapped.value.value.offset,
+                    ),
                 })
-            }
-            _ => {
-                let start = self.pos;
-                while let Some(c) = self.peek() {
-                    if matches!(c, b',' | b'}' | b']' | b' ' | b'\t' | b'\r' | b'\n') {
-                        break;
-                    }
-                    self.pos += 1;
-                }
-                Some(JNode {
-                    span: (start, self.pos),
-                    value: JValue::Other,
-                })
-            }
-        }
-    }
+                .collect(),
+        ),
+        JsonValue::Array(array) => JValue::Array(
+            array
+                .iter_mapped(code_map, offset)
+                .map(|mapped| from_json_value(mapped.value, code_map, mapped.offset))
+                .collect(),
+        ),
+        JsonValue::String(string) => JValue::String(string.to_string()),
+        JsonValue::Null | JsonValue::Boolean(_) | JsonValue::Number(_) => JValue::Other,
+    };
 
-    fn parse_object(&mut self) -> Option<JNode> {
-        let start = self.pos;
-        self.pos += 1; // {
-        let mut members = Vec::new();
-        loop {
-            self.skip_ws();
-            match self.peek()? {
-                b'}' => {
-                    self.pos += 1;
-                    break;
-                }
-                b'"' => {
-                    let key_start = self.pos;
-                    let key = self.parse_string()?;
-                    let key_span = (key_start, self.pos);
-                    self.skip_ws();
-                    if self.peek() == Some(b':') {
-                        self.pos += 1;
-                    }
-                    let value = self.parse_value();
-                    members.push(Member {
-                        key,
-                        key_span,
-                        value,
-                    });
-                    self.skip_ws();
-                    if self.peek() == Some(b',') {
-                        self.pos += 1;
-                    }
-                }
-                b',' => {
-                    self.pos += 1;
-                }
-                _ => return None,
-            }
-        }
-        Some(JNode {
-            span: (start, self.pos),
-            value: JValue::Object(members),
-        })
-    }
+    JNode { span, value }
+}
 
-    fn parse_array(&mut self) -> Option<JNode> {
-        let start = self.pos;
-        self.pos += 1; // [
-        let mut elements = Vec::new();
-        loop {
-            self.skip_ws();
-            match self.peek()? {
-                b']' => {
-                    self.pos += 1;
-                    break;
+fn find_key_span(value: &JsonValue, code_map: &CodeMap, offset: usize, key: &str) -> Option<Span> {
+    match value {
+        JsonValue::Object(object) => {
+            for mapped in object.iter_mapped(code_map, offset) {
+                if mapped.value.key.value.as_str() == key {
+                    return Some(source_span(code_map, mapped.value.key.offset));
                 }
-                b',' => {
-                    self.pos += 1;
-                }
-                _ => {
-                    elements.push(self.parse_value()?);
+                if let Some(span) = find_key_span(
+                    mapped.value.value.value,
+                    code_map,
+                    mapped.value.value.offset,
+                    key,
+                ) {
+                    return Some(span);
                 }
             }
+            None
         }
-        Some(JNode {
-            span: (start, self.pos),
-            value: JValue::Array(elements),
-        })
-    }
-
-    fn parse_string(&mut self) -> Option<String> {
-        debug_assert_eq!(self.peek(), Some(b'"'));
-        self.pos += 1;
-        let mut s = String::new();
-        while let Some(c) = self.peek() {
-            self.pos += 1;
-            match c {
-                b'"' => return Some(s),
-                b'\\' => {
-                    if let Some(esc) = self.peek() {
-                        self.pos += 1;
-                        s.push(esc as char);
-                    }
-                }
-                _ => s.push(c as char),
-            }
+        JsonValue::Array(array) => array
+            .iter_mapped(code_map, offset)
+            .find_map(|mapped| find_key_span(mapped.value, code_map, mapped.offset, key)),
+        JsonValue::Null | JsonValue::Boolean(_) | JsonValue::Number(_) | JsonValue::String(_) => {
+            None
         }
-        None
     }
 }
