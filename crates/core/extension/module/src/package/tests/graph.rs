@@ -326,6 +326,60 @@ fn installed_module_graph_blocks_required_consumers_from_incompatible_provider_v
 }
 
 #[test]
+fn installed_module_graph_rejects_provider_versions_that_do_not_match_the_contract() {
+    let mut frontend_dependencies = MeshDependencies::default();
+    frontend_dependencies
+        .backend
+        .insert("mesh.example".into(), ">=1.0.0".into());
+    let frontend = loaded_module(
+        "@mesh/frontend",
+        ModuleKind::Frontend,
+        frontend_dependencies,
+        vec![],
+        MeshContributes::default(),
+    );
+    let interface = interface_module(
+        "@mesh/example-interface",
+        "mesh.example",
+        "example",
+        InterfaceRelationship::Base,
+        None,
+    );
+    let backend = loaded_module(
+        "@mesh/backend",
+        ModuleKind::Backend,
+        MeshDependencies::default(),
+        vec![MeshProvidesDeclaration {
+            interface: "mesh.example".into(),
+            version: Some("2.0".into()),
+            base_module: Some("@mesh/example-interface".into()),
+            provider: Some("example".into()),
+            label: None,
+            priority: 100,
+        }],
+        MeshContributes::default(),
+    );
+    let root = root_with_modules(
+        &[
+            ("@mesh/frontend", ModuleKind::Frontend),
+            ("@mesh/example-interface", ModuleKind::Interface),
+            ("@mesh/backend", ModuleKind::Backend),
+        ],
+        &[("mesh.example", "@mesh/backend")],
+        None,
+    );
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![frontend, interface, backend]).unwrap();
+
+    assert!(!graph.module("@mesh/frontend").unwrap().enabled);
+    assert!(graph.active_provider("mesh.example").is_none());
+    assert!(graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@mesh/frontend"
+            && diagnostic.status == "required_interface_version_mismatch"
+    }));
+}
+
+#[test]
 fn installed_module_graph_exposes_frontend_backend_requirements() {
     let mut deps = MeshDependencies::default();
     deps.backend.insert("mesh.audio".into(), ">=1.0.0".into());

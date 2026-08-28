@@ -1,6 +1,6 @@
 use super::{ModuleId, ModuleManifestDiagnostic, ModuleManifestError, validate_relative_path};
 use crate::manifest::{self, CapabilitiesSection, DependencySpec, Manifest, ModuleType};
-use mesh_core_service::{parse_contract_version, parse_version_req};
+use mesh_core_service::{canonical_interface_name, parse_contract_version, parse_version_req};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -392,6 +392,20 @@ impl MeshModuleSection {
                     )));
                 }
             }
+            let mut inline_interface_names = self
+                .interfaces
+                .iter()
+                .map(|declaration| canonical_interface_name(&declaration.name))
+                .collect::<Vec<_>>();
+            inline_interface_names.sort();
+            for pair in inline_interface_names.windows(2) {
+                if pair[0] == pair[1] {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "mesh.interfaces contains duplicate interface declaration '{}'",
+                        pair[0]
+                    )));
+                }
+            }
         }
         if self.kind == ModuleKind::Composition {
             // A composition selects among what its members already declare. If
@@ -421,6 +435,9 @@ impl MeshModuleSection {
                     "composition modules implement no interfaces; they bind providers instead"
                         .into(),
                 ));
+            }
+            if let Some(parent) = &self.extends {
+                validate_module_dependency_id("mesh.extends", parent)?;
             }
         } else {
             if self.compose.is_some() {
@@ -578,6 +595,32 @@ impl MeshModuleSection {
             .map_err(ModuleManifestError::Validation)?;
         for provided in self.implementations() {
             provided.validate()?;
+        }
+        let mut implementation_ids = self
+            .implements
+            .iter()
+            .map(|provided| {
+                let version = provided
+                    .version
+                    .as_deref()
+                    .and_then(parse_contract_version)
+                    .map(|version| version.to_string())
+                    .unwrap_or_else(|| "*".into());
+                format!(
+                    "{}@{}",
+                    canonical_interface_name(&provided.interface),
+                    version
+                )
+            })
+            .collect::<Vec<_>>();
+        implementation_ids.sort();
+        for pair in implementation_ids.windows(2) {
+            if pair[0] == pair[1] {
+                return Err(ModuleManifestError::Validation(format!(
+                    "mesh.implements contains duplicate contract identity '{}'",
+                    pair[0]
+                )));
+            }
         }
         self.provides.validate()?;
         self.contributes.validate()?;
@@ -887,6 +930,13 @@ impl MeshUses {
             validate_interface_dependency_id(interface)?;
             validate_version_requirement("mesh.uses.optionalInterfaces", interface, version)?;
         }
+        for interface in self.interfaces.keys() {
+            if self.optional_interfaces.contains_key(interface) {
+                return Err(ModuleManifestError::Validation(format!(
+                    "mesh.uses.interfaces and mesh.uses.optionalInterfaces cannot both declare '{interface}'"
+                )));
+            }
+        }
         for capability in self
             .capabilities
             .iter()
@@ -1017,6 +1067,13 @@ impl MeshDependencies {
         for (interface, version) in self.backend.iter().chain(self.optional_backend.iter()) {
             validate_interface_dependency_id(interface)?;
             validate_version_requirement("mesh.dependencies.interfaces", interface, version)?;
+        }
+        for interface in self.backend.keys() {
+            if self.optional_backend.contains_key(interface) {
+                return Err(ModuleManifestError::Validation(format!(
+                    "mesh.dependencies.backend and mesh.dependencies.optionalBackend cannot both declare '{interface}'"
+                )));
+            }
         }
         Ok(())
     }
@@ -1276,6 +1333,7 @@ impl MeshExtensionPointDeclaration {
                 "mesh.extensionPoints '{point_name}' must declare a version"
             )));
         }
+        validate_declared_version("mesh.extensionPoints version", point_name, &self.version)?;
         for prop in &self.props {
             if prop.name.trim().is_empty() {
                 return Err(ModuleManifestError::Validation(format!(

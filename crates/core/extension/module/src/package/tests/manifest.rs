@@ -259,6 +259,81 @@ fn module_manifest_rejects_duplicate_contribution_identities() {
 }
 
 #[test]
+fn module_manifest_rejects_duplicate_provider_contract_identities() {
+    let error = ModuleManifest::from_json_str(
+        r#"{
+  "name": "@mesh/duplicate-providers",
+  "version": "1.0.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "implements": [
+      {"interface":"mesh.example","version":"1.0"},
+      {"interface":"mesh.example","version":"1.0"}
+    ]
+  }
+}"#,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(
+        error.contains("duplicate contract identity 'mesh.example@1.0.0'"),
+        "{error}"
+    );
+}
+
+#[test]
+fn module_manifest_rejects_duplicate_inline_interface_contracts() {
+    let error = ModuleManifest::from_json_str(
+        r#"{
+  "name": "@mesh/duplicate-inline-contracts",
+  "version": "1.0.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "interfaces": [
+      {"name":"mesh.example","version":"1.0","contract":{}},
+      {"name":"mesh.example","version":"1.0","contract":{}}
+    ]
+  }
+}"#,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(
+        error.contains("duplicate interface declaration 'mesh.example'"),
+        "{error}"
+    );
+}
+
+#[test]
+fn module_manifest_rejects_required_and_optional_interface_overlap() {
+    let error = ModuleManifest::from_json_str(
+        r#"{
+  "name": "@mesh/ambiguous-interfaces",
+  "version": "1.0.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "uses": {
+      "interfaces": {"mesh.example": ">=1.0"},
+      "optionalInterfaces": {"mesh.example": ">=1.0"}
+    }
+  }
+}"#,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(
+        error.contains("cannot both declare 'mesh.example'"),
+        "{error}"
+    );
+}
+
+#[test]
 fn interface_module_without_contract_file_is_valid() {
     // v0: an interface module may ship only name/version/domain and infer the
     // contract from emitted state — no `interface.toml` required.

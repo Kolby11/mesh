@@ -3,6 +3,7 @@ use super::{
     RootModuleGraphManifest, RootThemeSelection,
 };
 use crate::manifest::SurfaceLayoutSection;
+use mesh_core_service::{canonical_interface_name, parse_contract_version, parse_version_req};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs::{self, OpenOptions};
@@ -105,6 +106,37 @@ fn validate_unique_ordered_ids(field: &str, values: &[String]) -> Result<(), Mod
     Ok(())
 }
 
+fn version_satisfies_requirement(requirement: &str, version: &str) -> bool {
+    parse_version_req(requirement)
+        .zip(parse_contract_version(version))
+        .is_some_and(|(requirement, version)| requirement.matches(&version))
+}
+
+fn provider_version_satisfies(
+    offered_version: Option<&str>,
+    interface: &str,
+    requirement: &str,
+    declared_versions: &HashMap<String, Vec<String>>,
+) -> bool {
+    let declaration_matches = declared_versions.get(interface).is_none_or(|versions| {
+        versions
+            .iter()
+            .any(|version| version_satisfies_requirement(requirement, version))
+    });
+    if !declaration_matches {
+        return false;
+    }
+
+    offered_version.is_some_and(|version| version_satisfies_requirement(requirement, version))
+        || offered_version.is_none()
+            && declared_versions.get(interface).is_some_and(|versions| {
+                versions
+                    .iter()
+                    .any(|version| version_satisfies_requirement(requirement, version))
+            })
+        || offered_version.is_none() && !declared_versions.contains_key(interface)
+}
+
 impl Default for ProfileRootInstance {
     fn default() -> Self {
         Self {
@@ -202,6 +234,14 @@ impl ShellProfile {
         }
         if let Some(from) = &self.from {
             validate_module_ids([&from.module].into_iter(), "from")?;
+            if let Some(version) = &from.version
+                && parse_contract_version(version).is_none()
+            {
+                return Err(ModuleManifestError::Validation(format!(
+                    "profile composition version pin '{}' is not a valid semantic version",
+                    version
+                )));
+            }
         }
         validate_module_ids(self.background_services.iter(), "backgroundServices")?;
         validate_module_ids(self.providers.values(), "providers")?;
@@ -351,11 +391,15 @@ impl ShellProfile {
         manifests: impl IntoIterator<Item = &'a ModuleManifest>,
     ) -> Result<HashSet<String>, ModuleManifestError> {
         let manifest_list = manifests.into_iter().collect::<Vec<_>>();
-        let manifests = manifest_list
-            .iter()
-            .copied()
-            .map(|manifest| (manifest.name.as_str(), manifest))
-            .collect::<HashMap<_, _>>();
+        let mut manifests = HashMap::new();
+        for manifest in manifest_list.iter().copied() {
+            if manifests.insert(manifest.name.as_str(), manifest).is_some() {
+                return Err(ModuleManifestError::Validation(format!(
+                    "duplicate installed module manifest '{}'",
+                    manifest.name
+                )));
+            }
+        }
         let mut active = HashSet::new();
         let mut queue = VecDeque::new();
 
@@ -376,6 +420,36 @@ impl ShellProfile {
             .as_ref()
             .map(|resolved| &resolved.spec)
             .unwrap_or(&profile_spec);
+        let mut declared_interface_versions = HashMap::<String, Vec<String>>::new();
+        for manifest in &manifest_list {
+            if let Some(declaration) = &manifest.mesh.interface
+                && let Some(version) = &declaration.version
+            {
+                declared_interface_versions
+                    .entry(canonical_interface_name(&declaration.name))
+                    .or_default()
+                    .push(version.clone());
+            }
+            for declaration in &manifest.mesh.interfaces {
+                if let Some(version) = &declaration.version {
+                    declared_interface_versions
+                        .entry(canonical_interface_name(&declaration.name))
+                        .or_default()
+                        .push(version.clone());
+                }
+            }
+        }
+        let mut requested_providers = HashMap::new();
+        for (interface, module_id) in &activation_spec.providers {
+            let interface = canonical_interface_name(interface);
+            if let Some(previous) = requested_providers.insert(interface.clone(), module_id)
+                && previous != module_id
+            {
+                return Err(ModuleManifestError::Validation(format!(
+                    "profile declares conflicting providers for interface {interface}: {previous} and {module_id}"
+                )));
+            }
+        }
         for language_pack in &activation_spec.resources.languages {
             let manifest = manifests.get(language_pack.as_str()).ok_or_else(|| {
                 ModuleManifestError::Validation(format!(
@@ -461,39 +535,96 @@ impl ShellProfile {
                     .filter(|(_, dependency)| !dependency.is_optional())
                     .map(|(module_id, _)| module_id.clone()),
             );
+            if manifest.mesh.kind == ModuleKind::Composition
+                && let Some(parent) = &manifest.mesh.extends
+            {
+                queue.push_back(parent.clone());
+            }
             queue.extend(manifest.mesh.uses.resources.icons.iter().cloned());
             queue.extend(manifest.mesh.uses.resources.fonts.iter().cloned());
             queue.extend(manifest.mesh.uses.resources.i18n.iter().cloned());
             queue.extend(manifest.mesh.uses.resources.themes.iter().cloned());
 
-            for interface in manifest.mesh.uses.interfaces.keys() {
+            let interface_requirements = manifest
+                .mesh
+                .dependencies
+                .backend
+                .iter()
+                .chain(manifest.mesh.uses.interfaces.iter())
+                .map(|(interface, requirement)| {
+                    (canonical_interface_name(interface), requirement.clone())
+                })
+                .collect::<BTreeMap<_, _>>();
+            for (interface, requirement) in interface_requirements {
                 for candidate in manifests.values().filter(|candidate| {
                     candidate.mesh.kind == ModuleKind::Interface
                         && candidate
                             .mesh
                             .interface
                             .as_ref()
-                            .is_some_and(|declaration| declaration.name == *interface)
+                            .is_some_and(|declaration| {
+                                canonical_interface_name(&declaration.name) == interface
+                                    && declaration.version.as_deref().is_some_and(|version| {
+                                        version_satisfies_requirement(&requirement, version)
+                                    })
+                            })
                 }) {
                     queue.push_back(candidate.name.clone());
                 }
 
-                if let Some(provider) = self.providers.get(interface) {
-                    queue.push_back(provider.clone());
+                let compatible_provider = |candidate: &ModuleManifest| {
+                    candidate.mesh.kind == ModuleKind::Backend
+                        && candidate.mesh.implementations().any(|implementation| {
+                            canonical_interface_name(&implementation.interface) == interface
+                                && provider_version_satisfies(
+                                    implementation.version.as_deref(),
+                                    &interface,
+                                    &requirement,
+                                    &declared_interface_versions,
+                                )
+                        })
+                };
+                if let Some(provider) = requested_providers.get(&interface) {
+                    let candidate = manifests.get(provider.as_str()).ok_or_else(|| {
+                        ModuleManifestError::Validation(format!(
+                            "profile selects provider {provider} for {interface}, but it is not installed"
+                        ))
+                    })?;
+                    if !compatible_provider(candidate) {
+                        return Err(ModuleManifestError::Validation(format!(
+                            "profile selects provider {provider} for {interface} {requirement}, but it does not provide a compatible version"
+                        )));
+                    }
+                    queue.push_back((*provider).clone());
                     continue;
                 }
                 let providers = manifests
                     .values()
-                    .filter(|candidate| {
-                        candidate.mesh.kind == ModuleKind::Backend
-                            && candidate
-                                .mesh
-                                .implementations()
-                                .any(|implementation| implementation.interface == *interface)
-                    })
+                    .filter(|candidate| compatible_provider(candidate))
                     .collect::<Vec<_>>();
+                let mut providers = providers;
+                providers.sort_by(|left, right| left.name.cmp(&right.name));
                 if providers.len() == 1 {
                     queue.push_back(providers[0].name.clone());
+                } else if providers.len() > 1 {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "profile requires {interface} {requirement}, but compatible providers are ambiguous: {}",
+                        providers
+                            .iter()
+                            .map(|provider| provider.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )));
+                } else if manifests.values().any(|candidate| {
+                    candidate.mesh.kind == ModuleKind::Backend
+                        && candidate.mesh.implementations().any(|implementation| {
+                            canonical_interface_name(&implementation.interface) == interface
+                        })
+                }) || declared_interface_versions.contains_key(&interface)
+                {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "profile requires {interface} {requirement}, but no installed provider satisfies that version"
+                    )));
                 }
             }
 
@@ -503,6 +634,34 @@ impl ShellProfile {
                         queue.push_back(base_module.clone());
                     }
                 }
+            }
+        }
+        let resolution = super::resolve_closure(
+            active.iter().map(String::as_str),
+            manifest_list.iter().copied(),
+        );
+        if !resolution.is_satisfiable() {
+            if let Some(conflict) = resolution.conflicts.first() {
+                return Err(ModuleManifestError::Validation(format!(
+                    "profile activation rejected: {}",
+                    conflict.message()
+                )));
+            }
+            if let Some((dependency, requirers)) = resolution.missing.iter().next() {
+                return Err(ModuleManifestError::Validation(format!(
+                    "profile activation rejected: required module {dependency} is missing (requested by {})",
+                    requirers.iter().cloned().collect::<Vec<_>>().join(", ")
+                )));
+            }
+            if let Some((module_id, reasons)) = resolution
+                .blocked
+                .iter()
+                .find(|(module_id, _)| resolution.required_closure.contains(*module_id))
+            {
+                return Err(ModuleManifestError::Validation(format!(
+                    "profile activation rejected: module {module_id} is blocked because {}",
+                    reasons.iter().cloned().collect::<Vec<_>>().join("; ")
+                )));
             }
         }
         Ok(active)
@@ -940,6 +1099,96 @@ mod tests {
             root.layout.unwrap().entrypoint,
             "@me/panel:main".to_string()
         );
+    }
+
+    #[test]
+    fn activation_rejects_a_required_module_version_mismatch() {
+        let frontend = manifest(
+            r#"{"name":"@me/panel","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","entry":"main.mesh","uses":{"modules":{"@me/helpers":"^2.0.0"}}}}"#,
+        );
+        let helpers = manifest(
+            r#"{"name":"@me/helpers","version":"1.5.0","mesh":{"apiVersion":"0.1","kind":"library"}}"#,
+        );
+        let mut profile = ShellProfile::new();
+        profile.add_frontend(&frontend).unwrap();
+
+        let error = profile
+            .active_module_ids([&frontend, &helpers])
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("@me/helpers"), "{error}");
+        assert!(error.contains("^2.0.0"), "{error}");
+    }
+
+    #[test]
+    fn activation_keeps_an_optional_module_version_mismatch_degraded() {
+        let frontend = manifest(
+            r#"{"name":"@me/panel","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","entry":"main.mesh","uses":{"modules":{"@me/helpers":{"version":"^2.0.0","optional":true}}}}}"#,
+        );
+        let helpers = manifest(
+            r#"{"name":"@me/helpers","version":"1.5.0","mesh":{"apiVersion":"0.1","kind":"library"}}"#,
+        );
+        let mut profile = ShellProfile::new();
+        profile.add_frontend(&frontend).unwrap();
+
+        let active = profile.active_module_ids([&frontend, &helpers]).unwrap();
+        assert_eq!(active, HashSet::from(["@me/panel".to_string()]));
+    }
+
+    #[test]
+    fn activation_rejects_an_incompatible_required_interface_provider() {
+        let frontend = manifest(
+            r#"{"name":"@me/panel","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","entry":"main.mesh","uses":{"interfaces":{"mesh.audio":">=2.0.0"}}}}"#,
+        );
+        let interface = manifest(
+            r#"{"name":"@me/audio-interface","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"interface","interface":{"name":"mesh.audio","version":"1.0.0","contract":{}}}}"#,
+        );
+        let backend = manifest(
+            r#"{"name":"@me/audio","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"backend","implements":[{"interface":"mesh.audio","version":"1.0.0"}]}}"#,
+        );
+        let mut profile = ShellProfile::new();
+        profile.add_frontend(&frontend).unwrap();
+
+        let error = profile
+            .active_module_ids([&frontend, &interface, &backend])
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("mesh.audio"), "{error}");
+        assert!(error.contains("no installed provider"), "{error}");
+    }
+
+    #[test]
+    fn activation_includes_required_composition_extends_ancestors() {
+        let base = manifest(
+            r#"{"name":"@me/base","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"composition","compose":{}}}"#,
+        );
+        let derived = manifest(
+            r#"{"name":"@me/derived","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"composition","extends":"@me/base","compose":{"roots":{"@me/panel#top":{"module":"@me/panel"}}}}}"#,
+        );
+        let panel = manifest(
+            r#"{"name":"@me/panel","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","entry":"main.mesh"}}"#,
+        );
+        let profile = ShellProfile::from_json_str(
+            r#"{"schemaVersion":3,"from":{"module":"@me/derived","version":"1.0.0"}}"#,
+        )
+        .unwrap();
+
+        let active = profile
+            .active_module_ids([&base, &derived, &panel])
+            .unwrap();
+        assert!(active.contains("@me/base"));
+        assert!(active.contains("@me/derived"));
+        assert!(active.contains("@me/panel"));
+    }
+
+    #[test]
+    fn composition_version_pins_must_be_semantic_versions() {
+        let error = ShellProfile::from_json_str(
+            r#"{"schemaVersion":3,"from":{"module":"@me/desk","version":"not-a-version"}}"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("not a valid semantic version"), "{error}");
     }
 
     #[test]

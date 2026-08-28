@@ -174,13 +174,35 @@ pub fn resolve_closure<'a>(
         let Some(manifest) = available.get(module_id.as_str()) else {
             continue;
         };
-        for (dependency_id, spec) in &manifest.mesh.dependencies.modules {
-            let requirement = dependency_spec_to_string(spec);
+        let mut module_dependencies = manifest
+            .mesh
+            .dependencies
+            .modules
+            .iter()
+            .map(|(dependency_id, spec)| {
+                (
+                    dependency_id.clone(),
+                    (dependency_spec_to_string(spec), spec.is_optional()),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        if manifest.mesh.kind == super::ModuleKind::Composition
+            && let Some(parent) = &manifest.mesh.extends
+        {
+            // `extends` is an implicit required dependency. Preserve an
+            // explicit version range when one is also declared, but never let
+            // the inheritance edge become optional.
+            module_dependencies
+                .entry(parent.clone())
+                .and_modify(|(_, optional)| *optional = false)
+                .or_insert_with(|| ("*".into(), false));
+        }
+        for (dependency_id, (requirement, optional)) in module_dependencies {
             requested_by
                 .entry(dependency_id.clone())
                 .or_default()
                 .insert(module_id.clone());
-            if spec.is_optional() {
+            if optional {
                 optional_requirements
                     .entry(dependency_id.clone())
                     .or_default()
@@ -520,5 +542,21 @@ mod tests {
                 reference: Some("v1".into()),
             })
         );
+    }
+
+    #[test]
+    fn composition_extends_is_a_required_dependency_edge() {
+        let derived = ModuleManifest::from_json_str(
+            r#"{"name":"@me/derived","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"composition","extends":"@me/base","compose":{}}}"#,
+        )
+        .unwrap();
+        let outcome = resolve_closure(["@me/derived"], [&derived]);
+
+        assert!(!outcome.is_satisfiable());
+        assert_eq!(
+            outcome.missing["@me/base"],
+            BTreeSet::from(["@me/derived".to_string()])
+        );
+        assert!(outcome.blocked.contains_key("@me/derived"));
     }
 }

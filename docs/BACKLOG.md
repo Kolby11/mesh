@@ -105,9 +105,6 @@ The 2026-06-18 redesign largely shipped: canonical `module.json` with
 `mesh.uses` / `mesh.provides` / `mesh.implements`, the graph as single source of
 truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
-- [ ] Enforce required/optional module dependencies, module/interface version
-      ranges, composition pins/closure, and duplicate contract/contribution IDs
-      before activation rather than leaving conflicts diagnostic-only.
 - [ ] Make the canonical `module.json` loader the only production path; legacy
       manifests remain migration diagnostics, never runnable compatibility
       inputs.

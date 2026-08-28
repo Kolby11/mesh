@@ -29,8 +29,11 @@ contexts use the full_moon token stream for comment- and string-safe recovery.
 The active runtime publishes immutable
 activation snapshots, prepared frontends remain hidden until commit, and
 shutdown advances through explicit quiescing, teardown, flushing, and stopped
-phases. The next open item is enforcing required/optional module dependencies,
-module/interface version ranges, composition pins/closure, and duplicate
-contract/contribution IDs before activation.
+phases. Module activation now rejects unsatisfied required dependency closures,
+incompatible module/interface versions, invalid composition pins, and duplicate
+contract identities before runtime contributions are indexed. The next open
+item is making the canonical `module.json` loader the only production path;
+legacy manifests remain migration diagnostics, never runnable compatibility
+inputs.
 See
 [`.planning/log/2026-08.md`](log/2026-08.md).

@@ -196,13 +196,19 @@ pub fn resolve_composition<'a>(
         let selected = compositions
             .get(from.module.as_str())
             .expect("composition chain already validated the selected module");
-        if let Some(requested) = &from.version
-            && selected.version != *requested
-        {
-            return Err(ModuleManifestError::Validation(format!(
-                "profile selects composition {} version {}, but installed version is {}",
-                from.module, requested, selected.version
-            )));
+        if let Some(requested) = &from.version {
+            if mesh_core_service::parse_contract_version(requested).is_none() {
+                return Err(ModuleManifestError::Validation(format!(
+                    "profile composition version pin '{}' is not a valid semantic version",
+                    requested
+                )));
+            }
+            if selected.version != *requested {
+                return Err(ModuleManifestError::Validation(format!(
+                    "profile selects composition {} version {}, but installed version is {}",
+                    from.module, requested, selected.version
+                )));
+            }
         }
         // Base first, so a derived composition wins where they disagree.
         for module_id in chain.iter().rev() {

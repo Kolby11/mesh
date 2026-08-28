@@ -272,9 +272,26 @@ fn provider_satisfies_requirement(
     let Some(provider_version) = provider.version.as_deref() else {
         // Older providers without a version inherit the declared contract
         // version, which was checked above when one exists.
+        // Providers without any declaration are also valid for the legacy
+        // untyped interface path; there is no graph-owned version to compare.
         return true;
     };
-    parse_contract_version(provider_version).is_some_and(|version| request.matches(&version))
+    let Some(provider_version) = parse_contract_version(provider_version) else {
+        return false;
+    };
+    if let Some(contract) = contract
+        && provider_version != contract.version
+    {
+        return false;
+    }
+    if let Some(declaration_version) = declaration
+        .and_then(|declaration| declaration.version.as_deref())
+        .and_then(parse_contract_version)
+        && provider_version != declaration_version
+    {
+        return false;
+    }
+    request.matches(&provider_version)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
