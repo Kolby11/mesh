@@ -613,25 +613,15 @@ pub(in crate::shell) fn abort_package_transaction(
     }
 }
 
-fn candidate_interface_catalog(
-    live: &mesh_core_service::InterfaceCatalog,
+pub(super) fn interface_catalog_for_graph(
+    base: &mesh_core_service::InterfaceCatalog,
     graph: &InstalledModuleGraph,
 ) -> Result<mesh_core_service::InterfaceCatalog, ShellRunError> {
-    let mut catalog = live.clone();
-    let graph_interfaces = graph
-        .declared_interfaces()
-        .into_iter()
-        .map(|interface| mesh_core_service::canonical_interface_name(&interface.name))
-        .collect::<HashSet<_>>();
-
-    // Graph-owned contracts and providers replace the previous graph view;
-    // core-owned providers/contracts remain in the catalog. This makes the
-    // candidate self-contained even when the mutable live registry has seen
-    // several prior graph reloads.
-    for interface in &graph_interfaces {
-        catalog.contracts.remove(interface);
-        catalog.providers.remove(interface);
-    }
+    // Start from the immutable core catalog instead of the mutable live
+    // registry. The latter may contain providers or contracts from an older
+    // graph generation, which would make a rejected or disabled module
+    // reachable after activation.
+    let mut catalog = base.clone();
     for (interface, contract) in graph.interface_contracts() {
         let compiled = contract
             .compile(mesh_core_service::DeclarationProvenance::new(
@@ -645,31 +635,19 @@ fn candidate_interface_catalog(
             .insert(compiled.interface.clone(), vec![Arc::new(compiled)]);
     }
 
-    let mut providers = HashMap::<String, Vec<mesh_core_service::InterfaceProvider>>::new();
     for provider in graph.backend_provider_contributions() {
         let interface = mesh_core_service::canonical_interface_name(&provider.interface);
-        providers.entry(interface.clone()).or_default().push(
-            mesh_core_service::InterfaceProvider {
-                interface,
-                version: provider.version.clone(),
-                base_module: provider.base_module.clone(),
-                provider_module: provider.module_id.clone(),
-                backend_name: provider
-                    .provider
-                    .clone()
-                    .unwrap_or_else(|| provider.module_id.clone()),
-                priority: provider.priority,
-            },
-        );
-    }
-    for interface in graph_interfaces {
-        catalog.providers.insert(
-            interface.clone(),
-            providers.remove(&interface).unwrap_or_default(),
-        );
-    }
-    for (interface, providers) in providers {
-        catalog.providers.insert(interface, providers);
+        catalog.register_provider(mesh_core_service::InterfaceProvider {
+            interface,
+            version: provider.version.clone(),
+            base_module: provider.base_module.clone(),
+            provider_module: provider.module_id.clone(),
+            backend_name: provider
+                .provider
+                .clone()
+                .unwrap_or_else(|| provider.module_id.clone()),
+            priority: provider.priority,
+        });
     }
     catalog.generation = catalog.generation.saturating_add(1);
     Ok(catalog)
@@ -1516,7 +1494,7 @@ impl Shell {
             }};
         }
         let interface_catalog =
-            match candidate_interface_catalog(&self.interfaces.resolved_catalog(), &graph) {
+            match interface_catalog_for_graph(&self.builtin_interface_catalog, &graph) {
                 Ok(catalog) => Arc::new(catalog),
                 Err(error) => {
                     reject_candidate!(error.to_string());

@@ -109,6 +109,134 @@ fn installed_module_graph_exposes_shell_package_choices() {
 }
 
 #[test]
+fn graph_interface_catalog_replaces_stale_providers_and_excludes_disabled_candidates() {
+    let first = graph_from_json(
+        r#"{
+            "modulesDir": "modules",
+            "modules": {
+                "@test/example-interface": {
+                    "kind": "interface",
+                    "path": "example-interface",
+                    "enabled": true
+                },
+                "@test/old-backend": {
+                    "kind": "backend",
+                    "path": "old-backend",
+                    "enabled": true
+                }
+            },
+            "providers": { "mesh.example": "@test/old-backend" }
+        }"#,
+        vec![
+            r#"{
+                "name": "@test/example-interface",
+                "version": "1.0.0",
+                "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "interface",
+                    "interface": {
+                        "name": "mesh.example",
+                        "version": "1.0",
+                        "domain": "example",
+                        "contract": { "methods": [{ "name": "read", "returns": "boolean" }] }
+                    }
+                }
+            }"#,
+            r#"{
+                "name": "@test/old-backend",
+                "version": "1.0.0",
+                "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "backend",
+                    "entrypoints": { "main": "src/main.luau" },
+                    "implements": [{
+                        "interface": "mesh.example",
+                        "version": "1.0",
+                        "provider": "old",
+                        "priority": 10
+                    }]
+                }
+            }"#,
+        ],
+    );
+    let second = graph_from_json(
+        r#"{
+            "modulesDir": "modules",
+            "modules": {
+                "@test/example-interface": {
+                    "kind": "interface",
+                    "path": "example-interface",
+                    "enabled": true
+                },
+                "@test/old-backend": {
+                    "kind": "backend",
+                    "path": "old-backend",
+                    "enabled": false
+                }
+            },
+            "providers": { "mesh.example": "@test/old-backend" }
+        }"#,
+        vec![
+            r#"{
+                "name": "@test/example-interface",
+                "version": "1.0.0",
+                "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "interface",
+                    "interface": {
+                        "name": "mesh.example",
+                        "version": "1.0",
+                        "domain": "example",
+                        "contract": { "methods": [{ "name": "read", "returns": "boolean" }] }
+                    }
+                }
+            }"#,
+            r#"{
+                "name": "@test/old-backend",
+                "version": "1.0.0",
+                "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "backend",
+                    "entrypoints": { "main": "src/main.luau" },
+                    "implements": [{
+                        "interface": "mesh.example",
+                        "version": "1.0",
+                        "provider": "old",
+                        "priority": 10
+                    }]
+                }
+            }"#,
+        ],
+    );
+
+    let mut shell = Shell::new();
+    shell.commit_installed_module_graph(first).unwrap();
+    assert_eq!(
+        shell
+            .interfaces
+            .providers_for("mesh.example")
+            .iter()
+            .map(|provider| provider.provider_module.as_str())
+            .collect::<Vec<_>>(),
+        vec!["@test/old-backend"]
+    );
+
+    shell.commit_installed_module_graph(second).unwrap();
+    assert!(
+        shell.interfaces.providers_for("mesh.example").is_empty(),
+        "a disabled provider from the replacement graph must not inherit the previous registry entry"
+    );
+    assert!(
+        shell
+            .interfaces
+            .providers_for("mesh.theme")
+            .iter()
+            .any(|provider| { provider.provider_module == "@mesh/shell" }),
+        "core-owned providers must survive graph catalog replacement"
+    );
+}
+
+#[test]
 fn installed_graph_registers_each_module_settings_owner_before_consumption() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let graph = mesh_core_module::package::load_installed_module_graph(

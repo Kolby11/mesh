@@ -27,7 +27,7 @@ contexts use the full_moon token stream for comment- and string-safe recovery.
 The active runtime publishes immutable
 activation snapshots, prepared frontends remain hidden until commit, and
 shutdown advances through explicit quiescing, teardown, flushing, and stopped
-phases. The next open item is installed-graph activation: fail closed and
-retain the last-known-good runtime when graph validation fails.
+phases. The next open item is replacing the duplicate CLI/shell package
+implementations with one locked, journaled transaction engine.
 See
 [`.planning/log/2026-08.md`](log/2026-08.md).

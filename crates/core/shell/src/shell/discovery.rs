@@ -1766,6 +1766,7 @@ impl Shell {
             backend_name: "Shell Composition".to_string(),
             priority: 200,
         });
+        let builtin_interface_catalog = interfaces.catalog();
 
         let now = std::time::Instant::now();
 
@@ -1787,6 +1788,7 @@ impl Shell {
             locale,
             diagnostics,
             interfaces,
+            builtin_interface_catalog,
             capability_policy,
             effective_capabilities: Arc::new(HashMap::new()),
             installed_module_graph: None,
@@ -1899,6 +1901,8 @@ impl Shell {
         self.installed_module_graph = None;
         self.modules.clear();
         self.effective_capabilities = Arc::new(HashMap::new());
+        self.interfaces
+            .replace_catalog(self.builtin_interface_catalog.clone());
         self.frontend_catalog
             .replace(FrontendCatalog::default(), None);
         let (theme, theme_watch) = load_active_theme(&self.settings);
@@ -2107,9 +2111,21 @@ impl Shell {
         graph: InstalledModuleGraph,
         locale: LocaleEngine,
     ) {
+        let interface_catalog =
+            super::profile::interface_catalog_for_graph(&self.builtin_interface_catalog, &graph);
         self.sync_module_graph_health(&graph);
         self.locale = locale;
         self.installed_module_graph = Some(graph);
+        match interface_catalog {
+            Ok(catalog) => self.interfaces.replace_catalog(catalog),
+            Err(error) => {
+                tracing::error!(
+                    "graph-supplied interface catalog was rejected; retaining core catalog: {error}"
+                );
+                self.interfaces
+                    .replace_catalog(self.builtin_interface_catalog.clone());
+            }
+        }
     }
 
     /// Project immutable graph diagnostics into the live module records. The
@@ -2181,39 +2197,20 @@ impl Shell {
                 "failed to register graph-owned settings schemas transactionally: {error}"
             ),
         }
-        for contract in graph.interface_contracts().values() {
-            let interface = contract.interface.clone();
-            if let Err(error) = self.interfaces.try_register_contract(contract.clone()) {
-                // `register_contract` used to discard this silently: one bad
-                // field type on a module-supplied contract removed the whole
-                // interface from the catalog, and every method on it then
-                // rejected as an unknown channel with no signal pointing back
-                // at the actual cause. Surface it loudly instead of asserting
-                // — unlike a built-in contract, a graph-supplied one can be
-                // legitimately malformed third-party content.
+        match super::profile::interface_catalog_for_graph(&self.builtin_interface_catalog, graph) {
+            Ok(catalog) => self.interfaces.replace_catalog(catalog),
+            Err(error) => {
                 tracing::error!(
-                    "graph-supplied interface '{interface}' was rejected and is unavailable: {error}"
+                    "graph-supplied interface catalog was rejected; retaining core catalog: {error}"
                 );
                 self.diagnostics.record_lifecycle_error(
-                    interface,
+                    "@mesh/shell",
                     "graph_interface_contract_compile_failed",
                     error.to_string(),
                 );
+                self.interfaces
+                    .replace_catalog(self.builtin_interface_catalog.clone());
             }
-        }
-
-        for provider in graph.backend_provider_contributions() {
-            self.interfaces.register(InterfaceProvider {
-                interface: canonical_interface_name(&provider.interface),
-                version: provider.version.clone(),
-                base_module: provider.base_module.clone(),
-                provider_module: provider.module_id.clone(),
-                backend_name: provider
-                    .provider
-                    .clone()
-                    .unwrap_or_else(|| provider.module_id.clone()),
-                priority: provider.priority,
-            });
         }
     }
 

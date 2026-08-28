@@ -540,6 +540,10 @@ pub struct Shell {
     pub locale: LocaleEngine,
     pub diagnostics: DiagnosticsCollector,
     pub interfaces: InterfaceRegistry,
+    /// Immutable core-owned interface contracts and providers. Graph
+    /// activation rebuilds its catalog from this baseline so a replacement
+    /// cannot retain entries from an older graph generation.
+    builtin_interface_catalog: mesh_core_service::InterfaceCatalog,
     /// Catalog-backed policy loaded from the root graph's persisted approvals.
     capability_policy: CapabilityPolicy,
     /// Effective grants for the current activation candidate. Runtime
