@@ -75,7 +75,7 @@ fn resolve_component_target(
         resolve_import_target(doc, &import.target, registry)?
     } else {
         let module_id = registry.exported_component_tags().get(name)?;
-        registry.module_entrypoint(module_id)?.to_path_buf()
+        resolve_module_entrypoint(registry, module_id)?
     };
 
     let uri = Url::from_file_path(&path).ok()?;
@@ -93,10 +93,22 @@ pub(crate) fn resolve_import_target(
     match target {
         ComponentImportTarget::ComponentLocal(path) => resolve_local_component_path(doc, path),
         ComponentImportTarget::ComponentModule(module_id) => {
-            registry.module_entrypoint(module_id).map(Path::to_path_buf)
+            resolve_module_entrypoint(registry, module_id)
         }
         ComponentImportTarget::InterfaceApi { .. } => None,
     }
+}
+
+fn resolve_module_entrypoint(registry: &ModuleRegistry, module_id: &str) -> Option<PathBuf> {
+    let module_root = registry.module_dirs.get(module_id)?;
+    let entrypoint = registry.module_entrypoint(module_id)?;
+    let relative = entrypoint.strip_prefix(module_root).ok()?.to_str()?;
+    mesh_core_module::package::resolve_contained_module_file(
+        module_root,
+        relative,
+        "module component import",
+    )
+    .ok()
 }
 
 fn resolve_local_component_path(doc: &Document, path: &str) -> Option<PathBuf> {
@@ -275,8 +287,86 @@ local ThemeButton = require("./components/theme-button.mesh")
             )
             .is_none()
         );
+        assert!(
+            resolve_import_target(
+                &doc,
+                &ComponentImportTarget::ComponentLocal("./missing.mesh".into()),
+                &ModuleRegistry::empty(),
+            )
+            .is_none()
+        );
 
         std::fs::remove_file(outside).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn module_component_definitions_require_existing_contained_entrypoints() {
+        let root = std::env::temp_dir().join(format!(
+            "mesh-lsp-module-definition-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let module_root = root.join("module");
+        let entrypoint = module_root.join("src/main.mesh");
+        let outside = root.join("outside.mesh");
+        std::fs::create_dir_all(entrypoint.parent().unwrap()).unwrap();
+        std::fs::write(&entrypoint, "<template><button /></template>").unwrap();
+        std::fs::write(&outside, "<template><button /></template>").unwrap();
+
+        let doc = Document::new(
+            Url::parse("file:///workspace/main.mesh").unwrap(),
+            "<template></template>".into(),
+        );
+        let mut registry = ModuleRegistry::empty();
+        registry
+            .module_dirs
+            .insert("@mesh/component".into(), module_root.clone());
+        registry
+            .module_entrypoints
+            .insert("@mesh/component".into(), entrypoint.clone());
+
+        assert_eq!(
+            resolve_import_target(
+                &doc,
+                &ComponentImportTarget::ComponentModule("@mesh/component".into()),
+                &registry,
+            ),
+            Some(entrypoint.canonicalize().unwrap())
+        );
+
+        registry
+            .module_entrypoints
+            .insert("@mesh/missing".into(), module_root.join("src/missing.mesh"));
+        registry
+            .module_dirs
+            .insert("@mesh/missing".into(), module_root.clone());
+        assert!(
+            resolve_import_target(
+                &doc,
+                &ComponentImportTarget::ComponentModule("@mesh/missing".into()),
+                &registry,
+            )
+            .is_none()
+        );
+
+        registry
+            .module_entrypoints
+            .insert("@mesh/outside".into(), outside);
+        registry
+            .module_dirs
+            .insert("@mesh/outside".into(), module_root);
+        assert!(
+            resolve_import_target(
+                &doc,
+                &ComponentImportTarget::ComponentModule("@mesh/outside".into()),
+                &registry,
+            )
+            .is_none()
+        );
+
         std::fs::remove_dir_all(root).unwrap();
     }
 

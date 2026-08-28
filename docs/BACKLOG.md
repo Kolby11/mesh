@@ -96,7 +96,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/16-developer-and-authoring-tools/improvements.md)
 
-- [ ] Restrict definition resolution to existing module-contained imports.
 - [ ] Preserve Unicode JSON escapes, registry generations, and secure import provenance in authoring diagnostics.
 
 ## Foundation contracts
