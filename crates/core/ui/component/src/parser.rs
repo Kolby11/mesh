@@ -201,7 +201,7 @@ impl ParseError {
 }
 
 pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
-    parse_component_impl(source, true)
+    parse_component_impl(source, true, false)
 }
 
 /// Parse the structural component tree for editor tooling while allowing
@@ -210,27 +210,42 @@ pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
 /// Compiler and runtime callers must use [`parse_component`], which runs the
 /// semantic contract pass before accepting the component.
 pub fn parse_component_for_tooling(source: &str) -> Result<ComponentFile, ParseError> {
-    parse_component_impl(source, false)
+    parse_component_impl(source, false, true)
 }
 
 fn parse_component_impl(
     source: &str,
     validate_semantics: bool,
+    recover: bool,
 ) -> Result<ComponentFile, ParseError> {
-    let blocks = parse_top_level_blocks(source)?;
+    let blocks = if recover {
+        parse_top_level_blocks_for_tooling(source)?
+    } else {
+        parse_top_level_blocks(source)?
+    };
 
     let (imports, script) = if let Some(block) = blocks.iter().find(|block| block.name == "script")
     {
-        let (mut imports, mut script) =
-            parse_script(&source[block.content.start..block.content.end])
-                .map_err(|error| error.with_base(block.content.start))?;
-        script.span = SourceSpan::new(block.content.start, block.content.end);
-        for import in &mut imports {
-            import.span = add_base(import.span, block.content.start);
-            import.alias_span = add_base(import.alias_span, block.content.start);
-            import.target_span = add_base(import.target_span, block.content.start);
+        let result = parse_script(&source[block.content.start..block.content.end]);
+        let parsed = match result {
+            Ok(parsed) => Some(parsed),
+            Err(_error) if recover => Some((
+                Vec::new(),
+                script::parse_script_for_tooling(&source[block.content.start..block.content.end]),
+            )),
+            Err(error) => return Err(error.with_base(block.content.start)),
+        };
+        if let Some((mut imports, mut script)) = parsed {
+            script.span = SourceSpan::new(block.content.start, block.content.end);
+            for import in &mut imports {
+                import.span = add_base(import.span, block.content.start);
+                import.alias_span = add_base(import.alias_span, block.content.start);
+                import.target_span = add_base(import.target_span, block.content.start);
+            }
+            (imports, Some(script))
+        } else {
+            (Vec::new(), None)
         }
-        (imports, Some(script))
     } else {
         (Vec::new(), None)
     };
@@ -243,11 +258,17 @@ fn parse_component_impl(
         .iter()
         .find(|block| block.name == "template")
         .map(|block| {
-            markup::parse_markup_at(
-                &source[block.content.start..block.content.end],
-                block.content.start,
-                &imported_components,
-            )
+            let source = &source[block.content.start..block.content.end];
+            let parsed = markup::parse_markup_at(source, block.content.start, &imported_components);
+            match parsed {
+                Ok(template) => Ok(template),
+                Err(_error) if recover => markup::parse_markup_for_tooling_at(
+                    source,
+                    block.content.start,
+                    &imported_components,
+                ),
+                Err(error) => Err(error),
+            }
         })
         .transpose()?;
 
@@ -260,7 +281,8 @@ fn parse_component_impl(
                 block.content.start,
             )
         })
-        .transpose()?;
+        .transpose()
+        .or_else(|error| if recover { Ok(None) } else { Err(error) })?;
 
     let props = blocks
         .iter()
@@ -271,9 +293,14 @@ fn parse_component_impl(
                 block.content.start,
             )
         })
-        .transpose()?;
+        .transpose()
+        .or_else(|error| if recover { Ok(None) } else { Err(error) })?;
 
-    let template_expressions = compile_template_expressions(template.as_ref())?;
+    let template_expressions = match compile_template_expressions(template.as_ref()) {
+        Ok(expressions) => expressions,
+        Err(_error) if recover => Vec::new(),
+        Err(error) => return Err(error),
+    };
 
     let component = ComponentFile {
         blocks,
@@ -430,6 +457,17 @@ const TOP_LEVEL_BLOCKS: &[&str] = &["props", "template", "script", "style", "i18
 /// next, so unknown content, duplicate blocks, attributes, ordering, and
 /// source ranges cannot be silently discarded.
 fn parse_top_level_blocks(source: &str) -> Result<Vec<ComponentBlock>, ParseError> {
+    parse_top_level_blocks_impl(source, false)
+}
+
+fn parse_top_level_blocks_for_tooling(source: &str) -> Result<Vec<ComponentBlock>, ParseError> {
+    parse_top_level_blocks_impl(source, true)
+}
+
+fn parse_top_level_blocks_impl(
+    source: &str,
+    recover_unclosed: bool,
+) -> Result<Vec<ComponentBlock>, ParseError> {
     let mut blocks = Vec::new();
     let mut seen = HashSet::new();
     let mut offset = 0;
@@ -441,6 +479,9 @@ fn parse_top_level_blocks(source: &str) -> Result<Vec<ComponentBlock>, ParseErro
         }
 
         if source.as_bytes()[offset] != b'<' {
+            if recover_unclosed {
+                break;
+            }
             return Err(ParseError::UnexpectedTopLevelContent {
                 message: "expected a component block".into(),
                 span: SourceSpan::new(offset, offset + 1),
@@ -448,6 +489,9 @@ fn parse_top_level_blocks(source: &str) -> Result<Vec<ComponentBlock>, ParseErro
         }
 
         if source[offset..].starts_with("</") {
+            if recover_unclosed {
+                break;
+            }
             let name = scan_tag_name(source, offset + 2).unwrap_or_default();
             return Err(ParseError::UnexpectedClose {
                 tag: name,
@@ -458,8 +502,15 @@ fn parse_top_level_blocks(source: &str) -> Result<Vec<ComponentBlock>, ParseErro
             });
         }
 
-        let opening = parse_opening_tag(source, offset)?;
+        let opening = match parse_opening_tag(source, offset) {
+            Ok(opening) => opening,
+            Err(_error) if recover_unclosed => break,
+            Err(error) => return Err(error),
+        };
         if !TOP_LEVEL_BLOCKS.contains(&opening.name.as_str()) {
+            if recover_unclosed {
+                break;
+            }
             return Err(ParseError::UnknownBlock {
                 name: opening.name,
                 span: SourceSpan::new(offset, opening.end),
@@ -467,31 +518,52 @@ fn parse_top_level_blocks(source: &str) -> Result<Vec<ComponentBlock>, ParseErro
         }
 
         if !seen.insert(opening.name.clone()) {
+            if recover_unclosed {
+                break;
+            }
             return Err(ParseError::DuplicateBlock {
                 name: opening.name,
                 span: SourceSpan::new(offset, opening.end),
             });
         }
 
-        validate_block_attributes(offset, &opening)?;
+        if let Err(error) = validate_block_attributes(offset, &opening) {
+            if recover_unclosed {
+                break;
+            }
+            return Err(error);
+        }
 
         let content_start = opening.end;
         let (content_end, close_end) = find_block_close(source, content_start, &opening.name);
         let Some((content_end, close_end)) = content_end.zip(close_end) else {
-            return Err(ParseError::UnclosedBlock {
-                tag: opening.name,
-                span: SourceSpan::new(offset, opening.end),
+            if !recover_unclosed {
+                return Err(ParseError::UnclosedBlock {
+                    tag: opening.name,
+                    span: SourceSpan::new(offset, opening.end),
+                });
+            }
+            blocks.push(ComponentBlock {
+                name: opening.name,
+                attributes: opening.attributes,
+                span: SourceSpan::new(offset, source.len()),
+                open_tag: SourceSpan::new(offset, opening.end),
+                content: SourceSpan::new(content_start, source.len()),
+                close_tag: SourceSpan::new(source.len(), source.len()),
             });
+            break;
         };
 
         if opening.name == "i18n" {
-            return Err(ParseError::InvalidI18n {
-                message: format!(
-                    "inline catalogs are not supported; declare files in mesh.provides.i18n (line {})",
-                    line_at(source, offset)
-                ),
-                span: SourceSpan::new(offset, close_end),
-            });
+            if !recover_unclosed {
+                return Err(ParseError::InvalidI18n {
+                    message: format!(
+                        "inline catalogs are not supported; declare files in mesh.provides.i18n (line {})",
+                        line_at(source, offset)
+                    ),
+                    span: SourceSpan::new(offset, close_end),
+                });
+            }
         }
 
         blocks.push(ComponentBlock {
@@ -505,7 +577,7 @@ fn parse_top_level_blocks(source: &str) -> Result<Vec<ComponentBlock>, ParseErro
         offset = close_end;
     }
 
-    if !seen.contains("template") {
+    if !recover_unclosed && !seen.contains("template") {
         return Err(ParseError::MissingRequiredBlock {
             name: "template".into(),
             span: SourceSpan::new(source.len(), source.len()),
@@ -2149,6 +2221,55 @@ audio.VolumeChanged:on(function(_event) end)
                 ("mesh.power".into(), "BatteryChanged".into()),
                 ("mesh.audio".into(), "VolumeChanged".into()),
             ]
+        );
+    }
+
+    #[test]
+    fn script_member_accesses_ignore_comments_and_strings() {
+        let script = super::parse_luau_script(
+            r#"
+-- refs.fake.value
+local documentation = "refs.fake.value"
+local value = refs.real.name
+local invalid = refs.real.not_a_field
+"#,
+        )
+        .expect("script parses");
+
+        let paths: Vec<_> = script
+            .metadata
+            .member_accesses
+            .iter()
+            .map(|access| access.path.join("."))
+            .collect();
+        assert!(paths.contains(&"refs.real.name".to_string()));
+        assert!(paths.contains(&"refs.real.not_a_field".to_string()));
+        assert!(!paths.iter().any(|path| path.contains("fake")));
+    }
+
+    #[test]
+    fn tooling_parser_retains_completed_blocks_and_partial_luau_ast() {
+        let source = r#"
+<template><icon ref="known" /></template>
+<script lang="luau">
+local missing = refs.not_real.width
+function unfinished(
+"#;
+
+        assert!(matches!(
+            parse_component(source),
+            Err(ParseError::UnclosedBlock { tag, .. }) if tag == "script"
+        ));
+        let file = parse_component_for_tooling(source).expect("tooling parser recovers");
+        assert!(file.template.is_some());
+        assert!(file.script.is_some());
+        assert!(
+            file.script
+                .unwrap()
+                .metadata
+                .member_accesses
+                .iter()
+                .any(|access| { access.path == ["refs", "not_real", "width"] })
         );
     }
 

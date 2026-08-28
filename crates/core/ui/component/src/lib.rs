@@ -813,7 +813,9 @@ pub struct ScriptBlock {
 /// The metadata is deliberately shared by compiler and editor tooling.  It is
 /// derived from the Luau AST rather than from source lines, so comments,
 /// strings, multiline calls, and nested expressions cannot make consumers
-/// disagree about what the script declares.
+/// disagree about what the script declares. Syntax-aware lexer recovery adds
+/// only the member paths that a fallible AST had to discard while the user was
+/// editing an incomplete statement.
 #[derive(Debug, Clone, Default)]
 pub struct ScriptMetadata {
     pub state_vars: Vec<String>,
@@ -832,6 +834,21 @@ pub struct ScriptMetadata {
     pub backend_commands: Vec<String>,
     pub symbols: Vec<ScriptSymbol>,
     pub element_ref_aliases: Vec<ScriptAlias>,
+    /// Dotted member paths observed in the Luau AST, with one span per
+    /// identifier. Editor consumers use these spans for syntax-aware
+    /// diagnostics without rescanning comments or string literals.
+    pub member_accesses: Vec<ScriptMemberAccess>,
+}
+
+/// A dotted Luau member path and the source span of each path component.
+///
+/// The path is intentionally parser-owned metadata. Consumers that need to
+/// validate a particular host object can decide which roots are meaningful
+/// without having to implement a second Luau scanner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptMemberAccess {
+    pub path: Vec<String>,
+    pub spans: Vec<SourceSpan>,
 }
 
 /// A script symbol and its source location, relative to the script block.

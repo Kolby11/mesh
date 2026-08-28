@@ -1,6 +1,6 @@
 use crate::{
     ComponentImport, ComponentImportTarget, ScriptAlias, ScriptAliasTarget, ScriptBlock,
-    ScriptLang, ScriptMetadata, ScriptSymbol, ScriptSymbolKind, SourceSpan,
+    ScriptLang, ScriptMemberAccess, ScriptMetadata, ScriptSymbol, ScriptSymbolKind, SourceSpan,
 };
 use full_moon::{
     LuaVersion,
@@ -8,7 +8,7 @@ use full_moon::{
         Assignment, Call, Expression, Field, FunctionArgs, FunctionCall, FunctionDeclaration,
         Index, LocalAssignment, LocalFunction, Prefix, Return, Suffix, TableConstructor, Var,
     },
-    tokenizer::{Lexer, LexerResult, TokenReference, TokenType},
+    tokenizer::{Lexer, LexerResult, Symbol, TokenReference, TokenType},
     visitors::Visitor,
 };
 use std::collections::HashMap;
@@ -21,17 +21,58 @@ const PARSER_STACK_BYTES: usize = 16 * 1024 * 1024;
 pub(super) fn parse_script(
     source: &str,
 ) -> Result<(Vec<ComponentImport>, ScriptBlock), ParseError> {
-    let (explicit_imports, masked_source) = scan_explicit_imports(source)?;
+    parse_script_impl(source, false)
+}
+
+pub(super) fn parse_script_for_tooling(source: &str) -> ScriptBlock {
+    parse_script_impl(source, true)
+        .expect("tooling Luau parser recovers import errors")
+        .1
+}
+
+fn parse_script_impl(
+    source: &str,
+    recover: bool,
+) -> Result<(Vec<ComponentImport>, ScriptBlock), ParseError> {
+    let (explicit_imports, masked_source) = match scan_explicit_imports(source) {
+        Ok(result) => result,
+        Err(_error) if recover => (Vec::new(), source.to_string()),
+        Err(error) => return Err(error),
+    };
     let ast = parse_ast(&masked_source);
     let mut visitor = ScriptVisitor::default();
     visitor.visit_ast(&ast);
-    if let Some(span) = visitor.invalid_require_span {
+    if let Some(span) = visitor.invalid_require_span
+        && !recover
+    {
         return Err(ParseError::InvalidImport {
             message: "require source must be a quoted string".into(),
             span,
         });
     }
     let mut metadata = visitor.metadata;
+    metadata.member_accesses.retain(|access| {
+        access.path.len() >= 2
+            && access.path.len() == access.spans.len()
+            && access
+                .spans
+                .iter()
+                .all(|span| span.start < span.end && span.end <= source.len())
+    });
+    // A fallible AST intentionally drops expression statements such as
+    // `element.unknown_member`, which are common while an editor is mid-edit.
+    // The lexer is the explicit recovery fallback: it still understands
+    // comments, strings, and identifier boundaries, so it cannot resurrect
+    // text that merely looks like a member path in trivia.
+    for access in member_accesses_from_tokens(&masked_source) {
+        if !metadata
+            .member_accesses
+            .iter()
+            .any(|existing| existing.spans.first() == access.spans.first())
+        {
+            metadata.member_accesses.push(access);
+        }
+    }
     for (alias, event) in visitor.interface_event_subscriptions {
         if let Some(interface) = metadata.interface_proxies.get(&alias) {
             push_unique_pair(
@@ -48,12 +89,17 @@ pub(super) fn parse_script(
         .map(|import| (import.alias.clone(), import.target.clone()))
         .collect::<HashMap<_, _>>();
     for candidate in require_imports {
-        check_import_alias(
+        if let Err(error) = check_import_alias(
             &mut aliases,
             &candidate.import.alias,
             &candidate.import.target,
             candidate.import.span,
-        )?;
+        ) {
+            if recover {
+                continue;
+            }
+            return Err(error);
+        }
         imports.push(candidate.import);
     }
 
@@ -331,6 +377,9 @@ impl Visitor for ScriptVisitor {
     }
 
     fn visit_function_call(&mut self, call: &FunctionCall) {
+        if let Some(access) = function_call_access(call) {
+            push_unique_access(&mut self.metadata.member_accesses, access);
+        }
         let Some((callee, arguments)) = call_info(call) else {
             return;
         };
@@ -363,6 +412,15 @@ impl Visitor for ScriptVisitor {
             if let Some(local) = values.nth(1) {
                 self.metadata.service_bindings.push((service, local));
             }
+        }
+    }
+
+    fn visit_var(&mut self, var: &Var) {
+        let Var::Expression(expression) = var else {
+            return;
+        };
+        if let Some(access) = var_access(expression) {
+            push_unique_access(&mut self.metadata.member_accesses, access);
         }
     }
 
@@ -589,6 +647,93 @@ fn expression_path(expression: &Expression) -> Option<String> {
         path.push_str(identifier(name)?);
     }
     Some(path)
+}
+
+fn var_access(expression: &full_moon::ast::VarExpression) -> Option<ScriptMemberAccess> {
+    let Prefix::Name(name) = expression.prefix() else {
+        return None;
+    };
+
+    let mut path = vec![identifier(name)?.to_string()];
+    let mut spans = vec![token_span(name)];
+    for suffix in expression.suffixes() {
+        let Suffix::Index(Index::Dot { name, .. }) = suffix else {
+            return None;
+        };
+        path.push(identifier(name)?.to_string());
+        spans.push(token_span(name));
+    }
+    (path.len() >= 2).then_some(ScriptMemberAccess { path, spans })
+}
+
+fn function_call_access(call: &FunctionCall) -> Option<ScriptMemberAccess> {
+    let Prefix::Name(name) = call.prefix() else {
+        return None;
+    };
+
+    let mut path = vec![identifier(name)?.to_string()];
+    let mut spans = vec![token_span(name)];
+    for suffix in call.suffixes() {
+        let Suffix::Index(Index::Dot { name, .. }) = suffix else {
+            break;
+        };
+        path.push(identifier(name)?.to_string());
+        spans.push(token_span(name));
+    }
+    (path.len() >= 2).then_some(ScriptMemberAccess { path, spans })
+}
+
+fn push_unique_access(values: &mut Vec<ScriptMemberAccess>, value: ScriptMemberAccess) {
+    if !values
+        .iter()
+        .any(|existing| existing.path == value.path && existing.spans == value.spans)
+    {
+        values.push(value);
+    }
+}
+
+fn member_accesses_from_tokens(source: &str) -> Vec<ScriptMemberAccess> {
+    let Some(tokens) = significant_tokens(source) else {
+        return Vec::new();
+    };
+    let mut accesses = Vec::new();
+    let mut index = 0;
+    while index + 2 < tokens.len() {
+        let Some(root) = identifier(&tokens[index]) else {
+            index += 1;
+            continue;
+        };
+        if !is_dot(&tokens[index + 1]) {
+            index += 1;
+            continue;
+        }
+
+        let mut path = vec![root.to_string()];
+        let mut spans = vec![token_span(&tokens[index])];
+        let mut cursor = index + 1;
+        while cursor + 1 < tokens.len() && is_dot(&tokens[cursor]) {
+            let Some(member) = identifier(&tokens[cursor + 1]) else {
+                break;
+            };
+            path.push(member.to_string());
+            spans.push(token_span(&tokens[cursor + 1]));
+            cursor += 2;
+        }
+        if path.len() >= 2 {
+            push_unique_access(&mut accesses, ScriptMemberAccess { path, spans });
+        }
+        index = cursor;
+    }
+    accesses
+}
+
+fn is_dot(token: &TokenReference) -> bool {
+    matches!(
+        token.token_type(),
+        TokenType::Symbol {
+            symbol: Symbol::Dot
+        }
+    )
 }
 
 fn push_unique(values: &mut Vec<String>, value: String) {

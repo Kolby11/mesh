@@ -51,8 +51,19 @@ impl BraceLex {
         format!("__mesh_expr_{id}__")
     }
 
+    pub(super) fn quoted_marker(id: usize) -> String {
+        format!("__mesh_quoted_expr_{id}__")
+    }
+
     pub(super) fn marker_id(value: &str) -> Option<usize> {
         let value = value.strip_prefix("__mesh_expr_")?.strip_suffix("__")?;
+        value.parse().ok()
+    }
+
+    pub(super) fn quoted_marker_id(value: &str) -> Option<usize> {
+        let value = value
+            .strip_prefix("__mesh_quoted_expr_")?
+            .strip_suffix("__")?;
         value.parse().ok()
     }
 }

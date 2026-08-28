@@ -59,7 +59,7 @@ fn preprocess_template(source: &str, braces: &BraceLex) -> Result<String, ParseE
                 }
                 let marker = BraceLex::marker(id);
                 if markup.quote.is_some() {
-                    output.push_str(&marker);
+                    output.push_str(&BraceLex::quoted_marker(id));
                 } else {
                     output.push('"');
                     output.push_str(&marker);
@@ -195,9 +195,64 @@ pub(super) fn parse_markup_at(
     source_base: usize,
     imported_components: &HashMap<String, ComponentImportTarget>,
 ) -> Result<TemplateBlock, ParseError> {
-    let braces = brace::lex(source).map_err(|error| error.with_base(source_base))?;
-    let preprocessed =
-        preprocess_template(source, &braces).map_err(|error| error.with_base(source_base))?;
+    parse_markup_impl(source, source_base, imported_components, false)
+}
+
+/// Parse as much markup as possible for editor tooling. Completed nodes are
+/// retained when the user is still typing a closing tag or a later malformed
+/// node. Runtime/compiler callers must use [`parse_markup_at`].
+pub(super) fn parse_markup_for_tooling_at(
+    source: &str,
+    source_base: usize,
+    imported_components: &HashMap<String, ComponentImportTarget>,
+) -> Result<TemplateBlock, ParseError> {
+    parse_markup_impl(source, source_base, imported_components, true)
+}
+
+fn parse_markup_impl(
+    source: &str,
+    source_base: usize,
+    imported_components: &HashMap<String, ComponentImportTarget>,
+    recover: bool,
+) -> Result<TemplateBlock, ParseError> {
+    let braces = match brace::lex(source) {
+        Ok(braces) => braces,
+        Err(error) if recover => {
+            let cutoff = error.span().start.min(source.len());
+            if cutoff < source.len() {
+                return parse_markup_impl(
+                    &source[..cutoff],
+                    source_base,
+                    imported_components,
+                    true,
+                );
+            }
+            return Ok(TemplateBlock {
+                root: Vec::new(),
+                span: SourceSpan::new(source_base, source_base + source.len()),
+            });
+        }
+        Err(error) => return Err(error.with_base(source_base)),
+    };
+    let preprocessed = match preprocess_template(source, &braces) {
+        Ok(preprocessed) => preprocessed,
+        Err(error) if recover => {
+            let cutoff = error.span().start.min(source.len());
+            if cutoff < source.len() {
+                return parse_markup_impl(
+                    &source[..cutoff],
+                    source_base,
+                    imported_components,
+                    true,
+                );
+            }
+            return Ok(TemplateBlock {
+                root: Vec::new(),
+                span: SourceSpan::new(source_base, source_base + source.len()),
+            });
+        }
+        Err(error) => return Err(error.with_base(source_base)),
+    };
     let wrapped = format!("<mesh-root>{}</mesh-root>", preprocessed);
     let mut reader = Reader::from_str(&wrapped);
     reader.config_mut().trim_text(false);
@@ -217,8 +272,18 @@ pub(super) fn parse_markup_at(
                     locate_open_span(source, &tag, &event, &braces, &mut source_cursor),
                     source_base,
                 );
-                let attrs =
-                    parse_xml_attributes(source, &reader, &event, &braces, source_base, node_span)?;
+                let attrs = match parse_xml_attributes(
+                    source,
+                    &reader,
+                    &event,
+                    &braces,
+                    source_base,
+                    node_span,
+                ) {
+                    Ok(attrs) => attrs,
+                    Err(_error) if recover => break,
+                    Err(error) => return Err(error),
+                };
                 stack.push(OpenNode {
                     tag,
                     attributes: attrs,
@@ -236,9 +301,19 @@ pub(super) fn parse_markup_at(
                     locate_open_span(source, &tag, &event, &braces, &mut source_cursor),
                     source_base,
                 );
-                let attrs =
-                    parse_xml_attributes(source, &reader, &event, &braces, source_base, node_span)?;
-                let node = build_template_node(
+                let attrs = match parse_xml_attributes(
+                    source,
+                    &reader,
+                    &event,
+                    &braces,
+                    source_base,
+                    node_span,
+                ) {
+                    Ok(attrs) => attrs,
+                    Err(_error) if recover => continue,
+                    Err(error) => return Err(error),
+                };
+                let node = match build_template_node(
                     tag,
                     attrs,
                     Vec::new(),
@@ -247,7 +322,11 @@ pub(super) fn parse_markup_at(
                     &braces,
                     source_base,
                     node_span,
-                )?;
+                ) {
+                    Ok(node) => node,
+                    Err(_error) if recover => continue,
+                    Err(error) => return Err(error),
+                };
                 push_template_node(&mut stack, &mut root, node);
             }
             Ok(Event::Text(event)) => {
@@ -310,19 +389,27 @@ pub(super) fn parse_markup_at(
                     &braces,
                     stack.last().and_then(|node| node.synthetic_end),
                 );
-                let open = stack.pop().ok_or_else(|| ParseError::UnexpectedClose {
-                    tag: tag.clone(),
-                    span: close_span,
-                })?;
+                let Some(open) = stack.pop() else {
+                    if recover {
+                        break;
+                    }
+                    return Err(ParseError::UnexpectedClose {
+                        tag: tag.clone(),
+                        span: close_span,
+                    });
+                };
 
                 if open.tag != tag {
+                    if recover {
+                        break;
+                    }
                     return Err(ParseError::UnexpectedClose {
                         tag,
                         span: close_span,
                     });
                 }
 
-                let node = build_template_node(
+                let node = match build_template_node(
                     open.tag,
                     open.attributes,
                     open.children,
@@ -331,7 +418,11 @@ pub(super) fn parse_markup_at(
                     &braces,
                     source_base,
                     SourceSpan::new(open.span.start, close_span.end),
-                )?;
+                ) {
+                    Ok(node) => node,
+                    Err(_error) if recover => continue,
+                    Err(error) => return Err(error),
+                };
                 push_template_node(&mut stack, &mut root, node);
             }
             Ok(Event::Eof) => break,
@@ -340,6 +431,7 @@ pub(super) fn parse_markup_at(
             | Ok(Event::PI(_))
             | Ok(Event::DocType(_))
             | Ok(Event::GeneralRef(_)) => {}
+            Err(_err) if recover => break,
             Err(err) => {
                 return Err(ParseError::InvalidTemplate {
                     message: err.to_string(),
@@ -349,11 +441,38 @@ pub(super) fn parse_markup_at(
         }
     }
 
-    if let Some(open) = stack.pop() {
+    if !stack.is_empty() && !recover {
+        let open = stack.pop().expect("non-empty stack");
         return Err(ParseError::UnclosedBlock {
             tag: open.tag,
             span: open.span,
         });
+    }
+
+    if recover {
+        let close_span = SourceSpan::new(source_base + source.len(), source_base + source.len());
+        while let Some(open) = stack.pop() {
+            let children = open.children;
+            let node = match build_template_node(
+                open.tag,
+                open.attributes,
+                children.clone(),
+                imported_components,
+                source,
+                &braces,
+                source_base,
+                SourceSpan::new(open.span.start, close_span.end),
+            ) {
+                Ok(node) => node,
+                Err(_) => {
+                    for child in children {
+                        push_template_node(&mut stack, &mut root, child);
+                    }
+                    continue;
+                }
+            };
+            push_template_node(&mut stack, &mut root, node);
+        }
     }
 
     assign_duplicate_component_ordinals(&mut root);
@@ -468,19 +587,29 @@ fn parse_xml_attributes(
             })?
             .into_owned();
 
-        let expression = BraceLex::marker_id(&value).and_then(|id| {
-            let token = braces.token(id)?;
-            let BraceKind::Expression { expression } = &token.kind else {
-                return None;
-            };
-            Some((
-                source[expression.start..expression.end].to_string(),
-                crate::SourceSpan::new(
-                    source_base + token.span.start,
-                    source_base + token.span.end,
-                ),
-            ))
-        });
+        let expression = BraceLex::marker_id(&value)
+            .map(|id| (id, false))
+            .or_else(|| BraceLex::quoted_marker_id(&value).map(|id| (id, true)))
+            .and_then(|(id, quoted_expression)| {
+                let token = braces.token(id)?;
+                let BraceKind::Expression { expression } = &token.kind else {
+                    return None;
+                };
+                Some((
+                    (
+                        source[expression.start..expression.end].to_string(),
+                        crate::SourceSpan::new(
+                            source_base + token.span.start,
+                            source_base + token.span.end,
+                        ),
+                    ),
+                    quoted_expression,
+                ))
+            });
+        let quoted_expression = expression
+            .as_ref()
+            .is_some_and(|(_, quoted_expression)| *quoted_expression);
+        let expression = expression.map(|(expression, _)| expression);
         let binding = expression.as_ref().map(|(value, _)| value.as_str());
 
         let (attr_name, attr_value) = if name == "bind:this" {
@@ -516,6 +645,7 @@ fn parse_xml_attributes(
         attrs.push(Attribute {
             name: attr_name,
             value: attr_value,
+            quoted_expression,
             // Dynamic attributes retain the exact brace expression range for
             // compatibility with expression tooling. Static attributes have
             // no token offsets from quick-xml, so anchor them to their owning

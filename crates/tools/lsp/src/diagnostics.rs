@@ -2,14 +2,15 @@ use mesh_core_component::parser::ParseError;
 use mesh_core_elements::{BASE_ELEMENT_FIELDS, element_contract_for_tag, element_type_for_tag};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range};
 
-use crate::document::{Document, ElementRefAliasTarget, block_content_range, extract_block_text};
+use crate::document::{Document, ElementRefAliasTarget, ScriptMemberAccess};
 
 pub fn from_document(doc: &Document) -> Vec<Diagnostic> {
-    if let Some(err) = &doc.parse_error {
-        return diagnostics_from_error(err, &doc.source);
-    }
-
-    let mut diagnostics = diagnostics_from_script_refs(doc);
+    let mut diagnostics = doc
+        .parse_error
+        .as_ref()
+        .map(|error| diagnostics_from_error(error, &doc.source))
+        .unwrap_or_default();
+    diagnostics.extend(diagnostics_from_script_refs(doc));
     diagnostics.extend(diagnostics_from_quoted_expression_attrs(doc));
     diagnostics
 }
@@ -85,99 +86,20 @@ fn diagnostics_from_error(err: &ParseError, source: &str) -> Vec<Diagnostic> {
 }
 
 fn diagnostics_from_script_refs(doc: &Document) -> Vec<Diagnostic> {
-    let Some((script_start, _)) = block_content_range(&doc.source, "script") else {
-        return vec![];
-    };
-    let script = extract_block_text(&doc.source, "script");
     let mut diagnostics = Vec::new();
-    let mut offset = 0;
-
-    while let Some(relative) = script[offset..].find("refs.") {
-        let refs_start = offset + relative;
-        let name_start = refs_start + "refs.".len();
-        let Some((ref_name, name_end)) = parse_identifier_at(script, name_start) else {
-            offset = name_start;
-            continue;
-        };
-
-        let Some(element_ref) = doc
-            .element_refs
-            .iter()
-            .find(|element_ref| element_ref.name == ref_name)
-        else {
-            diagnostics.push(Diagnostic {
-                range: byte_range_to_lsp_range(
-                    &doc.source,
-                    script_start + refs_start,
-                    script_start + name_end,
-                ),
-                severity: Some(DiagnosticSeverity::WARNING),
-                message: format!(
-                    "Unknown element ref `refs.{ref_name}`. Add `ref=\"{ref_name}\"` to a template element."
-                ),
-                source: Some("mesh-tools-lsp".to_string()),
-                code: Some(NumberOrString::String("mesh.script.unknown_ref".to_string())),
-                ..Default::default()
-            });
-            offset = name_end;
-            continue;
-        };
-
-        if script[name_end..].starts_with('.') {
-            let field_start = name_end + 1;
-            if let Some((field_name, field_end)) = parse_identifier_at(script, field_start) {
-                if !element_field_exists(&element_ref.tag, field_name) {
-                    diagnostics.push(Diagnostic {
-                        range: byte_range_to_lsp_range(
-                            &doc.source,
-                            script_start + field_start,
-                            script_start + field_end,
-                        ),
-                        severity: Some(DiagnosticSeverity::WARNING),
-                        message: format!(
-                            "`{}` does not expose field `{field_name}`",
-                            element_ref.element_type
-                        ),
-                        source: Some("mesh-tools-lsp".to_string()),
-                        code: Some(NumberOrString::String(
-                            "mesh.script.unknown_member".to_string(),
-                        )),
-                        ..Default::default()
-                    });
-                }
-                offset = field_end;
+    for access in &doc.script_member_accesses {
+        if let Some(element_ref) = resolve_element_ref_access(doc, access) {
+            let field_index = if access.path[0] == "refs" { 2 } else { 1 };
+            if access.path.len() <= field_index {
                 continue;
             }
-        }
-
-        offset = name_end;
-    }
-
-    for alias in &doc.element_ref_aliases {
-        let ElementRefAliasTarget::Ref(ref_name) = &alias.target else {
-            continue;
-        };
-        let Some(element_ref) = doc
-            .element_refs
-            .iter()
-            .find(|element_ref| element_ref.name == *ref_name)
-        else {
-            continue;
-        };
-        let mut offset = 0;
-        let needle = format!("{}.", alias.alias);
-        while let Some(relative) = script[offset..].find(&needle) {
-            let member_start = offset + relative + needle.len();
-            let Some((field_name, field_end)) = parse_identifier_at(script, member_start) else {
-                offset = member_start;
-                continue;
-            };
+            let field_name = &access.path[field_index];
             if !element_field_exists(&element_ref.tag, field_name) {
                 diagnostics.push(Diagnostic {
                     range: byte_range_to_lsp_range(
                         &doc.source,
-                        script_start + member_start,
-                        script_start + field_end,
+                        access.spans[field_index].start,
+                        access.spans[field_index].end,
                     ),
                     severity: Some(DiagnosticSeverity::WARNING),
                     message: format!(
@@ -191,130 +113,111 @@ fn diagnostics_from_script_refs(doc: &Document) -> Vec<Diagnostic> {
                     ..Default::default()
                 });
             }
-            offset = field_end;
-        }
-    }
-
-    diagnostics
-}
-
-fn diagnostics_from_quoted_expression_attrs(doc: &Document) -> Vec<Diagnostic> {
-    let Some((template_start, template_end)) = block_content_range(&doc.source, "template") else {
-        return vec![];
-    };
-    let template = &doc.source[template_start..template_end];
-    let mut diagnostics = Vec::new();
-    let mut offset = 0usize;
-
-    while let Some(relative) = template[offset..].find("=\"") {
-        let equals = offset + relative;
-        let value_start = equals + 2;
-        let Some(value_end) = find_string_end(template, value_start, b'"') else {
-            break;
-        };
-        let value = &template[value_start..value_end];
-
-        if is_exact_brace_expr(value) && is_inside_template_tag(template, equals) {
+        } else if access.path.first().is_some_and(|root| root == "refs") && access.path.len() >= 2 {
+            let ref_name = &access.path[1];
             diagnostics.push(Diagnostic {
                 range: byte_range_to_lsp_range(
                     &doc.source,
-                    template_start + equals,
-                    template_start + value_end + 1,
+                    access.spans[1].start,
+                    access.spans[1].end,
                 ),
                 severity: Some(DiagnosticSeverity::WARNING),
-                message: "Quoted expression attribute can be written as `attr={expr}` instead of `attr=\"{expr}\"`.".to_string(),
+                message: format!(
+                    "Unknown element ref `refs.{ref_name}`. Add `ref=\"{ref_name}\"` to a template element."
+                ),
                 source: Some("mesh-tools-lsp".to_string()),
-                code: Some(NumberOrString::String(
-                    "mesh.template.quoted_expression".to_string(),
-                )),
+                code: Some(NumberOrString::String("mesh.script.unknown_ref".to_string())),
                 ..Default::default()
             });
         }
-
-        offset = value_end + 1;
     }
 
     diagnostics
 }
 
-fn find_string_end(source: &str, start: usize, quote: u8) -> Option<usize> {
-    let bytes = source.as_bytes();
-    let mut i = start;
-    while i < bytes.len() {
-        if bytes[i] == quote && (i == 0 || bytes[i - 1] != b'\\') {
-            return Some(i);
+fn resolve_element_ref_access<'a>(
+    doc: &'a Document,
+    access: &ScriptMemberAccess,
+) -> Option<&'a crate::document::ElementRef> {
+    let element_ref = if access.path.first().is_some_and(|root| root == "refs") {
+        let ref_name = access.path.get(1)?;
+        doc.element_refs
+            .iter()
+            .find(|element_ref| element_ref.name == *ref_name)?
+    } else {
+        let alias = doc
+            .element_ref_aliases
+            .iter()
+            .find(|alias| alias.alias == access.path[0])?;
+        let ElementRefAliasTarget::Ref(ref_name) = &alias.target else {
+            return None;
+        };
+        doc.element_refs
+            .iter()
+            .find(|element_ref| element_ref.name == *ref_name)?
+    };
+    Some(element_ref)
+}
+
+fn diagnostics_from_quoted_expression_attrs(doc: &Document) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    if let Some(template) = doc.parsed.as_ref().and_then(|file| file.template.as_ref()) {
+        for node in &template.root {
+            collect_quoted_expression_attrs(node, &doc.source, &mut diagnostics);
         }
-        i += 1;
     }
-    None
+    diagnostics
 }
 
-fn is_inside_template_tag(template: &str, offset: usize) -> bool {
-    let before = &template[..offset];
-    let last_lt = before.rfind('<');
-    let last_gt = before.rfind('>');
-    matches!((last_lt, last_gt), (Some(lt), Some(gt)) if lt > gt)
-        || matches!((last_lt, last_gt), (Some(_), None))
-}
+fn collect_quoted_expression_attrs(
+    node: &mesh_core_component::template::TemplateNode,
+    source: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    use mesh_core_component::template::TemplateNode;
 
-fn is_exact_brace_expr(value: &str) -> bool {
-    let trimmed = value.trim();
-    if !trimmed.starts_with('{') || !trimmed.ends_with('}') || trimmed.len() < 2 {
-        return false;
-    }
-
-    let bytes = trimmed.as_bytes();
-    let mut depth = 0i32;
-    let mut in_string = false;
-    let mut quote = b'"';
-
-    for (i, b) in bytes.iter().copied().enumerate() {
-        if in_string {
-            if b == quote && (i == 0 || bytes[i - 1] != b'\\') {
-                in_string = false;
+    let (attributes, children) = match node {
+        TemplateNode::Element(element) => (&element.attributes, &element.children),
+        TemplateNode::Component(component) => (&component.props, &component.children),
+        TemplateNode::If(if_node) => {
+            for child in &if_node.then_children {
+                collect_quoted_expression_attrs(child, source, diagnostics);
             }
+            for child in &if_node.else_children {
+                collect_quoted_expression_attrs(child, source, diagnostics);
+            }
+            return;
+        }
+        TemplateNode::For(for_node) => {
+            for child in &for_node.children {
+                collect_quoted_expression_attrs(child, source, diagnostics);
+            }
+            return;
+        }
+        TemplateNode::Slot(_) | TemplateNode::Text(_) | TemplateNode::Expr(_) => return,
+    };
+
+    for attribute in attributes {
+        if !attribute.quoted_expression {
             continue;
         }
-
-        if b == b'"' || b == b'\'' {
-            in_string = true;
-            quote = b;
+        let Some(span) = attribute.span else {
             continue;
-        }
-
-        if b == b'{' {
-            depth += 1;
-        } else if b == b'}' {
-            depth -= 1;
-            if depth == 0 && i != bytes.len() - 1 {
-                return false;
-            }
-            if depth < 0 {
-                return false;
-            }
-        }
+        };
+        diagnostics.push(Diagnostic {
+            range: byte_range_to_lsp_range(source, span.start, span.end),
+            severity: Some(DiagnosticSeverity::WARNING),
+            message: "Quoted expression attribute can be written as `attr={expr}` instead of `attr=\"{expr}\"`.".to_string(),
+            source: Some("mesh-tools-lsp".to_string()),
+            code: Some(NumberOrString::String(
+                "mesh.template.quoted_expression".to_string(),
+            )),
+            ..Default::default()
+        });
     }
-
-    depth == 0
-}
-
-fn parse_identifier_at(source: &str, start: usize) -> Option<(&str, usize)> {
-    let bytes = source.as_bytes();
-    let first = *bytes.get(start)?;
-    if !(first.is_ascii_alphabetic() || first == b'_') {
-        return None;
+    for child in children {
+        collect_quoted_expression_attrs(child, source, diagnostics);
     }
-
-    let mut end = start + 1;
-    while let Some(byte) = bytes.get(end) {
-        if byte.is_ascii_alphanumeric() || *byte == b'_' {
-            end += 1;
-        } else {
-            break;
-        }
-    }
-
-    Some((&source[start..end], end))
 }
 
 fn element_field_exists(tag: &str, field_name: &str) -> bool {
@@ -380,6 +283,44 @@ local invalid = refs.batteryIcon.value
     }
 
     #[test]
+    fn uses_luau_ast_for_refs_and_keeps_secondary_diagnostics_after_parse_errors() {
+        let source = r#"
+<template><icon ref="known" /></template>
+<script lang="luau">
+-- refs.fake.value
+local documentation = "refs.fake.value"
+local missing = refs.not_real.width
+function unfinished(
+"#;
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source.into());
+
+        assert!(
+            doc.parsed.is_some(),
+            "partial component AST should be retained"
+        );
+        let diagnostics = from_document(&doc);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("Unclosed block <script>"))
+        );
+        assert_eq!(
+            diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic
+                    .message
+                    .contains("Unknown element ref `refs.not_real`"))
+                .count(),
+            1
+        );
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("fake"))
+        );
+    }
+
+    #[test]
     fn bind_this_element_allows_attribute_member_aliases() {
         let source = r#"
 <template>
@@ -392,7 +333,6 @@ popover.notReal
 "#;
         let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source.to_string());
         let diags = from_document(&doc);
-
         assert!(
             !diags.iter().any(|diag| diag.message.contains("ariaLabel")),
             "ariaLabel should resolve as aria-label attribute"
@@ -401,6 +341,32 @@ popover.notReal
             diags.iter().any(|diag| diag.message.contains("notReal")),
             "unknown direct bind:this member should be diagnosed"
         );
+    }
+
+    #[test]
+    fn recovers_template_refs_while_a_child_tag_is_unclosed() {
+        let source = r#"
+<template><icon ref="known">
+</template>
+<script lang="luau">
+local missing = refs.not_real.width
+</script>
+"#;
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source.into());
+
+        assert!(doc.parsed.is_some());
+        assert_eq!(doc.element_refs.len(), 1);
+        let diagnostics = from_document(&doc);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("Template error:"))
+        );
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("Unknown element ref `refs.not_real`")
+        }));
     }
 
     #[test]

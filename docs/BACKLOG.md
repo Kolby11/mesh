@@ -96,7 +96,6 @@ the monthly log, so they are intentionally absent from the open backlog.
 
 [Audit](../.planning/log/sections/16-developer-and-authoring-tools/improvements.md)
 
-- [ ] Make LSP analysis syntax-aware with recoverable partial ASTs and useful mid-edit diagnostics.
 - [ ] Replace heuristic Luau/JSON scanners with standards-compliant parsers and source-span data.
 - [ ] Support workspace-folder-only initialization and versioned `didChange` refresh generations.
 - [ ] Select manifest flavors from parsed structure, not textual substring checks.

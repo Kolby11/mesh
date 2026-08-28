@@ -359,6 +359,9 @@ pub struct ElementNode {
 pub struct Attribute {
     pub name: String,
     pub value: AttributeValue,
+    /// Whether a brace expression was authored inside a quoted attribute
+    /// value, such as `title="{label}"`.
+    pub quoted_expression: bool,
     /// The complete authored attribute, including its name and value.
     pub span: Option<crate::SourceSpan>,
 }
