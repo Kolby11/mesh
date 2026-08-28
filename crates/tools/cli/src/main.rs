@@ -931,12 +931,11 @@ fn cmd_install(args: &[String]) {
         .protect(&destination)
         .unwrap_or_else(|error| exit_error(error));
 
-    source.place_at(&destination).unwrap_or_else(|error| {
-        let _ = std::fs::remove_dir_all(&destination);
+    if let Err(error) = source.place_at(&destination) {
+        let _ = transaction.abort();
         exit_error(format!("failed to install {}: {error}", manifest.name));
-    });
+    }
 
-    let previous_root = root.clone();
     let approvals = root
         .capability_approvals
         .entry(manifest.name.clone())
@@ -948,10 +947,10 @@ fn cmd_install(args: &[String]) {
     }
     approvals.sort();
     approvals.dedup();
-    root.save(&root_path).unwrap_or_else(|error| {
-        let _ = std::fs::remove_dir_all(&destination);
+    if let Err(error) = root.save(&root_path) {
+        let _ = transaction.abort();
         exit_error(error);
-    });
+    }
 
     let install_result = (|| -> Result<Option<String>, String> {
         let graph = mesh_core_module::package::load_installed_module_graph(&root_path)
@@ -1123,11 +1122,9 @@ fn cmd_install(args: &[String]) {
             }
         }
         Err(error) => {
-            let _ = std::fs::remove_dir_all(&destination);
-            let _ = previous_root.save(&root_path);
             let _ = transaction.abort();
             exit_error(format!(
-                "installation validation failed; removed staged module: {error}"
+                "installation validation failed; transaction aborted: {error}"
             ));
         }
     }
@@ -1645,12 +1642,13 @@ fn cmd_uninstall(args: &[String]) {
         None => mesh_core_module::package::module_install_path(&modules_dir, module_id)
             .unwrap_or_else(|error| exit_error(error)),
     };
-    transaction.remove(&installed_at).unwrap_or_else(|error| {
+    if let Err(error) = transaction.remove(&installed_at) {
+        let _ = transaction.abort();
         exit_error(format!(
             "failed to remove {}: {error}",
             installed_at.display()
-        ))
-    });
+        ));
+    }
     lock.modules.remove(module_id);
     if lock
         .composition
@@ -1662,14 +1660,18 @@ fn cmd_uninstall(args: &[String]) {
     let remaining_manifests = installed_manifests(&root_path);
     lock.refresh_metadata(remaining_manifests.values());
     let history = config_dir.join("lock-history");
-    mesh_core_module::package::MeshLock::archive(&lock_path, &history)
-        .unwrap_or_else(|error| exit_error(error));
-    lock.save_with_store(
+    if let Err(error) = mesh_core_module::package::MeshLock::archive(&lock_path, &history) {
+        let _ = transaction.abort();
+        exit_error(error);
+    }
+    if let Err(error) = lock.save_with_store(
         &lock_path,
         &modules_dir,
         &mesh_core_module::package::module_store_dir(&config_dir),
-    )
-    .unwrap_or_else(|error| exit_error(error));
+    ) {
+        let _ = transaction.abort();
+        exit_error(error);
+    }
     transaction
         .commit()
         .unwrap_or_else(|error| exit_error(format!("failed to commit uninstall: {error}")));

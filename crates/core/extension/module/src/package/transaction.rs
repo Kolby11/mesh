@@ -10,6 +10,8 @@
 
 use super::{ModuleManifestError, contained_path, validate_module_tree};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::cell::RefCell;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -18,6 +20,11 @@ const JOURNAL_SCHEMA_VERSION: u32 = 1;
 const JOURNAL_FILE: &str = ".mesh-package-transaction.json";
 const LOCK_FILE: &str = ".mesh-package.lock";
 const WORKSPACE_PREFIX: &str = ".mesh-package-transaction-";
+
+#[cfg(test)]
+thread_local! {
+    static TEST_FAILURE_POINT: RefCell<Option<&'static str>> = const { RefCell::new(None) };
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -138,6 +145,42 @@ impl PackageTransaction {
         Ok(transaction)
     }
 
+    /// Recover an interrupted package transaction without starting a new one.
+    ///
+    /// Shell startup calls this before loading the installed graph.  A missing
+    /// journal is a no-op and does not create a lock file, while an existing
+    /// journal is recovered under the same lock used by mutating commands.
+    pub fn recover(config_dir: &Path) -> Result<(), ModuleManifestError> {
+        let config_dir = canonical_config_dir(config_dir)?;
+        let journal_path = config_dir.join(JOURNAL_FILE);
+        match fs::symlink_metadata(&journal_path) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(source) => {
+                return Err(ModuleManifestError::Io {
+                    path: journal_path,
+                    source,
+                });
+            }
+        }
+
+        let lock_path = config_dir.join(LOCK_FILE);
+        let lock_file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .map_err(|source| ModuleManifestError::Io {
+                path: lock_path.clone(),
+                source,
+            })?;
+        lock_exclusive(&lock_file).map_err(|source| ModuleManifestError::Io {
+            path: lock_path,
+            source,
+        })?;
+        recover_journal(&config_dir, &journal_path)
+    }
+
     /// The directory for Git checkouts and other candidate materialization.
     /// It is never part of the live module tree.
     pub fn staging_dir(&self) -> PathBuf {
@@ -223,7 +266,9 @@ impl PackageTransaction {
     ) -> Result<(), ModuleManifestError> {
         self.protect(target)?;
         validate_staged_path(&self.workspace, staged)?;
+        maybe_inject_failure("replace.before")?;
         remove_path(target)?;
+        maybe_inject_failure("replace.after_remove")?;
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).map_err(|source| ModuleManifestError::Io {
                 path: parent.to_path_buf(),
@@ -233,17 +278,29 @@ impl PackageTransaction {
         fs::rename(staged, target).map_err(|source| ModuleManifestError::Io {
             path: target.to_path_buf(),
             source,
-        })
+        })?;
+        sync_directory(target.parent()).map_err(|source| ModuleManifestError::Io {
+            path: target
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| target.to_path_buf()),
+            source,
+        })?;
+        maybe_inject_failure("replace.after_rename")
     }
 
     /// Remove a live path after recording it in the journal.
     pub fn remove(&mut self, target: &Path) -> Result<(), ModuleManifestError> {
         self.protect(target)?;
-        remove_path(target)
+        maybe_inject_failure("remove.before")?;
+        remove_path(target)?;
+        maybe_inject_failure("remove.after")
     }
 
     /// Mark the durable state committed and remove the journal/workspace.
     pub fn commit(mut self) -> Result<(), ModuleManifestError> {
+        maybe_inject_failure("commit.before")?;
+        self.sync_targets()?;
         self.journal.phase = JournalPhase::Committed;
         self.persist_journal()?;
         self.finished = true;
@@ -299,7 +356,22 @@ impl PackageTransaction {
                 source,
             }
         })?;
-        durable_replace(&self.journal_path, &content)
+        maybe_inject_failure("journal.write.before")?;
+        durable_replace(&self.journal_path, &content)?;
+        sync_directory(Some(&self.workspace)).map_err(|source| ModuleManifestError::Io {
+            path: self.workspace.clone(),
+            source,
+        })?;
+        maybe_inject_failure("journal.write.after")
+    }
+
+    fn sync_targets(&self) -> Result<(), ModuleManifestError> {
+        for target in &self.journal.targets {
+            let path = contained_path(&self.config_dir, &target.target, "transaction target")
+                .map_err(|error| error)?;
+            sync_path(&path)?;
+        }
+        Ok(())
     }
 }
 
@@ -308,8 +380,21 @@ impl Drop for PackageTransaction {
         if self.finished {
             return;
         }
-        let _ = restore_journal(&self.config_dir, &self.journal, &self.workspace);
-        let _ = cleanup_workspace(&self.journal_path, &self.workspace);
+        if matches!(
+            self.journal.phase,
+            JournalPhase::Committed | JournalPhase::Aborted
+        ) {
+            let _ = cleanup_workspace(&self.journal_path, &self.workspace);
+        } else if restore_journal(&self.config_dir, &self.journal, &self.workspace).is_ok() {
+            // Persist the recovery marker before deleting the journal.  If a
+            // process dies during cleanup, the next process can safely retry
+            // cleanup instead of interpreting a half-restored Applying
+            // journal as an operation that still needs live mutations.
+            self.journal.phase = JournalPhase::Aborted;
+            if self.persist_journal().is_ok() {
+                let _ = cleanup_workspace(&self.journal_path, &self.workspace);
+            }
+        }
         // Keeping the advisory lock alive until this destructor returns makes
         // the restore indivisible from the next package operation.
         let _ = self.lock_file.sync_all();
@@ -338,8 +423,21 @@ fn canonical_config_dir(path: &Path) -> Result<PathBuf, ModuleManifestError> {
 }
 
 fn recover_journal(config_dir: &Path, journal_path: &Path) -> Result<(), ModuleManifestError> {
-    if !journal_path.exists() {
-        return Ok(());
+    let metadata = match fs::symlink_metadata(journal_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(ModuleManifestError::Io {
+                path: journal_path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(ModuleManifestError::Validation(format!(
+            "package transaction journal {} must be a regular file",
+            journal_path.display()
+        )));
     }
     let content = fs::read_to_string(journal_path).map_err(|source| ModuleManifestError::Io {
         path: journal_path.to_path_buf(),
@@ -364,6 +462,19 @@ fn recover_journal(config_dir: &Path, journal_path: &Path) -> Result<(), ModuleM
         }
         JournalPhase::Prepared | JournalPhase::Applying => {
             restore_journal(config_dir, &journal, &workspace)?;
+            let mut recovered = journal;
+            recovered.phase = JournalPhase::Aborted;
+            let content = serde_json::to_vec_pretty(&recovered).map_err(|source| {
+                ModuleManifestError::Json {
+                    path: journal_path.to_path_buf(),
+                    source,
+                }
+            })?;
+            durable_replace(journal_path, &content)?;
+            sync_directory(Some(&workspace)).map_err(|source| ModuleManifestError::Io {
+                path: workspace.clone(),
+                source,
+            })?;
             cleanup_workspace(journal_path, &workspace)
         }
     }
@@ -394,16 +505,75 @@ fn restore_journal(
 }
 
 fn cleanup_workspace(journal_path: &Path, workspace: &Path) -> Result<(), ModuleManifestError> {
-    if workspace.exists() {
-        remove_path(workspace)?;
+    if fs::symlink_metadata(workspace).is_ok() {
+        remove_workspace(workspace)?;
+        sync_directory(workspace.parent()).map_err(|source| ModuleManifestError::Io {
+            path: workspace
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| workspace.to_path_buf()),
+            source,
+        })?;
     }
     match fs::remove_file(journal_path) {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            sync_directory(journal_path.parent()).map_err(|source| ModuleManifestError::Io {
+                path: journal_path
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| journal_path.to_path_buf()),
+                source,
+            })?;
+            Ok(())
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(source) => Err(ModuleManifestError::Io {
             path: journal_path.to_path_buf(),
             source,
         }),
+    }
+}
+
+/// Remove generated transaction material without following symlinks from a
+/// staged checkout. Live package paths use `remove_path`, which validates the
+/// entire module tree before recursive deletion; cleanup must also handle a
+/// rejected candidate safely.
+fn remove_workspace(path: &Path) -> Result<(), ModuleManifestError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(ModuleManifestError::Io {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    if metadata.file_type().is_symlink() || metadata.is_file() {
+        fs::remove_file(path).map_err(|source| ModuleManifestError::Io {
+            path: path.to_path_buf(),
+            source,
+        })
+    } else if metadata.is_dir() {
+        for entry in fs::read_dir(path).map_err(|source| ModuleManifestError::Io {
+            path: path.to_path_buf(),
+            source,
+        })? {
+            let entry = entry.map_err(|source| ModuleManifestError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            remove_workspace(&entry.path())?;
+        }
+        fs::remove_dir(path).map_err(|source| ModuleManifestError::Io {
+            path: path.to_path_buf(),
+            source,
+        })
+    } else {
+        Err(ModuleManifestError::Validation(format!(
+            "transaction workspace path {} is not removable",
+            path.display()
+        )))
     }
 }
 
@@ -472,6 +642,12 @@ fn copy_path(
             path: destination.to_path_buf(),
             source: source_error,
         })?;
+        File::open(destination)
+            .and_then(|file| file.sync_all())
+            .map_err(|source| ModuleManifestError::Io {
+                path: destination.to_path_buf(),
+                source,
+            })?;
     } else {
         return Err(ModuleManifestError::Validation(format!(
             "transaction path {} must be a regular file or directory",
@@ -483,7 +659,14 @@ fn copy_path(
             path: destination.to_path_buf(),
             source,
         }
-    })
+    })?;
+    if metadata.is_dir() {
+        sync_directory(Some(destination)).map_err(|source| ModuleManifestError::Io {
+            path: destination.to_path_buf(),
+            source,
+        })?;
+    }
+    maybe_inject_failure("backup.copy.after")
 }
 
 fn remove_path(path: &Path) -> Result<(), ModuleManifestError> {
@@ -492,7 +675,7 @@ fn remove_path(path: &Path) -> Result<(), ModuleManifestError> {
             fs::remove_file(path).map_err(|source| ModuleManifestError::Io {
                 path: path.to_path_buf(),
                 source,
-            })
+            })?
         }
         Ok(metadata) if metadata.is_dir() => {
             // A package removal must reject the complete tree before invoking
@@ -503,18 +686,29 @@ fn remove_path(path: &Path) -> Result<(), ModuleManifestError> {
             fs::remove_dir_all(path).map_err(|source| ModuleManifestError::Io {
                 path: path.to_path_buf(),
                 source,
+            })?
+        }
+        Ok(_) => {
+            return Err(ModuleManifestError::Validation(format!(
+                "transaction path {} is not removable",
+                path.display()
+            )))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(ModuleManifestError::Io {
+                path: path.to_path_buf(),
+                source,
             })
         }
-        Ok(_) => Err(ModuleManifestError::Validation(format!(
-            "transaction path {} is not removable",
-            path.display()
-        ))),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(source) => Err(ModuleManifestError::Io {
-            path: path.to_path_buf(),
-            source,
-        }),
-    }
+    };
+    sync_directory(path.parent()).map_err(|source| ModuleManifestError::Io {
+        path: path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| path.to_path_buf()),
+        source,
+    })
 }
 
 fn durable_replace(path: &Path, content: &[u8]) -> Result<(), ModuleManifestError> {
@@ -546,9 +740,99 @@ fn durable_replace(path: &Path, content: &[u8]) -> Result<(), ModuleManifestErro
     Ok(())
 }
 
+pub(super) fn maybe_inject_failure(point: &str) -> Result<(), ModuleManifestError> {
+    #[cfg(not(test))]
+    let _ = point;
+    #[cfg(test)]
+    {
+        let injected = TEST_FAILURE_POINT.with(|failure| {
+            let mut failure = failure.borrow_mut();
+            if failure.as_deref() == Some(point) {
+                failure.take()
+            } else {
+                None
+            }
+        });
+        if injected.is_some() {
+            return Err(ModuleManifestError::Validation(format!(
+                "injected package transaction failure at {point}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+struct FailureInjectionGuard {
+    previous: Option<&'static str>,
+}
+
+#[cfg(test)]
+fn inject_failure_at(point: &'static str) -> FailureInjectionGuard {
+    let previous = TEST_FAILURE_POINT.with(|failure| failure.replace(Some(point)));
+    FailureInjectionGuard { previous }
+}
+
+#[cfg(test)]
+impl Drop for FailureInjectionGuard {
+    fn drop(&mut self) {
+        TEST_FAILURE_POINT.with(|failure| {
+            failure.replace(self.previous.take());
+        });
+    }
+}
+
 fn sync_directory(path: Option<&Path>) -> std::io::Result<()> {
     let Some(path) = path else { return Ok(()) };
     File::open(path)?.sync_all()
+}
+
+fn sync_path(path: &Path) -> Result<(), ModuleManifestError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(ModuleManifestError::Io {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(ModuleManifestError::Validation(format!(
+            "transaction target {} must not be a symlink",
+            path.display()
+        )));
+    }
+    if metadata.is_dir() {
+        for entry in fs::read_dir(path).map_err(|source| ModuleManifestError::Io {
+            path: path.to_path_buf(),
+            source,
+        })? {
+            let entry = entry.map_err(|source| ModuleManifestError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            sync_path(&entry.path())?;
+        }
+        sync_directory(Some(path)).map_err(|source| ModuleManifestError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    } else if metadata.is_file() {
+        File::open(path)
+            .and_then(|file| file.sync_all())
+            .map_err(|source| ModuleManifestError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+    } else {
+        return Err(ModuleManifestError::Validation(format!(
+            "transaction target {} is not syncable",
+            path.display()
+        )));
+    }
+    Ok(())
 }
 
 fn monotonic_nonce() -> u128 {
@@ -584,6 +868,18 @@ mod tests {
         ));
         fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    fn make_test_tree_writable(path: &Path) {
+        let metadata = fs::symlink_metadata(path).unwrap();
+        if metadata.is_dir() {
+            for entry in fs::read_dir(path).unwrap() {
+                make_test_tree_writable(&entry.unwrap().path());
+            }
+        }
+        let mut permissions = metadata.permissions();
+        permissions.set_readonly(false);
+        fs::set_permissions(path, permissions).unwrap();
     }
 
     #[test]
@@ -629,6 +925,130 @@ mod tests {
         assert_eq!(fs::read_to_string(&graph).unwrap(), "before");
         transaction.commit().unwrap();
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn public_recovery_restores_an_interrupted_transaction() {
+        let root = temp_dir("public-recover");
+        let graph = root.join("module.json");
+        fs::write(&graph, "before").unwrap();
+        let mut transaction = PackageTransaction::begin(&root, "update").unwrap();
+        transaction.protect(&graph).unwrap();
+        fs::write(&graph, "after").unwrap();
+        transaction.finished = true;
+        drop(transaction);
+
+        PackageTransaction::recover(&root).unwrap();
+
+        assert_eq!(fs::read_to_string(&graph).unwrap(), "before");
+        assert!(!root.join(JOURNAL_FILE).exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn injected_journal_write_failure_leaves_no_live_transaction() {
+        let root = temp_dir("journal-failure");
+        let failure = inject_failure_at("journal.write.after");
+        assert!(PackageTransaction::begin(&root, "failure-test").is_err());
+        drop(failure);
+
+        assert!(!root.join(JOURNAL_FILE).exists());
+        assert!(
+            fs::read_dir(&root)
+                .unwrap()
+                .filter_map(Result::ok)
+                .all(|entry| !entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(WORKSPACE_PREFIX))
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn injected_commit_failure_aborts_and_restores() {
+        let root = temp_dir("commit-failure");
+        let graph = root.join("module.json");
+        fs::write(&graph, "before").unwrap();
+        let mut transaction = PackageTransaction::begin(&root, "failure-test").unwrap();
+        transaction.protect(&graph).unwrap();
+        fs::write(&graph, "after").unwrap();
+
+        let failure = inject_failure_at("commit.before");
+        assert!(transaction.commit().is_err());
+        drop(failure);
+
+        assert_eq!(fs::read_to_string(&graph).unwrap(), "before");
+        assert!(!root.join(JOURNAL_FILE).exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn injected_failures_restore_each_live_mutation_boundary() {
+        for (index, point) in [
+            "replace.after_remove",
+            "replace.after_rename",
+            "remove.after",
+            "package.write.after",
+            "store.write.after",
+            "store.activate.after",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let root = temp_dir(&format!("failure-{index}"));
+            let graph = root.join("module.json");
+            let modules = root.join("modules");
+            let module = modules.join("widget");
+            fs::create_dir_all(&module).unwrap();
+            fs::write(&graph, "before").unwrap();
+            fs::write(module.join("version"), "old").unwrap();
+
+            let mut transaction = PackageTransaction::begin(&root, "failure-test").unwrap();
+            transaction.protect_package_state(&graph, &modules).unwrap();
+            let staged = transaction.staging_dir().join("widget");
+            fs::create_dir_all(&staged).unwrap();
+            fs::write(staged.join("version"), "new").unwrap();
+
+            let failure = inject_failure_at(point);
+            let result = match point {
+                "replace.after_remove" | "replace.after_rename" => {
+                    transaction.replace_with(&module, &staged)
+                }
+                "remove.after" => transaction.remove(&module),
+                "package.write.after" => super::super::profile::atomic_write(&graph, b"after"),
+                "store.write.after" | "store.activate.after" => {
+                    let mut lock = super::super::MeshLock::new();
+                    lock.save_with_store(
+                        &root.join("mesh.lock"),
+                        &modules,
+                        &root.join(".mesh-store"),
+                    )
+                }
+                _ => unreachable!(),
+            };
+            assert!(result.is_err(), "failure point {point} did not fail");
+            drop(failure);
+            drop(transaction);
+
+            assert_eq!(fs::read_to_string(&graph).unwrap(), "before");
+            assert_eq!(fs::read_to_string(module.join("version")).unwrap(), "old");
+            if point == "store.activate.after" {
+                assert!(!root.join(".mesh-store/active-generation").exists());
+            }
+            assert!(!root.join(JOURNAL_FILE).exists());
+            assert!(
+                fs::read_dir(&root)
+                    .unwrap()
+                    .filter_map(Result::ok)
+                    .all(|entry| !entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(WORKSPACE_PREFIX))
+            );
+            make_test_tree_writable(&root);
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]

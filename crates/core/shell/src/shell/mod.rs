@@ -14,7 +14,7 @@ use mesh_core_locale::LocaleEngine;
 use mesh_core_module::DependencyGraphError;
 use mesh_core_module::lifecycle::{ModuleInstance, ModuleState};
 use mesh_core_module::package::{
-    InstalledModuleGraph, ModuleKind, RootModuleGraphManifest, ShellProfile,
+    InstalledModuleGraph, ModuleKind, PackageTransaction, RootModuleGraphManifest, ShellProfile,
     load_installed_module_graph,
 };
 use mesh_core_service::{

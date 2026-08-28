@@ -1421,6 +1421,9 @@ impl Shell {
             SettingsStore::default()
         });
         let graph_path = installed_module_graph_path();
+        let package_recovery_error = graph_path
+            .parent()
+            .and_then(|config_dir| PackageTransaction::recover(config_dir).err());
         let capability_policy = RootModuleGraphManifest::from_path(&graph_path)
             .map(|root| CapabilityPolicy::from_approvals(root.capability_approvals))
             .unwrap_or_else(|error| {
@@ -1430,7 +1433,13 @@ impl Shell {
                 );
                 CapabilityPolicy::default()
             });
-        let (composition_mode, active_profile) = startup_composition(&graph_path);
+        let (mut composition_mode, mut active_profile) = startup_composition(&graph_path);
+        if let Some(error) = package_recovery_error {
+            active_profile = None;
+            composition_mode = ShellCompositionMode::Recovery {
+                reason: format!("interrupted package transaction could not be recovered: {error}"),
+            };
+        }
         if let Some(reason) = composition_mode.recovery_reason() {
             tracing::error!("starting shell in recovery mode: {reason}");
         }

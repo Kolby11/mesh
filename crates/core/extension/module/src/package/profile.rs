@@ -767,6 +767,7 @@ pub(super) fn atomic_write(path: &Path, content: &[u8]) -> Result<(), ModuleMani
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("profile.json");
+    super::transaction::maybe_inject_failure("package.write.before")?;
 
     for _ in 0..128 {
         let sequence = PROFILE_TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
@@ -804,6 +805,7 @@ pub(super) fn atomic_write(path: &Path, content: &[u8]) -> Result<(), ModuleMani
                 source,
             });
         }
+        super::transaction::maybe_inject_failure("package.write.after")?;
         return Ok(());
     }
 

@@ -62,8 +62,18 @@ impl ModuleStore {
         }
 
         let staging = self.staging_path("object")?;
-        copy_tree(source, &staging)?;
-        let staged_digest = ContentDigest::parse(&module_tree_digest(&staging)?)?;
+        if let Err(error) = copy_tree(source, &staging) {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error);
+        }
+        let staged_digest =
+            match module_tree_digest(&staging).and_then(|digest| ContentDigest::parse(&digest)) {
+                Ok(digest) => digest,
+                Err(error) => {
+                    let _ = fs::remove_dir_all(&staging);
+                    return Err(error);
+                }
+            };
         if staged_digest != digest {
             let _ = fs::remove_dir_all(&staging);
             return Err(ModuleManifestError::Validation(format!(
@@ -82,6 +92,13 @@ impl ModuleStore {
                 });
             }
         }
+        sync_directory(object.parent()).map_err(|source| ModuleManifestError::Io {
+            path: object
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| object.to_path_buf()),
+            source,
+        })?;
         make_immutable(&object)?;
         self.verify_object(&object, &digest)?;
 
@@ -199,8 +216,10 @@ impl ModuleStore {
                 path: staging.join(SNAPSHOT_FILE),
                 source,
             })?;
-        write_new_file(&staging.join(SNAPSHOT_FILE), &content)?;
-        make_immutable(&staging)?;
+        if let Err(error) = write_new_file(&staging.join(SNAPSHOT_FILE), &content) {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error);
+        }
         if let Err(source) = fs::rename(&staging, &generation_dir) {
             let _ = fs::remove_dir_all(&staging);
             if !generation_dir.exists() {
@@ -210,6 +229,14 @@ impl ModuleStore {
                 });
             }
         }
+        sync_directory(generation_dir.parent()).map_err(|source| ModuleManifestError::Io {
+            path: generation_dir
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| generation_dir.to_path_buf()),
+            source,
+        })?;
+        make_immutable(&generation_dir)?;
         super::validate_regular_file(&snapshot_path, "activation snapshot")?;
         Ok(snapshot_path)
     }
@@ -218,7 +245,8 @@ impl ModuleStore {
     pub fn activate_generation(&self, generation: u64) -> Result<(), ModuleManifestError> {
         let snapshot = self.activation_snapshot(generation)?;
         let content = format!("{}\n", snapshot.generation);
-        write_atomic(&self.active_generation_path(), content.as_bytes())
+        write_atomic(&self.active_generation_path(), content.as_bytes())?;
+        super::transaction::maybe_inject_failure("store.activate.after")
     }
 
     pub fn active_snapshot(&self) -> Result<Option<ActivationSnapshot>, ModuleManifestError> {
@@ -459,6 +487,12 @@ fn copy_tree(source: &Path, destination: &Path) -> Result<(), ModuleManifestErro
                     source: source_error,
                 }
             })?;
+            std::fs::File::open(&child_destination)
+                .and_then(|file| file.sync_all())
+                .map_err(|source_error| ModuleManifestError::Io {
+                    path: child_destination.clone(),
+                    source: source_error,
+                })?;
             fs::set_permissions(&child_destination, metadata.permissions()).map_err(
                 |source_error| ModuleManifestError::Io {
                     path: child_destination,
@@ -477,6 +511,10 @@ fn copy_tree(source: &Path, destination: &Path) -> Result<(), ModuleManifestErro
             path: destination.to_path_buf(),
             source: source_error,
         }
+    })?;
+    sync_directory(Some(destination)).map_err(|source| ModuleManifestError::Io {
+        path: destination.to_path_buf(),
+        source,
     })?;
     Ok(())
 }
@@ -537,6 +575,7 @@ fn make_immutable(path: &Path) -> Result<(), ModuleManifestError> {
 }
 
 fn write_new_file(path: &Path, content: &[u8]) -> Result<(), ModuleManifestError> {
+    super::transaction::maybe_inject_failure("store.write.before")?;
     let mut file = OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -553,11 +592,13 @@ fn write_new_file(path: &Path, content: &[u8]) -> Result<(), ModuleManifestError
     file.sync_all().map_err(|source| ModuleManifestError::Io {
         path: path.to_path_buf(),
         source,
-    })
+    })?;
+    super::transaction::maybe_inject_failure("store.write.after")
 }
 
 fn write_atomic(path: &Path, content: &[u8]) -> Result<(), ModuleManifestError> {
     super::validate_no_symlink_path(path, "module store write target")?;
+    super::transaction::maybe_inject_failure("store.write.before")?;
     let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
     let result = (|| {
         let mut file = OpenOptions::new()
@@ -567,7 +608,8 @@ fn write_atomic(path: &Path, content: &[u8]) -> Result<(), ModuleManifestError> 
             .open(&temporary)?;
         file.write_all(content)?;
         file.sync_all()?;
-        fs::rename(&temporary, path)
+        fs::rename(&temporary, path)?;
+        sync_directory(path.parent())
     })();
     if let Err(source) = result {
         let _ = fs::remove_file(&temporary);
@@ -576,7 +618,12 @@ fn write_atomic(path: &Path, content: &[u8]) -> Result<(), ModuleManifestError> 
             source,
         });
     }
-    Ok(())
+    super::transaction::maybe_inject_failure("store.write.after")
+}
+
+fn sync_directory(path: Option<&Path>) -> std::io::Result<()> {
+    let Some(path) = path else { return Ok(()) };
+    std::fs::File::open(path)?.sync_all()
 }
 
 #[derive(

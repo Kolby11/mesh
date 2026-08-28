@@ -93,7 +93,7 @@ impl Shell {
             .map_err(|error| package_error(error.to_string()))?;
         staged.place_at(&destination)?;
 
-        let previous_root = root.clone();
+        let previous_capability_approvals = root.capability_approvals.clone();
         let mut updated_root = root;
         approve_required_capabilities(&mut updated_root, &manifest);
         let explicit_inventory = !updated_root.modules.is_empty();
@@ -113,23 +113,16 @@ impl Shell {
             );
         }
         let root_changed = explicit_inventory
-            || updated_root.capability_approvals != previous_root.capability_approvals;
+            || updated_root.capability_approvals != previous_capability_approvals;
         if root_changed {
             if let Err(error) = updated_root.save(&graph_path) {
-                let _ = fs::remove_dir_all(&destination);
                 return Err(package_error(error.to_string()));
             }
         }
 
         let graph = match load_installed_module_graph(&graph_path) {
             Ok(graph) => graph,
-            Err(error) => {
-                let _ = fs::remove_dir_all(&destination);
-                if root_changed {
-                    let _ = previous_root.save(&graph_path);
-                }
-                return Err(package_error(error.to_string()));
-            }
+            Err(error) => return Err(package_error(error.to_string())),
         };
         let installed = graph.module(&manifest.name).ok_or_else(|| {
             package_error(format!(
@@ -138,10 +131,6 @@ impl Shell {
             ))
         })?;
         if installed.kind != manifest.mesh.kind {
-            let _ = fs::remove_dir_all(&destination);
-            if root_changed {
-                let _ = previous_root.save(&graph_path);
-            }
             return Err(package_error(format!(
                 "installed module {} changed kind while being copied",
                 manifest.name
@@ -345,12 +334,28 @@ impl Shell {
         let mut transaction = Some(transaction);
         let mut package_rollback = Some(package_rollback);
 
-        let new_graph = load_installed_module_graph(&graph_path)
-            .map_err(|error| package_error(error.to_string()))?;
+        let new_graph = match load_installed_module_graph(&graph_path) {
+            Ok(graph) => graph,
+            Err(error) => {
+                super::profile::abort_package_transaction(
+                    transaction.take(),
+                    package_rollback.take(),
+                    self,
+                );
+                return Err(package_error(error.to_string()));
+            }
+        };
         // Do not remove the in-memory module or its live runtime until the
         // replacement graph has loaded successfully. A broken on-disk
         // candidate must leave the last-known-good activation coherent.
-        self.commit_installed_module_graph(new_graph.clone())?;
+        if let Err(error) = self.commit_installed_module_graph(new_graph.clone()) {
+            super::profile::abort_package_transaction(
+                transaction.take(),
+                package_rollback.take(),
+                self,
+            );
+            return Err(error);
+        }
         self.modules.remove(module_id);
         self.discover_modules();
         if let Err(error) = self.resolve_modules() {
@@ -419,6 +424,11 @@ impl Shell {
                 && !self.profile_transition_pending()
                 && self.activation_generation == activation_generation
             {
+                super::profile::abort_package_transaction(
+                    transaction.take(),
+                    package_rollback.take(),
+                    self,
+                );
                 return Err(package_error(
                     "package activation was rejected before reaching the runtime commit",
                 ));
@@ -441,6 +451,11 @@ impl Shell {
                 && !self.profile_transition_pending()
                 && self.activation_generation == activation_generation
             {
+                super::profile::abort_package_transaction(
+                    transaction.take(),
+                    package_rollback.take(),
+                    self,
+                );
                 return Err(package_error(
                     "package activation was rejected before reaching the runtime commit",
                 ));
