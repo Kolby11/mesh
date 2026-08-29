@@ -25,6 +25,7 @@ fn material_bindings() -> IconPackBindings {
                 multicolor: false,
             },
         )]),
+        vocabularies: HashMap::new(),
         axes: SupportedAxes {
             fill: true,
             weight: true,

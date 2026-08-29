@@ -355,6 +355,8 @@ pub(crate) fn prepare_icon_pack_bindings_with_catalog(
             module_id
         ));
     }
+    mesh_core_icon::validate_canonical_identity(&section.id, "icon pack id")
+        .map_err(|error| error.to_string())?;
     let mut font_aliases = std::collections::HashMap::new();
     let mut seen_aliases = std::collections::HashSet::new();
     for req in &section.requires.fonts {
@@ -367,6 +369,8 @@ pub(crate) fn prepare_icon_pack_bindings_with_catalog(
                 module_id
             ));
         }
+        mesh_core_icon::validate_canonical_identity(&req.alias, "icon font alias")
+            .map_err(|error| error.to_string())?;
         if req.family.trim().is_empty() {
             return Err(format!(
                 "icon-pack '{}' declares font alias '{}' with an empty family",
@@ -473,7 +477,9 @@ pub(crate) fn prepare_icon_pack_bindings_with_catalog(
         );
     }
 
-    for (name, mapping) in &section.mappings {
+    let validate_mapping = |name: &str,
+                            mapping: &mesh_core_module::manifest::IconMappingTarget|
+     -> Result<(), String> {
         if name.trim().is_empty() || mapping.target.trim().is_empty() {
             return Err(format!(
                 "icon-pack '{}' declares an icon mapping with an empty name or target",
@@ -512,6 +518,21 @@ pub(crate) fn prepare_icon_pack_bindings_with_catalog(
                 ));
             }
         }
+        Ok(())
+    };
+    for (name, mapping) in &section.mappings {
+        validate_mapping(name, mapping)?;
+    }
+    for (owner, mappings) in &section.vocabularies {
+        if owner.trim().is_empty() {
+            return Err(format!(
+                "icon-pack '{}' declares an empty vocabulary owner",
+                module_id
+            ));
+        }
+        for (name, mapping) in mappings {
+            validate_mapping(name, mapping)?;
+        }
     }
     let axes = mesh_core_icon::SupportedAxes {
         fill: section.axes.fill,
@@ -532,6 +553,27 @@ pub(crate) fn prepare_icon_pack_bindings_with_catalog(
                         target: mapping.target.clone(),
                         multicolor: mapping.multicolor,
                     },
+                )
+            })
+            .collect(),
+        vocabularies: section
+            .vocabularies
+            .iter()
+            .map(|(owner, mappings)| {
+                (
+                    owner.clone(),
+                    mappings
+                        .iter()
+                        .map(|(name, mapping)| {
+                            (
+                                name.clone(),
+                                mesh_core_icon::IconMapping {
+                                    target: mapping.target.clone(),
+                                    multicolor: mapping.multicolor,
+                                },
+                            )
+                        })
+                        .collect(),
                 )
             })
             .collect(),

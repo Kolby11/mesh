@@ -1691,17 +1691,27 @@ impl MeshContributes {
 }
 
 fn validate_icon_pack(pack: &manifest::IconPackSection) -> Result<(), ModuleManifestError> {
-    if pack.id.trim().is_empty() {
+    if !is_canonical_icon_identity(&pack.id) {
         return Err(ModuleManifestError::Validation(
-            "mesh.contributes.icons[].id cannot be empty".into(),
+            "mesh.contributes.icons[].id must be a canonical lowercase pack id".into(),
         ));
     }
-    for name in pack.mappings.keys() {
-        if name.trim().is_empty() {
+    let mut aliases = std::collections::HashSet::new();
+    for requirement in &pack.requires.fonts {
+        if !is_canonical_icon_identity(&requirement.alias) {
             return Err(ModuleManifestError::Validation(
-                "mesh.contributes.icons[].mappings cannot contain empty names".into(),
+                "mesh.contributes.icons[].requires.fonts aliases must be canonical lowercase ids"
+                    .into(),
             ));
         }
+        if !aliases.insert(&requirement.alias) {
+            return Err(ModuleManifestError::Validation(
+                "mesh.contributes.icons[].requires.fonts cannot contain duplicate aliases".into(),
+            ));
+        }
+    }
+    for (name, mapping) in &pack.mappings {
+        validate_icon_mapping(name, &mapping.target, "mappings")?;
     }
     for vocabulary in pack.vocabularies.keys() {
         if vocabulary.trim().is_empty() {
@@ -1709,6 +1719,43 @@ fn validate_icon_pack(pack: &manifest::IconPackSection) -> Result<(), ModuleMani
                 "mesh.contributes.icons[].vocabularies cannot contain empty names".into(),
             ));
         }
+        for (name, mapping) in &pack.vocabularies[vocabulary] {
+            validate_icon_mapping(name, &mapping.target, "vocabularies")?;
+        }
+    }
+    Ok(())
+}
+
+fn is_canonical_icon_identity(value: &str) -> bool {
+    !value.is_empty()
+        && value.trim() == value
+        && value == value.to_ascii_lowercase()
+        && !value.contains('/')
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn validate_icon_mapping(
+    name: &str,
+    target: &str,
+    section: &str,
+) -> Result<(), ModuleManifestError> {
+    if name.trim().is_empty() {
+        return Err(ModuleManifestError::Validation(format!(
+            "mesh.contributes.icons[].{section} cannot contain empty names"
+        )));
+    }
+    if target.trim().is_empty()
+        || Path::new(target).is_absolute()
+        || target.trim_start().starts_with("~/")
+        || target
+            .split_once('/')
+            .is_none_or(|(pack, name)| pack.is_empty() || name.is_empty())
+    {
+        return Err(ModuleManifestError::Validation(format!(
+            "mesh.contributes.icons[].{section} mapping '{name}' must use a pack/name target"
+        )));
     }
     Ok(())
 }

@@ -1,9 +1,12 @@
-use crate::bindings::{FrontendIconBindings, IconPackBindings, parse_target};
+use crate::bindings::{
+    FrontendIconBindings, IconPackBindings, parse_target, validate_canonical_identity,
+    validate_reference,
+};
 use crate::config::{IconConfig, IconPackRoot};
 use crate::xdg;
 use anyhow::{Result, bail};
 use mesh_core_resources::{SystemResourceCatalog, resource_revision};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::mem::size_of;
 use std::path::PathBuf;
 
@@ -72,11 +75,11 @@ pub struct IconRegistry {
     host_catalog: std::sync::Arc<SystemResourceCatalog>,
     /// Loaded icon-pack binding modules keyed by their short pack id
     /// (`mesh.contributes.icons[].id`).
-    icon_packs: HashMap<String, IconPackBindings>,
+    icon_packs: BTreeMap<String, IconPackBindings>,
     /// Lookup index: full module id → short pack id.
-    pack_id_by_module: HashMap<String, String>,
+    pack_id_by_module: BTreeMap<String, String>,
     /// Per-frontend resolution context.
-    frontends: HashMap<String, FrontendIconBindings>,
+    frontends: BTreeMap<String, FrontendIconBindings>,
     /// Shell-wide default icon-pack module id.
     shell_default_pack_module: Option<String>,
     generation: u64,
@@ -93,18 +96,37 @@ const ICON_REGISTRY_CACHE_MAX_BYTES: usize = 8 * 1024 * 1024;
 const ICON_WARNED_MISS_CAPACITY: usize = 2048;
 const ICON_WARNED_MISS_MAX_BYTES: usize = 256 * 1024;
 
-fn canonical_pack_id(value: &str) -> Result<&str> {
-    if value.is_empty()
-        || value.trim() != value
-        || value != value.to_ascii_lowercase()
-        || value.contains('/')
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-    {
-        bail!("icon pack id '{value}' is not canonical");
+fn validate_bindings(bindings: &IconPackBindings) -> Result<()> {
+    validate_canonical_identity(&bindings.pack_id, "icon pack id")?;
+    validate_reference(&bindings.module_id, "icon pack module id")?;
+    for alias in bindings.font_aliases.keys() {
+        validate_canonical_identity(alias, "icon font alias")?;
     }
-    Ok(value)
+    for (name, mapping) in &bindings.mappings {
+        validate_reference(name, "icon mapping name")?;
+        validate_mapping_target(name, &mapping.target)?;
+    }
+    for (owner, mappings) in &bindings.vocabularies {
+        validate_reference(owner, "icon vocabulary owner")?;
+        for (name, mapping) in mappings {
+            validate_reference(name, "icon vocabulary mapping name")?;
+            validate_mapping_target(name, &mapping.target)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_mapping_target(name: &str, target: &str) -> Result<()> {
+    if target.trim().is_empty() {
+        bail!("icon mapping '{name}' target must not be empty");
+    }
+    if std::path::Path::new(target).is_absolute() || target.trim_start().starts_with("~/") {
+        bail!("icon mapping '{name}' target must be a pack/name reference");
+    }
+    if parse_target(target).is_none() {
+        bail!("icon mapping '{name}' target '{target}' is not pack/name");
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -207,9 +229,9 @@ impl IconRegistry {
         Ok(Self {
             config,
             host_catalog,
-            icon_packs: HashMap::new(),
-            pack_id_by_module: HashMap::new(),
-            frontends: HashMap::new(),
+            icon_packs: BTreeMap::new(),
+            pack_id_by_module: BTreeMap::new(),
+            frontends: BTreeMap::new(),
             shell_default_pack_module: None,
             generation: 0,
             cache: HashMap::new(),
@@ -250,17 +272,30 @@ impl IconRegistry {
 
     /// Register or replace an icon-pack binding module's bindings.
     pub fn set_icon_pack(&mut self, bindings: IconPackBindings) {
+        if let Err(error) = validate_bindings(&bindings) {
+            tracing::warn!("rejecting icon pack '{}': {error}", bindings.pack_id);
+            return;
+        }
         let pack_id = bindings.pack_id.clone();
         let module_id = bindings.module_id.clone();
+        if let Some(existing) = self.icon_packs.get(&pack_id)
+            && existing.module_id != module_id
+        {
+            tracing::warn!(
+                "rejecting icon pack '{}' from '{}': already owned by '{}'",
+                pack_id,
+                module_id,
+                existing.module_id
+            );
+            return;
+        }
+        if let Some(previous_pack_id) = self.pack_id_by_module.get(&module_id).cloned()
+            && previous_pack_id != pack_id
+        {
+            self.icon_packs.remove(&previous_pack_id);
+        }
         self.pack_id_by_module
             .insert(module_id.clone(), pack_id.clone());
-        // If the same module previously claimed a different pack id,
-        // remove that stale alias.
-        for (other_module, other_pack) in self.pack_id_by_module.clone() {
-            if other_module != module_id && other_pack == pack_id {
-                self.pack_id_by_module.remove(&other_module);
-            }
-        }
         self.icon_packs.insert(pack_id, bindings);
         self.bump_generation();
     }
@@ -275,13 +310,10 @@ impl IconRegistry {
         frontends: Vec<(String, FrontendIconBindings)>,
         shell_default_pack: Option<String>,
     ) -> Result<()> {
-        let mut next_packs = HashMap::new();
-        let mut next_pack_by_module = HashMap::new();
+        let mut next_packs = BTreeMap::new();
+        let mut next_pack_by_module = BTreeMap::new();
         for bindings in icon_packs {
-            canonical_pack_id(&bindings.pack_id)?;
-            if bindings.module_id.trim().is_empty() {
-                bail!("icon pack module id must not be empty");
-            }
+            validate_bindings(&bindings)?;
             if next_packs
                 .insert(bindings.pack_id.clone(), bindings.clone())
                 .is_some()
@@ -296,11 +328,12 @@ impl IconRegistry {
             }
         }
 
-        let mut next_frontends = HashMap::new();
+        let mut next_frontends = BTreeMap::new();
         for (module_id, bindings) in frontends {
             if module_id.trim().is_empty() {
                 bail!("frontend icon binding module id must not be empty");
             }
+            bindings.validate_chain()?;
             if next_frontends.insert(module_id.clone(), bindings).is_some() {
                 bail!("duplicate frontend icon binding module '{module_id}'");
             }
@@ -535,6 +568,7 @@ impl IconRegistry {
         if let Some((pack_id, inner)) = parse_target(semantic_name)
             && let Some(found) = self.try_pack_lookup(
                 pack_id,
+                module_id,
                 inner,
                 semantic_name,
                 size,
@@ -556,6 +590,7 @@ impl IconRegistry {
                 if let Some(pack_id) = self.pack_id_by_module.get(chain_id)
                     && let Some(found) = self.try_pack_lookup(
                         pack_id,
+                        module_id,
                         &fallback_name,
                         semantic_name,
                         size,
@@ -613,6 +648,7 @@ impl IconRegistry {
     fn try_pack_lookup(
         &self,
         pack_id: &str,
+        consumer_module_id: &str,
         logical_name: &str,
         semantic_name: &str,
         size: u32,
@@ -620,7 +656,11 @@ impl IconRegistry {
         fallback_stage: &str,
     ) -> Option<IconResolution> {
         let pack = self.icon_packs.get(pack_id)?;
-        let target = pack.mappings.get(logical_name)?;
+        let target = pack
+            .vocabularies
+            .get(consumer_module_id)
+            .and_then(|mappings| mappings.get(logical_name))
+            .or_else(|| pack.mappings.get(logical_name))?;
         self.try_target(
             &target.target,
             target.multicolor,
@@ -846,6 +886,7 @@ nothing = ["system:nothing"]
             pack_id: "material-rounded".into(),
             module_id: "@mesh/icons-material-symbols".into(),
             mappings: HashMap::from([("settings".into(), "ms/settings".into())]),
+            vocabularies: HashMap::new(),
             axes: SupportedAxes {
                 fill: true,
                 weight: true,
@@ -920,6 +961,7 @@ nothing = ["system:nothing"]
             pack_id: "lucide".into(),
             module_id: "@mesh/icons-lucide".into(),
             mappings,
+            vocabularies: HashMap::new(),
             axes: SupportedAxes::default(),
             font_aliases: HashMap::new(),
         });
@@ -950,6 +992,7 @@ nothing = ["system:nothing"]
             pack_id: "files-pack".into(),
             module_id: "@mesh/files-pack".into(),
             mappings: HashMap::from([("appears-later".into(), "files/appears-later".into())]),
+            vocabularies: HashMap::new(),
             axes: SupportedAxes::default(),
             font_aliases: HashMap::new(),
         });
@@ -997,6 +1040,7 @@ nothing = ["system:nothing"]
             pack_id: "fallbacks".into(),
             module_id: "@mesh/fallbacks".into(),
             mappings: HashMap::from([("network-wireless".into(), "files/base".into())]),
+            vocabularies: HashMap::new(),
             axes: SupportedAxes::default(),
             font_aliases: HashMap::new(),
         });
@@ -1008,6 +1052,163 @@ nothing = ["system:nothing"]
             result,
             IconResolution::Found { candidate, .. } if candidate == "pack:fallbacks:files/base"
         ));
+    }
+
+    #[test]
+    fn vocabulary_mappings_are_scoped_to_the_requesting_module() {
+        let td = tempdir().unwrap();
+        let weather = td.path().join("weather.svg");
+        let other = td.path().join("other.svg");
+        for path in [&weather, &other] {
+            fs::write(
+                path,
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>"#,
+            )
+            .unwrap();
+        }
+        let mut registry = registry();
+        registry
+            .register_pack(IconPackRoot {
+                id: "files".into(),
+                root: Some(td.path().to_path_buf()),
+                theme: "hicolor".into(),
+                kind: crate::IconPackKind::Xdg,
+            })
+            .unwrap();
+        registry
+            .replace_bindings(
+                vec![IconPackBindings {
+                    pack_id: "vocabulary".into(),
+                    module_id: "@mesh/icons-vocabulary".into(),
+                    mappings: HashMap::new(),
+                    vocabularies: HashMap::from([
+                        (
+                            "@community/weather".into(),
+                            HashMap::from([(
+                                "weather-clear".into(),
+                                IconMapping {
+                                    target: "files/weather".into(),
+                                    multicolor: true,
+                                },
+                            )]),
+                        ),
+                        (
+                            "@community/other".into(),
+                            HashMap::from([(
+                                "weather-clear".into(),
+                                IconMapping {
+                                    target: "files/other".into(),
+                                    multicolor: false,
+                                },
+                            )]),
+                        ),
+                    ]),
+                    axes: SupportedAxes::default(),
+                    font_aliases: HashMap::new(),
+                }],
+                vec![
+                    (
+                        "@community/weather".into(),
+                        FrontendIconBindings {
+                            declared_pack_chain: vec!["@mesh/icons-vocabulary".into()],
+                            ..Default::default()
+                        },
+                    ),
+                    (
+                        "@community/other".into(),
+                        FrontendIconBindings {
+                            declared_pack_chain: vec!["@mesh/icons-vocabulary".into()],
+                            ..Default::default()
+                        },
+                    ),
+                ],
+                None,
+            )
+            .unwrap();
+
+        let weather_result = registry.resolve_for_module("@community/weather", "weather-clear", 8);
+        let IconResolution::Found {
+            target: ResolvedTarget::File(path),
+            multicolor,
+            provenance,
+            ..
+        } = weather_result
+        else {
+            panic!("expected weather vocabulary mapping");
+        };
+        assert!(path.ends_with("weather.svg"));
+        assert!(multicolor);
+        assert_eq!(
+            provenance.owner_module.as_deref(),
+            Some("@mesh/icons-vocabulary")
+        );
+        assert_eq!(provenance.pack_id.as_deref(), Some("vocabulary"));
+
+        let other_result = registry.resolve_for_module("@community/other", "weather-clear", 8);
+        let ResolvedTarget::File(path) = other_result.target().unwrap() else {
+            panic!("expected other vocabulary mapping");
+        };
+        assert!(path.ends_with("other.svg"));
+    }
+
+    #[test]
+    fn replacing_a_module_pack_removes_its_superseded_pack_identity() {
+        let mut registry = registry();
+        registry.set_icon_pack(IconPackBindings {
+            pack_id: "old-pack".into(),
+            module_id: "@mesh/icons-changing".into(),
+            mappings: HashMap::new(),
+            vocabularies: HashMap::new(),
+            axes: SupportedAxes::default(),
+            font_aliases: HashMap::new(),
+        });
+        registry.set_icon_pack(IconPackBindings {
+            pack_id: "new-pack".into(),
+            module_id: "@mesh/icons-changing".into(),
+            mappings: HashMap::new(),
+            vocabularies: HashMap::new(),
+            axes: SupportedAxes::default(),
+            font_aliases: HashMap::new(),
+        });
+        assert!(registry.icon_pack("old-pack").is_none());
+        assert_eq!(
+            registry
+                .icon_pack("new-pack")
+                .map(|pack| pack.module_id.as_str()),
+            Some("@mesh/icons-changing")
+        );
+    }
+
+    #[test]
+    fn replacement_rejects_duplicate_chain_entries_without_touching_snapshot() {
+        let mut registry = registry();
+        registry
+            .replace_bindings(
+                vec![IconPackBindings {
+                    pack_id: "stable".into(),
+                    module_id: "@mesh/stable".into(),
+                    mappings: HashMap::new(),
+                    vocabularies: HashMap::new(),
+                    axes: SupportedAxes::default(),
+                    font_aliases: HashMap::new(),
+                }],
+                Vec::new(),
+                None,
+            )
+            .unwrap();
+        let result = registry.replace_bindings(
+            Vec::new(),
+            vec![(
+                "frontend".into(),
+                FrontendIconBindings {
+                    declared_pack_chain: vec!["duplicate".into(), "duplicate".into()],
+                    ..Default::default()
+                },
+            )],
+            None,
+        );
+        assert!(result.is_err());
+        assert!(registry.icon_pack("stable").is_some());
     }
 
     #[test]
@@ -1037,6 +1238,7 @@ nothing = ["system:nothing"]
             pack_id: "p".into(),
             module_id: "@mesh/icons-p".into(),
             mappings,
+            vocabularies: HashMap::new(),
             axes: SupportedAxes::default(),
             font_aliases: HashMap::new(),
         });
@@ -1087,6 +1289,7 @@ nothing = ["system:nothing"]
             pack_id: "default".into(),
             module_id: "@mesh/icons-default".into(),
             mappings: default_map,
+            vocabularies: HashMap::new(),
             axes: SupportedAxes::default(),
             font_aliases: HashMap::new(),
         });
@@ -1097,6 +1300,7 @@ nothing = ["system:nothing"]
             pack_id: "other".into(),
             module_id: "@mesh/icons-other".into(),
             mappings: other_map,
+            vocabularies: HashMap::new(),
             axes: SupportedAxes::default(),
             font_aliases: HashMap::new(),
         });
@@ -1124,6 +1328,7 @@ nothing = ["system:nothing"]
             pack_id: "stable".into(),
             module_id: "@mesh/stable-icons".into(),
             mappings: HashMap::new(),
+            vocabularies: HashMap::new(),
             axes: SupportedAxes::default(),
             font_aliases: HashMap::new(),
         });
@@ -1134,6 +1339,7 @@ nothing = ["system:nothing"]
                     pack_id: "duplicate".into(),
                     module_id: "@mesh/one".into(),
                     mappings: HashMap::new(),
+                    vocabularies: HashMap::new(),
                     axes: SupportedAxes::default(),
                     font_aliases: HashMap::new(),
                 },
@@ -1141,6 +1347,7 @@ nothing = ["system:nothing"]
                     pack_id: "duplicate".into(),
                     module_id: "@mesh/two".into(),
                     mappings: HashMap::new(),
+                    vocabularies: HashMap::new(),
                     axes: SupportedAxes::default(),
                     font_aliases: HashMap::new(),
                 },
@@ -1158,6 +1365,7 @@ nothing = ["system:nothing"]
                 pack_id: "Not-Canonical".into(),
                 module_id: "@mesh/not-canonical".into(),
                 mappings: HashMap::new(),
+                vocabularies: HashMap::new(),
                 axes: SupportedAxes::default(),
                 font_aliases: HashMap::new(),
             }],
@@ -1200,6 +1408,7 @@ nothing = ["system:nothing"]
                                 multicolor: true,
                             },
                         )]),
+                        vocabularies: HashMap::new(),
                         axes: SupportedAxes::default(),
                         font_aliases: HashMap::from([("ms".into(), font_asset(glyph_map_path))]),
                     },
@@ -1207,6 +1416,7 @@ nothing = ["system:nothing"]
                         pack_id: "pack-b".into(),
                         module_id: "@mesh/pack-b".into(),
                         mappings: HashMap::new(),
+                        vocabularies: HashMap::new(),
                         axes: SupportedAxes::default(),
                         font_aliases: HashMap::from([("ms".into(), font_asset(other_glyph_map))]),
                     },
@@ -1251,6 +1461,7 @@ nothing = ["system:nothing"]
                     pack_id: "prepared".into(),
                     module_id: "@mesh/prepared-icons".into(),
                     mappings: HashMap::from([("settings".into(), "font/settings".into())]),
+                    vocabularies: HashMap::new(),
                     axes: SupportedAxes::default(),
                     font_aliases: HashMap::from([(
                         "font".into(),

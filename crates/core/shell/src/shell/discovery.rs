@@ -161,6 +161,21 @@ fn resource_explanation_snapshot(
                     },
                 )
                 .collect::<Vec<_>>();
+            mappings.extend(
+                pack.vocabularies
+                    .iter()
+                    .flat_map(|(owner, owner_mappings)| {
+                        owner_mappings.iter().map(move |(semantic_name, mapping)| {
+                            mesh_core_resources::ResourceMappingExplanation {
+                                semantic_name: format!("{owner}:{semantic_name}"),
+                                target: mapping.target.clone(),
+                                multicolor: mapping.multicolor,
+                                owner_module: pack.module_id.clone(),
+                                fallback_stage: "vocabulary-chain".into(),
+                            }
+                        })
+                    }),
+            );
             mappings.sort_by(|left, right| left.semantic_name.cmp(&right.semantic_name));
 
             let mut assets = Vec::new();
@@ -309,8 +324,15 @@ fn resource_explanation_snapshot(
         {
             return explanation;
         }
+        let mut effective_requirements = BTreeMap::<(String, String), bool>::new();
         for (module_id, semantic_name, required) in icon_requirements {
-            let resolution = registry.resolve_for_module(module_id, semantic_name, 24);
+            effective_requirements
+                .entry((module_id.clone(), semantic_name.clone()))
+                .and_modify(|existing| *existing |= *required)
+                .or_insert(*required);
+        }
+        for ((module_id, semantic_name), required) in effective_requirements {
+            let resolution = registry.resolve_for_module(&module_id, &semantic_name, 24);
             let resolution_explanation = match resolution {
                 mesh_core_icon::IconResolution::Found {
                     provenance, target, ..
@@ -333,7 +355,7 @@ fn resource_explanation_snapshot(
                     mesh_core_resources::ResourceResolutionExplanation {
                         module_id: module_id.clone(),
                         semantic_name: semantic_name.clone(),
-                        required: *required,
+                        required,
                         status: "found".into(),
                         owner_module: provenance.owner_module,
                         pack_id: provenance.pack_id,
@@ -347,7 +369,7 @@ fn resource_explanation_snapshot(
                     mesh_core_resources::ResourceResolutionExplanation {
                         module_id: module_id.clone(),
                         semantic_name: semantic_name.clone(),
-                        required: *required,
+                        required,
                         status: "missing".into(),
                         owner_module: None,
                         pack_id: None,
@@ -361,8 +383,8 @@ fn resource_explanation_snapshot(
             if resolution_explanation.status == "missing" {
                 explanation.diagnostics.push(
                     mesh_core_resources::ResourceExplanationDiagnostic {
-                        severity: if *required { "error" } else { "warning" }.into(),
-                        code: if *required {
+                        severity: if required { "error" } else { "warning" }.into(),
+                        code: if required {
                             "missing_required_icon"
                         } else {
                             "missing_optional_icon"
@@ -372,7 +394,7 @@ fn resource_explanation_snapshot(
                         pack_id: None,
                         message: format!(
                             "{} icon '{semantic_name}' did not resolve in the effective resource snapshot",
-                            if *required { "required" } else { "optional" }
+                            if required { "required" } else { "optional" }
                         ),
                     },
                 );

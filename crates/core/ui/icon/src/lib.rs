@@ -8,7 +8,10 @@ mod fallback;
 mod registry;
 mod xdg;
 
-pub use bindings::{FontAsset, FrontendIconBindings, IconMapping, IconPackBindings, parse_target};
+pub use bindings::{
+    FontAsset, FrontendIconBindings, IconMapping, IconPackBindings, parse_target,
+    validate_canonical_identity,
+};
 pub use config::{IconCandidate, IconConfig, IconPackKind, IconPackRoot, IconProfile};
 pub use discovery::discover_xdg_packs;
 pub use fallback::{
@@ -241,6 +244,7 @@ mod tests {
                         "home".into(),
                         "files/home".into(),
                     )]),
+                    vocabularies: std::collections::HashMap::new(),
                     axes: SupportedAxes::default(),
                     font_aliases: std::collections::HashMap::new(),
                 }],
@@ -261,6 +265,7 @@ mod tests {
                     pack_id: "duplicate".into(),
                     module_id: "@test/one".into(),
                     mappings: std::collections::HashMap::new(),
+                    vocabularies: std::collections::HashMap::new(),
                     axes: SupportedAxes::default(),
                     font_aliases: std::collections::HashMap::new(),
                 },
@@ -268,6 +273,7 @@ mod tests {
                     pack_id: "duplicate".into(),
                     module_id: "@test/two".into(),
                     mappings: std::collections::HashMap::new(),
+                    vocabularies: std::collections::HashMap::new(),
                     axes: SupportedAxes::default(),
                     font_aliases: std::collections::HashMap::new(),
                 },

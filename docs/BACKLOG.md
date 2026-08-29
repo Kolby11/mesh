@@ -111,9 +111,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Host resources and icon packs
 
-- [ ] Make icon resolution deterministic and complete: canonical owner-scoped
-      pack IDs/aliases, typed multicolor mappings, semantic/dash fallbacks,
-      ordered chains, and required/optional results with provenance.
 - [ ] Remove legacy icon config and discovery authorities, and drive bounded
       pack validation, effective-state diagnostics, CLI/LSP/doctor inspection,
       and resource coverage previews from the canonical snapshot.

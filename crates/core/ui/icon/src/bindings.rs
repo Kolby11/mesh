@@ -1,4 +1,5 @@
 use crate::registry::SupportedAxes;
+use anyhow::{Result, bail};
 use mesh_core_resources::ResourceFingerprint;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -17,6 +18,10 @@ pub struct IconPackBindings {
     pub module_id: String,
     /// Logical name → asset reference (`<asset-pack>/<asset-name>`).
     pub mappings: HashMap<String, IconMapping>,
+    /// Vocabulary-owner-scoped mappings. A vocabulary owner can only select
+    /// its own namespaced mappings; this prevents two modules using the same
+    /// logical name from depending on map iteration order.
+    pub vocabularies: HashMap<String, HashMap<String, IconMapping>>,
     /// Variable-font axes the underlying assets expose.
     pub axes: SupportedAxes,
     /// Font aliases declared in `mesh.contributes.icons[].requires.fonts`.
@@ -120,6 +125,48 @@ impl FrontendIconBindings {
         }
         chain
     }
+
+    /// Validate the ordered chain before it is published in a registry
+    /// snapshot. The shell default may also occur in the module chain because
+    /// it is intentionally merged and de-duplicated at the boundary.
+    pub fn validate_chain(&self) -> Result<()> {
+        let source = self
+            .user_pack_chain
+            .as_deref()
+            .unwrap_or(&self.declared_pack_chain);
+        let mut seen = std::collections::HashSet::new();
+        for pack_id in source {
+            validate_reference(pack_id, "icon pack chain entry")?;
+            if !seen.insert(pack_id) {
+                bail!("duplicate icon pack chain entry '{pack_id}'");
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Short icon-pack ids and font aliases share the same canonical wire
+/// alphabet. Host XDG theme ids remain separate and may retain their native
+/// case; these validators apply only to module-owned identities.
+pub fn validate_canonical_identity(value: &str, label: &str) -> Result<()> {
+    if value.is_empty()
+        || value.trim() != value
+        || value != value.to_ascii_lowercase()
+        || value.contains('/')
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        bail!("{label} '{value}' is not canonical");
+    }
+    Ok(())
+}
+
+pub fn validate_reference(value: &str, label: &str) -> Result<()> {
+    if value.trim().is_empty() {
+        bail!("{label} must not be empty");
+    }
+    Ok(())
 }
 
 /// Parse a target string of the form `<pack>/<name>`. Returns
@@ -190,5 +237,23 @@ mod tests {
         assert_eq!(parse_target("home"), None);
         assert_eq!(parse_target("/home"), None);
         assert_eq!(parse_target("lucide/"), None);
+    }
+
+    #[test]
+    fn canonical_id_validation_rejects_ambiguous_module_identities() {
+        assert!(validate_canonical_identity("material-symbols", "icon pack id").is_ok());
+        assert!(validate_canonical_identity("Material-Symbols", "icon pack id").is_err());
+        assert!(validate_canonical_identity("material/symbols", "icon font alias").is_err());
+        assert!(validate_reference("@community/weather", "icon vocabulary owner").is_ok());
+        assert!(validate_reference(" ", "icon vocabulary owner").is_err());
+    }
+
+    #[test]
+    fn chain_validation_rejects_duplicate_declared_entries() {
+        let bindings = FrontendIconBindings {
+            declared_pack_chain: vec!["first".into(), "first".into()],
+            ..Default::default()
+        };
+        assert!(bindings.validate_chain().is_err());
     }
 }

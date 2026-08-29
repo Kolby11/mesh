@@ -338,11 +338,13 @@ fn diagnose_icon_requirements(
     diagnostics: &mut Vec<ModuleGraphDiagnostic>,
 ) {
     for requirement in &contributions.icon_requirements {
-        if contributions
-            .icon_packs
-            .iter()
-            .any(|pack| pack.mappings.contains_key(&requirement.name))
-        {
+        if contributions.icon_packs.iter().any(|pack| {
+            pack.mappings.contains_key(&requirement.name)
+                || pack
+                    .vocabularies
+                    .get(&requirement.module_id)
+                    .is_some_and(|mappings| mappings.contains_key(&requirement.name))
+        }) {
             continue;
         }
 

@@ -208,6 +208,7 @@ impl ModuleContributionIndex {
                         module_id: module_id.into(),
                         id: icon_pack.id.clone(),
                         mappings: icon_pack.mappings.clone(),
+                        vocabularies: icon_pack.vocabularies.clone(),
                     });
                 }
             }
@@ -298,6 +299,7 @@ impl ModuleContributionIndex {
                 module_id: module_id.into(),
                 id: icon_pack.id.clone(),
                 mappings: icon_pack.mappings.clone(),
+                vocabularies: icon_pack.vocabularies.clone(),
             });
         }
         Ok(())
@@ -742,4 +744,5 @@ pub struct ContributedIconPack {
     pub module_id: String,
     pub id: String,
     pub mappings: HashMap<String, crate::manifest::IconMappingTarget>,
+    pub vocabularies: HashMap<String, HashMap<String, crate::manifest::IconMappingTarget>>,
 }

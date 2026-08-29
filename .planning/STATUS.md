@@ -40,7 +40,10 @@ composition provenance, and rollback metadata rebuilt from restored manifests.
 The next open item is component-global isolation in the shared Lua realm.
 Host icon/font resources now use one explicit immutable graph/profile candidate
 catalog and copy-on-write registry handle, with failed preparation, recovery,
-and package rollback retaining the last-known-good snapshot.
+and package rollback retaining the last-known-good snapshot. Icon resolution
+now validates canonical module identities, keeps vocabulary mappings scoped to
+their requesting owner, preserves typed color policy and chain order, and
+reports effective requirement provenance from that snapshot.
 `aspect-ratio` is now part of the bounded style profile, and the shipped
 navigation bar derives its control sizing from the bar root through it rather
 than restating px sizes per component. That exposed the next surface item:
