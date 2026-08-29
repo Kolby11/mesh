@@ -1318,6 +1318,7 @@ fn find_matching_parenthesis(value: &str) -> Option<usize> {
     None
 }
 
+#[cfg(test)]
 #[derive(Debug, Deserialize)]
 struct RawTheme {
     id: String,
@@ -1336,6 +1337,7 @@ struct RawTheme {
     default_shell_animations: HashMap<String, String>,
 }
 
+#[cfg(test)]
 impl From<RawTheme> for Theme {
     fn from(raw: RawTheme) -> Self {
         let mut theme = Self {
@@ -1624,18 +1626,6 @@ pub enum ThemeError {
     #[error("theme not found: {0}")]
     NotFound(String),
 
-    #[error("failed to read theme file {path}: {source}")]
-    Io {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-
-    #[error("failed to parse theme file {path}: {source}")]
-    Parse {
-        path: PathBuf,
-        source: serde_json::Error,
-    },
-
     #[error("failed to parse theme css {path}: {message}")]
     CssParse { path: PathBuf, message: String },
 
@@ -1647,100 +1637,23 @@ pub enum ThemeError {
 }
 
 pub fn default_theme() -> Theme {
-    match load_theme_from_path(&default_theme_path()) {
-        Ok(mut theme) => {
-            // The bundled recovery theme's semantics are configuration, not
-            // an inference from its `tokyo-night` identifier.
-            theme.set_render_metadata("default", "dark", "normal");
-            theme
-        }
-        Err(err) => {
-            tracing::warn!("failed to load default theme, using embedded fallback: {err}");
-            let mut theme = embedded_default_theme();
-            theme.set_render_metadata("default", "dark", "normal");
-            theme
-        }
-    }
+    // Recovery is deliberately independent from the filesystem catalog. A
+    // configured or discovered path is not an activation authority, so the
+    // shell starts from this embedded snapshot until a graph candidate is
+    // prepared.
+    let mut theme = embedded_default_theme();
+    theme.set_render_metadata("default", "dark", "normal");
+    theme
 }
 
-pub fn default_theme_path() -> PathBuf {
-    theme_path_for_id("tokyo-night")
-}
-
-pub fn theme_dir_path() -> PathBuf {
-    if let Ok(path) = std::env::var("MESH_THEME_DIR")
-        && !path.trim().is_empty()
-    {
-        return PathBuf::from(path);
-    }
-
-    // Themes are modules like any other pack, so they live beside the other
-    // shipped module kinds rather than in the settings directory. This is the
-    // bootstrap/recovery lookup; once the installed graph is available its
-    // theme catalog is authoritative.
-    let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../..")
-        .join("modules/themes");
-    if repo_path.exists() {
-        return repo_path;
-    }
-
-    mesh_home_path().join("modules/themes")
-}
-
-pub fn theme_path_for_id(theme_id: &str) -> PathBuf {
-    let package_css = theme_dir_path().join(theme_id).join("theme.css");
-    if package_css.exists() {
-        return package_css;
-    }
-
-    theme_dir_path().join(format!("{theme_id}.json"))
-}
-
-/// Unparseable files are skipped so one bad theme cannot block startup.
-pub fn load_themes_from_dir(dir: &Path) -> Vec<Theme> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut themes: Vec<Theme> = entries
-        .filter_map(|e| e.ok())
-        .filter_map(|e| {
-            let path = e.path();
-            if path.is_dir() {
-                let css_path = path.join("theme.css");
-                return load_theme_from_path(&css_path).ok();
-            }
-            if path.extension().map(|x| x == "json").unwrap_or(false) {
-                return load_theme_from_path(&path).ok();
-            }
-            None
-        })
-        .collect();
-    themes.sort_by(|a, b| a.id.cmp(&b.id));
-    themes
-}
-
-pub fn load_theme_from_path(path: &Path) -> Result<Theme, ThemeError> {
-    if path.is_dir() {
-        return load_theme_from_path(&path.join("theme.css"));
-    }
-
-    let content = std::fs::read_to_string(path).map_err(|source| ThemeError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    match path.extension().and_then(|extension| extension.to_str()) {
-        Some("css") => parse_theme_css_file(path, &content),
-        _ => parse_theme(&content).map_err(|source| ThemeError::Parse {
-            path: path.to_path_buf(),
-            source,
-        }),
-    }
-}
-
-/// Load CSS through a graph-provided source handle. Unlike the legacy path
-/// loader, this cannot select JSON or construct a path from a theme ID.
-pub fn load_theme_from_source(source: &ThemeSourceHandle) -> Result<Theme, ThemeError> {
+/// Load CSS through a graph-provided source handle and graph-owned identity.
+/// The source handle supplies bytes only; neither the path nor adjacent
+/// manifest metadata can select the active theme.
+pub fn load_theme_from_source(
+    source: &ThemeSourceHandle,
+    id: &str,
+    name: &str,
+) -> Result<Theme, ThemeError> {
     let path = source.candidate_path();
     let content = source
         .read_utf8_bounded(DEFAULT_MAX_THEME_SOURCE_BYTES)
@@ -1748,7 +1661,7 @@ pub fn load_theme_from_source(source: &ThemeSourceHandle) -> Result<Theme, Theme
             path: path.clone(),
             message: error.to_string(),
         })?;
-    parse_theme_css_file(&path, &content)
+    parse_theme_css(id, name, &content).map_err(|message| ThemeError::CssParse { path, message })
 }
 
 fn embedded_default_theme() -> Theme {
@@ -1760,105 +1673,9 @@ fn embedded_default_theme() -> Theme {
     .expect("embedded default theme css must be valid")
 }
 
-fn mesh_home_path() -> PathBuf {
-    if let Ok(path) = std::env::var("MESH_HOME")
-        && !path.trim().is_empty()
-    {
-        return PathBuf::from(path);
-    }
-
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".mesh")
-}
-
+#[cfg(test)]
 fn parse_theme(content: &str) -> Result<Theme, serde_json::Error> {
     serde_json::from_str::<RawTheme>(content).map(Theme::from)
-}
-
-#[derive(Debug, Deserialize)]
-struct ThemePackageManifest {
-    #[serde(default)]
-    name: String,
-    mesh: ThemePackageMesh,
-}
-
-#[derive(Debug, Deserialize)]
-struct ThemePackageMesh {
-    #[serde(default)]
-    contributes: ThemePackageContributes,
-    #[serde(default)]
-    provides: ThemePackageContributes,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct ThemePackageContributes {
-    #[serde(default)]
-    themes: Vec<ThemePackageTheme>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ThemePackageTheme {
-    #[serde(default)]
-    id: Option<String>,
-    #[serde(default)]
-    label: Option<ThemePackageLabel>,
-}
-
-/// A theme label is either a literal or the manifest's translation record.
-/// Only the displayable text matters here; the locale engine owns lookup.
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum ThemePackageLabel {
-    Literal(String),
-    Translation { fallback: String },
-}
-
-impl ThemePackageLabel {
-    fn text(self) -> String {
-        match self {
-            Self::Literal(text) => text,
-            Self::Translation { fallback } => fallback,
-        }
-    }
-}
-
-fn parse_theme_css_file(path: &Path, content: &str) -> Result<Theme, ThemeError> {
-    let (id, name) = load_theme_package_metadata(path)?;
-    parse_theme_css(&id, &name, content).map_err(|message| ThemeError::CssParse {
-        path: path.to_path_buf(),
-        message,
-    })
-}
-
-fn load_theme_package_metadata(path: &Path) -> Result<(String, String), ThemeError> {
-    let package_dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let manifest_path = package_dir.join("module.json");
-    let manifest_content =
-        std::fs::read_to_string(&manifest_path).map_err(|source| ThemeError::Io {
-            path: manifest_path.clone(),
-            source,
-        })?;
-    let manifest: ThemePackageManifest =
-        serde_json::from_str(&manifest_content).map_err(|source| ThemeError::Parse {
-            path: manifest_path,
-            source,
-        })?;
-
-    // A theme module declares its packs under `mesh.contributes.themes`. The
-    // first entry owns this directory's stylesheet; the graph descriptor
-    // remains the activation identity once it is available.
-    let ThemePackageMesh {
-        contributes,
-        provides,
-    } = manifest.mesh;
-    let contribution = contributes.themes.into_iter().chain(provides.themes).next();
-    let (declared_id, declared_label) = match contribution {
-        Some(theme) => (theme.id, theme.label.map(ThemePackageLabel::text)),
-        None => (None, None),
-    };
-    let id = declared_id.unwrap_or_else(|| manifest.name.trim_start_matches("@mesh/").to_string());
-    let name = declared_label.unwrap_or_else(|| id.clone());
-    Ok((id, name))
 }
 
 fn parse_theme_css(id: &str, name: &str, content: &str) -> Result<Theme, String> {

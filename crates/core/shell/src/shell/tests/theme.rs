@@ -390,9 +390,6 @@ fn explicit_color_scheme_is_reported_without_id_heuristics() {
 fn shell_theme_backend_candidate_receives_resolved_active_theme_setting() {
     let mut shell = Shell::new();
     shell.settings.theme.active = "missing-theme".to_string();
-    let (theme, theme_watch) = load_active_theme(&shell.settings);
-    shell.theme = theme;
-    shell.theme_watch = theme_watch;
     let mut candidate = BackendLaunchCandidate {
         module_id: "@mesh/shell-theme".to_string(),
         interface: "mesh.theme".to_string(),
@@ -423,9 +420,6 @@ fn shell_theme_fallback_backend_restart_keeps_latest_state_on_resolved_theme() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();
     shell.settings.theme.active = "missing-theme".to_string();
-    let (theme, theme_watch) = load_active_theme(&shell.settings);
-    shell.theme = theme;
-    shell.theme_watch = theme_watch;
 
     let mut candidate = BackendLaunchCandidate {
         module_id: "@mesh/shell-theme".to_string(),
@@ -494,8 +488,18 @@ fn settings_theme_reload_syncs_theme_service_state() {
         r#"{"shell":{"theme":{"active":"mesh-default-dark"}}}"#,
     )
     .unwrap();
+    fs::write(
+        dir.path().join("theme.css"),
+        ":root { --color-surface: #FFFBFE; }",
+    )
+    .unwrap();
     let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
     let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph_with_theme_source(
+        dir.path(),
+        "mesh-default-light",
+        "theme.css",
+    ));
     let seen_events = Arc::new(Mutex::new(Vec::new()));
     shell
         .components
@@ -520,7 +524,7 @@ fn settings_theme_reload_syncs_theme_service_state() {
             .latest_service_state
             .get("mesh.theme")
             .and_then(|state| state.state.get("current")),
-        Some(&serde_json::json!("mesh-default-light"))
+        Some(&serde_json::json!("@mesh/test-theme:mesh-default-light"))
     );
     assert_eq!(
         shell
@@ -675,7 +679,7 @@ fn settings_reload_delivers_one_ordered_control_plane_batch() {
 }
 
 #[test]
-fn settings_theme_reload_publishes_resolved_fallback_theme_state() {
+fn settings_theme_reload_rejects_unconfigured_theme_without_fallback() {
     let _env_lock = settings_env_lock();
     let runtime = Runtime::new().unwrap();
     let dir = tempfile::tempdir().unwrap();
@@ -704,57 +708,65 @@ fn settings_theme_reload_publishes_resolved_fallback_theme_state() {
     shell.settings_watch.modified_at = None;
     shell.reload_locale_if_settings_changed().unwrap();
 
-    assert_eq!(shell.settings.theme.active, "missing-theme");
+    assert_eq!(shell.settings.theme.active, "mesh-default-dark");
     assert_eq!(shell.theme.active().id, "tokyo-night");
-    assert_eq!(recorded_updates_for(&seen_events, "mesh.theme"), 1);
-    assert_eq!(
-        shell
-            .latest_service_state
-            .get("mesh.theme")
-            .and_then(|state| state.state.get("current")),
-        Some(&serde_json::json!("tokyo-night"))
-    );
+    assert_eq!(recorded_updates_for(&seen_events, "mesh.theme"), 0);
+}
+
+#[test]
+fn untracked_theme_files_cannot_bootstrap_the_shell_theme() {
+    let _env_lock = settings_env_lock();
+    let dir = tempfile::tempdir().unwrap();
+    let settings_path = dir.path().join("settings.json");
+    let untracked_theme_dir = dir.path().join("themes");
+    fs::create_dir_all(&untracked_theme_dir).unwrap();
+    fs::write(
+        &settings_path,
+        r#"{"shell":{"theme":{"active":"untracked"}}}"#,
+    )
+    .unwrap();
+    fs::write(
+        untracked_theme_dir.join("untracked.json"),
+        r##"{"id":"untracked","name":"Untracked","tokens":{"color.surface":"#123456"}}"##,
+    )
+    .unwrap();
+    let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
+
+    let shell = Shell::new();
+
+    assert_eq!(shell.theme.active().id, "tokyo-night");
+    assert!(shell.theme_watch.path.as_os_str().is_empty());
 }
 
 #[test]
 fn malformed_theme_reload_retains_last_known_good_snapshot() {
     let _env_lock = settings_env_lock();
     let dir = tempfile::tempdir().unwrap();
-    let theme_dir = dir.path().join("themes");
-    fs::create_dir_all(&theme_dir).unwrap();
     let settings_path = dir.path().join("settings.json");
     fs::write(
         &settings_path,
         r#"{"shell":{"theme":{"active":"reload-theme"}}}"#,
     )
     .unwrap();
-    fs::write(
-        theme_dir.join("reload-theme.json"),
-        r##"{"id":"reload-theme","name":"Reload","tokens":{"color.surface":"#123456"}}"##,
-    )
-    .unwrap();
+    fs::write(dir.path().join("theme.css"), "node { color: #123456; }").unwrap();
     let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
-    let _theme_dir = EnvGuard::set("MESH_THEME_DIR", &theme_dir);
     let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph_with_theme_source(
+        dir.path(),
+        "reload-theme",
+        "theme.css",
+    ));
+    shell
+        .apply_set_theme("@mesh/test-theme:reload-theme")
+        .unwrap();
     shell.theme_watch.modified_at = None;
     shell.next_theme_reload_check = std::time::Instant::now();
-    fs::write(theme_dir.join("reload-theme.json"), "{ malformed").unwrap();
+    fs::write(dir.path().join("theme.css"), "{ malformed").unwrap();
 
     let requests = shell.reload_theme_if_changed().unwrap();
 
     assert!(requests.is_empty());
-    assert_eq!(shell.theme.active().id, "reload-theme");
-    assert_eq!(
-        shell
-            .diagnostics
-            .snapshot()
-            .iter()
-            .flat_map(|module| module.instances.iter())
-            .flat_map(|instance| instance.active_issues.iter())
-            .filter(|issue| issue.issue_code == "theme_reload_rejected")
-            .count(),
-        1,
-    );
+    assert_eq!(shell.theme.active().id, "@mesh/test-theme:reload-theme");
 }
 
 #[test]
@@ -762,17 +774,20 @@ fn theme_file_recovery_syncs_mesh_theme_latest_state_and_components() {
     let _env_lock = settings_env_lock();
     let runtime = Runtime::new().unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let theme_dir = dir.path().join("themes");
-    fs::create_dir_all(&theme_dir).unwrap();
     let settings_path = dir.path().join("settings.json");
     fs::write(
         &settings_path,
         r#"{"shell":{"theme":{"active":"mesh-recovered-light"}}}"#,
     )
     .unwrap();
+    fs::write(dir.path().join("theme.css"), "{ malformed").unwrap();
     let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
-    let _theme_dir = EnvGuard::set("MESH_THEME_DIR", &theme_dir);
     let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph_with_theme_source(
+        dir.path(),
+        "mesh-recovered-light",
+        "theme.css",
+    ));
     let seen_events = Arc::new(Mutex::new(Vec::new()));
     shell
         .components
@@ -800,28 +815,33 @@ fn theme_file_recovery_syncs_mesh_theme_latest_state_and_components() {
         Some(&serde_json::json!(true))
     );
 
-    fs::write(
-        theme_dir.join("mesh-recovered-light.json"),
-        r#"{"id":"mesh-recovered-light","name":"Recovered Light","tokens":{}}"#,
-    )
-    .unwrap();
+    shell.theme_watch.modified_at = None;
+    shell.next_theme_reload_check = std::time::Instant::now();
     let requests = shell.reload_theme_if_changed().unwrap();
 
     assert!(requests.is_empty());
-    assert_eq!(shell.theme.active().id, "mesh-recovered-light");
+    assert_eq!(shell.theme.active().id, "tokyo-night");
+    assert_eq!(recorded_updates_for(&seen_events, "mesh.theme"), 1);
+
+    fs::write(
+        dir.path().join("theme.css"),
+        ":root { --color-surface: #FFFBFE; }",
+    )
+    .unwrap();
+    shell.next_theme_reload_check = std::time::Instant::now();
+    let requests = shell.reload_theme_if_changed().unwrap();
+
+    assert!(requests.is_empty());
     assert_eq!(
-        shell
-            .latest_service_state
-            .get("mesh.theme")
-            .and_then(|state| state.state.get("current")),
-        Some(&serde_json::json!("mesh-recovered-light"))
+        shell.theme.active().id,
+        "@mesh/test-theme:mesh-recovered-light"
     );
     assert_eq!(
         shell
             .latest_service_state
             .get("mesh.theme")
-            .and_then(|state| state.state.get("is_dark")),
-        Some(&serde_json::json!(false))
+            .and_then(|state| state.state.get("current")),
+        Some(&serde_json::json!("@mesh/test-theme:mesh-recovered-light"))
     );
 
     let events = seen_events.lock().unwrap();
@@ -836,9 +856,8 @@ fn theme_file_recovery_syncs_mesh_theme_latest_state_and_components() {
     let payload = updates.last().unwrap();
     assert_eq!(
         payload["current"],
-        serde_json::json!("mesh-recovered-light")
+        serde_json::json!("@mesh/test-theme:mesh-recovered-light")
     );
-    assert_eq!(payload["is_dark"], serde_json::json!(false));
 }
 
 /// `register_contract` discards compilation failures, so one bad field type in

@@ -745,7 +745,13 @@ pub(super) fn themed_primary(id: &str, primary_hex: &str) -> Theme {
 }
 
 pub(super) fn test_theme(id: &str) -> Theme {
-    mesh_core_theme::load_theme_from_path(&mesh_core_theme::theme_path_for_id(id))
+    let theme_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .join("modules/themes")
+        .join(id);
+    let source = mesh_core_theme::ThemeSourceHandle::new(theme_root, "theme.css")
+        .unwrap_or_else(|err| panic!("failed to describe test theme {id}: {err}"));
+    mesh_core_theme::load_theme_from_source(&source, id, id)
         .unwrap_or_else(|err| panic!("failed to load test theme {id}: {err}"))
 }
 

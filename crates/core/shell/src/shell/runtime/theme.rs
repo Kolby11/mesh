@@ -25,39 +25,29 @@ pub(in crate::shell) struct ControlPlaneSettingsCommit {
 }
 
 fn theme_source_fingerprint(shell: &Shell) -> Result<u64, mesh_core_theme::ThemeError> {
-    if let Some(graph) = shell.installed_module_graph.as_ref().filter(|graph| {
-        graph
-            .theme_catalog()
-            .get(&shell.settings.theme.active)
-            .is_some()
-    }) {
-        let descriptor = graph
-            .theme_catalog()
-            .get(&shell.settings.theme.active)
-            .expect("catalog presence checked");
-        let mode = selected_theme_mode(&shell.settings, descriptor)?;
-        let source = descriptor.mode(&mode).ok_or_else(|| {
-            mesh_core_theme::ThemeError::Composition(format!(
-                "theme '{}' has no mode '{mode}'",
-                descriptor.id
-            ))
+    let graph = shell.installed_module_graph.as_ref().ok_or_else(|| {
+        mesh_core_theme::ThemeError::NotFound(shell.settings.theme.active.clone())
+    })?;
+    let descriptor = graph
+        .theme_catalog()
+        .get(&shell.settings.theme.active)
+        .ok_or_else(|| {
+            mesh_core_theme::ThemeError::NotFound(shell.settings.theme.active.clone())
         })?;
-        source
-            .source
-            .fingerprint()
-            .map_err(|error| mesh_core_theme::ThemeError::Source {
-                path: source.source.candidate_path(),
-                message: error.to_string(),
-            })
-    } else {
-        let bytes = std::fs::read(&shell.theme_watch.path).map_err(|source| {
-            mesh_core_theme::ThemeError::Io {
-                path: shell.theme_watch.path.clone(),
-                source,
-            }
-        })?;
-        Ok(mesh_core_theme::fingerprint_bytes(&bytes))
-    }
+    let mode = selected_theme_mode(&shell.settings, descriptor)?;
+    let source = descriptor.mode(&mode).ok_or_else(|| {
+        mesh_core_theme::ThemeError::Composition(format!(
+            "theme '{}' has no mode '{mode}'",
+            descriptor.id
+        ))
+    })?;
+    source
+        .source
+        .fingerprint()
+        .map_err(|error| mesh_core_theme::ThemeError::Source {
+            path: source.source.candidate_path(),
+            message: error.to_string(),
+        })
 }
 
 fn theme_preview_palette(theme: &mesh_core_theme::Theme) -> serde_json::Value {
@@ -273,6 +263,16 @@ impl Shell {
         // the fingerprint makes this poll cheap and content-sensitive.
         self.next_theme_reload_check = now + THEME_RELOAD_POLL_INTERVAL;
 
+        let has_authorized_theme = self.installed_module_graph.as_ref().is_some_and(|graph| {
+            graph
+                .theme_catalog()
+                .get(&self.settings.theme.active)
+                .is_some()
+        });
+        if !has_authorized_theme {
+            return Ok(VecDeque::new());
+        }
+
         let fingerprint = match theme_source_fingerprint(self) {
             Ok(fingerprint) => fingerprint,
             Err(error) => {
@@ -307,36 +307,15 @@ impl Shell {
         }
 
         let old_theme_id = self.theme.active().id.clone();
-        let (mut theme, mut candidate_watch) = if let Some(graph) =
-            self.installed_module_graph.as_ref().filter(|graph| {
-                graph
-                    .theme_catalog()
-                    .get(&self.settings.theme.active)
-                    .is_some()
-            }) {
-            match prepare_theme_for_graph(&self.settings, graph) {
-                Ok(candidate) => candidate,
-                Err(error) => {
-                    self.record_theme_reload_failure(&error);
-                    return Ok(VecDeque::new());
-                }
-            }
-        } else {
-            match mesh_core_theme::load_theme_from_path(&self.theme_watch.path) {
-                Ok(theme) => (
-                    theme.clone(),
-                    ThemeWatchState {
-                        path: self.theme_watch.path.clone(),
-                        modified_at,
-                        fingerprint: Some(fingerprint),
-                        mode: None,
-                        revision: theme.revision(),
-                    },
-                ),
-                Err(error) => {
-                    self.record_theme_reload_failure(&error);
-                    return Ok(VecDeque::new());
-                }
+        let Some(graph) = self.installed_module_graph.as_ref() else {
+            return Ok(VecDeque::new());
+        };
+        let (mut theme, mut candidate_watch) = match prepare_theme_for_graph(&self.settings, graph)
+        {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                self.record_theme_reload_failure(&error);
+                return Ok(VecDeque::new());
             }
         };
         apply_font_family(&mut theme, self.settings.fonts.ui_family.as_deref());
@@ -758,23 +737,23 @@ impl Shell {
 
         let theme_changed = old_theme != new_settings.theme || old_fonts != new_settings.fonts;
         let prepared_theme = if theme_changed {
-            let (theme, theme_watch) = if let Some(graph) =
-                self.installed_module_graph.as_ref().filter(|graph| {
-                    graph
-                        .theme_catalog()
-                        .get(&new_settings.theme.active)
-                        .is_some()
-                }) {
-                match prepare_theme_for_graph(&new_settings, graph) {
-                    Ok((theme, watch)) => (self.theme.with_active(theme), watch),
-                    Err(error) => {
-                        self.record_theme_reload_failure(&error);
-                        return Ok(requests);
-                    }
+            let Some(graph) = self.installed_module_graph.as_ref().filter(|graph| {
+                graph
+                    .theme_catalog()
+                    .get(&new_settings.theme.active)
+                    .is_some()
+            }) else {
+                self.record_theme_reload_failure(&mesh_core_theme::ThemeError::NotFound(
+                    new_settings.theme.active.clone(),
+                ));
+                return Ok(requests);
+            };
+            let (theme, theme_watch) = match prepare_theme_for_graph(&new_settings, graph) {
+                Ok((theme, watch)) => (self.theme.with_active(theme), watch),
+                Err(error) => {
+                    self.record_theme_reload_failure(&error);
+                    return Ok(requests);
                 }
-            } else {
-                let (engine, watch) = load_active_theme(&new_settings);
-                (engine, watch)
             };
             let mut theme = theme;
             theme.update_active(|active| {

@@ -337,7 +337,8 @@ impl Shell {
             if let Some(graph) = self.installed_module_graph.as_ref() {
                 for descriptor in graph.theme_catalog().iter() {
                     let source = descriptor.default_source();
-                    match mesh_core_theme::load_theme_from_source(source) {
+                    let label = descriptor.label.as_deref().unwrap_or(&descriptor.local_id);
+                    match mesh_core_theme::load_theme_from_source(source, &descriptor.id, label) {
                         Ok(mut theme) => {
                             // The graph identity, not CSS metadata, is the
                             // activation identity. CSS labels remain content,
@@ -967,7 +968,11 @@ impl Shell {
 
     fn file_watch_paths(&self) -> Vec<PathBuf> {
         let mut paths = Vec::new();
-        let mut push_path = |path: PathBuf| paths.push(path);
+        let mut push_path = |path: PathBuf| {
+            if !path.as_os_str().is_empty() {
+                paths.push(path);
+            }
+        };
 
         let graph_path = self.installed_module_graph_path();
         push_path(graph_path.clone());

@@ -241,11 +241,7 @@ pub(super) fn graph_with_theme_source(
             }}
         }}"#
     );
-    // Loading a graph theme reads the `module.json` beside its stylesheet for
-    // the pack's declared identity, so the manifest has to exist on disk and
-    // not just in the in-memory graph.
     let manifest_path = module_root.join("module.json");
-    std::fs::write(&manifest_path, &module).unwrap();
     let loaded = LoadedModuleManifest {
         manifest: ModuleManifest::from_json_str(&module).unwrap(),
         path: manifest_path,

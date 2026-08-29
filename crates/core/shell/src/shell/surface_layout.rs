@@ -8,40 +8,24 @@ use mesh_core_config::ShellSettings;
 use mesh_core_module::package::{InstalledModuleGraph, ModuleKind};
 use mesh_core_theme::{
     Theme, ThemeDefaults, ThemeEngine, ThemeError, ThemeModule, ThemeModuleLayer, ThemeProvenance,
-    TokenValue, default_theme, fingerprint_bytes, load_theme_from_path, load_theme_from_source,
-    theme_path_for_id,
+    TokenValue, default_theme, load_theme_from_source,
 };
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use super::types::ThemeWatchState;
 
-pub(super) fn load_active_theme(settings: &ShellSettings) -> (ThemeEngine, ThemeWatchState) {
-    let theme_path = theme_path_for_id(&settings.theme.active);
-    let mut theme = match load_theme_from_path(&theme_path) {
-        Ok(theme) => theme,
-        Err(err) => {
-            tracing::warn!(
-                "failed to load requested theme '{}' from {}: {err}; using default theme",
-                settings.theme.active,
-                theme_path.display()
-            );
-            default_theme()
-        }
-    };
+pub(super) fn default_theme_state(settings: &ShellSettings) -> (ThemeEngine, ThemeWatchState) {
+    let mut theme = default_theme();
     apply_font_family(&mut theme, settings.fonts.ui_family.as_deref());
     let revision = theme.revision();
-    let modified_at = std::fs::metadata(&theme_path)
-        .ok()
-        .and_then(|metadata| metadata.modified().ok());
 
     (
         ThemeEngine::new(theme),
         ThemeWatchState {
-            path: theme_path.clone(),
-            modified_at,
-            fingerprint: std::fs::read(&theme_path)
-                .ok()
-                .map(|bytes| fingerprint_bytes(&bytes)),
+            path: PathBuf::new(),
+            modified_at: None,
+            fingerprint: None,
             mode: None,
             revision,
         },
@@ -60,7 +44,11 @@ pub(super) fn prepare_theme_for_graph(
     let mode_descriptor = descriptor.mode(&mode).ok_or_else(|| {
         ThemeError::Composition(format!("theme '{}' has no mode '{mode}'", descriptor.id))
     })?;
-    let pack = load_theme_from_source(&mode_descriptor.source)?;
+    let pack = load_theme_from_source(
+        &mode_descriptor.source,
+        &descriptor.id,
+        descriptor.label.as_deref().unwrap_or(&descriptor.local_id),
+    )?;
     let base = default_theme();
     let module_layers = graph
         .modules_by_kind(ModuleKind::Frontend)

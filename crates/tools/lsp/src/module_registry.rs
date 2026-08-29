@@ -2,7 +2,7 @@ use mesh_core_component::parse_luau_script;
 #[cfg(test)]
 use mesh_core_module::manifest::load_canonical_manifest;
 use mesh_core_module::manifest::{Manifest, ModuleType};
-use mesh_core_module::package::{AuthoringSnapshot, ModuleKind, ModuleManifestError};
+use mesh_core_module::package::{AuthoringSnapshot, ModuleManifestError};
 use mesh_core_resources::{
     ResourceAssetExplanation, ResourceExplanationSnapshot, ResourceMappingExplanation,
     ResourcePackExplanation,
@@ -43,9 +43,8 @@ pub struct ModuleRegistry {
     pub interface_contracts: HashMap<String, InterfaceContract>,
     /// Maps component tag name → module-id for modules that export a component tag.
     pub exported_tags: HashMap<String, String>,
-    /// Theme ids installed on this machine, from the theme directory
-    /// (`modules/themes` in a checkout, `$MESH_HOME/modules/themes` otherwise) plus any
-    /// theme modules in the graph. Sorted, deduplicated.
+    /// Theme identities from the graph-authorized theme descriptor catalog.
+    /// Sorted, deduplicated, with both scoped and unambiguous local ids.
     pub themes: Vec<String>,
     /// Locale codes some module ships a catalog for, plus the default locales
     /// modules declare. Sorted, deduplicated.
@@ -190,7 +189,7 @@ impl ModuleRegistry {
                 .or_insert(shape);
         }
 
-        registry.themes = discover_themes(workspace_root, snapshot);
+        registry.themes = discover_themes(snapshot);
         registry.locales = discover_locales(snapshot);
         registry.resource_snapshot = discover_resources(workspace_root, snapshot);
         registry
@@ -546,30 +545,11 @@ fn resource_diagnostic(
     }
 }
 
-/// Theme ids the shell could activate: the theme packages and legacy `*.json`
-/// themes in the theme directory, plus modules of kind `theme`.
-fn discover_themes(workspace_root: &Path, graph: &AuthoringSnapshot) -> Vec<String> {
-    let mut ids: Vec<String> =
-        mesh_core_theme::load_themes_from_dir(&mesh_core_theme::theme_dir_path())
-            .into_iter()
-            .map(|theme| theme.id)
-            .collect();
-
-    // A checkout being edited is not necessarily the checkout the LSP binary
-    // was built from, so look next to the workspace root as well.
-    ids.extend(
-        mesh_core_theme::load_themes_from_dir(&workspace_root.join("modules/themes"))
-            .into_iter()
-            .map(|theme| theme.id),
-    );
-
-    ids.extend(
-        graph
-            .modules()
-            .into_iter()
-            .filter(|module| module.kind == ModuleKind::Theme)
-            .map(|module| module.id.clone()),
-    );
+/// Theme ids the shell could activate, derived only from the graph-authorized
+/// descriptor catalog. Filesystem presence and module inventory are not
+/// activation identities.
+fn discover_themes(graph: &AuthoringSnapshot) -> Vec<String> {
+    let mut ids = Vec::new();
     for descriptor in graph.theme_catalog().iter() {
         ids.push(descriptor.id.clone());
         ids.push(descriptor.local_id.clone());

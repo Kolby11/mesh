@@ -131,7 +131,6 @@ the Wayland blur protocol carries regions but no per-surface kernel settings.
 | --- | --- |
 | `MESH_HOME` | Overrides the module/configuration home; the module loader requires an absolute path |
 | `MESH_SETTINGS_PATH` | Overrides the settings file path |
-| `MESH_THEME_DIR` | Overrides the theme directory |
 | `MESH_IPC_SOCKET` | Overrides the Unix IPC socket path |
 | `MESH_BACKEND` | Forces a presentation backend where supported |
 | `RUST_LOG` | Controls tracing filters through `tracing-subscriber` |

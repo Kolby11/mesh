@@ -1654,15 +1654,10 @@ impl Shell {
             || self.settings.fonts != settings.shell().fonts
             || self.font_registry.revision() != resources.font_registry.revision();
         let prepared_theme = if theme_changed {
-            if graph.theme_catalog().is_empty() {
-                let (engine, watch) = load_active_theme(settings.shell());
-                Some((engine.active().clone(), watch))
-            } else {
-                match prepare_theme_for_graph(settings.shell(), &graph) {
-                    Ok(prepared) => Some(prepared),
-                    Err(error) => {
-                        reject_candidate!(format!("candidate theme is invalid: {error}"));
-                    }
+            match prepare_theme_for_graph(settings.shell(), &graph) {
+                Ok(prepared) => Some(prepared),
+                Err(error) => {
+                    reject_candidate!(format!("candidate theme is invalid: {error}"));
                 }
             }
         } else {
@@ -2153,7 +2148,7 @@ impl Shell {
                 .prepared_theme
                 .clone()
                 .map(|(theme, watch)| (self.theme.with_active(theme), watch))
-                .unwrap_or_else(|| load_active_theme(&settings));
+                .unwrap_or_else(|| default_theme_state(&settings));
             let mut theme = theme;
             theme.update_active(|active| {
                 super::discovery::apply_font_registry_tokens(active, &self.font_registry);

@@ -8,10 +8,10 @@
 //! stops accepting stops being completed.
 //!
 //! What the runtime tables cannot supply is *which values exist on this
-//! machine*: the themes in `modules/themes`, the locales modules ship catalogs
-//! for, the installed icon packs. Those come from the module registry and are
-//! offered as suggestions rather than enforced, because discovery from the
-//! workspace can never see everything the shell can.
+//! machine*: the graph-authorized theme descriptors, the locales modules ship
+//! catalogs for, and the installed icon packs. Those come from the module
+//! registry and are offered as suggestions rather than enforced, because
+//! discovery from the workspace can never see everything the shell can.
 
 use tower_lsp::lsp_types::{CompletionItem, Diagnostic, Hover, Position, Url};
 

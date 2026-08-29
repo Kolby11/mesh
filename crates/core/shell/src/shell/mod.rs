@@ -65,7 +65,7 @@ use mesh_core_render::{DebugOverlay, PixelBuffer};
 use runtime::EffectScheduler;
 use sounds::{SoundKind, shell_sound_request};
 use surface_layout::{
-    apply_font_family, default_surface_visibility, load_active_theme, prepare_theme_for_graph,
+    apply_font_family, default_surface_visibility, default_theme_state, prepare_theme_for_graph,
     selected_theme_mode,
 };
 use types::{

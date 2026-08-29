@@ -35,7 +35,7 @@ use super::{
         service_name_from_interface,
     },
     shell_global_shortcut_request,
-    surface_layout::{load_active_theme, resolve_frontend_module_settings},
+    surface_layout::resolve_frontend_module_settings,
 };
 use mesh_core_debug::{
     ComponentInvalidationCounts, DisplayBatchBarrierSnapshot, ProfilingBackendStage,

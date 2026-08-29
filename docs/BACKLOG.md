@@ -109,12 +109,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Themes
 
-- [ ] Make graph-authorized theme descriptors the only catalog/loader, with
-      contained mode sources and one composed base/pack/module/user cascade.
-      Themes are now discoverable modules under `modules/themes`, but
-      `theme_dir_path`/`theme_path_for_id` still bootstrap the active theme by
-      scanning that directory directly instead of going through the graph.
-      [Audit](../.planning/log/sections/04-themes/improvements.md).
 - [ ] Make theme selection, profile switching, graph changes, and hot reload one
       durable prepare/commit transaction that preserves the last-known-good
       snapshot, refreshes watches/catalog state, and never exits on bad CSS.
