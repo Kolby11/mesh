@@ -107,9 +107,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Service contracts
 
-- [ ] Gate provider/profile commits on validated readiness and buffered initial
-      state; immediately deliver unavailability and reject all state/events/results
-      from stopped or obsolete provider generations.
 - [ ] Diff the complete compiled contract in consumer and provider directions,
       load external candidate contracts, align LSP/static analysis/codegen with
       the runtime ABI, and remove the unused transitional `ServiceRegistry`.
