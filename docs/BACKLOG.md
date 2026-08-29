@@ -111,9 +111,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Localization / i18n
 
-- [ ] Replace per-surface locale engines and the cross-module global key pool
-      with one graph-authorized immutable catalog snapshot, strict module/interface
-      scopes, provenance, and atomic last-known-good refresh. [Audit](../.planning/log/sections/05-localization-i18n/improvements.md).
 - [ ] Make locale selection a durable revisioned settings/profile transaction:
       normalize BCP 47, derive the full fallback chain and direction, apply each
       module's default terminally, and remove stale/per-component locale mutation.

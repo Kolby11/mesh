@@ -986,7 +986,8 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         "only the exact current theme should be highlighted: {theme_options:?}"
     );
 
-    let slovak_locale = mesh_core_locale::LocaleEngine::new("sk");
+    let mut slovak_locale = mesh_core_locale::LocaleEngine::from_snapshot(component.locale.clone());
+    slovak_locale.set_locale("sk");
     component.locale_changed(&slovak_locale).unwrap();
     component
         .paint(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)

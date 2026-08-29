@@ -25,7 +25,7 @@ pub(super) fn record_localized_miss(
         format!("i18n-missing:{}:{key}", resolution.owner_module_id),
         mesh_core_diagnostics::IssueSeverity::Warning,
         format!(
-            "{subject}: owner='{}' field_path='{field}' key='{key}' fallback='{}' source='{}' snapshot_revision={}",
+            "{subject}: module_id='{}' field_path='{field}' key='{key}' fallback='{}' source='{}' snapshot_revision={}",
             resolution.owner_module_id,
             resolution.fallback.as_deref().unwrap_or(""),
             resolution

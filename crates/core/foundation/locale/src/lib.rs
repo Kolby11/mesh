@@ -690,6 +690,256 @@ impl LocaleCatalogSnapshot {
     }
 }
 
+/// One immutable locale decision and its graph-authorized catalog snapshot.
+///
+/// Shell surfaces retain this value instead of owning a `LocaleEngine`. The
+/// engine is the coordinator's mutable preparation handle; this is the
+/// read-only value shared with every mounted surface and runtime consumer.
+#[derive(Debug, Clone)]
+pub struct LocaleSnapshot {
+    selection: LocaleSelection,
+    catalogs: Arc<LocaleCatalogSnapshot>,
+}
+
+impl LocaleSnapshot {
+    pub fn new(default_locale: impl Into<String>, fallback_locale: impl Into<String>) -> Self {
+        match Self::try_new(default_locale, fallback_locale) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                tracing::warn!(%error, "invalid locale snapshot selection; using en");
+                Self::try_new("en", "en").expect("the built-in en locale must be valid")
+            }
+        }
+    }
+
+    pub fn try_new(
+        default_locale: impl Into<String>,
+        fallback_locale: impl Into<String>,
+    ) -> Result<Self, LocaleError> {
+        Ok(Self {
+            selection: LocaleSelection::try_new(default_locale.into(), fallback_locale.into(), 1)?,
+            catalogs: Arc::new(LocaleCatalogSnapshot::default()),
+        })
+    }
+
+    pub fn selection(&self) -> &LocaleSelection {
+        &self.selection
+    }
+
+    pub fn current(&self) -> &str {
+        self.selection.active()
+    }
+
+    pub fn fallback_locale(&self) -> &str {
+        self.selection.fallback()
+    }
+
+    pub fn direction(&self) -> LocaleDirection {
+        self.selection.direction()
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.selection.revision()
+    }
+
+    pub fn catalog_snapshot(&self) -> Arc<LocaleCatalogSnapshot> {
+        Arc::clone(&self.catalogs)
+    }
+
+    pub fn module_translator(&self, module_id: &str) -> ModuleTranslator<'_> {
+        ModuleTranslator {
+            snapshot: self,
+            module_id: module_id.to_string(),
+        }
+    }
+
+    pub fn core_translator(&self) -> CoreTranslator<'_> {
+        CoreTranslator { snapshot: self }
+    }
+
+    fn translate_in_core(&self, key: &str) -> Option<&CatalogEntry> {
+        for locale in self.selection.chain() {
+            if let Some(messages) = self.catalogs.core.get(locale) {
+                if let Some(value) = messages.get(key) {
+                    return Some(value);
+                }
+            }
+        }
+        None
+    }
+
+    fn translate_in_module(&self, key: &str, module_id: &str) -> Option<&CatalogEntry> {
+        for locale in self.selection.chain() {
+            if let Some(value) = self.module_entry(module_id, locale, key, true) {
+                return Some(value);
+            }
+        }
+        if let Some(default_locale) = self.catalogs.module_defaults.get(module_id)
+            && !self
+                .selection
+                .chain()
+                .iter()
+                .any(|locale| locale == default_locale)
+            && let Some(value) = self.module_entry(module_id, default_locale, key, false)
+        {
+            return Some(value);
+        }
+        None
+    }
+
+    fn resolve_in_core<'a>(&'a self, key: &str, args: &HashMap<String, String>) -> Option<&'a str> {
+        for locale in self.selection.chain() {
+            if let Some(entry) = self.catalogs.core.get(locale).and_then(|m| m.get(key)) {
+                return entry.resolve(args, self.current());
+            }
+        }
+        None
+    }
+
+    fn resolve_in_module<'a>(
+        &'a self,
+        key: &str,
+        module_id: &str,
+        args: &HashMap<String, String>,
+    ) -> Option<&'a str> {
+        for locale in self.selection.chain() {
+            if let Some(entry) = self.module_entry(module_id, locale, key, true) {
+                return entry.resolve(args, self.current());
+            }
+        }
+        if let Some(default_locale) = self.catalogs.module_defaults.get(module_id)
+            && !self
+                .selection
+                .chain()
+                .iter()
+                .any(|locale| locale == default_locale)
+            && let Some(entry) = self.module_entry(module_id, default_locale, key, false)
+        {
+            return entry.resolve(args, self.current());
+        }
+        None
+    }
+
+    fn module_entry(
+        &self,
+        module_id: &str,
+        locale: &str,
+        key: &str,
+        include_language_packs: bool,
+    ) -> Option<&CatalogEntry> {
+        self.catalogs
+            .modules
+            .get(module_id)
+            .and_then(|module_locales| module_locales.get(locale))
+            .and_then(|layers| {
+                layers.iter().find_map(|layer| {
+                    if !include_language_packs
+                        && layer.source.kind == CatalogSourceKind::LanguagePack
+                    {
+                        return None;
+                    }
+                    layer.messages.get(key)
+                })
+            })
+    }
+
+    fn source_for_module(&self, key: &str, module_id: &str) -> Option<&CatalogProvenance> {
+        for locale in self.selection.chain() {
+            if let Some(source) = self.module_source(module_id, locale, key, true) {
+                return Some(source);
+            }
+        }
+        if let Some(default_locale) = self.catalogs.module_defaults.get(module_id)
+            && !self
+                .selection
+                .chain()
+                .iter()
+                .any(|locale| locale == default_locale)
+        {
+            return self.module_source(module_id, default_locale, key, false);
+        }
+        None
+    }
+
+    fn module_source(
+        &self,
+        module_id: &str,
+        locale: &str,
+        key: &str,
+        include_language_packs: bool,
+    ) -> Option<&CatalogProvenance> {
+        self.catalogs
+            .modules
+            .get(module_id)
+            .and_then(|module_locales| module_locales.get(locale))
+            .and_then(|layers| {
+                layers.iter().find_map(|layer| {
+                    if !include_language_packs
+                        && layer.source.kind == CatalogSourceKind::LanguagePack
+                    {
+                        return None;
+                    }
+                    layer.messages.contains_key(key).then_some(&layer.source)
+                })
+            })
+    }
+
+    fn effective_core_translations(&self) -> HashMap<String, String> {
+        let mut messages = HashMap::new();
+        for locale in self.selection.chain().iter().rev() {
+            if let Some(catalog) = self.catalogs.core.get(locale) {
+                messages.extend(catalog.iter().filter_map(|(key, entry)| {
+                    entry
+                        .default_text()
+                        .map(|value| (key.clone(), value.to_string()))
+                }));
+            }
+        }
+        messages
+    }
+
+    fn effective_module_translations(&self, module_id: &str) -> HashMap<String, String> {
+        let mut messages = HashMap::new();
+        for key in self.module_keys(module_id) {
+            if let Some(entry) = self.translate_in_module(&key, module_id)
+                && let Some(value) = entry.default_text()
+            {
+                messages.insert(key, value.to_string());
+            }
+        }
+        messages
+    }
+
+    fn effective_module_entries(&self, module_id: &str) -> HashMap<String, CatalogEntry> {
+        let mut messages = HashMap::new();
+        for key in self.module_keys(module_id) {
+            if let Some(entry) = self.translate_in_module(&key, module_id) {
+                messages.insert(key, entry.clone());
+            }
+        }
+        messages
+    }
+
+    fn module_keys(&self, module_id: &str) -> BTreeSet<String> {
+        self.catalogs
+            .modules
+            .get(module_id)
+            .into_iter()
+            .flat_map(|locales| locales.values())
+            .flat_map(|layers| layers.iter())
+            .flat_map(|layer| layer.messages.keys().cloned())
+            .collect()
+    }
+
+    pub fn source_for(&self, module_id: &str, key: &str) -> Option<&CatalogProvenance> {
+        self.source_for_module(key, module_id)
+    }
+
+    pub fn fallback_chain(&self) -> &[String] {
+        self.selection.chain()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PreparedLocaleCatalogSnapshot {
     snapshot: Arc<LocaleCatalogSnapshot>,
@@ -873,12 +1123,12 @@ fn plural_category(locale: &str, count: f64) -> &'static str {
 
 /// A lookup handle restricted to one module's catalogs.
 ///
-/// The handle deliberately borrows the engine so callers cannot accidentally
-/// retain a copied global pool. A new handle observes the engine's current
-/// locale chain and catalog contents immediately.
+/// The handle deliberately borrows the immutable snapshot so callers cannot
+/// accidentally retain a copied cross-module key pool. A new handle observes
+/// the snapshot's locale chain and catalog contents immediately.
 #[derive(Debug, Clone)]
 pub struct ModuleTranslator<'a> {
-    engine: &'a LocaleEngine,
+    snapshot: &'a LocaleSnapshot,
     module_id: String,
 }
 
@@ -888,21 +1138,23 @@ impl ModuleTranslator<'_> {
     }
 
     pub fn locale(&self) -> &str {
-        self.engine.current()
+        self.snapshot.current()
     }
 
     pub fn snapshot_revision(&self) -> u64 {
-        self.engine.catalog_snapshot().revision()
+        self.snapshot.catalog_snapshot().revision()
     }
 
     pub fn translate(&self, key: &str) -> Option<&str> {
-        self.engine
+        self.snapshot
             .translate_in_module(key, &self.module_id)
             .and_then(CatalogEntry::default_text)
     }
 
     pub fn translate_with(&self, key: &str, args: &HashMap<String, String>) -> Option<String> {
-        let template = self.engine.resolve_in_module(key, &self.module_id, args)?;
+        let template = self
+            .snapshot
+            .resolve_in_module(key, &self.module_id, args)?;
         interpolate(template, args)
     }
 
@@ -953,15 +1205,15 @@ impl ModuleTranslator<'_> {
     /// Copy the effective module catalog for a consumer that crosses an
     /// execution boundary, such as a Luau context.
     pub fn translations(&self) -> HashMap<String, String> {
-        self.engine.effective_module_translations(&self.module_id)
+        self.snapshot.effective_module_translations(&self.module_id)
     }
 
     pub fn entries(&self) -> HashMap<String, CatalogEntry> {
-        self.engine.effective_module_entries(&self.module_id)
+        self.snapshot.effective_module_entries(&self.module_id)
     }
 
     pub fn source(&self, key: &str) -> Option<&CatalogProvenance> {
-        self.engine.source_for_module(key, &self.module_id)
+        self.snapshot.source_for_module(key, &self.module_id)
     }
 }
 
@@ -969,30 +1221,29 @@ impl ModuleTranslator<'_> {
 /// in module lookup implicitly.
 #[derive(Debug, Clone, Copy)]
 pub struct CoreTranslator<'a> {
-    engine: &'a LocaleEngine,
+    snapshot: &'a LocaleSnapshot,
 }
 
 impl CoreTranslator<'_> {
     pub fn translate(&self, key: &str) -> Option<&str> {
-        self.engine
+        self.snapshot
             .translate_in_core(key)
             .and_then(CatalogEntry::default_text)
     }
 
     pub fn translate_with(&self, key: &str, args: &HashMap<String, String>) -> Option<String> {
-        let template = self.engine.resolve_in_core(key, args)?;
+        let template = self.snapshot.resolve_in_core(key, args)?;
         interpolate(template, args)
     }
 
     pub fn translations(&self) -> HashMap<String, String> {
-        self.engine.effective_core_translations()
+        self.snapshot.effective_core_translations()
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct LocaleEngine {
-    selection: LocaleSelection,
-    catalogs: Arc<LocaleCatalogSnapshot>,
+    snapshot: Arc<LocaleSnapshot>,
 }
 
 impl LocaleEngine {
@@ -1005,9 +1256,12 @@ impl LocaleEngine {
         fallback_locale: impl Into<String>,
     ) -> Result<Self, LocaleError> {
         Ok(Self {
-            selection: LocaleSelection::try_new(default_locale.into(), fallback_locale.into(), 1)?,
-            catalogs: Arc::new(LocaleCatalogSnapshot::default()),
+            snapshot: Arc::new(LocaleSnapshot::try_new(default_locale, fallback_locale)?),
         })
+    }
+
+    pub fn from_snapshot(snapshot: Arc<LocaleSnapshot>) -> Self {
+        Self { snapshot }
     }
 
     pub fn with_fallback_locale(
@@ -1025,35 +1279,41 @@ impl LocaleEngine {
     }
 
     pub fn selection(&self) -> &LocaleSelection {
-        &self.selection
+        self.snapshot.selection()
     }
 
     pub fn direction(&self) -> LocaleDirection {
-        self.selection.direction()
+        self.snapshot.direction()
     }
 
     pub fn revision(&self) -> u64 {
-        self.selection.revision()
+        self.snapshot.revision()
     }
 
     pub fn fallback_locale(&self) -> &str {
-        self.selection.fallback()
+        self.snapshot.fallback_locale()
+    }
+
+    pub fn snapshot(&self) -> Arc<LocaleSnapshot> {
+        Arc::clone(&self.snapshot)
     }
 
     /// Adopt an already validated selection while retaining loaded catalogs.
     pub fn replace_selection(&mut self, selection: &LocaleSelection) {
-        self.selection = selection.clone();
+        let snapshot = Arc::make_mut(&mut self.snapshot);
+        snapshot.selection = selection.clone();
     }
 
     pub fn catalog_snapshot(&self) -> Arc<LocaleCatalogSnapshot> {
-        Arc::clone(&self.catalogs)
+        self.snapshot.catalog_snapshot()
     }
 
     /// Replace the catalog pointer after a complete candidate has been
     /// prepared. Existing readers retaining the prior Arc keep last-known-good
     /// data until the replacement is committed.
     pub fn replace_catalog_snapshot(&mut self, snapshot: Arc<LocaleCatalogSnapshot>) {
-        self.catalogs = snapshot;
+        let current = Arc::make_mut(&mut self.snapshot);
+        current.catalogs = snapshot;
     }
 
     /// Prepare a complete replacement catalog without changing this engine.
@@ -1092,7 +1352,7 @@ impl LocaleEngine {
         module_defaults: &HashMap<String, String>,
     ) -> Result<PreparedLocaleCatalogSnapshot, LocaleCatalogLoadError> {
         let mut snapshot = LocaleCatalogSnapshot {
-            revision: self.catalogs.revision.saturating_add(1),
+            revision: self.catalog_snapshot().revision.saturating_add(1),
             core: HashMap::new(),
             modules: HashMap::new(),
             module_defaults: HashMap::new(),
@@ -1194,18 +1454,20 @@ impl LocaleEngine {
     pub fn try_set_locale(&mut self, locale: impl AsRef<str>) -> Result<bool, LocaleError> {
         let next = LocaleSelection::try_new(
             locale,
-            self.selection.fallback(),
-            self.selection.revision().saturating_add(1),
+            self.snapshot.fallback_locale(),
+            self.snapshot.revision().saturating_add(1),
         )?;
-        if next.active == self.selection.active && next.fallback == self.selection.fallback {
+        if next.active == self.snapshot.selection.active
+            && next.fallback == self.snapshot.selection.fallback
+        {
             return Ok(false);
         }
-        self.selection = next;
+        self.replace_selection(&next);
         Ok(true)
     }
 
     pub fn current(&self) -> &str {
-        self.selection.active()
+        self.snapshot.current()
     }
 
     pub fn set_locale(&mut self, locale: impl Into<String>) {
@@ -1217,7 +1479,8 @@ impl LocaleEngine {
     /// Load a catalog owned by the explicit core domain.
     pub fn load_core_translations(&mut self, set: TranslationSet) {
         let locale = catalog_locale(&set.locale);
-        let catalogs = Arc::make_mut(&mut self.catalogs);
+        let snapshot = Arc::make_mut(&mut self.snapshot);
+        let catalogs = Arc::make_mut(&mut snapshot.catalogs);
         catalogs.core.entry(locale).or_default().extend(
             set.messages
                 .into_iter()
@@ -1228,7 +1491,8 @@ impl LocaleEngine {
 
     pub fn load_core_catalog(&mut self, catalog: CompiledCatalog) {
         let locale = catalog_locale(&catalog.locale);
-        let catalogs = Arc::make_mut(&mut self.catalogs);
+        let snapshot = Arc::make_mut(&mut self.snapshot);
+        let catalogs = Arc::make_mut(&mut snapshot.catalogs);
         catalogs
             .core
             .entry(locale)
@@ -1238,21 +1502,19 @@ impl LocaleEngine {
     }
 
     pub fn module_translator(&self, module_id: &str) -> ModuleTranslator<'_> {
-        ModuleTranslator {
-            engine: self,
-            module_id: module_id.to_string(),
-        }
+        self.snapshot.module_translator(module_id)
     }
 
     pub fn core_translator(&self) -> CoreTranslator<'_> {
-        CoreTranslator { engine: self }
+        self.snapshot.core_translator()
     }
 
     /// Load a catalog owned by one module. It is never copied into the core
     /// domain, so one module cannot shadow another module's keys.
     pub fn load_module_translations(&mut self, module_id: &str, set: TranslationSet) {
         let locale = catalog_locale(&set.locale);
-        let catalogs = Arc::make_mut(&mut self.catalogs);
+        let snapshot = Arc::make_mut(&mut self.snapshot);
+        let catalogs = Arc::make_mut(&mut snapshot.catalogs);
         catalogs
             .modules
             .entry(module_id.to_string())
@@ -1279,7 +1541,8 @@ impl LocaleEngine {
 
     pub fn load_module_catalog(&mut self, module_id: &str, catalog: CompiledCatalog) {
         let locale = catalog_locale(&catalog.locale);
-        let catalogs = Arc::make_mut(&mut self.catalogs);
+        let snapshot = Arc::make_mut(&mut self.snapshot);
+        let catalogs = Arc::make_mut(&mut snapshot.catalogs);
         catalogs
             .modules
             .entry(module_id.to_string())
@@ -1300,186 +1563,12 @@ impl LocaleEngine {
         catalogs.revision = catalogs.revision.saturating_add(1);
     }
 
-    fn translate_in_core(&self, key: &str) -> Option<&CatalogEntry> {
-        for locale in self.selection.chain() {
-            if let Some(messages) = self.catalogs.core.get(locale) {
-                if let Some(value) = messages.get(key) {
-                    return Some(value);
-                }
-            }
-        }
-        None
-    }
-
-    fn translate_in_module(&self, key: &str, module_id: &str) -> Option<&CatalogEntry> {
-        for locale in self.selection.chain() {
-            if let Some(value) = self.module_entry(module_id, locale, key, true) {
-                return Some(value);
-            }
-        }
-        if let Some(default_locale) = self.catalogs.module_defaults.get(module_id)
-            && !self
-                .selection
-                .chain()
-                .iter()
-                .any(|locale| locale == default_locale)
-            && let Some(value) = self.module_entry(module_id, default_locale, key, false)
-        {
-            return Some(value);
-        }
-        None
-    }
-
-    fn resolve_in_core<'a>(&'a self, key: &str, args: &HashMap<String, String>) -> Option<&'a str> {
-        for locale in self.selection.chain() {
-            if let Some(entry) = self.catalogs.core.get(locale).and_then(|m| m.get(key)) {
-                return entry.resolve(args, self.current());
-            }
-        }
-        None
-    }
-
-    fn resolve_in_module<'a>(
-        &'a self,
-        key: &str,
-        module_id: &str,
-        args: &HashMap<String, String>,
-    ) -> Option<&'a str> {
-        for locale in self.selection.chain() {
-            if let Some(entry) = self.module_entry(module_id, locale, key, true) {
-                return entry.resolve(args, self.current());
-            }
-        }
-        if let Some(default_locale) = self.catalogs.module_defaults.get(module_id)
-            && !self
-                .selection
-                .chain()
-                .iter()
-                .any(|locale| locale == default_locale)
-            && let Some(entry) = self.module_entry(module_id, default_locale, key, false)
-        {
-            return entry.resolve(args, self.current());
-        }
-        None
-    }
-
-    fn module_entry(
-        &self,
-        module_id: &str,
-        locale: &str,
-        key: &str,
-        include_language_packs: bool,
-    ) -> Option<&CatalogEntry> {
-        self.catalogs
-            .modules
-            .get(module_id)
-            .and_then(|module_locales| module_locales.get(locale))
-            .and_then(|layers| {
-                layers.iter().find_map(|layer| {
-                    if !include_language_packs
-                        && layer.source.kind == CatalogSourceKind::LanguagePack
-                    {
-                        return None;
-                    }
-                    layer.messages.get(key)
-                })
-            })
-    }
-
-    fn source_for_module(&self, key: &str, module_id: &str) -> Option<&CatalogProvenance> {
-        for locale in self.selection.chain() {
-            if let Some(source) = self.module_source(module_id, locale, key, true) {
-                return Some(source);
-            }
-        }
-        if let Some(default_locale) = self.catalogs.module_defaults.get(module_id)
-            && !self
-                .selection
-                .chain()
-                .iter()
-                .any(|locale| locale == default_locale)
-        {
-            return self.module_source(module_id, default_locale, key, false);
-        }
-        None
-    }
-
-    fn module_source(
-        &self,
-        module_id: &str,
-        locale: &str,
-        key: &str,
-        include_language_packs: bool,
-    ) -> Option<&CatalogProvenance> {
-        self.catalogs
-            .modules
-            .get(module_id)
-            .and_then(|module_locales| module_locales.get(locale))
-            .and_then(|layers| {
-                layers.iter().find_map(|layer| {
-                    if !include_language_packs
-                        && layer.source.kind == CatalogSourceKind::LanguagePack
-                    {
-                        return None;
-                    }
-                    layer.messages.contains_key(key).then_some(&layer.source)
-                })
-            })
-    }
-
-    fn effective_core_translations(&self) -> HashMap<String, String> {
-        let mut messages = HashMap::new();
-        for locale in self.selection.chain().iter().rev() {
-            if let Some(catalog) = self.catalogs.core.get(locale) {
-                messages.extend(catalog.iter().filter_map(|(key, entry)| {
-                    entry
-                        .default_text()
-                        .map(|value| (key.clone(), value.to_string()))
-                }));
-            }
-        }
-        messages
-    }
-
-    fn effective_module_translations(&self, module_id: &str) -> HashMap<String, String> {
-        let mut messages = HashMap::new();
-        for key in self.module_keys(module_id) {
-            if let Some(entry) = self.translate_in_module(&key, module_id)
-                && let Some(value) = entry.default_text()
-            {
-                messages.insert(key, value.to_string());
-            }
-        }
-        messages
-    }
-
-    fn effective_module_entries(&self, module_id: &str) -> HashMap<String, CatalogEntry> {
-        let mut messages = HashMap::new();
-        for key in self.module_keys(module_id) {
-            if let Some(entry) = self.translate_in_module(&key, module_id) {
-                messages.insert(key, entry.clone());
-            }
-        }
-        messages
-    }
-
-    fn module_keys(&self, module_id: &str) -> BTreeSet<String> {
-        self.catalogs
-            .modules
-            .get(module_id)
-            .into_iter()
-            .flat_map(|locales| locales.values())
-            .flat_map(|layers| layers.iter())
-            .flat_map(|layer| layer.messages.keys().cloned())
-            .collect()
-    }
-
     pub fn source_for(&self, module_id: &str, key: &str) -> Option<&CatalogProvenance> {
-        self.source_for_module(key, module_id)
+        self.snapshot.source_for(module_id, key)
     }
 
     pub fn fallback_chain(&self) -> &[String] {
-        self.selection.chain()
+        self.snapshot.fallback_chain()
     }
 }
 
@@ -1969,6 +2058,36 @@ mod tests {
         assert_eq!(
             engine.module_translator("@mesh/example").translate("hello"),
             None
+        );
+    }
+
+    #[test]
+    fn locale_snapshots_are_shared_until_the_coordinator_replaces_one() {
+        let mut engine = LocaleEngine::new("en");
+        let first = engine.snapshot();
+        assert!(Arc::ptr_eq(&first, &engine.snapshot()));
+
+        let mut replacement = LocaleEngine::from_snapshot(Arc::clone(&first));
+        replacement.set_locale("sk");
+
+        assert_eq!(first.current(), "en");
+        assert_eq!(replacement.current(), "sk");
+        assert!(!Arc::ptr_eq(&first, &replacement.snapshot()));
+
+        engine.load_module_translations(
+            "@mesh/example",
+            TranslationSet {
+                locale: "en".into(),
+                messages: HashMap::from([(String::from("hello"), String::from("Hello"))]),
+            },
+        );
+        assert_eq!(
+            first.module_translator("@mesh/example").translate("hello"),
+            None
+        );
+        assert_eq!(
+            engine.module_translator("@mesh/example").translate("hello"),
+            Some("Hello")
         );
     }
 

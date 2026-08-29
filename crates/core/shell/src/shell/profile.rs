@@ -1597,7 +1597,7 @@ impl Shell {
             )
             .with_effective_capabilities(effective_capabilities.clone())
             .with_instance_id(instance_id)
-            .with_locale_catalog_snapshot(locale.catalog_snapshot());
+            .with_locale_snapshot(locale.snapshot());
             let diagnostics = self
                 .diagnostics
                 .register_instance(root.module.clone(), instance_id.clone());

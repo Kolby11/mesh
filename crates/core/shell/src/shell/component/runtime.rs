@@ -532,67 +532,6 @@ impl FrontendSurfaceComponent {
             .unwrap_or_else(|| Arc::new(Mutex::new(Vec::new())))
     }
 
-    pub(super) fn load_graph_i18n_catalogs(&mut self) {
-        if self.locale_catalog_is_shared || self.graph_i18n_catalogs.is_empty() {
-            return;
-        }
-        let mut candidate = mesh_core_locale::LocaleEngine::with_fallback_locale(
-            self.locale.current(),
-            self.locale.fallback_locale(),
-        );
-        candidate.replace_selection(self.locale.selection());
-        let mut rejected = false;
-        for (module_id, locale, path) in &self.graph_i18n_catalogs {
-            let Ok(content) = std::fs::read_to_string(path) else {
-                tracing::warn!(
-                    "module '{}': failed to read graph i18n catalog {}",
-                    self.id(),
-                    path.display()
-                );
-                rejected = true;
-                continue;
-            };
-            let value: serde_json::Value = match serde_json::from_str(&content) {
-                Ok(value) => value,
-                Err(_) => {
-                    tracing::warn!(
-                        "module '{}': failed to parse graph i18n catalog {}",
-                        self.id(),
-                        path.display()
-                    );
-                    rejected = true;
-                    continue;
-                }
-            };
-            let catalog = mesh_core_locale::compile_catalog(locale.clone(), &value);
-            for diagnostic in &catalog.diagnostics {
-                tracing::warn!(
-                    "module '{}': i18n catalog '{}' entry '{}': {}",
-                    self.id(),
-                    path.display(),
-                    diagnostic.key,
-                    diagnostic.message
-                );
-            }
-            tracing::debug!(
-                "module '{}': loaded {} graph translations for locale '{}'",
-                self.id(),
-                catalog.messages.len(),
-                locale
-            );
-            candidate.load_module_catalog(module_id, catalog);
-        }
-        if rejected {
-            tracing::warn!(
-                "module '{}': retaining last-known-good locale catalog snapshot",
-                self.id()
-            );
-        } else {
-            self.locale
-                .replace_catalog_snapshot(candidate.catalog_snapshot());
-        }
-    }
-
     pub(super) fn create_runtime_for_component(
         &self,
         instance_key: &str,

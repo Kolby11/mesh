@@ -61,7 +61,7 @@ use mesh_core_elements::{
     VariableStore, WidgetNode, WindowSurfaceState, element_snapshot_json,
 };
 use mesh_core_frontend::{CompiledFrontendModule, FrontendRenderMode, root_accessibility_role};
-use mesh_core_locale::LocaleEngine;
+use mesh_core_locale::{LocaleEngine, LocaleSnapshot};
 use mesh_core_scripting::{
     LocaleBoundState, OperationRegistry, PublishedEvent, ScriptContext, ScriptInterfaceImport,
     ScriptState, SurfaceVm,
@@ -757,7 +757,6 @@ pub(super) struct FrontendSurfaceComponent {
     /// components use their own entry rather than inheriting the host's
     /// capabilities.
     effective_capabilities: Arc<HashMap<String, EffectiveCapabilities>>,
-    graph_i18n_catalogs: Vec<(String, String, PathBuf)>,
     pub(super) visible: bool,
     surface_exiting: bool,
     surface_entering: bool,
@@ -942,11 +941,10 @@ pub(super) struct FrontendSurfaceComponent {
     window_states: WindowSurfaceState,
     last_painted_buffer_size: Option<(u32, u32)>,
     surface_pixels_invalid: bool,
-    locale: LocaleEngine,
-    /// Shell-created components share the coordinator's immutable catalog
-    /// snapshot. Standalone component fixtures keep their local source-backed
-    /// catalog for authoring and integration tests.
-    locale_catalog_is_shared: bool,
+    /// The immutable locale decision prepared by the shell's graph
+    /// coordinator. All component instances receive the same Arc for a
+    /// generation; surfaces never read or parse catalog files themselves.
+    locale: Arc<LocaleSnapshot>,
     interface_catalog: Arc<mesh_core_service::ResolvedServiceCatalog>,
     last_tree: Option<WidgetNode>,
     /// Immutable cross-phase hand-off produced after layout and semantic
@@ -1221,7 +1219,6 @@ impl FrontendSurfaceComponent {
             frontend_catalog_handle,
             frontend_catalog_version: frontend_catalog_state.version,
             effective_capabilities: Arc::new(HashMap::new()),
-            graph_i18n_catalogs: Vec::new(),
             visible: settings_state.layout.visible_on_start,
             surface_exiting: false,
             surface_entering: false,
@@ -1306,8 +1303,7 @@ impl FrontendSurfaceComponent {
             window_states: WindowSurfaceState::default(),
             last_painted_buffer_size: None,
             surface_pixels_invalid: true,
-            locale: LocaleEngine::new("en"),
-            locale_catalog_is_shared: false,
+            locale: Arc::new(LocaleSnapshot::new("en", "en")),
             interface_catalog: interface_catalog.into(),
             last_tree: None,
             last_frame_snapshot: None,
@@ -1483,22 +1479,16 @@ impl FrontendSurfaceComponent {
         self.last_frontend_frame = Some(frame);
     }
 
-    pub(super) fn with_graph_i18n_catalogs(
-        mut self,
-        graph_i18n_catalogs: Vec<(String, String, PathBuf)>,
-    ) -> Self {
-        self.graph_i18n_catalogs = graph_i18n_catalogs;
+    pub(super) fn with_locale_snapshot(mut self, snapshot: Arc<LocaleSnapshot>) -> Self {
+        self.locale = snapshot;
         self
     }
 
-    pub(super) fn with_locale_catalog_snapshot(
-        mut self,
-        snapshot: std::sync::Arc<mesh_core_locale::LocaleCatalogSnapshot>,
-    ) -> Self {
-        self.locale.replace_catalog_snapshot(snapshot);
-        self.locale_catalog_is_shared = true;
-        self.graph_i18n_catalogs.clear();
-        self
+    #[cfg(test)]
+    pub(super) fn update_test_locale(&mut self, update: impl FnOnce(&mut LocaleEngine)) {
+        let mut engine = LocaleEngine::from_snapshot(self.locale.clone());
+        update(&mut engine);
+        self.locale = engine.snapshot();
     }
 
     pub(super) fn invalidate(&mut self, flags: ComponentDirtyFlags) {

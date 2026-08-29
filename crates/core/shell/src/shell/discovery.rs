@@ -2294,7 +2294,7 @@ impl Shell {
         self.frontend_catalog.replace(frontend_catalog, None);
         let frontend_catalog = self.frontend_catalog.snapshot().catalog;
         let enabled_frontends = self.installed_enabled_frontend_ids();
-        let locale_catalog_snapshot = self.locale.catalog_snapshot();
+        let locale_snapshot = self.locale.snapshot();
         let interface_catalog = std::sync::Arc::new(self.interfaces.resolved_catalog());
         if let Some(profile_id) = self.active_profile_id.clone() {
             let paths = mesh_core_module::package::ProfilePaths::from_root_graph(
@@ -2324,7 +2324,7 @@ impl Shell {
                     )
                     .with_effective_capabilities(self.effective_capabilities.clone())
                     .with_instance_id(instance_id)
-                    .with_locale_catalog_snapshot(locale_catalog_snapshot.clone()),
+                    .with_locale_snapshot(locale_snapshot.clone()),
                 ));
             }
             return Ok(());
@@ -2339,7 +2339,7 @@ impl Shell {
                     self.settings_store.clone(),
                 )
                 .with_effective_capabilities(self.effective_capabilities.clone())
-                .with_locale_catalog_snapshot(locale_catalog_snapshot.clone()),
+                .with_locale_snapshot(locale_snapshot.clone()),
             ));
         }
 
@@ -2422,7 +2422,7 @@ impl Shell {
                 )
                 .with_effective_capabilities(self.effective_capabilities.clone())
                 .with_instance_id(&instance_id)
-                .with_locale_catalog_snapshot(locale.catalog_snapshot());
+                .with_locale_snapshot(locale.snapshot());
                 let diagnostics = self
                     .diagnostics
                     .register_instance(module_id.to_string(), instance_id.clone());

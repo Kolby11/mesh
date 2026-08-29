@@ -556,21 +556,23 @@ lua_label = this.keybinds.mute.label
 "#,
         manifest,
     );
-    component.locale.load_module_translations(
-        "@test/keybind-descriptor",
-        mesh_core_locale::TranslationSet {
-            locale: "sk".into(),
-            messages: HashMap::from([
-                ("keybind.mute.label".into(), "Stlmit".into()),
-                (
-                    "keybind.mute.description".into(),
-                    "Prepnúť zvukový výstup".into(),
-                ),
-                ("keybind.category.audio".into(), "Zvuk".into()),
-            ]),
-        },
-    );
-    component.locale.set_locale("sk");
+    component.update_test_locale(|locale| {
+        locale.load_module_translations(
+            "@test/keybind-descriptor",
+            mesh_core_locale::TranslationSet {
+                locale: "sk".into(),
+                messages: HashMap::from([
+                    ("keybind.mute.label".into(), "Stlmit".into()),
+                    (
+                        "keybind.mute.description".into(),
+                        "Prepnúť zvukový výstup".into(),
+                    ),
+                    ("keybind.category.audio".into(), "Zvuk".into()),
+                ]),
+            },
+        )
+    });
+    component.update_test_locale(|locale| locale.set_locale("sk"));
     component.runtimes.lock().unwrap().clear();
     component.init_root_runtime().unwrap();
 
@@ -620,7 +622,7 @@ lua_label = this.keybinds.mute.label
 "#,
         manifest,
     );
-    component.locale.set_locale("sk");
+    component.update_test_locale(|locale| locale.set_locale("sk"));
 
     let tree = component.build_tree(&default_theme(), 240, 160);
     let mut text = Vec::new();
@@ -672,7 +674,7 @@ end
 </script>
 "#,
     );
-    component.locale.set_locale("sk-SK");
+    component.update_test_locale(|locale| locale.set_locale("sk-SK"));
     component.compiled.manifest.keybinds.actions.insert(
         "accept".into(),
         mesh_core_module::KeybindAction {
@@ -733,7 +735,7 @@ end
 </script>
 "#,
     );
-    component.locale.set_locale("sk-SK");
+    component.update_test_locale(|locale| locale.set_locale("sk-SK"));
     component.compiled.manifest.keybinds.actions.insert(
         "accept".into(),
         mesh_core_module::KeybindAction {
@@ -780,7 +782,7 @@ end
 </script>
 "#,
     );
-    component.locale.set_locale("sk-SK");
+    component.update_test_locale(|locale| locale.set_locale("sk-SK"));
     component.compiled.manifest.keybinds.actions.insert(
         "accept".into(),
         mesh_core_module::KeybindAction {
@@ -1166,21 +1168,23 @@ fn keybind_debug_metadata_includes_resolved_manifest_text() {
 <script lang="luau"></script>
 "#,
     );
-    component.locale.load_module_translations(
-        "@test/reactive-surface",
-        mesh_core_locale::TranslationSet {
-            locale: "sk".into(),
-            messages: HashMap::from([
-                ("keybind.mute.label".into(), "Stlmit".into()),
-                (
-                    "keybind.mute.description".into(),
-                    "Prepnúť zvukový výstup".into(),
-                ),
-                ("keybind.category.audio".into(), "Zvuk".into()),
-            ]),
-        },
-    );
-    component.locale.set_locale("sk");
+    component.update_test_locale(|locale| {
+        locale.load_module_translations(
+            "@test/reactive-surface",
+            mesh_core_locale::TranslationSet {
+                locale: "sk".into(),
+                messages: HashMap::from([
+                    ("keybind.mute.label".into(), "Stlmit".into()),
+                    (
+                        "keybind.mute.description".into(),
+                        "Prepnúť zvukový výstup".into(),
+                    ),
+                    ("keybind.category.audio".into(), "Zvuk".into()),
+                ]),
+            },
+        )
+    });
+    component.update_test_locale(|locale| locale.set_locale("sk"));
     component.compiled.manifest.keybinds.actions.insert(
         "mute".into(),
         mesh_core_module::KeybindAction {
@@ -1240,7 +1244,7 @@ end
 </script>
 "#,
     );
-    component.locale.set_locale("sk");
+    component.update_test_locale(|locale| locale.set_locale("sk"));
     component.compiled.manifest.keybinds.actions.insert(
         "accept".into(),
         mesh_core_module::KeybindAction {
@@ -1286,7 +1290,7 @@ end
 </script>
 "#,
     );
-    component.locale.set_locale("sk");
+    component.update_test_locale(|locale| locale.set_locale("sk"));
     component.compiled.manifest.keybinds.actions.insert(
         "accept".into(),
         mesh_core_module::KeybindAction {

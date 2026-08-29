@@ -119,7 +119,6 @@ impl ShellComponent for FrontendSurfaceComponent {
             self.unmount_runtimes()?;
         }
         self.diagnostics = Some(ctx.diagnostics);
-        self.load_graph_i18n_catalogs();
         self.record_declared_missing_icon_diagnostics();
         if let Err(error) = self.init_root_runtime() {
             let message = self.record_frontend_runtime_issue(
@@ -1281,18 +1280,7 @@ impl ShellComponent for FrontendSurfaceComponent {
 
     fn locale_changed(&mut self, locale: &LocaleEngine) -> Result<(), ComponentError> {
         tracing::debug!("locale_changed for component '{}'", self.id());
-        if self.locale_catalog_is_shared {
-            self.locale
-                .replace_catalog_snapshot(locale.catalog_snapshot());
-        }
-        self.locale.replace_selection(locale.selection());
-        // Graph-owned module catalogs are kept on the component when the
-        // shell assembles a frontend graph. Replacing only the locale
-        // selection leaves those catalogs on the previous locale, so the
-        // already-mounted navigation controls keep their old tooltip text.
-        // Rebuild the graph snapshot before refreshing each runtime's
-        // translator cell.
-        self.load_graph_i18n_catalogs();
+        self.locale = locale.snapshot();
         // Component memo entries contain localized attributes and text. Their
         // locale key is useful for normal reuse, but clearing them here also
         // covers a catalog snapshot replacement that keeps the same locale.

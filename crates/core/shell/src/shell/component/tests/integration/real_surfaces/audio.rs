@@ -622,7 +622,8 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
         "tooltip lookup should inherit the button title when hovering the icon"
     );
 
-    let slovak_locale = mesh_core_locale::LocaleEngine::new("sk");
+    let mut slovak_locale = mesh_core_locale::LocaleEngine::from_snapshot(component.locale.clone());
+    slovak_locale.set_locale("sk");
     component.locale_changed(&slovak_locale).unwrap();
     component
         .paint(

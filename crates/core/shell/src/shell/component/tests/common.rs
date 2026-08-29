@@ -12,6 +12,7 @@ use mesh_core_elements::style::Display;
 use mesh_core_frontend::{
     CompiledFrontendModule, compile_frontend_entrypoint, compile_frontend_module,
 };
+use mesh_core_locale::LocaleEngine;
 use mesh_core_module::manifest::{
     CapabilitiesSection, CompatibilitySection, DependenciesSection, EntrypointsSection,
 };
@@ -1221,35 +1222,39 @@ pub(super) fn real_frontend_module_component(
         navigation_items,
     );
 
-    // Mirror the shell's graph i18n wiring so component `t(...)` calls resolve
-    // against each module's `config/i18n/<locale>.json`, including child
-    // components. Without this, `t("nav.volume_level")` would surface the raw
-    // key instead of the translated string. Built before the dirs are moved
-    // into the (compiled, module_dir) selection below.
-    let mut graph_i18n_catalogs: Vec<(String, String, PathBuf)> = Vec::new();
-    for (id, dir) in [
-        ("@mesh/navigation-bar", &navigation_dir),
-        ("@mesh/audio-popover", &audio_popover_dir),
-        ("@mesh/language-popover", &language_popover_dir),
-        ("@mesh/theme-selector", &theme_selector_dir),
-        ("@mesh/quick-settings", &quick_settings_dir),
-        ("@mesh/debug-inspector", &debug_inspector_dir),
-        ("@mesh/settings", &settings_dir),
+    // Build the same immutable graph-authorized catalog snapshot that the
+    // shell supplies to mounted surfaces. Test fixtures do not load a module
+    // graph, so these are the explicit catalog contributions for the shipped
+    // modules represented by this helper.
+    let mut locale = LocaleEngine::new("en");
+    let mut sources = Vec::new();
+    for (id, dir, locales) in [
+        ("@mesh/navigation-bar", &navigation_dir, &["en", "sk"][..]),
+        ("@mesh/audio-popover", &audio_popover_dir, &["en", "sk"]),
+        (
+            "@mesh/language-popover",
+            &language_popover_dir,
+            &["en", "sk"],
+        ),
+        ("@mesh/settings", &settings_dir, &["en", "sk"]),
     ] {
-        let i18n_dir = dir.join("config/i18n");
-        let Ok(entries) = std::fs::read_dir(&i18n_dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-                continue;
-            }
-            if let Some(locale) = path.file_stem().and_then(|stem| stem.to_str()) {
-                graph_i18n_catalogs.push((id.to_string(), locale.to_string(), path.clone()));
-            }
+        for catalog_locale in locales {
+            sources.push(
+                mesh_core_locale::CatalogSource::module_from_root(
+                    id,
+                    *catalog_locale,
+                    *catalog_locale,
+                    dir,
+                    format!("config/i18n/{catalog_locale}.json"),
+                )
+                .expect("shipped locale contribution should have a safe path"),
+            );
         }
     }
+    let prepared = locale
+        .prepare_catalog_snapshot_off_thread(sources, HashMap::new())
+        .expect("shipped locale contributions should compile");
+    locale.replace_catalog_snapshot(prepared.snapshot());
 
     let (compiled, module_dir) = if module_id == "@mesh/audio-popover" {
         (audio_popover_compiled, audio_popover_dir)
@@ -1274,7 +1279,7 @@ pub(super) fn real_frontend_module_component(
         interface_catalog,
         test_settings_store(),
     )
-    .with_graph_i18n_catalogs(graph_i18n_catalogs);
+    .with_locale_snapshot(locale.snapshot());
     component
         .mount(ComponentContext {
             component_id: module_id.into(),

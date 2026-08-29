@@ -811,7 +811,7 @@ fn navigation_shipped_i18n_covers_all_template_translation_keys() {
 fn navigation_shipped_keybind_metadata_resolves_from_i18n_catalogs() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
-    component.locale.set_locale("sk");
+    component.update_test_locale(|locale| locale.set_locale("sk"));
     component.runtimes.lock().unwrap().clear();
     component.init_root_runtime().unwrap();
 
