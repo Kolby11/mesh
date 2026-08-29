@@ -52,14 +52,19 @@ fn graph_diagnostics_report_optional_icon_missing_mapping() {
         vec![],
         MeshContributes::default(),
     );
-    icon_pack.manifest.mesh.icon_pack = Some(crate::manifest::IconPackSection {
-        id: "material".into(),
-        mappings: HashMap::from([(
-            "audio-volume-high".into(),
-            "material-symbols/volume_up".into(),
-        )]),
-        ..crate::manifest::IconPackSection::default()
-    });
+    icon_pack
+        .manifest
+        .mesh
+        .contributes
+        .icons
+        .push(IconContribution::Pack(crate::manifest::IconPackSection {
+            id: "material".into(),
+            mappings: HashMap::from([(
+                "audio-volume-high".into(),
+                "material-symbols/volume_up".into(),
+            )]),
+            ..crate::manifest::IconPackSection::default()
+        }));
 
     let graph = InstalledModuleGraph::from_parts(root, vec![frontend, icon_pack]).unwrap();
 
@@ -163,7 +168,7 @@ fn graph_diagnostics_report_duplicate_keybind_trigger() {
         vec![],
         MeshContributes::default(),
     );
-    mod_a.manifest.mesh.keybinds.actions.insert(
+    mod_a.manifest.mesh.contributes.keybinds.actions.insert(
         "toggle".into(),
         crate::manifest::KeybindAction {
             scope: crate::manifest::KeybindScope::Surface,
@@ -182,7 +187,7 @@ fn graph_diagnostics_report_duplicate_keybind_trigger() {
         vec![],
         MeshContributes::default(),
     );
-    mod_b.manifest.mesh.keybinds.actions.insert(
+    mod_b.manifest.mesh.contributes.keybinds.actions.insert(
         "open".into(),
         crate::manifest::KeybindAction {
             scope: crate::manifest::KeybindScope::Surface,
@@ -334,7 +339,7 @@ fn graph_diagnostics_report_keybind_subscription_contract_gaps() {
         MeshContributes::default(),
     );
     module.path = dir.join("module.json");
-    module.manifest.mesh.keybinds.actions.insert(
+    module.manifest.mesh.contributes.keybinds.actions.insert(
         "mute".into(),
         crate::manifest::KeybindAction {
             trigger: crate::manifest::KeybindTrigger {
@@ -422,7 +427,7 @@ fn graph_diagnostics_no_duplicate_keybind_for_unique_triggers() {
         vec![],
         MeshContributes::default(),
     );
-    mod_a.manifest.mesh.keybinds.actions.insert(
+    mod_a.manifest.mesh.contributes.keybinds.actions.insert(
         "toggle".into(),
         crate::manifest::KeybindAction {
             scope: crate::manifest::KeybindScope::Surface,
@@ -441,7 +446,7 @@ fn graph_diagnostics_no_duplicate_keybind_for_unique_triggers() {
         vec![],
         MeshContributes::default(),
     );
-    mod_b.manifest.mesh.keybinds.actions.insert(
+    mod_b.manifest.mesh.contributes.keybinds.actions.insert(
         "open".into(),
         crate::manifest::KeybindAction {
             scope: crate::manifest::KeybindScope::Surface,

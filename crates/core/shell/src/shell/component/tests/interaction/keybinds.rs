@@ -14,7 +14,7 @@ end
 </script>
 "#,
     );
-    // Surface shortcuts resolve from `mesh.keybinds` declarations; the legacy
+    // Surface shortcuts resolve from `mesh.contributes.keybinds` declarations; the legacy
     // `settings.keyboard.shortcuts` form is migration-only and no longer
     // dispatches (it only records a diagnostic).
     component.compiled.manifest.keybinds.actions.insert(
@@ -480,7 +480,7 @@ fn keyboard_shortcuts_manifest_declaration_wins_over_legacy_settings_same_id() {
     assert_keybind_diagnostic(
         &component,
         "mute",
-        "legacy settings shortcut is ignored because mesh.keybinds declares this action",
+        "legacy settings shortcut is ignored because mesh.contributes.keybinds declares this action",
     );
 }
 
@@ -509,7 +509,7 @@ fn keyboard_shortcuts_legacy_settings_only_declaration_is_migration_diagnostic()
     assert_keybind_diagnostic(
         &component,
         "mute",
-        "legacy settings shortcut declarations are migration-only; declare this action in mesh.keybinds",
+        "legacy settings shortcut declarations are migration-only; declare this action in mesh.contributes.keybinds",
     );
 }
 
@@ -646,7 +646,7 @@ lua_label = this.keybinds.mute.label
         "diagnostic should include module id: {message}"
     );
     assert!(
-        message.contains("field_path='mesh.keybinds.mute.label'"),
+        message.contains("field_path='mesh.contributes.keybinds.mute.label'"),
         "diagnostic should include field path: {message}"
     );
     assert!(

@@ -541,13 +541,13 @@ impl FrontendSurfaceComponent {
             {
                 self.record_keybind_diagnostic(
                     &legacy.keybind_id,
-                    "legacy settings shortcut is ignored because mesh.keybinds declares this action",
+                    "legacy settings shortcut is ignored because mesh.contributes.keybinds declares this action",
                 );
                 continue;
             }
             self.record_keybind_diagnostic(
                 &legacy.keybind_id,
-                "legacy settings shortcut declarations are migration-only; declare this action in mesh.keybinds",
+                "legacy settings shortcut declarations are migration-only; declare this action in mesh.contributes.keybinds",
             );
         }
         declarations.sort_by(|left, right| left.keybind_id.cmp(&right.keybind_id));
@@ -679,7 +679,7 @@ impl FrontendSurfaceComponent {
                     action.label.as_ref().map(|text| {
                         self.resolve_manifest_text(
                             &self.compiled.manifest.package.id,
-                            &format!("mesh.keybinds.{}.label", shortcut.keybind_id),
+                            &format!("mesh.contributes.keybinds.{}.label", shortcut.keybind_id),
                             text,
                         )
                     })
@@ -688,7 +688,10 @@ impl FrontendSurfaceComponent {
                     action.description.as_ref().map(|text| {
                         self.resolve_manifest_text(
                             &self.compiled.manifest.package.id,
-                            &format!("mesh.keybinds.{}.description", shortcut.keybind_id),
+                            &format!(
+                                "mesh.contributes.keybinds.{}.description",
+                                shortcut.keybind_id
+                            ),
                             text,
                         )
                     })
@@ -697,7 +700,7 @@ impl FrontendSurfaceComponent {
                     action.category.as_ref().map(|text| {
                         self.resolve_manifest_text(
                             &self.compiled.manifest.package.id,
-                            &format!("mesh.keybinds.{}.category", shortcut.keybind_id),
+                            &format!("mesh.contributes.keybinds.{}.category", shortcut.keybind_id),
                             text,
                         )
                     })

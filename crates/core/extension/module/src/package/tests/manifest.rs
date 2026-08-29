@@ -724,7 +724,7 @@ fn module_manifest_loader_warns_for_raw_dotted_keybind_label() {
     let dir = temp_dir("canonical-module-raw-keybind-label");
     fs::write(
         dir.join("module.json"),
-        r#"{"name":"@mesh/module","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","keybinds":{"mute":{"label":"keybind.mute.label","trigger":{"kind":"shortcut","key":"m"}}}}}"#,
+        r#"{"name":"@mesh/module","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","contributes":{"keybinds":{"mute":{"label":"keybind.mute.label","trigger":{"kind":"shortcut","key":"m"}}}}}}"#,
     )
     .unwrap();
 
@@ -740,7 +740,7 @@ fn module_manifest_loader_warns_for_raw_dotted_keybind_label() {
     assert_eq!(diagnostic.module_id.as_deref(), Some("@mesh/module"));
     assert_eq!(
         diagnostic.field_path.as_deref(),
-        Some("mesh.keybinds.mute.label")
+        Some("mesh.contributes.keybinds.mute.label")
     );
     assert!(
         diagnostic
@@ -759,7 +759,7 @@ fn module_manifest_loader_does_not_warn_for_literal_keybind_label() {
     let dir = temp_dir("canonical-module-literal-keybind-label");
     fs::write(
         dir.join("module.json"),
-        r#"{"name":"@mesh/module","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","keybinds":{"mute":{"label":"Mute","trigger":{"kind":"shortcut","key":"m"}}}}}"#,
+        r#"{"name":"@mesh/module","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","contributes":{"keybinds":{"mute":{"label":"Mute","trigger":{"kind":"shortcut","key":"m"}}}}}}"#,
     )
     .unwrap();
 
@@ -767,6 +767,37 @@ fn module_manifest_loader_does_not_warn_for_literal_keybind_label() {
 
     assert_eq!(loaded.source, ModuleManifestSource::CanonicalModuleJson);
     assert!(loaded.diagnostics.is_empty());
+}
+
+#[test]
+fn module_manifest_maps_unified_icon_contribution_to_runtime_pack() {
+    let content = r#"
+{
+  "name": "@mesh/icons-example",
+  "version": "1.0.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "icon-pack",
+    "contributes": {
+      "icons": [{
+        "id": "example",
+        "mappings": {"settings": "example/settings"}
+      }]
+    }
+  }
+}
+"#;
+
+    let manifest = ModuleManifest::from_json_str(content).unwrap();
+    assert!(matches!(
+        manifest.mesh.contributes.icons.first(),
+        Some(IconContribution::Pack(pack)) if pack.id == "example"
+    ));
+    let runtime = manifest.into_runtime_manifest();
+    assert_eq!(
+        runtime.icon_pack.as_ref().map(|pack| pack.id.as_str()),
+        Some("example")
+    );
 }
 
 #[test]

@@ -591,14 +591,7 @@ fn diagnose_frontend_source_contracts(
             .default_locale
             .as_deref()
             .unwrap_or("en");
-        let all_i18n: Vec<_> = module
-            .manifest
-            .mesh
-            .contributes
-            .i18n
-            .iter()
-            .chain(module.manifest.mesh.provides.i18n.iter())
-            .collect();
+        let all_i18n: Vec<_> = module.manifest.mesh.contributes.i18n.iter().collect();
         if !all_i18n.is_empty() {
             let contributed_locales = all_i18n
                 .iter()
@@ -617,8 +610,9 @@ fn diagnose_frontend_source_contracts(
                     });
                 }
             }
-            // Warn when mesh.i18n.supportedLocales is redundant with provides.i18n.
-            // Authors should declare catalogs once in provides.i18n and omit supportedLocales.
+            // Warn when mesh.i18n.supportedLocales is redundant with
+            // mesh.contributes.i18n. Authors should declare catalogs once in
+            // contributes.i18n and omit supportedLocales.
             if !module.manifest.mesh.i18n.supported_locales.is_empty() {
                 let declared: std::collections::HashSet<&str> = module
                     .manifest
@@ -634,7 +628,7 @@ fn diagnose_frontend_source_contracts(
                         contribution_id: Some(format!("{}:i18n:supported_locales", module.id)),
                         status: "redundant_supported_locales".into(),
                         message: format!(
-                            "module {} mesh.i18n.supportedLocales lists the same locales as provides.i18n; remove supportedLocales and declare catalogs once in provides.i18n",
+                            "module {} mesh.i18n.supportedLocales lists the same locales as mesh.contributes.i18n; remove supportedLocales and declare catalogs once in mesh.contributes.i18n",
                             module.id
                         ),
                     });
@@ -745,7 +739,7 @@ fn diagnose_frontend_source_contracts(
                         contribution_id: Some(format!("{}:keybind:{}", module.id, file_name)),
                         status: "undeclared_keybind_subscription".into(),
                         message: format!(
-                            "module {} subscribes to keybind action '{}' in {}, but mesh.keybinds does not declare it",
+                            "module {} subscribes to keybind action '{}' in {}, but mesh.contributes.keybinds does not declare it",
                             module.id, action_id, file_name
                         ),
                     });

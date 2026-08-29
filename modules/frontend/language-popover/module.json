@@ -39,7 +39,7 @@
       ]
     },
     "entry": "src/main.mesh",
-    "provides": {
+    "contributes": {
       "i18n": [
         {
           "id": "en",

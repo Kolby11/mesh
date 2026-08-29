@@ -1,6 +1,6 @@
 use super::super::{
-    ModuleKind, ModuleManifest, ModuleManifestError, PathContribution, ThemeModeMetadata,
-    contained_path, dependency_spec_to_string, validate_relative_path,
+    IconContribution, ModuleKind, ModuleManifest, ModuleManifestError, PathContribution,
+    ThemeModeMetadata, contained_path, dependency_spec_to_string, validate_relative_path,
 };
 use super::*;
 use crate::manifest;
@@ -192,11 +192,25 @@ impl ModuleContributionIndex {
                 mode_metadata: contribution.mode_metadata.clone(),
             });
         }
+        let mut indexed_icon_pack = false;
         for contribution in &manifest.mesh.contributes.icons {
-            self.icons.push(ContributedPathResource::from_contribution(
-                module,
-                contribution,
-            )?);
+            match contribution {
+                IconContribution::Path(contribution) => {
+                    self.icons.push(ContributedPathResource::from_contribution(
+                        module,
+                        contribution,
+                    )?);
+                }
+                IconContribution::Pack(icon_pack) => {
+                    indexed_icon_pack = true;
+                    self.icon_packs.push(ContributedIconPack {
+                        source: ContributionSource::new(module, &icon_pack.id),
+                        module_id: module_id.into(),
+                        id: icon_pack.id.clone(),
+                        mappings: icon_pack.mappings.clone(),
+                    });
+                }
+            }
         }
         for contribution in &manifest.mesh.contributes.fonts {
             self.fonts.push(ContributedPathResource::from_contribution(
@@ -249,7 +263,7 @@ impl ModuleContributionIndex {
                 settings_page: settings_page_entry(manifest),
             });
         }
-        for (action_id, action) in &manifest.mesh.keybinds.actions {
+        for (action_id, action) in &manifest.mesh.effective_keybinds().actions {
             self.keybinds.push(ContributedKeybindAction {
                 source: ContributionSource::new(module, action_id),
                 module_id: module_id.into(),
@@ -278,7 +292,7 @@ impl ModuleContributionIndex {
                 required: false,
             });
         }
-        if let Some(icon_pack) = &manifest.mesh.icon_pack {
+        if !indexed_icon_pack && let Some(icon_pack) = manifest.mesh.icon_pack() {
             self.icon_packs.push(ContributedIconPack {
                 source: ContributionSource::new(module, &icon_pack.id),
                 module_id: module_id.into(),

@@ -105,13 +105,6 @@ The 2026-06-18 redesign largely shipped: canonical `module.json` with
 `mesh.uses` / `mesh.provides` / `mesh.implements`, the graph as single source of
 truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
-- [ ] **Deferred — unify the four contribution schemas.** Theme, icons, i18n,
-      and keybinds under one `contributes` shape, only where they share honest
-      structure. Revisit after profiles land. Capability inference and a
-      parallel inline-interface path were both rejected: they trade conceptual
-      simplicity for typing simplicity, which is the failure mode that redesign
-      set out to avoid.
-
 ## Service contracts
 
 - [ ] Replace the additive interface registry with one immutable, atomic

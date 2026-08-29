@@ -5,46 +5,50 @@
   "mesh": {
     "apiVersion": "0.1",
     "kind": "icon-pack",
-    "icon_pack": {
-      "id": "default",
-      "axes": {
-        "fill": false,
-        "weight": false,
-        "grade": false,
-        "optical_size": false
-      },
-      "mappings": {
-        "settings": "hicolor/preferences-system",
-        "preferences-system": "hicolor/preferences-system",
-        "weather-clear": "hicolor/weather-clear",
-        "weather-clear-night": "hicolor/weather-clear-night",
-        "weather-few-clouds": "hicolor/weather-few-clouds",
-        "display-brightness-off": "hicolor/display-brightness-symbolic",
-        "display-brightness-low": "hicolor/display-brightness-symbolic",
-        "display-brightness-medium": "hicolor/display-brightness-symbolic",
-        "display-brightness-high": "hicolor/display-brightness-symbolic",
-        "audio-volume-muted": "hicolor/audio-volume-muted",
-        "audio-volume-low": "hicolor/audio-volume-low",
-        "audio-volume-medium": "hicolor/audio-volume-medium",
-        "audio-volume-high": "hicolor/audio-volume-high",
-        "battery-empty": "hicolor/battery-empty",
-        "battery-caution": "hicolor/battery-caution",
-        "battery-low": "hicolor/battery-low",
-        "battery-good": "hicolor/battery-good",
-        "battery-full": "hicolor/battery-full",
-        "language": "hicolor/preferences-desktop-locale",
-        "preferences-desktop-locale": "hicolor/preferences-desktop-locale",
-        "media-playback-start": "hicolor/media-playback-start",
-        "applications-graphics": "hicolor/applications-graphics",
-        "emblem-photos": "hicolor/emblem-photos",
-        "wifi": "hicolor/network-wireless",
-        "bluetooth": "hicolor/bluetooth",
-        "computer": "hicolor/computer",
-        "close": "hicolor/window-close",
-        "window-close": "hicolor/window-close",
-        "window-new": "hicolor/window-new",
-        "window-restore": "hicolor/view-restore"
-      }
+    "contributes": {
+      "icons": [
+        {
+          "id": "default",
+          "axes": {
+            "fill": false,
+            "weight": false,
+            "grade": false,
+            "optical_size": false
+          },
+          "mappings": {
+            "settings": "hicolor/preferences-system",
+            "preferences-system": "hicolor/preferences-system",
+            "weather-clear": "hicolor/weather-clear",
+            "weather-clear-night": "hicolor/weather-clear-night",
+            "weather-few-clouds": "hicolor/weather-few-clouds",
+            "display-brightness-off": "hicolor/display-brightness-symbolic",
+            "display-brightness-low": "hicolor/display-brightness-symbolic",
+            "display-brightness-medium": "hicolor/display-brightness-symbolic",
+            "display-brightness-high": "hicolor/display-brightness-symbolic",
+            "audio-volume-muted": "hicolor/audio-volume-muted",
+            "audio-volume-low": "hicolor/audio-volume-low",
+            "audio-volume-medium": "hicolor/audio-volume-medium",
+            "audio-volume-high": "hicolor/audio-volume-high",
+            "battery-empty": "hicolor/battery-empty",
+            "battery-caution": "hicolor/battery-caution",
+            "battery-low": "hicolor/battery-low",
+            "battery-good": "hicolor/battery-good",
+            "battery-full": "hicolor/battery-full",
+            "language": "hicolor/preferences-desktop-locale",
+            "preferences-desktop-locale": "hicolor/preferences-desktop-locale",
+            "media-playback-start": "hicolor/media-playback-start",
+            "applications-graphics": "hicolor/applications-graphics",
+            "emblem-photos": "hicolor/emblem-photos",
+            "wifi": "hicolor/network-wireless",
+            "bluetooth": "hicolor/bluetooth",
+            "computer": "hicolor/computer",
+            "close": "hicolor/window-close",
+            "window-close": "hicolor/window-close",
+            "window-new": "hicolor/window-new",
+            "window-restore": "hicolor/view-restore"
+          }
+        }
+      ]
     }
   }
 }

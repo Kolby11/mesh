@@ -485,11 +485,15 @@ impl KeybindsSection {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        self.validate_at("mesh.keybinds")
+    }
+
+    pub fn validate_at(&self, field_path: &str) -> Result<(), String> {
         for (action_id, action) in &self.actions {
             if action_id.trim().is_empty() {
-                return Err("mesh.keybinds cannot contain empty action ids".into());
+                return Err(format!("{field_path} cannot contain empty action ids"));
             }
-            action.validate(action_id)?;
+            action.validate(action_id, field_path)?;
         }
         Ok(())
     }
@@ -512,18 +516,23 @@ pub struct KeybindAction {
 }
 
 impl KeybindAction {
-    fn validate(&self, action_id: &str) -> Result<(), String> {
-        validate_optional_keybind_text(action_id, "label", self.label.as_ref())?;
-        validate_optional_keybind_text(action_id, "description", self.description.as_ref())?;
-        validate_optional_keybind_text(action_id, "category", self.category.as_ref())?;
-        self.trigger.validate(action_id)?;
+    fn validate(&self, action_id: &str, field_path: &str) -> Result<(), String> {
+        validate_optional_keybind_text(action_id, field_path, "label", self.label.as_ref())?;
+        validate_optional_keybind_text(
+            action_id,
+            field_path,
+            "description",
+            self.description.as_ref(),
+        )?;
+        validate_optional_keybind_text(action_id, field_path, "category", self.category.as_ref())?;
+        self.trigger.validate(action_id, field_path)?;
         for (locale, trigger) in &self.localized_triggers {
             if locale.trim().is_empty() {
                 return Err(format!(
-                    "mesh.keybinds.{action_id}.localized_triggers cannot contain empty locale ids"
+                    "{field_path}.{action_id}.localized_triggers cannot contain empty locale ids"
                 ));
             }
-            trigger.validate_modifiers(action_id)?;
+            trigger.validate_modifiers(action_id, field_path)?;
         }
         Ok(())
     }
@@ -544,11 +553,12 @@ impl Default for KeybindAction {
 
 fn validate_optional_keybind_text(
     action_id: &str,
+    field_path: &str,
     field: &str,
     value: Option<&LocalizedText>,
 ) -> Result<(), String> {
     if let Some(value) = value {
-        value.validate(&format!("mesh.keybinds.{action_id}.{field}"))?;
+        value.validate(&format!("{field_path}.{action_id}.{field}"))?;
     }
     Ok(())
 }
@@ -564,32 +574,32 @@ pub struct KeybindTrigger {
 }
 
 impl KeybindTrigger {
-    fn validate(&self, action_id: &str) -> Result<(), String> {
+    fn validate(&self, action_id: &str, field_path: &str) -> Result<(), String> {
         match self.kind {
             KeybindTriggerKind::Shortcut | KeybindTriggerKind::AccessKey => {
                 if self.key.as_ref().is_some_and(|key| key.trim().is_empty()) {
                     return Err(format!(
-                        "mesh.keybinds.{action_id}.trigger.key cannot be empty"
+                        "{field_path}.{action_id}.trigger.key cannot be empty"
                     ));
                 }
             }
         }
 
-        self.validate_modifiers(action_id)
+        self.validate_modifiers(action_id, field_path)
     }
 
-    fn validate_modifiers(&self, action_id: &str) -> Result<(), String> {
+    fn validate_modifiers(&self, action_id: &str, field_path: &str) -> Result<(), String> {
         for modifier in &self.modifiers {
             if modifier.trim().is_empty() {
                 return Err(format!(
-                    "mesh.keybinds.{action_id}.trigger.modifiers cannot contain empty values"
+                    "{field_path}.{action_id}.trigger.modifiers cannot contain empty values"
                 ));
             }
             match modifier.trim().to_ascii_lowercase().as_str() {
                 "ctrl" | "control" | "shift" | "alt" | "option" => {}
                 other => {
                     return Err(format!(
-                        "mesh.keybinds.{action_id}.trigger.modifiers contains unsupported modifier '{other}'"
+                        "{field_path}.{action_id}.trigger.modifiers contains unsupported modifier '{other}'"
                     ));
                 }
             }

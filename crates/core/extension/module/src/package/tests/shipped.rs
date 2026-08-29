@@ -22,7 +22,7 @@ fn shipped_navigation_manifest_uses_explicit_localized_keybind_text() {
         loaded.manifest.mesh.i18n.default_locale.as_deref(),
         Some("en")
     );
-    // supportedLocales removed from navigation-bar; locales declared once via provides.i18n
+    // supportedLocales removed from navigation-bar; locales are declared once via contributes.i18n
     assert!(loaded.manifest.mesh.i18n.supported_locales.is_empty());
     assert!(
         loaded
@@ -46,6 +46,7 @@ fn shipped_navigation_manifest_uses_explicit_localized_keybind_text() {
     let action = loaded
         .manifest
         .mesh
+        .contributes
         .keybinds
         .actions
         .get("mute")
@@ -421,7 +422,7 @@ fn shipped_module_luau_scan_cost() {
 }
 
 /// Every shipped theme is a discoverable module contributing through
-/// `mesh.provides.themes`. Themes that live outside a discovery root, or that
+/// `mesh.contributes.themes`. Themes that live outside a discovery root, or that
 /// declare the frontend-only `mesh.theme` section, never reach the graph's
 /// theme catalog, which leaves the settings surface offering only the theme
 /// that happens to be active.

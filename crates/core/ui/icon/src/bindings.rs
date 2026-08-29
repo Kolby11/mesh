@@ -19,7 +19,7 @@ pub struct IconPackBindings {
     pub mappings: HashMap<String, IconMapping>,
     /// Variable-font axes the underlying assets expose.
     pub axes: SupportedAxes,
-    /// Font aliases declared in `mesh.icon_pack.requires.fonts`.
+    /// Font aliases declared in `mesh.contributes.icons[].requires.fonts`.
     /// Keyed by alias; the right-hand `FontAsset` carries fontconfig
     /// family name, resolved font path, and an optional codepoints map path.
     pub font_aliases: HashMap<String, FontAsset>,

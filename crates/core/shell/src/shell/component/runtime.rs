@@ -2028,7 +2028,7 @@ impl FrontendSurfaceComponent {
                     "label",
                     self.resolve_manifest_text(
                         &manifest.package.id,
-                        &format!("mesh.keybinds.{keybind_id}.label"),
+                        &format!("mesh.contributes.keybinds.{keybind_id}.label"),
                         &label,
                     ),
                 );
@@ -2042,7 +2042,7 @@ impl FrontendSurfaceComponent {
                     "description",
                     self.resolve_manifest_text(
                         &manifest.package.id,
-                        &format!("mesh.keybinds.{keybind_id}.description"),
+                        &format!("mesh.contributes.keybinds.{keybind_id}.description"),
                         &description,
                     ),
                 );
@@ -2052,7 +2052,7 @@ impl FrontendSurfaceComponent {
                         "category",
                         self.resolve_manifest_text(
                             &manifest.package.id,
-                            &format!("mesh.keybinds.{keybind_id}.category"),
+                            &format!("mesh.contributes.keybinds.{keybind_id}.category"),
                             category,
                         ),
                     );

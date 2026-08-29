@@ -585,10 +585,10 @@ impl Shell {
                     message: format!("icon-pack {module_id} has no module root"),
                 }
             })?;
-            let section = module.manifest.mesh.icon_pack.clone().ok_or_else(|| {
+            let section = module.manifest.mesh.icon_pack().cloned().ok_or_else(|| {
                 ShellRunError::FrontendComposition {
                     message: format!(
-                        "icon-pack {module_id} is selected but has no mesh.icon_pack declaration"
+                        "icon-pack {module_id} is selected but has no mesh.contributes.icons declaration"
                     ),
                 }
             })?;

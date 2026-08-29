@@ -2011,9 +2011,9 @@ mod tests {
         assert_eq!(marker.snapshot_revision, 1);
         assert_eq!(
             marker
-                .with_field_path("mesh.keybinds.mute.label")
+                .with_field_path("mesh.contributes.keybinds.mute.label")
                 .field_path,
-            Some("mesh.keybinds.mute.label".into())
+            Some("mesh.contributes.keybinds.mute.label".into())
         );
     }
 

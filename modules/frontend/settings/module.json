@@ -91,7 +91,7 @@
       "appId": "mesh.settings",
       "visible_on_start": false
     },
-    "provides": {
+    "contributes": {
       "i18n": [
         {
           "id": "en",

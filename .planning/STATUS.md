@@ -37,7 +37,7 @@ at graph commit, frontend/backend activation, candidate failure, recovery,
 quarantine, and teardown boundaries. The module lock now uses schema v3 with
 validated versions, direct dependency requirements, reverse requesters,
 composition provenance, and rollback metadata rebuilt from restored manifests.
-The next open item is the deferred contribution-schema unification follow-up.
+The next open item is component-global isolation in the shared Lua realm.
 `aspect-ratio` is now part of the bounded style profile, and the shipped
 navigation bar derives its control sizing from the bar root through it rather
 than restating px sizes per component. That exposed the next surface item:

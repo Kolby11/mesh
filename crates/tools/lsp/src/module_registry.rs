@@ -394,7 +394,7 @@ fn discover_resources(
             ));
             continue;
         };
-        let Some(section) = module.manifest.mesh.icon_pack.as_ref() else {
+        let Some(section) = module.manifest.mesh.icon_pack() else {
             snapshot.diagnostics.push(resource_diagnostic(
                 "error",
                 "missing_icon_pack_section",

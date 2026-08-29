@@ -1785,11 +1785,13 @@ struct ThemePackageManifest {
 #[derive(Debug, Deserialize)]
 struct ThemePackageMesh {
     #[serde(default)]
-    provides: ThemePackageProvides,
+    contributes: ThemePackageContributes,
+    #[serde(default)]
+    provides: ThemePackageContributes,
 }
 
 #[derive(Debug, Default, Deserialize)]
-struct ThemePackageProvides {
+struct ThemePackageContributes {
     #[serde(default)]
     themes: Vec<ThemePackageTheme>,
 }
@@ -1842,10 +1844,14 @@ fn load_theme_package_metadata(path: &Path) -> Result<(String, String), ThemeErr
             source,
         })?;
 
-    // A theme module declares its packs under `mesh.provides.themes`. The
+    // A theme module declares its packs under `mesh.contributes.themes`. The
     // first entry owns this directory's stylesheet; the graph descriptor
     // remains the activation identity once it is available.
-    let contribution = manifest.mesh.provides.themes.into_iter().next();
+    let ThemePackageMesh {
+        contributes,
+        provides,
+    } = manifest.mesh;
+    let contribution = contributes.themes.into_iter().chain(provides.themes).next();
     let (declared_id, declared_label) = match contribution {
         Some(theme) => (theme.id, theme.label.map(ThemePackageLabel::text)),
         None => (None, None),

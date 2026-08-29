@@ -5,59 +5,63 @@
   "mesh": {
     "apiVersion": "0.1",
     "kind": "icon-pack",
-    "icon_pack": {
-      "id": "material-rounded",
-      "requires": {
-        "fonts": [
-          {
-            "alias": "ms",
-            "family": "Material Symbols Rounded",
-            "file": "assets/MaterialSymbolsRounded.ttf",
-            "version": ">=4.0",
-            "glyph_map": "codepoints.json"
+    "contributes": {
+      "icons": [
+        {
+          "id": "material-rounded",
+          "requires": {
+            "fonts": [
+              {
+                "alias": "ms",
+                "family": "Material Symbols Rounded",
+                "file": "assets/MaterialSymbolsRounded.ttf",
+                "version": ">=4.0",
+                "glyph_map": "codepoints.json"
+              }
+            ]
+          },
+          "axes": {
+            "fill": true,
+            "weight": true,
+            "grade": true,
+            "optical_size": true
+          },
+          "mappings": {
+            "settings": "ms/settings",
+            "preferences-system": "ms/settings",
+            "preferences-desktop-locale": "ms/language",
+            "audio-volume-muted": "ms/volume_off",
+            "audio-volume-low": "ms/volume_mute",
+            "audio-volume-medium": "ms/volume_down",
+            "audio-volume-high": "ms/volume_up",
+            "battery-empty": "ms/battery_0_bar",
+            "battery-caution": "ms/battery_alert",
+            "battery-low": "ms/battery_2_bar",
+            "battery-good": "ms/battery_4_bar",
+            "battery-full": "ms/battery_full",
+            "wifi": "ms/wifi",
+            "network-wireless": "ms/wifi",
+            "bluetooth": "ms/bluetooth",
+            "computer": "ms/computer",
+            "close": "ms/close",
+            "window-close": "ms/close",
+            "window-new": "ms/open_in_new",
+            "window-restore": "ms/close_fullscreen",
+            "language": "ms/language",
+            "weather-clear": "ms/wb_sunny",
+            "weather-clear-night": "ms/clear_night",
+            "weather-few-clouds": "ms/partly_cloudy_day",
+            "display-brightness-off": "ms/brightness_empty",
+            "display-brightness-low": "ms/brightness_low",
+            "display-brightness-medium": "ms/brightness_medium",
+            "display-brightness-high": "ms/brightness_high",
+            "media-playback-start": "ms/play_arrow",
+            "palette": "ms/palette",
+            "applications-graphics": "ms/palette",
+            "emblem-photos": "ms/photo_library"
           }
-        ]
-      },
-      "axes": {
-        "fill": true,
-        "weight": true,
-        "grade": true,
-        "optical_size": true
-      },
-      "mappings": {
-        "settings": "ms/settings",
-        "preferences-system": "ms/settings",
-        "preferences-desktop-locale": "ms/language",
-        "audio-volume-muted": "ms/volume_off",
-        "audio-volume-low": "ms/volume_mute",
-        "audio-volume-medium": "ms/volume_down",
-        "audio-volume-high": "ms/volume_up",
-        "battery-empty": "ms/battery_0_bar",
-        "battery-caution": "ms/battery_alert",
-        "battery-low": "ms/battery_2_bar",
-        "battery-good": "ms/battery_4_bar",
-        "battery-full": "ms/battery_full",
-        "wifi": "ms/wifi",
-        "network-wireless": "ms/wifi",
-        "bluetooth": "ms/bluetooth",
-        "computer": "ms/computer",
-        "close": "ms/close",
-        "window-close": "ms/close",
-        "window-new": "ms/open_in_new",
-        "window-restore": "ms/close_fullscreen",
-        "language": "ms/language",
-        "weather-clear": "ms/wb_sunny",
-        "weather-clear-night": "ms/clear_night",
-        "weather-few-clouds": "ms/partly_cloudy_day",
-        "display-brightness-off": "ms/brightness_empty",
-        "display-brightness-low": "ms/brightness_low",
-        "display-brightness-medium": "ms/brightness_medium",
-        "display-brightness-high": "ms/brightness_high",
-        "media-playback-start": "ms/play_arrow",
-        "palette": "ms/palette",
-        "applications-graphics": "ms/palette",
-        "emblem-photos": "ms/photo_library"
-      }
+        }
+      ]
     }
   }
 }

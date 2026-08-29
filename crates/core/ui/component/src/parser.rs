@@ -558,7 +558,7 @@ fn parse_top_level_blocks_impl(
             if !recover_unclosed {
                 return Err(ParseError::InvalidI18n {
                     message: format!(
-                        "inline catalogs are not supported; declare files in mesh.provides.i18n (line {})",
+                        "inline catalogs are not supported; declare files in mesh.contributes.i18n (line {})",
                         line_at(source, offset)
                     ),
                     span: SourceSpan::new(offset, close_end),
@@ -1226,7 +1226,7 @@ mod tests {
             parse_component("<template><box /></template>\n<i18n>{\"hello\": \"Hello\"}</i18n>")
                 .unwrap_err();
         assert!(matches!(error, ParseError::InvalidI18n { .. }));
-        assert!(error.to_string().contains("mesh.provides.i18n"));
+        assert!(error.to_string().contains("mesh.contributes.i18n"));
     }
 
     #[test]
@@ -1269,7 +1269,7 @@ mod tests {
             message.contains("line 4"),
             "unexpected source location: {message}"
         );
-        assert!(message.contains("mesh.provides.i18n"));
+        assert!(message.contains("mesh.contributes.i18n"));
     }
 
     #[test]

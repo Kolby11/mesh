@@ -67,7 +67,7 @@ pub struct IconRegistry {
     /// `<asset-pack>/<asset-name>` targets.
     config: IconConfig,
     /// Loaded icon-pack binding modules keyed by their short pack id
-    /// (`mesh.icon_pack.id`).
+    /// (`mesh.contributes.icons[].id`).
     icon_packs: HashMap<String, IconPackBindings>,
     /// Lookup index: full module id → short pack id.
     pack_id_by_module: HashMap<String, String>,

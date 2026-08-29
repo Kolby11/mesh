@@ -380,7 +380,9 @@ fn mesh_section() -> Node {
             field(
                 "provides",
                 false,
-                mesh_contributes("Resources this module provides (legacy alias of `contributes`)."),
+                mesh_contributes(
+                    "General graph contributions; legacy theme, icon, and i18n entries normalize into `contributes`.",
+                ),
             ),
             field(
                 "contributes",
@@ -966,7 +968,7 @@ fn mesh_contributes(doc: &'static str) -> Node {
             field(
                 "icons",
                 false,
-                path_contribution_array("Icon contributions."),
+                icon_contribution_array("Icon contributions."),
             ),
             field(
                 "fonts",
@@ -1004,7 +1006,57 @@ fn mesh_contributes(doc: &'static str) -> Node {
                     ))),
                 ),
             ),
+            field(
+                "keybinds",
+                false,
+                node(
+                    "Declarative keybind contributions, keyed by action id.",
+                    "object",
+                    Kind::Map(Box::new(keybind_node())),
+                ),
+            ),
         ],
+    )
+}
+
+fn icon_contribution_array(doc: &'static str) -> Node {
+    node(
+        doc,
+        "array",
+        Kind::Array(Box::new(obj(
+            "An icon-pack or path-based icon contribution.",
+            vec![
+                field("id", true, scalar("Icon contribution id.", "string")),
+                field(
+                    "path",
+                    false,
+                    scalar("Path to a legacy icon resource.", "path"),
+                ),
+                field("label", false, localized_text("Display label.")),
+                field("kind", false, scalar("Icon asset source kind.", "string")),
+                field(
+                    "covers",
+                    false,
+                    scalar("Vocabulary coverage constraints.", "object"),
+                ),
+                field(
+                    "requires",
+                    false,
+                    scalar("Required system assets.", "object"),
+                ),
+                field("axes", false, scalar("Variable icon axes.", "object")),
+                field(
+                    "mappings",
+                    false,
+                    scalar("Logical icon mappings.", "object"),
+                ),
+                field(
+                    "vocabularies",
+                    false,
+                    scalar("Namespaced icon mappings.", "object"),
+                ),
+            ],
+        ))),
     )
 }
 
@@ -1060,6 +1112,26 @@ fn keybind_node() -> Node {
                             string_array("Modifier keys.", "Modifier, e.g. `super`."),
                         ),
                     ],
+                ),
+            ),
+            field(
+                "localizedTriggers",
+                false,
+                node(
+                    "Locale-specific access-key defaults.",
+                    "object<string, trigger>",
+                    Kind::Map(Box::new(obj(
+                        "A localized keybind trigger.",
+                        vec![
+                            field("kind", false, scalar("Trigger kind.", "string")),
+                            field("key", false, scalar("Key.", "string")),
+                            field(
+                                "modifiers",
+                                false,
+                                string_array("Modifier keys.", "Modifier."),
+                            ),
+                        ],
+                    ))),
                 ),
             ),
         ],

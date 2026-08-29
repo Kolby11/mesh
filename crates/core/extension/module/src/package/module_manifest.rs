@@ -80,6 +80,8 @@ impl ModuleManifest {
     pub fn into_runtime_manifest(self) -> Manifest {
         let mut mesh = self.mesh;
         mesh.normalize();
+        let effective_keybinds = mesh.effective_keybinds().clone();
+        let icon_pack = mesh.icon_pack().cloned();
         let i18n = mesh
             .contributes
             .i18n
@@ -101,13 +103,14 @@ impl ModuleManifest {
                     default_mode: theme.default_mode.clone(),
                     extends: None,
                 });
-        let assets = mesh
-            .contributes
-            .icons
-            .first()
-            .map(|icons| manifest::AssetsSection {
+        let assets = mesh.contributes.icons.iter().find_map(|contribution| {
+            let IconContribution::Path(icons) = contribution else {
+                return None;
+            };
+            Some(manifest::AssetsSection {
                 icons: Some(manifest::IconAssets::Path(icons.path.clone())),
-            });
+            })
+        });
         let provides = mesh
             .implementations()
             .cloned()
@@ -165,7 +168,7 @@ impl ModuleManifest {
                 main: mesh.entrypoints.main,
             },
             accessibility: mesh.accessibility,
-            keybinds: mesh.keybinds,
+            keybinds: effective_keybinds,
             i18n,
             theme: manifest_theme,
             service: None,
@@ -178,7 +181,7 @@ impl ModuleManifest {
             extension_point_contributions: mesh.contributes.extension_points,
             assets,
             icons: mesh.icons,
-            icon_pack: mesh.icon_pack,
+            icon_pack,
             icon_requirements: mesh.icon_requirements,
             translations: HashMap::new(),
             surface_layout: mesh.surface_layout,
@@ -201,7 +204,9 @@ pub struct MeshModuleSection {
     pub i18n: MeshI18nSupport,
     #[serde(default)]
     pub entrypoints: MeshEntrypoints,
-    #[serde(default)]
+    /// Legacy location retained only so older module manifests can produce a
+    /// useful normalized `mesh.contributes.keybinds` value.
+    #[serde(default, skip_serializing)]
     pub keybinds: manifest::KeybindsSection,
     #[serde(default)]
     pub dependencies: MeshDependencies,
@@ -243,7 +248,9 @@ pub struct MeshModuleSection {
     pub icons: Option<manifest::IconsSection>,
     #[serde(default)]
     pub fonts: Option<manifest::FontsSection>,
-    #[serde(default)]
+    /// Normalized legacy location for `mesh.icon_pack`. Canonical manifests
+    /// declare icon packs in `mesh.contributes.icons`.
+    #[serde(default, skip_serializing)]
     pub icon_pack: Option<manifest::IconPackSection>,
     #[serde(default)]
     pub font_pack: Option<manifest::FontPackSection>,
@@ -365,6 +372,34 @@ impl MeshModuleSection {
             &self.uses.icon_requirements.optional,
         );
         self.contributes.merge_provides(&self.provides);
+        self.contributes
+            .merge_keybinds(std::mem::take(&mut self.keybinds));
+        if let Some(icon_pack) = self.icon_pack.take() {
+            self.contributes
+                .icons
+                .push(IconContribution::Pack(icon_pack));
+        }
+    }
+
+    pub fn effective_keybinds(&self) -> &manifest::KeybindsSection {
+        if self.contributes.keybinds.is_empty() {
+            &self.keybinds
+        } else {
+            &self.contributes.keybinds
+        }
+    }
+
+    pub fn icon_pack(&self) -> Option<&manifest::IconPackSection> {
+        self.contributes
+            .icons
+            .iter()
+            .find_map(|contribution| {
+                let IconContribution::Pack(pack) = contribution else {
+                    return None;
+                };
+                Some(pack)
+            })
+            .or(self.icon_pack.as_ref())
     }
 
     fn validate(&self) -> Result<(), ModuleManifestError> {
@@ -531,9 +566,9 @@ impl MeshModuleSection {
             }
             theme.validate().map_err(ModuleManifestError::Validation)?;
         }
-        if self.icon_pack.is_some() && self.kind != ModuleKind::IconPack {
+        if self.icon_pack().is_some() && self.kind != ModuleKind::IconPack {
             return Err(ModuleManifestError::Validation(
-                "mesh.icon_pack is only supported for icon-pack modules".into(),
+                "mesh.contributes.icons is only supported for icon-pack modules".into(),
             ));
         }
         if self.fonts.is_some()
@@ -609,7 +644,7 @@ impl MeshModuleSection {
         }
         if !self.contributes.icons.is_empty() && self.kind != ModuleKind::IconPack {
             return Err(ModuleManifestError::Validation(
-                "mesh.provides.icons is only supported for icon-pack modules".into(),
+                "mesh.contributes.icons is only supported for icon-pack modules".into(),
             ));
         }
         if !self.contributes.fonts.is_empty() && self.kind != ModuleKind::FontPack {
@@ -619,11 +654,15 @@ impl MeshModuleSection {
         }
         if !self.contributes.themes.is_empty() && self.kind != ModuleKind::Theme {
             return Err(ModuleManifestError::Validation(
-                "mesh.provides.themes is only supported for theme modules".into(),
+                "mesh.contributes.themes is only supported for theme modules".into(),
             ));
         }
         self.keybinds
             .validate()
+            .map_err(ModuleManifestError::Validation)?;
+        self.contributes
+            .keybinds
+            .validate_at("mesh.contributes.keybinds")
             .map_err(ModuleManifestError::Validation)?;
         for provided in self.implementations() {
             provided.validate()?;
@@ -670,7 +709,7 @@ impl MeshModuleSection {
     ) -> Vec<ModuleManifestDiagnostic> {
         let mut diagnostics = Vec::new();
 
-        for (action_id, action) in &self.keybinds.actions {
+        for (action_id, action) in &self.effective_keybinds().actions {
             for (field, value) in [
                 ("label", action.label.as_ref()),
                 ("description", action.description.as_ref()),
@@ -683,7 +722,7 @@ impl MeshModuleSection {
                     continue;
                 }
 
-                let field_path = format!("mesh.keybinds.{action_id}.{field}");
+                let field_path = format!("mesh.contributes.keybinds.{action_id}.{field}");
                 let key = value.fallback_text();
                 diagnostics.push(ModuleManifestDiagnostic::warning(
                     path,
@@ -721,7 +760,7 @@ impl MeshModuleSection {
             if !value.is_suspicious_raw_i18n_key() {
                 continue;
             }
-            let field_path = format!("mesh.provides.themes[{index}].label");
+            let field_path = format!("mesh.contributes.themes[{index}].label");
             let key = value.fallback_text();
             diagnostics.push(ModuleManifestDiagnostic::warning(
                 path,
@@ -735,6 +774,10 @@ impl MeshModuleSection {
             .contributes
             .icons
             .iter()
+            .filter_map(|contribution| match contribution {
+                IconContribution::Path(contribution) => Some(contribution),
+                IconContribution::Pack(_) => None,
+            })
             .chain(self.contributes.fonts.iter())
             .enumerate()
         {
@@ -1457,12 +1500,39 @@ impl MeshProvides {
             extension_points: self.extension_points.clone(),
             settings: self.settings.clone(),
             themes: self.themes.clone(),
-            icons: self.icons.clone(),
+            icons: self
+                .icons
+                .iter()
+                .cloned()
+                .map(IconContribution::Path)
+                .collect(),
             fonts: self.fonts.clone(),
             i18n: self.i18n.clone(),
             libraries: self.libraries.clone(),
+            keybinds: manifest::KeybindsSection::default(),
         }
         .validate()
+    }
+}
+
+/// Icon contributions intentionally accept two typed payloads. Path resources
+/// are the older generic asset contribution, while icon-pack modules contribute
+/// the richer semantic mapping record. Keeping them tagged by shape avoids
+/// pretending those payloads have the same contract while placing both under
+/// the canonical `mesh.contributes.icons` bucket.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum IconContribution {
+    Path(PathContribution),
+    Pack(manifest::IconPackSection),
+}
+
+impl IconContribution {
+    fn id(&self) -> &str {
+        match self {
+            Self::Path(contribution) => &contribution.id,
+            Self::Pack(contribution) => &contribution.id,
+        }
     }
 }
 
@@ -1477,13 +1547,15 @@ pub struct MeshContributes {
     #[serde(default)]
     pub themes: Vec<ThemeContribution>,
     #[serde(default)]
-    pub icons: Vec<PathContribution>,
+    pub icons: Vec<IconContribution>,
     #[serde(default)]
     pub fonts: Vec<PathContribution>,
     #[serde(default)]
     pub i18n: Vec<I18nContribution>,
     #[serde(default)]
     pub libraries: Vec<LibraryContribution>,
+    #[serde(default)]
+    pub keybinds: manifest::KeybindsSection,
 }
 
 impl MeshContributes {
@@ -1495,16 +1567,14 @@ impl MeshContributes {
                 .map(|contribution| contribution.id.as_str()),
         )?;
         validate_unique_contribution_ids(
-            "mesh.provides.themes",
+            "mesh.contributes.themes",
             self.themes
                 .iter()
                 .map(|contribution| contribution.id.as_str()),
         )?;
         validate_unique_contribution_ids(
-            "mesh.provides.icons",
-            self.icons
-                .iter()
-                .map(|contribution| contribution.id.as_str()),
+            "mesh.contributes.icons",
+            self.icons.iter().map(IconContribution::id),
         )?;
         validate_unique_contribution_ids(
             "mesh.provides.fonts",
@@ -1513,7 +1583,7 @@ impl MeshContributes {
                 .map(|contribution| contribution.id.as_str()),
         )?;
         validate_unique_contribution_ids(
-            "mesh.provides.i18n",
+            "mesh.contributes.i18n",
             self.i18n
                 .iter()
                 .map(|contribution| contribution.id.as_str()),
@@ -1559,7 +1629,14 @@ impl MeshContributes {
             }
         }
         for contribution in &self.icons {
-            validate_relative_path("icon contribution", &contribution.path)?;
+            match contribution {
+                IconContribution::Path(contribution) => {
+                    validate_relative_path("icon contribution", &contribution.path)?;
+                }
+                IconContribution::Pack(contribution) => {
+                    validate_icon_pack(contribution)?;
+                }
+            }
         }
         for contribution in &self.fonts {
             validate_relative_path("font contribution", &contribution.path)?;
@@ -1582,7 +1659,8 @@ impl MeshContributes {
                 .extend(contributions.iter().cloned());
         }
         self.themes.extend(provides.themes.iter().cloned());
-        self.icons.extend(provides.icons.iter().cloned());
+        self.icons
+            .extend(provides.icons.iter().cloned().map(IconContribution::Path));
         self.fonts.extend(provides.fonts.iter().cloned());
         self.i18n.extend(provides.i18n.iter().cloned());
         self.libraries.extend(provides.libraries.iter().cloned());
@@ -1590,6 +1668,35 @@ impl MeshContributes {
             self.settings = provides.settings.clone();
         }
     }
+
+    fn merge_keybinds(&mut self, keybinds: manifest::KeybindsSection) {
+        for (action_id, action) in keybinds.actions {
+            self.keybinds.actions.entry(action_id).or_insert(action);
+        }
+    }
+}
+
+fn validate_icon_pack(pack: &manifest::IconPackSection) -> Result<(), ModuleManifestError> {
+    if pack.id.trim().is_empty() {
+        return Err(ModuleManifestError::Validation(
+            "mesh.contributes.icons[].id cannot be empty".into(),
+        ));
+    }
+    for name in pack.mappings.keys() {
+        if name.trim().is_empty() {
+            return Err(ModuleManifestError::Validation(
+                "mesh.contributes.icons[].mappings cannot contain empty names".into(),
+            ));
+        }
+    }
+    for vocabulary in pack.vocabularies.keys() {
+        if vocabulary.trim().is_empty() {
+            return Err(ModuleManifestError::Validation(
+                "mesh.contributes.icons[].vocabularies cannot contain empty names".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_unique_contribution_ids<'a>(

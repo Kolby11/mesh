@@ -5,7 +5,7 @@
   "mesh": {
     "apiVersion": "0.1",
     "kind": "theme",
-    "provides": {
+    "contributes": {
       "themes": [
         {
           "id": "gruvbox-dark",

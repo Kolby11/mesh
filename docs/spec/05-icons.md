@@ -92,25 +92,27 @@ spellings are deleted.
   "name": "@mesh/icons-material",
   "version": "1.0.0",
   "mesh": { "apiVersion": "0.1", "kind": "icon-pack" },
-  "icon_pack": {
-    "id": "material",
-    "kind": "font",
-    "covers": { "@mesh/audio-interface": ">=1.0", "mesh.shell": ">=1.0" },
-    "requires": { "fonts": [{
-      "alias": "material-symbols",
-      "family": "Material Symbols Rounded",
-      "file": "assets/MaterialSymbolsRounded.ttf",
-      "version": ">=4.0"
-    }] },
-    "axes": { "fill": true, "weight": true, "grade": true, "optical_size": true },
-    "mappings": {
-      "settings":           "material-symbols/settings_rounded",
-      "audio-volume-high":  "material-symbols/volume_up",
-      "audio-volume-muted": "material-symbols/volume_off"
-    },
-    "vocabularies": {
-      "@community/weather": { "weather-clear": "material-symbols/sunny" }
-    }
+  "contributes": {
+    "icons": [{
+      "id": "material",
+      "kind": "font",
+      "covers": { "@mesh/audio-interface": ">=1.0", "mesh.shell": ">=1.0" },
+      "requires": { "fonts": [{
+        "alias": "material-symbols",
+        "family": "Material Symbols Rounded",
+        "file": "assets/MaterialSymbolsRounded.ttf",
+        "version": ">=4.0"
+      }] },
+      "axes": { "fill": true, "weight": true, "grade": true, "optical_size": true },
+      "mappings": {
+        "settings":           "material-symbols/settings_rounded",
+        "audio-volume-high":  "material-symbols/volume_up",
+        "audio-volume-muted": "material-symbols/volume_off"
+      },
+      "vocabularies": {
+        "@community/weather": { "weather-clear": "material-symbols/sunny" }
+      }
+    }]
   }
 }
 ```

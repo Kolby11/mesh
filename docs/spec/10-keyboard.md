@@ -30,7 +30,7 @@ surface** (`keyboard_mode` + runtime focus transfers, shell-owned).
   cannot be stolen: user overrides that would shadow them are ignored with a
   diagnostic.
 
-## 2. Keybind actions (`mesh.keybinds`)
+## 2. Keybind actions (`mesh.contributes.keybinds`)
 
 **Status: shipped.**
 
@@ -38,13 +38,15 @@ Focused-surface keybinds are **semantic actions**, not global hotkeys.
 Modules declare actions; controls subscribe; users remap.
 
 ```json
-"keybinds": {
-  "mute": {
-    "label":       { "t": "keybind.mute.label", "fallback": "Mute audio" },
-    "description": { "t": "keybind.mute.description", "fallback": "Toggle audio mute" },
-    "category":    { "t": "keybind.category.audio", "fallback": "Audio" },
-    "trigger":     { "kind": "shortcut", "key": "m" },
-    "localizedTriggers": { "sk": { "kind": "access_key", "key": "u" } }
+"contributes": {
+  "keybinds": {
+    "mute": {
+      "label":       { "t": "keybind.mute.label", "fallback": "Mute audio" },
+      "description": { "t": "keybind.mute.description", "fallback": "Toggle audio mute" },
+      "category":    { "t": "keybind.category.audio", "fallback": "Audio" },
+      "trigger":     { "kind": "shortcut", "key": "m" },
+      "localizedTriggers": { "sk": { "kind": "access_key", "key": "u" } }
+    }
   }
 }
 ```
@@ -122,4 +124,4 @@ category, current effective binding, conflicts) and writes
 clients; compositor-global hotkeys belong to the compositor. Keybinds here
 are focused-surface scoped by design. If a global-hotkey story arrives, it
 will be a separate capability-gated contract, not an extension of
-`mesh.keybinds` semantics.
+`mesh.contributes.keybinds` semantics.

@@ -232,11 +232,11 @@ pub(crate) fn prepare_icon_pack_bindings_with_cancellation(
     }
     if section.id.trim().is_empty() {
         tracing::warn!(
-            "module {} declares mesh.icon_pack but icon_pack.id is empty; skipping",
+            "module {} declares mesh.contributes.icons but the icon-pack id is empty; skipping",
             module_id
         );
         return Err(format!(
-            "module {} declares mesh.icon_pack with an empty id",
+            "module {} declares mesh.contributes.icons with an empty icon-pack id",
             module_id
         ));
     }

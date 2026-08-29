@@ -40,7 +40,7 @@ model the renderer uses.
   "mesh": {
     "apiVersion": "0.1",
     "kind": "theme",
-    "provides": {
+    "contributes": {
       "themes": [{
         "id": "alice", "label": "Alice", "default_mode": "dark",
         "modes": { "dark": "themes/dark/theme.css", "light": "themes/light/theme.css" }

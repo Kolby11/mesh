@@ -204,7 +204,7 @@ fn lookup_xdg_icon_in_pack(pack: &IconPackRoot, asset_name: &str, size: u32) -> 
 
 /// Look up a glyph codepoint by name from a font pack's codepoints file.
 /// Used by the binding resolver when a mapping target points at a font
-/// alias declared in `mesh.icon_pack.requires.fonts`.
+/// alias declared in `mesh.contributes.icons[].requires.fonts`.
 pub fn lookup_glyph_codepoint(glyph_map_path: &Path, glyph_name: &str) -> Option<u32> {
     lookup_codepoint(glyph_map_path, glyph_name)
 }

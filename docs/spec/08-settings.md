@@ -148,7 +148,7 @@ the service contract explicitly declares another scope.
 | Surface placement | `mesh.surface` in the manifest | `<module>.surface.*` |
 | Per-module icon chain/overrides | `mesh.uses.resources.icons` + `mesh.icons` | `<module>.icons.*` |
 | Host/runtime knobs | host prop declarations | `shell.*` |
-| Keybinds | `mesh.keybinds` triggers | `shell.keyboard.surface_shortcuts` |
+| Keybinds | `mesh.contributes.keybinds` triggers | `shell.keyboard.surface_shortcuts` |
 
 ### 2.1 Blur quality (`shell.render.blur`)
 

@@ -27,7 +27,7 @@ replacement debt, never public synonyms.
 | extension point | Named, versioned UI contract: a region one module hosts and other modules fill (§4.3). |
 | composition | Installable module selecting roots, providers, resources, and slot arrangement (§5.2). |
 | provider | Backend module implementation of an interface. |
-| contribution | Something a module adds to the installed graph (`mesh.provides.*`). |
+| contribution | Something a module adds to the installed graph (`mesh.provides.*` or `mesh.contributes.*`). |
 | dependency | Something a module needs (`mesh.uses.*`). |
 | capability | Host power granted to a module (`shell.surface`, `exec.wpctl`, …). |
 | resource pack | Module kind contributing semantic-name → asset mappings. |
@@ -81,18 +81,20 @@ identity and release metadata (`name`, `version`, `description`, `license`,
       "iconRequirements": { "required": ["audio-volume-muted", "audio-volume-high"] }
     },
     "provides": {
-      "layout": [{ "id": "main", "entrypoint": "src/main.mesh", "label": "Volume Panel" }],
-      "i18n": [{ "id": "en", "locale": "en", "path": "config/i18n/en.json" }]
+      "layout": [{ "id": "main", "entrypoint": "src/main.mesh", "label": "Volume Panel" }]
+    },
+    "contributes": {
+      "i18n": [{ "id": "en", "locale": "en", "path": "config/i18n/en.json" }],
+      "keybinds": {
+        "mute": {
+          "label": { "t": "keybind.mute.label", "fallback": "Mute audio" },
+          "trigger": { "kind": "shortcut", "key": "m" }
+        }
+      }
     },
     "surface": { "anchor": "top", "exclusive_zone": 56 },
     "accessibility": { "role": "toolbar" },
-    "i18n": { "defaultLocale": "en", "supportedLocales": ["en"] },
-    "keybinds": {
-      "mute": {
-        "label": { "t": "keybind.mute.label", "fallback": "Mute audio" },
-        "trigger": { "kind": "shortcut", "key": "m" }
-      }
-    }
+    "i18n": { "defaultLocale": "en", "supportedLocales": ["en"] }
   }
 }
 ```
@@ -107,8 +109,10 @@ Rules:
   deps (`interfaces` / `optionalInterfaces`), resource-pack deps
   (`resources.icons/fonts/themes/i18n`), host capabilities, runtime binaries,
   icon requirements.
-- `mesh.provides` holds everything the module *contributes*: layout entries,
-  i18n catalogs, libraries, themes, fonts, icons.
+- `mesh.provides` holds general graph contributions such as layout entries,
+  settings, extension points, libraries, and fonts. The shared typed envelope
+  for theme packs, icon packs, i18n catalogs, and keybind actions is
+  `mesh.contributes`; each bucket keeps its domain-specific payload.
 - `mesh.implements` is only for backend provider records.
 - The validator keeps buckets strict: module/resource deps are `@scope/name`
   ids; interface deps are dotted contract names (`mesh.audio`); capabilities
@@ -122,9 +126,10 @@ Rules:
 **Status: target.**
 
 Core `mesh` fields (`kind`, `entry`, `uses`, `implements`, `surface`,
-`accessibility`, `keybinds`, `i18n`, `theme`, pack sections) are a **closed
-schema**: unknown core fields and near-miss typos produce diagnostics.
-`mesh.provides.*` and `mesh.uses.resources.*` are **open namespaces**: unknown
+`accessibility`, `i18n`, `theme`, pack sections, and the typed
+`contributes` buckets) are a **closed schema**: unknown core fields and
+near-miss typos produce diagnostics. `mesh.provides.*` and
+`mesh.uses.resources.*` are **open namespaces**: unknown
 contribution kinds are preserved in the installed graph as typed opaque records
 so third-party tools/modules can define new contribution kinds without a core
 release. Superseded manifest sections in code (`ServiceSection`,
@@ -135,16 +140,16 @@ generations in `model.rs`) are deleted outright.
 
 | Kind | Purpose | Kind-scoped sections |
 | ---- | ------- | -------------------- |
-| `frontend` | `.mesh` UI surfaces/widgets for a shell feature | `mesh.surface` (placement), `mesh.accessibility`, `mesh.keybinds`, `mesh.theme` |
+| `frontend` | `.mesh` UI surfaces/widgets for a shell feature | `mesh.surface` (placement), `mesh.accessibility`, `mesh.contributes.keybinds`, `mesh.theme` |
 | `backend` | Provider implementing interfaces (Luau `main.luau`) | `mesh.implements`, `mesh.uses.binaries`, in-script `props {}` |
 | `interface` | Data-only contract package | `mesh.interface` |
 | `component` | Embeddable `.mesh` component; **no** `mesh.surface`; consumed via `require("@scope/name")` | — |
 | `composition` | An installable shell composition: roots, provider bindings, resources, extension point arrangement | `mesh.compose`, `mesh.extends` |
 | `library` | Importable Luau helpers; grants no capabilities | `mesh.provides.libraries` |
-| `theme` | Theme tokens + component defaults (CSS) | `mesh.provides.themes` — see [04](04-styling.md) |
-| `icon-pack` | Semantic icon name → asset mappings | `mesh.icon_pack` — see [05](05-icons.md) |
+| `theme` | Theme tokens + component defaults (CSS) | `mesh.contributes.themes` — see [04](04-styling.md) |
+| `icon-pack` | Semantic icon name → asset mappings | `mesh.contributes.icons` — see [05](05-icons.md) |
 | `font-pack` | Font role → installed family mappings | `mesh.font_pack` — see [06](06-fonts.md) |
-| `language-pack` | Translation catalogs for other modules | `mesh.provides.i18n` — see [07](07-i18n.md) |
+| `language-pack` | Translation catalogs for other modules | `mesh.contributes.i18n` — see [07](07-i18n.md) |
 
 ### 3.3 Surface placement (`mesh.surface`)
 

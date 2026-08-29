@@ -852,11 +852,11 @@ fn installed_module_graph_indexes_theme_icon_font_i18n_contributions() {
         ..MeshContributes::default()
     };
     let icon_contributes = MeshContributes {
-        icons: vec![PathContribution {
+        icons: vec![IconContribution::Path(PathContribution {
             id: "material".into(),
             path: "icons".into(),
             label: None,
-        }],
+        })],
         ..MeshContributes::default()
     };
     let font_contributes = MeshContributes {
@@ -998,11 +998,11 @@ fn installed_module_graph_rejects_library_path_escape() {
 #[test]
 fn installed_module_graph_rejects_contribution_path_escape() {
     let contributes = MeshContributes {
-        icons: vec![PathContribution {
+        icons: vec![IconContribution::Path(PathContribution {
             id: "bad".into(),
             path: "../outside.json".into(),
             label: None,
-        }],
+        })],
         ..MeshContributes::default()
     };
     let root = root_with_modules(&[("@mesh/icons", ModuleKind::IconPack)], &[], None);

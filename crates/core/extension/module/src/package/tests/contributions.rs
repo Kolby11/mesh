@@ -11,27 +11,32 @@ fn contribution_index_records_source_metadata_and_scoped_ids() {
             MeshDependencies::default(),
             vec![],
             MeshContributes {
-                icons: vec![PathContribution {
+                icons: vec![IconContribution::Path(PathContribution {
                     id: "shared".into(),
                     path: "icons".into(),
                     label: None,
-                }],
+                })],
                 ..MeshContributes::default()
             },
         );
-        module.manifest.mesh.icon_pack = Some(crate::manifest::IconPackSection {
-            id: module_id
-                .rsplit('/')
-                .next()
-                .unwrap_or(module_id)
-                .trim_start_matches("icons-")
-                .into(),
-            mappings: HashMap::from([(
-                "audio-volume-high".into(),
-                format!("{module_id}/audio-volume-high").into(),
-            )]),
-            ..crate::manifest::IconPackSection::default()
-        });
+        module
+            .manifest
+            .mesh
+            .contributes
+            .icons
+            .push(IconContribution::Pack(crate::manifest::IconPackSection {
+                id: module_id
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(module_id)
+                    .trim_start_matches("icons-")
+                    .into(),
+                mappings: HashMap::from([(
+                    "audio-volume-high".into(),
+                    format!("{module_id}/audio-volume-high").into(),
+                )]),
+                ..crate::manifest::IconPackSection::default()
+            }));
         module
     };
     let root = root_with_modules(
@@ -115,7 +120,7 @@ fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_r
         }],
     );
     declare_frontend_surface_contract(&mut frontend);
-    frontend.manifest.mesh.keybinds.actions.insert(
+    frontend.manifest.mesh.contributes.keybinds.actions.insert(
         "mute".into(),
         crate::manifest::KeybindAction {
             label: Some(crate::manifest::LocalizedText::Literal("Mute".to_string())),
@@ -145,14 +150,19 @@ fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_r
         vec![],
         MeshContributes::default(),
     );
-    icon_pack.manifest.mesh.icon_pack = Some(crate::manifest::IconPackSection {
-        id: "material".into(),
-        mappings: HashMap::from([(
-            "audio-volume-high".into(),
-            "material-symbols/volume_up".into(),
-        )]),
-        ..crate::manifest::IconPackSection::default()
-    });
+    icon_pack
+        .manifest
+        .mesh
+        .contributes
+        .icons
+        .push(IconContribution::Pack(crate::manifest::IconPackSection {
+            id: "material".into(),
+            mappings: HashMap::from([(
+                "audio-volume-high".into(),
+                "material-symbols/volume_up".into(),
+            )]),
+            ..crate::manifest::IconPackSection::default()
+        }));
 
     let backend = loaded_module(
         "@mesh/example-backend",
@@ -254,7 +264,7 @@ fn contribution_index_preserves_keybind_localized_text() {
         vec![],
         MeshContributes::default(),
     );
-    frontend.manifest.mesh.keybinds.actions.insert(
+    frontend.manifest.mesh.contributes.keybinds.actions.insert(
         "mute".into(),
         crate::manifest::KeybindAction {
             label: Some(crate::manifest::LocalizedText::Translation {
@@ -455,14 +465,19 @@ fn contribution_index_reports_resource_and_settings_compatibility_diagnostics() 
         vec![],
         MeshContributes::default(),
     );
-    icon_pack.manifest.mesh.icon_pack = Some(crate::manifest::IconPackSection {
-        id: "material".into(),
-        mappings: HashMap::from([(
-            "available-semantic-icon".into(),
-            "material-symbols/check".into(),
-        )]),
-        ..crate::manifest::IconPackSection::default()
-    });
+    icon_pack
+        .manifest
+        .mesh
+        .contributes
+        .icons
+        .push(IconContribution::Pack(crate::manifest::IconPackSection {
+            id: "material".into(),
+            mappings: HashMap::from([(
+                "available-semantic-icon".into(),
+                "material-symbols/check".into(),
+            )]),
+            ..crate::manifest::IconPackSection::default()
+        }));
     let root = root_with_modules(
         &[
             ("@mesh/example-widget", ModuleKind::Frontend),
@@ -667,11 +682,16 @@ fn manifest_driven_extension_graph_indexes_provider_library_resource_and_fronten
         vec![],
         MeshContributes::default(),
     );
-    icon_pack.manifest.mesh.icon_pack = Some(crate::manifest::IconPackSection {
-        id: "material".into(),
-        mappings: HashMap::from([("example-action".into(), "material-symbols/check".into())]),
-        ..crate::manifest::IconPackSection::default()
-    });
+    icon_pack
+        .manifest
+        .mesh
+        .contributes
+        .icons
+        .push(IconContribution::Pack(crate::manifest::IconPackSection {
+            id: "material".into(),
+            mappings: HashMap::from([("example-action".into(), "material-symbols/check".into())]),
+            ..crate::manifest::IconPackSection::default()
+        }));
     let font_pack = loaded_module(
         "@mesh/example-fonts",
         ModuleKind::FontPack,

@@ -75,25 +75,39 @@
       ]
     },
     "entry": "src/main.mesh",
-    "keybinds": {
-      "mute": {
-        "label": {
-          "t": "keybind.mute.label",
-          "fallback": "Mute audio"
-        },
-        "description": {
-          "t": "keybind.mute.description",
-          "fallback": "Toggle audio mute"
-        },
-        "category": {
-          "t": "keybind.category.audio",
-          "fallback": "Audio"
-        },
-        "trigger": {
-          "kind": "shortcut",
-          "key": "m"
+    "contributes": {
+      "keybinds": {
+        "mute": {
+          "label": {
+            "t": "keybind.mute.label",
+            "fallback": "Mute audio"
+          },
+          "description": {
+            "t": "keybind.mute.description",
+            "fallback": "Toggle audio mute"
+          },
+          "category": {
+            "t": "keybind.category.audio",
+            "fallback": "Audio"
+          },
+          "trigger": {
+            "kind": "shortcut",
+            "key": "m"
+          }
         }
-      }
+      },
+      "i18n": [
+        {
+          "id": "en",
+          "locale": "en",
+          "path": "config/i18n/en.json"
+        },
+        {
+          "id": "sk",
+          "locale": "sk",
+          "path": "config/i18n/sk.json"
+        }
+      ]
     },
     "surface": {
       "anchor": "top",
@@ -110,18 +124,6 @@
       "blur": true
     },
     "provides": {
-      "i18n": [
-        {
-          "id": "en",
-          "locale": "en",
-          "path": "config/i18n/en.json"
-        },
-        {
-          "id": "sk",
-          "locale": "sk",
-          "path": "config/i18n/sk.json"
-        }
-      ],
       "layout": [
         {
           "id": "main",
