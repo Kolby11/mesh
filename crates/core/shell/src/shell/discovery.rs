@@ -1542,6 +1542,7 @@ impl Shell {
                 ("theme_id", "string"),
                 ("mode", "string?"),
                 ("mode_policy", "object?"),
+                ("modes", "object[]"),
                 ("color_scheme", "string?"),
                 ("contrast", "string?"),
                 ("tokens", "object?"),
@@ -1556,6 +1557,7 @@ impl Shell {
             ],
             &[
                 ("set_theme", &[("theme_id", "string")]),
+                ("set_mode", &[("mode", "string")]),
                 ("set_icon_theme", &[("theme_id", "string")]),
                 ("set_font_family", &[("family", "string")]),
             ],
@@ -1567,6 +1569,7 @@ impl Shell {
                     ("theme_id", "string"),
                     ("mode", "string"),
                     ("mode_policy", "object"),
+                    ("modes", "object[]"),
                     ("color_scheme", "string"),
                     ("contrast", "string"),
                     ("revision", "string"),

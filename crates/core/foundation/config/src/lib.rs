@@ -57,7 +57,7 @@ pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
         FieldKind::Section(&[
             FieldSpec::new("active", FieldKind::Str),
             FieldSpec::new("mode", FieldKind::Str),
-            FieldSpec::new("mode_policy", FieldKind::Opaque),
+            FieldSpec::new("mode_policy", FieldKind::ThemeModePolicy),
             FieldSpec::new("tokens", FieldKind::Map(&THEME_TOKEN_VALUE)),
         ]),
     ),

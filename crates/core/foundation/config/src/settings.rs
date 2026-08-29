@@ -377,6 +377,38 @@ impl SettingsStore {
         self.set_namespace(name, current);
     }
 
+    /// Remove one field from an object nested in a namespace. This is the
+    /// sparse counterpart to [`Self::merge_namespace`]: callers use it when a
+    /// selection change should fall back to the declaration rather than
+    /// storing a JSON `null` that would be rejected by validation.
+    pub fn unset_namespace_field(&mut self, namespace: &str, section: &str, field: &str) {
+        let remove_namespace = {
+            let Some(namespace_object) = self
+                .root
+                .get_mut(namespace)
+                .and_then(JsonValue::as_object_mut)
+            else {
+                return;
+            };
+            let Some(section_object) = namespace_object
+                .get_mut(section)
+                .and_then(JsonValue::as_object_mut)
+            else {
+                return;
+            };
+            section_object.remove(field);
+            let remove_section = section_object.is_empty();
+            if remove_section {
+                namespace_object.remove(section);
+            }
+            namespace_object.is_empty()
+        };
+        if remove_namespace {
+            self.root.remove(namespace);
+        }
+        self.rebuild_validation();
+    }
+
     /// Drop every override in a namespace; declared defaults win again.
     pub fn reset_namespace(&mut self, name: &str) {
         self.set_namespace(name, JsonValue::Null);
@@ -1003,6 +1035,103 @@ mod tests {
         assert_eq!(resolved["surface"]["anchor"], json!("top"));
         assert_eq!(resolved["surface"]["layer"], json!("overlay"));
         assert_eq!(resolved["props"]["global"]["density"], json!("compact"));
+    }
+
+    #[test]
+    fn unsetting_nested_field_keeps_sibling_overrides_and_removes_empty_containers() {
+        let mut store = store(json!({
+            "shell": {
+                "theme": {
+                    "active": "gruvbox-dark",
+                    "mode": "dark"
+                },
+                "i18n": { "locale": "sk-SK" }
+            }
+        }));
+
+        store.unset_namespace_field("shell", "theme", "mode");
+
+        assert_eq!(
+            store.to_value()["shell"],
+            json!({
+                "theme": { "active": "gruvbox-dark" },
+                "i18n": { "locale": "sk-SK" }
+            })
+        );
+        assert_eq!(store.shell().theme.mode, None);
+
+        store.unset_namespace_field("shell", "theme", "active");
+        assert_eq!(
+            store.to_value()["shell"],
+            json!({ "i18n": { "locale": "sk-SK" } })
+        );
+    }
+
+    #[test]
+    fn theme_token_overrides_are_sparse_scalar_values() {
+        let store = store(json!({
+            "shell": {
+                "theme": {
+                    "tokens": {
+                        "color.primary": "#123456",
+                        "spacing.md": 8,
+                        "feature.enabled": true,
+                        "discarded": null
+                    }
+                }
+            }
+        }));
+
+        assert_eq!(
+            store.shell().theme.tokens,
+            [
+                ("color.primary".into(), json!("#123456")),
+                ("spacing.md".into(), json!(8)),
+                ("feature.enabled".into(), json!(true)),
+            ]
+            .into_iter()
+            .collect()
+        );
+        assert!(
+            store
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.key_path == "theme.tokens.discarded")
+        );
+    }
+
+    #[test]
+    fn theme_mode_policy_keeps_a_valid_schedule() {
+        let store = store(json!({
+            "shell": {
+                "theme": {
+                    "mode_policy": {
+                        "kind": "scheduled",
+                        "entries": [
+                            { "at": "06:00", "mode": "light" },
+                            { "at": "18:00", "mode": "dark" }
+                        ]
+                    }
+                }
+            }
+        }));
+
+        assert_eq!(
+            store.shell().theme.mode_policy,
+            mesh_core_theme::ThemeModePolicy::Scheduled {
+                entries: vec![
+                    mesh_core_theme::ThemeModeSchedule {
+                        at: "06:00".into(),
+                        mode: "light".into(),
+                    },
+                    mesh_core_theme::ThemeModeSchedule {
+                        at: "18:00".into(),
+                        mode: "dark".into(),
+                    },
+                ],
+            }
+        );
+        assert!(store.diagnostics().is_empty());
     }
 
     #[test]

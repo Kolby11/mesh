@@ -172,7 +172,7 @@ const DEBUG_COMMANDS: [CoreServiceCommand; 7] = [
     },
 ];
 
-const THEME_COMMANDS: [CoreServiceCommand; 3] = [
+const THEME_COMMANDS: [CoreServiceCommand; 4] = [
     CoreServiceCommand {
         name: "set_theme",
         translate: |payload| {
@@ -186,6 +186,14 @@ const THEME_COMMANDS: [CoreServiceCommand; 3] = [
         translate: |payload| {
             Some(CoreRequest::SetIconTheme {
                 theme_id: required_text(payload, "theme_id")?,
+            })
+        },
+    },
+    CoreServiceCommand {
+        name: "set_mode",
+        translate: |payload| {
+            Some(CoreRequest::SetThemeMode {
+                mode: required_text(payload, "mode")?,
             })
         },
     },
@@ -262,6 +270,14 @@ mod tests {
                 &serde_json::json!({ "theme_id": "nord" })
             ),
             Some(CoreRequest::SetTheme { theme_id }) if theme_id == "nord"
+        ));
+        assert!(matches!(
+            registry.request(
+                "mesh.theme",
+                "set_mode",
+                &serde_json::json!({ "mode": "light" })
+            ),
+            Some(CoreRequest::SetThemeMode { mode }) if mode == "light"
         ));
         assert!(
             registry

@@ -184,6 +184,8 @@ pub enum FieldKind {
     /// Contents pass through untouched — used where the schema is owned
     /// elsewhere, such as `props`.
     Opaque,
+    /// The tagged policy object used by the shell theme mode selector.
+    ThemeModePolicy,
     /// A scalar theme token: string, finite number, or boolean.
     Token,
 }
@@ -205,6 +207,7 @@ impl FieldKind {
             Self::LocalizedText => "a string or localized text object".to_string(),
             Self::Enum { values, .. } => format!("one of [{}]", values.join(", ")),
             Self::Section(_) | Self::Map(_) | Self::Opaque => "an object".to_string(),
+            Self::ThemeModePolicy => "a theme mode policy object".to_string(),
             Self::Token => "a string, number, or boolean".to_string(),
         }
     }
@@ -459,6 +462,9 @@ pub fn validate_value(
             .and_then(canonicalize)
             .map(|canonical| JsonValue::String(canonical.to_string())),
         FieldKind::Opaque => value.is_object().then(|| value.clone()),
+        FieldKind::ThemeModePolicy => {
+            validate_theme_mode_policy(namespace, key_path, value, diagnostics)
+        }
         FieldKind::Token => match value {
             JsonValue::String(_) | JsonValue::Bool(_) => Some(value.clone()),
             JsonValue::Number(number) if number.as_f64().is_some_and(f64::is_finite) => {
@@ -505,6 +511,113 @@ pub fn validate_value(
         kind.suggestion(),
     ));
     None
+}
+
+fn validate_theme_mode_policy(
+    namespace: &str,
+    key_path: &str,
+    value: &JsonValue,
+    diagnostics: &mut Vec<SettingsDiagnostic>,
+) -> Option<JsonValue> {
+    let object = value.as_object()?;
+    let kind = object.get("kind").and_then(JsonValue::as_str)?;
+    if !matches!(kind, "manual" | "follow_system" | "scheduled") {
+        diagnostics.push(SettingsDiagnostic::error(
+            namespace,
+            &join_path(key_path, "kind"),
+            format!("expected one of [manual, follow_system, scheduled], found {kind:?}"),
+            "use one of: manual, follow_system, scheduled",
+        ));
+        return None;
+    }
+
+    let mut accepted = JsonMap::new();
+    accepted.insert("kind".into(), JsonValue::String(kind.into()));
+    for key in object
+        .keys()
+        .filter(|key| *key != "kind" && *key != "entries")
+    {
+        diagnostics.push(SettingsDiagnostic::warning(
+            namespace,
+            &join_path(key_path, key),
+            format!("unknown theme mode policy key '{key}'"),
+            "remove the key or check the theme mode policy shape",
+        ));
+    }
+
+    let Some(entries) = object.get("entries") else {
+        if kind == "scheduled" {
+            diagnostics.push(SettingsDiagnostic::error(
+                namespace,
+                &join_path(key_path, "entries"),
+                "scheduled theme mode policy requires an entries array",
+                "add entries with at and mode strings, or use manual",
+            ));
+            return None;
+        }
+        return Some(JsonValue::Object(accepted));
+    };
+    if kind != "scheduled" {
+        diagnostics.push(SettingsDiagnostic::warning(
+            namespace,
+            &join_path(key_path, "entries"),
+            "entries is only used by the scheduled theme mode policy",
+            "remove entries or use kind scheduled",
+        ));
+        return Some(JsonValue::Object(accepted));
+    }
+    let Some(entries) = entries.as_array() else {
+        diagnostics.push(SettingsDiagnostic::error(
+            namespace,
+            &join_path(key_path, "entries"),
+            format!("expected an array, found {}", describe(entries)),
+            "make entries an array of { at, mode } objects",
+        ));
+        return None;
+    };
+    let mut accepted_entries = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let entry_path = join_path(&join_path(key_path, "entries"), &index.to_string());
+        let Some(entry) = entry.as_object() else {
+            diagnostics.push(SettingsDiagnostic::error(
+                namespace,
+                &entry_path,
+                format!("expected an object, found {}", describe(entry)),
+                "use an object with at and mode strings",
+            ));
+            return None;
+        };
+        let Some(at) = entry.get("at").and_then(JsonValue::as_str) else {
+            diagnostics.push(SettingsDiagnostic::error(
+                namespace,
+                &join_path(&entry_path, "at"),
+                "scheduled theme mode entries require an at string",
+                "add a time in HH:MM form",
+            ));
+            return None;
+        };
+        let Some(mode) = entry.get("mode").and_then(JsonValue::as_str) else {
+            diagnostics.push(SettingsDiagnostic::error(
+                namespace,
+                &join_path(&entry_path, "mode"),
+                "scheduled theme mode entries require a mode string",
+                "add the declared theme mode name",
+            ));
+            return None;
+        };
+        if at.trim().is_empty() || mode.trim().is_empty() {
+            diagnostics.push(SettingsDiagnostic::error(
+                namespace,
+                &entry_path,
+                "scheduled theme mode entries cannot be empty",
+                "use non-empty at and mode strings",
+            ));
+            return None;
+        }
+        accepted_entries.push(serde_json::json!({ "at": at, "mode": mode }));
+    }
+    accepted.insert("entries".into(), JsonValue::Array(accepted_entries));
+    Some(JsonValue::Object(accepted))
 }
 
 /// Diagnose a key no declaration claims, suggesting the nearest known one.

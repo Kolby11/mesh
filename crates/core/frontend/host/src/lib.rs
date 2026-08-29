@@ -549,6 +549,9 @@ pub enum CoreRequest {
     SetTheme {
         theme_id: String,
     },
+    SetThemeMode {
+        mode: String,
+    },
     SetLocale {
         locale: String,
     },

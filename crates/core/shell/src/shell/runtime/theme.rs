@@ -4,6 +4,41 @@ const THEME_RELOAD_POLL_INTERVAL: std::time::Duration = std::time::Duration::fro
 const SHELL_SETTINGS_RELOAD_POLL_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(500);
 
+fn profile_shell_theme_object(
+    settings: &mut serde_json::Value,
+) -> &mut serde_json::Map<String, serde_json::Value> {
+    let object = settings
+        .as_object_mut()
+        .expect("profile shell settings must be an object");
+    if !object
+        .get("theme")
+        .is_some_and(serde_json::Value::is_object)
+    {
+        object.insert("theme".into(), serde_json::json!({}));
+    }
+    object
+        .get_mut("theme")
+        .and_then(serde_json::Value::as_object_mut)
+        .expect("theme settings object was just initialized")
+}
+
+fn set_profile_theme_selection(settings: &mut serde_json::Value, theme_id: &str) {
+    if !settings.is_object() {
+        *settings = serde_json::json!({});
+    }
+    let theme = profile_shell_theme_object(settings);
+    theme.insert("active".into(), serde_json::Value::String(theme_id.into()));
+    theme.remove("mode");
+}
+
+fn set_profile_theme_mode(settings: &mut serde_json::Value, mode: &str) {
+    if !settings.is_object() {
+        *settings = serde_json::json!({});
+    }
+    let theme = profile_shell_theme_object(settings);
+    theme.insert("mode".into(), serde_json::Value::String(mode.into()));
+}
+
 /// A validated settings candidate that has not crossed its durable commit
 /// boundary yet. Theme and locale preparation consume this value before any
 /// live shell state changes, so a rejected candidate cannot leave persistence
@@ -426,17 +461,18 @@ impl Shell {
         };
         let theme_id = theme_id.to_owned();
         let settings_candidate = self.prepare_control_plane_settings(|shared, profile| {
-            let patch = serde_json::json!({
-                "theme": { "active": theme_id, "mode": null }
-            });
             if let Some(profile) = profile {
                 let target = profile
                     .settings
                     .entry(mesh_core_config::SHELL_NAMESPACE.to_string())
                     .or_insert_with(|| serde_json::json!({}));
-                mesh_core_config::merge_json(target, &patch);
+                set_profile_theme_selection(target, &theme_id);
             } else {
-                shared.merge_namespace(mesh_core_config::SHELL_NAMESPACE, &patch);
+                shared.merge_namespace(
+                    mesh_core_config::SHELL_NAMESPACE,
+                    &serde_json::json!({ "theme": { "active": theme_id } }),
+                );
+                shared.unset_namespace_field(mesh_core_config::SHELL_NAMESPACE, "theme", "mode");
             }
             Ok(())
         })?;
@@ -456,6 +492,59 @@ impl Shell {
         });
         let commit = self.commit_control_plane_settings(settings_candidate)?;
         tracing::info!("active theme changed to '{theme_id}'");
+        self.commit_control_plane_batch(
+            commit,
+            Some((theme, prepared_theme.watch)),
+            None,
+            true,
+            false,
+        )
+    }
+
+    pub(in crate::shell) fn apply_set_theme_mode(
+        &mut self,
+        mode: &str,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let mode = mode.trim();
+        if mode.is_empty() {
+            tracing::warn!("ignoring empty theme mode request");
+            return Ok(VecDeque::new());
+        }
+        let Some(graph) = self.installed_module_graph.as_ref().cloned() else {
+            tracing::warn!("cannot select theme mode without an installed module graph");
+            return Ok(VecDeque::new());
+        };
+        let settings_candidate = self.prepare_control_plane_settings(|shared, profile| {
+            if let Some(profile) = profile {
+                let target = profile
+                    .settings
+                    .entry(mesh_core_config::SHELL_NAMESPACE.to_string())
+                    .or_insert_with(|| serde_json::json!({}));
+                set_profile_theme_mode(target, mode);
+            } else {
+                shared.merge_namespace(
+                    mesh_core_config::SHELL_NAMESPACE,
+                    &serde_json::json!({ "theme": { "mode": mode } }),
+                );
+            }
+            Ok(())
+        })?;
+        let candidate_settings =
+            mesh_core_config::resolve_shell_locale_settings(settings_candidate.store.shell());
+        let prepared_theme = match prepare_theme_state_for_graph(&candidate_settings, &graph) {
+            Ok(Some(candidate)) => candidate,
+            Ok(None) => return Ok(VecDeque::new()),
+            Err(error) => {
+                tracing::warn!("cannot select theme mode '{mode}': {error}");
+                return Ok(VecDeque::new());
+            }
+        };
+        let mut theme = prepared_theme.engine;
+        theme.update_active(|active| {
+            crate::shell::discovery::apply_font_registry_tokens(active, &self.font_registry);
+        });
+        let commit = self.commit_control_plane_settings(settings_candidate)?;
+        tracing::info!("active theme mode changed to '{mode}'");
         self.commit_control_plane_batch(
             commit,
             Some((theme, prepared_theme.watch)),
@@ -538,34 +627,55 @@ impl Shell {
         self.commit_control_plane_batch(commit, Some((theme, watch)), None, true, false)
     }
 
-    pub(in crate::shell) fn sync_theme_service_state(
-        &mut self,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
-        let snapshot = self.theme.active_snapshot().clone();
-        let previous_snapshot = self.last_published_theme_snapshot.clone();
-        let theme_id = snapshot.id.clone();
-        let is_dark = snapshot.color_scheme.eq_ignore_ascii_case("dark");
+    /// Build the only service state allowed to describe the rendered theme.
+    /// Provider mirrors can carry no independent theme identity, mode, token,
+    /// or color-scheme facts; those all come from the committed snapshot.
+    pub(in crate::shell) fn authoritative_theme_service_payload(&self) -> serde_json::Value {
+        let snapshot = self.theme.active_snapshot();
+        let theme_modes = |theme: &mesh_core_theme::Theme| {
+            self.installed_module_graph
+                .as_ref()
+                .and_then(|graph| graph.theme_catalog().get(&theme.id))
+                .map(|descriptor| {
+                    descriptor
+                        .modes
+                        .values()
+                        .map(|mode| {
+                            serde_json::json!({
+                                "name": mode.name,
+                                "color_scheme": mode.metadata.color_scheme,
+                                "contrast": mode.metadata.contrast,
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_else(|| {
+                    vec![serde_json::json!({
+                        "name": theme.metadata().mode,
+                        "color_scheme": theme.metadata().color_scheme,
+                        "contrast": theme.metadata().contrast,
+                    })]
+                })
+        };
+        let theme_entry = |theme: &mesh_core_theme::Theme| {
+            serde_json::json!({
+                "id": theme.id,
+                "label": theme.name,
+                "modes": theme_modes(theme),
+                "palette": theme_preview_palette(theme),
+            })
+        };
         let mut themes = self
             .theme
             .available_themes()
             .iter()
-            .map(|theme| {
-                serde_json::json!({
-                    "id": theme.id,
-                    "label": theme.name,
-                    "palette": theme_preview_palette(theme),
-                })
-            })
+            .map(theme_entry)
             .collect::<Vec<_>>();
         if !themes
             .iter()
-            .any(|theme| theme["id"].as_str() == Some(theme_id.as_str()))
+            .any(|theme| theme["id"].as_str() == Some(snapshot.id.as_str()))
         {
-            themes.push(serde_json::json!({
-                "id": self.theme.active().id,
-                "label": self.theme.active().name,
-                "palette": theme_preview_palette(self.theme.active()),
-            }));
+            themes.push(theme_entry(self.theme.active()));
         }
         themes.sort_by(|left, right| {
             left["id"]
@@ -578,24 +688,34 @@ impl Shell {
             .filter_map(|theme| theme["id"].as_str())
             .map(str::to_owned)
             .collect::<Vec<_>>();
-        let durable_revision = self.control_plane_revision.as_string();
-        let payload = serde_json::json!({
+        serde_json::json!({
             "current": snapshot.id.clone(),
             "theme_id": snapshot.id.clone(),
             "mode": snapshot.mode.clone(),
             "mode_policy": self.settings.theme.mode_policy.clone(),
+            "modes": theme_modes(self.theme.active()),
             "color_scheme": snapshot.color_scheme.clone(),
             "contrast": snapshot.contrast.clone(),
             "tokens": snapshot.tokens.clone(),
             "provenance": snapshot.provenance.clone(),
             "revision": format!("{:016x}", snapshot.revision),
-            "durable_revision": durable_revision.clone(),
+            "durable_revision": self.control_plane_revision.as_string(),
             "fingerprint": self.theme_watch.fingerprint,
-            "is_dark": is_dark,
+            "is_dark": snapshot.color_scheme.eq_ignore_ascii_case("dark"),
             "themes": themes,
             "available": available,
             "system_resources": system_resources_json(&self.settings),
-        });
+        })
+    }
+
+    pub(in crate::shell) fn sync_theme_service_state(
+        &mut self,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let snapshot = self.theme.active_snapshot().clone();
+        let previous_snapshot = self.last_published_theme_snapshot.clone();
+        let payload = self.authoritative_theme_service_payload();
+        let modes = payload["modes"].clone();
+        let durable_revision = self.control_plane_revision.as_string();
         // The renderer owns this snapshot; a provider mirror is delivered
         // through the normal `mesh.theme` state channel below, not an
         // internal `"set-current"` command the contract never declared. A
@@ -638,6 +758,7 @@ impl Shell {
                     "theme_id": snapshot.id.clone(),
                     "mode": snapshot.mode.clone(),
                     "mode_policy": self.settings.theme.mode_policy.clone(),
+                    "modes": modes,
                     "color_scheme": snapshot.color_scheme.clone(),
                     "contrast": snapshot.contrast.clone(),
                     "revision": revision.clone(),

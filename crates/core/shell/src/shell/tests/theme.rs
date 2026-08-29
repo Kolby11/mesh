@@ -28,6 +28,42 @@ fn provider_theme_update_is_accepted_through_the_generic_state_path() {
         shell.latest_service_state["mesh.theme"].provider_id,
         "@mesh/shell-theme"
     );
+    assert_eq!(
+        shell.latest_service_state["mesh.theme"].state["current"],
+        serde_json::json!(shell.theme.active().id)
+    );
+    assert_eq!(
+        shell.latest_service_state["mesh.theme"].state["is_dark"],
+        serde_json::json!(
+            shell
+                .theme
+                .active_snapshot()
+                .color_scheme
+                .eq_ignore_ascii_case("dark")
+        )
+    );
+    shell
+        .broadcast_backend_interface_event(
+            "mesh.theme".into(),
+            "@mesh/shell-theme".into(),
+            "ThemeChanged".into(),
+            serde_json::json!({
+                "theme_id": "spoofed-dark",
+                "mode": "spoofed",
+                "color_scheme": "dark",
+                "contrast": "low",
+                "revision": "spoofed",
+                "durable_revision": "spoofed",
+                "tokens": {},
+                "provenance": {},
+                "changed_tokens": []
+            }),
+        )
+        .unwrap();
+    assert_eq!(
+        shell.latest_service_state["mesh.theme"].state["current"],
+        serde_json::json!(shell.theme.active().id)
+    );
 }
 
 #[test]
@@ -611,6 +647,7 @@ fn set_theme_loads_css_package_and_updates_runtime_setting() {
         persisted.shell().theme.active,
         "@mesh/test-theme:mesh-default-light"
     );
+    assert_eq!(persisted.to_value()["shell"]["theme"].get("mode"), None);
     assert_eq!(
         shell.latest_service_state["mesh.settings"].state["durable_revision"],
         serde_json::json!("shared:1")
@@ -619,6 +656,64 @@ fn set_theme_loads_css_package_and_updates_runtime_setting() {
         shell.latest_service_state["mesh.theme"].state["durable_revision"],
         serde_json::json!("shared:1")
     );
+}
+
+#[test]
+fn set_theme_mode_persists_sparse_mode_and_publishes_declared_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let _settings = isolated_settings_file(dir.path());
+    fs::write(
+        dir.path().join("dark.css"),
+        ":root { --color-surface: #101010; }",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("light.css"),
+        ":root { --color-surface: #ffffff; }",
+    )
+    .unwrap();
+    let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph_with_theme_modes(
+        dir.path(),
+        "mode-theme",
+        [
+            ("dark", "dark.css", "dark", "normal"),
+            ("light", "light.css", "light", "high"),
+        ],
+        "dark",
+    ));
+
+    shell
+        .apply_set_theme("@mesh/test-theme:mode-theme")
+        .unwrap();
+    shell.apply_set_theme_mode("light").unwrap();
+
+    assert_eq!(shell.settings.theme.mode.as_deref(), Some("light"));
+    assert_eq!(shell.theme.active_snapshot().mode, "light");
+    assert_eq!(shell.theme.active_snapshot().color_scheme, "light");
+    assert_eq!(shell.theme.active_snapshot().contrast, "high");
+    assert_eq!(
+        shell.theme.active_snapshot().provenance["color.surface"],
+        mesh_core_theme::ThemeProvenance::ThemePack {
+            id: "@mesh/test-theme:mode-theme".into(),
+            mode: "light".into(),
+        }
+    );
+    assert_eq!(
+        shell.latest_service_state["mesh.theme"].state["mode"],
+        serde_json::json!("light")
+    );
+    assert_eq!(
+        shell.latest_service_state["mesh.theme"].state["modes"],
+        serde_json::json!([
+            { "name": "dark", "color_scheme": "dark", "contrast": "normal" },
+            { "name": "light", "color_scheme": "light", "contrast": "high" }
+        ])
+    );
+    let persisted =
+        mesh_core_config::SettingsStore::load_from(&dir.path().join("settings.json")).unwrap();
+    assert_eq!(persisted.shell().theme.mode.as_deref(), Some("light"));
+    assert_eq!(persisted.revision(), 2);
 }
 
 #[test]
@@ -937,7 +1032,7 @@ fn built_in_interfaces_compile_and_expose_their_methods() {
         .iter()
         .map(|method| method.name.as_str())
         .collect::<Vec<_>>();
-    for method in ["set_theme", "set_icon_theme", "set_font_family"] {
+    for method in ["set_theme", "set_mode", "set_icon_theme", "set_font_family"] {
         assert!(
             methods.contains(&method),
             "mesh.theme must expose {method}, found {methods:?}"

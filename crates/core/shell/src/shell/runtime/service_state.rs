@@ -86,6 +86,12 @@ impl Shell {
                 payload,
             };
         }
+        if interface == "mesh.theme" {
+            // Theme state is a rendered control-plane fact. A provider may
+            // implement commands or mirror the state, but it cannot replace
+            // the snapshot that the shell actually committed and painted.
+            payload = self.authoritative_theme_service_payload();
+        }
         // A command-bound field remains shell-authoritative until the provider
         // confirms it. This keeps every observer on one reactive value even if
         // an older provider snapshot arrives while the command is in flight.
@@ -812,6 +818,20 @@ impl Shell {
                 provider_id,
                 event = name,
                 "ignoring interface event from inactive or terminal provider"
+            );
+            return Ok(VecDeque::new());
+        }
+
+        if interface == "mesh.theme" && matches!(name.as_str(), "ThemeChanged" | "TokenChanged") {
+            // Theme events carry rendered facts and are emitted only by the
+            // shell after its revisioned snapshot commit. A provider mirror
+            // cannot publish a competing event with a different identity,
+            // palette, provenance, or revision.
+            tracing::debug!(
+                interface,
+                provider_id,
+                event = name,
+                "ignoring provider-authored rendered theme event"
             );
             return Ok(VecDeque::new());
         }

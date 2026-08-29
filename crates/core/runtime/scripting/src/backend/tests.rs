@@ -821,7 +821,12 @@ fn shell_theme_backend_treats_tokyo_night_as_dark() {
     );
     let mut ctx = BackendScriptContext::new_with_settings(
         "@mesh/shell-theme",
-        serde_json::json!({ "__shell": { "theme": "tokyo-night" } }),
+        serde_json::json!({
+            "__shell": {
+                "theme": "tokyo-night",
+                "theme_color_scheme": "dark"
+            }
+        }),
     );
     ctx.load_script(&script).unwrap();
 
@@ -832,6 +837,34 @@ fn shell_theme_backend_treats_tokyo_night_as_dark() {
         Some("tokyo-night")
     );
     assert_eq!(payload.get("is_dark").and_then(|v| v.as_bool()), Some(true));
+}
+
+#[test]
+fn shell_theme_backend_does_not_infer_darkness_from_theme_id() {
+    let script = bundled_backend_script(
+        "../../../../packages/modules/backend/core/shell-theme/src/main.luau",
+    );
+    let mut ctx = BackendScriptContext::new_with_settings(
+        "@mesh/shell-theme",
+        serde_json::json!({
+            "__shell": {
+                "theme": "custom-dark-looking-name",
+                "theme_color_scheme": "light"
+            }
+        }),
+    );
+    ctx.load_script(&script).unwrap();
+
+    let payload = ctx.call_init().unwrap().unwrap();
+
+    assert_eq!(
+        payload.get("current").and_then(|v| v.as_str()),
+        Some("custom-dark-looking-name")
+    );
+    assert_eq!(
+        payload.get("is_dark").and_then(|v| v.as_bool()),
+        Some(false)
+    );
 }
 
 #[test]

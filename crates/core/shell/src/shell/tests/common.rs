@@ -381,6 +381,69 @@ pub(super) fn backend_runtime_slot(
     )
 }
 
+pub(super) fn graph_with_theme_modes(
+    module_root: &Path,
+    theme_id: &str,
+    modes: impl IntoIterator<Item = (&'static str, &'static str, &'static str, &'static str)>,
+    default_mode: &str,
+) -> InstalledModuleGraph {
+    let mut mode_paths = serde_json::Map::new();
+    let mut mode_metadata = serde_json::Map::new();
+    for (name, path, color_scheme, contrast) in modes {
+        mode_paths.insert(name.to_string(), serde_json::json!(path));
+        mode_metadata.insert(
+            name.to_string(),
+            serde_json::json!({
+                "color_scheme": color_scheme,
+                "contrast": contrast,
+            }),
+        );
+    }
+    let module = serde_json::json!({
+        "name": "@mesh/test-theme",
+        "version": "0.1.0",
+        "mesh": {
+            "apiVersion": "0.1",
+            "kind": "theme",
+            "contributes": {
+                "themes": [{
+                    "id": theme_id,
+                    "label": "Test theme",
+                    "modes": mode_paths,
+                    "default_mode": default_mode,
+                    "mode_metadata": mode_metadata
+                }]
+            }
+        }
+    })
+    .to_string();
+    let loaded = LoadedModuleManifest {
+        manifest: ModuleManifest::from_json_str(&module).unwrap(),
+        path: module_root.join("module.json"),
+        source: ModuleManifestSource::CanonicalModuleJson,
+        diagnostics: Vec::new(),
+    };
+    let root = r#"{
+        "name": "@mesh/test-config",
+        "version": "0.1.0",
+        "mesh": {
+            "schemaVersion": 1,
+            "modulesDir": "modules",
+            "modules": {
+                "@mesh/test-theme": {
+                    "kind": "theme",
+                    "path": "@mesh/test-theme"
+                }
+            }
+        }
+    }"#;
+    InstalledModuleGraph::from_parts(
+        RootModuleGraphManifest::from_json_str(root).unwrap(),
+        vec![loaded],
+    )
+    .unwrap()
+}
+
 pub(super) fn service_update(
     interface: &str,
     provider_id: &str,

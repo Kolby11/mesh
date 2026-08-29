@@ -25,8 +25,7 @@
       }
     },
     "theme": {
-      "active": "@mesh/tokyo-night:tokyo-night",
-      "mode": null
+      "active": "@mesh/tokyo-night:tokyo-night"
     }
   }
 }

@@ -439,6 +439,7 @@ fn shell_registers_theme_provider_for_frontend_theme_proxy() {
             "theme_id",
             "mode",
             "mode_policy",
+            "modes",
             "color_scheme",
             "contrast",
             "tokens",

@@ -109,10 +109,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Themes
 
-- [ ] Complete `mesh.theme` and settings with modes, sparse token overrides,
-      provenance, explicit color-scheme/contrast, and revisioned authoritative
-      events instead of ID heuristics and provider-overwritable render facts.
-
 ## Localization / i18n
 
 - [ ] Replace per-surface locale engines and the cross-module global key pool

@@ -165,6 +165,7 @@ fn node_from_kind(kind: &'static FieldKind, path: &str, found: &Discovered) -> N
         // the LSP does not read yet, so anything goes rather than everything
         // being flagged. See `docs/spec/03-components.md`.
         FieldKind::Opaque => map(doc, "object", scalar("A declared prop value.", "any")),
+        FieldKind::ThemeModePolicy => map(doc, "object", scalar("Theme mode policy field.", "any")),
         FieldKind::Token => scalar(doc, "string, number, or boolean"),
     }
 }

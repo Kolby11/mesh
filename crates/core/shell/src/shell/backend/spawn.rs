@@ -99,6 +99,26 @@ impl Shell {
         candidate: &mut BackendLaunchCandidate,
     ) {
         Self::apply_runtime_settings(candidate, &self.theme.active().id, self.locale.current());
+        let snapshot = self.theme.active_snapshot();
+        if let Some(settings) = candidate.settings.as_object_mut()
+            && let Some(shell) = settings
+                .get_mut("__shell")
+                .and_then(serde_json::Value::as_object_mut)
+        {
+            // Keep the ambient context generic and scalar. Providers receive
+            // the same explicit render metadata as the renderer, without
+            // being allowed to author the committed theme snapshot.
+            shell.insert("theme_mode".into(), snapshot.mode.clone().into());
+            shell.insert(
+                "theme_color_scheme".into(),
+                snapshot.color_scheme.clone().into(),
+            );
+            shell.insert("theme_contrast".into(), snapshot.contrast.clone().into());
+            shell.insert(
+                "theme_is_dark".into(),
+                snapshot.color_scheme.eq_ignore_ascii_case("dark").into(),
+            );
+        }
     }
 
     pub(in crate::shell) fn apply_runtime_settings(
