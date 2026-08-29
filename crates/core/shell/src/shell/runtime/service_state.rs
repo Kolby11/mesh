@@ -468,15 +468,12 @@ impl Shell {
     }
 
     fn is_failed_bound_service_status(status: &str) -> bool {
-        matches!(
-            status,
-            "failed"
-                | "superseded"
-                | "timed_out"
-                | "cancelled"
-                | "service_unavailable"
-                | "stale_provider"
-        )
+        // `settle_bound_service_state` is called only for terminal call
+        // outcomes. Keep the rollback policy closed over the success state so
+        // newly added typed failures (for example invalid results, queue-full,
+        // and stale-generation outcomes) cannot leave an older transaction
+        // pinned as the visible owner of the field.
+        status != "completed"
     }
 
     /// Resolve a command's state-bound value: either copy the declared

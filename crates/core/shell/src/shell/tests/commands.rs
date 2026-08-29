@@ -277,7 +277,7 @@ fn failed_bound_write_rolls_back_and_older_failure_cannot_override_newer_write()
         .broadcast_service_event(service_update(
             "mesh.audio",
             "@mesh/pipewire-audio",
-            serde_json::json!({ "available": true, "percent": 42.0 }),
+            serde_json::json!({ "available": true, "percent": 42.0, "muted": false }),
         ))
         .unwrap();
     let mut capabilities = mesh_core_capability::CapabilitySet::new();
@@ -345,11 +345,10 @@ fn failed_bound_write_rolls_back_and_older_failure_cannot_override_newer_write()
                 generation: 0,
                 call_id: second_command.call_id,
                 command: "set_volume".to_string(),
-                result: serde_json::json!({
-                    "ok": false,
-                    "status": "failed",
-                    "error": "rejected",
-                }),
+                // A malformed provider result is converted into a typed
+                // invocation failure by the shell. It must unwind the same
+                // optimistic transaction chain as an ordinary rejection.
+                result: serde_json::Value::Null,
                 outcome: mesh_core_backend::BackendCommandOutcome::Failed,
             },
         )
@@ -364,6 +363,7 @@ fn failed_bound_write_rolls_back_and_older_failure_cannot_override_newer_write()
             .pending_bound_service_state
             .contains_key(&("mesh.audio".to_string(), "percent".to_string()))
     );
+    assert!(shell.bound_service_state_transactions.is_empty());
 }
 
 #[test]

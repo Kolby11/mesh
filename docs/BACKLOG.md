@@ -107,9 +107,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Service contracts
 
-- [ ] Make service methods correlated request/response transactions with typed
-      invocation failures, deadlines/cancellation, explicit coalescing outcomes,
-      and rollback/settlement for optimistic `stateBinding` writes.
 - [ ] Gate provider/profile commits on validated readiness and buffered initial
       state; immediately deliver unavailability and reject all state/events/results
       from stopped or obsolete provider generations.
