@@ -818,6 +818,42 @@ fn settings_reload_delivers_one_ordered_control_plane_batch() {
 }
 
 #[test]
+fn rejected_settings_reload_remains_eligible_for_retry() {
+    let _env_lock = settings_env_lock();
+    let dir = tempfile::tempdir().unwrap();
+    let settings_path = dir.path().join("settings.json");
+    fs::write(
+        &settings_path,
+        r#"{"shell":{"i18n":{"locale":"en","fallback_locale":"en"}}}"#,
+    )
+    .unwrap();
+    let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
+    let mut shell = Shell::new();
+
+    fs::write(&settings_path, "{ malformed").unwrap();
+    shell.settings_watch.modified_at = None;
+    shell.next_shell_settings_reload_check = std::time::Instant::now();
+    shell.reload_locale_if_settings_changed().unwrap();
+
+    assert_eq!(shell.locale.current(), "en");
+    assert_eq!(shell.settings_watch.modified_at, None);
+
+    fs::write(
+        &settings_path,
+        r#"{"revision":1,"shell":{"i18n":{"locale":"sk-SK","fallback_locale":"en"}}}"#,
+    )
+    .unwrap();
+    shell.next_shell_settings_reload_check = std::time::Instant::now();
+    shell.reload_locale_if_settings_changed().unwrap();
+
+    assert_eq!(shell.locale.current(), "sk-SK");
+    assert_eq!(
+        shell.settings_watch.modified_at,
+        fs::metadata(&settings_path).unwrap().modified().ok()
+    );
+}
+
+#[test]
 fn settings_theme_reload_rejects_unconfigured_theme_without_fallback() {
     let _env_lock = settings_env_lock();
     let runtime = Runtime::new().unwrap();

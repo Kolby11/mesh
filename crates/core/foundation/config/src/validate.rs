@@ -151,6 +151,8 @@ impl FieldSpec {
 #[derive(Debug, Clone, Copy)]
 pub enum FieldKind {
     Str,
+    /// A canonicalized BCP 47 locale tag.
+    Locale,
     Bool,
     UInt,
     /// Signed integer that must survive the trip into `i32`.
@@ -194,6 +196,7 @@ impl FieldKind {
     fn expectation(&self) -> String {
         match self {
             Self::Str => "a string".to_string(),
+            Self::Locale => "a valid BCP 47 locale tag".to_string(),
             Self::Bool => "a boolean".to_string(),
             Self::UInt => "a non-negative integer".to_string(),
             Self::Int32 => "an integer".to_string(),
@@ -215,6 +218,10 @@ impl FieldKind {
     fn suggestion(&self) -> String {
         match self {
             Self::Enum { values, .. } => format!("use one of: {}", values.join(", ")),
+            Self::Locale => {
+                "use a valid BCP 47 locale tag, or remove it to fall back to the declared default"
+                    .to_string()
+            }
             Self::LocalizedText => {
                 "use a literal string or an object with non-empty `t` and `fallback` strings"
                     .to_string()
@@ -433,6 +440,10 @@ pub fn validate_value(
 ) -> Option<JsonValue> {
     let accepted = match kind {
         FieldKind::Str => value.is_string().then(|| value.clone()),
+        FieldKind::Locale => value
+            .as_str()
+            .and_then(|locale| mesh_core_locale::normalize_locale_tag(locale).ok())
+            .map(JsonValue::String),
         FieldKind::Bool => value.is_boolean().then(|| value.clone()),
         FieldKind::UInt => value.as_u64().map(|_| value.clone()),
         FieldKind::Int32 => value

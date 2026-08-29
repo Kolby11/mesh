@@ -111,9 +111,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Localization / i18n
 
-- [ ] Make locale selection a durable revisioned settings/profile transaction:
-      normalize BCP 47, derive the full fallback chain and direction, apply each
-      module's default terminally, and remove stale/per-component locale mutation.
 - [ ] Compile bounded typed catalogs with per-entry diagnostics, interpolation,
       CLDR plural/select and formatting; add targeted language-pack identities,
       ordered key-level precedence, and deterministic duplicate validation.

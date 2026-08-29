@@ -61,8 +61,8 @@ impl LocaleSelection {
         fallback: impl AsRef<str>,
         revision: u64,
     ) -> Result<Self, LocaleError> {
-        let active = canonicalize_locale_tag(active.as_ref())?;
-        let fallback = canonicalize_locale_tag(fallback.as_ref())?;
+        let active = normalize_locale_tag(active.as_ref())?;
+        let fallback = normalize_locale_tag(fallback.as_ref())?;
         Ok(Self {
             direction: direction_for(&active),
             chain: complete_fallback_chain(&active, &fallback),
@@ -93,6 +93,12 @@ impl LocaleSelection {
     }
 }
 
+/// Normalize one user- or module-supplied BCP 47 locale tag into the casing
+/// used by catalog keys and fallback-chain comparisons.
+pub fn normalize_locale_tag(raw: &str) -> Result<String, LocaleError> {
+    canonicalize_locale_tag(raw)
+}
+
 /// Normalize a locale advertised by the host environment. POSIX locale
 /// modifiers and encodings are not BCP 47 subtags, so they are removed before
 /// the same canonical validator used by catalog selection is applied.
@@ -106,7 +112,7 @@ pub fn normalize_system_locale(raw: &str) -> Option<String> {
     if raw.is_empty() || raw.eq_ignore_ascii_case("c") || raw.eq_ignore_ascii_case("posix") {
         return None;
     }
-    canonicalize_locale_tag(&raw.replace('_', "-")).ok()
+    normalize_locale_tag(&raw.replace('_', "-")).ok()
 }
 
 /// Return the first usable locale from the standard POSIX environment

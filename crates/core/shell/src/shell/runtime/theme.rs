@@ -813,8 +813,6 @@ impl Shell {
             return Ok(requests);
         }
 
-        self.settings_watch.modified_at = Some(modified_at);
-
         let (store, profile_revision) = match SettingsStore::load_from(&self.settings_watch.path)
             .and_then(|shared| {
                 let profile = self.active_profile_id.as_ref().and_then(|profile_id| {
@@ -944,13 +942,21 @@ impl Shell {
             store,
             revision: DurableControlPlaneRevision::new(shared_revision, profile_revision),
         };
-        self.commit_control_plane_batch(
+        let result = self.commit_control_plane_batch(
             commit,
             prepared_theme,
             prepared_locale,
             theme_changed || icon_changed,
             locale_changed,
-        )
+        );
+        if result.is_ok() {
+            // Advance the watch only after the complete effective settings,
+            // theme, and locale candidate has committed. A rejected or
+            // partially prepared file must remain eligible for retry without
+            // replacing the last-known-good runtime snapshot.
+            self.settings_watch.modified_at = Some(modified_at);
+        }
+        result
     }
 
     /// Hand the reloaded store to every component.

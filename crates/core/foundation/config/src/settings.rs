@@ -884,6 +884,28 @@ mod tests {
     }
 
     #[test]
+    fn locale_settings_are_canonicalized_and_invalid_tags_fall_back() {
+        let store = store(json!({
+            "shell": {
+                "i18n": {
+                    "locale": " zh-hant-tw ",
+                    "fallback_locale": "not_a_locale"
+                }
+            }
+        }));
+
+        assert_eq!(store.shell().i18n.locale, "zh-Hant-TW");
+        assert_eq!(store.shell().i18n.fallback_locale, "en");
+        let diagnostic = store
+            .diagnostics()
+            .iter()
+            .find(|diagnostic| diagnostic.key_path == "i18n.fallback_locale")
+            .expect("invalid locale settings must be diagnosed");
+        assert!(diagnostic.is_error());
+        assert!(diagnostic.message.contains("BCP 47 locale tag"));
+    }
+
+    #[test]
     fn shell_overrides_are_sparse_and_leave_siblings_alone() {
         let store = store(json!({
             "shell": { "tooltip": { "delay_ms": 25 } }
@@ -1307,11 +1329,12 @@ mod tests {
             .map(|worker| {
                 let path = shared_path.clone();
                 std::thread::spawn(move || {
+                    let locale = ["en-US", "de-DE", "fr-FR", "sk-SK"][worker];
                     let mut store = SettingsStore::from_value(&*path, json!({})).unwrap();
                     store.set_namespace(
                         "shell",
                         json!({
-                            "i18n": { "locale": format!("worker-{worker}") }
+                            "i18n": { "locale": locale }
                         }),
                     );
                     for _ in 0..8 {
@@ -1327,7 +1350,9 @@ mod tests {
         }
 
         let loaded = SettingsStore::load_from(&path).expect("last atomic document is valid JSON");
-        assert!(loaded.shell().i18n.locale.starts_with("worker-"));
+        assert!(
+            ["en-US", "de-DE", "fr-FR", "sk-SK"].contains(&loaded.shell().i18n.locale.as_str())
+        );
         assert_eq!(
             std::fs::read_dir(&root)
                 .unwrap()

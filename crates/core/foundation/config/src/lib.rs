@@ -71,8 +71,8 @@ pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
                     values: LOCALE_POLICIES,
                 },
             ),
-            FieldSpec::new("locale", FieldKind::Str),
-            FieldSpec::new("fallback_locale", FieldKind::Str),
+            FieldSpec::new("locale", FieldKind::Locale),
+            FieldSpec::new("fallback_locale", FieldKind::Locale),
         ]),
     ),
     FieldSpec::new(

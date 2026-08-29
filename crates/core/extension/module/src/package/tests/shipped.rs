@@ -4,6 +4,18 @@ use std::fs;
 use std::path::PathBuf;
 
 #[test]
+fn shipped_language_popover_reads_locale_from_the_shell_service() {
+    let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../../modules/frontend/language-popover/src/main.mesh");
+    let source = fs::read_to_string(source_path).unwrap();
+
+    assert!(
+        !source.contains("self.storage") && !source.contains("stored_locale"),
+        "language-popover must not restore a stale component-local locale"
+    );
+}
+
+#[test]
 fn shipped_navigation_manifest_uses_explicit_localized_keybind_text() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../../../modules/frontend/navigation-bar");

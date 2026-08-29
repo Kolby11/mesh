@@ -134,16 +134,6 @@ local function current_locale()
     return locale
 end
 
-local function stored_locale(storage)
-    local locale = storage and storage.language
-    for _, valid in locales do
-        if locale == valid then
-            return locale
-        end
-    end
-    return nil
-end
-
 local function sync_window_to_locale(locale)
     for index, valid in locales do
         if valid == locale then
@@ -242,11 +232,7 @@ end
 
 function init(self)
     locale_changed = self.LocaleChanged
-    local locale = stored_locale(self.storage)
-    if locale ~= nil then
-        mesh.locale.set(locale)
-    end
-    apply_selection(locale or current_locale())
+    apply_selection(current_locale())
     recenter_ring()
 end
 
@@ -254,7 +240,7 @@ function render(self)
     -- Re-centre only when the locale changed underneath us. Doing it every
     -- frame would undo `onOptionScroll` before the scrolled window was ever
     -- painted, which is why scrolling the bubbles used to do nothing.
-    local locale = stored_locale(self.storage) or current_locale()
+    local locale = current_locale()
     if pending_locale ~= nil then
         -- Hold our own pick until the service reports anything other than the
         -- locale it replaced: that is either the pick landing or a change made

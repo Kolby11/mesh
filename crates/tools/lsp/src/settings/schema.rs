@@ -140,6 +140,7 @@ fn node_from_kind(kind: &'static FieldKind, path: &str, found: &Discovered) -> N
     let doc = doc_for(path);
     match kind {
         FieldKind::Str => scalar(doc, "string"),
+        FieldKind::Locale => scalar(doc, "BCP 47 locale tag"),
         FieldKind::Bool => scalar(doc, "boolean"),
         FieldKind::UInt => scalar(doc, "integer ≥ 0"),
         FieldKind::Int32 => scalar(doc, "integer"),
