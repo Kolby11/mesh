@@ -1,45 +1,23 @@
-use crate::style::{
-    ContainerQuery, Declaration, KeyframeRule, KeyframeStop, Selector, StyleBlock, StyleRule,
-    StyleValue, TransitionEasing, is_transition_safe_keyframe_property,
-};
-use lightningcss::{
-    media_query::{
-        MediaFeatureComparison, MediaFeatureName, MediaFeatureValue, Operator,
-        QueryFeature as LightningQueryFeature,
-    },
-    rules::container::{ContainerCondition, ContainerSizeFeature, ContainerSizeFeatureId},
-    rules::{
-        CssRule as LightningCssRule,
-        keyframes::{KeyframeSelector, KeyframesName},
-        style::StyleRule as LightningStyleRule,
-    },
-    stylesheet::{ParserOptions as CssParserOptions, PrinterOptions, StyleSheet},
-    traits::ToCss as LightningToCss,
-};
-
 use super::ParseError;
 use crate::SourceSpan;
+use crate::style::{
+    ContainerQuery, Declaration, KeyframeRule, KeyframeStop, StyleBlock, StyleRule, StyleValue,
+    classify_style_value,
+};
 
+/// Lower component CSS through the same restricted parser used by themes.
+/// Component-only concerns (prop references and the component AST) are applied
+/// after the shared CSS/token/keyframe syntax has been validated.
 pub(super) fn parse_style(source: &str, source_base: usize) -> Result<StyleBlock, ParseError> {
-    let stylesheet = StyleSheet::parse(
-        source,
-        CssParserOptions {
-            filename: "<style>".into(),
-            error_recovery: false,
-            ..CssParserOptions::default()
-        },
-    )
-    .map_err(|error| map_lightning_error(error, source, source_base))?;
-
+    let stylesheet =
+        mesh_core_theme::css::parse_stylesheet(source, source_base).map_err(map_shared_error)?;
     let mut rules = Vec::new();
     let mut keyframes = Vec::new();
-    let span = SourceSpan::new(source_base, source_base + source.len());
-    lower_css_rules(&stylesheet.rules.0, None, &mut rules, &mut keyframes)
-        .map_err(|error| error.with_fallback(span))?;
+    lower_rules(&stylesheet.rules, None, &mut rules, &mut keyframes)?;
     Ok(StyleBlock {
         rules,
         keyframes,
-        span,
+        span: SourceSpan::new(source_base, source_base + source.len()),
     })
 }
 
@@ -53,502 +31,142 @@ pub(super) fn parse_inline_style(source: &str) -> Result<Vec<Declaration>, Parse
         .unwrap_or_default())
 }
 
-fn lower_css_rules(
-    source_rules: &[LightningCssRule<'_>],
+fn lower_rules(
+    source_rules: &[mesh_core_theme::css::Rule],
     inherited_query: Option<ContainerQuery>,
     rules: &mut Vec<StyleRule>,
     keyframes: &mut Vec<KeyframeRule>,
 ) -> Result<(), ParseError> {
     for rule in source_rules {
         match rule {
-            LightningCssRule::Style(style_rule) => {
-                lower_style_rule(style_rule, inherited_query, rules)?;
+            mesh_core_theme::css::Rule::Style(style_rule) => {
+                let container_query = inherited_query;
+                let declarations = style_rule
+                    .declarations
+                    .iter()
+                    .map(lower_declaration)
+                    .collect::<Vec<_>>();
+                for selector in &style_rule.selectors {
+                    rules.push(StyleRule {
+                        selector: selector.clone(),
+                        declarations: declarations.clone(),
+                        container_query,
+                    });
+                }
             }
-            LightningCssRule::Container(container_rule) => {
-                let query = lower_container_query(container_rule)?;
+            mesh_core_theme::css::Rule::Container(container_rule) => {
+                let query = convert_container_query(container_rule.query);
                 let combined_query = inherited_query
                     .map(|existing| existing.intersect(query))
                     .or(Some(query));
-                lower_css_rules(&container_rule.rules.0, combined_query, rules, keyframes)?;
+                lower_rules(&container_rule.rules, combined_query, rules, keyframes)?;
             }
-            LightningCssRule::Keyframes(keyframes_rule) => {
+            mesh_core_theme::css::Rule::Keyframes(keyframes_rule) => {
                 keyframes.push(lower_keyframes_rule(keyframes_rule)?);
             }
-            LightningCssRule::Ignored => {}
-            other => {
+            mesh_core_theme::css::Rule::Custom(custom_rule) => {
                 return Err(ParseError::InvalidStyle {
-                    message: format!("unsupported at-rule '{}'", css_rule_name(other)),
-                    span: SourceSpan::default(),
+                    message: format!("unsupported at-rule '@{}'", custom_rule.name),
+                    span: to_source_span(custom_rule.span),
                 });
             }
         }
     }
-
     Ok(())
+}
+
+fn lower_declaration(declaration: &mesh_core_theme::css::Declaration) -> Declaration {
+    Declaration {
+        property: declaration.property.clone(),
+        value: classify_style_value(&declaration.value),
+    }
 }
 
 fn lower_keyframes_rule(
-    source_rule: &lightningcss::rules::keyframes::KeyframesRule<'_>,
+    source_rule: &mesh_core_theme::css::KeyframesRule,
 ) -> Result<KeyframeRule, ParseError> {
-    let name = lower_keyframe_name(&source_rule.name);
-    let mut stops = Vec::new();
-
-    for keyframe in &source_rule.keyframes {
-        let (declarations, easing) = lower_keyframe_declarations(&name, &keyframe.declarations)?;
-        if declarations.is_empty() {
-            continue;
-        }
-
-        for selector in &keyframe.selectors {
-            let offset = lower_keyframe_selector(selector)?;
-            stops.push(KeyframeStop {
-                offset,
-                declarations: declarations.clone(),
-                easing,
-            });
-        }
-    }
-
-    if stops.is_empty() {
-        return Err(ParseError::InvalidStyle {
-            message: format!("keyframes '{name}' has no supported animatable properties"),
-            span: SourceSpan::default(),
-        });
-    }
-
-    stops.sort_by(|left, right| left.offset.total_cmp(&right.offset));
-    Ok(KeyframeRule { name, stops })
-}
-
-fn lower_keyframe_name(name: &KeyframesName<'_>) -> String {
-    match name {
-        KeyframesName::Ident(ident) => ident.0.to_string(),
-        KeyframesName::Custom(name) => name.to_string(),
-    }
-}
-
-fn lower_keyframe_selector(selector: &KeyframeSelector) -> Result<f32, ParseError> {
-    match selector {
-        KeyframeSelector::Percentage(value) => Ok(value.0.clamp(0.0, 1.0)),
-        KeyframeSelector::From | KeyframeSelector::To => Err(ParseError::InvalidStyle {
-            message: "from/to keyframe aliases are not supported".into(),
-            span: SourceSpan::default(),
-        }),
-        KeyframeSelector::TimelineRangePercentage(_) => Err(ParseError::InvalidStyle {
-            message: "timeline-range keyframe selectors are not supported".into(),
-            span: SourceSpan::default(),
-        }),
-    }
-}
-
-fn lower_keyframe_declarations(
-    rule_name: &str,
-    source_block: &lightningcss::declaration::DeclarationBlock<'_>,
-) -> Result<(Vec<Declaration>, Option<TransitionEasing>), ParseError> {
-    let mut declarations = Vec::new();
-    let mut easing = None;
-
-    for property in &source_block.declarations {
-        let declaration = lower_property(property)?;
-        if declaration.property == "animation-timing-function" {
-            easing = Some(parse_keyframe_easing(rule_name, &declaration)?);
-            continue;
-        }
-        validate_keyframe_declaration(rule_name, &declaration)?;
-        declarations.push(declaration);
-    }
-    for property in &source_block.important_declarations {
-        let declaration = lower_property(property)?;
-        if declaration.property == "animation-timing-function" {
-            easing = Some(parse_keyframe_easing(rule_name, &declaration)?);
-            continue;
-        }
-        validate_keyframe_declaration(rule_name, &declaration)?;
-        declarations.push(declaration);
-    }
-
-    Ok((declarations, easing))
-}
-
-fn parse_keyframe_easing(
-    rule_name: &str,
-    declaration: &Declaration,
-) -> Result<TransitionEasing, ParseError> {
-    let StyleValue::Literal(value) = &declaration.value else {
-        return Err(ParseError::InvalidStyle {
-            message: format!("keyframes '{rule_name}' require a literal animation-timing-function"),
-            span: SourceSpan::default(),
-        });
-    };
-
-    crate::style::parse_easing(value).ok_or_else(|| ParseError::InvalidStyle {
-        message: format!(
-            "unsupported keyframe easing '{}' in '{rule_name}'",
-            value.trim()
-        ),
-        span: SourceSpan::default(),
-    })
-}
-
-fn validate_keyframe_declaration(
-    rule_name: &str,
-    declaration: &Declaration,
-) -> Result<(), ParseError> {
-    if contains_keyframe_value_reference(&declaration.value) {
-        return Err(ParseError::InvalidStyle {
-            message: format!("keyframes '{rule_name}' cannot use var() references in stop values"),
-            span: SourceSpan::default(),
-        });
-    }
-    if !is_transition_safe_keyframe_property(&declaration.property) {
-        return Err(ParseError::InvalidStyle {
-            message: format!("unsupported keyframe property '{}'", declaration.property),
-            span: SourceSpan::default(),
-        });
-    }
-    Ok(())
-}
-
-fn lower_style_rule(
-    source_rule: &LightningStyleRule<'_>,
-    inherited_query: Option<ContainerQuery>,
-    rules: &mut Vec<StyleRule>,
-) -> Result<(), ParseError> {
-    if !source_rule.rules.0.is_empty() {
-        return Err(ParseError::InvalidStyle {
-            message: "nested style rules are not supported".into(),
-            span: SourceSpan::default(),
-        });
-    }
-
-    let declarations = lower_declarations(&source_rule.declarations)?;
-    for selector in &source_rule.selectors.0 {
-        let selector_source = selector
-            .to_css_string(PrinterOptions::default())
-            .map_err(map_lightning_printer_error)?;
-        let selector = parse_selector(&selector_source)?;
-        rules.push(StyleRule {
-            selector,
-            declarations: declarations.clone(),
-            container_query: inherited_query,
-        });
-    }
-
-    Ok(())
-}
-
-fn lower_declarations(
-    source_block: &lightningcss::declaration::DeclarationBlock<'_>,
-) -> Result<Vec<Declaration>, ParseError> {
-    let mut declarations = Vec::new();
-
-    for property in &source_block.declarations {
-        declarations.push(lower_property(property)?);
-    }
-    for property in &source_block.important_declarations {
-        declarations.push(lower_property(property)?);
-    }
-
-    Ok(declarations)
-}
-
-fn lower_property(
-    property: &lightningcss::properties::Property<'_>,
-) -> Result<Declaration, ParseError> {
-    let property_name = property.property_id().name().to_string();
-    let value = property
-        .value_to_css_string(PrinterOptions::default())
-        .map_err(map_lightning_printer_error)?;
-
-    Ok(Declaration {
-        property: property_name,
-        value: classify_style_value(&value),
-    })
-}
-
-fn lower_container_query(
-    source_rule: &lightningcss::rules::container::ContainerRule<'_>,
-) -> Result<ContainerQuery, ParseError> {
-    let Some(condition) = &source_rule.condition else {
-        return Err(ParseError::InvalidStyle {
-            message: "container query is missing a condition".into(),
-            span: SourceSpan::default(),
-        });
-    };
-
-    lower_container_condition(condition)
-}
-
-fn css_rule_name(rule: &LightningCssRule<'_>) -> &'static str {
-    match rule {
-        LightningCssRule::Media(_) => "@media",
-        LightningCssRule::Import(_) => "@import",
-        LightningCssRule::Style(_) => "style",
-        LightningCssRule::Keyframes(_) => "@keyframes",
-        LightningCssRule::FontFace(_) => "@font-face",
-        LightningCssRule::FontPaletteValues(_) => "@font-palette-values",
-        LightningCssRule::FontFeatureValues(_) => "@font-feature-values",
-        LightningCssRule::Page(_) => "@page",
-        LightningCssRule::Supports(_) => "@supports",
-        LightningCssRule::CounterStyle(_) => "@counter-style",
-        LightningCssRule::Namespace(_) => "@namespace",
-        LightningCssRule::MozDocument(_) => "@-moz-document",
-        LightningCssRule::Nesting(_) => "@nest",
-        LightningCssRule::NestedDeclarations(_) => "nested declarations",
-        LightningCssRule::Viewport(_) => "@viewport",
-        LightningCssRule::CustomMedia(_) => "@custom-media",
-        LightningCssRule::LayerStatement(_) => "@layer",
-        LightningCssRule::LayerBlock(_) => "@layer",
-        LightningCssRule::Property(_) => "@property",
-        LightningCssRule::Container(_) => "@container",
-        LightningCssRule::Scope(_) => "@scope",
-        LightningCssRule::StartingStyle(_) => "@starting-style",
-        LightningCssRule::ViewTransition(_) => "@view-transition",
-        LightningCssRule::Ignored => "ignored rule",
-        LightningCssRule::Unknown(_) => "unknown at-rule",
-        LightningCssRule::Custom(_) => "custom at-rule",
-    }
-}
-
-fn map_lightning_error<T: std::fmt::Display>(
-    err: lightningcss::error::Error<T>,
-    source: &str,
-    source_base: usize,
-) -> ParseError {
-    let span = err
-        .loc
-        .map(|loc| {
-            let offset = line_column_to_offset(source, loc.line as usize, loc.column as usize);
-            SourceSpan::new(source_base + offset, source_base + offset + 1)
-        })
-        .unwrap_or_else(|| SourceSpan::new(source_base, source_base + source.len()));
-    ParseError::InvalidStyle {
-        message: err.kind.to_string(),
-        span,
-    }
-}
-
-fn map_lightning_printer_error(err: lightningcss::error::PrinterError) -> ParseError {
-    ParseError::InvalidStyle {
-        message: err.to_string(),
-        span: SourceSpan::default(),
-    }
-}
-
-fn line_column_to_offset(source: &str, line: usize, column: usize) -> usize {
-    let mut current_line = 0;
-    let mut line_start = 0;
-    for (offset, ch) in source.char_indices() {
-        if current_line == line {
-            break;
-        }
-        if ch == '\n' {
-            current_line += 1;
-            line_start = offset + 1;
-        }
-    }
-    source[line_start..]
-        .char_indices()
-        .take_while(|(_, ch)| *ch != '\n')
-        .take(column.saturating_sub(1))
-        .last()
-        .map_or(line_start, |(offset, ch)| {
-            line_start + offset + ch.len_utf8()
-        })
-        .min(source.len())
-}
-
-fn lower_container_condition(
-    condition: &ContainerCondition<'_>,
-) -> Result<ContainerQuery, ParseError> {
-    match condition {
-        ContainerCondition::Feature(feature) => lower_container_feature(feature),
-        ContainerCondition::Operation {
-            operator: Operator::And,
-            conditions,
-        } => {
-            let mut query = ContainerQuery::default();
-            for condition in conditions {
-                query = query.intersect(lower_container_condition(condition)?);
+    let stops = source_rule
+        .stops
+        .iter()
+        .map(|stop| {
+            let declarations = stop
+                .declarations
+                .iter()
+                .map(lower_declaration)
+                .collect::<Vec<_>>();
+            if let Some(declaration) = declarations.iter().find(|declaration| {
+                !mesh_core_theme::css::is_transition_safe_keyframe_property(&declaration.property)
+            }) {
+                return Err(ParseError::InvalidStyle {
+                    message: format!(
+                        "unsupported keyframe property '{}'",
+                        declaration.property
+                    ),
+                    span: to_source_span(stop.span),
+                });
             }
-            Ok(query)
-        }
-        ContainerCondition::Operation {
-            operator: Operator::Or,
-            ..
-        } => Err(ParseError::InvalidStyle {
-            message: "container queries with 'or' are not supported".into(),
-            span: SourceSpan::default(),
-        }),
-        ContainerCondition::Not(_) => Err(ParseError::InvalidStyle {
-            message: "negated container queries are not supported".into(),
-            span: SourceSpan::default(),
-        }),
-        ContainerCondition::Style(_) => Err(ParseError::InvalidStyle {
-            message: "style container queries are not supported".into(),
-            span: SourceSpan::default(),
-        }),
-        ContainerCondition::ScrollState(_) => Err(ParseError::InvalidStyle {
-            message: "scroll-state container queries are not supported".into(),
-            span: SourceSpan::default(),
-        }),
-        ContainerCondition::Unknown(_) => Err(ParseError::InvalidStyle {
-            message: "unsupported container query condition".into(),
-            span: SourceSpan::default(),
-        }),
-    }
-}
-
-fn lower_container_feature(
-    feature: &ContainerSizeFeature<'_>,
-) -> Result<ContainerQuery, ParseError> {
-    match feature {
-        LightningQueryFeature::Plain { name, value } => {
-            let axis = container_feature_axis(name)?;
-            let value = container_feature_length(value)?;
-            let mut query = ContainerQuery::default();
-            apply_container_bound(&mut query, axis, MediaFeatureComparison::Equal, value);
-            Ok(query)
-        }
-        LightningQueryFeature::Range {
-            name,
-            operator,
-            value,
-        } => {
-            let axis = container_feature_axis(name)?;
-            let value = container_feature_length(value)?;
-            let mut query = ContainerQuery::default();
-            apply_container_bound(&mut query, axis, *operator, value);
-            Ok(query)
-        }
-        LightningQueryFeature::Interval {
-            name,
-            start,
-            start_operator,
-            end,
-            end_operator,
-        } => {
-            let axis = container_feature_axis(name)?;
-            let start = container_feature_length(start)?;
-            let end = container_feature_length(end)?;
-            let mut query = ContainerQuery::default();
-            apply_container_bound(&mut query, axis, invert_comparison(*start_operator), start);
-            apply_container_bound(&mut query, axis, *end_operator, end);
-            Ok(query)
-        }
-        LightningQueryFeature::Boolean { .. } => Err(ParseError::InvalidStyle {
-            message: "boolean container queries are not supported".into(),
-            span: SourceSpan::default(),
-        }),
-    }
-}
-
-fn container_feature_axis(
-    name: &MediaFeatureName<'_, ContainerSizeFeatureId>,
-) -> Result<ContainerAxis, ParseError> {
-    match name {
-        MediaFeatureName::Standard(ContainerSizeFeatureId::Width)
-        | MediaFeatureName::Standard(ContainerSizeFeatureId::InlineSize) => {
-            Ok(ContainerAxis::Width)
-        }
-        MediaFeatureName::Standard(ContainerSizeFeatureId::Height)
-        | MediaFeatureName::Standard(ContainerSizeFeatureId::BlockSize) => {
-            Ok(ContainerAxis::Height)
-        }
-        MediaFeatureName::Standard(other) => Err(ParseError::InvalidStyle {
-            message: format!("unsupported container query property '{other:?}'"),
-            span: SourceSpan::default(),
-        }),
-        MediaFeatureName::Custom(_) | MediaFeatureName::Unknown(_) => {
-            Err(ParseError::InvalidStyle {
-                message: "custom container query properties are not supported".into(),
-                span: SourceSpan::default(),
+            if declarations.iter().any(contains_keyframe_value_reference) {
+                return Err(ParseError::InvalidStyle {
+                    message: format!(
+                        "keyframes '{}' cannot use var() references in stop values (prop() references are also unavailable)",
+                        source_rule.name
+                    ),
+                    span: to_source_span(stop.span),
+                });
+            }
+            let easing = stop
+                .easing
+                .as_deref()
+                .map(|value| {
+                    crate::style::parse_easing(value).ok_or_else(|| ParseError::InvalidStyle {
+                        message: format!(
+                            "unsupported keyframe easing '{}' in '{}'",
+                            value.trim(),
+                            source_rule.name
+                        ),
+                        span: to_source_span(stop.span),
+                    })
+                })
+                .transpose()?;
+            Ok(KeyframeStop {
+                offset: stop.offset,
+                declarations,
+                easing,
             })
-        }
-    }
-}
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
-fn container_feature_length(value: &MediaFeatureValue<'_>) -> Result<f32, ParseError> {
-    match value {
-        MediaFeatureValue::Length(length) => {
-            length.to_px().ok_or_else(|| ParseError::InvalidStyle {
-                message: "container query length must be convertible to px".into(),
-                span: SourceSpan::default(),
-            })
-        }
-        other => Err(ParseError::InvalidStyle {
-            message: format!("unsupported container query value '{other:?}'"),
-            span: SourceSpan::default(),
-        }),
-    }
-}
-
-fn apply_container_bound(
-    query: &mut ContainerQuery,
-    axis: ContainerAxis,
-    operator: MediaFeatureComparison,
-    value: f32,
-) {
-    match (axis, operator) {
-        (ContainerAxis::Width, MediaFeatureComparison::GreaterThan)
-        | (ContainerAxis::Width, MediaFeatureComparison::GreaterThanEqual) => {
-            query.min_width = Some(query.min_width.map_or(value, |current| current.max(value)));
-        }
-        (ContainerAxis::Width, MediaFeatureComparison::LessThan)
-        | (ContainerAxis::Width, MediaFeatureComparison::LessThanEqual) => {
-            query.max_width = Some(query.max_width.map_or(value, |current| current.min(value)));
-        }
-        (ContainerAxis::Width, MediaFeatureComparison::Equal) => {
-            query.min_width = Some(query.min_width.map_or(value, |current| current.max(value)));
-            query.max_width = Some(query.max_width.map_or(value, |current| current.min(value)));
-        }
-        (ContainerAxis::Height, MediaFeatureComparison::GreaterThan)
-        | (ContainerAxis::Height, MediaFeatureComparison::GreaterThanEqual) => {
-            query.min_height = Some(query.min_height.map_or(value, |current| current.max(value)));
-        }
-        (ContainerAxis::Height, MediaFeatureComparison::LessThan)
-        | (ContainerAxis::Height, MediaFeatureComparison::LessThanEqual) => {
-            query.max_height = Some(query.max_height.map_or(value, |current| current.min(value)));
-        }
-        (ContainerAxis::Height, MediaFeatureComparison::Equal) => {
-            query.min_height = Some(query.min_height.map_or(value, |current| current.max(value)));
-            query.max_height = Some(query.max_height.map_or(value, |current| current.min(value)));
-        }
-    }
-}
-
-fn invert_comparison(operator: MediaFeatureComparison) -> MediaFeatureComparison {
-    match operator {
-        MediaFeatureComparison::Equal => MediaFeatureComparison::Equal,
-        MediaFeatureComparison::GreaterThan => MediaFeatureComparison::LessThan,
-        MediaFeatureComparison::GreaterThanEqual => MediaFeatureComparison::LessThanEqual,
-        MediaFeatureComparison::LessThan => MediaFeatureComparison::GreaterThan,
-        MediaFeatureComparison::LessThanEqual => MediaFeatureComparison::GreaterThanEqual,
-    }
-}
-
-#[derive(Clone, Copy)]
-enum ContainerAxis {
-    Width,
-    Height,
-}
-
-fn parse_selector(source: &str) -> Result<Selector, ParseError> {
-    mesh_core_theme::css::parse_selector(source).map_err(|message| ParseError::InvalidStyle {
-        message,
-        span: SourceSpan::default(),
+    Ok(KeyframeRule {
+        name: source_rule.name.clone(),
+        stops,
     })
 }
 
-fn classify_style_value(value: &str) -> StyleValue {
-    let value = value.trim();
-    if value.starts_with("var(") && value.ends_with(')') {
-        StyleValue::Var(value[4..value.len() - 1].trim().to_string())
-    } else if let Some(name) = standalone_prop_reference(value) {
-        StyleValue::Prop(name)
-    } else {
-        StyleValue::Literal(value.to_string())
+fn contains_keyframe_value_reference(declaration: &Declaration) -> bool {
+    match &declaration.value {
+        StyleValue::Var(_) | StyleValue::Prop(_) => true,
+        StyleValue::Literal(value) => value.contains("var(") || value.contains("prop("),
     }
+}
+
+fn convert_container_query(query: mesh_core_theme::css::ContainerQuery) -> ContainerQuery {
+    ContainerQuery {
+        min_width: query.min_width,
+        max_width: query.max_width,
+        min_height: query.min_height,
+        max_height: query.max_height,
+    }
+}
+
+fn map_shared_error(error: mesh_core_theme::css::LoweringError) -> ParseError {
+    ParseError::InvalidStyle {
+        message: error.message,
+        span: to_source_span(error.span),
+    }
+}
+
+fn to_source_span(span: mesh_core_theme::css::SourceSpan) -> SourceSpan {
+    SourceSpan::new(span.start, span.end)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -778,24 +396,5 @@ pub(super) fn prop_type_matches(prop_type: crate::PropType, domain: PropCssDomai
             prop_type,
             PropType::Enum | PropType::String | PropType::Icon | PropType::Token
         ),
-    }
-}
-
-/// Match a value that is *exactly* one `prop(name)` reference. Embedded uses
-/// (inside `calc()` or a shorthand) stay `Literal` and are substituted later.
-fn standalone_prop_reference(value: &str) -> Option<String> {
-    let inner = value.strip_prefix("prop(")?.strip_suffix(')')?;
-    // Reject multi-function values like `prop(a) prop(b)`: the inner must hold a
-    // single identifier with no nested parens.
-    if inner.contains('(') || inner.contains(')') {
-        return None;
-    }
-    Some(inner.trim().to_string())
-}
-
-fn contains_keyframe_value_reference(value: &StyleValue) -> bool {
-    match value {
-        StyleValue::Var(_) | StyleValue::Prop(_) => true,
-        StyleValue::Literal(value) => value.contains("var(") || value.contains("prop("),
     }
 }

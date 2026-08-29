@@ -28,8 +28,8 @@ pub(super) fn contains_deprecated_token_reference(value: &StyleValue) -> bool {
 
 pub(super) fn classify_theme_style_value(value: &str) -> StyleValue {
     let value = value.trim();
-    if value.starts_with("var(") && value.ends_with(')') {
-        StyleValue::Var(value[4..value.len() - 1].trim().to_string())
+    if let Some(name) = mesh_core_theme::css::variable_reference(value) {
+        StyleValue::Var(name)
     } else {
         StyleValue::Literal(value.to_string())
     }

@@ -267,63 +267,28 @@ pub enum StyleValue {
     Prop(String),
 }
 
+/// Classify one lowered CSS value while preserving the shared theme variable
+/// syntax. Embedded references remain literals and are resolved by the style
+/// resolver after component props and inherited custom properties are known.
+pub fn classify_style_value(value: &str) -> StyleValue {
+    let value = value.trim();
+    if let Some(name) = mesh_core_theme::css::variable_reference(value) {
+        StyleValue::Var(name)
+    } else if let Some(name) = standalone_prop_reference(value) {
+        StyleValue::Prop(name)
+    } else {
+        StyleValue::Literal(value.to_string())
+    }
+}
+
+fn standalone_prop_reference(value: &str) -> Option<String> {
+    let inner = value.strip_prefix("prop(")?.strip_suffix(')')?;
+    if inner.contains('(') || inner.contains(')') {
+        return None;
+    }
+    Some(inner.trim().to_string())
+}
+
 pub fn is_transition_safe_keyframe_property(property: &str) -> bool {
-    matches!(
-        property,
-        "background"
-            | "background-color"
-            | "border-color"
-            | "border-radius"
-            | "border-top-left-radius"
-            | "border-top-right-radius"
-            | "border-bottom-right-radius"
-            | "border-bottom-left-radius"
-            | "border-width"
-            | "border-top-width"
-            | "border-right-width"
-            | "border-bottom-width"
-            | "border-left-width"
-            | "color"
-            | "opacity"
-            | "width"
-            | "height"
-            | "min-width"
-            | "max-width"
-            | "min-height"
-            | "max-height"
-            | "padding"
-            | "padding-top"
-            | "padding-right"
-            | "padding-bottom"
-            | "padding-left"
-            | "padding-x"
-            | "padding-y"
-            | "padding-inline"
-            | "padding-block"
-            | "margin"
-            | "margin-top"
-            | "margin-right"
-            | "margin-bottom"
-            | "margin-left"
-            | "margin-x"
-            | "margin-y"
-            | "margin-inline"
-            | "margin-block"
-            | "transform"
-            | "box-shadow"
-            | "filter"
-            | "backdrop-filter"
-            | "font-size"
-            | "letter-spacing"
-            | "line-height"
-            | "gap"
-            | "row-gap"
-            | "column-gap"
-            | "gap-x"
-            | "inset"
-            | "top"
-            | "right"
-            | "bottom"
-            | "left"
-    )
+    mesh_core_theme::css::is_transition_safe_keyframe_property(property)
 }

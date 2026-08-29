@@ -119,16 +119,6 @@ impl ParseError {
         self.map_span(|span| SourceSpan::new(base + span.start, base + span.end))
     }
 
-    /// Give internally generated diagnostics a reliable owning-block range
-    /// when the underlying library did not report a token location.
-    pub(crate) fn with_fallback(self, fallback: SourceSpan) -> Self {
-        if self.span().len() != 0 {
-            self
-        } else {
-            self.map_span(|_| fallback)
-        }
-    }
-
     fn map_span(self, map: impl Fn(SourceSpan) -> SourceSpan) -> Self {
         match self {
             Self::UnclosedBlock { tag, span } => Self::UnclosedBlock {
@@ -1739,7 +1729,7 @@ box {
     }
 
     #[test]
-    fn reject_from_keyframe_alias() {
+    fn parse_from_keyframe_alias_as_zero_percent() {
         let source = r#"
 <template><box /></template>
 <style>
@@ -1749,15 +1739,14 @@ box {
 }
 </style>
 "#;
-        let err = parse_component(source).unwrap_err().to_string();
-        assert!(
-            err.contains("from/to keyframe aliases are not supported"),
-            "{err}"
-        );
+        let file = parse_component(source).expect("from alias is equivalent to 0%");
+        let stops = &file.style.expect("style").keyframes[0].stops;
+        assert_eq!(stops[0].offset, 0.0);
+        assert_eq!(stops[1].offset, 1.0);
     }
 
     #[test]
-    fn reject_to_keyframe_alias() {
+    fn parse_to_keyframe_alias_as_one_hundred_percent() {
         let source = r#"
 <template><box /></template>
 <style>
@@ -1767,11 +1756,10 @@ box {
 }
 </style>
 "#;
-        let err = parse_component(source).unwrap_err().to_string();
-        assert!(
-            err.contains("from/to keyframe aliases are not supported"),
-            "{err}"
-        );
+        let file = parse_component(source).expect("to alias is equivalent to 100%");
+        let stops = &file.style.expect("style").keyframes[0].stops;
+        assert_eq!(stops[0].offset, 0.0);
+        assert_eq!(stops[1].offset, 1.0);
     }
 
     #[test]

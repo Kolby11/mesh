@@ -1679,7 +1679,6 @@ fn parse_theme(content: &str) -> Result<Theme, serde_json::Error> {
 }
 
 fn parse_theme_css(id: &str, name: &str, content: &str) -> Result<Theme, String> {
-    let content = strip_css_comments(content)?;
     let mut theme = Theme {
         id: id.to_string(),
         name: name.to_string(),
@@ -1693,305 +1692,193 @@ fn parse_theme_css(id: &str, name: &str, content: &str) -> Result<Theme, String>
         revision: next_theme_revision(),
     };
 
-    parse_theme_css_blocks(content.as_str(), &mut theme)?;
+    let stylesheet = css::parse_stylesheet(content, 0)
+        .map_err(|error| format!("{} at {:?}", error.message, error.span))?;
+    lower_theme_rules(&stylesheet.rules, &mut theme)?;
     normalize_legacy_default_shell_animations(&mut theme, Vec::new());
     flatten_module_tokens_into(&mut theme.tokens, &theme.modules);
     Ok(theme)
 }
 
-fn strip_css_comments(content: &str) -> Result<String, String> {
-    let mut output = String::with_capacity(content.len());
-    let mut rest = content;
-    while let Some(start) = rest.find("/*") {
-        output.push_str(&rest[..start]);
-        let after_start = &rest[start + 2..];
-        if let Some(end) = after_start.find("*/") {
-            rest = &after_start[end + 2..];
-        } else {
-            return Err("unterminated CSS comment".into());
+fn lower_theme_rules(rules: &[css::Rule], theme: &mut Theme) -> Result<(), String> {
+    for rule in rules {
+        match rule {
+            css::Rule::Style(style_rule) => lower_theme_style_rule(style_rule, theme)?,
+            css::Rule::Keyframes(keyframes) => {
+                let stops = keyframes
+                    .stops
+                    .iter()
+                    .map(|stop| ThemeKeyframeStop {
+                        offset: stop.offset,
+                        declarations: stop
+                            .declarations
+                            .iter()
+                            .map(|declaration| {
+                                (declaration.property.clone(), declaration.raw_value.clone())
+                            })
+                            .collect(),
+                        easing: stop.easing.clone(),
+                    })
+                    .collect();
+                theme.keyframes.insert(keyframes.name.clone(), stops);
+            }
+            css::Rule::Container(container) => {
+                return Err(format!(
+                    "unsupported at-rule '@container' at {:?}",
+                    container.span
+                ));
+            }
+            css::Rule::Custom(custom) if custom.name.eq_ignore_ascii_case("module") => {
+                let module_id = parse_module_prelude(&custom.prelude)?;
+                let block = custom
+                    .block
+                    .as_deref()
+                    .ok_or_else(|| format!("@module '{module_id}' is missing a block"))?;
+                let stylesheet =
+                    css::parse_stylesheet(block, custom.block_base.unwrap_or(custom.span.start))
+                        .map_err(|error| format!("{} at {:?}", error.message, error.span))?;
+                let mut module = theme.modules.remove(&module_id).unwrap_or_default();
+                lower_theme_module_rules(&stylesheet.rules, &mut module)?;
+                theme.modules.insert(module_id, module);
+            }
+            css::Rule::Custom(custom) => {
+                return Err(format!(
+                    "unsupported at-rule '@{}' at {:?}",
+                    custom.name, custom.span
+                ));
+            }
         }
-    }
-    output.push_str(rest);
-    Ok(output)
-}
-
-fn parse_theme_css_blocks(mut rest: &str, theme: &mut Theme) -> Result<(), String> {
-    while let Some(open) = rest.find('{') {
-        let selector = rest[..open].trim();
-        let body_start = open + 1;
-        let close = find_matching_brace(rest, open)
-            .ok_or_else(|| format!("missing closing brace for selector '{selector}'"))?;
-        let body = &rest[body_start..close];
-        parse_theme_css_block(selector, body, theme)?;
-        rest = &rest[close + 1..];
-    }
-    if !rest.trim().is_empty() {
-        return Err(format!("unexpected trailing CSS: '{}'", rest.trim()));
     }
     Ok(())
 }
 
-fn find_matching_brace(content: &str, open: usize) -> Option<usize> {
-    let mut depth = 0usize;
-    for (offset, byte) in content.as_bytes()[open..].iter().enumerate() {
-        match byte {
-            b'{' => depth += 1,
-            b'}' => {
-                depth = depth.checked_sub(1)?;
-                if depth == 0 {
-                    return Some(open + offset);
+fn lower_theme_style_rule(rule: &css::StyleRule, theme: &mut Theme) -> Result<(), String> {
+    for selector in &rule.selectors {
+        if is_root_selector(selector) {
+            for declaration in &rule.declarations {
+                let Some(token_name) = css_variable_to_token_name(&declaration.property) else {
+                    continue;
+                };
+                theme
+                    .tokens
+                    .insert(token_name, parse_token_value(&declaration.raw_value));
+            }
+            continue;
+        }
+
+        let component = match selector {
+            css::Selector::Tag(tag) if tag == "node" => "base",
+            css::Selector::Tag(tag) => tag.as_str(),
+            _ => "",
+        };
+        let declarations = rule
+            .declarations
+            .iter()
+            .map(|declaration| (declaration.property.clone(), declaration.raw_value.clone()))
+            .collect::<ComponentDefaults>();
+        if component.is_empty() {
+            theme.rules.push(ThemeStyleRule {
+                selector: selector.clone(),
+                declarations,
+            });
+        } else {
+            theme
+                .defaults
+                .components
+                .entry(component.to_string())
+                .or_default()
+                .extend(declarations);
+        }
+    }
+    Ok(())
+}
+
+fn lower_theme_module_rules(rules: &[css::Rule], module: &mut ThemeModule) -> Result<(), String> {
+    for rule in rules {
+        match rule {
+            css::Rule::Style(style_rule) => {
+                for selector in &style_rule.selectors {
+                    if is_root_selector(selector) {
+                        for declaration in &style_rule.declarations {
+                            let Some(token_name) =
+                                css_variable_to_token_name(&declaration.property)
+                            else {
+                                continue;
+                            };
+                            module
+                                .tokens
+                                .insert(token_name, parse_token_value(&declaration.raw_value));
+                        }
+                        continue;
+                    }
+                    let component = match selector {
+                        css::Selector::Tag(tag) if tag == "node" => "base",
+                        css::Selector::Tag(tag) => tag.as_str(),
+                        _ => "",
+                    };
+                    let declarations = style_rule
+                        .declarations
+                        .iter()
+                        .map(|declaration| {
+                            (declaration.property.clone(), declaration.raw_value.clone())
+                        })
+                        .collect::<ComponentDefaults>();
+                    if component.is_empty() {
+                        module.rules.push(ThemeStyleRule {
+                            selector: selector.clone(),
+                            declarations,
+                        });
+                    } else {
+                        module
+                            .defaults
+                            .components
+                            .entry(component.to_string())
+                            .or_default()
+                            .extend(declarations);
+                    }
                 }
             }
-            _ => {}
-        }
-    }
-    None
-}
-
-fn parse_theme_css_block(selector: &str, body: &str, theme: &mut Theme) -> Result<(), String> {
-    if selector.is_empty() {
-        return Ok(());
-    }
-
-    if let Some(name) = selector.strip_prefix("@keyframes") {
-        let name = name.trim();
-        if name.is_empty() {
-            return Err("@keyframes rule is missing a name".into());
-        }
-        let stops = parse_keyframes_body(name, body)?;
-        theme.keyframes.insert(name.to_string(), stops);
-        return Ok(());
-    }
-
-    if let Some(module_id) = parse_module_selector(selector) {
-        parse_theme_module_css(module_id, body, theme)?;
-        return Ok(());
-    }
-
-    let declarations = parse_css_declarations(body)?;
-    if selector == ":root" {
-        for (property, value) in declarations {
-            let Some(token_name) = css_variable_to_token_name(&property) else {
-                continue;
-            };
-            theme.tokens.insert(token_name, parse_token_value(&value));
-        }
-        return Ok(());
-    }
-
-    let component = if selector == "node" { "base" } else { selector };
-    push_theme_rule(
-        selector,
-        component,
-        declarations,
-        &mut theme.defaults,
-        &mut theme.rules,
-    )?;
-    Ok(())
-}
-
-fn push_theme_rule(
-    selector_source: &str,
-    simple_component: &str,
-    declarations: ComponentDefaults,
-    defaults: &mut ThemeDefaults,
-    rules: &mut Vec<ThemeStyleRule>,
-) -> Result<(), String> {
-    let selector = css::parse_selector(selector_source)?;
-    match selector {
-        css::Selector::Tag(_) => defaults
-            .components
-            .entry(simple_component.to_string())
-            .or_default()
-            .extend(declarations),
-        selector => rules.push(ThemeStyleRule {
-            selector,
-            declarations,
-        }),
-    }
-    Ok(())
-}
-
-/// Parse `<stop-selector> { declarations }` blocks, where the selector is
-/// `from`, `to`, `<percent>%`, or a comma list duplicating the declarations at
-/// each offset. Returns stops sorted by offset.
-fn parse_keyframes_body(name: &str, mut rest: &str) -> Result<Vec<ThemeKeyframeStop>, String> {
-    let mut stops: Vec<ThemeKeyframeStop> = Vec::new();
-    while let Some(open) = rest.find('{') {
-        let stop_selector = rest[..open].trim();
-        let close = find_matching_brace(rest, open)
-            .ok_or_else(|| format!("missing closing brace in @keyframes '{name}'"))?;
-        let declarations = parse_css_declarations(&rest[open + 1..close])?;
-        for part in stop_selector.split(',') {
-            let offset = parse_keyframe_offset(part.trim()).ok_or_else(|| {
-                format!("invalid keyframe offset '{part}' in @keyframes '{name}'")
-            })?;
-            stops.push(ThemeKeyframeStop {
-                offset,
-                declarations: declarations
-                    .iter()
-                    .filter(|(property, _)| *property != "animation-timing-function")
-                    .map(|(property, value)| (property.clone(), value.clone()))
-                    .collect(),
-                easing: declarations.get("animation-timing-function").cloned(),
-            });
-        }
-        rest = &rest[close + 1..];
-    }
-    stops.sort_by(|a, b| a.offset.total_cmp(&b.offset));
-    Ok(stops)
-}
-
-fn parse_keyframe_offset(selector: &str) -> Option<f32> {
-    match selector {
-        "from" => Some(0.0),
-        "to" => Some(1.0),
-        _ => {
-            let percent = selector.strip_suffix('%')?.trim().parse::<f32>().ok()?;
-            Some((percent / 100.0).clamp(0.0, 1.0))
-        }
-    }
-}
-
-fn parse_module_selector(selector: &str) -> Option<&str> {
-    let selector = selector.strip_prefix("@module")?.trim();
-    selector.strip_prefix('"')?.strip_suffix('"')
-}
-
-fn parse_theme_module_css(module_id: &str, content: &str, theme: &mut Theme) -> Result<(), String> {
-    let mut module = theme.modules.remove(module_id).unwrap_or_default();
-    let mut rest = content;
-    while let Some(open) = rest.find('{') {
-        let selector = rest[..open].trim();
-        let close = find_matching_brace(rest, open)
-            .ok_or_else(|| format!("missing closing brace for module selector '{selector}'"))?;
-        let body = &rest[open + 1..close];
-        parse_theme_module_css_block(selector, body, &mut module)?;
-        rest = &rest[close + 1..];
-    }
-    theme.modules.insert(module_id.to_string(), module);
-    Ok(())
-}
-
-fn parse_theme_module_css_block(
-    selector: &str,
-    body: &str,
-    module: &mut ThemeModule,
-) -> Result<(), String> {
-    let declarations = parse_css_declarations(body)?;
-    if selector == ":root" {
-        for (property, value) in declarations {
-            let Some(token_name) = css_variable_to_token_name(&property) else {
-                continue;
-            };
-            module.tokens.insert(token_name, parse_token_value(&value));
-        }
-        return Ok(());
-    }
-
-    let component = if selector == "node" { "base" } else { selector };
-    push_theme_rule(
-        selector,
-        component,
-        declarations,
-        &mut module.defaults,
-        &mut module.rules,
-    )?;
-    Ok(())
-}
-
-fn parse_css_declarations(body: &str) -> Result<ComponentDefaults, String> {
-    let mut declarations = ComponentDefaults::new();
-    for raw in split_css_top_level(body, ';')? {
-        let declaration = raw.trim();
-        if declaration.is_empty() {
-            continue;
-        }
-        let Some(colon) = find_css_top_level_delimiter(declaration, ':')? else {
-            return Err(format!("invalid declaration '{declaration}'"));
-        };
-        let property = declaration[..colon].trim();
-        let value = declaration[colon + 1..].trim();
-        if property.is_empty() || value.is_empty() {
-            return Err(format!("invalid declaration '{declaration}'"));
-        }
-        declarations.insert(property.to_string(), value.to_string());
-    }
-    Ok(declarations)
-}
-
-fn split_css_top_level(input: &str, delimiter: char) -> Result<Vec<&str>, String> {
-    let mut pieces = Vec::new();
-    let mut start = 0;
-    let mut depth = 0usize;
-    let mut quote = None;
-    let mut escaped = false;
-    for (index, character) in input.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if character == '\\' && quote.is_some() {
-            escaped = true;
-            continue;
-        }
-        if let Some(active_quote) = quote {
-            if character == active_quote {
-                quote = None;
+            css::Rule::Keyframes(_) => {
+                return Err("keyframes are not supported inside @module".into());
             }
-            continue;
-        }
-        match character {
-            '\'' | '"' => quote = Some(character),
-            '(' => depth += 1,
-            ')' if depth == 0 => return Err("unmatched ')' in CSS declaration".into()),
-            ')' => depth -= 1,
-            value if value == delimiter && depth == 0 => {
-                pieces.push(&input[start..index]);
-                start = index + value.len_utf8();
+            css::Rule::Container(container) => {
+                return Err(format!(
+                    "unsupported at-rule '@container' at {:?}",
+                    container.span
+                ));
             }
-            _ => {}
+            css::Rule::Custom(custom) => {
+                return Err(format!(
+                    "unsupported at-rule '@{}' at {:?}",
+                    custom.name, custom.span
+                ));
+            }
         }
     }
-    if quote.is_some() || depth != 0 || escaped {
-        return Err("unterminated quote or function in CSS declaration".into());
-    }
-    pieces.push(&input[start..]);
-    Ok(pieces)
+    Ok(())
 }
 
-fn find_css_top_level_delimiter(input: &str, delimiter: char) -> Result<Option<usize>, String> {
-    let mut depth = 0usize;
-    let mut quote = None;
-    let mut escaped = false;
-    for (index, character) in input.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if character == '\\' && quote.is_some() {
-            escaped = true;
-            continue;
-        }
-        if let Some(active_quote) = quote {
-            if character == active_quote {
-                quote = None;
-            }
-            continue;
-        }
-        match character {
-            '\'' | '"' => quote = Some(character),
-            '(' => depth += 1,
-            ')' if depth == 0 => return Err("unmatched ')' in CSS declaration".into()),
-            ')' => depth -= 1,
-            value if value == delimiter && depth == 0 => return Ok(Some(index)),
-            _ => {}
-        }
+fn parse_module_prelude(prelude: &str) -> Result<String, String> {
+    let prelude = prelude.trim();
+    let Some(module_id) = prelude
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            prelude
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
+    else {
+        return Err("@module requires a quoted module id".into());
+    };
+    if module_id.trim().is_empty() {
+        return Err("@module requires a non-empty module id".into());
     }
-    if quote.is_some() || depth != 0 || escaped {
-        return Err("unterminated quote or function in CSS declaration".into());
-    }
-    Ok(None)
+    Ok(module_id.to_string())
+}
+
+fn is_root_selector(selector: &css::Selector) -> bool {
+    matches!(selector, css::Selector::State(tag, state) if tag == "*" && state == "root")
 }
 
 fn css_variable_to_token_name(property: &str) -> Option<String> {

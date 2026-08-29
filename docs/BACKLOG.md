@@ -109,9 +109,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Themes
 
-- [ ] Share the restricted CSS/token/keyframe lowering path between themes and
-      components so pseudo-states, inherited custom properties, token recipes,
-      and general theme keyframes work or produce source-located diagnostics.
 - [ ] Complete `mesh.theme` and settings with modes, sparse token overrides,
       provenance, explicit color-scheme/contrast, and revisioned authoritative
       events instead of ID heuristics and provider-overwritable render facts.

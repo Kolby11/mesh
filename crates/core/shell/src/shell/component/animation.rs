@@ -579,18 +579,9 @@ fn theme_keyframe_stop(theme: &Theme, stop: &ThemeKeyframeStop) -> component_sty
             .iter()
             .map(|(property, value)| component_style::Declaration {
                 property: property.clone(),
-                value: theme_style_value(value),
+                value: component_style::classify_style_value(value),
             })
             .collect(),
-    }
-}
-
-fn theme_style_value(value: &str) -> component_style::StyleValue {
-    let value = value.trim();
-    if value.starts_with("var(") && value.ends_with(')') {
-        component_style::StyleValue::Var(value[4..value.len() - 1].trim().to_string())
-    } else {
-        component_style::StyleValue::Literal(value.to_string())
     }
 }
 
