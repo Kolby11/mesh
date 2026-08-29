@@ -2,8 +2,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 mod bindings;
-mod config;
-mod discovery;
 mod fallback;
 mod registry;
 mod xdg;
@@ -12,8 +10,6 @@ pub use bindings::{
     FontAsset, FrontendIconBindings, IconMapping, IconPackBindings, parse_target,
     validate_canonical_identity,
 };
-pub use config::{IconCandidate, IconConfig, IconPackKind, IconPackRoot, IconProfile};
-pub use discovery::discover_xdg_packs;
 pub use fallback::{
     BuiltInIconFallback, MISSING_ICON_SVG, fallback_stage, semantic_fallback_names,
 };
@@ -24,6 +20,16 @@ pub use xdg::{
     MAX_FONT_BYTES, MAX_GLYPH_MAP_BYTES, MAX_GLYPH_MAP_ENTRIES, parse_glyph_map_bytes,
     parse_glyph_map_bytes_with_cancellation, validate_font_bytes,
 };
+
+/// Bounds applied before a manifest becomes part of a resource snapshot.
+/// Keeping these limits in the icon contract makes shell and tooling agree on
+/// the maximum amount of mapping metadata a candidate may retain.
+pub const MAX_ICON_PACK_MAPPINGS: usize = 100_000;
+pub const MAX_ICON_PACK_VOCABULARY_OWNERS: usize = 10_000;
+pub const MAX_ICON_PACK_FONT_REQUIREMENTS: usize = 256;
+pub const MAX_ICON_PACK_THEME_REQUIREMENTS: usize = 256;
+pub const MAX_ICON_MAPPING_NAME_BYTES: usize = 512;
+pub const MAX_ICON_MAPPING_TARGET_BYTES: usize = 2_048;
 
 pub type IconRegistryHandle = Arc<Mutex<IconRegistry>>;
 
@@ -173,23 +179,6 @@ pub fn set_default_shell_pack(module_id: Option<String>) {
     replace_default_registry(Arc::new(Mutex::new(candidate)));
 }
 
-/// Register an icon pack on the process-wide default registry.
-///
-/// Used by the shell to auto-register packs contributed by modules that
-/// declare `assets.icons` in their manifest. Returns `Ok(true)` when the
-/// pack was newly registered and `Ok(false)` when a pack with the same id
-/// already existed (treated as a no-op so duplicate registration during
-/// module reloads is harmless).
-pub fn register_default_pack(pack: IconPackRoot) -> anyhow::Result<bool> {
-    let current = default_registry();
-    let mut candidate = current.lock().unwrap().clone();
-    let registered = candidate.register_pack(pack)?;
-    if registered {
-        replace_default_registry(Arc::new(Mutex::new(candidate)));
-    }
-    Ok(registered)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,18 +212,19 @@ mod tests {
     #[test]
     fn default_registry_replacement_retains_last_known_good_candidate() {
         let td = tempfile::tempdir().unwrap();
-        let icon = td.path().join("home.svg");
-        write_svg(&icon);
+        let theme = td.path().join("files/scalable");
+        fs::create_dir_all(&theme).unwrap();
+        fs::write(
+            td.path().join("files/index.theme"),
+            "[Icon Theme]\nName=Test theme\nDirectories=scalable\n\n[scalable]\nSize=16\nType=Scalable\nMinSize=1\nMaxSize=512\n",
+        )
+        .unwrap();
+        write_svg(&theme.join("home.svg"));
 
-        let mut registry = IconRegistry::empty();
-        registry
-            .register_pack(IconPackRoot {
-                id: "files".into(),
-                root: Some(td.path().to_path_buf()),
-                theme: "hicolor".into(),
-                kind: IconPackKind::Xdg,
-            })
-            .unwrap();
+        let mut registry = IconRegistry::from_catalog(Arc::new(
+            mesh_core_resources::SystemResourceCatalog::from_icon_dirs(vec![td.path().into()]),
+        ))
+        .unwrap();
         registry
             .replace_bindings(
                 vec![IconPackBindings {
@@ -289,164 +279,5 @@ mod tests {
         ));
 
         replace_default_registry(Arc::new(Mutex::new(IconRegistry::empty())));
-    }
-
-    // Profile-based resolution was the v0 mechanism, replaced by icon-pack
-    // binding modules + frontend-context resolution. The tests below were
-    // exercising the obsolete code path; preserved here behind `#[ignore]`
-    // until they're rewritten as binding-model fixtures.
-    #[ignore]
-    #[test]
-    fn icon_config_resolves_ordered_fallbacks() {
-        let td = tempfile::tempdir().unwrap();
-        let material = td.path().join("material");
-        fs::create_dir_all(&material).unwrap();
-        write_svg(&material.join("audio-volume-muted.svg"));
-        write_svg(&material.join("volume-off.svg"));
-
-        let config = IconConfig::from_toml_str(&format!(
-            r#"
-active_profile = "rounded"
-
-[[packs]]
-id = "material"
-root = "{}"
-theme = "hicolor"
-
-[[packs]]
-id = "missing"
-root = "{}"
-theme = "hicolor"
-
-[profiles.rounded.icons]
-audio-volume-muted = ["missing:nope", "material:audio-volume-muted", "material:volume-off"]
-"#,
-            material.display(),
-            td.path().join("missing").display()
-        ))
-        .unwrap();
-
-        let mut registry = IconRegistry::from_config(config).unwrap();
-        let result = registry.resolve("audio-volume-muted", 18);
-
-        match result {
-            IconResolution::Found {
-                candidate, target, ..
-            } => {
-                assert_eq!(candidate, "material:audio-volume-muted");
-                let ResolvedTarget::File(path) = target else {
-                    panic!("expected file target");
-                };
-                assert!(path.ends_with("audio-volume-muted.svg"));
-            }
-            IconResolution::Missing { .. } => panic!("expected fallback candidate to resolve"),
-        }
-    }
-
-    #[ignore]
-    #[test]
-    fn icon_config_resolves_freedesktop_theme_layout() {
-        let td = tempfile::tempdir().unwrap();
-        let theme = td.path().join("TestTheme");
-        let status = theme.join("scalable/status");
-        fs::create_dir_all(&status).unwrap();
-        fs::write(
-            theme.join("index.theme"),
-            r#"[Icon Theme]
-Name=Test Theme
-Comment=Test XDG theme
-Directories=scalable/status
-
-[scalable/status]
-Size=16
-Type=Scalable
-MinSize=1
-MaxSize=256
-Context=Status
-"#,
-        )
-        .unwrap();
-        write_svg(&status.join("network-wireless.svg"));
-
-        let config = IconConfig::from_toml_str(&format!(
-            r#"
-active_profile = "xdg"
-
-[[packs]]
-id = "test"
-root = "{}"
-theme = "TestTheme"
-
-[profiles.xdg.icons]
-network-wireless = ["test:network-wireless"]
-"#,
-            td.path().display()
-        ))
-        .unwrap();
-
-        let mut registry = IconRegistry::from_config(config).unwrap();
-        let result = registry.resolve("network-wireless", 24);
-
-        match result {
-            IconResolution::Found {
-                candidate, target, ..
-            } => {
-                assert_eq!(candidate, "test:network-wireless");
-                let ResolvedTarget::File(path) = target else {
-                    panic!("expected file target");
-                };
-                assert!(path.ends_with("TestTheme/scalable/status/network-wireless.svg"));
-            }
-            IconResolution::Missing { .. } => panic!("expected XDG theme icon to resolve"),
-        }
-    }
-
-    #[ignore]
-    #[test]
-    fn icon_profile_switch_invalidates_cache() {
-        let td = tempfile::tempdir().unwrap();
-        let rounded = td.path().join("rounded");
-        let filled = td.path().join("filled");
-        fs::create_dir_all(&rounded).unwrap();
-        fs::create_dir_all(&filled).unwrap();
-        write_svg(&rounded.join("audio.svg"));
-        write_svg(&filled.join("audio.svg"));
-
-        let config = IconConfig::from_toml_str(&format!(
-            r#"
-active_profile = "rounded"
-
-[[packs]]
-id = "rounded"
-root = "{}"
-theme = "hicolor"
-
-[[packs]]
-id = "filled"
-root = "{}"
-theme = "hicolor"
-
-[profiles.rounded.icons]
-audio-volume-muted = ["rounded:audio"]
-
-[profiles.filled.icons]
-audio-volume-muted = ["filled:audio"]
-"#,
-            rounded.display(),
-            filled.display()
-        ))
-        .unwrap();
-
-        let mut registry = IconRegistry::from_config(config.clone()).unwrap();
-        let first = registry.resolve("audio-volume-muted", 18).path().unwrap();
-
-        let mut switched = config;
-        switched.active_profile = "filled".into();
-        registry.set_config(switched).unwrap();
-        let second = registry.resolve("audio-volume-muted", 18).path().unwrap();
-
-        assert_ne!(first, second);
-        assert!(first.ends_with("rounded/audio.svg"));
-        assert!(second.ends_with("filled/audio.svg"));
     }
 }

@@ -8,7 +8,6 @@ The checked-in shell currently uses these files:
 | --- | --- |
 | `config/module.json` | Installed module directory, disabled modules, provider choices, and root layout |
 | `config/settings.json` | Every user setting, in one namespaced document |
-| `config/icons.toml` | Current semantic icon profiles and fallback candidates |
 
 The root graph is also a canonical `module.json`; `mesh.schemaVersion`
 distinguishes it from an installable module manifest.

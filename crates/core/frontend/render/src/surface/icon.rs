@@ -2595,22 +2595,7 @@ mod tests {
     fn draw_named_icon_uses_destination_box_for_missing_fallback() {
         let _guard = icon_test_lock();
         clear_icon_caches();
-        let td = tempfile::tempdir().unwrap();
-        let config = mesh_core_icon::IconConfig::from_toml_str(&format!(
-            r#"
-active_profile = "material"
-
-[[packs]]
-id = "material"
-root = "{}"
-
-[profiles.material.icons]
-missing-proof = ["material:not-present"]
-"#,
-            td.path().display()
-        ))
-        .unwrap();
-        let mut registry = mesh_core_icon::IconRegistry::from_config(config).unwrap();
+        let mut registry = mesh_core_icon::IconRegistry::empty();
         let mut buffer = PixelBuffer::new(40, 36);
 
         draw_named_icon_with_registry(

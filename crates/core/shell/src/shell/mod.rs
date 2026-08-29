@@ -357,6 +357,91 @@ pub(crate) fn prepare_icon_pack_bindings_with_catalog(
     }
     mesh_core_icon::validate_canonical_identity(&section.id, "icon pack id")
         .map_err(|error| error.to_string())?;
+    if section.mappings.len() > mesh_core_icon::MAX_ICON_PACK_MAPPINGS {
+        return Err(format!(
+            "icon-pack '{}' contains more than {} mappings",
+            module_id,
+            mesh_core_icon::MAX_ICON_PACK_MAPPINGS
+        ));
+    }
+    if section.vocabularies.len() > mesh_core_icon::MAX_ICON_PACK_VOCABULARY_OWNERS {
+        return Err(format!(
+            "icon-pack '{}' contains more than {} vocabulary owners",
+            module_id,
+            mesh_core_icon::MAX_ICON_PACK_VOCABULARY_OWNERS
+        ));
+    }
+    if section.requires.fonts.len() > mesh_core_icon::MAX_ICON_PACK_FONT_REQUIREMENTS {
+        return Err(format!(
+            "icon-pack '{}' contains more than {} font requirements",
+            module_id,
+            mesh_core_icon::MAX_ICON_PACK_FONT_REQUIREMENTS
+        ));
+    }
+    if section.requires.themes.len() > mesh_core_icon::MAX_ICON_PACK_THEME_REQUIREMENTS {
+        return Err(format!(
+            "icon-pack '{}' contains more than {} theme requirements",
+            module_id,
+            mesh_core_icon::MAX_ICON_PACK_THEME_REQUIREMENTS
+        ));
+    }
+    let total_mappings = section.mappings.len().saturating_add(
+        section
+            .vocabularies
+            .values()
+            .map(|mappings| mappings.len())
+            .sum(),
+    );
+    if total_mappings > mesh_core_icon::MAX_ICON_PACK_MAPPINGS {
+        return Err(format!(
+            "icon-pack '{}' contains more than {} total mappings",
+            module_id,
+            mesh_core_icon::MAX_ICON_PACK_MAPPINGS
+        ));
+    }
+    for (name, mapping) in &section.mappings {
+        if name.len() > mesh_core_icon::MAX_ICON_MAPPING_NAME_BYTES {
+            return Err(format!(
+                "icon-pack '{}' mapping name exceeds {} bytes",
+                module_id,
+                mesh_core_icon::MAX_ICON_MAPPING_NAME_BYTES
+            ));
+        }
+        if mapping.target.len() > mesh_core_icon::MAX_ICON_MAPPING_TARGET_BYTES {
+            return Err(format!(
+                "icon-pack '{}' mapping '{}' target exceeds {} bytes",
+                module_id,
+                name,
+                mesh_core_icon::MAX_ICON_MAPPING_TARGET_BYTES
+            ));
+        }
+    }
+    for (owner, mappings) in &section.vocabularies {
+        if owner.len() > mesh_core_icon::MAX_ICON_MAPPING_NAME_BYTES {
+            return Err(format!(
+                "icon-pack '{}' vocabulary owner exceeds {} bytes",
+                module_id,
+                mesh_core_icon::MAX_ICON_MAPPING_NAME_BYTES
+            ));
+        }
+        for (name, mapping) in mappings {
+            if name.len() > mesh_core_icon::MAX_ICON_MAPPING_NAME_BYTES {
+                return Err(format!(
+                    "icon-pack '{}' vocabulary mapping name exceeds {} bytes",
+                    module_id,
+                    mesh_core_icon::MAX_ICON_MAPPING_NAME_BYTES
+                ));
+            }
+            if mapping.target.len() > mesh_core_icon::MAX_ICON_MAPPING_TARGET_BYTES {
+                return Err(format!(
+                    "icon-pack '{}' mapping '{}' target exceeds {} bytes",
+                    module_id,
+                    name,
+                    mesh_core_icon::MAX_ICON_MAPPING_TARGET_BYTES
+                ));
+            }
+        }
+    }
     let mut font_aliases = std::collections::HashMap::new();
     let mut seen_aliases = std::collections::HashSet::new();
     for req in &section.requires.fonts {
@@ -484,6 +569,21 @@ pub(crate) fn prepare_icon_pack_bindings_with_catalog(
             return Err(format!(
                 "icon-pack '{}' declares an icon mapping with an empty name or target",
                 module_id
+            ));
+        }
+        if name.len() > mesh_core_icon::MAX_ICON_MAPPING_NAME_BYTES {
+            return Err(format!(
+                "icon-pack '{}' mapping name exceeds {} bytes",
+                module_id,
+                mesh_core_icon::MAX_ICON_MAPPING_NAME_BYTES
+            ));
+        }
+        if mapping.target.len() > mesh_core_icon::MAX_ICON_MAPPING_TARGET_BYTES {
+            return Err(format!(
+                "icon-pack '{}' mapping '{}' target exceeds {} bytes",
+                module_id,
+                name,
+                mesh_core_icon::MAX_ICON_MAPPING_TARGET_BYTES
             ));
         }
         if cancellation.is_cancelled() {

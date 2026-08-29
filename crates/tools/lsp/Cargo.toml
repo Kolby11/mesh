@@ -14,6 +14,7 @@ path = "src/main.rs"
 mesh-core-component = { workspace = true }
 mesh-core-config    = { workspace = true }
 mesh-core-elements  = { workspace = true }
+mesh-core-icon     = { workspace = true }
 mesh-core-module    = { workspace = true }
 mesh-core-resources = { workspace = true }
 mesh-core-service   = { workspace = true }

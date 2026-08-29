@@ -1,5 +1,3 @@
-use crate::config::{IconPackKind, IconPackRoot};
-use crate::registry::{ResolvedTarget, SupportedAxes};
 use mesh_core_resources::{
     ResourceFingerprint, ResourcePreparationToken, SystemResourceCatalog, resource_fingerprint,
     resource_revision,
@@ -14,88 +12,15 @@ pub const MAX_GLYPH_MAP_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_GLYPH_MAP_ENTRIES: usize = 100_000;
 pub const MAX_FONT_BYTES: usize = 64 * 1024 * 1024;
 
-static SUPPORTED_AXES_CACHE: OnceLock<Mutex<SupportedAxesCache>> = OnceLock::new();
 static XDG_ICON_LOOKUP_CACHE: OnceLock<Mutex<XdgIconLookupCache>> = OnceLock::new();
-const SUPPORTED_AXES_CACHE_CAPACITY: usize = 128;
-const SUPPORTED_AXES_CACHE_MAX_BYTES: usize = 128 * 1024;
 const XDG_ICON_LOOKUP_CACHE_CAPACITY: usize = 2048;
 const XDG_ICON_LOOKUP_CACHE_MAX_BYTES: usize = 512 * 1024;
 
 type FontFreshness = ResourceFingerprint;
 
-#[derive(Debug, Clone, Copy)]
-struct CachedSupportedAxes {
-    revision: u64,
-    freshness: FontFreshness,
-    axes: SupportedAxes,
-}
-
-#[derive(Debug, Default)]
-struct SupportedAxesCache {
-    entries: HashMap<PathBuf, CachedSupportedAxes>,
-    order: VecDeque<PathBuf>,
-    bytes: usize,
-}
-
-impl SupportedAxesCache {
-    fn get(
-        &mut self,
-        path: &Path,
-        revision: u64,
-        freshness: FontFreshness,
-    ) -> Option<SupportedAxes> {
-        let axes = self
-            .entries
-            .get(path)
-            .filter(|cached| cached.revision == revision && cached.freshness == freshness)
-            .map(|cached| cached.axes);
-        if axes.is_some() {
-            self.order.retain(|existing| existing != path);
-            self.order.push_back(path.to_path_buf());
-        }
-        axes
-    }
-
-    fn insert(&mut self, path: PathBuf, value: CachedSupportedAxes) {
-        let weight = supported_axes_cache_weight(&path);
-        if weight > SUPPORTED_AXES_CACHE_MAX_BYTES {
-            return;
-        }
-        if self.entries.remove(&path).is_some() {
-            self.bytes = self
-                .bytes
-                .saturating_sub(supported_axes_cache_weight(&path));
-        }
-        self.order.retain(|existing| existing != &path);
-        while self.entries.len() >= SUPPORTED_AXES_CACHE_CAPACITY
-            || self.bytes.saturating_add(weight) > SUPPORTED_AXES_CACHE_MAX_BYTES
-        {
-            let Some(evicted) = self.order.pop_front() else {
-                break;
-            };
-            if self.entries.remove(&evicted).is_some() {
-                self.bytes = self
-                    .bytes
-                    .saturating_sub(supported_axes_cache_weight(&evicted));
-            }
-        }
-        self.order.push_back(path.clone());
-        self.entries.insert(path, value);
-        self.bytes = self.bytes.saturating_add(weight);
-    }
-}
-
-fn supported_axes_cache_weight(path: &Path) -> usize {
-    size_of::<PathBuf>()
-        .saturating_add(size_of::<CachedSupportedAxes>())
-        .saturating_add(path.as_os_str().len())
-        .max(1)
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct XdgIconLookupKey {
     revision: u64,
-    root: Option<PathBuf>,
     theme: String,
     asset_name: String,
     size: u32,
@@ -149,74 +74,11 @@ impl XdgIconLookupCache {
 
 fn xdg_lookup_cache_weight(key: &XdgIconLookupKey, value: Option<&PathBuf>) -> usize {
     size_of::<XdgIconLookupKey>()
-        .saturating_add(key.root.as_ref().map_or(0, |path| path.as_os_str().len()))
         .saturating_add(key.theme.len())
         .saturating_add(key.asset_name.len())
         .saturating_add(size_of::<Option<PathBuf>>())
         .saturating_add(value.map_or(0, |path| path.as_os_str().len()))
         .max(1)
-}
-
-#[allow(dead_code)]
-pub fn find_icon_in_pack(
-    pack: &IconPackRoot,
-    asset_name: &str,
-    size: u32,
-) -> Option<ResolvedTarget> {
-    let catalog = mesh_core_resources::discover_system_resources();
-    find_icon_in_pack_with_catalog(pack, &catalog, asset_name, size)
-}
-
-pub fn find_icon_in_pack_with_catalog(
-    pack: &IconPackRoot,
-    catalog: &SystemResourceCatalog,
-    asset_name: &str,
-    size: u32,
-) -> Option<ResolvedTarget> {
-    if let IconPackKind::Font {
-        font_file,
-        glyph_map,
-    } = &pack.kind
-    {
-        return resolve_font_glyph(pack, font_file, glyph_map, asset_name);
-    }
-
-    let path = lookup_xdg_icon_in_pack(pack, catalog, asset_name, size)?;
-
-    Some(ResolvedTarget::File(path))
-}
-
-fn lookup_xdg_icon_in_pack(
-    pack: &IconPackRoot,
-    catalog: &SystemResourceCatalog,
-    asset_name: &str,
-    size: u32,
-) -> Option<PathBuf> {
-    let key = XdgIconLookupKey {
-        revision: resource_revision(),
-        root: pack.root.clone(),
-        theme: theme_name(pack).to_string(),
-        asset_name: asset_name.to_string(),
-        size: size.max(1),
-    };
-    let cache = XDG_ICON_LOOKUP_CACHE.get_or_init(|| Mutex::new(XdgIconLookupCache::default()));
-    if let Ok(mut guard) = cache.lock()
-        && let Some(cached) = guard.get(&key)
-    {
-        return cached;
-    }
-
-    let path = search_for_pack(pack, catalog)
-        .search()
-        .icons()
-        .find_icon(asset_name, key.size, 1, &key.theme)
-        .map(|icon| icon.path().to_path_buf())
-        .or_else(|| find_direct_file(pack, asset_name));
-
-    if let Ok(mut guard) = cache.lock() {
-        guard.insert(key, path.clone());
-    }
-    path
 }
 
 /// Look up a glyph codepoint by name from a font pack's codepoints file.
@@ -366,15 +228,6 @@ pub fn validate_font_bytes(bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-/// Look up an icon in any installed theme on the system XDG search path.
-/// Used as a last-resort fallback when neither module bindings nor the
-/// active profile produce a hit.
-#[allow(dead_code)]
-pub fn find_icon_in_theme(theme: &str, asset_name: &str, size: u32) -> Option<PathBuf> {
-    let catalog = mesh_core_resources::discover_system_resources();
-    find_icon_in_theme_with_catalog(&catalog, theme, asset_name, size)
-}
-
 pub fn find_icon_in_theme_with_catalog(
     catalog: &SystemResourceCatalog,
     theme: &str,
@@ -383,7 +236,6 @@ pub fn find_icon_in_theme_with_catalog(
 ) -> Option<PathBuf> {
     let key = XdgIconLookupKey {
         revision: resource_revision(),
-        root: None,
         theme: theme.to_string(),
         asset_name: asset_name.to_string(),
         size: size.max(1),
@@ -405,46 +257,6 @@ pub fn find_icon_in_theme_with_catalog(
         guard.insert(key, path.clone());
     }
     path
-}
-
-fn resolve_font_glyph(
-    pack: &IconPackRoot,
-    font_file: &str,
-    glyph_map: &str,
-    asset_name: &str,
-) -> Option<ResolvedTarget> {
-    let root = pack.root.as_ref()?;
-    let font_path = resolve_pack_path(root, font_file);
-    let glyph_map_path = resolve_pack_path(root, glyph_map);
-    if !font_path.is_file() {
-        return None;
-    }
-    let codepoint = lookup_codepoint(&glyph_map_path, asset_name)?;
-    let supported_axes = detect_supported_axes(&font_path);
-    let font_fingerprint = resource_fingerprint(&font_path);
-    Some(ResolvedTarget::Glyph {
-        font_path,
-        font_bytes: None,
-        font_fingerprint,
-        codepoint,
-        supported_axes,
-    })
-}
-
-/// Resolve a path declared inside `mesh-pack.json` against the pack root,
-/// honoring shell-style `~` expansion and absolute paths.
-fn resolve_pack_path(root: &Path, declared: &str) -> PathBuf {
-    let trimmed = declared.trim();
-    if let Some(rest) = trimmed.strip_prefix("~/")
-        && let Some(home) = std::env::var_os("HOME")
-    {
-        return PathBuf::from(home).join(rest);
-    }
-    let candidate = PathBuf::from(trimmed);
-    if candidate.is_absolute() {
-        return candidate;
-    }
-    root.join(candidate)
 }
 
 static CODEPOINTS_CACHE: OnceLock<Mutex<CodepointsCache>> = OnceLock::new();
@@ -564,91 +376,8 @@ fn read_bounded_file(path: &Path, max_bytes: usize) -> Option<Vec<u8>> {
 /// it actually exposes. Returns conservative defaults (everything off)
 /// when the font can't be parsed; the painter then silently ignores
 /// CSS `--icon-*` properties that don't match.
-fn detect_supported_axes(font_path: &Path) -> SupportedAxes {
-    let revision = resource_revision();
-    let freshness = font_freshness(font_path);
-    if let Some(freshness) = freshness {
-        let cache = SUPPORTED_AXES_CACHE.get_or_init(|| Mutex::new(SupportedAxesCache::default()));
-        if let Ok(mut guard) = cache.lock()
-            && let Some(axes) = guard.get(font_path, revision, freshness)
-        {
-            return axes;
-        }
-    }
-
-    let Some(bytes) = read_bounded_file(font_path, MAX_FONT_BYTES) else {
-        return SupportedAxes::default();
-    };
-    let face = match ttf_parser::Face::parse(&bytes, 0) {
-        Ok(face) => face,
-        Err(_) => return SupportedAxes::default(),
-    };
-    let mut axes = SupportedAxes::default();
-    for axis in face.variation_axes() {
-        let tag = axis.tag.to_bytes();
-        match &tag {
-            b"FILL" => axes.fill = true,
-            b"wght" => axes.weight = true,
-            b"GRAD" => axes.grade = true,
-            b"opsz" => axes.optical_size = true,
-            _ => {}
-        }
-    }
-    if let Some(freshness) = freshness {
-        let cache = SUPPORTED_AXES_CACHE.get_or_init(|| Mutex::new(SupportedAxesCache::default()));
-        if let Ok(mut guard) = cache.lock() {
-            guard.insert(
-                font_path.to_path_buf(),
-                CachedSupportedAxes {
-                    revision,
-                    freshness,
-                    axes,
-                },
-            );
-        }
-    }
-    axes
-}
-
 fn font_freshness(path: &Path) -> Option<FontFreshness> {
     resource_fingerprint(path)
-}
-
-fn search_for_pack(pack: &IconPackRoot, catalog: &SystemResourceCatalog) -> icon::IconSearch {
-    match &pack.root {
-        Some(root) => icon::IconSearch::new_from(vec![xdg_base_dir_for_root(root)]),
-        None => icon::IconSearch::new_from(catalog.icon_dirs.clone()),
-    }
-}
-
-fn xdg_base_dir_for_root(root: &Path) -> PathBuf {
-    if root.join("index.theme").is_file() {
-        return root.parent().unwrap_or(root).to_path_buf();
-    }
-    root.to_path_buf()
-}
-
-fn theme_name(pack: &IconPackRoot) -> &str {
-    if pack.theme != "hicolor" {
-        return &pack.theme;
-    }
-    if let Some(root) = &pack.root
-        && root.join("index.theme").is_file()
-        && let Some(name) = root.file_name().and_then(|name| name.to_str())
-    {
-        return name;
-    }
-    &pack.theme
-}
-
-fn find_direct_file(pack: &IconPackRoot, asset_name: &str) -> Option<PathBuf> {
-    let Some(root) = &pack.root else {
-        return None;
-    };
-    ["svg", "png", "jpg", "jpeg", "bmp"]
-        .into_iter()
-        .map(|ext| root.join(format!("{asset_name}.{ext}")))
-        .find(|candidate| candidate.is_file())
 }
 
 #[cfg(test)]
@@ -692,26 +421,6 @@ mod tests {
     fn rejects_invalid_font_bytes() {
         let error = validate_font_bytes(b"not a font").unwrap_err();
         assert!(error.contains("invalid"));
-    }
-
-    #[test]
-    fn resource_revision_invalidates_negative_icon_lookup() {
-        let temp = tempfile::tempdir().unwrap();
-        let pack = IconPackRoot {
-            id: "revision-test".into(),
-            root: Some(temp.path().to_path_buf()),
-            theme: "hicolor".into(),
-            kind: IconPackKind::Xdg,
-        };
-
-        assert!(find_icon_in_pack(&pack, "appears-later", 24).is_none());
-        std::fs::write(temp.path().join("appears-later.svg"), b"<svg/>").unwrap();
-
-        mesh_core_resources::advance_resource_revision();
-        assert_eq!(
-            find_icon_in_pack(&pack, "appears-later", 24),
-            Some(ResolvedTarget::File(temp.path().join("appears-later.svg")))
-        );
     }
 
     #[test]

@@ -536,9 +536,18 @@ fn icon_reliability_core_surfaces_proof() {
         .join("../../..")
         .canonicalize()
         .unwrap();
-    let icon_config_path = root.join("config/icons.toml");
-    let icon_config = fs::read_to_string(&icon_config_path).unwrap();
-    let config = mesh_core_icon::IconConfig::from_toml_str(&icon_config).unwrap();
+    let graph =
+        mesh_core_module::package::load_authoring_snapshot(&root.join("config/module.json"))
+            .unwrap();
+    let icon_pack_id = graph
+        .icon_pack_chain()
+        .iter()
+        .find(|module_id| module_id.as_str() == "@mesh/icons-material-symbols")
+        .expect("the active graph must select the Material Symbols icon pack");
+    let icon_pack = graph
+        .module(icon_pack_id)
+        .and_then(|module| module.manifest.mesh.icon_pack())
+        .expect("the selected icon pack must have its canonical contribution");
 
     let inventory = [
         "audio-volume-muted",
@@ -558,11 +567,10 @@ fn icon_reliability_core_surfaces_proof() {
     ];
     for semantic_name in inventory {
         assert!(
-            config.active_profile().icons.contains_key(semantic_name),
-            "{semantic_name} must be mapped in config/icons.toml"
+            icon_pack.mappings.contains_key(semantic_name),
+            "{semantic_name} must be mapped in the canonical icon-pack contribution"
         );
     }
-    assert!(config.active_profile().icons.contains_key("missing-proof"));
 
     let surface_manifests = [root.join("modules/frontend/navigation-bar")];
     for module_dir in surface_manifests {

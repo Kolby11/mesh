@@ -888,6 +888,31 @@ impl SystemResourceCatalog {
         }
     }
 
+    /// Build an explicit host snapshot from icon roots supplied by the caller.
+    /// This is useful for deterministic previews and tests that must not
+    /// consult process-wide environment discovery. The roots retain their
+    /// caller-provided precedence and theme metadata is captured once here.
+    pub fn from_icon_dirs(icon_dirs: Vec<PathBuf>) -> Self {
+        let roots = HostResourceRoots {
+            data_dirs: Vec::new(),
+            icon_dirs,
+            font_dirs: Vec::new(),
+        };
+        let font_database = Arc::new(fontdb::Database::new());
+        let icon_themes = discover_icon_themes_in(&roots.icon_dirs);
+        let fingerprints = catalog_fingerprints(&roots, &icon_themes, &font_database);
+        Self {
+            revision: resource_revision(),
+            data_dirs: roots.data_dirs,
+            icon_dirs: roots.icon_dirs,
+            font_dirs: roots.font_dirs,
+            icon_themes,
+            font_families: Vec::new(),
+            fingerprints,
+            font_database,
+        }
+    }
+
     /// Reuse the exact font database that produced `font_families` rather than
     /// invoking font discovery again in a consumer-specific path.
     pub fn font_database(&self) -> fontdb::Database {

@@ -111,10 +111,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Host resources and icon packs
 
-- [ ] Remove legacy icon config and discovery authorities, and drive bounded
-      pack validation, effective-state diagnostics, CLI/LSP/doctor inspection,
-      and resource coverage previews from the canonical snapshot.
-
 ## Component language
 
 - [ ] Replace lossy `.mesh` block extraction and ad-hoc template preprocessing

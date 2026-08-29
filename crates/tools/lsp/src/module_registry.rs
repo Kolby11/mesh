@@ -1,4 +1,5 @@
 use mesh_core_component::parse_luau_script;
+use mesh_core_icon::{FontAsset, FrontendIconBindings, IconMapping};
 #[cfg(test)]
 use mesh_core_module::manifest::load_canonical_manifest;
 use mesh_core_module::manifest::{Manifest, ModuleType};
@@ -12,6 +13,7 @@ use mesh_core_service::parse_interface_contract;
 use mesh_core_service::{InterfaceContract, canonical_interface_name};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// State fields and commands exposed by a backend service module.
 #[derive(Debug, Default, Clone)]
@@ -50,9 +52,9 @@ pub struct ModuleRegistry {
     /// modules declare. Sorted, deduplicated.
     pub locales: Vec<String>,
     /// The same serializable effective-resource explanation consumed by shell
-    /// diagnostics and the CLI. LSP does not prepare render assets, so its
-    /// records are marked as metadata-only until the runtime snapshot is
-    /// available; identifiers and ordered graph ownership stay identical.
+    /// diagnostics and the CLI. LSP does not publish render assets, but it
+    /// resolves canonical mappings and records the same requirement status,
+    /// provenance, and bounded diagnostics against its graph snapshot.
     pub resource_snapshot: ResourceExplanationSnapshot,
 }
 
@@ -382,6 +384,7 @@ fn discover_resources(
     snapshot.icons.available.dedup();
     snapshot.fonts.available.extend(font_chain.iter().cloned());
 
+    let mut icon_packs = Vec::new();
     for (chain_position, module_id) in icon_chain.iter().enumerate() {
         let Some(module) = graph.module(module_id) else {
             snapshot.diagnostics.push(resource_diagnostic(
@@ -403,31 +406,15 @@ fn discover_resources(
             ));
             continue;
         };
-        let mut mappings = section
-            .mappings
-            .iter()
-            .map(|(name, mapping)| ResourceMappingExplanation {
-                semantic_name: name.clone(),
-                target: mapping.target.clone(),
-                multicolor: mapping.multicolor,
-                owner_module: module_id.clone(),
-                fallback_stage: "pack-chain".into(),
-            })
-            .collect::<Vec<_>>();
-        for vocabulary in section.vocabularies.values() {
-            mappings.extend(
-                vocabulary
-                    .iter()
-                    .map(|(name, mapping)| ResourceMappingExplanation {
-                        semantic_name: name.clone(),
-                        target: mapping.target.clone(),
-                        multicolor: mapping.multicolor,
-                        owner_module: module_id.clone(),
-                        fallback_stage: "pack-vocabulary".into(),
-                    }),
-            );
-        }
-        mappings.sort_by(|left, right| left.semantic_name.cmp(&right.semantic_name));
+        let root = module.manifest_path.parent().unwrap_or(workspace_root);
+        let bindings = lsp_icon_bindings(
+            module_id,
+            root,
+            section,
+            &catalog,
+            &mut snapshot.diagnostics,
+        );
+        let mappings = resource_icon_mappings(module_id, section);
         snapshot.icons.chain.push(ResourcePackExplanation {
             module_id: module_id.clone(),
             pack_id: section.id.clone(),
@@ -437,7 +424,17 @@ fn discover_resources(
             mappings,
             script_coverage: Vec::new(),
         });
+        icon_packs.push(bindings);
     }
+    snapshot.icons.available.extend(
+        snapshot
+            .icons
+            .chain
+            .iter()
+            .flat_map(|pack| [pack.module_id.clone(), pack.pack_id.clone()]),
+    );
+    snapshot.icons.available.sort();
+    snapshot.icons.available.dedup();
 
     for (chain_position, module_id) in font_chain.iter().enumerate() {
         let Some(module) = graph.module(module_id) else {
@@ -526,7 +523,401 @@ fn discover_resources(
         .sort_by(|left, right| left.module_id.cmp(&right.module_id));
     snapshot.fonts.available.sort();
     snapshot.fonts.available.dedup();
+
+    let frontend_bindings = snapshot
+        .frontends
+        .iter()
+        .map(|frontend| {
+            (
+                frontend.module_id.clone(),
+                FrontendIconBindings {
+                    declared_pack_chain: frontend.icon_chain.clone(),
+                    ..Default::default()
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    let known_pack_ids = icon_packs
+        .iter()
+        .flat_map(|pack| [pack.module_id.as_str(), pack.pack_id.as_str()])
+        .collect::<std::collections::HashSet<_>>();
+    let known_host_themes = catalog
+        .icon_themes
+        .iter()
+        .filter(|theme| !theme.hidden)
+        .map(|theme| theme.id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    for (module_id, bindings) in &frontend_bindings {
+        for pack_id in bindings.effective_chain(None) {
+            if !known_pack_ids.contains(pack_id.as_str())
+                && !known_host_themes.contains(pack_id.as_str())
+            {
+                snapshot.diagnostics.push(resource_diagnostic(
+                    "error",
+                    "missing_icon_chain_pack",
+                    Some(module_id.clone()),
+                    Some(pack_id.clone()),
+                    format!(
+                        "frontend '{module_id}' effective icon chain references unavailable pack '{pack_id}'"
+                    ),
+                ));
+            }
+        }
+    }
+    if let Ok(mut registry) = mesh_core_icon::IconRegistry::from_catalog(Arc::new(catalog)) {
+        if let Err(error) = registry.replace_bindings(icon_packs, frontend_bindings, None) {
+            snapshot.diagnostics.push(resource_diagnostic(
+                "error",
+                "invalid_icon_snapshot",
+                None,
+                None,
+                format!("canonical icon snapshot could not be inspected: {error}"),
+            ));
+        } else {
+            let mut requirements = std::collections::BTreeMap::<(String, String), bool>::new();
+            for requirement in graph.icon_requirements() {
+                requirements
+                    .entry((requirement.module_id.clone(), requirement.name.clone()))
+                    .and_modify(|required| *required |= requirement.required)
+                    .or_insert(requirement.required);
+            }
+            for ((module_id, semantic_name), required) in requirements {
+                let resolution = registry.resolve_for_module(&module_id, &semantic_name, 24);
+                let explanation =
+                    lsp_resolution_explanation(&module_id, &semantic_name, required, resolution);
+                if explanation.status == "missing" {
+                    snapshot.diagnostics.push(resource_diagnostic(
+                        if required { "error" } else { "warning" },
+                        if required {
+                            "missing_required_icon"
+                        } else {
+                            "missing_optional_icon"
+                        },
+                        Some(module_id.clone()),
+                        None,
+                        format!(
+                            "icon requirement '{semantic_name}' for '{module_id}' is missing from the canonical effective chain"
+                        ),
+                    ));
+                }
+                snapshot.icons.resolutions.push(explanation);
+            }
+            snapshot.icons.resolutions.sort_by(|left, right| {
+                left.module_id
+                    .cmp(&right.module_id)
+                    .then(left.semantic_name.cmp(&right.semantic_name))
+            });
+        }
+    }
     snapshot
+}
+
+fn resource_icon_mappings(
+    module_id: &str,
+    section: &mesh_core_module::manifest::IconPackSection,
+) -> Vec<ResourceMappingExplanation> {
+    let mut mappings = Vec::new();
+    let mut declared = section.mappings.iter().collect::<Vec<_>>();
+    declared.sort_by(|left, right| left.0.cmp(right.0));
+    for (name, mapping) in declared
+        .into_iter()
+        .take(mesh_core_icon::MAX_ICON_PACK_MAPPINGS)
+    {
+        mappings.push(ResourceMappingExplanation {
+            semantic_name: name.clone(),
+            target: mapping.target.clone(),
+            multicolor: mapping.multicolor,
+            owner_module: module_id.into(),
+            fallback_stage: "pack-chain".into(),
+        });
+    }
+    let mut remaining = mesh_core_icon::MAX_ICON_PACK_MAPPINGS.saturating_sub(mappings.len());
+    let mut vocabulary_owners = section.vocabularies.iter().collect::<Vec<_>>();
+    vocabulary_owners.sort_by(|left, right| left.0.cmp(right.0));
+    for (owner, vocabulary) in vocabulary_owners
+        .into_iter()
+        .take(mesh_core_icon::MAX_ICON_PACK_VOCABULARY_OWNERS)
+    {
+        if remaining == 0 {
+            break;
+        }
+        let mut entries = vocabulary.iter().collect::<Vec<_>>();
+        entries.sort_by(|left, right| left.0.cmp(right.0));
+        for (name, mapping) in entries.into_iter().take(remaining) {
+            mappings.push(ResourceMappingExplanation {
+                semantic_name: format!("{owner}:{name}"),
+                target: mapping.target.clone(),
+                multicolor: mapping.multicolor,
+                owner_module: module_id.into(),
+                fallback_stage: "vocabulary-chain".into(),
+            });
+            remaining = remaining.saturating_sub(1);
+        }
+    }
+    mappings.sort_by(|left, right| left.semantic_name.cmp(&right.semantic_name));
+    mappings
+}
+
+fn lsp_icon_bindings(
+    module_id: &str,
+    module_root: &Path,
+    section: &mesh_core_module::manifest::IconPackSection,
+    catalog: &mesh_core_resources::SystemResourceCatalog,
+    diagnostics: &mut Vec<mesh_core_resources::ResourceExplanationDiagnostic>,
+) -> mesh_core_icon::IconPackBindings {
+    if section.mappings.len() > mesh_core_icon::MAX_ICON_PACK_MAPPINGS {
+        diagnostics.push(resource_diagnostic(
+            "error",
+            "icon_mapping_limit",
+            Some(module_id.into()),
+            Some(section.id.clone()),
+            format!(
+                "icon pack exceeds the {}-mapping snapshot limit",
+                mesh_core_icon::MAX_ICON_PACK_MAPPINGS
+            ),
+        ));
+    }
+    if section.vocabularies.len() > mesh_core_icon::MAX_ICON_PACK_VOCABULARY_OWNERS {
+        diagnostics.push(resource_diagnostic(
+            "error",
+            "icon_vocabulary_limit",
+            Some(module_id.into()),
+            Some(section.id.clone()),
+            format!(
+                "icon pack exceeds the {}-vocabulary-owner snapshot limit",
+                mesh_core_icon::MAX_ICON_PACK_VOCABULARY_OWNERS
+            ),
+        ));
+    }
+    let total_mappings = section.mappings.len().saturating_add(
+        section
+            .vocabularies
+            .values()
+            .map(HashMap::len)
+            .fold(0_usize, usize::saturating_add),
+    );
+    if total_mappings > mesh_core_icon::MAX_ICON_PACK_MAPPINGS {
+        diagnostics.push(resource_diagnostic(
+            "error",
+            "icon_mapping_limit",
+            Some(module_id.into()),
+            Some(section.id.clone()),
+            format!(
+                "icon pack exceeds the {}-mapping snapshot limit including vocabularies",
+                mesh_core_icon::MAX_ICON_PACK_MAPPINGS
+            ),
+        ));
+    }
+    if section.requires.fonts.len() > mesh_core_icon::MAX_ICON_PACK_FONT_REQUIREMENTS {
+        diagnostics.push(resource_diagnostic(
+            "error",
+            "icon_font_requirement_limit",
+            Some(module_id.into()),
+            Some(section.id.clone()),
+            format!(
+                "icon pack exceeds the {}-font-requirement snapshot limit",
+                mesh_core_icon::MAX_ICON_PACK_FONT_REQUIREMENTS
+            ),
+        ));
+    }
+    if section.requires.themes.len() > mesh_core_icon::MAX_ICON_PACK_THEME_REQUIREMENTS {
+        diagnostics.push(resource_diagnostic(
+            "error",
+            "icon_theme_requirement_limit",
+            Some(module_id.into()),
+            Some(section.id.clone()),
+            format!(
+                "icon pack exceeds the {}-theme-requirement snapshot limit",
+                mesh_core_icon::MAX_ICON_PACK_THEME_REQUIREMENTS
+            ),
+        ));
+    }
+    let mut font_aliases = HashMap::new();
+    for requirement in section
+        .requires
+        .fonts
+        .iter()
+        .take(mesh_core_icon::MAX_ICON_PACK_FONT_REQUIREMENTS)
+    {
+        let glyph_map_path = requirement.glyph_map.as_deref().and_then(|declared| {
+            mesh_core_resources::ResourceAssetHandle::new(module_root, declared)
+                .map(|handle| handle.candidate_path())
+                .map_err(|error| {
+                    diagnostics.push(resource_diagnostic(
+                        "error",
+                        "unsafe_icon_glyph_map",
+                        Some(module_id.into()),
+                        Some(section.id.clone()),
+                        format!("glyph map '{declared}' is unsafe: {error}"),
+                    ));
+                })
+                .ok()
+        });
+        let resolved_font_path = match requirement.file.as_deref() {
+            Some(declared) => mesh_core_resources::ResourceAssetHandle::new(module_root, declared)
+                .map(|handle| handle.candidate_path())
+                .map_err(|error| {
+                    diagnostics.push(resource_diagnostic(
+                        "error",
+                        "unsafe_icon_font",
+                        Some(module_id.into()),
+                        Some(section.id.clone()),
+                        format!("font file '{declared}' is unsafe: {error}"),
+                    ));
+                })
+                .ok(),
+            None => catalog.font_path_for_family(&requirement.family),
+        };
+        font_aliases.insert(
+            requirement.alias.clone(),
+            FontAsset {
+                family: requirement.family.clone(),
+                glyph_map_path,
+                resolved_font_path,
+                prepared_font: None,
+                font_fingerprint: None,
+                prepared_glyphs: None,
+            },
+        );
+    }
+
+    let mappings: HashMap<String, IconMapping> = section
+        .mappings
+        .iter()
+        .take(mesh_core_icon::MAX_ICON_PACK_MAPPINGS)
+        .filter_map(|(name, mapping)| {
+            lsp_icon_mapping(module_id, &section.id, name, mapping, diagnostics)
+        })
+        .collect();
+    let mut remaining_mappings =
+        mesh_core_icon::MAX_ICON_PACK_MAPPINGS.saturating_sub(mappings.len());
+    let mut vocabularies = HashMap::new();
+    for (owner, declared_mappings) in section
+        .vocabularies
+        .iter()
+        .take(mesh_core_icon::MAX_ICON_PACK_VOCABULARY_OWNERS)
+    {
+        if remaining_mappings == 0 {
+            break;
+        }
+        let mut normalized = HashMap::new();
+        for (name, mapping) in declared_mappings.iter().take(remaining_mappings) {
+            if remaining_mappings == 0 {
+                break;
+            }
+            remaining_mappings = remaining_mappings.saturating_sub(1);
+            if let Some(mapping) =
+                lsp_icon_mapping(module_id, &section.id, name, mapping, diagnostics)
+            {
+                normalized.insert(mapping.0, mapping.1);
+            }
+        }
+        vocabularies.insert(owner.clone(), normalized);
+    }
+    mesh_core_icon::IconPackBindings {
+        pack_id: section.id.clone(),
+        module_id: module_id.into(),
+        mappings,
+        vocabularies,
+        axes: mesh_core_icon::SupportedAxes {
+            fill: section.axes.fill,
+            weight: section.axes.weight,
+            grade: section.axes.grade,
+            optical_size: section.axes.optical_size,
+        },
+        font_aliases,
+    }
+}
+
+fn lsp_icon_mapping(
+    module_id: &str,
+    pack_id: &str,
+    name: &str,
+    mapping: &mesh_core_module::manifest::IconMappingTarget,
+    diagnostics: &mut Vec<mesh_core_resources::ResourceExplanationDiagnostic>,
+) -> Option<(String, IconMapping)> {
+    if name.trim().is_empty()
+        || name.len() > mesh_core_icon::MAX_ICON_MAPPING_NAME_BYTES
+        || mapping.target.trim().is_empty()
+        || mapping.target.len() > mesh_core_icon::MAX_ICON_MAPPING_TARGET_BYTES
+        || Path::new(&mapping.target).is_absolute()
+        || mapping.target.trim_start().starts_with("~/")
+        || mesh_core_icon::parse_target(&mapping.target).is_none()
+    {
+        diagnostics.push(resource_diagnostic(
+            "error",
+            "invalid_icon_mapping",
+            Some(module_id.into()),
+            Some(pack_id.into()),
+            format!("icon mapping '{name}' has an invalid bounded pack/name target"),
+        ));
+        return None;
+    }
+    Some((
+        name.into(),
+        IconMapping {
+            target: mapping.target.clone(),
+            multicolor: mapping.multicolor,
+        },
+    ))
+}
+
+fn lsp_resolution_explanation(
+    module_id: &str,
+    semantic_name: &str,
+    required: bool,
+    resolution: mesh_core_icon::IconResolution,
+) -> mesh_core_resources::ResourceResolutionExplanation {
+    match resolution {
+        mesh_core_icon::IconResolution::Found {
+            provenance, target, ..
+        } => {
+            let asset = match target {
+                mesh_core_icon::ResolvedTarget::File(path) => Some(ResourceAssetExplanation {
+                    id: "resolved-icon".into(),
+                    path: path.display().to_string(),
+                    fingerprint: mesh_core_resources::resource_fingerprint(&path),
+                    prepared: false,
+                }),
+                mesh_core_icon::ResolvedTarget::Glyph {
+                    font_path,
+                    font_fingerprint,
+                    ..
+                } => Some(ResourceAssetExplanation {
+                    id: "resolved-glyph".into(),
+                    path: font_path.display().to_string(),
+                    fingerprint: font_fingerprint,
+                    prepared: false,
+                }),
+            };
+            mesh_core_resources::ResourceResolutionExplanation {
+                module_id: module_id.into(),
+                semantic_name: semantic_name.into(),
+                required,
+                status: "found".into(),
+                owner_module: provenance.owner_module,
+                pack_id: provenance.pack_id,
+                candidate: Some(provenance.candidate),
+                fallback_stage: Some(provenance.fallback_stage),
+                tried: Vec::new(),
+                asset,
+            }
+        }
+        mesh_core_icon::IconResolution::Missing { tried, .. } => {
+            mesh_core_resources::ResourceResolutionExplanation {
+                module_id: module_id.into(),
+                semantic_name: semantic_name.into(),
+                required,
+                status: "missing".into(),
+                owner_module: None,
+                pack_id: None,
+                candidate: None,
+                fallback_stage: None,
+                tried,
+                asset: None,
+            }
+        }
+    }
 }
 
 fn resource_diagnostic(

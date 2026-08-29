@@ -82,7 +82,7 @@ pub struct FrontendIconBindings {
     /// declaration order (first preference wins for duplicate logical
     /// names).
     pub declared_pack_chain: Vec<String>,
-    /// Author-side per-icon overrides from the frontend's `package.json`
+    /// Author-side per-icon overrides from the frontend's canonical `module.json`
     /// `icons.overrides`. Format: logical name → `<pack-id>/<asset-name>`
     /// or absolute path.
     pub author_overrides: HashMap<String, String>,

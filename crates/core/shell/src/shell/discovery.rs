@@ -115,6 +115,62 @@ fn resource_asset_explanation_with_fingerprint(
     }
 }
 
+fn icon_resolution_explanation(
+    module_id: &str,
+    semantic_name: &str,
+    required: bool,
+    resolution: mesh_core_icon::IconResolution,
+    prepared: bool,
+) -> mesh_core_resources::ResourceResolutionExplanation {
+    match resolution {
+        mesh_core_icon::IconResolution::Found {
+            provenance, target, ..
+        } => {
+            let asset = match target {
+                mesh_core_icon::ResolvedTarget::File(path) => {
+                    Some(resource_asset_explanation("resolved-icon", &path, prepared))
+                }
+                mesh_core_icon::ResolvedTarget::Glyph {
+                    font_path,
+                    font_fingerprint,
+                    ..
+                } => Some(resource_asset_explanation_with_fingerprint(
+                    "resolved-glyph",
+                    &font_path,
+                    font_fingerprint,
+                    prepared,
+                )),
+            };
+            mesh_core_resources::ResourceResolutionExplanation {
+                module_id: module_id.into(),
+                semantic_name: semantic_name.into(),
+                required,
+                status: "found".into(),
+                owner_module: provenance.owner_module,
+                pack_id: provenance.pack_id,
+                candidate: Some(provenance.candidate),
+                fallback_stage: Some(provenance.fallback_stage),
+                tried: Vec::new(),
+                asset,
+            }
+        }
+        mesh_core_icon::IconResolution::Missing { tried, .. } => {
+            mesh_core_resources::ResourceResolutionExplanation {
+                module_id: module_id.into(),
+                semantic_name: semantic_name.into(),
+                required,
+                status: "missing".into(),
+                owner_module: None,
+                pack_id: None,
+                candidate: None,
+                fallback_stage: None,
+                tried,
+                asset: None,
+            }
+        }
+    }
+}
+
 fn resource_explanation_snapshot(
     revision: u64,
     host_catalog: &mesh_core_resources::SystemResourceCatalog,
@@ -135,6 +191,11 @@ fn resource_explanation_snapshot(
         .icons
         .available
         .extend(icon_chain.iter().cloned());
+    explanation.icons.available.extend(
+        icon_packs
+            .iter()
+            .flat_map(|pack| [pack.module_id.clone(), pack.pack_id.clone()]),
+    );
     explanation.icons.available.sort();
     explanation.icons.available.dedup();
     explanation.icons.contributions = icon_assets
@@ -311,6 +372,52 @@ fn resource_explanation_snapshot(
         )
         .collect();
 
+    let known_pack_ids = icon_packs
+        .iter()
+        .flat_map(|pack| [pack.module_id.as_str(), pack.pack_id.as_str()])
+        .collect::<HashSet<_>>();
+    let known_host_themes = host_catalog
+        .icon_themes
+        .iter()
+        .filter(|theme| !theme.hidden)
+        .map(|theme| theme.id.as_str())
+        .collect::<HashSet<_>>();
+    for (module_id, bindings) in frontends {
+        for pack_id in bindings.effective_chain(shell_default_icon_pack) {
+            if !known_pack_ids.contains(pack_id.as_str())
+                && !known_host_themes.contains(pack_id.as_str())
+            {
+                explanation.diagnostics.push(
+                    mesh_core_resources::ResourceExplanationDiagnostic {
+                        severity: "error".into(),
+                        code: "missing_icon_chain_pack".into(),
+                        module_id: Some(module_id.clone()),
+                        pack_id: Some(pack_id.clone()),
+                        message: format!(
+                            "frontend '{module_id}' effective icon chain references unavailable pack '{pack_id}'"
+                        ),
+                    },
+                );
+            }
+        }
+    }
+    if let Some(pack_id) = shell_default_icon_pack
+        && !known_pack_ids.contains(pack_id)
+        && !known_host_themes.contains(pack_id)
+    {
+        explanation
+            .diagnostics
+            .push(mesh_core_resources::ResourceExplanationDiagnostic {
+                severity: "error".into(),
+                code: "missing_shell_default_icon_pack".into(),
+                module_id: None,
+                pack_id: Some(pack_id.into()),
+                message: format!(
+                    "shell default icon pack '{pack_id}' is not present in the canonical snapshot"
+                ),
+            });
+    }
+
     if let Ok(mut registry) =
         mesh_core_icon::IconRegistry::from_catalog(std::sync::Arc::new(host_catalog.clone()))
     {
@@ -333,53 +440,8 @@ fn resource_explanation_snapshot(
         }
         for ((module_id, semantic_name), required) in effective_requirements {
             let resolution = registry.resolve_for_module(&module_id, &semantic_name, 24);
-            let resolution_explanation = match resolution {
-                mesh_core_icon::IconResolution::Found {
-                    provenance, target, ..
-                } => {
-                    let asset = match target {
-                        mesh_core_icon::ResolvedTarget::File(path) => {
-                            Some(resource_asset_explanation("resolved-icon", &path, true))
-                        }
-                        mesh_core_icon::ResolvedTarget::Glyph {
-                            font_path,
-                            font_fingerprint,
-                            ..
-                        } => Some(resource_asset_explanation_with_fingerprint(
-                            "resolved-glyph",
-                            &font_path,
-                            font_fingerprint,
-                            true,
-                        )),
-                    };
-                    mesh_core_resources::ResourceResolutionExplanation {
-                        module_id: module_id.clone(),
-                        semantic_name: semantic_name.clone(),
-                        required,
-                        status: "found".into(),
-                        owner_module: provenance.owner_module,
-                        pack_id: provenance.pack_id,
-                        candidate: Some(provenance.candidate),
-                        fallback_stage: Some(provenance.fallback_stage),
-                        tried: Vec::new(),
-                        asset,
-                    }
-                }
-                mesh_core_icon::IconResolution::Missing { tried, .. } => {
-                    mesh_core_resources::ResourceResolutionExplanation {
-                        module_id: module_id.clone(),
-                        semantic_name: semantic_name.clone(),
-                        required,
-                        status: "missing".into(),
-                        owner_module: None,
-                        pack_id: None,
-                        candidate: None,
-                        fallback_stage: None,
-                        tried,
-                        asset: None,
-                    }
-                }
-            };
+            let resolution_explanation =
+                icon_resolution_explanation(&module_id, &semantic_name, required, resolution, true);
             if resolution_explanation.status == "missing" {
                 explanation.diagnostics.push(
                     mesh_core_resources::ResourceExplanationDiagnostic {
@@ -1085,6 +1147,119 @@ impl Shell {
         self.resource_snapshot = std::sync::Arc::new(snapshot.clone());
         let mut explanation = (*self.resource_explanation).clone();
         explanation.revision = snapshot.revision;
+        {
+            let registry = snapshot
+                .icon_registry
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            for frontend in &mut explanation.frontends {
+                if let Some(bindings) = registry.frontend_bindings(&frontend.module_id) {
+                    frontend.icon_chain = bindings.effective_chain(registry.shell_default_pack());
+                }
+            }
+        }
+        let stale_codes = [
+            "missing_required_icon",
+            "missing_optional_icon",
+            "missing_icon_chain_pack",
+            "missing_shell_default_icon_pack",
+        ];
+        explanation
+            .diagnostics
+            .retain(|diagnostic| !stale_codes.contains(&diagnostic.code.as_str()));
+        for frontend in &explanation.frontends {
+            for pack_id in &frontend.icon_chain {
+                if !explanation
+                    .icons
+                    .available
+                    .iter()
+                    .any(|available| available == pack_id)
+                {
+                    explanation.diagnostics.push(
+                        mesh_core_resources::ResourceExplanationDiagnostic {
+                            severity: "error".into(),
+                            code: "missing_icon_chain_pack".into(),
+                            module_id: Some(frontend.module_id.clone()),
+                            pack_id: Some(pack_id.clone()),
+                            message: format!(
+                                "frontend '{}' effective icon chain references unavailable pack '{}'",
+                                frontend.module_id, pack_id
+                            ),
+                        },
+                    );
+                }
+            }
+        }
+        if let Some(pack_id) = snapshot
+            .icon_registry
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .shell_default_pack()
+            .map(str::to_owned)
+            && !explanation
+                .icons
+                .available
+                .iter()
+                .any(|available| available == &pack_id)
+        {
+            explanation.diagnostics.push(
+                mesh_core_resources::ResourceExplanationDiagnostic {
+                    severity: "error".into(),
+                    code: "missing_shell_default_icon_pack".into(),
+                    module_id: None,
+                    pack_id: Some(pack_id.clone()),
+                    message: format!(
+                        "shell default icon pack '{pack_id}' is not present in the canonical snapshot"
+                    ),
+                },
+            );
+        }
+        let mut refreshed_resolutions = Vec::with_capacity(explanation.icons.resolutions.len());
+        for previous in explanation.icons.resolutions.drain(..) {
+            let resolution = snapshot.icon_registry.lock().unwrap().resolve_for_module(
+                &previous.module_id,
+                &previous.semantic_name,
+                24,
+            );
+            let refreshed = icon_resolution_explanation(
+                &previous.module_id,
+                &previous.semantic_name,
+                previous.required,
+                resolution,
+                true,
+            );
+            if refreshed.status == "missing" {
+                explanation
+                    .diagnostics
+                    .push(mesh_core_resources::ResourceExplanationDiagnostic {
+                        severity: if refreshed.required {
+                            "error"
+                        } else {
+                            "warning"
+                        }
+                        .into(),
+                        code: if refreshed.required {
+                            "missing_required_icon"
+                        } else {
+                            "missing_optional_icon"
+                        }
+                        .into(),
+                        module_id: Some(refreshed.module_id.clone()),
+                        pack_id: None,
+                        message: format!(
+                            "{} icon '{}' did not resolve in the effective resource snapshot",
+                            if refreshed.required {
+                                "required"
+                            } else {
+                                "optional"
+                            },
+                            refreshed.semantic_name
+                        ),
+                    });
+            }
+            refreshed_resolutions.push(refreshed);
+        }
+        explanation.icons.resolutions = refreshed_resolutions;
         self.resource_explanation = std::sync::Arc::new(explanation);
     }
 }

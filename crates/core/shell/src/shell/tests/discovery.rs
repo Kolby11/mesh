@@ -141,6 +141,30 @@ fn invalid_icon_pack_assets_are_rejected_before_binding_creation() {
 }
 
 #[test]
+fn oversized_icon_pack_metadata_is_rejected_before_preparation() {
+    let module = tempfile::tempdir().unwrap();
+    let mappings = (0..=mesh_core_icon::MAX_ICON_PACK_MAPPINGS)
+        .map(|index| {
+            (
+                format!("icon-{index}"),
+                mesh_core_module::manifest::IconMappingTarget::from(format!(
+                    "hicolor/icon-{index}"
+                )),
+            )
+        })
+        .collect();
+    let section = mesh_core_module::manifest::IconPackSection {
+        id: "bounded".into(),
+        mappings,
+        ..Default::default()
+    };
+
+    let error = super::super::prepare_icon_pack_bindings("@test/bounded", module.path(), &section)
+        .unwrap_err();
+    assert!(error.contains("mapping"), "unexpected error: {error}");
+}
+
+#[test]
 fn cancelled_icon_pack_preparation_never_returns_bindings() {
     let module = tempfile::tempdir().unwrap();
     let cancellation = mesh_core_resources::ResourcePreparationToken::new();

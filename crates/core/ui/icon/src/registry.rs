@@ -2,7 +2,6 @@ use crate::bindings::{
     FrontendIconBindings, IconPackBindings, parse_target, validate_canonical_identity,
     validate_reference,
 };
-use crate::config::{IconConfig, IconPackRoot};
 use crate::xdg;
 use anyhow::{Result, bail};
 use mesh_core_resources::{SystemResourceCatalog, resource_revision};
@@ -65,10 +64,6 @@ pub struct SupportedAxes {
 
 #[derive(Debug, Clone)]
 pub struct IconRegistry {
-    /// Underlying file/font pack roots discovered from XDG dirs and
-    /// registered ad-hoc by modules. Used by the resolver to look up
-    /// `<asset-pack>/<asset-name>` targets.
-    config: IconConfig,
     /// Host resources captured by the graph/profile candidate. Resolution
     /// must never consult a process-wide discovery result because that could
     /// mix generations while a profile or graph is being replaced.
@@ -99,19 +94,70 @@ const ICON_WARNED_MISS_MAX_BYTES: usize = 256 * 1024;
 fn validate_bindings(bindings: &IconPackBindings) -> Result<()> {
     validate_canonical_identity(&bindings.pack_id, "icon pack id")?;
     validate_reference(&bindings.module_id, "icon pack module id")?;
+    if bindings.mappings.len() > crate::MAX_ICON_PACK_MAPPINGS {
+        bail!(
+            "icon pack '{}' contains more than {} mappings",
+            bindings.pack_id,
+            crate::MAX_ICON_PACK_MAPPINGS
+        );
+    }
+    if bindings.vocabularies.len() > crate::MAX_ICON_PACK_VOCABULARY_OWNERS {
+        bail!(
+            "icon pack '{}' contains more than {} vocabulary owners",
+            bindings.pack_id,
+            crate::MAX_ICON_PACK_VOCABULARY_OWNERS
+        );
+    }
+    let vocabulary_mappings = bindings
+        .vocabularies
+        .values()
+        .map(HashMap::len)
+        .sum::<usize>();
+    if bindings.mappings.len().saturating_add(vocabulary_mappings) > crate::MAX_ICON_PACK_MAPPINGS {
+        bail!(
+            "icon pack '{}' contains more than {} total mappings",
+            bindings.pack_id,
+            crate::MAX_ICON_PACK_MAPPINGS
+        );
+    }
+    if bindings.font_aliases.len() > crate::MAX_ICON_PACK_FONT_REQUIREMENTS {
+        bail!(
+            "icon pack '{}' contains more than {} font requirements",
+            bindings.pack_id,
+            crate::MAX_ICON_PACK_FONT_REQUIREMENTS
+        );
+    }
     for alias in bindings.font_aliases.keys() {
         validate_canonical_identity(alias, "icon font alias")?;
     }
     for (name, mapping) in &bindings.mappings {
+        validate_mapping_size(name, &mapping.target)?;
         validate_reference(name, "icon mapping name")?;
         validate_mapping_target(name, &mapping.target)?;
     }
     for (owner, mappings) in &bindings.vocabularies {
         validate_reference(owner, "icon vocabulary owner")?;
         for (name, mapping) in mappings {
+            validate_mapping_size(name, &mapping.target)?;
             validate_reference(name, "icon vocabulary mapping name")?;
             validate_mapping_target(name, &mapping.target)?;
         }
+    }
+    Ok(())
+}
+
+fn validate_mapping_size(name: &str, target: &str) -> Result<()> {
+    if name.len() > crate::MAX_ICON_MAPPING_NAME_BYTES {
+        bail!(
+            "icon mapping name exceeds {} bytes",
+            crate::MAX_ICON_MAPPING_NAME_BYTES
+        );
+    }
+    if target.len() > crate::MAX_ICON_MAPPING_TARGET_BYTES {
+        bail!(
+            "icon mapping target exceeds {} bytes",
+            crate::MAX_ICON_MAPPING_TARGET_BYTES
+        );
     }
     Ok(())
 }
@@ -192,43 +238,13 @@ impl IconRegistry {
     /// Create the empty registry used before the first graph has committed or
     /// after the shell enters recovery. It has no host lookup authority.
     pub fn empty() -> Self {
-        Self::from_config_with_catalog(
-            IconConfig::builtin_xdg().expect("builtin xdg icon config should be valid"),
-            std::sync::Arc::new(SystemResourceCatalog::empty()),
-        )
-        .expect("builtin empty icon registry should be valid")
-    }
-
-    pub fn from_config(config: IconConfig) -> Result<Self> {
-        Self::from_config_with_catalog(
-            config,
-            std::sync::Arc::new(mesh_core_resources::discover_system_resources()),
-        )
+        Self::from_catalog(std::sync::Arc::new(SystemResourceCatalog::empty()))
+            .expect("builtin empty icon registry should be valid")
     }
 
     pub fn from_catalog(catalog: std::sync::Arc<SystemResourceCatalog>) -> Result<Self> {
-        let mut config = IconConfig::builtin_xdg()?;
-        for theme in catalog.icon_themes.iter().filter(|theme| !theme.hidden) {
-            if config.pack(&theme.id).is_none() {
-                config.packs.push(IconPackRoot {
-                    id: theme.id.clone(),
-                    root: Some(theme.path.clone()),
-                    theme: theme.id.clone(),
-                    kind: crate::config::IconPackKind::Xdg,
-                });
-            }
-        }
-        Self::from_config_with_catalog(config, catalog)
-    }
-
-    pub fn from_config_with_catalog(
-        config: IconConfig,
-        host_catalog: std::sync::Arc<SystemResourceCatalog>,
-    ) -> Result<Self> {
-        config.validate()?;
         Ok(Self {
-            config,
-            host_catalog,
+            host_catalog: catalog,
             icon_packs: BTreeMap::new(),
             pack_id_by_module: BTreeMap::new(),
             frontends: BTreeMap::new(),
@@ -241,33 +257,6 @@ impl IconRegistry {
             warned_miss_order: VecDeque::new(),
             warned_miss_bytes: 0,
         })
-    }
-
-    pub fn set_config(&mut self, config: IconConfig) -> Result<()> {
-        config.validate()?;
-        self.config = config;
-        self.bump_generation();
-        Ok(())
-    }
-
-    pub fn register_pack(&mut self, pack: IconPackRoot) -> Result<bool> {
-        if pack.id.trim().is_empty() {
-            bail!("pack id must not be empty");
-        }
-        if self.config.pack(&pack.id).is_some() {
-            return Ok(false);
-        }
-        if let Some(root) = &pack.root
-            && root.as_os_str().is_empty()
-        {
-            bail!("pack '{}' root must not be empty", pack.id);
-        }
-        if pack.theme.trim().is_empty() {
-            bail!("pack '{}' theme must not be empty", pack.id);
-        }
-        self.config.packs.push(pack);
-        self.bump_generation();
-        Ok(true)
     }
 
     /// Register or replace an icon-pack binding module's bindings.
@@ -300,9 +289,8 @@ impl IconRegistry {
         self.bump_generation();
     }
 
-    /// Atomically replace all graph-authorized binding modules. The system XDG
-    /// config remains installed, while module-owned packs and frontend
-    /// contexts are swapped as one candidate so a failed graph/profile
+    /// Atomically replace all graph-authorized binding modules and frontend
+    /// contexts as one candidate so a failed graph/profile
     /// preparation cannot leave a mixed registry.
     pub fn replace_bindings(
         &mut self,
@@ -681,11 +669,11 @@ impl IconRegistry {
         size: u32,
         tried: &mut Vec<String>,
     ) -> Option<IconResolution> {
-        let pack = self.config.pack(pack_id)?;
         let mapping = format!("system-pack:{pack_id}/{lookup_name}");
         tried.push(mapping.clone());
         let target =
-            xdg::find_icon_in_pack_with_catalog(pack, &self.host_catalog, lookup_name, size)?;
+            xdg::find_icon_in_theme_with_catalog(&self.host_catalog, pack_id, lookup_name, size)
+                .map(ResolvedTarget::File)?;
         Some(IconResolution::Found {
             semantic_name: semantic_name.into(),
             candidate: mapping.clone(),
@@ -748,21 +736,7 @@ impl IconRegistry {
             });
         }
 
-        // Asset-pack registered as an XDG/file pack in the IconConfig
-        if let Some(pack) = self.config.pack(asset_pack)
-            && let Some(target) =
-                xdg::find_icon_in_pack_with_catalog(pack, &self.host_catalog, asset_name, size)
-        {
-            return Some(IconResolution::Found {
-                semantic_name: semantic_name.into(),
-                candidate: mapping_label.clone(),
-                target,
-                multicolor,
-                provenance: self.provenance(owner_pack, mapping_label, fallback_stage),
-            });
-        }
-
-        // Asset-pack as a bare XDG theme name on the system
+        // Asset-pack as a bare XDG theme name in the captured host catalog.
         if let Some(path) =
             xdg::find_icon_in_theme_with_catalog(&self.host_catalog, asset_pack, asset_name, size)
         {
@@ -845,26 +819,34 @@ mod tests {
     use crate::bindings::{FontAsset, IconMapping};
     use std::collections::HashMap;
     use std::fs;
+    use std::path::Path;
+    use std::sync::Arc;
     use tempfile::tempdir;
 
-    fn empty_config() -> IconConfig {
-        IconConfig::from_toml_str(
-            r#"
-active_profile = "system"
-
-[[packs]]
-id = "system"
-theme = "hicolor"
-
-[profiles.system.icons]
-nothing = ["system:nothing"]
-"#,
-        )
-        .unwrap()
+    fn registry() -> IconRegistry {
+        IconRegistry::empty()
     }
 
-    fn registry() -> IconRegistry {
-        IconRegistry::from_config(empty_config()).unwrap()
+    fn registry_with_theme(root: &Path, theme: &str, icons: &[&str]) -> IconRegistry {
+        let theme_root = root.join(theme);
+        let scalable = theme_root.join("scalable");
+        fs::create_dir_all(&scalable).unwrap();
+        fs::write(
+            theme_root.join("index.theme"),
+            "[Icon Theme]\nName=Test theme\nDirectories=scalable\n\n[scalable]\nSize=16\nType=Scalable\nMinSize=1\nMaxSize=512\n",
+        )
+        .unwrap();
+        for icon in icons {
+            fs::write(
+                scalable.join(format!("{icon}.svg")),
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>"#,
+            )
+            .unwrap();
+        }
+        IconRegistry::from_catalog(Arc::new(
+            mesh_core_resources::SystemResourceCatalog::from_icon_dirs(vec![root.to_path_buf()]),
+        ))
+        .unwrap()
     }
 
     #[test]
@@ -938,22 +920,8 @@ nothing = ["system:nothing"]
 
     #[test]
     fn pack_qualified_template_name_resolves_through_named_pack() {
-        let td = tempdir().unwrap();
-        let icon = td.path().join("home.svg");
-        fs::write(
-            &icon,
-            r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16"/></svg>"#,
-        )
-        .unwrap();
-
-        let mut reg = registry();
-        reg.register_pack(IconPackRoot {
-            id: "lucide-files".into(),
-            root: Some(td.path().to_path_buf()),
-            theme: "hicolor".into(),
-            kind: crate::IconPackKind::Xdg,
-        })
-        .unwrap();
+        let td = tempfile::tempdir().unwrap();
+        let mut reg = registry_with_theme(td.path(), "lucide-files", &["home"]);
 
         let mut mappings = HashMap::new();
         mappings.insert("home".into(), "lucide-files/home".into());
@@ -980,14 +948,7 @@ nothing = ["system:nothing"]
     #[test]
     fn resource_revision_retries_registry_negative_resolution() {
         let td = tempdir().unwrap();
-        let mut reg = registry();
-        reg.register_pack(IconPackRoot {
-            id: "files".into(),
-            root: Some(td.path().to_path_buf()),
-            theme: "hicolor".into(),
-            kind: crate::IconPackKind::Xdg,
-        })
-        .unwrap();
+        let mut reg = registry_with_theme(td.path(), "files", &[]);
         reg.set_icon_pack(IconPackBindings {
             pack_id: "files-pack".into(),
             module_id: "@mesh/files-pack".into(),
@@ -1003,7 +964,7 @@ nothing = ["system:nothing"]
             IconResolution::Missing { .. }
         ));
         fs::write(
-            td.path().join("appears-later.svg"),
+            td.path().join("files/scalable/appears-later.svg"),
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>"#,
         )
         .unwrap();
@@ -1021,21 +982,7 @@ nothing = ["system:nothing"]
     #[test]
     fn semantic_resolution_generalizes_dash_suffixes_in_chain_order() {
         let td = tempdir().unwrap();
-        let icon = td.path().join("base.svg");
-        fs::write(
-            &icon,
-            r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>"#,
-        )
-        .unwrap();
-        let mut registry = registry();
-        registry
-            .register_pack(IconPackRoot {
-                id: "files".into(),
-                root: Some(td.path().to_path_buf()),
-                theme: "hicolor".into(),
-                kind: crate::IconPackKind::Xdg,
-            })
-            .unwrap();
+        let mut registry = registry_with_theme(td.path(), "files", &["base"]);
         registry.set_icon_pack(IconPackBindings {
             pack_id: "fallbacks".into(),
             module_id: "@mesh/fallbacks".into(),
@@ -1057,24 +1004,7 @@ nothing = ["system:nothing"]
     #[test]
     fn vocabulary_mappings_are_scoped_to_the_requesting_module() {
         let td = tempdir().unwrap();
-        let weather = td.path().join("weather.svg");
-        let other = td.path().join("other.svg");
-        for path in [&weather, &other] {
-            fs::write(
-                path,
-                r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>"#,
-            )
-            .unwrap();
-        }
-        let mut registry = registry();
-        registry
-            .register_pack(IconPackRoot {
-                id: "files".into(),
-                root: Some(td.path().to_path_buf()),
-                theme: "hicolor".into(),
-                kind: crate::IconPackKind::Xdg,
-            })
-            .unwrap();
+        let mut registry = registry_with_theme(td.path(), "files", &["weather", "other"]);
         registry
             .replace_bindings(
                 vec![IconPackBindings {
@@ -1224,14 +1154,7 @@ nothing = ["system:nothing"]
             .unwrap();
         }
 
-        let mut reg = registry();
-        reg.register_pack(IconPackRoot {
-            id: "files".into(),
-            root: Some(td.path().to_path_buf()),
-            theme: "hicolor".into(),
-            kind: crate::IconPackKind::Xdg,
-        })
-        .unwrap();
+        let mut reg = registry_with_theme(td.path(), "files", &["pack"]);
         let mut mappings = HashMap::new();
         mappings.insert("home".into(), "files/pack".into());
         reg.set_icon_pack(IconPackBindings {
@@ -1264,24 +1187,7 @@ nothing = ["system:nothing"]
     #[test]
     fn shell_default_pack_is_prepended() {
         let td = tempdir().unwrap();
-        let default_icon = td.path().join("default.svg");
-        let other_icon = td.path().join("other.svg");
-        for p in [&default_icon, &other_icon] {
-            fs::write(
-                p,
-                r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>"#,
-            )
-            .unwrap();
-        }
-
-        let mut reg = registry();
-        reg.register_pack(IconPackRoot {
-            id: "files".into(),
-            root: Some(td.path().to_path_buf()),
-            theme: "hicolor".into(),
-            kind: crate::IconPackKind::Xdg,
-        })
-        .unwrap();
+        let mut reg = registry_with_theme(td.path(), "files", &["default", "other"]);
 
         let mut default_map = HashMap::new();
         default_map.insert("home".into(), "files/default".into());
@@ -1323,7 +1229,7 @@ nothing = ["system:nothing"]
 
     #[test]
     fn replacement_rejects_duplicate_pack_ids_without_touching_live_bindings() {
-        let mut registry = IconRegistry::from_config(empty_config()).unwrap();
+        let mut registry = registry();
         registry.set_icon_pack(IconPackBindings {
             pack_id: "stable".into(),
             module_id: "@mesh/stable-icons".into(),
@@ -1509,22 +1415,7 @@ nothing = ["system:nothing"]
     #[test]
     fn system_xdg_theme_can_be_the_shell_default_without_a_mesh_module() {
         let td = tempdir().unwrap();
-        let theme = td.path().join("Ocean");
-        fs::create_dir_all(&theme).unwrap();
-        fs::write(
-            theme.join("settings.svg"),
-            r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>"#,
-        )
-        .unwrap();
-
-        let mut reg = registry();
-        reg.register_pack(IconPackRoot {
-            id: "Ocean".into(),
-            root: Some(theme),
-            theme: "Ocean".into(),
-            kind: crate::IconPackKind::Xdg,
-        })
-        .unwrap();
+        let mut reg = registry_with_theme(td.path(), "Ocean", &["settings"]);
         reg.set_shell_default_pack(Some("Ocean".into()));
         reg.set_frontend_bindings("settings", FrontendIconBindings::default());
 
