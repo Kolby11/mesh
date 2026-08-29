@@ -1006,7 +1006,7 @@ impl Shell {
         &mut self,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let locale = self.locale.clone();
-        let locale_id = locale.current().to_string();
+        let selection = locale.selection().clone();
         for component_index in 0..self.components.len() {
             if self.component_is_quarantined(component_index) {
                 continue;
@@ -1021,7 +1021,7 @@ impl Shell {
                 }
             }
         }
-        self.broadcast_core_event(CoreEvent::LocaleChanged { locale: locale_id })
+        self.broadcast_core_event(CoreEvent::LocaleChanged { selection })
     }
 
     pub(in crate::shell) fn apply_set_locale(
@@ -1105,12 +1105,7 @@ impl Shell {
     pub(in crate::shell) fn sync_locale_service_state(
         &mut self,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
-        let selection = self.locale.selection();
-        let locale = selection.active().to_string();
-        let chain = selection.chain().to_vec();
-        let direction = selection.direction().as_str();
         let policy = self.settings.i18n.policy.as_str();
-        let revision = selection.revision().to_string();
         let durable_revision = self.control_plane_revision.as_string();
         // As with theme, the shell supplies the host-derived snapshot while
         // the selected provider owns the interface state observed by modules.
@@ -1118,15 +1113,11 @@ impl Shell {
         self.broadcast_service_event(ServiceEvent::Updated {
             service: "mesh.locale".into(),
             source_module,
-            payload: serde_json::json!({
-                "locale": locale.clone(),
-                "current": locale,
-                "chain": chain,
-                "direction": direction,
-                "policy": policy,
-                "revision": revision,
-                "durable_revision": durable_revision,
-            }),
+            payload: crate::shell::locale_service_payload(
+                &self.locale.snapshot(),
+                Some(policy),
+                Some(&durable_revision),
+            ),
         })
     }
 }

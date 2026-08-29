@@ -109,7 +109,6 @@ impl ScriptContext {
             let i18n = create_i18n_library(
                 self.lua(),
                 Arc::clone(&self.locale_cell),
-                self.module_id.clone(),
                 Arc::clone(&self.localized_misses),
             )
             .map_err(lua_err)?;
@@ -208,7 +207,7 @@ impl ScriptContext {
                     "current",
                     self.lua()
                         .create_function(move |_lua, ()| {
-                            Ok(locale_cell.lock().unwrap().locale.clone())
+                            Ok(locale_cell.lock().unwrap().resolver.locale().to_string())
                         })
                         .map_err(lua_err)?,
                 )
@@ -221,7 +220,12 @@ impl ScriptContext {
                     self.lua()
                         .create_function(move |_lua, value: LuaValue| {
                             let value = lua_number_string(value)?;
-                            let locale = locale_cell_for_number.lock().unwrap().locale.clone();
+                            let locale = locale_cell_for_number
+                                .lock()
+                                .unwrap()
+                                .resolver
+                                .locale()
+                                .to_string();
                             format_number_value(&locale, &value)
                                 .map_err(|error| LuaError::external(error.to_string()))
                         })
@@ -238,7 +242,12 @@ impl ScriptContext {
                             move |_lua, (timestamp, style): (LuaValue, Option<String>)| {
                                 let timestamp = lua_timestamp(timestamp)?;
                                 let style = style.unwrap_or_else(|| "short".into());
-                                let locale = locale_cell_for_date.lock().unwrap().locale.clone();
+                                let locale = locale_cell_for_date
+                                    .lock()
+                                    .unwrap()
+                                    .resolver
+                                    .locale()
+                                    .to_string();
                                 format_date(&locale, timestamp, &style)
                                     .map_err(|error| LuaError::external(error.to_string()))
                             },
@@ -254,7 +263,12 @@ impl ScriptContext {
                     self.lua()
                         .create_function(move |_lua, value: LuaValue| {
                             let value = lua_number(value)?;
-                            let locale = locale_cell_for_duration.lock().unwrap().locale.clone();
+                            let locale = locale_cell_for_duration
+                                .lock()
+                                .unwrap()
+                                .resolver
+                                .locale()
+                                .to_string();
                             format_duration(&locale, value)
                                 .map_err(|error| LuaError::external(error.to_string()))
                         })
@@ -543,7 +557,6 @@ impl ScriptContext {
         let optional_interfaces_for_require = Arc::clone(&self.optional_interfaces);
         let locale_cell = Arc::clone(&self.locale_cell);
         let localized_misses = Arc::clone(&self.localized_misses);
-        let i18n_owner_module_id = self.module_id.clone();
         // The per-instance _ENV is the channel-registry scope so interface event
         // channels stay private when components share one thread VM.
         let scope_for_require = globals.clone();
@@ -566,7 +579,6 @@ impl ScriptContext {
                     return create_i18n_library(
                         lua,
                         Arc::clone(&locale_cell),
-                        i18n_owner_module_id.clone(),
                         Arc::clone(&localized_misses),
                     )
                     .map(LuaValue::Table);
@@ -723,6 +735,21 @@ impl ScriptContext {
                             "import: member names must be strings".to_string(),
                         )));
                     };
+                    if spec.as_bytes() == b"mesh.locale" {
+                        let key_name = key.to_str()?.to_string();
+                        let allowed = match key_name.as_str() {
+                            "current" | "format_number" | "format_date" | "format_duration" => {
+                                has_locale_read
+                            }
+                            "set" => has_locale_write,
+                            _ => true,
+                        };
+                        if !allowed {
+                            return Err(LuaError::external(ScriptError::CapabilityDenied(
+                                format!("mesh.locale.{key_name}"),
+                            )));
+                        }
+                    }
                     results.push(table.get::<LuaValue>(key)?);
                 }
                 Ok(Variadic::from_iter(results))

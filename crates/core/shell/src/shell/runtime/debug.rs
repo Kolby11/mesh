@@ -17,6 +17,10 @@ impl Shell {
     }
 
     fn debug_snapshot(&mut self) -> DebugSnapshot {
+        // Build graph metadata before collecting diagnostics: localized
+        // metadata resolution can discover misses that belong in this same
+        // point-in-time debug snapshot.
+        let module_graph = self.module_graph_entries();
         let modules = self
             .modules
             .values()
@@ -159,7 +163,7 @@ impl Shell {
 
         DebugSnapshot {
             modules,
-            module_graph: self.module_graph_entries(),
+            module_graph,
             resources: self.resource_explanation_snapshot(),
             module_instances,
             interfaces,
@@ -290,7 +294,7 @@ fn debug_service_payload(
 }
 
 impl Shell {
-    fn module_graph_entries(&self) -> Vec<mesh_core_debug::ModuleGraphEntry> {
+    fn module_graph_entries(&mut self) -> Vec<mesh_core_debug::ModuleGraphEntry> {
         let Some(graph) = self.installed_module_graph.as_ref() else {
             return Vec::new();
         };
@@ -329,7 +333,18 @@ impl Shell {
                     for provider in &providers {
                         provides_interfaces.push(provider.interface.clone());
                         provides_interface_labels.push(provider.label.as_ref().map(|label| {
-                            resolve_debug_manifest_text(&self.locale, &module.id, label).text
+                            let resolution = resolve_debug_manifest_text(
+                                &self.locale,
+                                &module.id,
+                                "mesh.provides.interface.label",
+                                label,
+                            );
+                            record_debug_localized_resolution(
+                                &mut self.diagnostics,
+                                &mut diagnostics,
+                                &resolution,
+                            );
+                            resolution.text
                         }));
                     }
                 }
@@ -359,7 +374,18 @@ impl Shell {
                         .filter(|t| t.module_id == module.id)
                         .map(|t| {
                             let label = t.label.as_ref().map(|label| {
-                                resolve_debug_manifest_text(&self.locale, &module.id, label).text
+                                let resolution = resolve_debug_manifest_text(
+                                    &self.locale,
+                                    &module.id,
+                                    "mesh.provides.theme.label",
+                                    label,
+                                );
+                                record_debug_localized_resolution(
+                                    &mut self.diagnostics,
+                                    &mut diagnostics,
+                                    &resolution,
+                                );
+                                resolution.text
                             });
                             (t.id.clone(), label)
                         })
@@ -369,6 +395,20 @@ impl Shell {
                     .settings_schemas()
                     .iter()
                     .find(|settings| settings.module_id == module.id);
+                let settings_schema = module_settings.map(|settings| {
+                    let (schema, resolutions) = {
+                        let translator = self.locale.module_translator(&module.id);
+                        translator.resolve_json(&settings.schema, "mesh.settings.generated_props")
+                    };
+                    for resolution in resolutions {
+                        record_debug_localized_resolution(
+                            &mut self.diagnostics,
+                            &mut diagnostics,
+                            &resolution,
+                        );
+                    }
+                    schema
+                });
                 let provides_settings = graph
                     .settings_schemas()
                     .iter()
@@ -489,9 +529,24 @@ impl Shell {
                         .iter()
                         .find(|layout| layout.module_id == module.id && layout.path == surface.path)
                         .and_then(|layout| layout.label.as_ref())
-                        .map(|label| resolve_debug_manifest_text(&self.locale, &module.id, label))
+                        .map(|label| {
+                            let resolution = resolve_debug_manifest_text(
+                                &self.locale,
+                                &module.id,
+                                "mesh.provides.layout.label",
+                                label,
+                            );
+                            record_debug_localized_resolution(
+                                &mut self.diagnostics,
+                                &mut diagnostics,
+                                &resolution,
+                            );
+                            resolution
+                        })
                 });
 
+                diagnostics.sort();
+                diagnostics.dedup();
                 mesh_core_debug::ModuleGraphEntry {
                     module_id: module.id.clone(),
                     kind: format!("{:?}", module.kind).to_lowercase(),
@@ -552,7 +607,7 @@ impl Shell {
                     provides_interfaces,
                     provides_interface_labels,
                     provides_settings,
-                    settings_schema: module_settings.map(|settings| settings.schema.clone()),
+                    settings_schema,
                     settings_values,
                     settings_instances,
                     settings_instance_values,
@@ -1360,20 +1415,21 @@ fn sorted_keys<T>(map: &std::collections::HashMap<String, T>) -> Vec<String> {
 fn resolve_debug_manifest_text(
     locale: &mesh_core_locale::LocaleEngine,
     module_id: &str,
+    field_path: &str,
     text: &mesh_core_module::LocalizedText,
 ) -> mesh_core_locale::LocalizedTextResolution {
-    match text {
-        mesh_core_module::LocalizedText::Literal(value) => {
-            mesh_core_locale::LocalizedTextResolution::literal(
-                module_id,
-                value,
-                locale.catalog_snapshot().revision(),
-            )
-        }
-        mesh_core_module::LocalizedText::Translation { key, fallback } => {
-            let translator = locale.module_translator(module_id);
-            translator.resolve(key, Some(fallback))
-        }
+    crate::shell::resolve_manifest_text(&locale.snapshot(), module_id, field_path, text)
+}
+
+fn record_debug_localized_resolution(
+    shell_diagnostics: &mut mesh_core_diagnostics::DiagnosticsCollector,
+    module_diagnostics: &mut Vec<String>,
+    resolution: &mesh_core_locale::LocalizedTextResolution,
+) {
+    if super::super::record_localized_miss(shell_diagnostics, resolution, None)
+        && let Some(key) = resolution.key.as_deref()
+    {
+        module_diagnostics.push(format!("i18n-missing:{key}"));
     }
 }
 

@@ -10,7 +10,7 @@ use mesh_core_debug::{
     InterfaceEntry, ModuleEntry, ProviderEntry,
 };
 use mesh_core_diagnostics::DiagnosticsCollector;
-use mesh_core_locale::LocaleEngine;
+use mesh_core_locale::{LocaleEngine, LocaleSnapshot};
 use mesh_core_module::DependencyGraphError;
 use mesh_core_module::lifecycle::{ModuleInstance, ModuleState};
 use mesh_core_module::package::{
@@ -36,6 +36,102 @@ use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use tokio::task::{AbortHandle, JoinHandle};
+
+pub(super) fn record_localized_miss(
+    diagnostics: &mut DiagnosticsCollector,
+    resolution: &mesh_core_locale::LocalizedTextResolution,
+    field_path: Option<&str>,
+) -> bool {
+    let Some(key) = resolution.key.as_deref() else {
+        return false;
+    };
+    let issue_code = format!("i18n-missing:{}:{key}", resolution.owner_module_id);
+    if !resolution.missing {
+        return diagnostics.resolve_instance_issue(
+            &resolution.owner_module_id,
+            "i18n",
+            &issue_code,
+        );
+    }
+    let field = resolution
+        .field_path
+        .as_deref()
+        .or(field_path)
+        .unwrap_or("runtime");
+    diagnostics.record_instance_issue_with_source(
+        resolution.owner_module_id.clone(),
+        "i18n",
+        issue_code,
+        mesh_core_diagnostics::DiagnosticCategory::I18n,
+        mesh_core_diagnostics::IssueSeverity::Warning,
+        format!(
+            "missing localized text: module_id='{}' field_path='{field}' key='{key}' fallback='{}' source='{}' snapshot_revision={}",
+            resolution.owner_module_id,
+            resolution.fallback.as_deref().unwrap_or(""),
+            resolution
+                .source
+                .as_ref()
+                .map(|source| source.path.display().to_string())
+                .unwrap_or_else(|| "missing".to_string()),
+            resolution.snapshot_revision,
+        ),
+        resolution
+            .source
+            .as_ref()
+            .map(|source| source.path.display().to_string()),
+        None,
+    )
+}
+
+/// Build the single locale state shape shared by core service updates and
+/// component-local service delivery. Optional persistence fields are added by
+/// the shell coordinator once the durable transaction has committed.
+pub(super) fn locale_service_payload(
+    locale: &mesh_core_locale::LocaleSnapshot,
+    policy: Option<&str>,
+    durable_revision: Option<&str>,
+) -> serde_json::Value {
+    let selection = locale.selection();
+    let mut payload = serde_json::json!({
+        "locale": selection.active(),
+        "current": selection.active(),
+        "chain": selection.chain(),
+        "direction": selection.direction().as_str(),
+        "revision": selection.revision().to_string(),
+    });
+    if let Some(policy) = policy {
+        payload["policy"] = serde_json::json!(policy);
+    }
+    if let Some(durable_revision) = durable_revision {
+        payload["durable_revision"] = serde_json::json!(durable_revision);
+    }
+    payload
+}
+
+/// Resolve a manifest-localized field against exactly the module named by the
+/// field's owner. All shell metadata consumers use this same conversion so a
+/// debug label and a live descriptor cannot silently select different
+/// catalogs.
+pub(super) fn resolve_manifest_text(
+    locale: &LocaleSnapshot,
+    module_id: &str,
+    field_path: &str,
+    text: &mesh_core_module::LocalizedText,
+) -> mesh_core_locale::LocalizedTextResolution {
+    let resolution = match text {
+        mesh_core_module::LocalizedText::Literal(value) => {
+            mesh_core_locale::LocalizedTextResolution::literal(
+                module_id,
+                value,
+                locale.catalog_snapshot().revision(),
+            )
+        }
+        mesh_core_module::LocalizedText::Translation { key, fallback } => locale
+            .module_translator(module_id)
+            .resolve(key, Some(fallback)),
+    };
+    resolution.with_field_path(field_path)
+}
 
 mod backend;
 mod component;

@@ -832,7 +832,7 @@ changes composition or configuration:
 | `mesh.packages` | `install`, `uninstall`, `set_module_enabled`, `set_provider`, `switch_profile` | `service.packages.control` |
 | `mesh.settings` | `set_prop`, `unset_prop` | `service.settings.control` |
 | `mesh.theme` | `set_theme`, `set_icon_theme`, `set_font_family` | `service.theme.control` |
-| `mesh.locale` | — (state only) | — |
+| `mesh.locale` | — (state projection; host read/write APIs) | `locale.read` / `locale.write` |
 
 The fifth core interface, mesh.composition, publishes the active profile
 generation, roots, named slots, effective/default placements, and compatible
@@ -848,9 +848,10 @@ same reach as `@mesh/settings`, and `@mesh/settings` without the capability has
 none. This is what makes the settings experience replaceable rather than merely
 mountable.
 
-Locale is state-only on purpose: `mesh.locale.set` is a host API that already
-enforces `locale.write`. Adding a service method would create a second
-capability name for one write.
+Locale writes remain on the `mesh.locale.set` host API, which enforces
+`locale.write` before publishing the shell request. The `mesh.locale` service
+projection is read only and carries the committed locale, fallback chain,
+direction, selection revision, policy, and durable control-plane revision.
 
 A command whose payload does not match the declared arguments is reported as
 unsupported and applied nowhere — core-provided methods never substitute a

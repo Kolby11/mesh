@@ -282,6 +282,49 @@ end
 }
 
 #[test]
+fn named_locale_imports_enforce_read_and_write_members() {
+    let mut write = CapabilitySet::new();
+    write.grant(Capability::new("locale.write"));
+    let mut write_ctx = ScriptContext::new("@mesh/locale-write-import", write).unwrap();
+    write_ctx
+        .load_script(
+            r#"
+function init()
+    current_ok = pcall(import, "mesh.locale", "current")
+    set_ok = pcall(import, "mesh.locale", "set")
+end
+"#,
+        )
+        .unwrap();
+    write_ctx.call_init().unwrap();
+    assert_eq!(
+        write_ctx.state.get("current_ok"),
+        Some(serde_json::json!(false))
+    );
+    assert_eq!(write_ctx.state.get("set_ok"), Some(serde_json::json!(true)));
+
+    let mut read = CapabilitySet::new();
+    read.grant(Capability::new("locale.read"));
+    let mut read_ctx = ScriptContext::new("@mesh/locale-read-import", read).unwrap();
+    read_ctx
+        .load_script(
+            r#"
+function init()
+    current_ok = pcall(import, "mesh.locale", "current")
+    set_ok = pcall(import, "mesh.locale", "set")
+end
+"#,
+        )
+        .unwrap();
+    read_ctx.call_init().unwrap();
+    assert_eq!(
+        read_ctx.state.get("current_ok"),
+        Some(serde_json::json!(true))
+    );
+    assert_eq!(read_ctx.state.get("set_ok"), Some(serde_json::json!(false)));
+}
+
+#[test]
 fn require_resolves_mesh_i18n_library_alias() {
     let mut caps = CapabilitySet::new();
     caps.grant(Capability::new("locale.read"));
@@ -303,6 +346,7 @@ end
     ctx.call_init().unwrap();
 
     assert_eq!(ctx.state.get("label"), Some(serde_json::json!("Volume")));
+    assert!(ctx.drain_localized_misses().is_empty());
 }
 
 #[test]

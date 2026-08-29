@@ -813,6 +813,27 @@ impl LocaleSnapshot {
         None
     }
 
+    fn module_entry_locale(&self, module_id: &str, key: &str) -> Option<&str> {
+        for locale in self.selection.chain() {
+            if self.module_entry(module_id, locale, key, true).is_some() {
+                return Some(locale);
+            }
+        }
+        if let Some(default_locale) = self.catalogs.module_defaults.get(module_id)
+            && !self
+                .selection
+                .chain()
+                .iter()
+                .any(|locale| locale == default_locale)
+            && self
+                .module_entry(module_id, default_locale, key, false)
+                .is_some()
+        {
+            return Some(default_locale);
+        }
+        None
+    }
+
     fn resolve_in_core<'a>(&'a self, key: &str, args: &HashMap<String, String>) -> Option<&'a str> {
         for locale in self.selection.chain() {
             if let Some(entry) = self.catalogs.core.get(locale).and_then(|m| m.get(key)) {
@@ -1447,6 +1468,10 @@ impl ModuleTranslator<'_> {
     /// useful after a later catalog replacement.
     pub fn resolve(&self, key: &str, fallback: Option<&str>) -> LocalizedTextResolution {
         let source = self.source(key).cloned();
+        let present = self
+            .snapshot
+            .translate_in_module(key, &self.module_id)
+            .is_some();
         let translated = self.translate(key).map(str::to_owned);
         let text = translated
             .or_else(|| fallback.map(str::to_owned))
@@ -1457,7 +1482,7 @@ impl ModuleTranslator<'_> {
             text,
             fallback: fallback.map(str::to_owned),
             field_path: None,
-            missing: source.is_none(),
+            missing: !present,
             source,
             snapshot_revision: self.snapshot_revision(),
         }
@@ -1470,6 +1495,10 @@ impl ModuleTranslator<'_> {
         fallback: Option<&str>,
     ) -> LocalizedTextResolution {
         let source = self.source(key).cloned();
+        let present = self
+            .snapshot
+            .translate_in_module(key, &self.module_id)
+            .is_some();
         let translated = self
             .translate_with(key, args)
             .or_else(|| fallback.map(str::to_owned));
@@ -1480,8 +1509,50 @@ impl ModuleTranslator<'_> {
             text,
             fallback: fallback.map(str::to_owned),
             field_path: None,
-            missing: source.is_none(),
+            missing: !present,
             source,
+            snapshot_revision: self.snapshot_revision(),
+        }
+    }
+
+    /// Resolve every localized-text object in a JSON value using this module's
+    /// snapshot. This is the shared bridge for metadata-shaped surfaces such
+    /// as generated settings schemas; callers receive the same owned
+    /// resolution records used by runtime text so misses retain their owner,
+    /// source, and snapshot revision.
+    pub fn resolve_json(
+        &self,
+        value: &serde_json::Value,
+        field_path: impl Into<String>,
+    ) -> (serde_json::Value, Vec<LocalizedTextResolution>) {
+        resolve_json_value(value, &field_path.into(), &mut |key, fallback| {
+            self.resolve(key, fallback)
+        })
+    }
+
+    /// Copy this module-scoped resolver across an execution boundary while
+    /// retaining effective catalog provenance for diagnostics.
+    pub fn owned(&self) -> OwnedModuleTranslator {
+        let mut entries = HashMap::new();
+        let mut entry_locales = HashMap::new();
+        let mut sources = HashMap::new();
+        for key in self.snapshot.module_keys(&self.module_id) {
+            if let Some(entry) = self.snapshot.translate_in_module(&key, &self.module_id) {
+                entries.insert(key.clone(), entry.clone());
+                if let Some(locale) = self.snapshot.module_entry_locale(&self.module_id, &key) {
+                    entry_locales.insert(key.clone(), locale.to_string());
+                }
+                if let Some(source) = self.source(&key) {
+                    sources.insert(key, source.clone());
+                }
+            }
+        }
+        OwnedModuleTranslator {
+            owner_module_id: self.module_id.clone(),
+            locale: self.locale().to_string(),
+            entries,
+            entry_locales,
+            sources,
             snapshot_revision: self.snapshot_revision(),
         }
     }
@@ -1498,6 +1569,174 @@ impl ModuleTranslator<'_> {
 
     pub fn source(&self, key: &str) -> Option<&CatalogProvenance> {
         self.snapshot.source_for_module(key, &self.module_id)
+    }
+}
+
+/// An owned module-scoped resolver for callers that cannot borrow a live
+/// LocaleSnapshot, such as a Luau closure retained by a script context.
+/// It is deliberately keyed by one owner module and never contains a global
+/// translation pool.
+#[derive(Debug, Clone)]
+pub struct OwnedModuleTranslator {
+    owner_module_id: String,
+    locale: String,
+    entries: HashMap<String, CatalogEntry>,
+    entry_locales: HashMap<String, String>,
+    sources: HashMap<String, CatalogProvenance>,
+    snapshot_revision: u64,
+}
+
+impl OwnedModuleTranslator {
+    pub fn new(
+        owner_module_id: impl Into<String>,
+        locale: impl Into<String>,
+        entries: HashMap<String, CatalogEntry>,
+        snapshot_revision: u64,
+    ) -> Self {
+        Self {
+            owner_module_id: owner_module_id.into(),
+            locale: locale.into(),
+            entries,
+            entry_locales: HashMap::new(),
+            sources: HashMap::new(),
+            snapshot_revision,
+        }
+    }
+
+    pub fn module_id(&self) -> &str {
+        &self.owner_module_id
+    }
+
+    pub fn locale(&self) -> &str {
+        &self.locale
+    }
+
+    pub fn snapshot_revision(&self) -> u64 {
+        self.snapshot_revision
+    }
+
+    pub fn resolve(&self, key: &str, fallback: Option<&str>) -> LocalizedTextResolution {
+        let source = self.sources.get(key).cloned();
+        let entry = self.entries.get(key);
+        let translated = entry.and_then(|entry| {
+            entry.render(
+                self.entry_locales
+                    .get(key)
+                    .map(String::as_str)
+                    .unwrap_or(&self.locale),
+                &HashMap::new(),
+            )
+        });
+        let text = translated
+            .or_else(|| fallback.map(str::to_owned))
+            .unwrap_or_else(|| LocalizedTextResolution::missing_marker(key));
+        LocalizedTextResolution {
+            owner_module_id: self.owner_module_id.clone(),
+            key: Some(key.to_owned()),
+            text,
+            fallback: fallback.map(str::to_owned),
+            field_path: None,
+            missing: entry.is_none(),
+            source,
+            snapshot_revision: self.snapshot_revision,
+        }
+    }
+
+    pub fn resolve_with(
+        &self,
+        key: &str,
+        args: &HashMap<String, String>,
+        fallback: Option<&str>,
+    ) -> LocalizedTextResolution {
+        let source = self.sources.get(key).cloned();
+        let entry = self.entries.get(key);
+        let translated = entry
+            .and_then(|entry| {
+                entry.render(
+                    self.entry_locales
+                        .get(key)
+                        .map(String::as_str)
+                        .unwrap_or(&self.locale),
+                    args,
+                )
+            })
+            .or_else(|| fallback.map(str::to_owned));
+        let text = translated.unwrap_or_else(|| LocalizedTextResolution::missing_marker(key));
+        LocalizedTextResolution {
+            owner_module_id: self.owner_module_id.clone(),
+            key: Some(key.to_owned()),
+            text,
+            fallback: fallback.map(str::to_owned),
+            field_path: None,
+            missing: entry.is_none(),
+            source,
+            snapshot_revision: self.snapshot_revision,
+        }
+    }
+
+    pub fn resolve_json(
+        &self,
+        value: &serde_json::Value,
+        field_path: impl Into<String>,
+    ) -> (serde_json::Value, Vec<LocalizedTextResolution>) {
+        resolve_json_value(value, &field_path.into(), &mut |key, fallback| {
+            self.resolve(key, fallback)
+        })
+    }
+}
+
+fn resolve_json_value(
+    value: &serde_json::Value,
+    field_path: &str,
+    resolve: &mut impl FnMut(&str, Option<&str>) -> LocalizedTextResolution,
+) -> (serde_json::Value, Vec<LocalizedTextResolution>) {
+    match value {
+        serde_json::Value::Object(object)
+            if object
+                .get("t")
+                .and_then(serde_json::Value::as_str)
+                .is_some() =>
+        {
+            let key = object
+                .get("t")
+                .and_then(serde_json::Value::as_str)
+                .expect("localized object has a string key");
+            let fallback = object.get("fallback").and_then(serde_json::Value::as_str);
+            let resolution = resolve(key, fallback).with_field_path(field_path);
+            (
+                serde_json::Value::String(resolution.text.clone()),
+                vec![resolution],
+            )
+        }
+        serde_json::Value::Object(object) => {
+            let mut resolved = serde_json::Map::new();
+            let mut resolutions = Vec::new();
+            for (key, value) in object {
+                let child_path = if field_path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{field_path}.{key}")
+                };
+                let (value, mut child_resolutions) =
+                    resolve_json_value(value, &child_path, resolve);
+                resolved.insert(key.clone(), value);
+                resolutions.append(&mut child_resolutions);
+            }
+            (serde_json::Value::Object(resolved), resolutions)
+        }
+        serde_json::Value::Array(values) => {
+            let mut resolved = Vec::with_capacity(values.len());
+            let mut resolutions = Vec::new();
+            for (index, value) in values.iter().enumerate() {
+                let child_path = format!("{field_path}[{index}]");
+                let (value, mut child_resolutions) =
+                    resolve_json_value(value, &child_path, resolve);
+                resolved.push(value);
+                resolutions.append(&mut child_resolutions);
+            }
+            (serde_json::Value::Array(resolved), resolutions)
+        }
+        _ => (value.clone(), Vec::new()),
     }
 }
 
@@ -2288,6 +2527,30 @@ mod tests {
     }
 
     #[test]
+    fn owned_translator_keeps_fallback_plural_locale_and_catalog_presence() {
+        let mut engine = LocaleEngine::try_with_fallback_locale("sk", "en").unwrap();
+        engine.load_module_catalog(
+            "@mesh/example",
+            compile_catalog(
+                "en",
+                &serde_json::json!({
+                    "items": {
+                        "_plural": true,
+                        "one": "{count} item",
+                        "other": "{count} items"
+                    }
+                }),
+            ),
+        );
+        let translator = engine.module_translator("@mesh/example").owned();
+        let args = HashMap::from([("count".into(), "1.0".into())]);
+        let resolution = translator.resolve_with("items", &args, None);
+
+        assert_eq!(resolution.text, "1.0 items");
+        assert!(!resolution.missing);
+    }
+
+    #[test]
     fn locale_formatters_are_bounded_and_locale_aware() {
         assert_eq!(
             format_number_value("en-US", "1234567.89").unwrap(),
@@ -2502,6 +2765,63 @@ mod tests {
                 .with_field_path("mesh.contributes.keybinds.mute.label")
                 .field_path,
             Some("mesh.contributes.keybinds.mute.label".into())
+        );
+    }
+
+    #[test]
+    fn json_resolution_preserves_owner_paths_and_visible_misses() {
+        let mut engine = LocaleEngine::new("sk");
+        engine.load_module_translations(
+            "@mesh/settings-owner",
+            TranslationSet {
+                locale: "sk".into(),
+                messages: HashMap::from([(
+                    String::from("props.volume.label"),
+                    String::from("Hlasitosť"),
+                )]),
+            },
+        );
+
+        let input = serde_json::json!({
+            "properties": {
+                "volume": {
+                    "label": { "t": "props.volume.label", "fallback": "Volume" }
+                },
+                "missing": {
+                    "description": { "t": "props.missing.description" }
+                }
+            }
+        });
+        let translator = engine.module_translator("@mesh/settings-owner");
+        let (resolved, resolutions) =
+            translator.resolve_json(&input, "mesh.settings.generated_props");
+
+        assert_eq!(
+            resolved["properties"]["volume"]["label"],
+            serde_json::json!("Hlasitosť")
+        );
+        assert_eq!(
+            resolved["properties"]["missing"]["description"],
+            serde_json::json!("!!props.missing.description")
+        );
+        assert_eq!(resolutions.len(), 2);
+        let translated = resolutions
+            .iter()
+            .find(|resolution| resolution.key.as_deref() == Some("props.volume.label"))
+            .expect("translated resolution");
+        assert_eq!(translated.owner_module_id, "@mesh/settings-owner");
+        assert_eq!(
+            translated.field_path.as_deref(),
+            Some("mesh.settings.generated_props.properties.volume.label")
+        );
+        assert!(!translated.missing);
+        assert!(
+            resolutions
+                .iter()
+                .any(
+                    |resolution| resolution.key.as_deref() == Some("props.missing.description")
+                        && resolution.missing
+                )
         );
     }
 

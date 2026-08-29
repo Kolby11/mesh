@@ -11,6 +11,10 @@ pub(super) fn record_localized_miss(
     let Some(diagnostics) = diagnostics else {
         return false;
     };
+    let issue_code = format!("i18n-missing:{}:{key}", resolution.owner_module_id);
+    if !resolution.missing {
+        return diagnostics.resolve_issue(&issue_code);
+    }
     let field = resolution
         .field_path
         .as_deref()
@@ -21,8 +25,9 @@ pub(super) fn record_localized_miss(
     } else {
         "missing localized text"
     };
-    diagnostics.record_issue(
-        format!("i18n-missing:{}:{key}", resolution.owner_module_id),
+    diagnostics.record_issue_with_source(
+        issue_code,
+        mesh_core_diagnostics::DiagnosticCategory::I18n,
         mesh_core_diagnostics::IssueSeverity::Warning,
         format!(
             "{subject}: module_id='{}' field_path='{field}' key='{key}' fallback='{}' source='{}' snapshot_revision={}",
@@ -35,6 +40,11 @@ pub(super) fn record_localized_miss(
                 .unwrap_or_else(|| "missing".to_string()),
             resolution.snapshot_revision,
         ),
+        resolution
+            .source
+            .as_ref()
+            .map(|source| source.path.display().to_string()),
+        None,
     )
 }
 

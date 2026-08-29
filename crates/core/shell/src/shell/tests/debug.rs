@@ -298,6 +298,84 @@ fn debug_snapshot_resolves_module_graph_layout_label_with_active_locale() {
 }
 
 #[test]
+fn debug_snapshot_resolves_generated_settings_with_the_declaring_module_owner() {
+    let graph = graph_from_json(
+        r#"{
+              "schemaVersion": 1,
+              "modulesDir": "modules",
+              "modules": {
+                "@mesh/owner": { "kind": "frontend", "path": "@mesh/owner", "enabled": true }
+              },
+              "layout": { "entrypoint": "@mesh/owner:main" }
+            }"#,
+        vec![
+            r#"{
+                  "name": "@mesh/owner",
+                  "version": "0.1.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "frontend",
+                    "entry": "src/main.mesh",
+                    "provides": {
+                      "settings": {
+                        "namespace": "@mesh/owner",
+                        "schema": {
+                          "type": "object",
+                          "properties": {
+                            "volume": {
+                              "type": "number",
+                              "label": { "t": "owner.volume.label", "fallback": "Volume" },
+                              "description": { "t": "owner.volume.description" }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }"#,
+        ],
+    );
+    let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph);
+    shell.locale.load_module_translations(
+        "@mesh/owner",
+        mesh_core_locale::TranslationSet {
+            locale: "sk".into(),
+            messages: HashMap::from([("owner.volume.label".into(), "Hlasitosť".into())]),
+        },
+    );
+    shell.locale.set_locale("sk");
+
+    let snapshot = shell.build_debug_snapshot();
+    let owner = snapshot
+        .module_graph
+        .iter()
+        .find(|entry| entry.module_id == "@mesh/owner")
+        .expect("owner module graph entry");
+    assert_eq!(
+        owner.settings_schema.as_ref().unwrap()["properties"]["volume"]["label"],
+        serde_json::json!("Hlasitosť")
+    );
+    assert_eq!(
+        owner.settings_schema.as_ref().unwrap()["properties"]["volume"]["description"],
+        serde_json::json!("!!owner.volume.description")
+    );
+    assert!(
+        owner
+            .diagnostics
+            .contains(&"i18n-missing:owner.volume.description".to_string())
+    );
+    assert!(snapshot.diagnostics.iter().any(|diagnostic| {
+        diagnostic.module_id == "@mesh/owner"
+            && diagnostic.issue_code == "i18n-missing:@mesh/owner:owner.volume.description"
+            && diagnostic.category == mesh_core_diagnostics::DiagnosticCategory::I18n
+            && diagnostic
+                .message
+                .contains("mesh.settings.generated_props.properties.volume.description")
+    }));
+}
+
+#[test]
 fn debug_snapshot_backfills_mesh_debug_service_state() {
     let mut shell = Shell::new();
     shell.debug.enabled = true;

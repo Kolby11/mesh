@@ -248,6 +248,26 @@ fn locale_snapshot_is_published_by_the_active_provider() {
 }
 
 #[test]
+fn locale_service_state_publishes_the_complete_committed_selection() {
+    let mut shell = Shell::new();
+    shell.locale.set_locale("ar");
+
+    shell.sync_locale_service_state().unwrap();
+
+    let state = &shell.latest_service_state["mesh.locale"].state;
+    assert_eq!(state["locale"], serde_json::json!("ar"));
+    assert_eq!(state["current"], serde_json::json!("ar"));
+    assert_eq!(state["chain"], serde_json::json!(["ar", "en"]));
+    assert_eq!(state["direction"], serde_json::json!("rtl"));
+    assert_eq!(
+        state["revision"],
+        serde_json::json!(shell.locale.revision().to_string())
+    );
+    assert!(state["policy"].is_string());
+    assert!(state["durable_revision"].is_string());
+}
+
+#[test]
 fn manual_locale_change_commits_the_shared_settings_revision_before_broadcast() {
     let _env_lock = settings_env_lock();
     let dir = tempfile::tempdir().unwrap();

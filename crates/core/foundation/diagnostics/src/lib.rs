@@ -578,6 +578,51 @@ impl DiagnosticsCollector {
         )
     }
 
+    /// Record a typed issue for a module-owned instance, creating the
+    /// diagnostic identity only when the first issue is observed. This keeps
+    /// shell-generated metadata diagnostics visible even before a module has a
+    /// mounted runtime.
+    pub fn record_instance_issue_with_source(
+        &mut self,
+        module_id: impl Into<String>,
+        instance_id: impl Into<String>,
+        issue_code: impl Into<String>,
+        category: DiagnosticCategory,
+        severity: IssueSeverity,
+        message: impl Into<String>,
+        source_path: Option<String>,
+        source_span: Option<DiagnosticSourceSpan>,
+    ) -> bool {
+        let module_id = module_id.into();
+        let instance_id = instance_id.into();
+        let diagnostics = self
+            .modules
+            .get(&(module_id.clone(), instance_id.clone()))
+            .cloned()
+            .unwrap_or_else(|| self.register_instance(module_id, instance_id));
+        diagnostics.record_issue_with_source(
+            issue_code,
+            category,
+            severity,
+            message,
+            source_path,
+            source_span,
+        )
+    }
+
+    /// Resolve one issue for one exact module instance without hiding
+    /// independent issues owned by that instance.
+    pub fn resolve_instance_issue(
+        &self,
+        module_id: &str,
+        instance_id: &str,
+        issue_code: &str,
+    ) -> bool {
+        self.modules
+            .get(&(module_id.to_string(), instance_id.to_string()))
+            .is_some_and(|diagnostics| diagnostics.resolve_issue(issue_code))
+    }
+
     pub fn resolve_lifecycle_errors(&self, provider_id: &str) -> usize {
         self.modules
             .iter()

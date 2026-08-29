@@ -581,14 +581,7 @@ impl FrontendSurfaceComponent {
                 source,
             })?;
         if script_has_service_read(&script_ctx, "mesh.locale", "locale") {
-            let selection = self.locale.selection();
-            let payload = serde_json::json!({
-                "locale": self.locale.current(),
-                "current": self.locale.current(),
-                "chain": selection.chain(),
-                "direction": selection.direction().as_str(),
-                "revision": selection.revision().to_string(),
-            });
+            let payload = crate::shell::locale_service_payload(&self.locale, None, None);
             apply_service_update_with_name(
                 script_ctx.state_mut(),
                 true,
@@ -1920,25 +1913,10 @@ impl FrontendSurfaceComponent {
         field_path: &str,
         text: &mesh_core_module::LocalizedText,
     ) -> mesh_core_locale::LocalizedTextResolution {
-        match text {
-            mesh_core_module::LocalizedText::Literal(value) => {
-                mesh_core_locale::LocalizedTextResolution::literal(
-                    module_id,
-                    value,
-                    self.locale.catalog_snapshot().revision(),
-                )
-            }
-            mesh_core_module::LocalizedText::Translation { key, fallback } => {
-                let translator = self.locale.module_translator(module_id);
-                let resolution = translator
-                    .resolve(key, Some(fallback))
-                    .with_field_path(field_path);
-                if resolution.missing {
-                    self.record_localized_miss(&resolution, None);
-                }
-                resolution
-            }
-        }
+        let resolution =
+            crate::shell::resolve_manifest_text(&self.locale, module_id, field_path, text);
+        self.record_localized_miss(&resolution, None);
+        resolution
     }
 
     fn module_descriptor_from_manifest(

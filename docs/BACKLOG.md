@@ -111,9 +111,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Localization / i18n
 
-- [ ] Route templates, Luau, manifests, props, generated settings, and debug data
-      through one owner-aware resolver with visible misses; align `mesh.i18n`,
-      `mesh.locale`, service events, and read/write capability enforcement.
 - [ ] Drive locale CLI/LSP/doctor, extraction, missing-key and provenance tooling
       from the canonical graph/snapshot, and either implement `<i18n>` component
       blocks with explicit precedence or reject them instead of discarding them.

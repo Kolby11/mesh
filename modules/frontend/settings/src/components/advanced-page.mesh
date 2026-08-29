@@ -279,8 +279,10 @@ local function localized_text(value, fallback)
     if type(value) == "string" and value ~= "" then return value end
     if type(value) == "table" then
         if type(value.t) == "string" and value.t ~= "" then
-            local translated = t(value.t)
-            if translated ~= value.t then return translated end
+            -- Generated schemas are resolved by the shell with the schema
+            -- owner's catalog before they cross the debug service boundary.
+            -- Never resolve here with the settings module's catalog.
+            return "!!" .. value.t
         end
         if type(value.fallback) == "string" and value.fallback ~= "" then
             return value.fallback

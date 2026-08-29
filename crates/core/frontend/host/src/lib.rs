@@ -1314,7 +1314,10 @@ pub enum CoreEvent {
         snapshot: mesh_core_theme::ThemeSnapshot,
     },
     LocaleChanged {
-        locale: String,
+        /// The complete committed selection, including its fallback chain and
+        /// revision. Subscribers must not reconstruct locale state from the
+        /// active tag alone.
+        selection: mesh_core_locale::LocaleSelection,
     },
     ShuttingDown,
 }

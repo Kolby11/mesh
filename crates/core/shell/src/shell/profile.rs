@@ -13,47 +13,6 @@ use mesh_core_module::package::{
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 
-fn resolve_component_props_schema(
-    mut schema: serde_json::Value,
-    translator: &mesh_core_locale::ModuleTranslator<'_>,
-) -> serde_json::Value {
-    let Some(properties) = schema
-        .get_mut("properties")
-        .and_then(serde_json::Value::as_object_mut)
-    else {
-        return schema;
-    };
-
-    for definition in properties.values_mut() {
-        let Some(definition) = definition.as_object_mut() else {
-            continue;
-        };
-        for field in ["label", "description"] {
-            let Some(value) = definition.get_mut(field) else {
-                continue;
-            };
-            let Some(localized) = value.as_object() else {
-                continue;
-            };
-            let key = localized
-                .get("t")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned);
-            let fallback = localized
-                .get("fallback")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned);
-            if let Some(key) = key.as_deref() {
-                *value =
-                    serde_json::Value::String(translator.resolve(key, fallback.as_deref()).text);
-            } else if let Some(fallback) = fallback {
-                *value = serde_json::Value::String(fallback);
-            }
-        }
-    }
-    schema
-}
-
 pub(super) struct PreparedProfileFrontend {
     component: FrontendSurfaceComponent,
     requests: VecDeque<CoreRequest>,
@@ -1230,12 +1189,22 @@ impl Shell {
                         compiled.component.props.as_ref(),
                     )
                     .map(|schema| {
-                        resolve_component_props_schema(
-                            schema,
-                            &self
+                        let (schema, resolutions) = {
+                            let translator = self
                                 .locale
-                                .module_translator(&contribution.source_module_id),
-                        )
+                                .module_translator(&contribution.source_module_id);
+                            translator.resolve_json(
+                                &schema,
+                                &format!(
+                                    "mesh.composition.palette.{}.props_schema",
+                                    contribution.contribution_id
+                                ),
+                            )
+                        };
+                        for resolution in resolutions {
+                            super::record_localized_miss(&mut self.diagnostics, &resolution, None);
+                        }
+                        schema
                     });
                     palette.push(serde_json::json!({
                         "contract": point,

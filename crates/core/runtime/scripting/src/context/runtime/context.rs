@@ -11,7 +11,7 @@ use crate::pool;
 use crate::storage::{ScopedStorage, StorageManager, StorageScope};
 use crate::util::default_runtime_storage_root;
 use mesh_core_capability::CapabilitySet;
-use mesh_core_locale::{CatalogEntry, LocalizedTextResolution, ModuleTranslator};
+use mesh_core_locale::{LocalizedTextResolution, ModuleTranslator, OwnedModuleTranslator};
 use mesh_core_service::{InterfaceResolution, ResolvedServiceCatalog};
 use mlua::{Lua, Table, Value as LuaValue};
 use std::collections::{HashMap, HashSet};
@@ -30,17 +30,13 @@ static NEXT_SCRIPT_CONTEXT_GENERATION: std::sync::atomic::AtomicU64 =
 /// older catalog (or the reverse) between host calls.
 #[derive(Debug, Clone)]
 pub(super) struct LocaleCell {
-    pub(super) locale: String,
-    pub(super) translations: HashMap<String, CatalogEntry>,
-    pub(super) snapshot_revision: u64,
+    pub(super) resolver: OwnedModuleTranslator,
 }
 
 impl Default for LocaleCell {
     fn default() -> Self {
         Self {
-            locale: "en".into(),
-            translations: HashMap::new(),
-            snapshot_revision: 0,
+            resolver: OwnedModuleTranslator::new("@mesh/unknown", "en", HashMap::new(), 0),
         }
     }
 }
@@ -372,22 +368,17 @@ impl ScriptContext {
     /// Luau handles share the cell, so a locale switch takes effect immediately.
     pub fn set_i18n_translations(&mut self, translations: HashMap<String, String>) {
         let mut cell = self.locale_cell.lock().unwrap();
-        cell.translations = translations
+        let entries = translations
             .into_iter()
-            .map(|(key, value)| (key, CatalogEntry::Text(value)))
+            .map(|(key, value)| (key, mesh_core_locale::CatalogEntry::Text(value)))
             .collect();
-        cell.locale = "en".into();
-        cell.snapshot_revision = 0;
+        cell.resolver = OwnedModuleTranslator::new(self.module_id.clone(), "en", entries, 0);
     }
 
     /// Replace the catalog behind `mesh.i18n.t()` with the owning module's
     /// scoped translator snapshot.
     pub fn set_i18n_translator(&mut self, translator: &ModuleTranslator<'_>) {
-        *self.locale_cell.lock().unwrap() = LocaleCell {
-            locale: translator.locale().to_string(),
-            translations: translator.entries(),
-            snapshot_revision: translator.snapshot_revision(),
-        };
+        self.locale_cell.lock().unwrap().resolver = translator.owned();
         // Template expressions containing t(...) can otherwise remain in the
         // pure-member cache when the script members themselves did not change.
         // A locale/catalog replacement changes their result even when all

@@ -1285,14 +1285,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         // locale key is useful for normal reuse, but clearing them here also
         // covers a catalog snapshot replacement that keeps the same locale.
         self.clear_component_memo();
-        let selection = locale.selection();
-        let payload = serde_json::json!({
-            "locale": locale.current(),
-            "current": locale.current(),
-            "chain": selection.chain(),
-            "direction": selection.direction().as_str(),
-            "revision": selection.revision().to_string(),
-        });
+        let payload = crate::shell::locale_service_payload(&locale.snapshot(), None, None);
         let mut generations = Vec::new();
         for (instance_key, runtime) in self.runtimes.lock().unwrap().iter_mut() {
             let translator = self.locale.module_translator(&runtime.script_ctx.module_id);

@@ -127,7 +127,6 @@ pub(super) fn parent_subscription_channel(
 pub(super) fn create_i18n_library(
     lua: &Lua,
     locale_cell: Arc<Mutex<LocaleCell>>,
-    owner_module_id: String,
     localized_misses: Arc<Mutex<Vec<LocalizedTextResolution>>>,
 ) -> mlua::Result<Table> {
     let exports = lua.create_table()?;
@@ -145,26 +144,14 @@ pub(super) fn create_i18n_library(
                     args.insert(name, lua_value_to_string(value));
                 }
             }
-            let (translated, snapshot_revision) = {
+            let resolution = {
                 let cell = locale_cell.lock().unwrap();
-                (
-                    cell.translations
-                        .get(&key)
-                        .and_then(|entry| entry.render(&cell.locale, &args)),
-                    cell.snapshot_revision,
-                )
+                cell.resolver.resolve_with(&key, &args, None)
             };
-            let translated = translated.unwrap_or_else(|| {
-                let resolution = LocalizedTextResolution::missing(
-                    owner_module_id.clone(),
-                    key.clone(),
-                    None,
-                    snapshot_revision,
-                );
+            if resolution.missing {
                 localized_misses.lock().unwrap().push(resolution.clone());
-                resolution.text
-            });
-            Ok(translated)
+            }
+            Ok(resolution.text)
         })?,
     )?;
     Ok(exports)

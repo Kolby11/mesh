@@ -55,8 +55,13 @@ fn complete_mesh_api(
         .iter()
         .filter(|entry| entry.path.starts_with(prefix))
         .map(|entry| {
-            // Full sub-path as label; insert only what hasn't been typed yet + call params.
-            let label = entry.path.to_string();
+            // Show only the member suffix once the namespace has been typed;
+            // direct mesh. completion still displays the full path.
+            let label = entry
+                .path
+                .strip_prefix(prefix)
+                .unwrap_or(entry.path)
+                .to_string();
             let remaining = entry.path.strip_prefix(prefix).unwrap_or(entry.path);
             let (insert_text, insert_text_format) = call_snippet(entry.path, remaining);
 
@@ -105,6 +110,9 @@ static CALL_PARAMS: &[(&str, &str)] = &[
     ("events.publish", "(\"$1\", $2)"),
     ("theme.token", "(\"$1\")"),
     ("locale.current", "()"),
+    ("locale.format_number", "($1)"),
+    ("locale.format_date", "($1, \"$2\")"),
+    ("locale.format_duration", "($1)"),
     ("locale.set", "(\"$1\")"),
     ("ui.request_redraw", "()"),
     ("exec", "(\"$1\", {$2})"),
@@ -556,10 +564,13 @@ fn complete_service_names(registry: &ModuleRegistry) -> Vec<CompletionItem> {
 /// Builtin `mesh.*` module specifiers resolvable via `require`/`import`,
 /// independent of any installed backend interface.
 static BUILTIN_IMPORT_SPECIFIERS: &[(&str, &str)] = &[
-    ("mesh.i18n", "translation helpers (t)"),
+    ("mesh.i18n", "translation helpers (t; locale.read)"),
     ("mesh.ui", "UI host API (request_redraw, …)"),
     ("mesh.log", "logging host API (info, warn, error)"),
-    ("mesh.locale", "locale host API (current, set)"),
+    (
+        "mesh.locale",
+        "locale host API (current, formatters; set requires locale.write)",
+    ),
     ("mesh.events", "event bus (subscribe, publish)"),
     ("mesh.popover", "popover host API (activate, hide)"),
 ];

@@ -111,6 +111,24 @@ pub static MESH_API_ENTRIES: &[MeshApiEntry] = &[
         backend_only: false,
     },
     MeshApiEntry {
+        path: "locale.format_number",
+        signature: "mesh.locale.format_number(value: number|string) -> string",
+        description: "Format a decimal using the active locale (requires the locale.read capability).",
+        backend_only: false,
+    },
+    MeshApiEntry {
+        path: "locale.format_date",
+        signature: "mesh.locale.format_date(timestamp: number|string, style?: string) -> string",
+        description: "Format a Unix timestamp using the active locale (requires the locale.read capability).",
+        backend_only: false,
+    },
+    MeshApiEntry {
+        path: "locale.format_duration",
+        signature: "mesh.locale.format_duration(seconds: number) -> string",
+        description: "Format a duration using the active locale (requires the locale.read capability).",
+        backend_only: false,
+    },
+    MeshApiEntry {
         path: "locale.set",
         signature: "mesh.locale.set(locale: string)",
         description: "Request a locale change (requires the locale.write capability).",
