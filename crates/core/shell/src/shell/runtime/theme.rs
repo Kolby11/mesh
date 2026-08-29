@@ -225,8 +225,10 @@ impl Shell {
         self.control_plane_revision = commit.revision;
 
         if let Some((theme, watch)) = theme {
-            self.theme = theme;
-            self.theme_watch = watch;
+            self.install_prepared_theme(PreparedThemeState {
+                engine: theme,
+                watch,
+            });
         }
         if let Some(locale) = locale {
             self.locale = locale;
@@ -247,6 +249,50 @@ impl Shell {
         if locale_effect {
             requests.extend(self.mark_components_locale_changed()?);
             requests.extend(self.sync_locale_service_state()?);
+        }
+        Ok(requests)
+    }
+
+    /// Install a fully prepared theme candidate and refresh the managed watch
+    /// set at the same in-memory commit boundary. Preparation is the only
+    /// fallible CSS/source phase; this operation only swaps owned snapshots.
+    pub(in crate::shell) fn install_prepared_theme(&mut self, candidate: PreparedThemeState) {
+        let PreparedThemeState { engine, mut watch } = candidate;
+        watch.revision = engine.active_snapshot().revision;
+        self.theme = engine;
+        self.theme_watch = watch;
+        self.reconcile_file_watcher();
+    }
+
+    /// Commit a theme candidate used by hot reload. The candidate has already
+    /// been parsed, composed, and fingerprinted, so a failure in notification
+    /// handling retains the exact previous renderer snapshot and watch state.
+    fn commit_prepared_theme(
+        &mut self,
+        candidate: PreparedThemeState,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        let previous_theme = self.theme.clone();
+        let previous_watch = self.theme_watch.clone();
+        self.install_prepared_theme(candidate);
+        let mut requests = match self.mark_components_theme_changed() {
+            Ok(requests) => requests,
+            Err(error) => {
+                self.theme = previous_theme;
+                self.theme_watch = previous_watch;
+                self.reconcile_file_watcher();
+                self.record_theme_reload_failure(&error);
+                return Ok(VecDeque::new());
+            }
+        };
+        match self.sync_theme_service_state() {
+            Ok(effects) => requests.extend(effects),
+            Err(error) => {
+                self.theme = previous_theme;
+                self.theme_watch = previous_watch;
+                self.reconcile_file_watcher();
+                self.record_theme_reload_failure(&error);
+                return Ok(VecDeque::new());
+            }
         }
         Ok(requests)
     }
@@ -306,47 +352,28 @@ impl Shell {
             return Ok(VecDeque::new());
         }
 
-        let old_theme_id = self.theme.active().id.clone();
         let Some(graph) = self.installed_module_graph.as_ref() else {
             return Ok(VecDeque::new());
         };
-        let (mut theme, mut candidate_watch) = match prepare_theme_for_graph(&self.settings, graph)
-        {
-            Ok(candidate) => candidate,
+        let mut candidate = match prepare_theme_state_for_graph(&self.settings, graph) {
+            Ok(Some(candidate)) => candidate,
+            Ok(None) => return Ok(VecDeque::new()),
             Err(error) => {
                 self.record_theme_reload_failure(&error);
                 return Ok(VecDeque::new());
             }
         };
-        apply_font_family(&mut theme, self.settings.fonts.ui_family.as_deref());
-        crate::shell::discovery::apply_font_registry_tokens(&mut theme, &self.font_registry);
-        candidate_watch.revision = theme.revision();
+        candidate.engine.update_active(|theme| {
+            apply_font_family(theme, self.settings.fonts.ui_family.as_deref());
+            crate::shell::discovery::apply_font_registry_tokens(theme, &self.font_registry);
+        });
+        candidate.watch.revision = candidate.engine.active_snapshot().revision;
         tracing::info!(
             "reloaded active theme '{}' from {}",
-            theme.id,
-            candidate_watch.path.display()
+            candidate.engine.active().id,
+            candidate.watch.path.display()
         );
-        let previous_theme = self.theme.active().clone();
-        let previous_watch = self.theme_watch.clone();
-        self.theme.replace_active(theme);
-        self.theme_watch = candidate_watch;
-        let mut requests = match self.mark_components_theme_changed() {
-            Ok(requests) => requests,
-            Err(error) => {
-                self.theme.replace_active(previous_theme);
-                self.theme_watch = previous_watch;
-                self.record_theme_reload_failure(&error);
-                return Ok(VecDeque::new());
-            }
-        };
-        let new_theme_id = self.theme.active().id.clone();
-        if new_theme_id != old_theme_id {
-            tracing::info!(
-                "theme identity changed during reload: {old_theme_id} -> {new_theme_id}"
-            );
-        }
-        requests.extend(self.sync_theme_service_state()?);
-        Ok(requests)
+        self.commit_prepared_theme(candidate)
     }
 
     fn record_theme_reload_failure(&mut self, error: &dyn std::fmt::Display) {
@@ -398,7 +425,7 @@ impl Shell {
             return Ok(VecDeque::new());
         };
         let theme_id = theme_id.to_owned();
-        let candidate = self.prepare_control_plane_settings(|shared, profile| {
+        let settings_candidate = self.prepare_control_plane_settings(|shared, profile| {
             let patch = serde_json::json!({
                 "theme": { "active": theme_id, "mode": null }
             });
@@ -414,21 +441,24 @@ impl Shell {
             Ok(())
         })?;
         let candidate_settings =
-            mesh_core_config::resolve_shell_locale_settings(candidate.store.shell());
-        let (theme, watch) = match prepare_theme_for_graph(&candidate_settings, &graph) {
-            Ok(candidate) => candidate,
+            mesh_core_config::resolve_shell_locale_settings(settings_candidate.store.shell());
+        let prepared_theme = match prepare_theme_state_for_graph(&candidate_settings, &graph) {
+            Ok(Some(candidate)) => candidate,
+            Ok(None) => return Ok(VecDeque::new()),
             Err(error) => {
                 tracing::warn!("cannot compose theme '{theme_id}': {error}");
                 return Ok(VecDeque::new());
             }
         };
-        let mut theme = theme;
-        crate::shell::discovery::apply_font_registry_tokens(&mut theme, &self.font_registry);
-        let commit = self.commit_control_plane_settings(candidate)?;
+        let mut theme = prepared_theme.engine;
+        theme.update_active(|active| {
+            crate::shell::discovery::apply_font_registry_tokens(active, &self.font_registry);
+        });
+        let commit = self.commit_control_plane_settings(settings_candidate)?;
         tracing::info!("active theme changed to '{theme_id}'");
         self.commit_control_plane_batch(
             commit,
-            Some((self.theme.with_active(theme), watch)),
+            Some((theme, prepared_theme.watch)),
             None,
             true,
             false,
@@ -748,8 +778,14 @@ impl Shell {
                 ));
                 return Ok(requests);
             };
-            let (theme, theme_watch) = match prepare_theme_for_graph(&new_settings, graph) {
-                Ok((theme, watch)) => (self.theme.with_active(theme), watch),
+            let (theme, theme_watch) = match prepare_theme_state_for_graph(&new_settings, graph) {
+                Ok(Some(candidate)) => (candidate.engine, candidate.watch),
+                Ok(None) => {
+                    self.record_theme_reload_failure(&mesh_core_theme::ThemeError::NotFound(
+                        new_settings.theme.active.clone(),
+                    ));
+                    return Ok(requests);
+                }
                 Err(error) => {
                     self.record_theme_reload_failure(&error);
                     return Ok(requests);

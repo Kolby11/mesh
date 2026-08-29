@@ -622,6 +622,50 @@ fn set_theme_loads_css_package_and_updates_runtime_setting() {
 }
 
 #[test]
+fn set_theme_rejects_malformed_css_before_persisting_or_swapping() {
+    let dir = tempfile::tempdir().unwrap();
+    let _settings = isolated_settings_file(dir.path());
+    fs::write(
+        dir.path().join("theme.css"),
+        ":root { --color-surface: #123456; }",
+    )
+    .unwrap();
+    let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph_with_theme_source(
+        dir.path(),
+        "transaction-theme",
+        "theme.css",
+    ));
+    shell
+        .apply_set_theme("@mesh/test-theme:transaction-theme")
+        .unwrap();
+    let previous_watch = shell.theme_watch.clone();
+
+    fs::write(dir.path().join("theme.css"), "{ malformed").unwrap();
+    shell
+        .apply_set_theme("@mesh/test-theme:transaction-theme")
+        .unwrap();
+
+    assert_eq!(
+        shell
+            .theme
+            .active()
+            .token("color.surface")
+            .map(ToString::to_string),
+        Some("#123456".into())
+    );
+    assert_eq!(
+        shell.settings.theme.active,
+        "@mesh/test-theme:transaction-theme"
+    );
+    assert_eq!(shell.theme_watch.path, previous_watch.path);
+    assert_eq!(shell.theme_watch.fingerprint, previous_watch.fingerprint);
+    let persisted =
+        mesh_core_config::SettingsStore::load_from(&dir.path().join("settings.json")).unwrap();
+    assert_eq!(persisted.revision(), 1);
+}
+
+#[test]
 fn settings_reload_delivers_one_ordered_control_plane_batch() {
     let _env_lock = settings_env_lock();
     let dir = tempfile::tempdir().unwrap();

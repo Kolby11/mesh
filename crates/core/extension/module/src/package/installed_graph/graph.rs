@@ -1207,6 +1207,9 @@ impl InstalledModuleGraph {
                 next.language_pack_chain.join(",")
             ));
         }
+        if self.theme_catalog != next.theme_catalog {
+            diff.profile_effects.push("themes changed".into());
+        }
 
         let mut slots = BTreeSet::new();
         slots.extend(self.node_slots.iter().flat_map(|(root, values)| {

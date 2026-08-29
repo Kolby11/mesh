@@ -109,9 +109,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Themes
 
-- [ ] Make theme selection, profile switching, graph changes, and hot reload one
-      durable prepare/commit transaction that preserves the last-known-good
-      snapshot, refreshes watches/catalog state, and never exits on bad CSS.
 - [ ] Share the restricted CSS/token/keyframe lowering path between themes and
       components so pseudo-states, inherited custom properties, token recipes,
       and general theme keyframes work or produce source-located diagnostics.

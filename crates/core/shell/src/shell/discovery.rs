@@ -1981,10 +1981,10 @@ impl Shell {
         if self.installed_module_graph.is_none() {
             let graph_path = self.installed_module_graph_path();
             let candidate = load_installed_module_graph_candidate(&graph_path)?;
-            let locale = self.prepare_locale_for_graph(&candidate).map_err(|error| {
-                mesh_core_module::package::ModuleManifestError::Validation(error.to_string())
-            })?;
-            self.commit_installed_module_graph_with_locale(candidate, locale);
+            self.commit_installed_module_graph(candidate)
+                .map_err(|error| {
+                    mesh_core_module::package::ModuleManifestError::Validation(error.to_string())
+                })?;
         }
         Ok(self
             .installed_module_graph
@@ -2074,25 +2074,27 @@ impl Shell {
         Ok(candidate)
     }
 
-    /// Commit a graph and its prepared locale candidate as one in-memory
-    /// activation boundary. Callers that need to prepare runtime objects first
-    /// use `commit_installed_module_graph_with_locale` with the same candidate.
+    /// Commit a graph, its locale catalog, and its graph-authorized theme
+    /// candidate together. CSS/source preparation happens before any of these
+    /// live snapshots change, so a malformed selected theme retains the
+    /// previous graph and last-known-good theme.
     pub(in crate::shell) fn commit_installed_module_graph(
         &mut self,
         graph: InstalledModuleGraph,
     ) -> Result<(), ShellRunError> {
         let locale = self.prepare_locale_for_graph(&graph)?;
-        self.commit_installed_module_graph_with_locale(graph, locale);
-        Ok(())
-    }
-
-    pub(in crate::shell) fn commit_installed_module_graph_with_locale(
-        &mut self,
-        graph: InstalledModuleGraph,
-        locale: LocaleEngine,
-    ) {
         let interface_catalog =
             super::profile::interface_catalog_for_graph(&self.builtin_interface_catalog, &graph);
+        let mut theme = match prepare_theme_state_for_graph(&self.settings, &graph)? {
+            Some(theme) => theme,
+            None => {
+                let (engine, watch) = default_theme_state(&self.settings);
+                PreparedThemeState { engine, watch }
+            }
+        };
+        theme.engine.update_active(|active| {
+            apply_font_registry_tokens(active, &self.font_registry);
+        });
         self.sync_module_graph_health(&graph);
         self.locale = locale;
         self.installed_module_graph = Some(graph);
@@ -2106,6 +2108,8 @@ impl Shell {
                     .replace_catalog(self.builtin_interface_catalog.clone());
             }
         }
+        self.install_prepared_theme(theme);
+        Ok(())
     }
 
     /// Project immutable graph diagnostics into the live module records. The

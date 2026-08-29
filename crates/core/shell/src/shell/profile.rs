@@ -241,7 +241,7 @@ pub(super) struct ActivationPlan {
     pub(super) locale: LocaleEngine,
     pub(super) settings: Arc<SettingsStore>,
     pub(super) resources: super::discovery::PreparedResourceSnapshot,
-    pub(super) prepared_theme: Option<(mesh_core_theme::Theme, ThemeWatchState)>,
+    pub(super) prepared_theme: Option<PreparedThemeState>,
     pub(super) catalog: FrontendCatalog,
     pub(super) effective_capabilities: Arc<HashMap<String, EffectiveCapabilities>>,
     pub(super) desired_surfaces: HashSet<String>,
@@ -1650,22 +1650,27 @@ impl Shell {
         }) {
             reject_candidate!(status.message.clone());
         }
-        let theme_changed = self.settings.theme != settings.shell().theme
-            || self.settings.fonts != settings.shell().fonts
-            || self.font_registry.revision() != resources.font_registry.revision();
-        let prepared_theme = if theme_changed {
-            match prepare_theme_for_graph(settings.shell(), &graph) {
-                Ok(prepared) => Some(prepared),
-                Err(error) => {
-                    reject_candidate!(format!("candidate theme is invalid: {error}"));
-                }
+        // Theme state is part of every activation candidate, not only when a
+        // settings field changed. A graph can replace a descriptor's source,
+        // modes, label, or catalog while the selected id stays the same.
+        let mut prepared_theme = match prepare_theme_state_for_graph(settings.shell(), &graph) {
+            Ok(Some(prepared)) => Some(prepared),
+            Ok(None) => {
+                let (engine, watch) = default_theme_state(settings.shell());
+                Some(PreparedThemeState { engine, watch })
             }
-        } else {
-            None
+            Err(error) => {
+                reject_candidate!(format!("candidate theme is invalid: {error}"));
+            }
         };
+        if let Some(prepared) = prepared_theme.as_mut() {
+            prepared.engine.update_active(|active| {
+                super::discovery::apply_font_registry_tokens(active, &resources.font_registry);
+            });
+        }
         let candidate_theme_id = prepared_theme
             .as_ref()
-            .map(|(theme, _)| theme.id.clone())
+            .map(|prepared| prepared.engine.active().id.clone())
             .unwrap_or_else(|| self.theme.active().id.clone());
         for candidate in &mut candidates {
             Self::apply_runtime_settings(
@@ -1704,13 +1709,6 @@ impl Shell {
                     .collect::<HashMap<_, _>>()
             })
             .unwrap_or_default();
-        // Font bindings are part of the prepared theme, not a side effect of
-        // the later resource commit. The plan therefore contains the exact
-        // theme that will be published with its resource snapshot.
-        let mut prepared_theme = prepared_theme;
-        if let Some((theme, _)) = prepared_theme.as_mut() {
-            super::discovery::apply_font_registry_tokens(theme, &resources.font_registry);
-        }
         let plan = Arc::new(ActivationPlan {
             generation: self.activation_generation.saturating_add(1),
             profile_id: profile_id.clone(),
@@ -2013,7 +2011,6 @@ impl Shell {
             self.abort_profile_candidate(pending, error.to_string());
             return VecDeque::new();
         }
-        let old_font_registry_revision = self.font_registry.revision();
         if let Err(error) = self.commit_resource_snapshot_for_settings(
             &plan.resources,
             plan.settings.shell().icons.default_pack.clone(),
@@ -2135,25 +2132,20 @@ impl Shell {
         }
         self.retag_backend_runtimes_for_activation(plan.generation);
 
-        let old_theme = self.settings.theme.clone();
-        let old_fonts = self.settings.fonts.clone();
         let old_locale = self.settings.i18n.clone();
         let old_locale_catalog_revision = self.locale.catalog_snapshot().revision();
         let settings = mesh_core_config::resolve_shell_locale_settings(plan.settings.shell());
-        let theme_changed = old_theme != settings.theme
-            || old_fonts != settings.fonts
-            || old_font_registry_revision != self.font_registry.revision();
-        let prepared_theme = if theme_changed {
-            let (theme, watch) = plan
-                .prepared_theme
-                .clone()
-                .map(|(theme, watch)| (self.theme.with_active(theme), watch))
-                .unwrap_or_else(|| default_theme_state(&settings));
-            let mut theme = theme;
+        // Every activation carries a prepared theme state. This is intentional
+        // even when the selected id is unchanged: graph replacement can alter
+        // descriptor modes, source content, ownership, or the catalog itself.
+        let theme_changed = plan.prepared_theme.is_some();
+        let prepared_theme = if let Some(prepared) = plan.prepared_theme.clone() {
+            Some((prepared.engine, prepared.watch))
+        } else if theme_changed {
+            let (mut theme, mut watch) = default_theme_state(&settings);
             theme.update_active(|active| {
                 super::discovery::apply_font_registry_tokens(active, &self.font_registry);
             });
-            let mut watch = watch;
             watch.revision = theme.active_snapshot().revision;
             Some((theme, watch))
         } else {

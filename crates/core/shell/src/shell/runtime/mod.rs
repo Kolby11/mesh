@@ -335,47 +335,11 @@ impl Shell {
             );
         } else {
             if let Some(graph) = self.installed_module_graph.as_ref() {
-                for descriptor in graph.theme_catalog().iter() {
-                    let source = descriptor.default_source();
-                    let label = descriptor.label.as_deref().unwrap_or(&descriptor.local_id);
-                    match mesh_core_theme::load_theme_from_source(source, &descriptor.id, label) {
-                        Ok(mut theme) => {
-                            // The graph identity, not CSS metadata, is the
-                            // activation identity. CSS labels remain content,
-                            // while ownership and mode selection come from the
-                            // authorized descriptor.
-                            theme.id = descriptor.id.clone();
-                            if let Some(label) = &descriptor.label {
-                                theme.name = label.clone();
-                            }
-                            tracing::debug!(
-                                "registering graph-authorized theme '{}' mode '{}'",
-                                descriptor.id,
-                                descriptor.default_mode
-                            );
-                            if let Err(error) = self.theme.register_theme(theme) {
-                                tracing::warn!(
-                                    "skipping graph-authorized theme '{}' due to duplicate identity: {error}",
-                                    descriptor.id
-                                );
-                            }
-                        }
-                        Err(error) => tracing::warn!(
-                            "failed to load graph-authorized theme '{}' mode '{}': {error}",
-                            descriptor.id,
-                            descriptor.default_mode
-                        ),
+                match prepare_theme_state_for_graph(&self.settings, graph) {
+                    Ok(Some(prepared)) => {
+                        self.install_prepared_theme(prepared);
                     }
-                }
-            }
-            if let Some(graph) = self.installed_module_graph.clone()
-                && !graph.theme_catalog().is_empty()
-            {
-                match prepare_theme_for_graph(&self.settings, &graph) {
-                    Ok((theme, watch)) => {
-                        self.theme.replace_active(theme);
-                        self.theme_watch = watch;
-                    }
+                    Ok(None) => {}
                     Err(error) => tracing::warn!(
                         "failed to compose selected graph theme '{}': {error}; retaining recovery theme",
                         self.settings.theme.active

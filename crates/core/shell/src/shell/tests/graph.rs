@@ -525,6 +525,71 @@ fn graph_locale_commit_replaces_catalog_and_retains_last_known_good_on_failure()
 }
 
 #[test]
+fn graph_theme_commit_rejects_bad_css_before_swapping_graph_or_watch() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("theme.css"),
+        ":root { --color-surface: #123456; }",
+    )
+    .unwrap();
+    let graph = graph_with_theme_source(dir.path(), "graph-theme", "theme.css");
+    let theme_id = "@mesh/test-theme:graph-theme";
+
+    let mut shell = Shell::new();
+    shell.settings.theme.active = theme_id.to_string();
+    shell.commit_installed_module_graph(graph.clone()).unwrap();
+    let previous_watch = shell.theme_watch.clone();
+    let previous_watch_set = shell.file_watch_set.clone();
+    assert!(
+        shell
+            .file_watch_set
+            .paths
+            .iter()
+            .any(|path| path.ends_with("theme.css"))
+    );
+
+    fs::write(dir.path().join("theme.css"), "{ malformed").unwrap();
+    let replacement = graph_with_theme_source(dir.path(), "graph-theme", "theme.css");
+
+    assert!(shell.commit_installed_module_graph(replacement).is_err());
+    assert_eq!(shell.theme.active().id, theme_id);
+    assert_eq!(
+        shell
+            .theme
+            .active()
+            .token("color.surface")
+            .map(ToString::to_string),
+        Some("#123456".into())
+    );
+    assert_eq!(shell.theme_watch.path, previous_watch.path);
+    assert_eq!(shell.theme_watch.fingerprint, previous_watch.fingerprint);
+    assert_eq!(shell.file_watch_set, previous_watch_set);
+    assert!(
+        shell
+            .installed_module_graph
+            .as_ref()
+            .is_some_and(|active| active.theme_catalog().get(theme_id).is_some())
+    );
+}
+
+#[test]
+fn graph_theme_descriptor_changes_enter_the_activation_diff() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("theme.css"), ":root {} ").unwrap();
+    let before = graph_with_theme_source(dir.path(), "before", "theme.css");
+    let after = graph_with_theme_source(dir.path(), "after", "theme.css");
+
+    let diff = before.diff(&after);
+
+    assert!(
+        diff.profile_effects
+            .iter()
+            .any(|effect| effect == "themes changed"),
+        "theme descriptor changes must not be treated as an empty graph diff: {diff:?}"
+    );
+}
+
+#[test]
 fn core_crate_boundaries_do_not_regress() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
 

@@ -15,6 +15,16 @@ use std::path::PathBuf;
 
 use super::types::ThemeWatchState;
 
+/// The complete theme state prepared from one graph/settings snapshot. The
+/// engine contains both the selected active theme and the catalog presented to
+/// consumers; the watch metadata is committed alongside it so a source change
+/// cannot leave the renderer and watcher looking at different revisions.
+#[derive(Debug, Clone)]
+pub(super) struct PreparedThemeState {
+    pub(super) engine: ThemeEngine,
+    pub(super) watch: ThemeWatchState,
+}
+
 pub(super) fn default_theme_state(settings: &ShellSettings) -> (ThemeEngine, ThemeWatchState) {
     let mut theme = default_theme();
     apply_font_family(&mut theme, settings.fonts.ui_family.as_deref());
@@ -145,6 +155,62 @@ pub(super) fn prepare_theme_for_graph(
             revision,
         },
     ))
+}
+
+/// Prepare the graph-authorized theme catalog and selected snapshot together.
+///
+/// A descriptor is enough to advertise a theme in the catalog even when an
+/// inactive mode is currently malformed: its source is opened and parsed only
+/// when selected. The selected descriptor, however, must parse successfully
+/// before this candidate can be committed. This keeps an editor's partial CSS
+/// write from terminating the shell or replacing its last-known-good snapshot.
+pub(super) fn prepare_theme_state_for_graph(
+    settings: &ShellSettings,
+    graph: &InstalledModuleGraph,
+) -> Result<Option<PreparedThemeState>, ThemeError> {
+    if graph.theme_catalog().is_empty() {
+        return Ok(None);
+    }
+
+    let (active, watch) = prepare_theme_for_graph(settings, graph)?;
+    let active_id = active.id.clone();
+    let mut engine = ThemeEngine::new(active);
+
+    for descriptor in graph.theme_catalog().iter() {
+        if descriptor.id == active_id {
+            continue;
+        }
+        let mode = descriptor
+            .mode(&descriptor.default_mode)
+            .expect("theme descriptor default mode was validated by the graph");
+        let mut theme = load_theme_from_source(
+            &mode.source,
+            &descriptor.id,
+            descriptor.label.as_deref().unwrap_or(&descriptor.local_id),
+        )
+        .unwrap_or_else(|_| {
+            // Keep the graph identity discoverable while deferring an
+            // inactive source's parse failure until the user selects it.
+            Theme::new(
+                descriptor.id.clone(),
+                descriptor.label.as_deref().unwrap_or(&descriptor.local_id),
+            )
+        });
+        theme.id = descriptor.id.clone();
+        if let Some(label) = &descriptor.label {
+            theme.name = label.clone();
+        }
+        theme.set_render_metadata(
+            mode.name.clone(),
+            mode.metadata.color_scheme.clone(),
+            mode.metadata.contrast.clone(),
+        );
+        engine
+            .register_theme(theme)
+            .map_err(|error| ThemeError::Composition(error.to_string()))?;
+    }
+
+    Ok(Some(PreparedThemeState { engine, watch }))
 }
 
 pub(super) fn selected_theme_mode(
