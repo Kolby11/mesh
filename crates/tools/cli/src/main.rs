@@ -266,6 +266,10 @@ fn locale_read_model() -> (
     (graph, engine, diagnostics, policy)
 }
 
+fn is_locale_graph_diagnostic(status: &str) -> bool {
+    status.contains("i18n") || status.contains("locale")
+}
+
 fn cmd_locale(args: &[String]) {
     match args.first().map(String::as_str) {
         Some("list") | None => {
@@ -341,9 +345,29 @@ fn cmd_locale(args: &[String]) {
         Some("doctor") => {
             let (graph, engine, catalog_diagnostics, _) = locale_read_model();
             let mut issues = 0;
+            let mut errors = 0;
+            let mut graph_diagnostics = graph.diagnostics().to_vec();
+            graph_diagnostics.extend(graph.authoring_diagnostics());
+            for diagnostic in graph_diagnostics
+                .iter()
+                .filter(|diagnostic| is_locale_graph_diagnostic(&diagnostic.status))
+            {
+                issues += 1;
+                let severity = if diagnostic.status.starts_with("redundant_") {
+                    "warning"
+                } else {
+                    errors += 1;
+                    "error"
+                };
+                println!(
+                    "{severity} {} [{}]: {}",
+                    diagnostic.module_id, diagnostic.status, diagnostic.message
+                );
+            }
             for source in catalog_diagnostics {
                 for diagnostic in source.diagnostics {
                     issues += 1;
+                    errors += 1;
                     println!(
                         "error {} {} {}: {}",
                         source.module_id, source.locale, diagnostic.key, diagnostic.message
@@ -353,6 +377,7 @@ fn cmd_locale(args: &[String]) {
             for module in graph.enabled_modules() {
                 for (path, error) in graph.component_source_errors(&module.id) {
                     issues += 1;
+                    errors += 1;
                     println!("error {} {}: {}", module.id, path.display(), error);
                 }
                 let translator = engine.module_translator(&module.id);
@@ -368,6 +393,9 @@ fn cmd_locale(args: &[String]) {
             }
             if issues == 0 {
                 println!("locale catalogs and static keys are healthy");
+            }
+            if errors > 0 {
+                std::process::exit(1);
             }
         }
         Some(other) => exit_error(format!(

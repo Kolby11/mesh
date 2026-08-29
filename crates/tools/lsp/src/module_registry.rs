@@ -564,20 +564,14 @@ fn discover_themes(graph: &AuthoringSnapshot) -> Vec<String> {
 /// completion. The graph also supplies enabled language-pack contributions and
 /// module defaults consistently with the runtime.
 fn discover_locales(graph: &AuthoringSnapshot) -> Vec<String> {
-    let mut locales: Vec<String> = Vec::new();
-    locales.extend(
-        graph
-            .contributed_i18n()
-            .iter()
-            .map(|catalog| catalog.locale.clone()),
-    );
-    locales.extend(
-        graph
-            .modules()
-            .into_iter()
-            .filter(|module| module.enabled)
-            .filter_map(|module| module.manifest.mesh.i18n.default_locale.clone()),
-    );
+    let Ok((sources, defaults)) = graph.locale_catalog_sources() else {
+        return Vec::new();
+    };
+    let mut locales: Vec<String> = sources
+        .into_iter()
+        .map(|source| source.locale)
+        .chain(defaults.into_values())
+        .collect();
 
     locales.sort();
     locales.dedup();

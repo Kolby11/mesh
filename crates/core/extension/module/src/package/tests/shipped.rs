@@ -397,6 +397,38 @@ fn shipped_frontend_translation_keys_are_declared() {
     );
 }
 
+#[test]
+fn shipped_locale_usage_inventory_includes_props_and_manifest_metadata() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let graph = load_installed_module_graph(&workspace_root.join("config/module.json")).unwrap();
+
+    let audio_keys = graph.localized_keys("@mesh/audio-popover");
+    for key in ["var.track_width", "var.track_height", "var.anim_ms"] {
+        assert!(
+            audio_keys.contains(&key.to_string()),
+            "missing prop key {key}"
+        );
+    }
+
+    let navigation_keys = graph.localized_keys("@mesh/navigation-bar");
+    for key in [
+        "keybind.mute.label",
+        "keybind.mute.description",
+        "keybind.category.audio",
+    ] {
+        assert!(
+            navigation_keys.contains(&key.to_string()),
+            "missing manifest key {key}"
+        );
+    }
+
+    let settings_keys = graph.localized_keys("@mesh/settings");
+    assert!(
+        settings_keys.contains(&"settings.title".to_string()),
+        "missing surface metadata key"
+    );
+}
+
 // cargo test -p mesh-core-module --release -- shipped_module_luau_scan_cost --ignored --nocapture
 #[test]
 #[ignore = "release-only graph-scan cost measurement"]

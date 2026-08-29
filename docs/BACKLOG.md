@@ -109,12 +109,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Themes
 
-## Localization / i18n
-
-- [ ] Drive locale CLI/LSP/doctor, extraction, missing-key and provenance tooling
-      from the canonical graph/snapshot, and either implement `<i18n>` component
-      blocks with explicit precedence or reject them instead of discarding them.
-
 ## Host resources and icon packs
 
 - [ ] Replace discovery-time global resource registration with one immutable,

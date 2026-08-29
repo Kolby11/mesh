@@ -423,6 +423,10 @@ fn contribution_index_preserves_settings_schema_localized_descriptions() {
 
     assert_eq!(description["t"], "settings.mode.description");
     assert_eq!(description["fallback"], "Theme mode");
+    assert_eq!(
+        graph.localized_keys("@mesh/example-widget"),
+        vec!["settings.mode.description".to_string()]
+    );
 }
 
 #[test]

@@ -85,6 +85,26 @@ fn extract_t_keys_from_mesh_source_finds_static_keys() {
 }
 
 #[test]
+fn extract_t_keys_from_mesh_source_includes_localized_props() {
+    let src = r#"
+<props>
+  volume: { type: "int", label: t("settings.volume.label"), description: t("settings.volume.description") }
+  hidden: { type: "bool", label: t("settings.hidden.label"), expose: false }
+</props>
+<template><text>{t("template.title")}</text></template>
+"#;
+    assert_eq!(
+        extract_t_keys_from_mesh_source(src),
+        vec![
+            "settings.hidden.label".to_string(),
+            "settings.volume.description".to_string(),
+            "settings.volume.label".to_string(),
+            "template.title".to_string(),
+        ]
+    );
+}
+
+#[test]
 fn extract_t_keys_ignores_dynamic_expressions() {
     let src = r#"<template><box>{t(audio_title_key)}{t("audio.fixed")}</box></template>"#;
     let keys = extract_t_keys_from_mesh_source(src);

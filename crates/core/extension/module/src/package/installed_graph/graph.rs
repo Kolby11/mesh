@@ -1463,13 +1463,18 @@ impl InstalledModuleGraph {
         Ok((sources, defaults))
     }
 
-    /// Extract static translation keys from one enabled module's canonical
-    /// source tree. Dynamic keys are intentionally absent: callers can report
-    /// only what the parser can prove, while runtime misses cover the rest.
+    /// Extract statically provable translation keys from one enabled module's
+    /// canonical graph inputs. This includes Luau/template calls, localized
+    /// component props, manifest metadata, and generated/declared settings
+    /// schemas. Dynamic keys are intentionally absent: callers can report only
+    /// what the authoring model can prove, while runtime misses cover the rest.
     pub fn localized_keys(&self, module_id: &str) -> Vec<String> {
         let Some(module) = self.module(module_id) else {
             return Vec::new();
         };
+        if !module.enabled {
+            return Vec::new();
+        }
         let module_dir = module
             .manifest_path
             .parent()
@@ -1484,6 +1489,68 @@ impl InstalledModuleGraph {
             .into_iter()
             .flat_map(|(_, content)| scan_mesh_source(&content).static_calls.t_keys)
             .collect::<Vec<_>>();
+
+        let localized_text_key = |text: Option<&manifest::LocalizedText>| {
+            text.and_then(manifest::LocalizedText::translation_key)
+                .map(str::to_owned)
+        };
+        for provided in module.manifest.mesh.implementations() {
+            if let Some(key) = localized_text_key(provided.label.as_ref()) {
+                keys.push(key);
+            }
+        }
+        if let Some(layout) = &module.manifest.mesh.surface_layout
+            && let Some(key) = localized_text_key(layout.title.as_ref())
+        {
+            keys.push(key);
+        }
+        for contribution in &self.contributions.layout {
+            if contribution.module_id == module_id
+                && let Some(key) = localized_text_key(contribution.label.as_ref())
+            {
+                keys.push(key);
+            }
+        }
+        for contribution in &self.contributions.themes {
+            if contribution.module_id == module_id
+                && let Some(key) = localized_text_key(contribution.label.as_ref())
+            {
+                keys.push(key);
+            }
+        }
+        for contribution in &self.contributions.icons {
+            if contribution.module_id == module_id
+                && let Some(key) = localized_text_key(contribution.label.as_ref())
+            {
+                keys.push(key);
+            }
+        }
+        for contribution in &self.contributions.fonts {
+            if contribution.module_id == module_id
+                && let Some(key) = localized_text_key(contribution.label.as_ref())
+            {
+                keys.push(key);
+            }
+        }
+        for contribution in &self.contributions.keybinds {
+            if contribution.module_id != module_id {
+                continue;
+            }
+            for text in [
+                contribution.label.as_ref(),
+                contribution.description.as_ref(),
+                contribution.category.as_ref(),
+            ] {
+                if let Some(key) = localized_text_key(text) {
+                    keys.push(key);
+                }
+            }
+        }
+        for schema in &self.contributions.settings {
+            if schema.module_id == module_id {
+                collect_localized_schema_keys(&schema.schema, &mut keys);
+            }
+        }
         keys.sort();
         keys.dedup();
         keys
@@ -1675,6 +1742,28 @@ fn graph_revision(
     }
     let digest = hasher.finalize();
     u64::from_be_bytes(digest[..8].try_into().expect("sha256 has enough bytes")).max(1)
+}
+
+fn collect_localized_schema_keys(value: &serde_json::Value, keys: &mut Vec<String>) {
+    match value {
+        serde_json::Value::Object(object) => {
+            if let Some(serde_json::Value::String(key)) = object.get("t") {
+                keys.push(key.clone());
+            }
+            for value in object.values() {
+                collect_localized_schema_keys(value, keys);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                collect_localized_schema_keys(value, keys);
+            }
+        }
+        serde_json::Value::Null
+        | serde_json::Value::Bool(_)
+        | serde_json::Value::Number(_)
+        | serde_json::Value::String(_) => {}
+    }
 }
 
 fn catalog_source(

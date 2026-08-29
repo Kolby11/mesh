@@ -87,7 +87,18 @@ fn extract_mesh_static_calls_from_component(component: &ComponentFile) -> MeshSt
 
     let mut found = luau_scan::static_call_string_arguments(&sources, &MESH_SCANNED_CALLEES);
     let publish_channels = found.pop().unwrap_or_default();
-    let t_keys = found.pop().unwrap_or_default();
+    let mut t_keys = found.pop().unwrap_or_default();
+    if let Some(props) = &component.props {
+        for prop in &props.props {
+            for label in [&prop.label, &prop.description] {
+                if let Some(mesh_core_component::LocalizedLabel::Translation { key, .. }) = label {
+                    t_keys.push(key.clone());
+                }
+            }
+        }
+    }
+    t_keys.sort();
+    t_keys.dedup();
     MeshStaticCalls {
         t_keys,
         publish_channels,
