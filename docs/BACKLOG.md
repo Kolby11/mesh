@@ -107,9 +107,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Service contracts
 
-- [ ] Compile and enforce complete contracts end to end: canonical unique names,
-      recursive named/array types, consistent optional semantics, typed method
-      inputs/results, last-known-good state, and event payloads.
 - [ ] Make service methods correlated request/response transactions with typed
       invocation failures, deadlines/cancellation, explicit coalescing outcomes,
       and rollback/settlement for optimistic `stateBinding` writes.
