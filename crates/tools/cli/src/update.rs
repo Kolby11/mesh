@@ -1222,7 +1222,7 @@ mod tests {
             manifest("@me/audio", "1.0.0", &[], BASE_CONTRACT),
         )]);
         let widened = r#"{"state":[{"name":"percent","type":"float"},
-            {"name":"muted","type":"boolean"}],
+            {"name":"muted","type":"boolean"},{"name":"device","type":"string"}],
             "methods":[{"name":"set_volume","args":[{"name":"percent","type":"float"}],
             "returns":"Result"}],"events":[],
             "capabilities":{"required":["service.audio.read"]}}"#;

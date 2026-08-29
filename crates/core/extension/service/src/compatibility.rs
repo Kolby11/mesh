@@ -775,12 +775,10 @@ mod tests {
 
     #[test]
     fn optional_feature_groups_are_additive_but_required_groups_are_breaking() {
-        let optional = contract(
-            r#"{
-                "capabilities": {
-                    "featureGroups": { "recording": {} }
-                }
-            }"#,
+        let mut optional = base();
+        optional.capabilities.feature_groups.insert(
+            "recording".to_string(),
+            crate::contract::ContractFeatureGroup::default(),
         );
         let diff = diff_contracts(&base(), &optional);
         assert!(!diff.is_breaking());
@@ -789,14 +787,13 @@ mod tests {
                 && change.class == CompatibilityClass::Additive
         }));
 
-        let required = contract(
-            r#"{
-                "capabilities": {
-                    "featureGroups": {
-                        "exclusive_output": { "required": true }
-                    }
-                }
-            }"#,
+        let mut required = base();
+        required.capabilities.feature_groups.insert(
+            "exclusive_output".to_string(),
+            crate::contract::ContractFeatureGroup {
+                required: true,
+                ..Default::default()
+            },
         );
         let diff = diff_contracts(&base(), &required);
         assert!(diff.is_breaking());

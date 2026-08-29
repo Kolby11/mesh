@@ -107,10 +107,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Service contracts
 
-- [ ] Diff the complete compiled contract in consumer and provider directions,
-      load external candidate contracts, align LSP/static analysis/codegen with
-      the runtime ABI, and remove the unused transitional `ServiceRegistry`.
-
 ## Themes
 
 - [ ] Make graph-authorized theme descriptors the only catalog/loader, with
