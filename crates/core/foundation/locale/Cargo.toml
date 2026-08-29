@@ -11,3 +11,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 libc = { workspace = true }
+fixed_decimal = { workspace = true }
+icu_decimal = { workspace = true, features = ["alloc"] }
+icu_locale_core = { workspace = true }
+icu_plurals = { workspace = true }

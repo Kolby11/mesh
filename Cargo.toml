@@ -102,3 +102,7 @@ rayon = "1"
 # Luau parser for static analysis of module scripts during graph scanning.
 full_moon = { version = "2.2.0", features = ["luau"] }
 libc = "0.2"
+icu_decimal = "2.2.0"
+icu_locale_core = "2.2.0"
+icu_plurals = "2.2.0"
+fixed_decimal = "0.7.2"

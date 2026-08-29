@@ -167,6 +167,36 @@ fn language_pack_catalogs_require_one_target_per_locale() {
 }
 
 #[test]
+fn locale_manifest_identities_are_canonical_and_deterministic() {
+    let case_insensitive_match = r#"
+{
+  "name": "@mesh/panel",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "i18n": { "defaultLocale": "EN-us", "supportedLocales": ["en-US"] }
+  }
+}
+"#;
+    ModuleManifest::from_json_str(case_insensitive_match)
+        .expect("locale identities should compare canonically");
+
+    let duplicate_supported =
+        case_insensitive_match.replace("[\"en-US\"]", "[\"en-US\", \"en-us\"]");
+    let error = ModuleManifest::from_json_str(&duplicate_supported)
+        .expect_err("supported locale identities must be unique")
+        .to_string();
+    assert!(error.contains("duplicate locale 'en-US'"), "{error}");
+
+    let invalid = case_insensitive_match.replace("[\"en-US\"]", "[\"en_US\"]");
+    let error = ModuleManifest::from_json_str(&invalid)
+        .expect_err("locale declarations must use BCP 47 syntax")
+        .to_string();
+    assert!(error.contains("valid BCP 47 locale"), "{error}");
+}
+
+#[test]
 fn compact_surface_block_normalizes_into_surface_layout() {
     let content = r#"
 {

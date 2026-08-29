@@ -8,9 +8,59 @@ use super::super::{PublishedEvent, ScriptError, ScriptInterfaceImport};
 use super::*;
 use crate::host_api::{HostApiManifest, InterfaceProxy};
 use crate::operation::OperationRegistry;
+use mesh_core_locale::{format_date, format_duration, format_number_value};
 use mlua::{Error as LuaError, LuaSerdeExt, Table, Value as LuaValue, Variadic};
 use serde_json::Value;
 use std::sync::{Arc, atomic::Ordering};
+
+fn lua_number(value: LuaValue) -> mlua::Result<f64> {
+    let value = match value {
+        LuaValue::Integer(value) => value as f64,
+        LuaValue::Number(value) => value,
+        LuaValue::String(value) => value
+            .to_str()?
+            .parse::<f64>()
+            .map_err(|_| LuaError::external("expected a finite number"))?,
+        _ => return Err(LuaError::external("expected a number")),
+    };
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(LuaError::external("expected a finite number"))
+    }
+}
+
+fn lua_number_string(value: LuaValue) -> mlua::Result<String> {
+    match value {
+        LuaValue::Integer(value) => Ok(value.to_string()),
+        LuaValue::Number(value) => {
+            if !value.is_finite() {
+                return Err(LuaError::external("expected a finite number"));
+            }
+            Ok(value.to_string())
+        }
+        LuaValue::String(value) => {
+            let value = value.to_str()?.to_string();
+            value
+                .parse::<f64>()
+                .ok()
+                .filter(|number| number.is_finite())
+                .map(|_| value)
+                .ok_or_else(|| LuaError::external("expected a finite number"))
+        }
+        _ => Err(LuaError::external("expected a number")),
+    }
+}
+
+fn lua_timestamp(value: LuaValue) -> mlua::Result<i64> {
+    let value = lua_number(value)?;
+    if value.fract() != 0.0 || value < i64::MIN as f64 || value > i64::MAX as f64 {
+        return Err(LuaError::external(
+            "date timestamp must be an integral Unix timestamp",
+        ));
+    }
+    Ok(value as i64)
+}
 
 impl ScriptContext {
     pub(super) fn install_host_api(&mut self, target: &mlua::Table) -> Result<(), ScriptError> {
@@ -159,6 +209,54 @@ impl ScriptContext {
                     self.lua()
                         .create_function(move |_lua, ()| {
                             Ok(locale_cell.lock().unwrap().locale.clone())
+                        })
+                        .map_err(lua_err)?,
+                )
+                .map_err(lua_err)?;
+
+            let locale_cell_for_number = Arc::clone(&self.locale_cell);
+            mesh_locale
+                .set(
+                    "format_number",
+                    self.lua()
+                        .create_function(move |_lua, value: LuaValue| {
+                            let value = lua_number_string(value)?;
+                            let locale = locale_cell_for_number.lock().unwrap().locale.clone();
+                            format_number_value(&locale, &value)
+                                .map_err(|error| LuaError::external(error.to_string()))
+                        })
+                        .map_err(lua_err)?,
+                )
+                .map_err(lua_err)?;
+
+            let locale_cell_for_date = Arc::clone(&self.locale_cell);
+            mesh_locale
+                .set(
+                    "format_date",
+                    self.lua()
+                        .create_function(
+                            move |_lua, (timestamp, style): (LuaValue, Option<String>)| {
+                                let timestamp = lua_timestamp(timestamp)?;
+                                let style = style.unwrap_or_else(|| "short".into());
+                                let locale = locale_cell_for_date.lock().unwrap().locale.clone();
+                                format_date(&locale, timestamp, &style)
+                                    .map_err(|error| LuaError::external(error.to_string()))
+                            },
+                        )
+                        .map_err(lua_err)?,
+                )
+                .map_err(lua_err)?;
+
+            let locale_cell_for_duration = Arc::clone(&self.locale_cell);
+            mesh_locale
+                .set(
+                    "format_duration",
+                    self.lua()
+                        .create_function(move |_lua, value: LuaValue| {
+                            let value = lua_number(value)?;
+                            let locale = locale_cell_for_duration.lock().unwrap().locale.clone();
+                            format_duration(&locale, value)
+                                .map_err(|error| LuaError::external(error.to_string()))
                         })
                         .map_err(lua_err)?,
                 )

@@ -6,6 +6,7 @@ use crate::manifest::{
     canonical_surface_edge, canonical_surface_layer, canonical_surface_role,
     canonical_window_decorations,
 };
+use mesh_core_locale::normalize_locale_tag;
 use mesh_core_service::{ContractCapabilities, InterfaceContract};
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -591,14 +592,18 @@ fn diagnose_frontend_source_contracts(
             .default_locale
             .as_deref()
             .unwrap_or("en");
+        let canonical_default_locale =
+            normalize_locale_tag(default_locale).unwrap_or_else(|_| default_locale.to_string());
         let all_i18n: Vec<_> = module.manifest.mesh.contributes.i18n.iter().collect();
         if !all_i18n.is_empty() {
             let contributed_locales = all_i18n
                 .iter()
-                .map(|catalog| catalog.locale.as_str())
+                .filter_map(|catalog| normalize_locale_tag(&catalog.locale).ok())
                 .collect::<std::collections::HashSet<_>>();
             for locale in &module.manifest.mesh.i18n.supported_locales {
-                if !contributed_locales.contains(locale.as_str()) {
+                let canonical_locale =
+                    normalize_locale_tag(locale).unwrap_or_else(|_| locale.clone());
+                if !contributed_locales.contains(&canonical_locale) {
                     diagnostics.push(ModuleGraphDiagnostic {
                         module_id: module.id.clone(),
                         contribution_id: Some(format!("{}:i18n:{}", module.id, locale)),
@@ -614,13 +619,13 @@ fn diagnose_frontend_source_contracts(
             // mesh.contributes.i18n. Authors should declare catalogs once in
             // contributes.i18n and omit supportedLocales.
             if !module.manifest.mesh.i18n.supported_locales.is_empty() {
-                let declared: std::collections::HashSet<&str> = module
+                let declared: std::collections::HashSet<String> = module
                     .manifest
                     .mesh
                     .i18n
                     .supported_locales
                     .iter()
-                    .map(String::as_str)
+                    .filter_map(|locale| normalize_locale_tag(locale).ok())
                     .collect();
                 if declared == contributed_locales {
                     diagnostics.push(ModuleGraphDiagnostic {
@@ -636,7 +641,9 @@ fn diagnose_frontend_source_contracts(
             }
             // Warn when defaultLocale is declared but has no contributed catalog.
             if let Some(default) = module.manifest.mesh.i18n.default_locale.as_deref() {
-                if !contributed_locales.contains(default) {
+                let canonical_default =
+                    normalize_locale_tag(default).unwrap_or_else(|_| default.to_string());
+                if !contributed_locales.contains(&canonical_default) {
                     diagnostics.push(ModuleGraphDiagnostic {
                         module_id: module.id.clone(),
                         contribution_id: Some(format!("{}:i18n:default_locale", module.id)),
@@ -651,7 +658,11 @@ fn diagnose_frontend_source_contracts(
         }
         let catalog_keys: Option<std::collections::HashSet<String>> = all_i18n
             .iter()
-            .find(|c| c.locale == default_locale)
+            .find(|c| {
+                normalize_locale_tag(&c.locale)
+                    .ok()
+                    .is_some_and(|locale| locale == canonical_default_locale)
+            })
             .and_then(|c| {
                 let catalog_path =
                     super::super::contained_path(module_dir, &c.path, "i18n catalog").ok()?;

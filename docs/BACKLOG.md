@@ -111,9 +111,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Localization / i18n
 
-- [ ] Compile bounded typed catalogs with per-entry diagnostics, interpolation,
-      CLDR plural/select and formatting; add targeted language-pack identities,
-      ordered key-level precedence, and deterministic duplicate validation.
 - [ ] Route templates, Luau, manifests, props, generated settings, and debug data
       through one owner-aware resolver with visible misses; align `mesh.i18n`,
       `mesh.locale`, service events, and read/write capability enforcement.

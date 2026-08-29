@@ -1,5 +1,6 @@
 use super::{ModuleId, ModuleManifestDiagnostic, ModuleManifestError, validate_relative_path};
 use crate::manifest::{self, CapabilitiesSection, DependencySpec, Manifest, ModuleType};
+use mesh_core_locale::normalize_locale_tag;
 use mesh_core_service::{canonical_interface_name, parse_contract_version, parse_version_req};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -829,33 +830,46 @@ pub struct MeshI18nSupport {
 
 impl MeshI18nSupport {
     fn validate(&self) -> Result<(), ModuleManifestError> {
-        if let Some(default_locale) = &self.default_locale {
-            if default_locale.trim().is_empty() {
-                return Err(ModuleManifestError::Validation(
-                    "mesh.i18n.defaultLocale cannot be empty".into(),
-                ));
-            }
-            if !self.supported_locales.is_empty()
-                && !self
-                    .supported_locales
-                    .iter()
-                    .any(|locale| locale == default_locale)
-            {
+        let default_locale = self
+            .default_locale
+            .as_deref()
+            .map(|locale| validate_locale("mesh.i18n.defaultLocale", locale))
+            .transpose()?;
+        let mut supported_locales = self
+            .supported_locales
+            .iter()
+            .map(|locale| validate_locale("mesh.i18n.supportedLocales", locale))
+            .collect::<Result<Vec<_>, _>>()?;
+        supported_locales.sort();
+        for pair in supported_locales.windows(2) {
+            if pair[0] == pair[1] {
                 return Err(ModuleManifestError::Validation(format!(
-                    "mesh.i18n.defaultLocale {default_locale} must be listed in supportedLocales"
+                    "mesh.i18n.supportedLocales contains duplicate locale '{}'",
+                    pair[0]
                 )));
             }
         }
-
-        for locale in &self.supported_locales {
-            if locale.trim().is_empty() {
-                return Err(ModuleManifestError::Validation(
-                    "mesh.i18n.supportedLocales cannot contain empty locales".into(),
-                ));
-            }
+        if let Some(default_locale) = default_locale
+            && !supported_locales.is_empty()
+            && !supported_locales
+                .iter()
+                .any(|locale| locale == &default_locale)
+        {
+            return Err(ModuleManifestError::Validation(format!(
+                "mesh.i18n.defaultLocale {} must be listed in supportedLocales",
+                self.default_locale.as_deref().unwrap_or_default()
+            )));
         }
         Ok(())
     }
+}
+
+fn validate_locale(field: &str, locale: &str) -> Result<String, ModuleManifestError> {
+    normalize_locale_tag(locale).map_err(|error| {
+        ModuleManifestError::Validation(format!(
+            "{field} '{locale}' is not a valid BCP 47 locale: {error}"
+        ))
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -1733,12 +1747,16 @@ fn validate_i18n_contributions(
                 contribution.id
             )));
         }
+        let locale = validate_locale(
+            &format!("i18n contribution '{}' locale", contribution.id),
+            &contribution.locale,
+        )?;
         validate_relative_path("i18n contribution", &contribution.path)?;
 
         match (kind, contribution.module.as_deref()) {
             (ModuleKind::LanguagePack, Some(target)) => {
-                ModuleId::parse(target)?;
-                target_locales.push((target.to_string(), contribution.locale.to_ascii_lowercase()));
+                let target = ModuleId::parse(target)?;
+                target_locales.push((target.as_str().to_string(), locale));
             }
             (ModuleKind::LanguagePack, None) => {
                 return Err(ModuleManifestError::Validation(format!(
@@ -1753,7 +1771,7 @@ fn validate_i18n_contributions(
                 )));
             }
             (_, None) => {
-                target_locales.push((String::new(), contribution.locale.to_ascii_lowercase()));
+                target_locales.push((String::new(), locale));
             }
         }
     }

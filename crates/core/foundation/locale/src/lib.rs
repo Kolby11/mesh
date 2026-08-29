@@ -1,8 +1,13 @@
 //! System-wide locale management with per-module translation catalogs,
 //! fallback chains, and runtime locale switching.
 
+use fixed_decimal::Decimal;
+use icu_decimal::DecimalFormatter;
+use icu_locale_core::Locale as IcuLocale;
+use icu_plurals::{PluralCategory, PluralRules};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::fmt::{self, Write};
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -17,6 +22,22 @@ const MAX_CATALOG_ENTRIES: usize = 4096;
 const MAX_VARIANTS_PER_ENTRY: usize = 32;
 const MAX_MESSAGE_LENGTH: usize = 16 * 1024;
 pub const DEFAULT_MAX_CATALOG_SOURCE_BYTES: usize = 2 * 1024 * 1024;
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum LocaleFormatError {
+    #[error("invalid locale '{locale}' for formatting")]
+    InvalidLocale { locale: String },
+    #[error("invalid number '{value}' for locale formatting")]
+    InvalidNumber { value: String },
+    #[error("number is not finite")]
+    NonFiniteNumber,
+    #[error("unsupported date style '{style}'")]
+    InvalidDateStyle { style: String },
+    #[error("date timestamp is outside the supported year range")]
+    DateOutOfRange,
+    #[error("locale formatter data is unavailable: {message}")]
+    FormatterData { message: String },
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -169,7 +190,6 @@ impl CatalogEntry {
             Self::Plural(variants) => {
                 let category = args
                     .get("count")
-                    .and_then(|count| count.parse::<f64>().ok())
                     .map(|count| plural_category(locale, count))
                     .unwrap_or("other");
                 variants
@@ -796,7 +816,7 @@ impl LocaleSnapshot {
     fn resolve_in_core<'a>(&'a self, key: &str, args: &HashMap<String, String>) -> Option<&'a str> {
         for locale in self.selection.chain() {
             if let Some(entry) = self.catalogs.core.get(locale).and_then(|m| m.get(key)) {
-                return entry.resolve(args, self.current());
+                return entry.resolve(args, locale);
             }
         }
         None
@@ -810,7 +830,7 @@ impl LocaleSnapshot {
     ) -> Option<&'a str> {
         for locale in self.selection.chain() {
             if let Some(entry) = self.module_entry(module_id, locale, key, true) {
-                return entry.resolve(args, self.current());
+                return entry.resolve(args, locale);
             }
         }
         if let Some(default_locale) = self.catalogs.module_defaults.get(module_id)
@@ -821,7 +841,7 @@ impl LocaleSnapshot {
                 .any(|locale| locale == default_locale)
             && let Some(entry) = self.module_entry(module_id, default_locale, key, false)
         {
-            return entry.resolve(args, self.current());
+            return entry.resolve(args, default_locale);
         }
         None
     }
@@ -986,7 +1006,12 @@ pub fn compile_catalog(locale: impl Into<String>, value: &serde_json::Value) -> 
             message: format!("catalog exceeds {MAX_CATALOG_ENTRIES} entries"),
         });
     }
-    for (index, (key, raw)) in object.iter().enumerate() {
+    // `serde_json::Map` is ordered in the default build, but sorting here
+    // keeps the bounded admission decision deterministic for callers that
+    // construct a Value with an order-preserving map feature enabled.
+    let mut entries = object.iter().collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.0.cmp(right.0));
+    for (index, (key, raw)) in entries.into_iter().enumerate() {
         if index >= MAX_CATALOG_ENTRIES {
             break;
         }
@@ -1005,6 +1030,45 @@ pub fn compile_catalog(locale: impl Into<String>, value: &serde_json::Value) -> 
         messages,
         diagnostics,
     }
+}
+
+fn parse_catalog_document(
+    input: &str,
+) -> Result<(serde_json::Value, Vec<String>), serde_json::Error> {
+    struct CatalogDocumentVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for CatalogDocumentVisitor {
+        type Value = (serde_json::Value, Vec<String>);
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a JSON object catalog")
+        }
+
+        fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::MapAccess<'de>,
+        {
+            let mut object = serde_json::Map::new();
+            let mut duplicates = BTreeSet::new();
+            while let Some((key, value)) = map.next_entry::<String, serde_json::Value>()? {
+                if object.contains_key(&key) {
+                    duplicates.insert(key);
+                } else {
+                    object.insert(key, value);
+                }
+            }
+            Ok((
+                serde_json::Value::Object(object),
+                duplicates.into_iter().collect(),
+            ))
+        }
+    }
+
+    let mut deserializer = serde_json::Deserializer::from_str(input);
+    let document =
+        serde::de::Deserializer::deserialize_map(&mut deserializer, CatalogDocumentVisitor)?;
+    deserializer.end()?;
+    Ok(document)
 }
 
 fn compile_catalog_entry(key: &str, raw: &serde_json::Value) -> Result<CatalogEntry, String> {
@@ -1106,25 +1170,239 @@ fn message_placeholders(message: &str) -> Result<BTreeSet<String>, String> {
     Ok(placeholders)
 }
 
-fn plural_category(locale: &str, count: f64) -> &'static str {
-    let language = locale.split('-').next().unwrap_or_default();
-    let integer = count.fract() == 0.0;
-    let absolute = count.abs();
-    if language == "sk" && integer {
-        if absolute == 1.0 {
-            "one"
-        } else if (2.0..=4.0).contains(&absolute) {
-            "few"
-        } else {
-            "many"
-        }
-    } else if language == "fr" && (absolute == 0.0 || absolute == 1.0) {
-        "one"
-    } else if absolute == 1.0 {
-        "one"
-    } else {
-        "other"
+/// Select a cardinal CLDR plural category for a decimal value.
+///
+/// The value is accepted as a string so visible fraction digits are retained:
+/// `1`, `1.0`, and `1.00` can have different CLDR categories. Invalid values
+/// deliberately fall back to `other`, which is the required safe catalog
+/// variant.
+pub fn plural_category(locale: &str, value: &str) -> &'static str {
+    let Ok(locale) = IcuLocale::try_from_str(locale) else {
+        return "other";
+    };
+    let Ok(value) = value.parse::<Decimal>() else {
+        return "other";
+    };
+    let Ok(rules) = PluralRules::try_new_cardinal(locale.into()) else {
+        return "other";
+    };
+    match rules.category_for(&value) {
+        PluralCategory::Zero => "zero",
+        PluralCategory::One => "one",
+        PluralCategory::Two => "two",
+        PluralCategory::Few => "few",
+        PluralCategory::Many => "many",
+        PluralCategory::Other => "other",
     }
+}
+
+/// Format a decimal using the locale's CLDR decimal symbols and grouping.
+///
+/// The string form is useful for script arguments because it preserves the
+/// number of visible fraction digits. `format_number` below is the convenient
+/// floating-point wrapper for Rust callers.
+pub fn format_number_value(locale: &str, value: &str) -> Result<String, LocaleFormatError> {
+    let locale = normalized_icu_locale(locale)?;
+    let value = value
+        .parse::<Decimal>()
+        .map_err(|_| LocaleFormatError::InvalidNumber {
+            value: value.to_string(),
+        })?;
+    let formatter =
+        DecimalFormatter::try_new(locale.into(), Default::default()).map_err(|error| {
+            LocaleFormatError::FormatterData {
+                message: error.to_string(),
+            }
+        })?;
+    Ok(formatter.format_to_string(&value))
+}
+
+/// Format a finite floating-point number using locale-sensitive decimal
+/// symbols. Callers that need trailing-zero-sensitive plural or number input
+/// should use [`format_number_value`] instead.
+pub fn format_number(locale: &str, value: f64) -> Result<String, LocaleFormatError> {
+    if !value.is_finite() {
+        return Err(LocaleFormatError::NonFiniteNumber);
+    }
+    let value = value.to_string();
+    format_number_value(locale, &value)
+}
+
+/// Format a Unix timestamp in UTC using a small, stable set of shell-facing
+/// date styles. The date fields and month names are locale-aware; keeping the
+/// accepted style set bounded makes script output deterministic across hosts.
+pub fn format_date(
+    locale: &str,
+    timestamp_seconds: i64,
+    style: &str,
+) -> Result<String, LocaleFormatError> {
+    let locale = normalized_icu_locale(locale)?;
+    if !matches!(style, "short" | "long") {
+        return Err(LocaleFormatError::InvalidDateStyle {
+            style: style.to_string(),
+        });
+    }
+    const MIN_TIMESTAMP: i64 = -62_135_596_800; // 0001-01-01T00:00:00Z
+    const MAX_TIMESTAMP: i64 = 253_402_300_799; // 9999-12-31T23:59:59Z
+    if !(MIN_TIMESTAMP..=MAX_TIMESTAMP).contains(&timestamp_seconds) {
+        return Err(LocaleFormatError::DateOutOfRange);
+    }
+    let (year, month, day) = civil_date_from_days(timestamp_seconds.div_euclid(86_400));
+    let language = locale.id.language.to_string();
+    let region = locale.id.region.map(|region| region.to_string());
+    if style == "short" {
+        return Ok(match language.as_str() {
+            "en" if !matches!(region.as_deref(), Some("GB" | "AU" | "NZ" | "IE")) => {
+                format!("{month:02}/{day:02}/{year:04}")
+            }
+            "en" | "fr" => format!("{day:02}/{month:02}/{year:04}"),
+            "de" | "cs" | "sk" | "ru" | "uk" => {
+                format!("{day:02}.{month:02}.{year:04}")
+            }
+            "ja" | "zh" | "ko" => format!("{year:04}/{month:02}/{day:02}"),
+            _ => format!("{year:04}-{month:02}-{day:02}"),
+        });
+    }
+
+    let month_name = localized_month_name(&language, month);
+    Ok(match language.as_str() {
+        "en" => format!("{month_name} {day}, {year}"),
+        "de" => format!("{day}. {month_name} {year}"),
+        "fr" => format!("{day} {month_name} {year}"),
+        "cs" | "sk" | "ru" | "uk" => format!("{day}. {month_name} {year}"),
+        _ => format!("{year}-{month:02}-{day:02}"),
+    })
+}
+
+/// Format a duration in seconds with localized, compact unit labels.
+pub fn format_duration(locale: &str, seconds: f64) -> Result<String, LocaleFormatError> {
+    if !seconds.is_finite() {
+        return Err(LocaleFormatError::NonFiniteNumber);
+    }
+    let locale = normalized_icu_locale(locale)?;
+    let sign = if seconds.is_sign_negative() { "-" } else { "" };
+    let mut remaining = seconds.abs().trunc() as u64;
+    let hours = remaining / 3_600;
+    remaining %= 3_600;
+    let minutes = remaining / 60;
+    let secs = remaining % 60;
+    let language = locale.id.language.to_string();
+    let (hour, minute, second) = match language.as_str() {
+        "sk" => ("h", "min", "s"),
+        "cs" => ("h", "min", "s"),
+        "de" => ("Std.", "Min.", "Sek."),
+        "fr" => ("h", "min", "s"),
+        _ => ("h", "min", "s"),
+    };
+    let mut result = String::new();
+    if hours > 0 {
+        let _ = write!(result, "{hours} {hour}");
+    }
+    if minutes > 0 {
+        if !result.is_empty() {
+            result.push(' ');
+        }
+        let _ = write!(result, "{minutes} {minute}");
+    }
+    if (hours == 0 && minutes == 0 && secs > 0) || result.is_empty() {
+        if !result.is_empty() {
+            result.push(' ');
+        }
+        let _ = write!(result, "{secs} {second}");
+    }
+    Ok(format!("{sign}{result}"))
+}
+
+fn normalized_icu_locale(locale: &str) -> Result<IcuLocale, LocaleFormatError> {
+    let locale = normalize_locale_tag(locale).map_err(|_| LocaleFormatError::InvalidLocale {
+        locale: locale.to_string(),
+    })?;
+    IcuLocale::try_from_str(&locale).map_err(|_| LocaleFormatError::InvalidLocale { locale })
+}
+
+fn localized_month_name(language: &str, month: u32) -> &'static str {
+    const ENGLISH: [&str; 12] = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
+    const GERMAN: [&str; 12] = [
+        "Januar",
+        "Februar",
+        "März",
+        "April",
+        "Mai",
+        "Juni",
+        "Juli",
+        "August",
+        "September",
+        "Oktober",
+        "November",
+        "Dezember",
+    ];
+    const FRENCH: [&str; 12] = [
+        "janvier",
+        "février",
+        "mars",
+        "avril",
+        "mai",
+        "juin",
+        "juillet",
+        "août",
+        "septembre",
+        "octobre",
+        "novembre",
+        "décembre",
+    ];
+    const SLOVAK: [&str; 12] = [
+        "január",
+        "február",
+        "marec",
+        "apríl",
+        "máj",
+        "jún",
+        "júl",
+        "august",
+        "september",
+        "október",
+        "november",
+        "december",
+    ];
+    let names = match language {
+        "de" => &GERMAN,
+        "fr" => &FRENCH,
+        "cs" | "sk" => &SLOVAK,
+        _ => &ENGLISH,
+    };
+    names
+        .get(month.saturating_sub(1) as usize)
+        .copied()
+        .unwrap_or("?")
+}
+
+fn civil_date_from_days(days: i64) -> (i64, u32, u32) {
+    // Howard Hinnant's proleptic Gregorian civil-from-days algorithm.
+    let days = days + 719_468;
+    let era = if days >= 0 { days } else { days - 146_096 } / 146_097;
+    let day_of_era = days - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_part = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_part + 2) / 5 + 1;
+    let month = month_part + if month_part < 10 { 3 } else { -9 };
+    let year = year + i64::from(month <= 2);
+    (year, month as u32, day as u32)
 }
 
 /// A lookup handle restricted to one module's catalogs.
@@ -1385,13 +1663,20 @@ impl LocaleEngine {
             let content = source
                 .handle
                 .read_utf8_bounded(DEFAULT_MAX_CATALOG_SOURCE_BYTES)?;
-            let value = serde_json::from_str(&content).map_err(|source_error| {
-                LocaleCatalogLoadError::Parse {
-                    path: source.path.clone(),
-                    source: source_error,
-                }
-            })?;
-            let catalog = compile_catalog(locale.clone(), &value);
+            let (value, duplicate_keys) =
+                parse_catalog_document(&content).map_err(|source_error| {
+                    LocaleCatalogLoadError::Parse {
+                        path: source.path.clone(),
+                        source: source_error,
+                    }
+                })?;
+            let mut catalog = compile_catalog(locale.clone(), &value);
+            catalog
+                .diagnostics
+                .extend(duplicate_keys.into_iter().map(|key| CatalogDiagnostic {
+                    key,
+                    message: "duplicate catalog key; first entry wins".into(),
+                }));
             if !catalog.diagnostics.is_empty() {
                 diagnostics.push(CatalogSourceDiagnostics {
                     module_id: source.owner_module_id.clone(),
@@ -1966,6 +2251,76 @@ mod tests {
     }
 
     #[test]
+    fn plural_selection_uses_cldr_decimal_operands() {
+        assert_eq!(plural_category("en", "1.0"), "other");
+        assert_eq!(plural_category("sk", "1"), "one");
+        assert_eq!(plural_category("sk", "1.0"), "many");
+        assert_eq!(plural_category("ru", "2"), "few");
+        assert_eq!(plural_category("ru", "5"), "many");
+        assert_eq!(plural_category("ar", "0"), "zero");
+        assert_eq!(plural_category("ar", "2"), "two");
+        assert_eq!(plural_category("ar", "11"), "many");
+    }
+
+    #[test]
+    fn fallback_catalog_uses_its_own_cldr_plural_locale() {
+        let mut engine = LocaleEngine::try_with_fallback_locale("sk", "en").unwrap();
+        engine.load_module_catalog(
+            "@mesh/example",
+            compile_catalog(
+                "en",
+                &serde_json::json!({
+                    "items": {
+                        "_plural": true,
+                        "one": "{count} item",
+                        "other": "{count} items"
+                    }
+                }),
+            ),
+        );
+        let args = HashMap::from([("count".into(), "2".into())]);
+        assert_eq!(
+            engine
+                .module_translator("@mesh/example")
+                .translate_with("items", &args),
+            Some("2 items".into())
+        );
+    }
+
+    #[test]
+    fn locale_formatters_are_bounded_and_locale_aware() {
+        assert_eq!(
+            format_number_value("en-US", "1234567.89").unwrap(),
+            "1,234,567.89"
+        );
+        assert_eq!(
+            format_number_value("sk-SK", "1234567.89").unwrap(),
+            "1 234 567,89"
+        );
+        assert_eq!(format_date("en-US", 0, "short").unwrap(), "01/01/1970");
+        assert_eq!(format_date("sk-SK", 0, "short").unwrap(), "01.01.1970");
+        assert_eq!(format_duration("en", 3_675.0).unwrap(), "1 h 1 min");
+        assert!(matches!(
+            format_date("en", 0, "full"),
+            Err(LocaleFormatError::InvalidDateStyle { .. })
+        ));
+    }
+
+    #[test]
+    fn catalog_entry_admission_is_bounded_and_sorted() {
+        let mut value = serde_json::Map::new();
+        for index in 0..=MAX_CATALOG_ENTRIES {
+            value.insert(format!("key-{index:04}"), serde_json::json!("value"));
+        }
+
+        let compiled = compile_catalog("en", &serde_json::Value::Object(value));
+        assert_eq!(compiled.messages.len(), MAX_CATALOG_ENTRIES);
+        assert!(compiled.messages.contains_key("key-0000"));
+        assert!(!compiled.messages.contains_key("key-4096"));
+        assert_eq!(compiled.diagnostics[0].key, "<catalog>");
+    }
+
+    #[test]
     fn ordered_language_packs_win_before_bundled_and_default_catalogs() {
         let module_path = test_catalog_path("layer-module");
         let first_pack_path = test_catalog_path("layer-pack-first");
@@ -1987,7 +2342,11 @@ mod tests {
         .unwrap();
         std::fs::write(
             &second_pack_path,
-            serde_json::json!({ "shared": "second-pack" }).to_string(),
+            serde_json::json!({
+                "shared": "second-pack",
+                "second-only": "second-pack-value"
+            })
+            .to_string(),
         )
         .unwrap();
         std::fs::write(
@@ -2023,6 +2382,10 @@ mod tests {
 
         let translator = engine.module_translator("@mesh/example");
         assert_eq!(translator.translate("shared"), Some("first-pack"));
+        assert_eq!(
+            translator.translate("second-only"),
+            Some("second-pack-value")
+        );
         assert_eq!(translator.translate("bundled"), Some("bundled-cs"));
         assert_eq!(translator.translate("defaulted"), Some("module-default"));
         let source = translator.source("shared").unwrap();
@@ -2266,6 +2629,30 @@ mod tests {
                 .module_translator("@mesh/example")
                 .translate("broken"),
             None
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn catalog_preparation_reports_duplicate_keys_deterministically() {
+        let path = test_catalog_path("duplicate-keys");
+        std::fs::write(
+            &path,
+            r#"{"duplicate":"first","valid":"Visible","duplicate":"second"}"#,
+        )
+        .unwrap();
+        let sources = vec![("@mesh/example".into(), "en".into(), path.clone())];
+        let mut engine = LocaleEngine::new("en");
+        let prepared = engine.prepare_module_catalog_snapshot(&sources).unwrap();
+
+        assert_eq!(prepared.diagnostics().len(), 1);
+        assert_eq!(prepared.diagnostics()[0].diagnostics[0].key, "duplicate");
+        engine.replace_catalog_snapshot(prepared.snapshot());
+        assert_eq!(
+            engine
+                .module_translator("@mesh/example")
+                .translate("duplicate"),
+            Some("first")
         );
         let _ = std::fs::remove_file(path);
     }

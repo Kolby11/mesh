@@ -111,6 +111,38 @@ end
 }
 
 #[test]
+fn locale_host_exposes_locale_aware_formatters() {
+    let mut caps = CapabilitySet::new();
+    caps.grant(Capability::new("locale.read"));
+    let mut ctx = ScriptContext::new("@mesh/locale-format-test", caps).unwrap();
+    let locale = LocaleEngine::new("en-US");
+    let translator = locale.module_translator("@mesh/locale-format-test");
+    ctx.set_i18n_translator(&translator);
+    ctx.load_script(
+        r#"
+function init()
+    local locale = require("mesh.locale")
+    number = locale.format_number(1234567.89)
+    date = locale.format_date(0, "short")
+    duration = locale.format_duration(3675)
+end
+"#,
+    )
+    .unwrap();
+
+    ctx.call_init().unwrap();
+    assert_eq!(
+        ctx.state.get("number"),
+        Some(serde_json::json!("1,234,567.89"))
+    );
+    assert_eq!(ctx.state.get("date"), Some(serde_json::json!("01/01/1970")));
+    assert_eq!(
+        ctx.state.get("duration"),
+        Some(serde_json::json!("1 h 1 min"))
+    );
+}
+
+#[test]
 fn locale_current_reads_the_host_owned_translation_snapshot() {
     let mut caps = CapabilitySet::new();
     caps.grant(Capability::new("locale.read"));
