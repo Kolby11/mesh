@@ -2,7 +2,7 @@ use crate::bindings::{FrontendIconBindings, IconPackBindings, parse_target};
 use crate::config::{IconConfig, IconPackRoot};
 use crate::xdg;
 use anyhow::{Result, bail};
-use mesh_core_resources::resource_revision;
+use mesh_core_resources::{SystemResourceCatalog, resource_revision};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem::size_of;
 use std::path::PathBuf;
@@ -66,6 +66,10 @@ pub struct IconRegistry {
     /// registered ad-hoc by modules. Used by the resolver to look up
     /// `<asset-pack>/<asset-name>` targets.
     config: IconConfig,
+    /// Host resources captured by the graph/profile candidate. Resolution
+    /// must never consult a process-wide discovery result because that could
+    /// mix generations while a profile or graph is being replaced.
+    host_catalog: std::sync::Arc<SystemResourceCatalog>,
     /// Loaded icon-pack binding modules keyed by their short pack id
     /// (`mesh.contributes.icons[].id`).
     icon_packs: HashMap<String, IconPackBindings>,
@@ -163,10 +167,46 @@ fn icon_target_cache_weight(target: &ResolvedTarget) -> usize {
 }
 
 impl IconRegistry {
+    /// Create the empty registry used before the first graph has committed or
+    /// after the shell enters recovery. It has no host lookup authority.
+    pub fn empty() -> Self {
+        Self::from_config_with_catalog(
+            IconConfig::builtin_xdg().expect("builtin xdg icon config should be valid"),
+            std::sync::Arc::new(SystemResourceCatalog::empty()),
+        )
+        .expect("builtin empty icon registry should be valid")
+    }
+
     pub fn from_config(config: IconConfig) -> Result<Self> {
+        Self::from_config_with_catalog(
+            config,
+            std::sync::Arc::new(mesh_core_resources::discover_system_resources()),
+        )
+    }
+
+    pub fn from_catalog(catalog: std::sync::Arc<SystemResourceCatalog>) -> Result<Self> {
+        let mut config = IconConfig::builtin_xdg()?;
+        for theme in catalog.icon_themes.iter().filter(|theme| !theme.hidden) {
+            if config.pack(&theme.id).is_none() {
+                config.packs.push(IconPackRoot {
+                    id: theme.id.clone(),
+                    root: Some(theme.path.clone()),
+                    theme: theme.id.clone(),
+                    kind: crate::config::IconPackKind::Xdg,
+                });
+            }
+        }
+        Self::from_config_with_catalog(config, catalog)
+    }
+
+    pub fn from_config_with_catalog(
+        config: IconConfig,
+        host_catalog: std::sync::Arc<SystemResourceCatalog>,
+    ) -> Result<Self> {
         config.validate()?;
         Ok(Self {
             config,
+            host_catalog,
             icon_packs: HashMap::new(),
             pack_id_by_module: HashMap::new(),
             frontends: HashMap::new(),
@@ -271,7 +311,6 @@ impl IconRegistry {
         self.frontends = next_frontends;
         self.shell_default_pack_module = shell_default_pack;
         self.bump_generation();
-        mesh_core_resources::advance_resource_revision();
         Ok(())
     }
 
@@ -539,7 +578,12 @@ impl IconRegistry {
 
             // 5. Hicolor system fallback (bare logical name as freedesktop
             // name), after the active chain has had the same candidate.
-            if let Some(found) = xdg::find_icon_in_theme("hicolor", &fallback_name, size) {
+            if let Some(found) = xdg::find_icon_in_theme_with_catalog(
+                &self.host_catalog,
+                "hicolor",
+                &fallback_name,
+                size,
+            ) {
                 let mapping = format!("hicolor:{fallback_name}");
                 tried.push(mapping.clone());
                 return IconResolution::Found {
@@ -600,7 +644,8 @@ impl IconRegistry {
         let pack = self.config.pack(pack_id)?;
         let mapping = format!("system-pack:{pack_id}/{lookup_name}");
         tried.push(mapping.clone());
-        let target = xdg::find_icon_in_pack(pack, lookup_name, size)?;
+        let target =
+            xdg::find_icon_in_pack_with_catalog(pack, &self.host_catalog, lookup_name, size)?;
         Some(IconResolution::Found {
             semantic_name: semantic_name.into(),
             candidate: mapping.clone(),
@@ -665,7 +710,8 @@ impl IconRegistry {
 
         // Asset-pack registered as an XDG/file pack in the IconConfig
         if let Some(pack) = self.config.pack(asset_pack)
-            && let Some(target) = xdg::find_icon_in_pack(pack, asset_name, size)
+            && let Some(target) =
+                xdg::find_icon_in_pack_with_catalog(pack, &self.host_catalog, asset_name, size)
         {
             return Some(IconResolution::Found {
                 semantic_name: semantic_name.into(),
@@ -677,7 +723,9 @@ impl IconRegistry {
         }
 
         // Asset-pack as a bare XDG theme name on the system
-        if let Some(path) = xdg::find_icon_in_theme(asset_pack, asset_name, size) {
+        if let Some(path) =
+            xdg::find_icon_in_theme_with_catalog(&self.host_catalog, asset_pack, asset_name, size)
+        {
             return Some(IconResolution::Found {
                 semantic_name: semantic_name.into(),
                 candidate: mapping_label.clone(),

@@ -309,10 +309,12 @@ pub(crate) fn prepare_icon_pack_bindings(
     module_dir: &Path,
     section: &mesh_core_module::manifest::IconPackSection,
 ) -> Result<mesh_core_icon::IconPackBindings, String> {
-    prepare_icon_pack_bindings_with_cancellation(
+    let host_catalog = mesh_core_resources::discover_system_resources();
+    prepare_icon_pack_bindings_with_catalog(
         module_id,
         module_dir,
         section,
+        &host_catalog,
         &mesh_core_resources::ResourcePreparationToken::new(),
     )
 }
@@ -321,6 +323,23 @@ pub(crate) fn prepare_icon_pack_bindings_with_cancellation(
     module_id: &str,
     module_dir: &Path,
     section: &mesh_core_module::manifest::IconPackSection,
+    cancellation: &mesh_core_resources::ResourcePreparationToken,
+) -> Result<mesh_core_icon::IconPackBindings, String> {
+    let host_catalog = mesh_core_resources::discover_system_resources();
+    prepare_icon_pack_bindings_with_catalog(
+        module_id,
+        module_dir,
+        section,
+        &host_catalog,
+        cancellation,
+    )
+}
+
+pub(crate) fn prepare_icon_pack_bindings_with_catalog(
+    module_id: &str,
+    module_dir: &Path,
+    section: &mesh_core_module::manifest::IconPackSection,
+    host_catalog: &mesh_core_resources::SystemResourceCatalog,
     cancellation: &mesh_core_resources::ResourcePreparationToken,
 ) -> Result<mesh_core_icon::IconPackBindings, String> {
     if cancellation.is_cancelled() {
@@ -408,7 +427,7 @@ pub(crate) fn prepare_icon_pack_bindings_with_cancellation(
                 font_fingerprint,
             )
         } else {
-            let path = mesh_core_resources::system_resource_catalog()
+            let path = host_catalog
                 .font_path_for_family(&req.family)
                 .ok_or_else(|| {
                 format!(

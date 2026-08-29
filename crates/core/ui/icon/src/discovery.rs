@@ -11,9 +11,15 @@ use std::path::Path;
 /// manifest). Caller is responsible for registering them with the registry
 /// and deciding what to do about duplicate ids.
 pub fn discover_xdg_packs() -> Vec<IconPackRoot> {
+    let catalog = mesh_core_resources::discover_system_resources();
+    discover_xdg_packs_with_catalog(&catalog)
+}
+
+pub fn discover_xdg_packs_with_catalog(
+    catalog: &mesh_core_resources::SystemResourceCatalog,
+) -> Vec<IconPackRoot> {
     let mut packs = Vec::new();
     let mut seen_ids = std::collections::HashSet::new();
-    let catalog = mesh_core_resources::system_resource_catalog();
 
     for base in &catalog.icon_dirs {
         let entries = match std::fs::read_dir(&base) {

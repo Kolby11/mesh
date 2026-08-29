@@ -111,9 +111,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Host resources and icon packs
 
-- [ ] Replace discovery-time global resource registration with one immutable,
-      graph/profile-authorized icon-and-font snapshot and atomic last-known-good
-      lifecycle reconciliation. [Audit](../.planning/log/sections/06-host-resources-and-icon-packs/improvements.md).
 - [ ] Make icon resolution deterministic and complete: canonical owner-scoped
       pack IDs/aliases, typed multicolor mappings, semantic/dash fallbacks,
       ordered chains, and required/optional results with provenance.

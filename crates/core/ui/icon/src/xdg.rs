@@ -1,7 +1,8 @@
 use crate::config::{IconPackKind, IconPackRoot};
 use crate::registry::{ResolvedTarget, SupportedAxes};
 use mesh_core_resources::{
-    ResourceFingerprint, ResourcePreparationToken, resource_fingerprint, resource_revision,
+    ResourceFingerprint, ResourcePreparationToken, SystemResourceCatalog, resource_fingerprint,
+    resource_revision,
 };
 use std::collections::{HashMap, VecDeque};
 use std::io::Read;
@@ -156,8 +157,19 @@ fn xdg_lookup_cache_weight(key: &XdgIconLookupKey, value: Option<&PathBuf>) -> u
         .max(1)
 }
 
+#[allow(dead_code)]
 pub fn find_icon_in_pack(
     pack: &IconPackRoot,
+    asset_name: &str,
+    size: u32,
+) -> Option<ResolvedTarget> {
+    let catalog = mesh_core_resources::discover_system_resources();
+    find_icon_in_pack_with_catalog(pack, &catalog, asset_name, size)
+}
+
+pub fn find_icon_in_pack_with_catalog(
+    pack: &IconPackRoot,
+    catalog: &SystemResourceCatalog,
     asset_name: &str,
     size: u32,
 ) -> Option<ResolvedTarget> {
@@ -169,12 +181,17 @@ pub fn find_icon_in_pack(
         return resolve_font_glyph(pack, font_file, glyph_map, asset_name);
     }
 
-    let path = lookup_xdg_icon_in_pack(pack, asset_name, size)?;
+    let path = lookup_xdg_icon_in_pack(pack, catalog, asset_name, size)?;
 
     Some(ResolvedTarget::File(path))
 }
 
-fn lookup_xdg_icon_in_pack(pack: &IconPackRoot, asset_name: &str, size: u32) -> Option<PathBuf> {
+fn lookup_xdg_icon_in_pack(
+    pack: &IconPackRoot,
+    catalog: &SystemResourceCatalog,
+    asset_name: &str,
+    size: u32,
+) -> Option<PathBuf> {
     let key = XdgIconLookupKey {
         revision: resource_revision(),
         root: pack.root.clone(),
@@ -189,7 +206,7 @@ fn lookup_xdg_icon_in_pack(pack: &IconPackRoot, asset_name: &str, size: u32) -> 
         return cached;
     }
 
-    let path = search_for_pack(pack)
+    let path = search_for_pack(pack, catalog)
         .search()
         .icons()
         .find_icon(asset_name, key.size, 1, &key.theme)
@@ -352,7 +369,18 @@ pub fn validate_font_bytes(bytes: &[u8]) -> Result<(), String> {
 /// Look up an icon in any installed theme on the system XDG search path.
 /// Used as a last-resort fallback when neither module bindings nor the
 /// active profile produce a hit.
+#[allow(dead_code)]
 pub fn find_icon_in_theme(theme: &str, asset_name: &str, size: u32) -> Option<PathBuf> {
+    let catalog = mesh_core_resources::discover_system_resources();
+    find_icon_in_theme_with_catalog(&catalog, theme, asset_name, size)
+}
+
+pub fn find_icon_in_theme_with_catalog(
+    catalog: &SystemResourceCatalog,
+    theme: &str,
+    asset_name: &str,
+    size: u32,
+) -> Option<PathBuf> {
     let key = XdgIconLookupKey {
         revision: resource_revision(),
         root: None,
@@ -367,7 +395,6 @@ pub fn find_icon_in_theme(theme: &str, asset_name: &str, size: u32) -> Option<Pa
         return cached;
     }
 
-    let catalog = mesh_core_resources::system_resource_catalog();
     let path = icon::IconSearch::new_from(catalog.icon_dirs.clone())
         .search()
         .icons()
@@ -587,13 +614,10 @@ fn font_freshness(path: &Path) -> Option<FontFreshness> {
     resource_fingerprint(path)
 }
 
-fn search_for_pack(pack: &IconPackRoot) -> icon::IconSearch {
+fn search_for_pack(pack: &IconPackRoot, catalog: &SystemResourceCatalog) -> icon::IconSearch {
     match &pack.root {
         Some(root) => icon::IconSearch::new_from(vec![xdg_base_dir_for_root(root)]),
-        None => {
-            let catalog = mesh_core_resources::system_resource_catalog();
-            icon::IconSearch::new_from(catalog.icon_dirs.clone())
-        }
+        None => icon::IconSearch::new_from(catalog.icon_dirs.clone()),
     }
 }
 

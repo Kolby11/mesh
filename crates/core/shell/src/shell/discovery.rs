@@ -43,13 +43,39 @@ pub(in crate::shell) struct ResourceAsset {
     pub handle: mesh_core_resources::ResourceAssetHandle,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(in crate::shell) struct ResourceSnapshot {
     pub revision: u64,
+    /// The host roots, metadata, and font database captured for this active
+    /// graph/profile generation. It is the only host-resource view used by
+    /// the committed icon and font resolvers.
+    pub host_catalog: std::sync::Arc<mesh_core_resources::SystemResourceCatalog>,
+    /// Mutable only for resolver caches; the bindings and captured host
+    /// catalog are replaced by swapping this whole handle at commit.
+    pub icon_registry: mesh_core_icon::IconRegistryHandle,
     pub icon_pack_chain: Vec<String>,
     pub font_pack_chain: Vec<String>,
     pub icon_assets: Vec<ResourceAsset>,
     pub font_assets: Vec<ResourceAsset>,
+}
+
+impl Default for ResourceSnapshot {
+    fn default() -> Self {
+        let host_catalog = std::sync::Arc::new(mesh_core_resources::SystemResourceCatalog::empty());
+        let icon_registry = std::sync::Arc::new(std::sync::Mutex::new(
+            mesh_core_icon::IconRegistry::from_catalog(host_catalog.clone())
+                .expect("empty icon registry should be valid"),
+        ));
+        Self {
+            revision: 0,
+            host_catalog,
+            icon_registry,
+            icon_pack_chain: Vec::new(),
+            font_pack_chain: Vec::new(),
+            icon_assets: Vec::new(),
+            font_assets: Vec::new(),
+        }
+    }
 }
 
 pub(in crate::shell) struct PreparedResourceSnapshot {
@@ -270,16 +296,19 @@ fn resource_explanation_snapshot(
         )
         .collect();
 
-    if let Ok(config) = mesh_core_icon::IconConfig::builtin_xdg()
-        && let Ok(mut registry) = mesh_core_icon::IconRegistry::from_config(config)
+    if let Ok(mut registry) =
+        mesh_core_icon::IconRegistry::from_catalog(std::sync::Arc::new(host_catalog.clone()))
     {
-        for pack in icon_packs {
-            registry.set_icon_pack(pack.clone());
+        if registry
+            .replace_bindings(
+                icon_packs.to_vec(),
+                frontends.to_vec(),
+                shell_default_icon_pack.map(str::to_owned),
+            )
+            .is_err()
+        {
+            return explanation;
         }
-        for (module_id, bindings) in frontends {
-            registry.set_frontend_bindings(module_id.clone(), bindings.clone());
-        }
-        registry.set_shell_default_pack(shell_default_icon_pack.map(str::to_owned));
         for (module_id, semantic_name, required) in icon_requirements {
             let resolution = registry.resolve_for_module(module_id, semantic_name, 24);
             let resolution_explanation = match resolution {
@@ -686,9 +715,12 @@ impl Shell {
                         message: "resource preparation cancelled".into(),
                     });
                 }
-                // Refresh host roots before preparing any icon or font asset so
-                // every consumer in this candidate reads the same catalog.
-                let host_catalog = mesh_core_resources::refresh_system_resource_catalog();
+                // Capture host roots once for this candidate. Every icon and
+                // font operation below receives this immutable catalog rather
+                // than consulting process-wide discovery state.
+                let host_catalog = std::sync::Arc::new(
+                    mesh_core_resources::discover_system_resources(),
+                );
                 if worker_cancellation.is_cancelled() {
                     return Err(ShellRunError::FrontendComposition {
                         message: "resource preparation cancelled".into(),
@@ -751,10 +783,11 @@ impl Shell {
                 let icon_packs = pack_inputs
                     .into_iter()
                     .map(|(module_id, root, section)| {
-                        prepare_icon_pack_bindings_with_cancellation(
+                        prepare_icon_pack_bindings_with_catalog(
                             &module_id,
                             &root,
                             &section,
+                            &host_catalog,
                             &worker_cancellation,
                         )
                     })
@@ -844,6 +877,21 @@ impl Shell {
                     .map_err(|error| ShellRunError::FrontendComposition {
                         message: format!("invalid frontend font-pack bindings: {error}"),
                     })?;
+                let mut icon_registry = mesh_core_icon::IconRegistry::from_catalog(
+                    host_catalog.clone(),
+                )
+                .map_err(|error| ShellRunError::FrontendComposition {
+                    message: format!("invalid icon resource snapshot: {error}"),
+                })?;
+                icon_registry
+                    .replace_bindings(
+                        icon_packs.clone(),
+                        frontends.clone(),
+                        shell_default_icon_pack.clone(),
+                    )
+                    .map_err(|error| ShellRunError::FrontendComposition {
+                        message: format!("invalid icon resource snapshot: {error}"),
+                    })?;
                 for (pack_id, family) in font_registry.missing_requirements() {
                     tracing::warn!(
                         pack_id = %pack_id,
@@ -875,6 +923,10 @@ impl Shell {
                     resource_lease: None,
                     snapshot: ResourceSnapshot {
                         revision,
+                        host_catalog,
+                        icon_registry: std::sync::Arc::new(std::sync::Mutex::new(
+                            icon_registry,
+                        )),
                         icon_pack_chain: icon_chain,
                         font_pack_chain: font_chain,
                         icon_assets,
@@ -927,14 +979,24 @@ impl Shell {
         }
         let font_revision_changed =
             self.font_registry.revision() != prepared.font_registry.revision();
-        mesh_core_icon::replace_default_bindings(
-            prepared.icon_packs.clone(),
-            prepared.frontends.clone(),
-            default_icon_pack,
-        )
-        .map_err(|error| ShellRunError::FrontendComposition {
-            message: format!("failed to publish resource snapshot: {error}"),
-        })?;
+        let icon_registry = prepared.snapshot.icon_registry.clone();
+        if default_icon_pack
+            != icon_registry
+                .lock()
+                .map_err(|_| ShellRunError::FrontendComposition {
+                    message: "icon resource snapshot lock is poisoned".into(),
+                })?
+                .shell_default_pack()
+                .map(str::to_owned)
+        {
+            icon_registry
+                .lock()
+                .map_err(|_| ShellRunError::FrontendComposition {
+                    message: "icon resource snapshot lock is poisoned".into(),
+                })?
+                .set_shell_default_pack(default_icon_pack);
+        }
+        mesh_core_icon::replace_default_registry(icon_registry);
         self.font_registry = prepared.font_registry.clone();
         self.resource_snapshot = Arc::new(prepared.snapshot.clone());
         self.resource_explanation = Arc::new(prepared.explanation.clone());
@@ -966,6 +1028,42 @@ impl Shell {
         &self,
     ) -> mesh_core_resources::ResourceExplanationSnapshot {
         (*self.resource_explanation).clone()
+    }
+
+    /// Reconcile a settings-owned shell default without mutating the active
+    /// registry in place. The new handle is published together with the
+    /// shell's resource snapshot, so readers retain the previous default
+    /// until the replacement is complete.
+    pub(in crate::shell) fn reconcile_icon_shell_default(&mut self) {
+        let default_pack = self.settings.icons.default_pack.clone();
+        let current_pack = self
+            .resource_snapshot
+            .icon_registry
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .shell_default_pack()
+            .map(str::to_owned);
+        if current_pack == default_pack {
+            return;
+        }
+
+        let mut registry = self
+            .resource_snapshot
+            .icon_registry
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        registry.set_shell_default_pack(default_pack);
+        let icon_registry = std::sync::Arc::new(std::sync::Mutex::new(registry));
+        mesh_core_icon::replace_default_registry(icon_registry.clone());
+
+        let mut snapshot = (*self.resource_snapshot).clone();
+        snapshot.revision = snapshot.revision.saturating_add(1);
+        snapshot.icon_registry = icon_registry;
+        self.resource_snapshot = std::sync::Arc::new(snapshot.clone());
+        let mut explanation = (*self.resource_explanation).clone();
+        explanation.revision = snapshot.revision;
+        self.resource_explanation = std::sync::Arc::new(explanation);
     }
 }
 
@@ -1498,26 +1596,6 @@ impl Shell {
         mesh_core_config::log_settings_diagnostics("settings", settings_store.diagnostics());
         let settings = mesh_core_config::resolve_shell_locale_settings(settings_store.shell());
 
-        // Discover and register XDG icon themes installed on the system.
-        // Icon-pack binding modules reference them by name in their
-        // mapping targets (`<theme>/<icon-name>`). Failures are logged
-        // but non-fatal — hicolor fallback still works.
-        let mut registered_themes = 0usize;
-        for pack in mesh_core_icon::discover_xdg_packs() {
-            let id = pack.id.clone();
-            match mesh_core_icon::register_default_pack(pack) {
-                Ok(true) => {
-                    registered_themes += 1;
-                    tracing::debug!("registered XDG icon theme '{}'", id);
-                }
-                Ok(false) => tracing::debug!("XDG icon theme '{}' already registered", id),
-                Err(err) => {
-                    tracing::warn!("failed to register XDG icon theme '{}': {err}", id)
-                }
-            }
-        }
-        tracing::info!("registered {registered_themes} XDG icon theme(s)");
-        mesh_core_icon::set_default_shell_pack(settings.icons.default_pack.clone());
         mesh_core_render::set_blur_quality(blur_quality_from_settings(&settings.render.blur));
         let (theme, theme_watch) = default_theme_state(&settings);
         let locale = LocaleEngine::with_fallback_locale(
@@ -1892,6 +1970,7 @@ impl Shell {
         self.theme = theme;
         self.theme_watch = theme_watch;
         self.resource_snapshot = Arc::new(ResourceSnapshot::default());
+        mesh_core_icon::replace_default_registry(self.resource_snapshot.icon_registry.clone());
         self.resource_explanation =
             Arc::new(mesh_core_resources::ResourceExplanationSnapshot::default());
         self.font_registry = mesh_core_resources::FontRegistry::default();

@@ -371,7 +371,7 @@ fn discover_resources(
     workspace_root: &Path,
     graph: &AuthoringSnapshot,
 ) -> ResourceExplanationSnapshot {
-    let catalog = mesh_core_resources::refresh_system_resource_catalog();
+    let catalog = mesh_core_resources::discover_system_resources();
     let mut snapshot = ResourceExplanationSnapshot::from_catalog(&catalog);
 
     snapshot.revision = mesh_core_resources::resource_revision();

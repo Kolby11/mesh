@@ -106,8 +106,10 @@ fn theme_preview_palette(theme: &mesh_core_theme::Theme) -> serde_json::Value {
     })
 }
 
-fn system_resources_json(settings: &ShellSettings) -> serde_json::Value {
-    let resources = mesh_core_resources::system_resource_catalog();
+fn system_resources_json(
+    settings: &ShellSettings,
+    resources: &mesh_core_resources::SystemResourceCatalog,
+) -> serde_json::Value {
     serde_json::json!({
         "active_icon_theme": settings.icons.default_pack,
         "active_font_family": settings.fonts.ui_family,
@@ -269,7 +271,7 @@ impl Shell {
             self.locale = locale;
         }
 
-        mesh_core_icon::set_default_shell_pack(self.settings.icons.default_pack.clone());
+        self.reconcile_icon_shell_default();
         mesh_core_render::set_blur_quality(blur_quality_from_settings(&self.settings.render.blur));
 
         let mut requests = VecDeque::new();
@@ -559,7 +561,9 @@ impl Shell {
         theme_id: &str,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let theme_id = theme_id.trim();
-        let available_host_theme = mesh_core_resources::system_resource_catalog()
+        let available_host_theme = self
+            .resource_snapshot
+            .host_catalog
             .icon_themes
             .iter()
             .any(|theme| theme.id == theme_id && !theme.hidden);
@@ -597,7 +601,9 @@ impl Shell {
         family: &str,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
         let family = family.trim();
-        let available = mesh_core_resources::system_resource_catalog()
+        let available = self
+            .resource_snapshot
+            .host_catalog
             .font_families
             .iter()
             .any(|candidate| candidate.name == family);
@@ -704,7 +710,10 @@ impl Shell {
             "is_dark": snapshot.color_scheme.eq_ignore_ascii_case("dark"),
             "themes": themes,
             "available": available,
-            "system_resources": system_resources_json(&self.settings),
+            "system_resources": system_resources_json(
+                &self.settings,
+                &self.resource_snapshot.host_catalog,
+            ),
         })
     }
 

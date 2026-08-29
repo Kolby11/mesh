@@ -521,7 +521,9 @@ impl PackageRuntimeRollback {
         }
 
         shell.installed_module_graph = installed_module_graph;
+        let icon_registry = resource_snapshot.icon_registry.clone();
         shell.resource_snapshot = resource_snapshot;
+        mesh_core_icon::replace_default_registry(icon_registry);
         shell.resource_explanation = resource_explanation;
         shell.font_registry = font_registry;
         shell.font_renderer_revision = font_renderer_revision;

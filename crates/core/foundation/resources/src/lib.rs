@@ -22,7 +22,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::sync::{Arc, Mutex};
 #[cfg(unix)]
 use std::{
     ffi::CString,
@@ -852,19 +852,6 @@ impl ResourceExplanationSnapshot {
     }
 }
 
-static SYSTEM_RESOURCES: OnceLock<RwLock<Arc<SystemResourceCatalog>>> = OnceLock::new();
-
-/// Return the current immutable host catalog. Consumers clone the `Arc`, so a
-/// refresh can publish a new snapshot without invalidating an in-flight
-/// lookup or renderer preparation.
-pub fn system_resource_catalog() -> Arc<SystemResourceCatalog> {
-    SYSTEM_RESOURCES
-        .get_or_init(|| RwLock::new(Arc::new(discover_system_resources())))
-        .read()
-        .expect("host resource catalog lock is not poisoned")
-        .clone()
-}
-
 pub fn discover_system_resources() -> SystemResourceCatalog {
     let roots = host_resource_roots();
     let font_database = discover_font_database(&roots.font_dirs);
@@ -882,25 +869,25 @@ pub fn discover_system_resources() -> SystemResourceCatalog {
     }
 }
 
-/// Refresh the process-wide host snapshot when the ordered roots, installed
-/// themes, or available font faces changed. An unchanged refresh retains the
-/// existing revision and allocation.
-pub fn refresh_system_resource_catalog() -> Arc<SystemResourceCatalog> {
-    let store = SYSTEM_RESOURCES.get_or_init(|| RwLock::new(Arc::new(discover_system_resources())));
-    let mut current = store
-        .write()
-        .expect("host resource catalog lock is not poisoned");
-    let mut candidate = discover_system_resources();
-    if current.as_ref() == &candidate {
-        return current.clone();
-    }
-    candidate.revision = advance_resource_revision();
-    let next = Arc::new(candidate);
-    *current = next.clone();
-    next
-}
-
 impl SystemResourceCatalog {
+    /// Return an empty host snapshot for inactive or recovery runtimes.
+    ///
+    /// Host discovery is intentionally explicit and owned by a resource
+    /// preparation candidate. An empty snapshot keeps the initial and
+    /// recovery states from becoming an implicit process-wide authority.
+    pub fn empty() -> Self {
+        Self {
+            revision: resource_revision(),
+            data_dirs: Vec::new(),
+            icon_dirs: Vec::new(),
+            font_dirs: Vec::new(),
+            icon_themes: Vec::new(),
+            font_families: Vec::new(),
+            fingerprints: BTreeMap::new(),
+            font_database: Arc::new(fontdb::Database::new()),
+        }
+    }
+
     /// Reuse the exact font database that produced `font_families` rather than
     /// invoking font discovery again in a consumer-specific path.
     pub fn font_database(&self) -> fontdb::Database {
@@ -1177,10 +1164,13 @@ mod tests {
     }
 
     #[test]
-    fn unchanged_host_catalog_refresh_reuses_the_snapshot() {
-        let first = system_resource_catalog();
-        let second = refresh_system_resource_catalog();
-        assert!(Arc::ptr_eq(&first, &second));
+    fn empty_host_catalog_has_no_discovery_authority() {
+        let catalog = SystemResourceCatalog::empty();
+        assert!(catalog.data_dirs.is_empty());
+        assert!(catalog.icon_dirs.is_empty());
+        assert!(catalog.font_dirs.is_empty());
+        assert!(catalog.icon_themes.is_empty());
+        assert!(catalog.font_families.is_empty());
     }
 
     #[test]

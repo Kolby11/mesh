@@ -1036,6 +1036,16 @@ impl Shell {
             }
         }
 
+        for path in self
+            .resource_snapshot
+            .host_catalog
+            .data_dirs
+            .iter()
+            .chain(self.resource_snapshot.host_catalog.icon_dirs.iter())
+            .chain(self.resource_snapshot.host_catalog.font_dirs.iter())
+        {
+            push_path(path.clone());
+        }
         for asset in self
             .resource_snapshot
             .icon_assets
