@@ -14,6 +14,27 @@ pub(super) fn settings_env_lock() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// Test-only copy-on-write helpers for preparing a complete catalog before it
+/// is published. Production code has no additive registry mutation path.
+pub(super) trait TestInterfaceCatalogExt {
+    fn register_contract(&self, contract: mesh_core_service::InterfaceContract);
+    fn register(&self, provider: InterfaceProvider);
+}
+
+impl TestInterfaceCatalogExt for ResolvedServiceCatalogHandle {
+    fn register_contract(&self, contract: mesh_core_service::InterfaceContract) {
+        let mut catalog = self.resolved_catalog().to_builder();
+        catalog.register_contract(contract);
+        self.publish(catalog);
+    }
+
+    fn register(&self, provider: InterfaceProvider) {
+        let mut catalog = self.resolved_catalog().to_builder();
+        catalog.register_provider(provider);
+        self.publish(catalog);
+    }
+}
+
 pub(super) struct EnvGuard {
     pub(super) key: &'static str,
     pub(super) old: Option<String>,
@@ -326,7 +347,7 @@ pub(super) fn test_contract(interface: &str) -> InterfaceContract {
 }
 
 pub(super) fn register_test_provider(
-    interfaces: &InterfaceRegistry,
+    interfaces: &impl TestInterfaceCatalogExt,
     interface: &str,
     provider_id: &str,
 ) {

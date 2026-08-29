@@ -17,7 +17,7 @@ config/module.json + optional active profile
         ▼
 module discovery and installed graph
         │
-        ├──► interface registry ──► selected backend providers
+        ├──► resolved service catalog ──► selected backend providers
         │                                  │
         ▼                                  ▼
 frontend entrypoints ──► .mesh compiler ──► Luau service proxies

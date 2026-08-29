@@ -107,9 +107,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Service contracts
 
-- [ ] Replace the additive interface registry with one immutable, atomic
-      graph-derived service catalog binding each consumer to the active compatible
-      contract/provider/version/policy generation. [Audit](../.planning/log/sections/03-service-contracts/improvements.md).
 - [ ] Compile and enforce complete contracts end to end: canonical unique names,
       recursive named/array types, consistent optional semantics, typed method
       inputs/results, last-known-good state, and event payloads.

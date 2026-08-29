@@ -28,7 +28,7 @@ fn service_contract_provider_declaration_requires_provider_pair() {
     );
     let (_dir, module) = module_instance("@mesh/backend", Some("src/main.luau"));
     let modules = HashMap::from([("@mesh/backend".to_string(), module)]);
-    let interfaces = InterfaceRegistry::new();
+    let interfaces = ResolvedServiceCatalogHandle::new();
     interfaces.register_contract(test_contract("mesh.audio"));
 
     let (candidates, statuses) =
@@ -79,7 +79,7 @@ fn backend_lifecycle_accepts_provider_without_consumer_capabilities() {
     );
     let (_dir, module) = module_instance("@mesh/backend", Some("src/main.luau"));
     let modules = HashMap::from([("@mesh/backend".to_string(), module)]);
-    let interfaces = InterfaceRegistry::new();
+    let interfaces = ResolvedServiceCatalogHandle::new();
     let mut contract = test_contract("mesh.example");
     contract.capabilities.required = vec!["service.example.read".to_string()];
     interfaces.register_contract(contract);
@@ -125,7 +125,7 @@ fn backend_lifecycle_accepts_valid_provider_with_contract() {
     let (_dir, mut module) = module_instance("@mesh/backend", Some("src/main.luau"));
     module.manifest.capabilities.required = vec!["exec.argv:example:*".to_string()];
     let modules = HashMap::from([("@mesh/backend".to_string(), module)]);
-    let interfaces = InterfaceRegistry::new();
+    let interfaces = ResolvedServiceCatalogHandle::new();
     let mut contract = test_contract("mesh.example");
     contract.capabilities.required = vec!["service.example.read".to_string()];
     interfaces.register_contract(contract);

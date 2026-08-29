@@ -4,23 +4,50 @@ use crate::contract::{
 };
 use semver::Version;
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
+/// Mutable authoring input used to assemble one service catalog.
+///
+/// A builder is intentionally separate from [`ResolvedServiceCatalog`]. It is
+/// only used while the graph is being compiled or by tests; runtime consumers
+/// receive the immutable result of [`Self::build`].
 #[derive(Debug, Clone, Default)]
 pub struct InterfaceCatalog {
-    /// Monotonic identity for this immutable catalog view. Builders advance
-    /// it on mutation; runtimes retain the value with every resolution.
+    /// Monotonic identity for the catalog generation being assembled.
     pub generation: u64,
     pub contracts: HashMap<String, Vec<Arc<CompiledContract>>>,
     pub providers: HashMap<String, Vec<InterfaceProvider>>,
     pub provider_features: HashMap<String, Vec<String>>,
+    active_providers: HashMap<String, Option<String>>,
+    graph_provider_modules: HashMap<String, HashSet<String>>,
 }
 
-/// The runtime-facing name for a catalog copied from the registration
-/// boundary. It is generation-stamped and is normally shared behind `Arc`
-/// without mutation.
-pub type ResolvedServiceCatalog = InterfaceCatalog;
+/// The immutable, graph-derived service view consumed by frontends, backend
+/// launch, dispatch, diagnostics, and scripting. All values in a resolution
+/// come from one binding entry, so a consumer cannot observe a contract from
+/// one generation paired with a provider or policy from another.
+#[derive(Debug, Clone, Default)]
+pub struct ResolvedServiceCatalog {
+    generation: u64,
+    contracts: HashMap<String, Vec<Arc<CompiledContract>>>,
+    providers: HashMap<String, Vec<InterfaceProvider>>,
+    provider_features: HashMap<String, Vec<String>>,
+    bindings: HashMap<String, Vec<ResolvedServiceBinding>>,
+}
+
+/// One compatible contract/provider binding in a resolved catalog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedServiceBinding {
+    pub interface: String,
+    pub contract: Option<Arc<CompiledContract>>,
+    pub provider: Option<InterfaceProvider>,
+    pub feature_negotiation: FeatureNegotiation,
+}
+
+/// Name retained for callers that construct a catalog explicitly. Runtime
+/// code must publish the built [`ResolvedServiceCatalog`] instead.
+pub type InterfaceCatalogBuilder = InterfaceCatalog;
 
 /// Metadata about an available interface provider.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,217 +72,78 @@ pub struct InterfaceResolution {
     pub compiled_contract: Option<Arc<CompiledContract>>,
     pub feature_negotiation: FeatureNegotiation,
     pub provider: Option<InterfaceProvider>,
+    /// Fingerprint of the exact operation policy carried by the bound
+    /// contract. This lets dispatch and diagnostics prove which policy was
+    /// used without consulting another mutable registry.
+    pub policy_fingerprint: Option<u64>,
 }
 
+/// Atomic publication boundary for resolved service catalogs.
+///
+/// The lock protects only the pointer swap. Readers clone the `Arc` while
+/// holding the read lock and then use one immutable snapshot for their entire
+/// operation. There is deliberately no additive registration API here.
 #[derive(Debug, Default)]
-struct InterfaceRegistrySnapshot {
-    generation: u64,
-    contracts: HashMap<String, Vec<Arc<CompiledContract>>>,
-    providers: HashMap<String, Vec<InterfaceProvider>>,
-    provider_features: HashMap<String, Vec<String>>,
+pub struct ResolvedServiceCatalogHandle {
+    snapshot: RwLock<Arc<ResolvedServiceCatalog>>,
 }
 
-/// Mutable registration boundary for named interfaces. Every read observes
-/// one lock-protected snapshot, and `catalog()` publishes that snapshot as an
-/// immutable generation-stamped view for runtimes.
-#[derive(Debug, Default)]
-pub struct InterfaceRegistry {
-    snapshot: RwLock<InterfaceRegistrySnapshot>,
-}
-
-impl InterfaceRegistry {
+impl ResolvedServiceCatalogHandle {
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Build a registration boundary from one immutable catalog view.
-    ///
-    /// Activation preparation uses this to resolve every candidate against
-    /// the same catalog that will be published at commit time, rather than
-    /// reading the shell's mutable live registry midway through preparation.
-    pub fn from_catalog(catalog: InterfaceCatalog) -> Self {
-        let registry = Self::new();
-        registry.replace_catalog(catalog);
-        registry
+    pub fn from_catalog(catalog: impl Into<ResolvedServiceCatalog>) -> Self {
+        let handle = Self::new();
+        handle.publish(catalog);
+        handle
     }
 
-    /// Replace the registry's view as one lock-protected catalog update.
-    /// Registration remains the mutable authoring boundary; this operation is
-    /// the runtime hand-off for a fully prepared activation generation.
-    pub fn replace_catalog(&self, catalog: InterfaceCatalog) {
+    /// Publish a complete catalog as one atomic runtime generation.
+    pub fn publish(&self, catalog: impl Into<ResolvedServiceCatalog>) {
+        self.publish_snapshot(Arc::new(catalog.into()));
+    }
+
+    /// Publish an already shared snapshot without cloning its immutable
+    /// contents. Activation uses this at its commit point so prepared
+    /// consumers and the live handle retain the exact same catalog object.
+    pub fn publish_snapshot(&self, catalog: Arc<ResolvedServiceCatalog>) {
         let mut snapshot = self.snapshot.write().unwrap();
-        snapshot.generation = catalog.generation;
-        snapshot.contracts = catalog.contracts;
-        snapshot.providers = catalog.providers;
-        snapshot.provider_features = catalog.provider_features;
+        *snapshot = catalog;
     }
 
-    pub fn register_contract(&self, contract: InterfaceContract) {
-        let _ = self.try_register_contract(contract);
+    /// Compatibility spelling for the activation coordinator. The operation
+    /// still replaces the whole immutable catalog; it does not merge entries.
+    pub fn replace_catalog(&self, catalog: impl Into<ResolvedServiceCatalog>) {
+        self.publish(catalog);
     }
 
-    pub fn try_register_contract(&self, contract: InterfaceContract) -> Result<(), ContractError> {
-        let contract = CompiledContract::compile(contract, DeclarationProvenance::unknown())?;
-        self.register_compiled_contract(contract);
-        Ok(())
-    }
-
-    pub fn register_compiled_contract(&self, contract: CompiledContract) {
-        let contract = Arc::new(contract);
-        let mut snapshot = self.snapshot.write().unwrap();
-        let entry = snapshot
-            .contracts
-            .entry(contract.interface.clone())
-            .or_default();
-        entry.retain(|existing| existing.version != contract.version);
-        entry.push(contract);
-        entry.sort_by(|a, b| b.version.cmp(&a.version));
-        snapshot.generation = snapshot.generation.saturating_add(1);
-    }
-
-    pub fn register(&self, provider: InterfaceProvider) {
-        let mut snapshot = self.snapshot.write().unwrap();
-        register_provider_in_map(&mut snapshot.providers, provider);
-        snapshot.generation = snapshot.generation.saturating_add(1);
-    }
-
-    pub fn register_provider_features(
-        &self,
-        provider_module: impl Into<String>,
-        features: impl IntoIterator<Item = impl Into<String>>,
-    ) {
-        let mut snapshot = self.snapshot.write().unwrap();
-        let mut features = features.into_iter().map(Into::into).collect::<Vec<_>>();
-        features.sort();
-        features.dedup();
-        snapshot
-            .provider_features
-            .insert(provider_module.into(), features);
-        snapshot.generation = snapshot.generation.saturating_add(1);
-    }
-
-    pub fn resolve(&self, requested: &str, requested_version: Option<&str>) -> InterfaceResolution {
-        let canonical = canonical_interface_name(requested);
-        let snapshot = self.snapshot.read().unwrap();
-        let compiled_contract = snapshot.contracts.get(&canonical).and_then(|contracts| {
-            contracts
-                .iter()
-                .find(|contract| version_matches_contract(requested_version, &contract.version))
-                .cloned()
-        });
-        let mut provider = snapshot.providers.get(&canonical).and_then(|providers| {
-            providers
-                .iter()
-                .find(|provider| {
-                    version_matches_provider(
-                        requested_version,
-                        provider.version.as_deref(),
-                        compiled_contract.as_deref(),
-                    )
-                })
-                .cloned()
-        });
-        let feature_negotiation = compiled_contract
-            .as_ref()
-            .zip(provider.as_ref())
-            .map(|(contract, provider)| {
-                negotiate_feature_groups(
-                    contract,
-                    snapshot
-                        .provider_features
-                        .get(&provider.provider_module)
-                        .cloned()
-                        .unwrap_or_default(),
-                )
-            })
-            .unwrap_or_default();
-        if !feature_negotiation.is_compatible() {
-            provider = None;
-        }
-
-        InterfaceResolution {
-            requested: canonical,
-            requested_version: requested_version.map(ToOwned::to_owned),
-            generation: snapshot.generation,
-            contract: compiled_contract
-                .as_ref()
-                .map(|contract| Arc::clone(&contract.raw)),
-            compiled_contract,
-            feature_negotiation,
-            provider,
-        }
-    }
-
-    pub fn providers_for(&self, requested: &str) -> Vec<InterfaceProvider> {
-        let canonical = canonical_interface_name(requested);
-        self.snapshot
-            .read()
-            .unwrap()
-            .providers
-            .get(&canonical)
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    pub fn contracts_for(&self, requested: &str) -> Vec<InterfaceContract> {
-        let canonical = canonical_interface_name(requested);
-        self.snapshot
-            .read()
-            .unwrap()
-            .contracts
-            .get(&canonical)
-            .map(|contracts| {
-                contracts
-                    .iter()
-                    .map(|contract| contract.to_interface_contract())
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    pub fn list_interfaces(&self) -> Vec<String> {
-        let snapshot = self.snapshot.read().unwrap();
-        let contracts = &snapshot.contracts;
-        let providers = &snapshot.providers;
-        let mut names = Vec::with_capacity(contracts.len() + providers.len());
-        names.extend(contracts.keys().cloned());
-        names.extend(providers.keys().cloned());
-        names.sort();
-        names.dedup();
-        names
-    }
-
-    pub fn has(&self, requested: &str) -> bool {
-        let canonical = canonical_interface_name(requested);
-        let snapshot = self.snapshot.read().unwrap();
-        snapshot.contracts.contains_key(&canonical) || snapshot.providers.contains_key(&canonical)
-    }
-
-    pub fn catalog(&self) -> InterfaceCatalog {
-        let snapshot = self.snapshot.read().unwrap();
-        InterfaceCatalog {
-            generation: snapshot.generation,
-            contracts: snapshot
-                .contracts
-                .iter()
-                .map(|(name, contracts)| (name.clone(), contracts.iter().cloned().collect()))
-                .collect(),
-            providers: snapshot
-                .providers
-                .iter()
-                .map(|(name, providers)| {
-                    (
-                        name.clone(),
-                        providers.iter().map(|provider| provider.clone()).collect(),
-                    )
-                })
-                .collect(),
-            provider_features: snapshot.provider_features.clone(),
-        }
+    pub fn snapshot(&self) -> Arc<ResolvedServiceCatalog> {
+        Arc::clone(&self.snapshot.read().unwrap())
     }
 
     pub fn resolved_catalog(&self) -> ResolvedServiceCatalog {
-        self.catalog()
+        self.snapshot().as_ref().clone()
+    }
+
+    pub fn resolve(&self, requested: &str, requested_version: Option<&str>) -> InterfaceResolution {
+        self.snapshot().resolve(requested, requested_version)
+    }
+
+    pub fn providers_for(&self, requested: &str) -> Vec<InterfaceProvider> {
+        self.snapshot().providers_for(requested)
+    }
+
+    pub fn contracts_for(&self, requested: &str) -> Vec<InterfaceContract> {
+        self.snapshot().contracts_for(requested)
+    }
+
+    pub fn list_interfaces(&self) -> Vec<String> {
+        self.snapshot().list_interfaces()
+    }
+
+    pub fn has(&self, requested: &str) -> bool {
+        self.snapshot().has(requested)
     }
 }
 
@@ -347,54 +235,56 @@ impl InterfaceCatalog {
         self.generation = self.generation.saturating_add(1);
     }
 
-    pub fn resolve(&self, requested: &str, requested_version: Option<&str>) -> InterfaceResolution {
-        let canonical = canonical_interface_name(requested);
-        let compiled_contract = self.contracts.get(&canonical).and_then(|contracts| {
-            contracts
-                .iter()
-                .find(|contract| version_matches_contract(requested_version, &contract.version))
-                .cloned()
-        });
-        let mut provider = self.providers.get(&canonical).and_then(|providers| {
-            providers
-                .iter()
-                .find(|provider| {
-                    version_matches_provider(
-                        requested_version,
-                        provider.version.as_deref(),
-                        compiled_contract.as_deref(),
-                    )
-                })
-                .cloned()
-        });
-        let feature_negotiation = compiled_contract
-            .as_ref()
-            .zip(provider.as_ref())
-            .map(|(contract, provider)| {
-                negotiate_feature_groups(
-                    contract,
-                    self.provider_features
-                        .get(&provider.provider_module)
-                        .cloned()
-                        .unwrap_or_default(),
-                )
-            })
-            .unwrap_or_default();
-        if !feature_negotiation.is_compatible() {
-            provider = None;
-        }
+    /// Replace every contract version for one interface with the graph-owned
+    /// contract. Graph declarations are authoritative for the generation being
+    /// assembled and must not be merged with an older graph's versions.
+    pub fn replace_contract(&mut self, contract: CompiledContract) {
+        let interface = contract.interface.clone();
+        self.contracts.insert(interface, vec![Arc::new(contract)]);
+        self.generation = self.generation.saturating_add(1);
+    }
 
-        InterfaceResolution {
-            requested: canonical,
-            requested_version: requested_version.map(ToOwned::to_owned),
-            generation: self.generation,
-            contract: compiled_contract
-                .as_ref()
-                .map(|contract| Arc::clone(&contract.raw)),
-            compiled_contract,
-            feature_negotiation,
-            provider,
-        }
+    /// Restrict resolution to the provider selected by the installed graph.
+    /// `None` means graph providers for this interface are not active; core
+    /// providers already present in the baseline remain eligible.
+    pub fn set_active_provider(
+        &mut self,
+        interface: impl Into<String>,
+        provider_module: Option<String>,
+    ) {
+        self.active_providers
+            .insert(canonical_interface_name(&interface.into()), provider_module);
+        self.generation = self.generation.saturating_add(1);
+    }
+
+    /// Mark graph-owned provider modules so an ambiguous graph selection cannot
+    /// fall back to an unselected module merely because it has the highest
+    /// priority. Baseline providers remain available when no graph provider is
+    /// active.
+    pub fn set_graph_provider_modules(
+        &mut self,
+        interface: impl Into<String>,
+        provider_modules: impl IntoIterator<Item = impl Into<String>>,
+    ) {
+        let modules = provider_modules.into_iter().map(Into::into).collect();
+        self.graph_provider_modules
+            .insert(canonical_interface_name(&interface.into()), modules);
+        self.generation = self.generation.saturating_add(1);
+    }
+
+    pub fn bump_generation(&mut self) {
+        self.generation = self.generation.saturating_add(1);
+    }
+
+    /// Compile the complete builder into one immutable service view. Contract
+    /// and provider matching happens here, never independently at each
+    /// consumer call site.
+    pub fn build(&self) -> ResolvedServiceCatalog {
+        ResolvedServiceCatalog::from_builder(self)
+    }
+
+    pub fn resolve(&self, requested: &str, requested_version: Option<&str>) -> InterfaceResolution {
+        self.build().resolve(requested, requested_version)
     }
 
     pub fn list_interfaces(&self) -> Vec<String> {
@@ -409,6 +299,211 @@ impl InterfaceCatalog {
     pub fn has(&self, requested: &str) -> bool {
         let canonical = canonical_interface_name(requested);
         self.contracts.contains_key(&canonical) || self.providers.contains_key(&canonical)
+    }
+}
+
+impl ResolvedServiceCatalog {
+    fn from_builder(builder: &InterfaceCatalog) -> Self {
+        let mut interfaces = HashSet::new();
+        interfaces.extend(builder.contracts.keys().cloned());
+        interfaces.extend(builder.providers.keys().cloned());
+
+        let mut bindings = HashMap::new();
+        for interface in interfaces {
+            let contracts = builder
+                .contracts
+                .get(&interface)
+                .cloned()
+                .unwrap_or_default();
+            let providers = builder
+                .providers
+                .get(&interface)
+                .cloned()
+                .unwrap_or_default();
+            let active = builder.active_providers.get(&interface);
+            let graph_modules = builder.graph_provider_modules.get(&interface);
+            let eligible_providers = providers.iter().filter(|provider| match active {
+                Some(Some(active_module)) => provider.provider_module == *active_module,
+                Some(None) => {
+                    graph_modules.is_none_or(|modules| !modules.contains(&provider.provider_module))
+                }
+                None => true,
+            });
+
+            let mut interface_bindings = Vec::new();
+            for contract in &contracts {
+                let mut provider = None;
+                let mut feature_negotiation = FeatureNegotiation::default();
+                for candidate in eligible_providers.clone() {
+                    if !provider_matches_contract(candidate, contract) {
+                        continue;
+                    }
+                    let negotiation = negotiate_feature_groups(
+                        contract,
+                        builder
+                            .provider_features
+                            .get(&candidate.provider_module)
+                            .cloned()
+                            .unwrap_or_default(),
+                    );
+                    if provider.is_none() {
+                        // Retain the first compatible-version negotiation for
+                        // fail-closed diagnostics when every provider misses a
+                        // required feature group.
+                        feature_negotiation = negotiation.clone();
+                    }
+                    if negotiation.is_compatible() {
+                        provider = Some(candidate.clone());
+                        feature_negotiation = negotiation;
+                        break;
+                    }
+                }
+                interface_bindings.push(ResolvedServiceBinding {
+                    interface: interface.clone(),
+                    contract: Some(Arc::clone(contract)),
+                    provider,
+                    feature_negotiation,
+                });
+            }
+            if contracts.is_empty()
+                && let Some(provider) = eligible_providers
+                    .clone()
+                    .find(|provider| provider_matches_request(provider, None))
+                    .cloned()
+            {
+                interface_bindings.push(ResolvedServiceBinding {
+                    interface: interface.clone(),
+                    contract: None,
+                    provider: Some(provider),
+                    feature_negotiation: FeatureNegotiation::default(),
+                });
+            }
+            bindings.insert(interface, interface_bindings);
+        }
+
+        Self {
+            generation: builder.generation,
+            contracts: builder.contracts.clone(),
+            providers: builder.providers.clone(),
+            provider_features: builder.provider_features.clone(),
+            bindings,
+        }
+    }
+
+    pub fn binding(
+        &self,
+        requested: &str,
+        requested_version: Option<&str>,
+    ) -> Option<&ResolvedServiceBinding> {
+        let canonical = canonical_interface_name(requested);
+        self.bindings.get(&canonical).and_then(|bindings| {
+            bindings.iter().find(|binding| {
+                binding.contract.as_ref().map_or_else(
+                    || {
+                        binding.provider.as_ref().is_some_and(|provider| {
+                            provider_matches_request(provider, requested_version)
+                        })
+                    },
+                    |contract| version_matches_contract(requested_version, &contract.version),
+                )
+            })
+        })
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Start a new candidate from this complete snapshot. The returned value
+    /// is a builder and does not share mutable storage with the published view.
+    pub fn to_builder(&self) -> InterfaceCatalog {
+        InterfaceCatalog {
+            generation: self.generation,
+            contracts: self.contracts.clone(),
+            providers: self.providers.clone(),
+            provider_features: self.provider_features.clone(),
+            active_providers: HashMap::new(),
+            graph_provider_modules: HashMap::new(),
+        }
+    }
+
+    pub fn resolve(&self, requested: &str, requested_version: Option<&str>) -> InterfaceResolution {
+        let canonical = canonical_interface_name(requested);
+        let binding = self.bindings.get(&canonical).and_then(|bindings| {
+            bindings.iter().find(|binding| {
+                binding.contract.as_ref().map_or_else(
+                    || {
+                        binding.provider.as_ref().is_some_and(|provider| {
+                            provider_matches_request(provider, requested_version)
+                        })
+                    },
+                    |contract| version_matches_contract(requested_version, &contract.version),
+                )
+            })
+        });
+        let compiled_contract = binding.and_then(|binding| binding.contract.clone());
+        let provider = binding.and_then(|binding| binding.provider.clone());
+        let feature_negotiation = binding
+            .map(|binding| binding.feature_negotiation.clone())
+            .unwrap_or_default();
+        InterfaceResolution {
+            requested: canonical,
+            requested_version: requested_version.map(ToOwned::to_owned),
+            generation: self.generation,
+            contract: compiled_contract
+                .as_ref()
+                .map(|contract| Arc::clone(&contract.raw)),
+            policy_fingerprint: compiled_contract
+                .as_ref()
+                .map(|contract| contract.policy_fingerprint),
+            compiled_contract,
+            feature_negotiation,
+            provider,
+        }
+    }
+
+    pub fn providers_for(&self, requested: &str) -> Vec<InterfaceProvider> {
+        let canonical = canonical_interface_name(requested);
+        self.providers.get(&canonical).cloned().unwrap_or_default()
+    }
+
+    pub fn contracts_for(&self, requested: &str) -> Vec<InterfaceContract> {
+        let canonical = canonical_interface_name(requested);
+        self.contracts
+            .get(&canonical)
+            .map(|contracts| {
+                contracts
+                    .iter()
+                    .map(|contract| contract.to_interface_contract())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn list_interfaces(&self) -> Vec<String> {
+        let mut names = Vec::with_capacity(self.contracts.len() + self.providers.len());
+        names.extend(self.contracts.keys().cloned());
+        names.extend(self.providers.keys().cloned());
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    pub fn has(&self, requested: &str) -> bool {
+        let canonical = canonical_interface_name(requested);
+        self.contracts.contains_key(&canonical) || self.providers.contains_key(&canonical)
+    }
+}
+
+impl From<InterfaceCatalog> for ResolvedServiceCatalog {
+    fn from(catalog: InterfaceCatalog) -> Self {
+        catalog.build()
+    }
+}
+
+impl From<InterfaceCatalog> for Arc<ResolvedServiceCatalog> {
+    fn from(catalog: InterfaceCatalog) -> Self {
+        Arc::new(catalog.build())
     }
 }
 
@@ -447,6 +542,26 @@ fn register_provider_in_map(
     });
 }
 
+fn provider_matches_contract(provider: &InterfaceProvider, contract: &CompiledContract) -> bool {
+    provider
+        .version
+        .as_deref()
+        .and_then(parse_contract_version)
+        .is_none_or(|version| version == contract.version)
+}
+
+fn provider_matches_request(provider: &InterfaceProvider, requested: Option<&str>) -> bool {
+    let Some(requested) = requested.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+    provider
+        .version
+        .as_deref()
+        .and_then(parse_contract_version)
+        .and_then(|version| parse_version_req(requested).map(|request| request.matches(&version)))
+        .unwrap_or(false)
+}
+
 fn version_matches_contract(requested: Option<&str>, contract_version: &Version) -> bool {
     let Some(requested) = requested.map(str::trim).filter(|value| !value.is_empty()) else {
         return true;
@@ -455,28 +570,6 @@ fn version_matches_contract(requested: Option<&str>, contract_version: &Version)
     parse_version_req(requested)
         .map(|req| req.matches(contract_version))
         .unwrap_or(false)
-}
-
-fn version_matches_provider(
-    requested: Option<&str>,
-    provider_version: Option<&str>,
-    contract: Option<&CompiledContract>,
-) -> bool {
-    let Some(requested) = requested.map(str::trim).filter(|value| !value.is_empty()) else {
-        return true;
-    };
-
-    if let Some(provider_version) = provider_version.and_then(parse_contract_version) {
-        return parse_version_req(requested)
-            .map(|req| req.matches(&provider_version))
-            .unwrap_or(false);
-    }
-
-    if let Some(contract) = contract {
-        return version_matches_contract(Some(requested), &contract.version);
-    }
-
-    true
 }
 
 #[cfg(test)]
@@ -517,10 +610,10 @@ mod tests {
 
     #[test]
     fn registry_canonicalizes_contract_identity_at_registration() {
-        let registry = InterfaceRegistry::new();
-        registry.register_contract(test_contract("audio", 1));
+        let mut catalog = InterfaceCatalog::default();
+        catalog.register_contract(test_contract("audio", 1));
 
-        let contract = registry.resolve("mesh.audio", None).contract.unwrap();
+        let contract = catalog.resolve("mesh.audio", None).contract.unwrap();
         assert_eq!(contract.interface, "mesh.audio");
     }
 
@@ -543,8 +636,8 @@ mod tests {
 
     #[test]
     fn resolves_highest_priority_provider_for_contract() {
-        let registry = InterfaceRegistry::new();
-        registry.register_contract(InterfaceContract {
+        let mut catalog = InterfaceCatalog::default();
+        catalog.register_contract(InterfaceContract {
             interface: "mesh.audio".into(),
             version: Version::parse("1.0.0").unwrap(),
             state_fields: vec![],
@@ -571,7 +664,7 @@ mod tests {
             types: HashMap::new(),
             capabilities: ContractCapabilities::default(),
         });
-        registry.register(InterfaceProvider {
+        catalog.register_provider(InterfaceProvider {
             interface: "mesh.audio".into(),
             version: Some("1.0".into()),
             base_module: Some("@mesh/audio-interface".into()),
@@ -579,7 +672,7 @@ mod tests {
             backend_name: "PulseAudio".into(),
             priority: 50,
         });
-        registry.register(InterfaceProvider {
+        catalog.register_provider(InterfaceProvider {
             interface: "mesh.audio".into(),
             version: Some("1.0".into()),
             base_module: Some("@mesh/audio-interface".into()),
@@ -588,7 +681,7 @@ mod tests {
             priority: 100,
         });
 
-        let resolved = registry.resolve("audio", Some(">=1.0"));
+        let resolved = catalog.resolve("audio", Some(">=1.0"));
         assert_eq!(resolved.contract.unwrap().version.to_string(), "1.0.0");
         assert_eq!(
             resolved.provider.unwrap().provider_module,
@@ -597,19 +690,107 @@ mod tests {
     }
 
     #[test]
-    fn repeated_registry_resolution_shares_contract_storage() {
-        let registry = InterfaceRegistry::new();
-        registry.register_contract(test_contract("mesh.audio", 8));
+    fn resolved_catalog_honors_graph_provider_selection_over_priority() {
+        let mut catalog = InterfaceCatalog::default();
+        catalog.register_contract(test_contract("mesh.audio", 1));
+        catalog.register_provider(InterfaceProvider {
+            interface: "mesh.audio".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider_module: "@mesh/low-priority".into(),
+            backend_name: "low".into(),
+            priority: 10,
+        });
+        catalog.register_provider(InterfaceProvider {
+            interface: "mesh.audio".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider_module: "@mesh/high-priority".into(),
+            backend_name: "high".into(),
+            priority: 100,
+        });
+        catalog.set_active_provider("mesh.audio", Some("@mesh/low-priority".into()));
 
-        let first = registry.resolve("audio", None).contract.unwrap();
-        let second = registry.resolve("audio", None).contract.unwrap();
+        let resolved = catalog.build();
+        assert_eq!(
+            resolved
+                .resolve("mesh.audio", None)
+                .provider
+                .unwrap()
+                .provider_module,
+            "@mesh/low-priority"
+        );
+        assert_eq!(
+            resolved
+                .binding("mesh.audio", None)
+                .unwrap()
+                .contract
+                .as_ref()
+                .unwrap()
+                .policy_fingerprint,
+            resolved
+                .resolve("mesh.audio", None)
+                .policy_fingerprint
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn resolved_catalog_tries_the_next_compatible_provider() {
+        let mut catalog = InterfaceCatalog::default();
+        let mut contract = test_contract("mesh.audio", 1);
+        contract.capabilities.feature_groups = BTreeMap::from([(
+            "recording".into(),
+            ContractFeatureGroup {
+                required: true,
+                capabilities: Vec::new(),
+            },
+        )]);
+        catalog.register_contract(contract);
+        catalog.register_provider(InterfaceProvider {
+            interface: "mesh.audio".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider_module: "@mesh/missing-feature".into(),
+            backend_name: "missing".into(),
+            priority: 100,
+        });
+        catalog.register_provider(InterfaceProvider {
+            interface: "mesh.audio".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider_module: "@mesh/recording".into(),
+            backend_name: "recording".into(),
+            priority: 10,
+        });
+        catalog.register_provider_features("@mesh/recording", ["recording"]);
+
+        assert_eq!(
+            catalog
+                .build()
+                .resolve("mesh.audio", None)
+                .provider
+                .unwrap()
+                .provider_module,
+            "@mesh/recording"
+        );
+    }
+
+    #[test]
+    fn repeated_registry_resolution_shares_contract_storage() {
+        let mut catalog = InterfaceCatalog::default();
+        catalog.register_contract(test_contract("mesh.audio", 8));
+
+        let snapshot = catalog.build();
+        let first = snapshot.resolve("audio", None).contract.unwrap();
+        let second = snapshot.resolve("audio", None).contract.unwrap();
 
         assert!(Arc::ptr_eq(&first, &second));
     }
 
     #[test]
     fn provider_feature_negotiation_keeps_optional_groups_and_rejects_required_gaps() {
-        let registry = InterfaceRegistry::new();
+        let mut catalog = InterfaceCatalog::default();
         let mut capabilities = ContractCapabilities::default();
         capabilities.feature_groups = BTreeMap::from([
             ("recording".into(), ContractFeatureGroup::default()),
@@ -621,7 +802,7 @@ mod tests {
                 },
             ),
         ]);
-        registry.register_contract(InterfaceContract {
+        catalog.register_contract(InterfaceContract {
             interface: "mesh.audio".into(),
             version: Version::parse("1.0.0").unwrap(),
             state_fields: vec![],
@@ -630,7 +811,7 @@ mod tests {
             types: HashMap::new(),
             capabilities,
         });
-        registry.register(InterfaceProvider {
+        catalog.register_provider(InterfaceProvider {
             interface: "mesh.audio".into(),
             version: Some("1.0".into()),
             base_module: None,
@@ -639,15 +820,15 @@ mod tests {
             priority: 100,
         });
 
-        let unavailable = registry.resolve("mesh.audio", None);
+        let unavailable = catalog.resolve("mesh.audio", None);
         assert!(unavailable.provider.is_none());
         assert_eq!(
             unavailable.feature_negotiation.missing_required.as_ref(),
             &["exclusive_output".to_string()][..]
         );
 
-        registry.register_provider_features("@mesh/audio", ["recording", "exclusive_output"]);
-        let resolved = registry.resolve("mesh.audio", None);
+        catalog.register_provider_features("@mesh/audio", ["recording", "exclusive_output"]);
+        let resolved = catalog.resolve("mesh.audio", None);
         assert!(resolved.provider.is_some());
         assert!(resolved.feature_negotiation.is_compatible());
         assert_eq!(
@@ -658,9 +839,9 @@ mod tests {
 
     #[test]
     fn resolved_catalog_is_an_immutable_generation_stamped_view() {
-        let registry = InterfaceRegistry::new();
-        registry.register_contract(test_contract("mesh.audio", 1));
-        registry.register(InterfaceProvider {
+        let mut catalog = InterfaceCatalog::default();
+        catalog.register_contract(test_contract("mesh.audio", 1));
+        catalog.register_provider(InterfaceProvider {
             interface: "mesh.audio".into(),
             version: Some("1.0".into()),
             base_module: None,
@@ -669,13 +850,13 @@ mod tests {
             priority: 100,
         });
 
-        let snapshot = registry.resolved_catalog();
+        let snapshot = catalog.build();
         let snapshot_resolution = snapshot.resolve("mesh.audio", None);
-        let registry_generation = registry.resolve("mesh.audio", None).generation;
-        assert_eq!(snapshot_resolution.generation, snapshot.generation);
+        let registry_generation = catalog.resolve("mesh.audio", None).generation;
+        assert_eq!(snapshot_resolution.generation, snapshot.generation());
         assert_eq!(snapshot_resolution.generation, registry_generation);
 
-        registry.register(InterfaceProvider {
+        catalog.register_provider(InterfaceProvider {
             interface: "mesh.audio".into(),
             version: Some("1.0".into()),
             base_module: None,
@@ -691,9 +872,9 @@ mod tests {
                 .provider_module,
             "@mesh/audio"
         );
-        assert!(registry.resolve("mesh.audio", None).generation > snapshot.generation);
+        assert!(catalog.resolve("mesh.audio", None).generation > snapshot.generation());
         assert_eq!(
-            registry
+            catalog
                 .resolve("mesh.audio", None)
                 .provider
                 .unwrap()
@@ -704,8 +885,8 @@ mod tests {
 
     #[test]
     fn catalog_can_be_prepared_and_committed_without_mutating_the_source_view() {
-        let live = InterfaceRegistry::new();
-        live.register(InterfaceProvider {
+        let mut live = InterfaceCatalog::default();
+        live.register_provider(InterfaceProvider {
             interface: "mesh.audio".into(),
             version: Some("1.0".into()),
             base_module: None,
@@ -713,10 +894,10 @@ mod tests {
             backend_name: "old".into(),
             priority: 100,
         });
-        let source = live.resolved_catalog();
+        let source = live.build();
 
-        let candidate = InterfaceRegistry::from_catalog(source.clone());
-        candidate.register(InterfaceProvider {
+        let mut candidate = source.to_builder();
+        candidate.register_provider(InterfaceProvider {
             interface: "mesh.audio".into(),
             version: Some("1.0".into()),
             base_module: None,
@@ -742,7 +923,8 @@ mod tests {
             "@mesh/audio-new"
         );
 
-        live.replace_catalog(candidate.resolved_catalog());
+        let live = ResolvedServiceCatalogHandle::from_catalog(live.build());
+        live.replace_catalog(candidate.build());
         assert_eq!(
             live.resolve("mesh.audio", None)
                 .provider
@@ -753,16 +935,60 @@ mod tests {
     }
 
     #[test]
+    fn catalog_handle_publishes_one_complete_snapshot() {
+        let mut first = InterfaceCatalog::default();
+        first.register_contract(test_contract("mesh.audio", 1));
+        first.register_provider(InterfaceProvider {
+            interface: "mesh.audio".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider_module: "@mesh/old".into(),
+            backend_name: "old".into(),
+            priority: 100,
+        });
+        let handle = ResolvedServiceCatalogHandle::from_catalog(first.build());
+        let old = handle.snapshot();
+
+        let mut second = old.to_builder();
+        second.register_provider(InterfaceProvider {
+            interface: "mesh.audio".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider_module: "@mesh/new".into(),
+            backend_name: "new".into(),
+            priority: 200,
+        });
+        handle.publish(second.build());
+
+        assert_eq!(
+            old.resolve("mesh.audio", None)
+                .provider
+                .unwrap()
+                .provider_module,
+            "@mesh/old"
+        );
+        assert_eq!(
+            handle
+                .snapshot()
+                .resolve("mesh.audio", None)
+                .provider
+                .unwrap()
+                .provider_module,
+            "@mesh/new"
+        );
+    }
+
+    #[test]
     #[ignore = "release-only performance benchmark"]
     fn benchmark_direct_registry_resolution_against_catalog_snapshot() {
         use std::hint::black_box;
         use std::time::Instant;
 
-        let registry = InterfaceRegistry::new();
+        let mut catalog = InterfaceCatalog::default();
         for index in 0..64 {
             let interface = format!("mesh.service_{index}");
-            registry.register_contract(test_contract(&interface, 32));
-            registry.register(InterfaceProvider {
+            catalog.register_contract(test_contract(&interface, 32));
+            catalog.register_provider(InterfaceProvider {
                 interface,
                 version: Some("1.0".into()),
                 base_module: None,
@@ -775,13 +1001,13 @@ mod tests {
         let iterations = 10_000;
         let started = Instant::now();
         for _ in 0..iterations {
-            black_box(registry.catalog().resolve("mesh.service_31", None));
+            black_box(catalog.build().resolve("mesh.service_31", None));
         }
         let snapshot_elapsed = started.elapsed();
 
         let started = Instant::now();
         for _ in 0..iterations {
-            black_box(registry.resolve("mesh.service_31", None));
+            black_box(catalog.build().resolve("mesh.service_31", None));
         }
         let direct_elapsed = started.elapsed();
 
@@ -860,8 +1086,8 @@ mod tests {
 
     #[test]
     fn falls_back_to_contract_version_when_provider_omits_one() {
-        let registry = InterfaceRegistry::new();
-        registry.register_contract(InterfaceContract {
+        let mut catalog = InterfaceCatalog::default();
+        catalog.register_contract(InterfaceContract {
             interface: "alice.thermal".into(),
             version: Version::parse("1.0.0").unwrap(),
             state_fields: Vec::new(),
@@ -870,7 +1096,7 @@ mod tests {
             types: HashMap::new(),
             capabilities: ContractCapabilities::default(),
         });
-        registry.register(InterfaceProvider {
+        catalog.register_provider(InterfaceProvider {
             interface: "alice.thermal".into(),
             version: None,
             base_module: None,
@@ -879,7 +1105,7 @@ mod tests {
             priority: 100,
         });
 
-        let resolved = registry.resolve("alice.thermal", Some(">=1.0"));
+        let resolved = catalog.resolve("alice.thermal", Some(">=1.0"));
         assert_eq!(
             resolved.provider.unwrap().provider_module,
             "@alice/lmsensors"

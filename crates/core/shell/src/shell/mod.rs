@@ -19,7 +19,7 @@ use mesh_core_module::package::{
 #[cfg(test)]
 use mesh_core_service::InterfaceProvider;
 use mesh_core_service::{
-    InterfaceRegistry, canonical_interface_name, canonical_interface_name_cow,
+    ResolvedServiceCatalogHandle, canonical_interface_name, canonical_interface_name_cow,
     canonical_interface_name_owned,
 };
 use mesh_core_theme::ThemeEngine;
@@ -543,7 +543,8 @@ pub struct Shell {
     pub theme: ThemeEngine,
     pub locale: LocaleEngine,
     pub diagnostics: DiagnosticsCollector,
-    pub interfaces: InterfaceRegistry,
+    /// Atomically published graph-derived service catalog.
+    pub interfaces: ResolvedServiceCatalogHandle,
     /// Host-backed service providers use the same identity and command seam
     /// as module-backed providers, even when their final action stays in the
     /// shell process.
@@ -551,7 +552,7 @@ pub struct Shell {
     /// Immutable core-owned interface contracts and providers. Graph
     /// activation rebuilds its catalog from this baseline so a replacement
     /// cannot retain entries from an older graph generation.
-    builtin_interface_catalog: mesh_core_service::InterfaceCatalog,
+    builtin_interface_catalog: mesh_core_service::ResolvedServiceCatalog,
     /// Catalog-backed policy loaded from the root graph's persisted approvals.
     capability_policy: CapabilityPolicy,
     /// Effective grants for the current activation candidate. Runtime

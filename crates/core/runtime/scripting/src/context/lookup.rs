@@ -1,5 +1,5 @@
 use super::{ScriptDiagnostic, ScriptDiagnosticCategory, ScriptError};
-use mesh_core_service::{InterfaceCatalog, InterfaceResolution};
+use mesh_core_service::{InterfaceResolution, ResolvedServiceCatalog};
 use mlua::Value as LuaValue;
 use std::sync::{
     Arc, Mutex,
@@ -52,7 +52,7 @@ pub(super) fn record_lookup_diagnostic(
 }
 
 pub(super) fn lookup_failure_reason(
-    catalog: &InterfaceCatalog,
+    catalog: &ResolvedServiceCatalog,
     resolution: &InterfaceResolution,
 ) -> String {
     if !resolution.feature_negotiation.missing_required.is_empty() {
@@ -65,14 +65,8 @@ pub(super) fn lookup_failure_reason(
             .join(", ");
         return format!("provider is missing required feature groups: {groups}");
     }
-    let has_contracts = catalog
-        .contracts
-        .get(&resolution.requested)
-        .is_some_and(|contracts| !contracts.is_empty());
-    let has_providers = catalog
-        .providers
-        .get(&resolution.requested)
-        .is_some_and(|providers| !providers.is_empty());
+    let has_contracts = !catalog.contracts_for(&resolution.requested).is_empty();
+    let has_providers = !catalog.providers_for(&resolution.requested).is_empty();
 
     match (
         resolution.contract.is_some(),

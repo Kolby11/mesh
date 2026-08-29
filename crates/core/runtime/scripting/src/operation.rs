@@ -8,7 +8,7 @@
 
 use crate::policy::ResourceBudget;
 use mesh_core_capability::{Capability, CapabilitySet};
-use mesh_core_service::{InterfaceCatalog, InterfaceContract, InterfaceMethod, TypeExpr};
+use mesh_core_service::{InterfaceContract, InterfaceMethod, ResolvedServiceCatalog, TypeExpr};
 use serde_json::{Map, Value};
 use std::fmt;
 
@@ -148,7 +148,7 @@ impl OperationRegistry {
         payload: &Value,
         module_id: &str,
         capabilities: &CapabilitySet,
-        catalog: &InterfaceCatalog,
+        catalog: &ResolvedServiceCatalog,
     ) -> Result<Option<ShellOperation>, OperationRejection> {
         if channel.starts_with("shell.") {
             return self.authorize_event(channel, payload, module_id, capabilities);

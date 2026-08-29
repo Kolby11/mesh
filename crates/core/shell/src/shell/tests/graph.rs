@@ -106,6 +106,16 @@ fn installed_module_graph_exposes_shell_package_choices() {
             && provider.backend_name == "pulseaudio"
             && provider.base_module.as_deref() == Some("@mesh/audio-interface")
     }));
+    assert_eq!(
+        shell
+            .interfaces
+            .resolve("mesh.audio", None)
+            .provider
+            .as_ref()
+            .map(|provider| provider.provider_module.as_str()),
+        Some("@mesh/pipewire-audio"),
+        "resolution must use the graph-selected provider rather than registry priority"
+    );
 }
 
 #[test]

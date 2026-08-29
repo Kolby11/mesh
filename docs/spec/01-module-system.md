@@ -451,9 +451,12 @@ remain target tooling.
 
 Interfaces follow semver. Major = breaking (prefer a new name, `mesh.audio.v2`,
 so old consumers keep working); minor = additive; patch = clarification. The
-registry indexes each `(interface, version)` pair independently; a backend may
-advertise several versions at once during migrations; consumers request ranges
-(`require("mesh.audio@>=1.0")`).
+graph-derived resolved service catalog binds each consumer request to one
+compatible `(interface, contract version, provider version, operation-policy
+fingerprint)` tuple for the active graph generation. A backend may advertise
+several versions during migrations; the catalog keeps those immutable records
+while exposing only the graph-selected compatible binding to a consumer.
+Consumers request ranges (`require("mesh.audio@>=1.0")`).
 
 ### 4.2 Relationships & domains
 

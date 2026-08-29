@@ -947,7 +947,7 @@ pub(super) struct FrontendSurfaceComponent {
     /// snapshot. Standalone component fixtures keep their local source-backed
     /// catalog for authoring and integration tests.
     locale_catalog_is_shared: bool,
-    interface_catalog: Arc<mesh_core_service::InterfaceCatalog>,
+    interface_catalog: Arc<mesh_core_service::ResolvedServiceCatalog>,
     last_tree: Option<WidgetNode>,
     /// Immutable cross-phase hand-off produced after layout and semantic
     /// normalization. The mutable `last_tree` remains the input-side working
@@ -1175,7 +1175,7 @@ impl FrontendSurfaceComponent {
         compiled: impl Into<SharedCompiledFrontendModule>,
         module_dir: PathBuf,
         frontend_catalog: impl Into<FrontendCatalogHandle>,
-        interface_catalog: impl Into<Arc<mesh_core_service::InterfaceCatalog>>,
+        interface_catalog: impl Into<Arc<mesh_core_service::ResolvedServiceCatalog>>,
         settings: impl Into<Arc<SettingsStore>>,
     ) -> Self {
         let compiled = compiled.into();

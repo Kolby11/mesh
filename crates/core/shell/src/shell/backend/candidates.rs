@@ -6,11 +6,49 @@ use crate::shell::core_provider::CoreServiceRegistry;
 use mesh_core_capability::EffectiveCapabilities;
 use mesh_core_module::package::{BackendProviderNode, binary_available};
 
-pub(in crate::shell) fn backend_launch_candidates_from_graph(
+pub(in crate::shell) trait ServiceCatalogView {
+    fn resolve(
+        &self,
+        requested: &str,
+        requested_version: Option<&str>,
+    ) -> mesh_core_service::InterfaceResolution;
+
+    fn providers_for(&self, requested: &str) -> Vec<mesh_core_service::InterfaceProvider>;
+}
+
+impl ServiceCatalogView for mesh_core_service::ResolvedServiceCatalog {
+    fn resolve(
+        &self,
+        requested: &str,
+        requested_version: Option<&str>,
+    ) -> mesh_core_service::InterfaceResolution {
+        mesh_core_service::ResolvedServiceCatalog::resolve(self, requested, requested_version)
+    }
+
+    fn providers_for(&self, requested: &str) -> Vec<mesh_core_service::InterfaceProvider> {
+        mesh_core_service::ResolvedServiceCatalog::providers_for(self, requested)
+    }
+}
+
+impl ServiceCatalogView for mesh_core_service::ResolvedServiceCatalogHandle {
+    fn resolve(
+        &self,
+        requested: &str,
+        requested_version: Option<&str>,
+    ) -> mesh_core_service::InterfaceResolution {
+        mesh_core_service::ResolvedServiceCatalogHandle::resolve(self, requested, requested_version)
+    }
+
+    fn providers_for(&self, requested: &str) -> Vec<mesh_core_service::InterfaceProvider> {
+        mesh_core_service::ResolvedServiceCatalogHandle::providers_for(self, requested)
+    }
+}
+
+pub(in crate::shell) fn backend_launch_candidates_from_graph<T: ServiceCatalogView + ?Sized>(
     graph: &InstalledModuleGraph,
     modules: &HashMap<String, ModuleInstance>,
     settings: &SettingsStore,
-    interfaces: &InterfaceRegistry,
+    interfaces: &T,
 ) -> (
     Vec<BackendLaunchCandidate>,
     Vec<BackendLifecycleStatusRecord>,
@@ -20,11 +58,13 @@ pub(in crate::shell) fn backend_launch_candidates_from_graph(
     )
 }
 
-pub(in crate::shell) fn backend_launch_candidates_from_graph_with_capabilities(
+pub(in crate::shell) fn backend_launch_candidates_from_graph_with_capabilities<
+    T: ServiceCatalogView + ?Sized,
+>(
     graph: &InstalledModuleGraph,
     modules: &HashMap<String, ModuleInstance>,
     settings: &SettingsStore,
-    interfaces: &InterfaceRegistry,
+    interfaces: &T,
     effective_capabilities: Option<&HashMap<String, EffectiveCapabilities>>,
 ) -> (
     Vec<BackendLaunchCandidate>,
@@ -70,11 +110,11 @@ pub(in crate::shell) fn backend_launch_candidates_from_graph_with_capabilities(
 /// Build the launch candidate for one concrete provider of an interface,
 /// validating manifest state, contract registration, required binaries, and
 /// the entrypoint script. Shared by startup launch and supervised restarts.
-pub(in crate::shell) fn launch_candidate_for_provider(
+pub(in crate::shell) fn launch_candidate_for_provider<T: ServiceCatalogView + ?Sized>(
     graph: &InstalledModuleGraph,
     modules: &HashMap<String, ModuleInstance>,
     settings: &SettingsStore,
-    interfaces: &InterfaceRegistry,
+    interfaces: &T,
     provider: &BackendProviderNode,
 ) -> Result<BackendLaunchCandidate, BackendLifecycleStatusRecord> {
     launch_candidate_for_provider_with_capabilities(
@@ -82,11 +122,13 @@ pub(in crate::shell) fn launch_candidate_for_provider(
     )
 }
 
-pub(in crate::shell) fn launch_candidate_for_provider_with_capabilities(
+pub(in crate::shell) fn launch_candidate_for_provider_with_capabilities<
+    T: ServiceCatalogView + ?Sized,
+>(
     graph: &InstalledModuleGraph,
     modules: &HashMap<String, ModuleInstance>,
     settings: &SettingsStore,
-    interfaces: &InterfaceRegistry,
+    interfaces: &T,
     provider: &BackendProviderNode,
     effective_capabilities: Option<&HashMap<String, EffectiveCapabilities>>,
 ) -> Result<BackendLaunchCandidate, BackendLifecycleStatusRecord> {
@@ -240,9 +282,9 @@ pub(in crate::shell) fn launch_candidate_for_provider_with_capabilities(
     })
 }
 
-fn backend_requirement_statuses(
+fn backend_requirement_statuses<T: ServiceCatalogView + ?Sized>(
     graph: &InstalledModuleGraph,
-    interfaces: &InterfaceRegistry,
+    interfaces: &T,
 ) -> Vec<BackendLifecycleStatusRecord> {
     let core_service_providers = CoreServiceRegistry::builtin();
     let is_core_provider = |provider: &mesh_core_service::InterfaceProvider| {
@@ -349,10 +391,10 @@ fn binary_package_hint(binary: &mesh_core_module::manifest::BinaryDependency) ->
     )
 }
 
-fn validate_backend_provider_contract(
+fn validate_backend_provider_contract<T: ServiceCatalogView + ?Sized>(
     interface: &str,
     provider: &BackendProviderNode,
-    interfaces: &InterfaceRegistry,
+    interfaces: &T,
 ) -> Option<BackendLifecycleStatusRecord> {
     let resolution = interfaces.resolve(interface, None);
     let provider_id = provider.module_id.as_str();

@@ -1073,11 +1073,11 @@ fn builtin_state_contract(
 /// every method on it then rejects as an unknown channel. A malformed built-in
 /// contract is a bug in this file, so say so loudly.
 fn register_builtin_contract(
-    interfaces: &mesh_core_service::InterfaceRegistry,
+    catalog: &mut mesh_core_service::InterfaceCatalog,
     contract: mesh_core_service::InterfaceContract,
 ) {
     let interface = contract.interface.clone();
-    if let Err(error) = interfaces.try_register_contract(contract) {
+    if let Err(error) = catalog.try_register_contract(contract) {
         tracing::error!(
             "built-in interface '{interface}' was rejected and is unavailable: {error}"
         );
@@ -1533,7 +1533,7 @@ impl Shell {
             SettingsWatchState { path, modified_at }
         };
 
-        let interfaces = InterfaceRegistry::new();
+        let mut builtin_interface_catalog = mesh_core_service::InterfaceCatalog::default();
         let core_service_providers = CoreServiceRegistry::builtin();
         let mut theme_contract = builtin_contract(
             "mesh.theme",
@@ -1601,12 +1601,12 @@ impl Shell {
                 .collect(),
             },
         ];
-        register_builtin_contract(&interfaces, theme_contract);
+        register_builtin_contract(&mut builtin_interface_catalog, theme_contract);
         // Locale writes stay on the `mesh.locale.set` host API, which already
         // enforces `locale.write`. A second, service-shaped way in would mean
         // two capability names for one operation.
         register_builtin_contract(
-            &interfaces,
+            &mut builtin_interface_catalog,
             builtin_state_contract(
                 "mesh.locale",
                 &[
@@ -1621,7 +1621,7 @@ impl Shell {
             ),
         );
         register_builtin_contract(
-            &interfaces,
+            &mut builtin_interface_catalog,
             builtin_contract(
                 mesh_core_debug::DEBUG_INTERFACE,
                 &[],
@@ -1637,7 +1637,7 @@ impl Shell {
             ),
         );
         register_builtin_contract(
-            &interfaces,
+            &mut builtin_interface_catalog,
             builtin_contract(
                 "mesh.settings",
                 &[
@@ -1667,7 +1667,7 @@ impl Shell {
             ),
         );
         register_builtin_contract(
-            &interfaces,
+            &mut builtin_interface_catalog,
             builtin_contract(
                 "mesh.packages",
                 &[
@@ -1704,7 +1704,7 @@ impl Shell {
             ),
         );
         register_builtin_contract(
-            &interfaces,
+            &mut builtin_interface_catalog,
             builtin_contract(
                 "mesh.composition",
                 &[
@@ -1740,9 +1740,12 @@ impl Shell {
             ),
         );
         for provider in core_service_providers.providers() {
-            interfaces.register(provider.interface_provider());
+            builtin_interface_catalog.register_provider(provider.interface_provider());
         }
-        let builtin_interface_catalog = interfaces.catalog();
+        let builtin_interface_catalog = builtin_interface_catalog.build();
+        let interfaces = mesh_core_service::ResolvedServiceCatalogHandle::from_catalog(
+            builtin_interface_catalog.clone(),
+        );
 
         let now = std::time::Instant::now();
 

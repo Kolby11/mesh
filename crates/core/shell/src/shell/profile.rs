@@ -237,7 +237,7 @@ pub(super) struct ActivationPlan {
     pub(super) profile_id: String,
     pub(super) profile_revision: Option<u64>,
     pub(super) graph: InstalledModuleGraph,
-    pub(super) interface_catalog: Arc<mesh_core_service::InterfaceCatalog>,
+    pub(super) interface_catalog: Arc<mesh_core_service::ResolvedServiceCatalog>,
     pub(super) locale: LocaleEngine,
     pub(super) settings: Arc<SettingsStore>,
     pub(super) resources: super::discovery::PreparedResourceSnapshot,
@@ -396,7 +396,7 @@ impl ActiveSnapshot {
         &self.plan.graph
     }
 
-    pub fn interface_catalog(&self) -> Arc<mesh_core_service::InterfaceCatalog> {
+    pub fn interface_catalog(&self) -> Arc<mesh_core_service::ResolvedServiceCatalog> {
         self.plan.interface_catalog.clone()
     }
 
@@ -492,7 +492,7 @@ pub(super) struct PackageRuntimeRollback {
     control_plane_revision: DurableControlPlaneRevision,
     theme: ThemeEngine,
     locale: LocaleEngine,
-    interfaces: mesh_core_service::InterfaceCatalog,
+    interfaces: mesh_core_service::ResolvedServiceCatalog,
     effective_capabilities: Arc<HashMap<String, EffectiveCapabilities>>,
     composition_mode: ShellCompositionMode,
     active_profile_id: Option<String>,
@@ -614,14 +614,14 @@ pub(in crate::shell) fn abort_package_transaction(
 }
 
 pub(super) fn interface_catalog_for_graph(
-    base: &mesh_core_service::InterfaceCatalog,
+    base: &mesh_core_service::ResolvedServiceCatalog,
     graph: &InstalledModuleGraph,
-) -> Result<mesh_core_service::InterfaceCatalog, ShellRunError> {
-    // Start from the immutable core catalog instead of the mutable live
-    // registry. The latter may contain providers or contracts from an older
+) -> Result<mesh_core_service::ResolvedServiceCatalog, ShellRunError> {
+    // Start from the immutable core catalog instead of the live
+    // published snapshot. The latter may contain providers or contracts from an older
     // graph generation, which would make a rejected or disabled module
     // reachable after activation.
-    let mut catalog = base.clone();
+    let mut catalog = base.to_builder();
     for (interface, contract) in graph.interface_contracts() {
         let compiled = contract
             .compile(mesh_core_service::DeclarationProvenance::new(
@@ -630,13 +630,16 @@ pub(super) fn interface_catalog_for_graph(
             .map_err(|error| ShellRunError::FrontendComposition {
                 message: format!("candidate interface '{interface}' is invalid: {error}"),
             })?;
-        catalog
-            .contracts
-            .insert(compiled.interface.clone(), vec![Arc::new(compiled)]);
+        catalog.replace_contract(compiled);
     }
 
+    let mut graph_provider_modules = HashMap::<String, Vec<String>>::new();
     for provider in graph.backend_provider_contributions() {
         let interface = mesh_core_service::canonical_interface_name(&provider.interface);
+        graph_provider_modules
+            .entry(interface.clone())
+            .or_default()
+            .push(provider.module_id.clone());
         catalog.register_provider(mesh_core_service::InterfaceProvider {
             interface,
             version: provider.version.clone(),
@@ -649,8 +652,16 @@ pub(super) fn interface_catalog_for_graph(
             priority: provider.priority,
         });
     }
-    catalog.generation = catalog.generation.saturating_add(1);
-    Ok(catalog)
+    for (interface, provider_modules) in graph_provider_modules {
+        catalog.set_graph_provider_modules(&interface, provider_modules);
+        catalog.set_active_provider(
+            &interface,
+            graph
+                .active_provider(&interface)
+                .map(|provider| provider.module_id.clone()),
+        );
+    }
+    Ok(catalog.build())
 }
 
 fn candidate_capabilities(
@@ -1500,7 +1511,7 @@ impl Shell {
                     reject_candidate!(error.to_string());
                 }
             };
-        let candidate_interfaces = InterfaceRegistry::from_catalog((*interface_catalog).clone());
+        let candidate_interfaces = interface_catalog.as_ref();
         let effective_capabilities =
             match candidate_capabilities(&self.capability_policy, &graph, &self.modules) {
                 Ok(capabilities) => capabilities,
@@ -1628,7 +1639,7 @@ impl Shell {
             &graph,
             &self.modules,
             &settings,
-            &candidate_interfaces,
+            candidate_interfaces,
             Some(&effective_capabilities),
         );
         if let Some(status) = statuses.iter().find(|status| {
@@ -1676,11 +1687,12 @@ impl Shell {
             .installed_module_graph
             .as_ref()
             .map(|current_graph| {
+                let current_interface_catalog = self.interfaces.snapshot();
                 let (mut current, _) = backend_launch_candidates_from_graph_with_capabilities(
                     current_graph,
                     &self.modules,
                     &self.settings_store,
-                    &self.interfaces,
+                    current_interface_catalog.as_ref(),
                     Some(&self.effective_capabilities),
                 );
                 for candidate in &mut current {
@@ -2066,7 +2078,7 @@ impl Shell {
         // objects. The immutable ActiveSnapshot is published after those
         // swaps, before any newly committed state can emit follow-up work.
         self.interfaces
-            .replace_catalog((*plan.interface_catalog).clone());
+            .publish_snapshot(Arc::clone(&plan.interface_catalog));
         self.clear_candidate_preview(plan.generation);
         let prepared_surfaces = pending
             .prepared_frontends

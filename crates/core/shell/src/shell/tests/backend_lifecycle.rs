@@ -452,7 +452,7 @@ fn backend_lifecycle_uses_explicit_active_provider_from_package_graph() {
         &graph,
         &modules,
         &test_settings(),
-        &InterfaceRegistry::new(),
+        &ResolvedServiceCatalogHandle::new(),
     );
 
     assert!(
@@ -532,7 +532,7 @@ fn backend_lifecycle_never_falls_back_to_an_unselected_discovered_provider() {
     // discovery-driven compatibility lane would incorrectly launch it.
     let (_fallback_dir, fallback) = module_instance("@mesh/fallback", Some("src/main.luau"));
     let modules = HashMap::from([("@mesh/fallback".to_string(), fallback)]);
-    let interfaces = InterfaceRegistry::new();
+    let interfaces = ResolvedServiceCatalogHandle::new();
     interfaces.register_contract(test_contract("mesh.example"));
     register_test_provider(&interfaces, "mesh.example", "@mesh/selected");
     register_test_provider(&interfaces, "mesh.example", "@mesh/fallback");
@@ -584,7 +584,7 @@ fn backend_lifecycle_rejects_missing_backend_entrypoint_before_launch() {
         &graph,
         &modules,
         &test_settings(),
-        &InterfaceRegistry::new(),
+        &ResolvedServiceCatalogHandle::new(),
     );
 
     assert!(candidates.is_empty());
@@ -625,7 +625,7 @@ fn backend_lifecycle_rejects_escaping_backend_entrypoint_before_read() {
         &graph,
         &modules,
         &test_settings(),
-        &InterfaceRegistry::new(),
+        &ResolvedServiceCatalogHandle::new(),
     );
 
     assert!(candidates.is_empty());
@@ -675,7 +675,7 @@ fn backend_lifecycle_rejects_symlinked_backend_entrypoint_before_read() {
         &graph,
         &modules,
         &test_settings(),
-        &InterfaceRegistry::new(),
+        &ResolvedServiceCatalogHandle::new(),
     );
 
     assert!(candidates.is_empty());
@@ -727,7 +727,7 @@ fn backend_lifecycle_excludes_disabled_backend_modules() {
         &graph,
         &modules,
         &test_settings(),
-        &InterfaceRegistry::new(),
+        &ResolvedServiceCatalogHandle::new(),
     );
 
     assert!(candidates.is_empty());
@@ -777,7 +777,7 @@ fn backend_lifecycle_reports_frontend_requirement_without_active_provider() {
         &graph,
         &modules,
         &test_settings(),
-        &InterfaceRegistry::new(),
+        &ResolvedServiceCatalogHandle::new(),
     );
 
     assert_eq!(candidates.len(), 1);
@@ -817,7 +817,7 @@ fn backend_lifecycle_reports_frontend_requirement_without_installed_provider() {
         &graph,
         &HashMap::new(),
         &test_settings(),
-        &InterfaceRegistry::new(),
+        &ResolvedServiceCatalogHandle::new(),
     );
 
     assert!(candidates.is_empty());

@@ -37,9 +37,10 @@ impl Shell {
 
         let catalog = self.interfaces.resolved_catalog();
         let mut interfaces: Vec<InterfaceEntry> = catalog
-            .providers
-            .iter()
-            .map(|(name, providers)| {
+            .list_interfaces()
+            .into_iter()
+            .map(|name| {
+                let providers = catalog.providers_for(&name);
                 let providers = providers
                     .iter()
                     .map(|p| ProviderEntry {
@@ -47,10 +48,7 @@ impl Shell {
                         priority: p.priority,
                     })
                     .collect();
-                InterfaceEntry {
-                    name: name.clone(),
-                    providers,
-                }
+                InterfaceEntry { name, providers }
             })
             .collect();
         interfaces.sort_by(|a, b| a.name.cmp(&b.name));
@@ -629,7 +627,9 @@ impl Shell {
             });
         }
 
-        for (interface, providers) in self.interfaces.resolved_catalog().providers {
+        let catalog = self.interfaces.resolved_catalog();
+        for interface in catalog.list_interfaces() {
+            let providers = catalog.providers_for(&interface);
             for provider in providers {
                 let active = self
                     .backend_runtimes

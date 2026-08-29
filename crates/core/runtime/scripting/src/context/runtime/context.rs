@@ -12,7 +12,7 @@ use crate::storage::{ScopedStorage, StorageManager, StorageScope};
 use crate::util::default_runtime_storage_root;
 use mesh_core_capability::CapabilitySet;
 use mesh_core_locale::{CatalogEntry, LocalizedTextResolution, ModuleTranslator};
-use mesh_core_service::{InterfaceCatalog, InterfaceResolution};
+use mesh_core_service::{InterfaceResolution, ResolvedServiceCatalog};
 use mlua::{Lua, Table, Value as LuaValue};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -75,7 +75,7 @@ pub struct ScriptContext {
     /// passes through `__newindex`. Handler sync then consumes the write log
     /// instead of re-reading every unchanged scalar.
     pub(super) reactive_scalar_globals: Option<Table>,
-    pub(super) interface_catalog: Arc<InterfaceCatalog>,
+    pub(super) interface_catalog: Arc<ResolvedServiceCatalog>,
     pub(in crate::context) interface_bindings: HashMap<String, InterfaceResolution>,
     pub(super) shared_interface_bindings: Arc<Mutex<SharedInterfaceBindings>>,
     pub(super) interface_bindings_generation: u64,
@@ -321,7 +321,7 @@ impl ScriptContext {
             realm_policy,
             env_table: None,
             reactive_scalar_globals: None,
-            interface_catalog: Arc::new(InterfaceCatalog::default()),
+            interface_catalog: Arc::new(ResolvedServiceCatalog::default()),
             interface_bindings: HashMap::new(),
             shared_interface_bindings: Arc::new(Mutex::new(SharedInterfaceBindings::default())),
             interface_bindings_generation: 0,
@@ -360,7 +360,7 @@ impl ScriptContext {
         })
     }
 
-    pub fn set_interface_catalog(&mut self, catalog: impl Into<Arc<InterfaceCatalog>>) {
+    pub fn set_interface_catalog(&mut self, catalog: impl Into<Arc<ResolvedServiceCatalog>>) {
         self.interface_catalog = catalog.into();
     }
 

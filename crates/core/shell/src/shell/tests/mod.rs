@@ -21,7 +21,7 @@ mod window_role;
 use super::types;
 use super::{
     BackendLaunchCandidate, BackendRuntimeSlot, BackendRuntimeStatus, ComponentInput, CoreRequest,
-    InterfaceProvider, InterfaceRegistry, KeyModifiers, ServiceCommandMsg, ServiceEvent,
+    InterfaceProvider, KeyModifiers, ResolvedServiceCatalogHandle, ServiceCommandMsg, ServiceEvent,
     ServiceInterfaceEventSubscription, ServiceObservationSummary, Shell, ShellCompositionMode,
     TabFocusTarget, backend_launch_candidates_from_graph, blur_quality_from_settings,
     component_key_pressed_input, component_key_released_input,

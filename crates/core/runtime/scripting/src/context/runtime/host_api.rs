@@ -385,7 +385,7 @@ impl ScriptContext {
         payload: Value,
         module_id: &str,
         capabilities: &mesh_core_capability::CapabilitySet,
-        interface_catalog: &mesh_core_service::InterfaceCatalog,
+        interface_catalog: &mesh_core_service::ResolvedServiceCatalog,
         resources: &crate::policy::ResourceBudget,
     ) -> Result<(), LuaError> {
         OperationRegistry::builtin()

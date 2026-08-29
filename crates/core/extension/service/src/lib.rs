@@ -2,7 +2,8 @@
 ///
 /// The source of truth is the contract JSON declared in a module's
 /// `module.json` (standalone interface module or inline in a backend module)
-/// plus the backend module that provides it. This crate hosts the registry and
+/// plus the backend module that provides it. This crate hosts the resolved
+/// service catalog and the registry-free contract parser. All service interfaces
 /// the contract parser. All service interfaces are declared by modules; there
 /// are no hardcoded Rust trait adapters.
 ///
@@ -13,7 +14,7 @@
 ///                 |                         |
 ///                 +-----------+-------------+
 ///                             |
-///                    InterfaceRegistry
+///              ResolvedServiceCatalogHandle
 ///                             |
 ///                 frontend / scripting bindings
 /// ```
@@ -21,7 +22,8 @@
 /// - An **interface contract** defines methods, events, and capability names.
 /// - A **backend module** provides an implementation of that contract.
 /// - A **frontend module** consumes the interface through runtime bindings.
-/// - The **interface catalog** tracks discovered contracts and providers.
+/// - The **resolved service catalog** binds compatible contracts and providers
+///   for one graph generation.
 pub mod compatibility;
 pub mod contract;
 pub mod generator;
@@ -47,7 +49,8 @@ pub use generator::{
     generate_luau_consumer_types, generate_luau_mock, generate_luau_provider_stub,
 };
 pub use interface::{
-    InterfaceCatalog, InterfaceProvider, InterfaceRegistry, InterfaceResolution,
-    ResolvedServiceCatalog, canonical_interface_name, canonical_interface_name_cow,
-    canonical_interface_name_owned, service_name_from_interface, service_name_from_interface_cow,
+    InterfaceCatalog, InterfaceCatalogBuilder, InterfaceProvider, InterfaceResolution,
+    ResolvedServiceBinding, ResolvedServiceCatalog, ResolvedServiceCatalogHandle,
+    canonical_interface_name, canonical_interface_name_cow, canonical_interface_name_owned,
+    service_name_from_interface, service_name_from_interface_cow,
 };
