@@ -1362,6 +1362,92 @@ fn frontend_module_activation_mounts_shipped_surface_live() {
 }
 
 #[test]
+fn changing_ui_font_repaints_the_mounted_settings_surface() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    shell.discover_modules();
+    shell.resolve_modules().unwrap();
+    let graph = shell.load_installed_module_graph_cached().unwrap().clone();
+
+    let mut requests = shell
+        .activate_frontend_module("@mesh/settings", &graph)
+        .unwrap();
+    shell.drain_requests(&mut requests).unwrap();
+
+    let surface = shell.surfaces.get_mut("@mesh/settings").unwrap();
+    surface.width = 420;
+    surface.height = 1200;
+    let mut requests = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: "@mesh/settings".into(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut requests).unwrap();
+    shell.render_components().unwrap();
+
+    let runtime = shell
+        .components
+        .iter()
+        .find(|runtime| runtime.surface_id == "@mesh/settings")
+        .unwrap();
+    let frame = runtime
+        .component
+        .frontend_frame()
+        .expect("settings should publish a frontend frame");
+    let tree = frame.tree().expect("settings should publish a frame tree");
+    let normal_text_nodes = tree
+        .nodes()
+        .iter()
+        .filter(|node| node.tag() == "text" && !node.style().explicit_properties.font_family)
+        .map(|node| (node.identity().clone(), node.style().font_family.clone()))
+        .collect::<Vec<_>>();
+    assert!(
+        !normal_text_nodes.is_empty(),
+        "settings should contain inherited text nodes to exercise global typography"
+    );
+    let initial_family = normal_text_nodes[0].1.to_string();
+    let selected_family = shell
+        .resource_snapshot
+        .host_catalog
+        .font_families
+        .iter()
+        .map(|family| family.name.as_str())
+        .find(|family| *family != initial_family)
+        .expect("host catalog should expose a second font family")
+        .to_owned();
+
+    let mut requests = shell
+        .apply_request(CoreRequest::SetFontFamily {
+            family: selected_family.clone(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut requests).unwrap();
+    shell.render_components().unwrap();
+
+    let runtime = shell
+        .components
+        .iter()
+        .find(|runtime| runtime.surface_id == "@mesh/settings")
+        .unwrap();
+    let frame = runtime
+        .component
+        .frontend_frame()
+        .expect("settings should publish its updated frontend frame");
+    let tree = frame
+        .tree()
+        .expect("settings should publish its updated frame tree");
+    let updated_node = tree
+        .node(&normal_text_nodes[0].0)
+        .expect("the normal text node should survive a font-only update");
+    let updated_family = updated_node.style().font_family.to_string();
+    assert_eq!(
+        updated_family, selected_family,
+        "initial={initial_family}, selected={selected_family}"
+    );
+}
+
+#[test]
 fn backend_lifecycle_init_failure_removes_command_handler() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();

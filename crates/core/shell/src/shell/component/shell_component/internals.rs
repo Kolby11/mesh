@@ -164,10 +164,22 @@ impl FrontendSurfaceComponent {
         let container_bounds = None;
 
         // Measure the real logical tooltip box (mirrors render_tooltip's
-        // geometry at scale 1: 12px Inter, 1.3 line height, 320px wrap width,
-        // 8px/5px padding) so fit checks match what actually paints.
+        // geometry at scale 1: the active UI family, 1.3 line height, 320px
+        // wrap width, 8px/5px padding) so fit checks match what actually
+        // paints.
+        let font_family = theme
+            .resolve_token_value("typography.family")
+            .ok()
+            .flatten()
+            .and_then(|value| match value {
+                mesh_core_theme::TokenValue::String(value) => Some(value),
+                _ => None,
+            })
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "Inter".into());
+        mesh_core_render::set_tooltip_paint_font_family(font_family.clone());
         let (text_w, text_h) =
-            SharedTextMeasurer.measure_styled(&text, "Inter", 12.0, 400, 1.3, Some(320.0));
+            SharedTextMeasurer.measure_styled(&text, &font_family, 12.0, 400, 1.3, Some(320.0));
         let tooltip_size = (
             (text_w.ceil() + 16.0).min(320.0 + 16.0),
             (text_h.ceil() + 10.0).max(12.0 + 10.0),

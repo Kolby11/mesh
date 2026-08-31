@@ -93,6 +93,10 @@ pub struct FrontendRenderEngine {
     text_renderer: SharedTextMeasurer,
     tooltip_colors: Cell<TooltipPaintColors>,
     tooltip_opacity: Cell<f32>,
+    /// Font family used by the standalone tooltip overlay. Tooltips are
+    /// painted outside the display list, so the shell supplies the active
+    /// typography token before each tooltip is measured and drawn.
+    tooltip_font_family: RefCell<String>,
     /// When true, `paint_x` passed to `render_tooltip` is the horizontal
     /// center of the tooltip box rather than its left edge.
     tooltip_center_x: Cell<bool>,
@@ -150,6 +154,7 @@ impl FrontendRenderEngine {
             text_renderer: SharedTextMeasurer,
             tooltip_colors: Cell::new(TooltipPaintColors::DEFAULT_DARK),
             tooltip_opacity: Cell::new(1.0),
+            tooltip_font_family: RefCell::new("Inter".into()),
             tooltip_center_x: Cell::new(false),
             tooltip_scale: Cell::new(1.0),
             render_scratch: RefCell::new(RenderScratch::default()),
@@ -167,6 +172,7 @@ impl FrontendRenderEngine {
             text_renderer: SharedTextMeasurer,
             tooltip_colors: Cell::new(TooltipPaintColors::DEFAULT_DARK),
             tooltip_opacity: Cell::new(1.0),
+            tooltip_font_family: RefCell::new("Inter".into()),
             tooltip_center_x: Cell::new(false),
             tooltip_scale: Cell::new(1.0),
             render_scratch: RefCell::new(RenderScratch::default()),
@@ -202,6 +208,10 @@ impl FrontendRenderEngine {
         self.tooltip_opacity.set(opacity.clamp(0.0, 1.0));
     }
 
+    pub fn set_tooltip_font_family(&self, family: impl Into<String>) {
+        *self.tooltip_font_family.borrow_mut() = family.into();
+    }
+
     pub fn set_tooltip_center_x(&self, centered: bool) {
         self.tooltip_center_x.set(centered);
     }
@@ -216,6 +226,10 @@ impl FrontendRenderEngine {
 
     pub(super) fn tooltip_opacity(&self) -> f32 {
         self.tooltip_opacity.get()
+    }
+
+    pub(super) fn tooltip_font_family(&self) -> String {
+        self.tooltip_font_family.borrow().clone()
     }
 
     pub(super) fn tooltip_center_x(&self) -> bool {

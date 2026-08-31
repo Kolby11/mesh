@@ -250,4 +250,28 @@ pub(super) fn apply_font_family(theme: &mut Theme, family: Option<&str>) {
             ThemeProvenance::UserOverride,
         );
     }
+
+    // Shipped theme CSS repeats these custom properties in every component's
+    // defaults. Updating only the root token leaves those per-component
+    // values (usually `Inter`) shadowing the selected global family.
+    for defaults in theme.defaults_mut().components.values_mut() {
+        replace_ui_font_defaults(defaults, family);
+    }
+    for module in theme.modules_mut().values_mut() {
+        for defaults in module.defaults.components.values_mut() {
+            replace_ui_font_defaults(defaults, family);
+        }
+    }
+}
+
+fn replace_ui_font_defaults(defaults: &mut mesh_core_theme::ComponentDefaults, family: &str) {
+    for property in [
+        "--typography-family",
+        "--typography-family-brand",
+        "--typography-family-plain",
+    ] {
+        if defaults.contains_key(property) {
+            defaults.insert(property.into(), family.into());
+        }
+    }
 }

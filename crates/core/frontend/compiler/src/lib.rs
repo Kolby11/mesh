@@ -531,9 +531,9 @@ impl CompiledFrontendModule {
             .insert("id".into(), self.manifest.package.id.clone());
         root.computed_style = match mode {
             FrontendRenderMode::Surface => {
-                style::surface_style(&self.manifest.package.id, width, height)
+                style::surface_style(theme, &self.manifest.package.id, width, height)
             }
-            FrontendRenderMode::Embedded => style::embedded_root_style(),
+            FrontendRenderMode::Embedded => style::embedded_root_style(theme),
         };
 
         if let Some(accessibility) = &self.manifest.accessibility {
@@ -1561,6 +1561,37 @@ mod tests {
         );
         assert!(surface.layout.width > 0.0);
         assert!(surface.layout.height > 0.0);
+    }
+
+    #[test]
+    fn surface_roots_inherit_the_active_ui_font_family() {
+        let compiled = make_test_module("<template><text>font test</text></template>");
+        let mut theme = mesh_core_theme::default_theme();
+        theme.set_token(
+            "typography.family",
+            mesh_core_theme::TokenValue::String("DejaVu Serif".into()),
+            mesh_core_theme::ThemeProvenance::UserOverride,
+        );
+
+        let surface = compiled.build_preview_tree(&theme, 400, 300);
+        let embedded = compiled.build_tree_with_state(
+            &theme,
+            400,
+            300,
+            None,
+            FrontendRenderMode::Embedded,
+            "test/embedded-font",
+            None,
+            None,
+        );
+
+        for tree in [&surface, &embedded] {
+            assert_eq!(tree.computed_style.font_family.as_ref(), "DejaVu Serif");
+            assert_eq!(
+                tree.children[0].computed_style.font_family.as_ref(),
+                "DejaVu Serif"
+            );
+        }
     }
 
     #[test]

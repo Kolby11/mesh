@@ -251,6 +251,15 @@ pub fn set_tooltip_paint_opacity(opacity: f32) {
     });
 }
 
+/// Set the font family used by the next tooltip paint on this thread's
+/// renderer. Tooltip text is an overlay rather than a display-list node, so
+/// the shell passes the active typography token through this render setting.
+pub fn set_tooltip_paint_font_family(family: impl Into<String>) {
+    FRONTEND_RENDERER.with(|engine| {
+        engine.borrow().set_tooltip_font_family(family);
+    });
+}
+
 /// When `centered` is true the next tooltip paint treats its X coordinate as
 /// the horizontal center of the tooltip box rather than the left edge.
 /// The shell sets this for element-anchored placements (bottom/top) so the

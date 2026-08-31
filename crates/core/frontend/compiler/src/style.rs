@@ -3,6 +3,7 @@ use mesh_core_elements::style::{
     FlexDirection, StyleNodeAttrs, StylePropertyMask, selector_matches_attrs,
 };
 use mesh_core_elements::{ComputedStyle, Dimension, ElementState, StyleContext};
+use mesh_core_theme::{Theme, TokenValue};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -335,8 +336,27 @@ fn resolve_dimension_for_context(dimension: Dimension, available: f32) -> f32 {
     }
 }
 
-pub(crate) fn surface_style(_surface_id: &str, width: u32, height: u32) -> ComputedStyle {
+fn ui_font_family(theme: &Theme) -> String {
+    theme
+        .resolve_token_value("typography.family")
+        .ok()
+        .flatten()
+        .and_then(|value| match value {
+            TokenValue::String(value) => Some(value),
+            TokenValue::Number(_) | TokenValue::Bool(_) => None,
+        })
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "Inter".into())
+}
+
+pub(crate) fn surface_style(
+    theme: &Theme,
+    _surface_id: &str,
+    width: u32,
+    height: u32,
+) -> ComputedStyle {
     let mut style = ComputedStyle::default();
+    style.font_family = ui_font_family(theme).into();
     style.direction = FlexDirection::Column;
     style.width = mesh_core_elements::Dimension::Px(width as f32);
     style.height = mesh_core_elements::Dimension::Px(height as f32);
@@ -353,8 +373,9 @@ pub(crate) fn synthetic_wrapper_style() -> ComputedStyle {
     style
 }
 
-pub(crate) fn embedded_root_style() -> ComputedStyle {
+pub(crate) fn embedded_root_style(theme: &Theme) -> ComputedStyle {
     let mut style = ComputedStyle::default();
+    style.font_family = ui_font_family(theme).into();
     style.direction = FlexDirection::Column;
     style
 }

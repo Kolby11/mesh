@@ -4,11 +4,11 @@
       "default_locale": "sk"
     }
   },
-  "revision": 62,
+  "revision": 83,
   "schemaVersion": 1,
   "shell": {
     "fonts": {
-      "ui_family": "JetBrainsMono NFP"
+      "ui_family": "CaskaydiaCove NF"
     },
     "i18n": {
       "fallback_locale": "en",
@@ -16,7 +16,7 @@
       "policy": "manual"
     },
     "icons": {
-      "default_pack": "Bibata-Modern-Amber-Right"
+      "default_pack": "Bibata-Modern-Classic"
     },
     "render": {
       "blur": {

@@ -1096,6 +1096,24 @@ fn built_in_interfaces_compile_and_expose_their_methods() {
     }
 }
 
+#[test]
+fn selected_ui_font_reaches_component_text_defaults() {
+    let mut theme = mesh_core_theme::default_theme();
+    super::super::surface_layout::apply_font_family(&mut theme, Some("DejaVu Serif"));
+
+    let resolver = mesh_core_elements::style::StyleResolver::new(&theme);
+    let style = resolver.resolve_node_style(
+        &[],
+        "text",
+        &[],
+        None,
+        mesh_core_elements::StyleContext::default(),
+        mesh_core_elements::ElementState::default(),
+    );
+
+    assert_eq!(style.font_family.as_ref(), "DejaVu Serif");
+}
+
 /// Live component dispatch authorizes published events against the catalog,
 /// not the shell operation registry, so this is the path that rejected every
 /// theme change with "Unknown shell channel 'mesh.theme.set_theme'".

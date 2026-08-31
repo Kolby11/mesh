@@ -160,6 +160,38 @@ fn tooltip_chrome_is_drawn_inside_painter_layer() {
 }
 
 #[test]
+fn tooltip_geometry_uses_the_configured_font_family() {
+    let mut database = fontdb::Database::new();
+    database.load_system_fonts();
+    SharedTextMeasurer.set_font_database(database);
+
+    let backend = RecordingPaintBackend::default();
+    let recorded = backend.clone();
+    let engine = FrontendRenderEngine::with_paint_backend(Box::new(backend));
+    let font_family = "monospace";
+    let text = "mmmmmmmmmmmmmmmmmmmm";
+    let mut buffer = PixelBuffer::new(360, 48);
+
+    engine.set_tooltip_font_family(font_family);
+    engine.render_tooltip(text, 20.0, 10.0, &mut buffer, 1.0);
+
+    let (text_width, _) =
+        SharedTextMeasurer.measure_styled(text, font_family, 12.0, 400, 1.3, Some(320.0));
+    let expected_width = text_width.ceil() as i32 + 16;
+    let painted_width = recorded
+        .recorded_commands()
+        .into_iter()
+        .filter_map(|command| match command {
+            PainterCommand::DrawRoundedRect { rect, .. } => Some(rect.width),
+            _ => None,
+        })
+        .nth(1)
+        .expect("tooltip background command");
+
+    assert_eq!(painted_width, expected_width);
+}
+
+#[test]
 fn tooltip_rounded_corner_outside_shape_stays_transparent_to_underlay() {
     let engine = FrontendRenderEngine::new();
     let mut buffer = PixelBuffer::new(96, 48);

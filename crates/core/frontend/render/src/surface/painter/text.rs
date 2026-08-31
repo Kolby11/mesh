@@ -1254,10 +1254,16 @@ impl FrontendRenderEngine {
         let pad_h = (8.0 * scale) as i32;
         let pad_v = (5.0 * scale) as i32;
         let max_text_w = 320.0 * scale;
+        let font_family = self.tooltip_font_family();
 
-        let (text_w, text_h) =
-            self.text_renderer
-                .measure_styled(text, "Inter", font_size, 400, 1.3, Some(max_text_w));
+        let (text_w, text_h) = self.text_renderer.measure_styled(
+            text,
+            &font_family,
+            font_size,
+            400,
+            1.3,
+            Some(max_text_w),
+        );
 
         let box_w =
             (text_w.ceil() as i32 + pad_h * 2).min((max_text_w + pad_h as f32 * 2.0) as i32);
@@ -1385,7 +1391,7 @@ impl FrontendRenderEngine {
         );
         self.text_renderer.render_clipped(
             text,
-            "Inter",
+            &font_family,
             font_size,
             400,
             1.3,
