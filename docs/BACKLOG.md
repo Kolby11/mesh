@@ -113,9 +113,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Component language
 
-- [ ] Make the `<props>` contract one normalized typed value pipeline: reject
-      invalid constraints/coercions and retain the highest valid precedence value
-      when a later settings or instance override is invalid.
 - [ ] Derive surface geometry from the root component's measured CSS box and
       delete the hand-written `mesh.surface.exclusive_zone` and
       `mesh.surface.margins`, which duplicate it and drift silently.

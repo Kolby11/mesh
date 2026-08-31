@@ -1,5 +1,5 @@
 use mesh_core_component::{
-    PropDef, PropsBlock, json_to_prop_value_ref, prop_value_to_json, validate_prop_value,
+    PropDef, PropsBlock, json_to_prop_value_ref, normalize_prop_value, prop_value_to_json,
 };
 use mesh_core_config::validate::{
     FieldKind, FieldSpec, SettingsDiagnostic, unknown_key_diagnostic_from, validate_object,
@@ -949,14 +949,12 @@ fn validate_prop_map(
             continue;
         };
         let path = format!("{prefix}.{name}");
-        let valid = json_to_prop_value_ref(value).ok().and_then(|prop_value| {
-            validate_prop_value(def, &prop_value)
-                .ok()
-                .map(|_| prop_value)
-        });
+        let valid = json_to_prop_value_ref(value)
+            .ok()
+            .and_then(|prop_value| normalize_prop_value(def, prop_value).ok());
         match valid {
-            Some(_) => {
-                accepted.insert(name.clone(), value.clone());
+            Some(value) => {
+                accepted.insert(name.clone(), prop_value_to_json(&value));
             }
             None => diagnostics.push(SettingsDiagnostic::error(
                 namespace,
@@ -972,7 +970,7 @@ fn validate_prop_map(
 fn prop_value_error(def: &PropDef, value: &serde_json::Value) -> String {
     json_to_prop_value_ref(value)
         .ok()
-        .and_then(|value| validate_prop_value(def, &value).err())
+        .and_then(|value| normalize_prop_value(def, value).err())
         .map(|error| error.message)
         .unwrap_or_else(|| {
             format!(
@@ -1853,6 +1851,37 @@ mod tests {
         );
         assert!(state.effective.pointer("/props/global/density").is_none());
         assert!(state.effective.pointer("/props/global/anim_ms").is_none());
+    }
+
+    #[test]
+    fn declared_duration_settings_are_normalized_before_storage() {
+        let manifest = manifest_with_surface_layout(SurfaceLayoutSection::default());
+        let props = declared_props();
+        let state = resolve_frontend_module_settings_with_props(
+            "@mesh/test",
+            serde_json::json!({
+                "props": {
+                    "global": { "anim_ms": "240ms" },
+                    "instances": { "one": { "anim_ms": "900ms" } }
+                }
+            }),
+            &manifest,
+            Some(&props),
+        );
+
+        assert_eq!(
+            state.props.global.get("anim_ms"),
+            Some(&serde_json::json!(240.0))
+        );
+        assert_eq!(state.props.instances.get("one"), Some(&BTreeMap::new()));
+        assert_eq!(
+            state.effective.pointer("/props/global/anim_ms"),
+            Some(&serde_json::json!(240.0))
+        );
+        assert_eq!(
+            state.effective.pointer("/props/instances/one"),
+            Some(&serde_json::json!({}))
+        );
     }
 
     #[test]

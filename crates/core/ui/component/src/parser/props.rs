@@ -12,8 +12,8 @@
 //! ```
 
 use crate::{
-    LocalizedLabel, PropDef, PropType, PropValue, PropsBlock, SourceSpan, validate_prop_definition,
-    validate_prop_value,
+    LocalizedLabel, PropDef, PropType, PropValue, PropsBlock, SourceSpan, normalize_prop_value,
+    validate_prop_definition,
 };
 
 use super::ParseError;
@@ -378,15 +378,15 @@ fn build_prop(
 
     validate_prop_definition(&def).map_err(|err| invalid(err.message))?;
 
-    if let Some(default) = &def.default {
-        validate_prop_value(&def, default).map_err(|err| {
+    if let Some(default) = def.default.take() {
+        def.default = Some(normalize_prop_value(&def, default).map_err(|err| {
             invalid(format!(
                 "prop `{}` default is invalid for type `{}`: {}",
                 def.name,
                 def.ty.as_str(),
                 err
             ))
-        })?;
+        })?);
     }
 
     Ok(def)

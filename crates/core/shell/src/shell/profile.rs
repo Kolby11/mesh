@@ -1276,7 +1276,7 @@ impl Shell {
             .map(|id| format!("props.instances.{id}"))
             .unwrap_or_else(|| "props.global".to_string());
 
-        if let Some(value) = value.as_ref() {
+        let normalized_value = if let Some(value) = value.as_ref() {
             let parsed = mesh_core_component::json_to_prop_value_ref(value).map_err(|error| {
                 ShellRunError::FrontendComposition {
                     message: format!(
@@ -1284,12 +1284,14 @@ impl Shell {
                     ),
                 }
             })?;
-            mesh_core_component::validate_prop_value(&definition, &parsed).map_err(|error| {
-                ShellRunError::FrontendComposition {
+            let normalized = mesh_core_component::normalize_prop_value(&definition, parsed)
+                .map_err(|error| ShellRunError::FrontendComposition {
                     message: format!("invalid setting {module_id}.{settings_path}.{prop}: {error}"),
-                }
-            })?;
-        }
+                })?;
+            Some(mesh_core_component::prop_value_to_json(&normalized))
+        } else {
+            None
+        };
 
         let candidate = self.prepare_control_plane_settings(|shared, profile| {
             if let Some(profile) = profile {
@@ -1297,13 +1299,18 @@ impl Shell {
                     .settings
                     .entry(module_id.to_string())
                     .or_insert_with(|| serde_json::json!({}));
-                update_module_prop_override(namespace, instance_id, prop, value);
+                update_module_prop_override(namespace, instance_id, prop, normalized_value.clone());
                 if namespace.as_object().is_some_and(serde_json::Map::is_empty) {
                     profile.settings.remove(module_id);
                 }
             } else {
                 let mut namespace = shared.namespace(module_id);
-                update_module_prop_override(&mut namespace, instance_id, prop, value);
+                update_module_prop_override(
+                    &mut namespace,
+                    instance_id,
+                    prop,
+                    normalized_value.clone(),
+                );
                 shared.set_namespace(module_id, namespace);
             }
             Ok(())

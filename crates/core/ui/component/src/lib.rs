@@ -420,7 +420,37 @@ fn is_valid_prop_unit(ty: PropType, unit: &str) -> bool {
     }
 }
 
+/// Normalize one value to the representation shared by settings, composition,
+/// script state, CSS projection, and generated controls, then validate it.
+///
+/// The duration type is authored as either milliseconds or an `<n>ms` CSS
+/// spelling, but its Lua/settings contract is milliseconds as a number. CSS
+/// domain strings also discard insignificant surrounding whitespace here so a
+/// value cannot change shape merely by crossing an ingress boundary.
+pub fn normalize_prop_value(
+    def: &PropDef,
+    value: PropValue,
+) -> Result<PropValue, PropValidationError> {
+    let value = match (def.ty, value) {
+        (PropType::Duration, PropValue::String(value)) => parse_duration_ms(&value)
+            .map(PropValue::Number)
+            .unwrap_or(PropValue::String(value)),
+        (
+            PropType::Size | PropType::Color | PropType::Token | PropType::Icon,
+            PropValue::String(value),
+        ) => PropValue::String(value.trim().to_string()),
+        (_, value) => value,
+    };
+    validate_prop_value_raw(def, &value)?;
+    Ok(value)
+}
+
+/// Validate a value without changing the caller's owned representation.
 pub fn validate_prop_value(def: &PropDef, value: &PropValue) -> Result<(), PropValidationError> {
+    normalize_prop_value(def, value.clone()).map(|_| ())
+}
+
+fn validate_prop_value_raw(def: &PropDef, value: &PropValue) -> Result<(), PropValidationError> {
     match def.ty {
         PropType::Size => validate_size_prop(def, value),
         PropType::Number => validate_number_prop(def, value),
@@ -453,18 +483,11 @@ pub fn validate_prop_value(def: &PropDef, value: &PropValue) -> Result<(), PropV
 }
 
 pub fn prop_value_to_css(def: &PropDef, value: &PropValue) -> Result<String, PropValidationError> {
-    validate_prop_value(def, value)?;
-    Ok(match (def.ty, value) {
+    let value = normalize_prop_value(def, value.clone())?;
+    Ok(match (def.ty, &value) {
         (PropType::Bool, PropValue::Bool(value)) => if *value { "1" } else { "0" }.to_string(),
         (PropType::Duration, PropValue::Number(value)) => {
             format!("{}ms", format_prop_number(*value))
-        }
-        (PropType::Duration, PropValue::String(value)) => {
-            if value.trim().parse::<f64>().is_ok() {
-                format!("{}ms", value.trim())
-            } else {
-                value.clone()
-            }
         }
         (PropType::Int, PropValue::Number(value)) => format!("{}", *value as i64),
         (_, PropValue::String(value)) => value.clone(),
@@ -601,6 +624,33 @@ pub fn json_to_prop_value_ref(value: &serde_json::Value) -> Result<PropValue, Js
         serde_json::Value::Array(_) => Err(JsonPropValueError::Array),
         serde_json::Value::Object(_) => Err(JsonPropValueError::Object),
     }
+}
+
+/// Parse a static component attribute according to a child's prop type and
+/// return the same normalized value used by every JSON/runtime ingress.
+///
+/// Static attributes are lexed as text, so numeric, boolean, and duration
+/// literals need a type-directed parse. Dynamic bindings must use
+/// [`json_to_prop_value_ref`] instead and never receive this literal syntax
+/// treatment.
+pub fn parse_prop_literal(def: &PropDef, value: &str) -> Result<PropValue, PropValidationError> {
+    let value = match def.ty {
+        PropType::Bool => match value.trim() {
+            "" | "true" | "1" => PropValue::Bool(true),
+            "false" | "0" => PropValue::Bool(false),
+            _ => PropValue::String(value.to_string()),
+        },
+        PropType::Size | PropType::Number | PropType::Int => value
+            .trim()
+            .parse::<f64>()
+            .map(PropValue::Number)
+            .unwrap_or_else(|_| PropValue::String(value.to_string())),
+        PropType::Duration => PropValue::String(value.to_string()),
+        PropType::Enum | PropType::String | PropType::Color | PropType::Token | PropType::Icon => {
+            PropValue::String(value.to_string())
+        }
+    };
+    normalize_prop_value(def, value)
 }
 
 fn validate_size_prop(def: &PropDef, value: &PropValue) -> Result<(), PropValidationError> {
@@ -920,6 +970,35 @@ mod prop_value_conversion_tests {
         assert_eq!(
             json_to_prop_value_ref(&serde_json::Value::Null),
             Err(JsonPropValueError::Null)
+        );
+    }
+
+    #[test]
+    fn prop_literals_share_normalization_and_constraint_validation() {
+        let component = parse_component(
+            r#"
+<props>
+  delay: { type: "duration", default: "120ms", min: 0, max: 500 }
+</props>
+<template><box /></template>
+"#,
+        )
+        .expect("component with duration prop");
+        let definition = &component.props.expect("props block").props[0];
+
+        assert_eq!(
+            definition.default,
+            Some(PropValue::Number(120.0)),
+            "duration defaults use the Lua/settings number representation"
+        );
+        assert_eq!(
+            parse_prop_literal(definition, " 240ms "),
+            Ok(PropValue::Number(240.0))
+        );
+        assert!(parse_prop_literal(definition, "600ms").is_err());
+        assert_eq!(
+            normalize_prop_value(definition, PropValue::String("300ms".into())),
+            Ok(PropValue::Number(300.0))
         );
     }
 }

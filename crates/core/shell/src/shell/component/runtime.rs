@@ -446,7 +446,11 @@ impl FrontendSurfaceComponent {
             );
             match current.get(&def.name) {
                 Some(value) => match validate_json_prop(def, value.clone()) {
-                    Ok(_) => {
+                    Ok(value) => {
+                        if current.get(&def.name) != Some(&value) {
+                            normalized.insert(def.name.clone(), value);
+                            changed = true;
+                        }
                         if let Some(diagnostics) = diagnostics {
                             diagnostics.resolve_issue(&issue_code);
                         }
@@ -532,6 +536,49 @@ impl FrontendSurfaceComponent {
             .unwrap_or_else(|| Arc::new(Mutex::new(Vec::new())))
     }
 
+    fn settings_json_for_component(
+        &self,
+        manifest: &mesh_core_module::Manifest,
+        component: &mesh_core_component::ComponentFile,
+    ) -> serde_json::Value {
+        if manifest.package.id == self.compiled.manifest.package.id {
+            return self.settings_json.clone();
+        }
+        let state = resolve_frontend_module_settings_with_props(
+            &manifest.package.id,
+            self.settings.namespace(&manifest.package.id),
+            manifest,
+            component.props.as_ref(),
+        );
+        mesh_core_config::log_settings_diagnostics(
+            "embedded component settings",
+            &state.diagnostics,
+        );
+        state.effective
+    }
+
+    fn refresh_existing_runtime_props(
+        diagnostics: &Option<Diagnostics>,
+        runtime: &mut EmbeddedFrontendRuntime,
+        component: &mesh_core_component::ComponentFile,
+        props: &HashMap<String, serde_json::Value>,
+        settings_json: &serde_json::Value,
+        instance_key: &str,
+    ) -> Result<(), ScriptError> {
+        let next_host_props = resolved_props_json(component, props, settings_json, instance_key);
+        let merged_props = merge_reloaded_props(
+            runtime.script_ctx.state().get_ref("props"),
+            &runtime.host_props,
+            &next_host_props,
+        );
+        runtime.host_props = next_host_props;
+        runtime
+            .script_ctx
+            .set_member_state_if_changed("props", merged_props)?;
+        Self::normalize_script_props(diagnostics, runtime);
+        Ok(())
+    }
+
     pub(super) fn create_runtime_for_component(
         &self,
         instance_key: &str,
@@ -594,30 +641,12 @@ impl FrontendSurfaceComponent {
         for (key, value) in props {
             script_ctx.state_mut().set(key.clone(), value.clone());
         }
-        // Imported modules own their settings just like top-level surfaces do.
-        // Falling back to the host surface's settings made an embedded audio,
-        // language, or theme module accidentally inherit the navigation bar's
-        // global props instead of reading its own namespace.
-        let imported_settings =
-            (manifest.package.id != self.compiled.manifest.package.id).then(|| {
-                let state = resolve_frontend_module_settings_with_props(
-                    &manifest.package.id,
-                    self.settings.namespace(&manifest.package.id),
-                    manifest,
-                    component.props.as_ref(),
-                );
-                mesh_core_config::log_settings_diagnostics(
-                    "imported component settings",
-                    &state.diagnostics,
-                );
-                state.effective
-            });
-        let settings_json = imported_settings.as_ref().unwrap_or(&self.settings_json);
+        let settings_json = self.settings_json_for_component(manifest, component);
         let host_props = publish_resolved_props(
             &mut script_ctx,
             component,
             props,
-            settings_json,
+            &settings_json,
             instance_key,
         )
         .map_err(|source| ComponentError::Script {
@@ -742,6 +771,8 @@ impl FrontendSurfaceComponent {
         compiled: &mesh_core_frontend::CompiledFrontendModule,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<(), ComponentError> {
+        let settings_json =
+            self.settings_json_for_component(&compiled.manifest, &compiled.component);
         let existing_generation = {
             let mut runtimes = self.runtimes.lock().unwrap();
             if let Some(runtime) = runtimes.get_mut(instance_key) {
@@ -750,6 +781,18 @@ impl FrontendSurfaceComponent {
                         component_id: runtime.module_id.clone(),
                         source,
                     }
+                })?;
+                Self::refresh_existing_runtime_props(
+                    &self.diagnostics,
+                    runtime,
+                    &compiled.component,
+                    props,
+                    &settings_json,
+                    instance_key,
+                )
+                .map_err(|source| ComponentError::Script {
+                    component_id: runtime.module_id.clone(),
+                    source,
                 })?;
                 Some(runtime.script_ctx.state().mutation_generation())
             } else {
@@ -812,6 +855,7 @@ impl FrontendSurfaceComponent {
         component: &mesh_core_component::ComponentFile,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<(), ComponentError> {
+        let settings_json = self.settings_json_for_component(host_manifest, component);
         let existing_generation = {
             let mut runtimes = self.runtimes.lock().unwrap();
             if let Some(runtime) = runtimes.get_mut(instance_key) {
@@ -820,6 +864,18 @@ impl FrontendSurfaceComponent {
                         component_id: runtime.module_id.clone(),
                         source,
                     }
+                })?;
+                Self::refresh_existing_runtime_props(
+                    &self.diagnostics,
+                    runtime,
+                    component,
+                    props,
+                    &settings_json,
+                    instance_key,
+                )
+                .map_err(|source| ComponentError::Script {
+                    component_id: runtime.module_id.clone(),
+                    source,
                 })?;
                 Some(runtime.script_ctx.state().mutation_generation())
             } else {
@@ -1826,9 +1882,9 @@ fn validate_json_prop(
             def.ty.lua_type()
         )
     })?;
-    mesh_core_component::validate_prop_value(def, &prop_value)
-        .map(|_| value)
-        .map_err(|error| error.message)
+    let normalized = mesh_core_component::normalize_prop_value(def, prop_value)
+        .map_err(|error| error.message)?;
+    Ok(mesh_core_component::prop_value_to_json(&normalized))
 }
 
 pub(super) fn script_has_service_read(
@@ -1902,6 +1958,39 @@ mod prop_resolution_tests {
         assert_eq!(
             resolved_props_json(&component, &instance_props, &settings, "instance"),
             serde_json::json!({ "width": "20px" })
+        );
+    }
+
+    #[test]
+    fn duration_string_overrides_are_normalized_before_precedence_resolution() {
+        let component = mesh_core_component::parse_component(
+            r#"
+<props>
+  delay: { type: "duration", default: "120ms", min: 0, max: 600 }
+</props>
+<template><box /></template>
+"#,
+        )
+        .expect("component with duration prop");
+
+        assert_eq!(
+            resolved_props_json(
+                &component,
+                &HashMap::new(),
+                &serde_json::json!({ "props": { "global": { "delay": "240ms" } } }),
+                "instance",
+            ),
+            serde_json::json!({ "delay": 240.0 })
+        );
+        assert_eq!(
+            resolved_props_json(
+                &component,
+                &HashMap::new(),
+                &serde_json::json!({ "props": { "global": { "delay": "900ms" } } }),
+                "instance",
+            ),
+            serde_json::json!({ "delay": 120.0 }),
+            "an invalid later value leaves the highest valid lower layer"
         );
     }
 }

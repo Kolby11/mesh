@@ -1,8 +1,8 @@
 use crate::{CompiledFrontendModule, CompiledFrontendRevision};
 
 use mesh_core_component::{
-    ComponentFile, ComponentImportTarget, ParseDiagnosticCategory, PropDef, PropType, PropValue,
-    SourceSpan, normalized_public_prop_schema, parse_component, referenced_identifiers,
+    ComponentFile, ComponentImportTarget, ParseDiagnosticCategory, PropDef, PropValue, SourceSpan,
+    normalized_public_prop_schema, parse_component, referenced_identifiers,
     template::{Attribute, AttributeValue, TemplateNode},
 };
 use mesh_core_module::{Manifest, ModuleType};
@@ -919,22 +919,16 @@ pub fn validate_component_import_props(
         };
 
         if let AttributeValue::Static(value) = &attribute.value {
-            let parsed = static_prop_value(definition, value).map_err(|message| {
+            static_prop_value(definition, value).map_err(|message| {
                 component_prop_error(
                     parent_path,
                     &reference.name,
                     &attribute.name,
                     attribute.span.unwrap_or(reference.span),
-                    message,
-                )
-            })?;
-            mesh_core_component::validate_prop_value(definition, &parsed).map_err(|error| {
-                component_prop_error(
-                    parent_path,
-                    &reference.name,
-                    &attribute.name,
-                    attribute.span.unwrap_or(reference.span),
-                    format!("invalid value for child prop `{}`: {error}", attribute.name),
+                    format!(
+                        "invalid value for child prop `{}`: {message}",
+                        attribute.name
+                    ),
                 )
             })?;
         }
@@ -952,33 +946,12 @@ fn public_component_fields(component: &ComponentFile) -> HashSet<String> {
 }
 
 fn static_prop_value(definition: &PropDef, value: &str) -> Result<PropValue, String> {
-    match definition.ty {
-        PropType::Bool => match value.trim() {
-            "" | "true" | "1" => Ok(PropValue::Bool(true)),
-            "false" | "0" => Ok(PropValue::Bool(false)),
-            other => Err(format!(
-                "child prop `{}` expects a boolean literal, got `{other}`",
-                definition.name
-            )),
-        },
-        PropType::Number | PropType::Int => value
-            .trim()
-            .parse::<f64>()
-            .map(PropValue::Number)
-            .map_err(|_| {
-                format!(
-                    "child prop `{}` expects a numeric literal, got `{value}`",
-                    definition.name
-                )
-            }),
-        PropType::Duration if value.trim().parse::<f64>().is_ok() => Ok(PropValue::Number(
-            value
-                .trim()
-                .parse::<f64>()
-                .expect("checked numeric duration"),
-        )),
-        _ => Ok(PropValue::String(value.to_string())),
-    }
+    mesh_core_component::parse_prop_literal(definition, value).map_err(|error| {
+        format!(
+            "child prop `{}` has invalid literal `{value}`: {}",
+            definition.name, error.message
+        )
+    })
 }
 
 fn component_prop_error(

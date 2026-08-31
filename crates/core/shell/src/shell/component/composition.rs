@@ -170,7 +170,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             let marks_before = self.memo_effect_marks();
             let build_started = self.profiling_enabled.then(std::time::Instant::now);
             let bind_this = props.bind_this.clone();
-            let props_json = runtime_props_json(&props.values);
+            let props_json = normalized_runtime_props_json(props, &resolved.component);
             let mut node = self.render_local_component(
                 &compiled.manifest,
                 alias,
@@ -260,6 +260,10 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             return Some(placeholder);
         }
 
+        let Some(entry) = self.frontend_catalog.modules.get(&module_id) else {
+            return Some(self.build_error_widget(format!("missing embedded module '{module_id}'")));
+        };
+
         let instance_key = self.instance_keys.borrow_mut().intern_embedded_occurrence(
             host_instance_key,
             "import",
@@ -280,7 +284,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         }
         let marks_before = self.memo_effect_marks();
         let build_started = self.profiling_enabled.then(std::time::Instant::now);
-        let props_json = runtime_props_json(&props.values);
+        let props_json = normalized_runtime_props_json(props, &entry.compiled.component);
         let bind_this = props.bind_this.clone();
         let mut node = self.render_embedded_instance(
             &instance_key,
@@ -524,6 +528,59 @@ fn runtime_props_json(props: &AttributeMap) -> HashMap<String, serde_json::Value
         props_json.insert(key.as_str().to_string(), value);
     }
     props_json
+}
+
+/// Normalize values at the component boundary before they enter the child
+/// runtime. Static attributes arrive as strings even when the child declares a
+/// number, boolean, or duration prop; dynamic bindings retain their JSON type
+/// and must use the strict JSON conversion instead of receiving literal
+/// syntax coercion.
+fn normalized_runtime_props_json(
+    props: &ComponentCompositionProps,
+    component: &mesh_core_component::ComponentFile,
+) -> HashMap<String, serde_json::Value> {
+    let mut normalized = runtime_props_json(&props.values);
+    let definitions = component
+        .props
+        .as_ref()
+        .map(|block| {
+            block
+                .props
+                .iter()
+                .map(|definition| (definition.name.as_str(), definition))
+                .collect::<HashMap<_, _>>()
+        })
+        .unwrap_or_default();
+
+    for (key, value) in props.values.iter_values() {
+        let Some(definition) = definitions.get(key.as_str()) else {
+            continue;
+        };
+        let raw = value.to_json_value();
+        let normalized_value = if props.bindings.get(key.as_str()).is_some() {
+            mesh_core_component::json_to_prop_value_ref(&raw)
+                .ok()
+                .and_then(|value| mesh_core_component::normalize_prop_value(definition, value).ok())
+        } else {
+            let literal = value.to_legacy_string();
+            mesh_core_component::parse_prop_literal(definition, &literal).ok()
+        };
+        match normalized_value {
+            Some(value) => {
+                normalized.insert(
+                    key.as_str().to_string(),
+                    mesh_core_component::prop_value_to_json(&value),
+                );
+            }
+            None => {
+                // Let host defaults/settings resolve this declared prop. An
+                // invalid child value must not survive as a raw top-level
+                // state field and accidentally shadow the typed projection.
+                normalized.remove(key.as_str());
+            }
+        }
+    }
+    normalized
 }
 
 fn apply_prop_handler_calls(
@@ -968,6 +1025,47 @@ mod tests {
             props_json.get("weird"),
             Some(&serde_json::Value::String("[not json".into()))
         );
+    }
+
+    #[test]
+    fn declared_child_props_use_typed_static_and_dynamic_boundaries() {
+        let component = mesh_core_component::parse_component(
+            r#"
+<props>
+  count: { type: "number" }
+  enabled: { type: "bool" }
+  delay: { type: "duration" }
+</props>
+<template><box /></template>
+"#,
+        )
+        .expect("component with typed props");
+        let static_props = ComponentCompositionProps {
+            values: AttributeMap::from([
+                ("count".into(), "42".into()),
+                ("enabled".into(), "".into()),
+                ("delay".into(), "120ms".into()),
+            ]),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            normalized_runtime_props_json(&static_props, &component),
+            HashMap::from([
+                ("count".into(), serde_json::json!(42.0)),
+                ("enabled".into(), serde_json::json!(true)),
+                ("delay".into(), serde_json::json!(120.0)),
+            ])
+        );
+
+        let mut dynamic_props = ComponentCompositionProps::default();
+        dynamic_props
+            .values
+            .insert_value("count".into(), serde_json::json!("42"));
+        dynamic_props
+            .bindings
+            .insert("count".into(), "count_value".into());
+        assert!(!normalized_runtime_props_json(&dynamic_props, &component).contains_key("count"));
     }
 
     // cargo test -p mesh-core-shell --release -- presized_runtime_props_json_beats_filtered_collect --ignored --nocapture
