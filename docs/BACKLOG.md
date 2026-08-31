@@ -113,9 +113,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Component language
 
-- [ ] Replace lossy `.mesh` block extraction and ad-hoc template preprocessing
-      with a span-preserving parser that rejects unknown/duplicate blocks,
-      malformed expressions, unsupported script languages, and discarded `<i18n>` data. [Audit](../.planning/log/sections/07-component-language/improvements.md).
 - [ ] Make component compilation resolve imports per owner, enforce module-root
       path containment, detect alias collisions/cycles, and validate child prop
       names, visibility, values, and `prop()` references before runtime.
