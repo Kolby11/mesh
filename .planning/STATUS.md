@@ -37,9 +37,8 @@ at graph commit, frontend/backend activation, candidate failure, recovery,
 quarantine, and teardown boundaries. The module lock now uses schema v3 with
 validated versions, direct dependency requirements, reverse requesters,
 composition provenance, and rollback metadata rebuilt from restored manifests.
-The next open item is unifying template expression semantics and root-scope
-validation around the real Luau parser/runtime, then enforcing imported
-public-prop and child-surface contracts.
+The next open item is splitting renderer/Wayland/package/debug policy out of
+the compiler-facing frontend host ABI.
 Host icon/font resources now use one explicit immutable graph/profile candidate
 catalog and copy-on-write registry handle, with failed preparation, recovery,
 and package rollback retaining the last-known-good snapshot. Icon resolution

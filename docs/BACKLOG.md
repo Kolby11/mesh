@@ -119,9 +119,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Frontend compiler and host
 
-- [ ] Unify template expression semantics and root-scope validation around the
-      real Luau parser/runtime, then enforce imported public-prop and
-      child-surface contracts.
 - [ ] Split the renderer/Wayland/package/debug policy out of the
       compiler-facing frontend host ABI.
 
