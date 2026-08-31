@@ -117,9 +117,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Interaction and motion
 
-- [ ] Implement or safely gate the public `box-shadow` parser and add the
-      Section 9 interaction/render/animation regression matrix.
-
 ## Frontend compiler and host
 
 - [ ] Compile, validate, watch, invalidate, and reload primary and

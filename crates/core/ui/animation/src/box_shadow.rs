@@ -1,16 +1,8 @@
-//! `box-shadow` parsing, interpolation, and rasterization.
+//! `box-shadow` parsing and interpolation for the animation API.
 //!
-//! Not currently part of `ComputedStyle`. Lands as:
-//!
-//! 1. Add `box_shadow: BoxShadow` field to `ComputedStyle`.
-//! 2. Add the `box-shadow` parser in `mesh-core-elements::style`.
-//! 3. Implement `Interpolate` for `BoxShadow` (per-component lerp).
-//! 4. Paint pass: blur a rounded-rect mask at `(offset_x, offset_y)` with
-//!    `blur_radius` into the buffer underneath the node, before drawing the
-//!    node body. `tiny_skia` provides Gaussian blur via `Pixmap::filter`.
-//!
-//! Multiple shadows per element (CSS allows comma-separated list) is a v2
-//! concern — start with a single shadow.
+//! The public animation parser intentionally supports one shadow and rejects
+//! comma-separated lists with a structured error. Rendering consumes the
+//! canonical style value after the shell has validated and lowered it.
 
 use mesh_core_elements::style::Color;
 use std::fmt;
@@ -312,5 +304,61 @@ mod tests {
             parse_box_shadow("inset inset 0 2px #000"),
             Err(BoxShadowParseError::DuplicateInset)
         );
+    }
+
+    #[test]
+    fn section9_box_shadow_parser_matrix_returns_structured_errors() {
+        let cases = [
+            ("", BoxShadowParseError::EmptyValue),
+            (
+                "0 0 #000, 1px 1px #fff",
+                BoxShadowParseError::MultipleShadows,
+            ),
+            (
+                "0 0 rgb(0, 0, 0 #000",
+                BoxShadowParseError::UnbalancedFunction,
+            ),
+            ("0 0 #ggg", BoxShadowParseError::InvalidColor("#ggg".into())),
+            (
+                "0 0 1em #000",
+                BoxShadowParseError::InvalidLength("1em".into()),
+            ),
+            ("0 0 nope", BoxShadowParseError::InvalidToken("nope".into())),
+            ("inset inset 0 0 #000", BoxShadowParseError::DuplicateInset),
+            ("0 0 #000 #fff", BoxShadowParseError::DuplicateColor),
+            ("0 #000", BoxShadowParseError::MissingOffsets),
+            ("0 0 1px", BoxShadowParseError::MissingColor),
+            ("0 0 1px 2px 3px #000", BoxShadowParseError::TooManyLengths),
+            ("0 0 -1px #000", BoxShadowParseError::NegativeBlur),
+        ];
+
+        for (value, expected) in cases {
+            let error = parse_box_shadow(value).expect_err(value);
+            assert_eq!(error, expected, "unexpected parse result for {value:?}");
+            assert!(error.to_string().contains("box-shadow"));
+        }
+    }
+
+    #[test]
+    fn section9_box_shadow_interpolation_matrix_preserves_supported_components() {
+        let from = parse_box_shadow("0 0 0 0 #00000000").unwrap();
+        let to = parse_box_shadow("10px 20px 30px 4px rgba(255, 128, 0, 0.5) inset").unwrap();
+
+        let midpoint = from.lerp(to, 0.5);
+        assert_eq!(midpoint.offset_x, 5.0);
+        assert_eq!(midpoint.offset_y, 10.0);
+        assert_eq!(midpoint.blur_radius, 15.0);
+        assert_eq!(midpoint.spread_radius, 2.0);
+        assert_eq!(
+            midpoint.color,
+            Color {
+                r: 128,
+                g: 64,
+                b: 0,
+                a: 64,
+            }
+        );
+        assert!(midpoint.inset);
+        assert!(!from.lerp(to, 0.49).inset);
     }
 }
