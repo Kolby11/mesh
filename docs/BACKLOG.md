@@ -117,9 +117,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Interaction and motion
 
-- [ ] Define a canonical interaction transaction for focus, pointer capture,
-      press origin, gesture/scroll ownership, and typed invalidation instead of
-      splitting policy between `mesh-core-interaction` and the shell.
 - [ ] Complete motion semantics: pause/resume, stable animation identity,
       cancellation/reversal, reduced-motion policy, discrete visibility timing,
       and per-keyframe easing propagation.

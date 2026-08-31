@@ -1350,9 +1350,8 @@ impl FrontendSurfaceComponent {
         keys.sort();
         keys.dedup();
         self.active_touches.clear();
-        for id in self.touch_targets.keys().copied().collect::<Vec<_>>() {
-            self.release_touch_owner(id);
-        }
+        let touch_ids = self.touch_targets.keys().copied().collect::<Vec<_>>();
+        self.release_touch_owners(&touch_ids);
         self.touch_targets.clear();
         self.touch_gestures.clear();
         self.last_tap = None;

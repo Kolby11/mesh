@@ -121,6 +121,20 @@ impl FrontendSurfaceComponent {
         self.commit_interaction_delta(transaction)
     }
 
+    pub(super) fn release_pointer_and_focus(&mut self, button: Option<u32>) -> InteractionDelta {
+        let mut transaction = self.interaction_state.begin();
+        transaction.release_pointer(button);
+        transaction.focus(None, false);
+        self.commit_interaction_delta(transaction)
+    }
+
+    pub(super) fn release_scrollbar_drag(&mut self, button: Option<u32>) -> InteractionDelta {
+        let mut transaction = self.interaction_state.begin();
+        transaction.release_pointer(button);
+        transaction.release_scroll(None);
+        self.commit_interaction_delta(transaction)
+    }
+
     pub(super) fn release_pointer_capture(&mut self, button: Option<u32>) -> InteractionDelta {
         let mut transaction = self.interaction_state.begin();
         transaction.release_pointer(button);
@@ -171,13 +185,22 @@ impl FrontendSurfaceComponent {
         self.commit_interaction_delta(transaction)
     }
 
+    pub(super) fn release_touch_owners(&mut self, touch_ids: &[i32]) -> InteractionDelta {
+        let mut transaction = self.interaction_state.begin();
+        for touch_id in touch_ids {
+            transaction.release_touch(*touch_id);
+        }
+        self.commit_interaction_delta(transaction)
+    }
+
     pub(super) fn reset_interaction_owners(&mut self) -> InteractionDelta {
         let mut transaction = self.interaction_state.begin();
         transaction.focus(None, false);
         transaction.capture_pointer(None);
         transaction.release_gesture(None);
         transaction.release_scroll(None);
-        for touch_id in self.interaction_state.touch_ids() {
+        let touch_ids = self.interaction_state.touch_ids().collect::<Vec<_>>();
+        for touch_id in touch_ids {
             transaction.release_touch(touch_id);
         }
         self.commit_interaction_delta(transaction)

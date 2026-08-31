@@ -149,8 +149,20 @@ impl InteractionInvalidation {
         self.0 == 0
     }
 
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
     fn insert(&mut self, other: Self) {
         self.0 |= other.0;
+    }
+}
+
+impl BitOr for InteractionInvalidation {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        self.union(rhs)
     }
 }
 

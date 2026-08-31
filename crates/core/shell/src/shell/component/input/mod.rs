@@ -208,8 +208,7 @@ impl FrontendSurfaceComponent {
                     return Ok(Vec::new());
                 }
                 if !pressed && self.active_scrollbar_drag.take().is_some() {
-                    self.release_pointer_capture(Some(button));
-                    self.release_scroll_owner(None);
+                    self.release_scrollbar_drag(Some(button));
                     self.invalidate_paint();
                     return Ok(Vec::new());
                 }
@@ -291,11 +290,11 @@ impl FrontendSurfaceComponent {
                             .as_deref()
                             .is_some_and(|key| self.pointer_focus_visible_for_key(tree, key));
                         self.stage_pointer_press(target.node.id, button, focus_id, focus_visible);
-                        let mut requests = if let Some(focused_key) = focusable_key {
-                            self.set_focus_target(tree, Some(focused_key), focus_visible)?
-                        } else {
-                            self.set_focus_target(tree, None, false)?
-                        };
+                        let mut requests = self.apply_focus_target_after_transaction(
+                            tree,
+                            focusable_key,
+                            focus_visible,
+                        )?;
 
                         if target.node.tag == "slider" {
                             self.active_slider_id = Some(target.node.id);
@@ -349,8 +348,9 @@ impl FrontendSurfaceComponent {
                             return Ok(requests);
                         }
                     } else {
-                        self.release_pointer_capture(Some(button));
-                        let requests = self.set_focus_target(tree, None, false)?;
+                        self.release_pointer_and_focus(Some(button));
+                        let requests =
+                            self.apply_focus_target_after_transaction(tree, None, false)?;
                         self.pointer_down_id = None;
                         self.pointer_down_bounds = None;
                         self.pointer_down_target = None;

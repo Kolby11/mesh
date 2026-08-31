@@ -10,8 +10,6 @@ impl FrontendSurfaceComponent {
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         let next_key = next_key
             .filter(|key| node_can_receive_interaction(tree, key, InteractionTarget::Focus));
-        let previous_key = self.focused_key.clone();
-        let mut requests = Vec::new();
 
         let next_id = next_key
             .as_deref()
@@ -20,6 +18,17 @@ impl FrontendSurfaceComponent {
         transaction.focus(next_id, focus_visible);
         self.commit_interaction_delta(transaction);
 
+        self.apply_focus_target_after_transaction(tree, next_key, focus_visible)
+    }
+
+    pub(super) fn apply_focus_target_after_transaction(
+        &mut self,
+        tree: &WidgetNode,
+        next_key: Option<String>,
+        focus_visible: bool,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let previous_key = self.focused_key.clone();
+        let mut requests = Vec::new();
         if previous_key != next_key {
             self.keyboard_button_press_activations.clear();
             self.input_preedits.clear();

@@ -133,6 +133,25 @@ end
         )
         .unwrap();
     assert_eq!(component.focus_visible_key.as_deref(), Some("root/0"));
+    assert_eq!(component.interaction_frame.decisions().len(), 2);
+    assert!(
+        component
+            .interaction_frame
+            .invalidation()
+            .contains(mesh_core_interaction::InteractionInvalidation::FOCUS)
+    );
+    assert!(
+        component
+            .interaction_frame
+            .invalidation()
+            .contains(mesh_core_interaction::InteractionInvalidation::POINTER_CAPTURE)
+    );
+    assert!(
+        component
+            .interaction_frame
+            .invalidation()
+            .contains(mesh_core_interaction::InteractionInvalidation::PRESS_ORIGIN)
+    );
 
     component
         .handle_input(

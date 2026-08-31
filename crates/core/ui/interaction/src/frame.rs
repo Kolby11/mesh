@@ -3,8 +3,9 @@
 //! [`InteractionState`] owns the persistent interaction state and
 //! [`InteractionTransaction`] owns one input-boundary mutation. This module
 //! owns the cross-phase hand-off: input and state changes are recorded first,
-//! then style invalidation, layout, animation, paint, and semantics advance
-//! through one ordered frame with shared revisions and dirty output.
+//! then typed invalidation, style invalidation, layout, animation, paint, and
+//! semantics advance through one ordered frame with shared revisions and dirty
+//! output.
 
 use std::fmt;
 use std::time::Instant;
@@ -13,7 +14,7 @@ use mesh_core_elements::{FrameSnapshot, NodeId};
 
 use super::transaction::{
     InteractionDecision, InteractionDelta, InteractionDirty, InteractionDirtyFlags,
-    InteractionState, PressOrigin,
+    InteractionInvalidation, InteractionState, PressOrigin,
 };
 
 /// The renderer-neutral phases of one interaction frame.
@@ -152,8 +153,8 @@ impl std::error::Error for InteractionFrameError {}
 ///
 /// The frame contains no renderer, Wayland, or script handles. Consumers can
 /// use the same state snapshot, phase revision, typed decisions, dirty nodes,
-/// and immutable tree snapshot while each subsystem remains responsible for
-/// its own work.
+/// typed invalidation, and immutable tree snapshot while each subsystem remains
+/// responsible for its own work.
 #[derive(Debug, Clone)]
 pub struct InteractionFrame {
     revision: u64,
@@ -165,8 +166,10 @@ pub struct InteractionFrame {
     state: InteractionStateSnapshot,
     dirty: InteractionDirty,
     decisions: Vec<InteractionDecision>,
+    invalidation: InteractionInvalidation,
     deferred_dirty: InteractionDirty,
     deferred_decisions: Vec<InteractionDecision>,
+    deferred_invalidation: InteractionInvalidation,
     tree_snapshot: Option<FrameSnapshot>,
 }
 
@@ -182,8 +185,10 @@ impl Default for InteractionFrame {
             state: InteractionStateSnapshot::default(),
             dirty: InteractionDirty::empty(),
             decisions: Vec::new(),
+            invalidation: InteractionInvalidation::empty(),
             deferred_dirty: InteractionDirty::empty(),
             deferred_decisions: Vec::new(),
+            deferred_invalidation: InteractionInvalidation::empty(),
             tree_snapshot: None,
         }
     }
@@ -259,6 +264,7 @@ impl InteractionFrame {
             );
             self.deferred_decisions
                 .extend(delta.decisions.iter().copied());
+            self.deferred_invalidation = self.deferred_invalidation.union(delta.invalidation);
             return;
         } else if self.phase.is_none() && self.revision == 0 {
             self.begin_next_frame(
@@ -272,6 +278,7 @@ impl InteractionFrame {
         self.advance_to_state_updated();
         self.record_dirty(delta.dirty.nodes.iter().copied(), delta.dirty.flags);
         self.decisions.extend(delta.decisions.iter().copied());
+        self.invalidation = self.invalidation.union(delta.invalidation);
     }
 
     /// Add dirty output without coupling the frame contract to a renderer.
@@ -383,6 +390,10 @@ impl InteractionFrame {
         &self.decisions
     }
 
+    pub fn invalidation(&self) -> InteractionInvalidation {
+        self.invalidation
+    }
+
     pub fn tree_snapshot(&self) -> Option<&FrameSnapshot> {
         self.tree_snapshot.as_ref()
     }
@@ -417,9 +428,11 @@ impl InteractionFrame {
         let revision = self.revision.saturating_add(1);
         let deferred_dirty = std::mem::take(&mut self.deferred_dirty);
         let deferred_decisions = std::mem::take(&mut self.deferred_decisions);
+        let deferred_invalidation = std::mem::take(&mut self.deferred_invalidation);
         *self = Self::begin(revision, state.revision, tree_revision, started_at, state);
         self.dirty = deferred_dirty;
         self.decisions = deferred_decisions;
+        self.invalidation = deferred_invalidation;
     }
 }
 
@@ -461,6 +474,11 @@ mod tests {
         assert_eq!(frame.phase(), Some(InteractionFramePhase::StateUpdated));
         assert_eq!(frame.input_revision(), state.revision());
         assert!(frame.dirty().nodes.contains(&node_id));
+        assert!(
+            frame
+                .invalidation()
+                .contains(InteractionInvalidation::FOCUS)
+        );
 
         let error = frame
             .advance(InteractionFramePhase::LayoutReady)
@@ -515,6 +533,31 @@ mod tests {
     }
 
     #[test]
+    fn frame_carries_all_typed_interaction_invalidation() {
+        let (mut state, node_id, _) = state_with_focus();
+        let mut transaction = state.begin();
+        transaction.capture_pointer(Some(PressOrigin {
+            node_id,
+            button: 0x110,
+        }));
+        transaction.claim_gesture(node_id, super::super::transaction::GestureKind::Swipe);
+        transaction.claim_scroll(node_id);
+        let delta = transaction.commit(&mut state);
+
+        let mut frame = InteractionFrame::default();
+        frame.record_interaction_delta(&delta, &state);
+
+        for invalidation in [
+            InteractionInvalidation::POINTER_CAPTURE,
+            InteractionInvalidation::PRESS_ORIGIN,
+            InteractionInvalidation::GESTURE,
+            InteractionInvalidation::SCROLL,
+        ] {
+            assert!(frame.invalidation().contains(invalidation));
+        }
+    }
+
+    #[test]
     fn preparing_after_completion_starts_a_new_frame() {
         let (state, _node_id, delta) = state_with_focus();
         let mut frame = InteractionFrame::default();
@@ -555,6 +598,11 @@ mod tests {
         frame.record_interaction_delta(&late_delta, &state);
         assert_eq!(frame.state().focus_owner, Some(node_id));
         assert_eq!(frame.decisions().len(), 1);
+        assert!(
+            frame
+                .invalidation()
+                .contains(InteractionInvalidation::FOCUS)
+        );
 
         for phase in [
             InteractionFramePhase::LayoutReady,
@@ -574,5 +622,10 @@ mod tests {
         assert_eq!(frame.revision(), previous_revision + 1);
         assert_eq!(frame.state().focus_owner, None);
         assert_eq!(frame.decisions().len(), 1);
+        assert!(
+            frame
+                .invalidation()
+                .contains(InteractionInvalidation::FOCUS)
+        );
     }
 }
