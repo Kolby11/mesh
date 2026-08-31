@@ -11,7 +11,7 @@ use mesh_core_component::ComponentFile;
 use mesh_core_elements::HandlerTarget;
 use mesh_core_elements::{
     ComponentCompositionProps, EventHandlerCall, LayoutEngine, NodeId, StyleContext, StyleResolver,
-    VariableStore, WidgetNode,
+    VariableStore, WidgetNode, validate_widget_tree,
 };
 use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
@@ -620,6 +620,18 @@ impl CompiledFrontendModule {
                     surface_root.clear_surface_root();
                 }
             }
+        }
+
+        // Do not hand duplicate or unknown nodes to layout. Compiler template
+        // validation rejects unknown source tags; this guard also covers
+        // runtime composition paths that can reuse an authored subtree.
+        if let Err(error) = validate_widget_tree(&root) {
+            tracing::error!(
+                target: "mesh::frontend::compiler",
+                error = %error,
+                "rejecting invalid widget tree before compiler layout"
+            );
+            root.children.clear();
         }
 
         // Embedded trees are laid out after composition, against the embedded

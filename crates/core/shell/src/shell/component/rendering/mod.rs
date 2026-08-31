@@ -363,6 +363,14 @@ impl FrontendSurfaceComponent {
                 .or_else(|| self.last_tree.clone())
                 .unwrap_or_else(|| self.build_error_widget(failure));
         }
+        if let Err(error) = mesh_core_elements::validate_widget_tree(&tree) {
+            tracing::error!(
+                component = %self.id(),
+                error = %error,
+                "rejecting invalid widget tree before shell finalization"
+            );
+            tree = self.build_error_widget(format!("invalid widget tree: {error}"));
+        }
         #[cfg(test)]
         {
             self.last_template_build_reused_nodes = selective

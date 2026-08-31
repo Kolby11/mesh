@@ -4,7 +4,7 @@ use crate::interaction_contract::{
     AffineClipStack, AffineTransform, InteractionTarget, NodeEligibility, child_transform,
     node_clip, node_eligibility, node_transform, root_transform,
 };
-use crate::tree::{ElementState, NodeId, WidgetNode};
+use crate::tree::{ElementState, NodeId, WidgetNode, validate_widget_tree};
 
 /// A UI event targeted at a specific node.
 #[derive(Debug, Clone, PartialEq)]
@@ -182,12 +182,28 @@ impl EventDispatcher {
 
     /// Find the deepest node at the given coordinates.
     pub fn hit_test(root: &WidgetNode, x: f32, y: f32) -> Option<NodeId> {
+        if let Err(error) = validate_widget_tree(root) {
+            tracing::error!(
+                target: "mesh::events",
+                error = %error,
+                "rejecting invalid widget tree before hit testing"
+            );
+            return None;
+        }
         hit_test_node(root, x, y, NodeEligibility::ROOT)
     }
 
     /// Apply one raw input event through the canonical stateful route and
     /// return both targeted events and the nodes needing interaction restyle.
     pub fn dispatch(&mut self, root: &mut WidgetNode, raw: &RawInputEvent) -> InputDispatchResult {
+        if let Err(error) = validate_widget_tree(root) {
+            tracing::error!(
+                target: "mesh::events",
+                error = %error,
+                "rejecting invalid widget tree before event dispatch"
+            );
+            return InputDispatchResult::default();
+        }
         let mut result = InputDispatchResult::default();
         self.reconcile_invalid_state(root, &mut result);
 
@@ -354,6 +370,14 @@ impl EventDispatcher {
         root: &mut WidgetNode,
         target: Option<NodeId>,
     ) -> InputDispatchResult {
+        if let Err(error) = validate_widget_tree(root) {
+            tracing::error!(
+                target: "mesh::events",
+                error = %error,
+                "rejecting invalid widget tree before focus update"
+            );
+            return InputDispatchResult::default();
+        }
         let mut result = InputDispatchResult::default();
         let target = target.filter(|id| node_is_focusable_target(root, *id));
         self.set_focus_inner(root, target, &mut result);
@@ -367,6 +391,18 @@ impl EventDispatcher {
 
     /// Reset all tracked state and report the nodes requiring restyle.
     pub fn reset_with_invalidation(&mut self, root: &mut WidgetNode) -> InputDispatchResult {
+        if let Err(error) = validate_widget_tree(root) {
+            tracing::error!(
+                target: "mesh::events",
+                error = %error,
+                "rejecting invalid widget tree before input reset"
+            );
+            self.hovered_node = None;
+            self.active_node = None;
+            self.focused_node = None;
+            self.pointer_capture = None;
+            return InputDispatchResult::default();
+        }
         let mut result = InputDispatchResult::default();
         if let Some(id) = self.hovered_node.take() {
             set_state_flag(root, id, |s| s.hovered = false, &mut result);
@@ -733,7 +769,7 @@ mod tests {
     use crate::style::Dimension;
 
     fn two_button_fixture() -> (WidgetNode, NodeId, NodeId) {
-        let mut root = WidgetNode::new("root");
+        let mut root = WidgetNode::new("box");
         root.computed_style.width = Dimension::Px(200.0);
         root.computed_style.height = Dimension::Px(100.0);
 
@@ -754,7 +790,7 @@ mod tests {
 
     #[test]
     fn hit_test_finds_deepest_node() {
-        let mut root = WidgetNode::new("root");
+        let mut root = WidgetNode::new("box");
         root.computed_style.width = Dimension::Px(200.0);
         root.computed_style.height = Dimension::Px(100.0);
 
@@ -775,8 +811,29 @@ mod tests {
     }
 
     #[test]
+    fn events_reject_an_unknown_element_tree() {
+        let mut root = WidgetNode::new("not-an-element");
+        let mut dispatcher = InputState::new();
+
+        assert_eq!(EventDispatcher::hit_test(&root, 0.0, 0.0), None);
+        assert!(
+            dispatcher
+                .dispatch(
+                    &mut root,
+                    &RawInputEvent::Key {
+                        keycode: 30,
+                        pressed: true,
+                        modifiers: Modifiers::default(),
+                    }
+                )
+                .events
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn dispatch_preserves_pointer_button_identity() {
-        let mut root = WidgetNode::new("root");
+        let mut root = WidgetNode::new("box");
         root.computed_style.width = Dimension::Px(200.0);
         root.computed_style.height = Dimension::Px(100.0);
         root.children = vec![WidgetNode::new("button")].into();

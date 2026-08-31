@@ -11,7 +11,7 @@ use crate::style::{
     AlignContent, AlignItems, AlignSelf, Dimension, Display, Edges, FlexDirection, FontStyle,
     JustifyContent, Overflow, Position, TextDirection, WhiteSpace,
 };
-use crate::tree::{NodeId, WidgetNode};
+use crate::tree::{NodeId, WidgetNode, validate_widget_tree};
 use taffy::TaffyTree;
 use taffy::geometry::{Point as TaffyPoint, Rect as TaffyRect, Size as TaffySize};
 use taffy::prelude::{AvailableSpace as TaffyAvailableSpace, NodeId as TaffyNodeId};
@@ -334,6 +334,14 @@ impl LayoutEngine {
         intrinsic_cache: &mut IntrinsicLayoutCache,
         measurer: Option<&dyn TextMeasurer>,
     ) {
+        if let Err(error) = validate_widget_tree(root) {
+            tracing::error!(
+                target: "mesh::layout",
+                error = %error,
+                "rejecting invalid widget tree before layout"
+            );
+            return;
+        }
         Self::compute_taffy_layout_with_cache(
             root,
             available_width,
@@ -512,6 +520,15 @@ impl LayoutEngine {
         intrinsic_cache: &mut IntrinsicLayoutCache,
         measurer: Option<&dyn TextMeasurer>,
     ) {
+        if let Err(error) = validate_widget_tree(root) {
+            tracing::error!(
+                target: "mesh::layout",
+                error = %error,
+                "rejecting invalid widget tree before incremental layout"
+            );
+            state.valid = false;
+            return;
+        }
         let text_measure_revisions = measurer
             .map(|measurer| measurer.revisions())
             .unwrap_or_default();

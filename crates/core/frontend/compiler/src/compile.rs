@@ -62,6 +62,13 @@ pub enum CompileFrontendError {
         state: String,
         span: SourceSpan,
     },
+
+    #[error("unknown element tag <{tag}> in component source {path} at bytes {span:?}")]
+    UnknownElementTag {
+        path: PathBuf,
+        tag: String,
+        span: SourceSpan,
+    },
 }
 
 /// Stable categories emitted by frontend compilation. Parser categories are
@@ -118,9 +125,9 @@ impl CompileFrontendError {
             Self::ConflictingImportAlias { .. } | Self::ImportCycle { .. } => {
                 FrontendDiagnosticCategory::Import
             }
-            Self::StandaloneComponentViolation { .. } | Self::UnsupportedPseudoState { .. } => {
-                FrontendDiagnosticCategory::Validation
-            }
+            Self::StandaloneComponentViolation { .. }
+            | Self::UnsupportedPseudoState { .. }
+            | Self::UnknownElementTag { .. } => FrontendDiagnosticCategory::Validation,
         }
     }
 
@@ -131,7 +138,8 @@ impl CompileFrontendError {
         match self {
             Self::ParseSource { span, .. }
             | Self::StandaloneComponentViolation { span, .. }
-            | Self::UnsupportedPseudoState { span, .. } => Some(*span),
+            | Self::UnsupportedPseudoState { span, .. }
+            | Self::UnknownElementTag { span, .. } => Some(*span),
             Self::NotFrontendModule { .. }
             | Self::MissingFrontendEntrypoint { .. }
             | Self::ReadSource { .. }
@@ -148,7 +156,8 @@ impl CompileFrontendError {
             | Self::ParseSource { path, .. }
             | Self::InvalidSourcePath { path, .. }
             | Self::StandaloneComponentViolation { path, .. }
-            | Self::UnsupportedPseudoState { path, .. } => Some(path),
+            | Self::UnsupportedPseudoState { path, .. }
+            | Self::UnknownElementTag { path, .. } => Some(path),
             Self::ConflictingImportAlias { owner, .. } => Some(owner),
             Self::NotFrontendModule { .. }
             | Self::MissingFrontendEntrypoint { .. }
@@ -708,6 +717,13 @@ fn validate_template_nodes(
     for node in nodes {
         match node {
             TemplateNode::Element(element) => {
+                if mesh_core_elements::element_contract_for_tag(&element.tag).is_none() {
+                    return Err(CompileFrontendError::UnknownElementTag {
+                        path: path.to_path_buf(),
+                        tag: element.tag.clone(),
+                        span: element.span,
+                    });
+                }
                 if strict_scope {
                     validate_attributes(&element.attributes, path, allowed_symbols, loop_locals)?;
                 }
@@ -1123,6 +1139,36 @@ box:value { opacity: 0.3; }
 "#;
         let component = component(source);
         validate_component_pseudo_states(Path::new("/tmp/states.mesh"), &component).unwrap();
+    }
+
+    #[test]
+    fn unknown_template_element_has_a_source_owned_compiler_diagnostic() {
+        let mut component = component("<template><box /></template>");
+        let Some(TemplateNode::Element(element)) = component
+            .template
+            .as_mut()
+            .and_then(|template| template.root.first_mut())
+        else {
+            panic!("test component should contain a root element");
+        };
+        element.tag = "not-an-element".into();
+        let source_path = path("unknown-element.mesh");
+        let error = validate_standalone_imports(
+            &component,
+            &source_path,
+            Path::new("/tmp"),
+            &HashMap::new(),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            CompileFrontendError::UnknownElementTag { ref tag, span, .. }
+                if tag == "not-an-element" && span.start < span.end
+        ));
+        assert_eq!(error.category(), FrontendDiagnosticCategory::Validation);
+        assert_eq!(error.source_path(), Some(source_path.as_path()));
+        assert!(error.source_span().is_some());
     }
 
     #[test]

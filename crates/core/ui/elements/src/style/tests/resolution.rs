@@ -1048,7 +1048,7 @@ fn input_state_sets_hover_flags_on_nodes() {
     use crate::style::Dimension;
     use crate::tree::WidgetNode;
 
-    let mut root = WidgetNode::new("root");
+    let mut root = WidgetNode::new("box");
     root.computed_style.width = Dimension::Px(200.0);
     root.computed_style.height = Dimension::Px(100.0);
 

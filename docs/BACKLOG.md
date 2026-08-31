@@ -115,8 +115,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## UI element core
 
-- [ ] Establish unique `NodeId` tree identity and reject duplicate/unknown
-      element definitions before layout, events, and accessibility projection.
 - [ ] Generate element contracts, runtime types, attributes, events, and
       pseudo-state matching from one canonical schema with complete coverage.
 - [ ] Consolidate interaction, style invalidation, retained layout, and

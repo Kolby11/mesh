@@ -8,6 +8,9 @@ use crate::style::{
 use std::cell::Cell;
 
 fn make_node(tag: &str, width: Dimension, height: Dimension) -> WidgetNode {
+    // These fixtures use descriptive labels for generic layout boxes. The
+    // runtime tree now accepts only registered element definitions.
+    let tag = crate::element::element_contract_for_tag(tag).map_or("box", |_| tag);
     let mut node = WidgetNode::new(tag);
     node.computed_style.width = width;
     node.computed_style.height = height;
@@ -1009,7 +1012,7 @@ fn phase87_layout_runtime_stack_spacer_divider_and_scroll_area_stay_compatible()
 
 #[test]
 fn taffy_diagnostic_records_node_identity_and_reason() {
-    let node = make_node("diagnostic-target", Dimension::Auto, Dimension::Auto);
+    let node = WidgetNode::new("diagnostic-target");
     let mut report = TaffyLayoutReport::default();
 
     record_taffy_diagnostic(&mut report, &node, "unsupported layout mapping: test-only");
@@ -1022,6 +1025,16 @@ fn taffy_diagnostic_records_node_identity_and_reason() {
         report.diagnostics[0].reason,
         "unsupported layout mapping: test-only"
     );
+}
+
+#[test]
+fn layout_rejects_an_unknown_element_before_building_taffy() {
+    let mut root = WidgetNode::new("not-an-element");
+    root.layout.width = 17.0;
+
+    LayoutEngine::compute(&mut root, 200.0, 100.0);
+
+    assert_eq!(root.layout.width, 17.0);
 }
 
 #[test]

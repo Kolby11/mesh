@@ -12,7 +12,9 @@ use crate::attributes::AttributeMap;
 use crate::element::element_runtime_tag_for_tag;
 use crate::layout::LayoutRect;
 use crate::style::ComputedStyle;
-use crate::tree::{ElementState, NodeId, WidgetNode};
+use crate::tree::{
+    ElementState, NodeId, WidgetNode, WidgetTreeValidationError, validate_widget_tree,
+};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
@@ -172,6 +174,17 @@ pub enum FrameSnapshotError {
     DuplicateNodeId { id: NodeId },
     #[error("duplicate stable node identity {identity}")]
     DuplicateIdentity { identity: StableNodeIdentity },
+    #[error("unknown element tag <{tag}> on node {node_id}")]
+    UnknownElementTag { node_id: NodeId, tag: String },
+    #[error(
+        "node {node_id} uses source element <{source_tag}> with runtime tag <{runtime_tag}>; expected <{expected_runtime_tag}>"
+    )]
+    ElementTagMismatch {
+        node_id: NodeId,
+        source_tag: String,
+        runtime_tag: String,
+        expected_runtime_tag: String,
+    },
     #[error("node {node_id} has a non-finite {field} value")]
     NonFiniteLayout {
         node_id: NodeId,
@@ -187,6 +200,31 @@ pub enum FrameSnapshotError {
         node_id: NodeId,
         referenced_id: NodeId,
     },
+}
+
+impl From<WidgetTreeValidationError> for FrameSnapshotError {
+    fn from(error: WidgetTreeValidationError) -> Self {
+        match error {
+            WidgetTreeValidationError::DuplicateNodeId { id } => Self::DuplicateNodeId { id },
+            WidgetTreeValidationError::DuplicateMeshKey { key } => Self::DuplicateIdentity {
+                identity: StableNodeIdentity::MeshKey(Arc::from(key)),
+            },
+            WidgetTreeValidationError::UnknownElementTag { node_id, tag } => {
+                Self::UnknownElementTag { node_id, tag }
+            }
+            WidgetTreeValidationError::ElementTagMismatch {
+                node_id,
+                source_tag,
+                runtime_tag,
+                expected_runtime_tag,
+            } => Self::ElementTagMismatch {
+                node_id,
+                source_tag,
+                runtime_tag,
+                expected_runtime_tag,
+            },
+        }
+    }
 }
 
 /// The semantic projection captured for one frame node.
@@ -426,11 +464,15 @@ impl FrameSnapshot {
             });
         }
 
-        let accessibility = AccessibilityTree::from_widget_tree(root);
+        // Validate before building either identity-indexed frame maps or the
+        // semantic projection. In particular, accessibility must not observe
+        // a tree that the frame later rejects for duplicate or unknown nodes.
+        validate_widget_tree(root).map_err(FrameSnapshotError::from)?;
         let mut nodes = Vec::with_capacity(root.node_count());
         let mut node_ids = HashSet::with_capacity(root.node_count());
         let mut identities = HashSet::with_capacity(root.node_count());
         append_node(root, None, &mut nodes, &mut node_ids, &mut identities)?;
+        let accessibility = AccessibilityTree::from_validated_widget_tree(root);
 
         let mut index = HashMap::with_capacity(nodes.len());
         let mut node_index = HashMap::with_capacity(nodes.len());
@@ -881,6 +923,17 @@ mod tests {
         assert!(matches!(
             FrameSnapshot::complete(&non_finite, 1, None),
             Err(FrameSnapshotError::NonFiniteLayout { .. })
+        ));
+    }
+
+    #[test]
+    fn snapshot_rejects_unknown_element_tags_before_semantic_projection() {
+        let root = WidgetNode::new("not-an-element");
+
+        assert!(matches!(
+            FrameSnapshot::capture(&root, 1, FramePhaseStamps::complete(1), None),
+            Err(FrameSnapshotError::UnknownElementTag { ref tag, .. })
+                if tag == "not-an-element"
         ));
     }
 

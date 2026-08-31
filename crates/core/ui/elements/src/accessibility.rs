@@ -1,7 +1,7 @@
 /// Accessibility tree — semantic representation for AT-SPI and screen readers.
 use crate::interaction_contract::{InteractionTarget, NodeEligibility};
 use crate::layout::LayoutRect;
-use crate::tree::{NodeId, WidgetNode};
+use crate::tree::{NodeId, WidgetNode, WidgetTreeValidationError, validate_widget_tree};
 use serde::{Deserialize, Serialize};
 
 /// Accessibility roles for semantic tree construction.
@@ -166,6 +166,29 @@ pub struct AccessibilityTree {
 impl AccessibilityTree {
     /// Build a flat accessibility tree from a laid-out widget tree.
     pub fn from_widget_tree(root: &WidgetNode) -> Self {
+        match Self::try_from_widget_tree(root) {
+            Ok(tree) => tree,
+            Err(error) => {
+                tracing::error!(
+                    target: "mesh::accessibility",
+                    error = %error,
+                    "rejecting invalid widget tree before accessibility projection"
+                );
+                Self { nodes: Vec::new() }
+            }
+        }
+    }
+
+    /// Build a flat accessibility tree, rejecting invalid identity or element
+    /// definitions before any semantic node is projected.
+    pub fn try_from_widget_tree(root: &WidgetNode) -> Result<Self, WidgetTreeValidationError> {
+        validate_widget_tree(root)?;
+        Ok(Self::from_validated_widget_tree(root))
+    }
+
+    /// Build a projection after the caller has validated the tree at the
+    /// frame boundary. This avoids repeating the full validation traversal.
+    pub(crate) fn from_validated_widget_tree(root: &WidgetNode) -> Self {
         let Some(mut root) = build_snapshot_node(root, NodeEligibility::ROOT) else {
             return Self { nodes: Vec::new() };
         };
@@ -191,7 +214,22 @@ impl AccessibilityTree {
 /// This mutates only the semantic projection; authored attributes, layout,
 /// and interaction state remain the source of truth for their own domains.
 pub fn normalize_accessibility(root: &mut WidgetNode) {
+    if let Err(error) = validate_widget_tree(root) {
+        tracing::error!(
+            target: "mesh::accessibility",
+            error = %error,
+            "rejecting invalid widget tree before accessibility normalization"
+        );
+        return;
+    }
     normalize_node(root, NodeEligibility::ROOT);
+}
+
+/// Normalize live semantic metadata after validating the complete tree.
+pub fn try_normalize_accessibility(root: &mut WidgetNode) -> Result<(), WidgetTreeValidationError> {
+    validate_widget_tree(root)?;
+    normalize_node(root, NodeEligibility::ROOT);
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -864,6 +902,18 @@ mod tests {
         let snapshot = AccessibilityTree::publish(&root);
         assert_eq!(snapshot.nodes.len(), 1);
         assert!(snapshot.nodes[0].children.is_empty());
+    }
+
+    #[test]
+    fn accessibility_rejects_an_unknown_element_tree() {
+        let root = WidgetNode::new("not-an-element");
+
+        assert!(matches!(
+            AccessibilityTree::try_from_widget_tree(&root),
+            Err(WidgetTreeValidationError::UnknownElementTag { tag, .. })
+                if tag == "not-an-element"
+        ));
+        assert!(AccessibilityTree::from_widget_tree(&root).nodes.is_empty());
     }
 
     #[test]

@@ -129,6 +129,7 @@ fn phase87_layout_display_source_semantics_survive_lowering() {
         None,
         &[],
     );
+    mesh_core_elements::validate_widget_tree(&tree).expect("lowered tree should validate");
 
     let grid = tree.children.first().expect("grid node");
     assert_eq!(grid.tag, "box");

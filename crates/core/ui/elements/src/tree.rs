@@ -4,7 +4,7 @@ use crate::attributes::AttributeMap;
 use crate::composition::HandlerTarget;
 use crate::layout::LayoutRect;
 use crate::style::ComputedStyle;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -58,7 +58,83 @@ pub type NodeId = u64;
 static NEXT_NODE_ID: AtomicU64 = AtomicU64::new(1);
 
 pub fn next_node_id() -> NodeId {
-    NEXT_NODE_ID.fetch_add(1, Ordering::Relaxed)
+    NEXT_NODE_ID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+        .expect("MESH exhausted the runtime NodeId space")
+}
+
+/// A structural invariant violation discovered before a widget tree is handed
+/// to a phase that builds identity-indexed maps or publishes projections.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum WidgetTreeValidationError {
+    #[error("duplicate runtime node id {id}")]
+    DuplicateNodeId { id: NodeId },
+    #[error("duplicate stable mesh key '{key}'")]
+    DuplicateMeshKey { key: String },
+    #[error("node {node_id} uses unknown element tag <{tag}>")]
+    UnknownElementTag { node_id: NodeId, tag: String },
+    #[error(
+        "node {node_id} uses source element <{source_tag}> with runtime tag <{runtime_tag}>; expected <{expected_runtime_tag}>"
+    )]
+    ElementTagMismatch {
+        node_id: NodeId,
+        source_tag: String,
+        runtime_tag: String,
+        expected_runtime_tag: String,
+    },
+}
+
+/// Validate the identity and element-definition invariants of a live tree.
+///
+/// `WidgetNode::Clone` intentionally preserves ids so memoized subtrees can
+/// retain their identity. Reusing such a subtree twice is therefore invalid;
+/// this traversal is the single shared guard before layout, input, and
+/// semantic projections build identity-indexed state.
+pub fn validate_widget_tree(root: &WidgetNode) -> Result<(), WidgetTreeValidationError> {
+    fn visit(
+        node: &WidgetNode,
+        node_ids: &mut HashSet<NodeId>,
+        mesh_keys: &mut HashSet<String>,
+    ) -> Result<(), WidgetTreeValidationError> {
+        if !node_ids.insert(node.id) {
+            return Err(WidgetTreeValidationError::DuplicateNodeId { id: node.id });
+        }
+
+        if let Some(key) = node.mesh_key().filter(|key| !key.is_empty())
+            && !mesh_keys.insert(key.to_owned())
+        {
+            return Err(WidgetTreeValidationError::DuplicateMeshKey {
+                key: key.to_owned(),
+            });
+        }
+
+        let source_tag = node.attributes.get("data-mesh-element").map(String::as_str);
+        let definition_tag = source_tag.unwrap_or(node.tag.as_str());
+        let Some(contract) = crate::element::element_contract_for_tag(definition_tag) else {
+            return Err(WidgetTreeValidationError::UnknownElementTag {
+                node_id: node.id,
+                tag: definition_tag.to_owned(),
+            });
+        };
+
+        if let Some(source_tag) = source_tag
+            && contract.runtime_tag != node.tag
+        {
+            return Err(WidgetTreeValidationError::ElementTagMismatch {
+                node_id: node.id,
+                source_tag: source_tag.to_owned(),
+                runtime_tag: node.tag.clone(),
+                expected_runtime_tag: contract.runtime_tag.to_owned(),
+            });
+        }
+
+        for child in &node.children {
+            visit(child, node_ids, mesh_keys)?;
+        }
+        Ok(())
+    }
+
+    visit(root, &mut HashSet::new(), &mut HashSet::new())
 }
 
 /// Pre-bound handler call from markup like `onclick={handler(arg)}`, kept out
@@ -692,6 +768,71 @@ mod tests {
 
         node.clear_mesh_key();
         assert_eq!(node.mesh_key(), Some("legacy/path"));
+    }
+
+    #[test]
+    fn widget_tree_validation_accepts_unique_runtime_and_source_identity() {
+        let mut root = WidgetNode::new("box");
+        let mut authored_grid = WidgetNode::new("box");
+        authored_grid
+            .attributes
+            .insert("data-mesh-element".into(), "grid".into());
+        root.children.push(authored_grid);
+
+        validate_widget_tree(&root).expect("known source and runtime tags should validate");
+    }
+
+    #[test]
+    fn widget_tree_validation_rejects_duplicate_node_ids() {
+        let mut root = WidgetNode::new("box");
+        let mut child = WidgetNode::new("text");
+        child.id = root.id;
+        root.children.push(child);
+
+        assert_eq!(
+            validate_widget_tree(&root),
+            Err(WidgetTreeValidationError::DuplicateNodeId { id: root.id })
+        );
+    }
+
+    #[test]
+    fn widget_tree_validation_rejects_duplicate_mesh_keys() {
+        let mut root = WidgetNode::new("box");
+        root.set_mesh_key("same");
+        let mut child = WidgetNode::new("text");
+        child.set_mesh_key("same");
+        root.children.push(child);
+
+        assert_eq!(
+            validate_widget_tree(&root),
+            Err(WidgetTreeValidationError::DuplicateMeshKey { key: "same".into() })
+        );
+    }
+
+    #[test]
+    fn widget_tree_validation_rejects_unknown_and_mismatched_element_tags() {
+        let unknown = WidgetNode::new("not-an-element");
+        assert!(matches!(
+            validate_widget_tree(&unknown),
+            Err(WidgetTreeValidationError::UnknownElementTag { tag, .. })
+                if tag == "not-an-element"
+        ));
+
+        let mut mismatch = WidgetNode::new("button");
+        mismatch
+            .attributes
+            .insert("data-mesh-element".into(), "grid".into());
+        assert!(matches!(
+            validate_widget_tree(&mismatch),
+            Err(WidgetTreeValidationError::ElementTagMismatch {
+                source_tag,
+                runtime_tag,
+                expected_runtime_tag,
+                ..
+            }) if source_tag == "grid"
+                && runtime_tag == "button"
+                && expected_runtime_tag == "box"
+        ));
     }
 
     #[test]

@@ -27,6 +27,7 @@ pub mod tree;
 pub use accessibility::{
     AccessibilityInfo, AccessibilityRelationships, AccessibilityRole, AccessibilityState,
     AccessibilityTree, AccessibilityTreeNode, live_accessibility_focus, normalize_accessibility,
+    try_normalize_accessibility,
 };
 pub use attributes::{AttrKey, AttributeMap};
 pub use composition::{ComponentCompositionProps, HandlerTarget};
@@ -74,7 +75,10 @@ pub use style::{
     VisualFilter, WhiteSpace,
 };
 pub use tree::EventHandlerCall;
-pub use tree::{ElementState, NodeId, WidgetNode, WidgetScrollMetrics, WindowSurfaceState};
+pub use tree::{
+    ElementState, NodeId, WidgetNode, WidgetScrollMetrics, WidgetTreeValidationError,
+    WindowSurfaceState, validate_widget_tree,
+};
 
 /// Abstraction over the source of variable values for template evaluation.
 ///
