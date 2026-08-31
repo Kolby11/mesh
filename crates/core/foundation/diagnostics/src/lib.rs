@@ -320,6 +320,17 @@ impl Diagnostics {
         handler_name: impl Into<String>,
         message: impl Into<String>,
     ) -> bool {
+        self.record_handler_error_with_source(component_id, handler_name, message, None, None)
+    }
+
+    pub fn record_handler_error_with_source(
+        &self,
+        component_id: impl Into<String>,
+        handler_name: impl Into<String>,
+        message: impl Into<String>,
+        source_path: Option<String>,
+        source_span: Option<DiagnosticSourceSpan>,
+    ) -> bool {
         let component_id = component_id.into();
         let handler_name = handler_name.into();
         self.record_issue_with_source(
@@ -330,8 +341,8 @@ impl Diagnostics {
                 "handler '{handler_name}' failed in component '{component_id}': {}",
                 message.into()
             ),
-            None,
-            None,
+            source_path,
+            source_span,
         )
     }
 

@@ -181,6 +181,11 @@ end
     );
     let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
     assert_eq!(diagnostics.error_count(), 1);
+    assert!(diagnostics.active_issues().iter().any(|issue| {
+        issue.category == mesh_core_diagnostics::DiagnosticCategory::Script
+            && issue.source_path.is_some()
+            && issue.source_span.is_some()
+    }));
     assert!(!component.wants_render());
 }
 

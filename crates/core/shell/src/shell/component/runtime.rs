@@ -27,24 +27,13 @@ fn apply_runtime_props(
     props: &HashMap<String, serde_json::Value>,
     skip_unchanged: bool,
 ) -> Result<(), ScriptError> {
-    for (key, value) in props {
-        let result = if skip_unchanged {
-            runtime
-                .script_ctx
-                .set_member_state_if_changed_ref(key, value)
-                .map(|_| ())
-        } else {
-            runtime.script_ctx.set_member_state(key, value.clone())
-        };
-        if let Err(err) = result {
-            tracing::warn!(
-                module_id = %runtime.module_id,
-                prop = %key,
-                error = %err,
-                "failed to apply embedded component prop to script member"
-            );
-            return Err(err);
-        }
+    if let Err(err) = runtime.script_ctx.set_member_states(props, skip_unchanged) {
+        tracing::warn!(
+            module_id = %runtime.module_id,
+            error = %err,
+            "failed to apply embedded component props to script members"
+        );
+        return Err(err);
     }
     Ok(())
 }
@@ -92,10 +81,12 @@ impl FrontendSurfaceComponent {
                 "frontend lifecycle hook failed"
             );
             if let Some(diagnostics) = diagnostics {
-                diagnostics.record_handler_error(
+                diagnostics.record_handler_error_with_source(
                     component_id.clone(),
                     hook.to_string(),
                     error_message,
+                    Some(runtime.source_path.display().to_string()),
+                    runtime.script_source_span,
                 );
             }
             return Err(ComponentError::Script {
@@ -142,6 +133,39 @@ impl FrontendSurfaceComponent {
         runtimes: HashMap<Arc<str>, EmbeddedFrontendRuntime>,
     ) {
         *self.runtimes.lock().unwrap() = runtimes;
+        self.rebuild_runtime_generation_index();
+
+        // The rollback candidates were cleanly detached before the
+        // replacement was initialized. Re-enter them through the same
+        // lifecycle boundary as a fresh runtime; otherwise a failed reload
+        // would restore the Rust map while leaving authored resources and
+        // subscriptions in their unmounted state.
+        let mut instance_keys = self
+            .runtimes
+            .lock()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        instance_keys
+            .sort_by(|left, right| left.len().cmp(&right.len()).then_with(|| left.cmp(right)));
+        let mut runtimes = self.runtimes.lock().unwrap();
+        for instance_key in instance_keys {
+            let Some(runtime) = runtimes.get_mut(&instance_key) else {
+                continue;
+            };
+            if let Err(error) = Self::dispatch_runtime_hook(&self.diagnostics, runtime, "mount") {
+                tracing::warn!(
+                    component_id = %runtime.module_id,
+                    instance_key = %instance_key,
+                    error = %error,
+                    "frontend runtime rollback mount failed"
+                );
+            }
+            runtime.script_ctx.drain_published_events();
+            runtime.script_ctx.drain_element_actions();
+        }
+        drop(runtimes);
         self.rebuild_runtime_generation_index();
     }
 
@@ -336,7 +360,13 @@ impl FrontendSurfaceComponent {
                 "frontend render hook failed"
             );
             if let Some(diagnostics) = diagnostics {
-                diagnostics.record_handler_error(component_id, "render".to_string(), error_message);
+                diagnostics.record_handler_error_with_source(
+                    component_id,
+                    "render".to_string(),
+                    error_message,
+                    Some(runtime.source_path.display().to_string()),
+                    runtime.script_source_span,
+                );
             }
             Self::drain_script_diagnostics(diagnostics, runtime);
             return false;
@@ -386,12 +416,18 @@ impl FrontendSurfaceComponent {
                 ),
             };
             diagnostics.record_issue_with_source(
-                format!("script:{}:{}", category.as_str(), diagnostic.interface),
+                format!(
+                    "script:{}:{}:{}:{}",
+                    runtime.module_id,
+                    runtime.script_ctx.instance_id,
+                    category.as_str(),
+                    diagnostic.interface
+                ),
                 category,
                 mesh_core_diagnostics::IssueSeverity::Error,
                 message,
-                None,
-                None,
+                Some(runtime.source_path.display().to_string()),
+                runtime.script_source_span,
             );
         }
     }
@@ -571,10 +607,10 @@ impl FrontendSurfaceComponent {
             &runtime.host_props,
             &next_host_props,
         );
+        let mut publication = props.clone();
+        publication.insert("props".to_string(), merged_props);
+        runtime.script_ctx.set_member_states(&publication, true)?;
         runtime.host_props = next_host_props;
-        runtime
-            .script_ctx
-            .set_member_state_if_changed("props", merged_props)?;
         Self::normalize_script_props(diagnostics, runtime);
         Ok(())
     }
@@ -585,6 +621,7 @@ impl FrontendSurfaceComponent {
         component_id: String,
         manifest: &mesh_core_module::Manifest,
         component: &mesh_core_component::ComponentFile,
+        source_path: &Path,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<EmbeddedFrontendRuntime, ComponentError> {
         let capabilities = self
@@ -719,6 +756,10 @@ impl FrontendSurfaceComponent {
 
         let mut runtime = EmbeddedFrontendRuntime {
             module_id: component_id,
+            source_path: source_path.to_path_buf(),
+            script_source_span: component.script.as_ref().map(|script| {
+                mesh_core_diagnostics::DiagnosticSourceSpan::new(script.span.start, script.span.end)
+            }),
             script_ctx,
             has_script: component.script.is_some(),
             prop_definitions: component
@@ -745,6 +786,7 @@ impl FrontendSurfaceComponent {
             compiled.manifest.package.id.clone(),
             &compiled.manifest,
             &compiled.component,
+            &compiled.source_path,
             props,
         )
     }
@@ -776,12 +818,6 @@ impl FrontendSurfaceComponent {
         let existing_generation = {
             let mut runtimes = self.runtimes.lock().unwrap();
             if let Some(runtime) = runtimes.get_mut(instance_key) {
-                apply_runtime_props(runtime, props, true).map_err(|source| {
-                    ComponentError::Script {
-                        component_id: runtime.module_id.clone(),
-                        source,
-                    }
-                })?;
                 Self::refresh_existing_runtime_props(
                     &self.diagnostics,
                     runtime,
@@ -853,18 +889,13 @@ impl FrontendSurfaceComponent {
         host_manifest: &mesh_core_module::Manifest,
         alias: &str,
         component: &mesh_core_component::ComponentFile,
+        source_path: &Path,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<(), ComponentError> {
         let settings_json = self.settings_json_for_component(host_manifest, component);
         let existing_generation = {
             let mut runtimes = self.runtimes.lock().unwrap();
             if let Some(runtime) = runtimes.get_mut(instance_key) {
-                apply_runtime_props(runtime, props, true).map_err(|source| {
-                    ComponentError::Script {
-                        component_id: runtime.module_id.clone(),
-                        source,
-                    }
-                })?;
                 Self::refresh_existing_runtime_props(
                     &self.diagnostics,
                     runtime,
@@ -893,6 +924,7 @@ impl FrontendSurfaceComponent {
             local_component_runtime_id(host_module_id, alias),
             host_manifest,
             component,
+            source_path,
             props,
         )?;
         Self::call_runtime_render_hook(&self.diagnostics, &mut runtime);
@@ -931,6 +963,7 @@ impl FrontendSurfaceComponent {
             host,
             alias,
             component,
+            source_path,
             props,
         ) {
             let message = self.record_frontend_runtime_issue("render", instance_key, &err);
@@ -1101,10 +1134,12 @@ impl FrontendSurfaceComponent {
                 "frontend event handler failed"
             );
             if let Some(diagnostics) = &self.diagnostics {
-                diagnostics.record_handler_error(
+                diagnostics.record_handler_error_with_source(
                     component_id.clone(),
                     handler_name.to_string(),
                     error_message,
+                    Some(runtime.source_path.display().to_string()),
+                    runtime.script_source_span,
                 );
             }
             Self::drain_script_diagnostics(&self.diagnostics, runtime);

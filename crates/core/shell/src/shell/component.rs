@@ -54,7 +54,7 @@ use runtime_tree::{
 use mesh_core_capability::{Capability, CapabilitySet, EffectiveCapabilities};
 use mesh_core_component::template::{AttributeValue, TemplateNode};
 use mesh_core_config::TooltipSettings;
-use mesh_core_diagnostics::Diagnostics;
+use mesh_core_diagnostics::{DiagnosticSourceSpan, Diagnostics};
 use mesh_core_elements::{
     FramePhaseStamps, FrameSnapshot, HandlerTarget, InteractionTarget, IntrinsicLayoutCache,
     LayoutEngine, NodeId, PerSurfaceLayoutState, PopoverPlacement, StyleContext, StyleResolver,
@@ -1147,6 +1147,11 @@ impl ElementMetricUsage {
 #[derive(Debug)]
 struct EmbeddedFrontendRuntime {
     module_id: String,
+    /// Source ownership for diagnostics emitted after the component has been
+    /// compiled. Embedded runtimes may belong to a different file than the
+    /// surface's primary module.
+    source_path: PathBuf,
+    script_source_span: Option<DiagnosticSourceSpan>,
     script_ctx: ScriptContext,
     /// Whether the authored component has a script in which lifecycle hooks
     /// can exist. Template-only components should not initialize a Luau VM

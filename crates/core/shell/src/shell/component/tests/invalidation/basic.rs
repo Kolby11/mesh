@@ -1766,6 +1766,15 @@ stable_global = "before"
 function stable_handler()
     stable_global = "still-active"
 end
+
+function mount(self)
+    self.storage.mounts = (self.storage.mounts or 0) + 1
+    mount_count = self.storage.mounts
+end
+
+function unmount(self)
+    self.storage.unmounts = (self.storage.unmounts or 0) + 1
+end
 </script>
 "#,
     );
@@ -1800,6 +1809,18 @@ end
         .unwrap()
         .script_ctx
         .generation;
+    assert_eq!(
+        component
+            .runtimes
+            .lock()
+            .unwrap()
+            .get(component.root_instance_key())
+            .unwrap()
+            .script_ctx
+            .state()
+            .get("mount_count"),
+        Some(serde_json::json!(1))
+    );
 
     write_source(
         module_dir,
@@ -1821,6 +1842,10 @@ end
     );
     assert_eq!(runtime.script_ctx.generation, initial_generation);
     assert!(runtime.script_ctx.has_handler("stable_handler"));
+    assert_eq!(
+        runtime.script_ctx.state().get("mount_count"),
+        Some(serde_json::json!(2))
+    );
 }
 
 #[test]

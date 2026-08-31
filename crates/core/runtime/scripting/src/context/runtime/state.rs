@@ -8,7 +8,7 @@ use mlua::Table;
 use mlua::{LuaSerdeExt, Value as LuaValue};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, atomic::Ordering};
 
 impl ScriptContext {
     /// Copy a capability-authorized service payload into this context's
@@ -170,6 +170,85 @@ impl ScriptContext {
         let lua_value = self.lua().to_value(&value).map_err(lua_err)?;
         self.env().set(name, lua_value).map_err(map_lua_error)?;
         self.state.set(name.to_string(), value);
+        Ok(())
+    }
+
+    /// Publish several host-owned members as one state update.
+    ///
+    /// Conversion happens before the first Lua write. If a Lua metamethod
+    /// rejects a later write, both the raw environment tables and the Rust
+    /// snapshot are restored, so callers never expose a partially published
+    /// prop set to the renderer or to Luau.
+    pub fn set_member_states(
+        &mut self,
+        members: &HashMap<String, Value>,
+        skip_unchanged: bool,
+    ) -> Result<(), ScriptError> {
+        self.ensure_initialized()?;
+
+        let mut updates = members
+            .iter()
+            .filter(|(name, value)| {
+                !skip_unchanged
+                    || self
+                        .state
+                        .get_ref(name.as_str())
+                        .is_none_or(|current| current != *value)
+            })
+            .map(|(name, value)| {
+                self.lua()
+                    .to_value(value)
+                    .map(|lua_value| (name.clone(), value.clone(), lua_value))
+                    .map_err(lua_err)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        updates.sort_by(|left, right| left.0.cmp(&right.0));
+        if updates.is_empty() {
+            return Ok(());
+        }
+
+        let env = self.env().clone();
+        let reactive = self
+            .reactive_scalar_globals
+            .as_ref()
+            .expect("reactive scalar table initialized with _ENV")
+            .clone();
+        let previous = updates
+            .iter()
+            .map(|(name, _, _)| {
+                Ok::<_, ScriptError>((
+                    name.clone(),
+                    reactive
+                        .raw_get::<LuaValue>(name.as_str())
+                        .map_err(lua_err)?,
+                    env.raw_get::<LuaValue>(name.as_str()).map_err(lua_err)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let previous_state = self.state.clone();
+        let previous_assigned = self.assigned_global_keys.lock().unwrap().clone();
+        let previous_pending = self.pending_assigned_global_keys.load(Ordering::Acquire);
+
+        for (name, _, lua_value) in &updates {
+            if let Err(error) = env
+                .set(name.as_str(), lua_value.clone())
+                .map_err(map_lua_error)
+            {
+                for (name, reactive_value, env_value) in &previous {
+                    let _ = reactive.raw_set(name.as_str(), reactive_value.clone());
+                    let _ = env.raw_set(name.as_str(), env_value.clone());
+                }
+                self.state = previous_state;
+                *self.assigned_global_keys.lock().unwrap() = previous_assigned;
+                self.pending_assigned_global_keys
+                    .store(previous_pending, Ordering::Release);
+                return Err(error);
+            }
+        }
+
+        for (name, value, _) in updates {
+            self.state.set(name, value);
+        }
         Ok(())
     }
 
@@ -407,5 +486,26 @@ mod tests {
                 .expect("decode Luau member"),
             old_value
         );
+
+        let old_title = serde_json::json!("old title");
+        let old_title_lua_value = context
+            .lua()
+            .to_value(&old_title)
+            .expect("convert old title value");
+        context
+            .reactive_scalar_globals
+            .as_ref()
+            .expect("reactive globals")
+            .raw_set("title", old_title_lua_value)
+            .expect("seed reactive title");
+        context.state.set("title", old_title.clone());
+
+        let updates = HashMap::from([
+            ("label".to_string(), serde_json::json!("new")),
+            ("title".to_string(), serde_json::json!("new title")),
+        ]);
+        assert!(context.set_member_states(&updates, false).is_err());
+        assert_eq!(context.state.get("label"), Some(old_value.clone()));
+        assert_eq!(context.state.get("title"), Some(old_title.clone()));
     }
 }

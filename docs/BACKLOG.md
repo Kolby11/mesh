@@ -119,9 +119,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Frontend compiler and host
 
-- [ ] Complete frontend runtime lifecycle and recovery: dispatch mount/unmount,
-      make prop publication transactional, and preserve truthful typed,
-      source-located diagnostics on failures.
 - [ ] Unify template expression semantics and root-scope validation around the
       real Luau parser/runtime, then enforce imported public-prop and
       child-surface contracts.

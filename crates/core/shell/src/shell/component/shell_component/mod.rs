@@ -1472,10 +1472,11 @@ impl ShellComponent for FrontendSurfaceComponent {
             .update(next_layout.policy_snapshot(0));
         let policy_changed = !policy_update.diff.is_noop();
         self.surface_policy = policy_update.current;
-        let settings_changed = self.settings_json != settings_state.effective;
+        let next_settings_json = settings_state.effective;
+        let settings_changed = self.settings_json != next_settings_json;
 
         self.surface_layout = next_layout;
-        self.settings_json = settings_state.effective;
+        self.settings_json = next_settings_json.clone();
 
         if settings_changed {
             if let Some(runtime) = self
@@ -1487,7 +1488,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 let next_host_props = resolved_props_json(
                     &self.compiled.component,
                     &HashMap::new(),
-                    &self.settings_json,
+                    &next_settings_json,
                     self.root_instance_key(),
                 );
                 let merged_props = merge_reloaded_props(
@@ -1495,13 +1496,17 @@ impl ShellComponent for FrontendSurfaceComponent {
                     &runtime.host_props,
                     &next_host_props,
                 );
-                runtime.host_props = next_host_props;
-                if let Err(error) = runtime.script_ctx.set_member_state("props", merged_props) {
+                if let Err(error) = runtime
+                    .script_ctx
+                    .set_member_state_if_changed("props", merged_props)
+                {
                     tracing::warn!(
                         "failed to refresh component props after settings reload: {error}"
                     );
+                } else {
+                    runtime.host_props = next_host_props;
+                    Self::normalize_script_props(&self.diagnostics, runtime);
                 }
-                Self::normalize_script_props(&self.diagnostics, runtime);
             }
             if let Some(generation) = self
                 .runtimes
