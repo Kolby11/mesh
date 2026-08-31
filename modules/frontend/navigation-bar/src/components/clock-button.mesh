@@ -40,7 +40,7 @@ end
 
 <style>
 .clock-btn {
-    height: 28px;
+    height: 100%;
     flex-shrink: 0;
     justify-content: center;
     align-items: center;

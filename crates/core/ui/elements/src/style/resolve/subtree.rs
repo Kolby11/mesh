@@ -80,18 +80,20 @@ impl<'a> StyleResolver<'a> {
         context: StyleContext,
         parent_style: Option<&ParentInheritedStyle>,
     ) {
-        let attrs = StyleNodeAttrs::from_node(node);
-        node.computed_style = self.resolve_node_style_with_attrs_indexed_inner(
-            rules,
-            index,
-            &attrs,
-            context,
-            None,
-            None,
-            parent_style.map(|parent| &parent.custom_properties),
-        );
-        if let Some(parent) = parent_style {
-            inherit_retained_text_style(&mut node.computed_style, parent);
+        if !preserve_synthetic_surface_style(node, parent_style) {
+            let attrs = StyleNodeAttrs::from_node(node);
+            node.computed_style = self.resolve_node_style_with_attrs_indexed_inner(
+                rules,
+                index,
+                &attrs,
+                context,
+                None,
+                None,
+                parent_style.map(|parent| &parent.custom_properties),
+            );
+            if let Some(parent) = parent_style {
+                inherit_retained_text_style(&mut node.computed_style, parent);
+            }
         }
 
         let parent = ParentInheritedStyle::from(&node.computed_style);
@@ -109,18 +111,20 @@ impl<'a> StyleResolver<'a> {
         parent_style: Option<&ParentInheritedStyle>,
         attribution: &mut StyleRuleAttribution,
     ) {
-        let attrs = StyleNodeAttrs::from_node(node);
-        node.computed_style = self.resolve_node_style_with_attrs_indexed_inner(
-            rules,
-            index,
-            &attrs,
-            context,
-            None,
-            Some(attribution),
-            parent_style.map(|parent| &parent.custom_properties),
-        );
-        if let Some(parent) = parent_style {
-            inherit_retained_text_style(&mut node.computed_style, parent);
+        if !preserve_synthetic_surface_style(node, parent_style) {
+            let attrs = StyleNodeAttrs::from_node(node);
+            node.computed_style = self.resolve_node_style_with_attrs_indexed_inner(
+                rules,
+                index,
+                &attrs,
+                context,
+                None,
+                Some(attribution),
+                parent_style.map(|parent| &parent.custom_properties),
+            );
+            if let Some(parent) = parent_style {
+                inherit_retained_text_style(&mut node.computed_style, parent);
+            }
         }
         let parent = ParentInheritedStyle::from(&node.computed_style);
         for child in &mut node.children {
@@ -212,22 +216,24 @@ impl<'a> StyleResolver<'a> {
 
         if should_restyle {
             let previous_inherited = ParentInheritedStyle::from(&node.computed_style);
-            // Recompute this node's style.
-            // For target nodes: apply new pseudo-class rules.
-            // For descendants of targets: inherit updated values from the
-            // restyled ancestor.
-            let attrs = StyleNodeAttrs::from_node(node);
-            node.computed_style = self.resolve_node_style_with_attrs_indexed_inner(
-                rules,
-                index,
-                &attrs,
-                context,
-                None,
-                None,
-                parent_style.map(|parent| &parent.custom_properties),
-            );
-            if let Some(parent) = parent_style {
-                inherit_retained_text_style(&mut node.computed_style, parent);
+            if !preserve_synthetic_surface_style(node, parent_style) {
+                // Recompute this node's style.
+                // For target nodes: apply new pseudo-class rules.
+                // For descendants of targets: inherit updated values from the
+                // restyled ancestor.
+                let attrs = StyleNodeAttrs::from_node(node);
+                node.computed_style = self.resolve_node_style_with_attrs_indexed_inner(
+                    rules,
+                    index,
+                    &attrs,
+                    context,
+                    None,
+                    None,
+                    parent_style.map(|parent| &parent.custom_properties),
+                );
+                if let Some(parent) = parent_style {
+                    inherit_retained_text_style(&mut node.computed_style, parent);
+                }
             }
 
             // Descendants only need their rules re-resolved when an inherited
@@ -281,18 +287,20 @@ impl<'a> StyleResolver<'a> {
         let should_restyle = target_ids.contains(&node.id) || inherited_dirty;
         if should_restyle {
             let previous_inherited = ParentInheritedStyle::from(&node.computed_style);
-            let attrs = StyleNodeAttrs::from_node(node);
-            node.computed_style = self.resolve_node_style_with_attrs_indexed_inner(
-                rules,
-                index,
-                &attrs,
-                context,
-                None,
-                Some(attribution),
-                parent_style.map(|parent| &parent.custom_properties),
-            );
-            if let Some(parent) = parent_style {
-                inherit_retained_text_style(&mut node.computed_style, parent);
+            if !preserve_synthetic_surface_style(node, parent_style) {
+                let attrs = StyleNodeAttrs::from_node(node);
+                node.computed_style = self.resolve_node_style_with_attrs_indexed_inner(
+                    rules,
+                    index,
+                    &attrs,
+                    context,
+                    None,
+                    Some(attribution),
+                    parent_style.map(|parent| &parent.custom_properties),
+                );
+                if let Some(parent) = parent_style {
+                    inherit_retained_text_style(&mut node.computed_style, parent);
+                }
             }
             let child_parent = ParentInheritedStyle::from(&node.computed_style);
             let inheritance_changed = previous_inherited != child_parent;
@@ -324,4 +332,24 @@ impl<'a> StyleResolver<'a> {
             }
         }
     }
+}
+
+/// Embedded component instances use a synthetic `surface` node to retain
+/// instance identity and slot provenance. Its compiler-assigned layout style
+/// is structural, not author CSS, so a normal restyle must not replace it.
+/// Inherited variables and text values still cross the wrapper boundary for
+/// the authored contribution subtree below it.
+fn preserve_synthetic_surface_style(
+    node: &mut crate::tree::WidgetNode,
+    parent_style: Option<&ParentInheritedStyle>,
+) -> bool {
+    if node.tag != "surface" {
+        return false;
+    }
+
+    if let Some(parent_style) = parent_style {
+        node.computed_style.custom_properties = parent_style.custom_properties.clone();
+        inherit_retained_text_style(&mut node.computed_style, parent_style);
+    }
+    true
 }

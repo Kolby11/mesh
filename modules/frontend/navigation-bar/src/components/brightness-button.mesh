@@ -81,8 +81,8 @@ end
 
 <style>
 .brightness-button {
-    height: 28px;
-    width: 28px;
+    height: 100%;
+    aspect-ratio: 1;
     justify-content: center;
     align-items: center;
     flex-shrink: 0;

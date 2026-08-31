@@ -113,11 +113,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Component language
 
-- [ ] Make embedded contribution wrappers transparent to layout: the wrapper's
-      assigned root style is discarded before layout, and its auto cross size
-      makes a contributed root's percentage sizing collapse to content.
-      [Design](../.planning/todos/pending/2026-08-28-embedded-contribution-wrapper-layout.md).
-
 ## UI element core
 
 - [ ] Establish unique `NodeId` tree identity and reject duplicate/unknown

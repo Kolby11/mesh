@@ -1,6 +1,7 @@
 use mesh_core_component::style::{Selector, StyleRule};
 use mesh_core_elements::style::{
-    FlexDirection, StyleNodeAttrs, StylePropertyMask, selector_matches_attrs,
+    AlignSelf, FlexDirection, JustifyContent, StyleNodeAttrs, StylePropertyMask,
+    selector_matches_attrs,
 };
 use mesh_core_elements::{ComputedStyle, Dimension, ElementState, StyleContext};
 use mesh_core_theme::{Theme, TokenValue};
@@ -377,6 +378,8 @@ pub(crate) fn embedded_root_style(theme: &Theme) -> ComputedStyle {
     let mut style = ComputedStyle::default();
     style.font_family = ui_font_family(theme).into();
     style.direction = FlexDirection::Column;
+    style.align_self = AlignSelf::Stretch;
+    style.justify_content = JustifyContent::Center;
     style
 }
 

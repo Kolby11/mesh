@@ -450,6 +450,85 @@ fn targeted_restyle_recomputes_only_named_stateful_nodes() {
 }
 
 #[test]
+fn restyling_embedded_surface_preserves_compiler_layout_style() {
+    let theme = mesh_core_theme::default_theme();
+    let resolver = StyleResolver::new(&theme);
+    let rules = vec![
+        StyleRule {
+            selector: Selector::Class("host".to_string()),
+            declarations: vec![Declaration {
+                property: "--accent".to_string(),
+                value: StyleValue::Literal("#123456".to_string()),
+            }],
+            container_query: None,
+        },
+        StyleRule {
+            selector: Selector::Tag("button".to_string()),
+            declarations: vec![Declaration {
+                property: "color".to_string(),
+                value: StyleValue::Var("--accent".to_string()),
+            }],
+            container_query: None,
+        },
+    ];
+
+    let mut host = crate::tree::WidgetNode::new("row");
+    host.attributes.insert("class".into(), "host".into());
+    let mut wrapper = crate::tree::WidgetNode::new("surface");
+    wrapper.computed_style.direction = crate::style::FlexDirection::Column;
+    wrapper.computed_style.align_self = crate::style::AlignSelf::Stretch;
+    wrapper.computed_style.justify_content = crate::style::JustifyContent::Center;
+    wrapper.computed_style.width = crate::style::Dimension::Px(999.0);
+    let contribution = crate::tree::WidgetNode::new("button");
+    wrapper.children.push(contribution);
+    host.children.push(wrapper);
+
+    resolver.restyle_subtree_cached(&mut host, &rules, StyleContext::default(), &mut None);
+
+    let wrapper = &host.children[0];
+    assert_eq!(
+        wrapper.computed_style.direction,
+        crate::style::FlexDirection::Column
+    );
+    assert_eq!(
+        wrapper.computed_style.align_self,
+        crate::style::AlignSelf::Stretch
+    );
+    assert_eq!(
+        wrapper.computed_style.justify_content,
+        crate::style::JustifyContent::Center
+    );
+    assert_eq!(
+        wrapper.computed_style.width,
+        crate::style::Dimension::Px(999.0)
+    );
+    assert_eq!(
+        wrapper.computed_style.custom_properties.get("--accent"),
+        Some(&StyleValue::Literal("#123456".to_string()))
+    );
+    assert_eq!(
+        wrapper.children[0].computed_style.color,
+        Color::from_hex("#123456").unwrap()
+    );
+
+    let wrapper_id = wrapper.id;
+    resolver.restyle_subtree_for_ids(
+        &mut host,
+        &rules,
+        StyleContext::default(),
+        &std::collections::HashSet::from([wrapper_id]),
+    );
+    assert_eq!(
+        host.children[0].computed_style.align_self,
+        crate::style::AlignSelf::Stretch
+    );
+    assert_eq!(
+        host.children[0].computed_style.justify_content,
+        crate::style::JustifyContent::Center
+    );
+}
+
+#[test]
 fn retained_restyle_preserves_explicit_transparent_and_default_inherited_values() {
     let theme = mesh_core_theme::default_theme();
     let resolver = StyleResolver::new(&theme);

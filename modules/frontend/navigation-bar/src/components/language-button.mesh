@@ -156,8 +156,8 @@ end
 
 <style>
     .nav-button-shell {
-        height: 28px;
-        width: 28px;
+        height: 100%;
+        aspect-ratio: 1;
         flex-shrink: 0;
         justify-content: center;
         align-items: center;
@@ -166,8 +166,8 @@ end
     }
 
     .language-trigger {
-        height: 28px;
-        width: 28px;
+        height: 100%;
+        width: 100%;
         flex-shrink: 0;
         justify-content: center;
         align-items: center;

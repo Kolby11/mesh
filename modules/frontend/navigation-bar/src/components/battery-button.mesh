@@ -108,7 +108,7 @@ end
 
 <style>
     .battery-widget {
-        height: 28px;
+        height: 100%;
         flex-shrink: 0;
         justify-content: center;
         align-items: center;

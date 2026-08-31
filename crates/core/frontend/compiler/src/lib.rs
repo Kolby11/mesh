@@ -1553,6 +1553,18 @@ mod tests {
         assert_eq!(embedded.layout.width, 0.0);
         assert_eq!(embedded.layout.height, 0.0);
         assert_eq!(
+            embedded.computed_style.direction,
+            mesh_core_elements::style::FlexDirection::Column
+        );
+        assert_eq!(
+            embedded.computed_style.align_self,
+            mesh_core_elements::style::AlignSelf::Stretch
+        );
+        assert_eq!(
+            embedded.computed_style.justify_content,
+            mesh_core_elements::style::JustifyContent::Center
+        );
+        assert_eq!(
             embedded.children[0].children[0]
                 .event_handlers
                 .get("click")

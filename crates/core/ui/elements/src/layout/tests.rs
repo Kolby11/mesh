@@ -2,7 +2,8 @@ use super::lowering::*;
 use super::retained::*;
 use super::*;
 use crate::style::{
-    AlignSelf, Color, Display, Edges, FlexDirection, FontStyle, Position, TextDirection, WhiteSpace,
+    AlignItems, AlignSelf, Color, Display, Edges, FlexDirection, FontStyle, JustifyContent,
+    Position, TextDirection, WhiteSpace,
 };
 use std::cell::Cell;
 
@@ -286,6 +287,29 @@ fn aspect_ratio_squares_a_child_that_only_declares_its_height() {
     assert_eq!(root.children[0].layout.width, 28.0);
     assert_eq!(root.children[1].layout.height, 28.0);
     assert_eq!(root.children[1].layout.width, 56.0);
+}
+
+#[test]
+fn stretched_embedded_wrapper_gives_percent_child_a_definite_cross_size() {
+    let mut root = make_node("row", Dimension::Px(400.0), Dimension::Px(28.0));
+    root.computed_style.direction = FlexDirection::Row;
+    root.computed_style.align_items = AlignItems::Center;
+
+    let mut wrapper = make_node("surface", Dimension::Auto, Dimension::Auto);
+    wrapper.computed_style.direction = FlexDirection::Column;
+    wrapper.computed_style.align_self = AlignSelf::Stretch;
+    wrapper.computed_style.justify_content = JustifyContent::Center;
+
+    let mut contribution = make_node("button", Dimension::Auto, Dimension::Percent(100.0));
+    contribution.computed_style.aspect_ratio = Some(1.0);
+    wrapper.children = vec![contribution].into();
+    root.children = vec![wrapper].into();
+
+    LayoutEngine::compute(&mut root, 400.0, 28.0);
+
+    assert_eq!(root.children[0].layout.height, 28.0);
+    assert_eq!(root.children[0].children[0].layout.height, 28.0);
+    assert_eq!(root.children[0].children[0].layout.width, 28.0);
 }
 
 #[test]
