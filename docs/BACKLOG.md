@@ -115,8 +115,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## UI element core
 
-- [ ] Generate element contracts, runtime types, attributes, events, and
-      pseudo-state matching from one canonical schema with complete coverage.
 - [ ] Consolidate interaction, style invalidation, retained layout, and
       accessibility into a coherent frame transaction with pointer capture,
       failure-safe layout, and explicit dirty-node output.
