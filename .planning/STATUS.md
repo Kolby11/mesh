@@ -37,9 +37,9 @@ at graph commit, frontend/backend activation, candidate failure, recovery,
 quarantine, and teardown boundaries. The module lock now uses schema v3 with
 validated versions, direct dependency requirements, reverse requesters,
 composition provenance, and rollback metadata rebuilt from restored manifests.
-The next open item is consolidating interaction, style invalidation, retained
-layout, and accessibility into a coherent frame transaction with pointer
-capture, failure-safe layout, and explicit dirty-node output.
+The next open item is normalizing ARIA, visibility, and accessible-name
+semantics after child construction while invalidating text measurement caches
+on font and measurer generation changes.
 Host icon/font resources now use one explicit immutable graph/profile candidate
 catalog and copy-on-write registry handle, with failed preparation, recovery,
 and package rollback retaining the last-known-good snapshot. Icon resolution

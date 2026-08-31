@@ -115,9 +115,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## UI element core
 
-- [ ] Consolidate interaction, style invalidation, retained layout, and
-      accessibility into a coherent frame transaction with pointer capture,
-      failure-safe layout, and explicit dirty-node output.
 - [ ] Normalize ARIA/visibility/name semantics after child construction and
       invalidate text measurement caches on font/measurer generation changes.
 
