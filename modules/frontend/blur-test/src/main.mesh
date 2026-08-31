@@ -19,6 +19,8 @@
 .blur-test-shell {
     width: 640px;
     height: 560px;
+    margin-top: 400px;
+    exclusive-zone: none;
     padding: 0;
     background: transparent;
 }

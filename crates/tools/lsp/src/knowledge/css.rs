@@ -171,6 +171,11 @@ pub static CSS_PROPERTIES: &[CssProp] = &[
         values: &[],
     },
     CssProp {
+        name: "exclusive-zone",
+        description: "Reserve the root's measured border box at the anchored layer edge, or use none for an overlay.",
+        values: &["auto", "none"],
+    },
+    CssProp {
         name: "width",
         description: "Element width (px, %, auto).",
         values: &["auto", "100%"],
@@ -512,7 +517,14 @@ mod tests {
     fn css_completion_includes_phase_8_shorthands() {
         let names = property_names();
         for property in [
-            "border", "padding", "margin", "font", "flex", "overflow", "inset",
+            "border",
+            "padding",
+            "margin",
+            "exclusive-zone",
+            "font",
+            "flex",
+            "overflow",
+            "inset",
         ] {
             assert!(names.contains(&property), "{property}");
         }

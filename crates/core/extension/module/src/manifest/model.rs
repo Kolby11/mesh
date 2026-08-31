@@ -786,15 +786,9 @@ pub struct SurfaceLayoutSection {
     /// Layer-shell stacking layer: "background" | "bottom" | "top" | "overlay"
     #[serde(default)]
     pub layer: Option<String>,
-    /// Reserved compositor space in pixels.
-    #[serde(default)]
-    pub exclusive_zone: Option<i32>,
     /// Whether this surface starts visible when Mesh boots.
     #[serde(default)]
     pub visible_on_start: Option<bool>,
-    /// Per-edge surface margins.
-    #[serde(default)]
-    pub margins: Option<SurfaceMargins>,
     /// "none" | "on_demand" | "exclusive" (durable default; runtime may override)
     #[serde(default)]
     pub keyboard_mode: Option<String>,
@@ -852,9 +846,7 @@ impl SurfaceLayoutSection {
             SurfaceRoleField::Decorations => self.decorations.is_some(),
             SurfaceRoleField::Anchor => self.anchor.is_some(),
             SurfaceRoleField::Layer => self.layer.is_some(),
-            SurfaceRoleField::ExclusiveZone => self.exclusive_zone.is_some(),
             SurfaceRoleField::KeyboardMode => self.keyboard_mode.is_some(),
-            SurfaceRoleField::Margins => self.margins.is_some(),
             SurfaceRoleField::Blur => self.blur.is_some(),
         }
     }
@@ -914,18 +906,6 @@ pub fn canonical_keyboard_mode(value: &str) -> Option<&'static str> {
         "on_demand" | "ondemand" | "on-demand" => Some("on_demand"),
         _ => None,
     }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SurfaceMargins {
-    #[serde(default)]
-    pub top: i32,
-    #[serde(default)]
-    pub right: i32,
-    #[serde(default)]
-    pub bottom: i32,
-    #[serde(default)]
-    pub left: i32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

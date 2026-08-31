@@ -1120,6 +1120,7 @@ end
     }
 
     .inspector-shell {
+        exclusive-zone: none;
         width: 480px;
         max-width: 480px;
         min-height: 640px;

@@ -322,6 +322,11 @@ const STYLE_PROFILE_PROPERTIES: &[StyleProfileProperty] = &[
         status: StyleProfileStatus::Implemented,
     },
     StyleProfileProperty {
+        property: "exclusive-zone",
+        category: "layout",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
         property: "font",
         category: "font",
         status: StyleProfileStatus::Implemented,
@@ -678,6 +683,28 @@ pub enum TooltipAnchor {
     Cursor,
 }
 
+/// Whether a layer surface reserves the measured root box at its anchored
+/// edge. This is intentionally a CSS property on the component root rather
+/// than a manifest number: the reservation follows the box as CSS changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum SurfaceExclusiveZone {
+    /// Reserve the root's border box plus its margin on the anchored edge.
+    #[default]
+    Auto,
+    /// Do not reserve compositor space; the surface is an overlay/HUD.
+    None,
+}
+
+impl SurfaceExclusiveZone {
+    pub fn from_css(value: &str) -> Option<Self> {
+        match value.trim() {
+            "auto" => Some(Self::Auto),
+            "none" => Some(Self::None),
+            _ => None,
+        }
+    }
+}
+
 impl TooltipAnchor {
     pub fn from_css(value: &str) -> Option<Self> {
         match value.trim() {
@@ -712,6 +739,8 @@ pub struct ComputedStyle {
     pub max_height: Dimension,
     pub padding: Edges,
     pub margin: Edges,
+    /// Layer-surface reservation policy for the component root.
+    pub surface_exclusive_zone: SurfaceExclusiveZone,
     pub border_width: Edges,
     pub background_color: Color,
     pub background_paint: BackgroundPaint,
@@ -793,6 +822,7 @@ impl Default for ComputedStyle {
             max_height: Dimension::Auto,
             padding: Edges::zero(),
             margin: Edges::zero(),
+            surface_exclusive_zone: SurfaceExclusiveZone::Auto,
             border_width: Edges::zero(),
             background_color: Color::TRANSPARENT,
             background_paint: BackgroundPaint::None,

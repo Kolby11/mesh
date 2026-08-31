@@ -209,6 +209,10 @@ pub struct WidgetNode {
     /// Cached split `class` tokens derived from the raw `class` attribute.
     cached_class_attr: Option<String>,
     cached_classes: Vec<String>,
+    /// The first authored root of a top-level surface. Its CSS margins are
+    /// lowered to the compositor surface rather than consumed by Taffy's
+    /// synthetic wrapper.
+    surface_root: bool,
     authored: Arc<WidgetNodeAuthored>,
 }
 
@@ -240,6 +244,7 @@ impl WidgetNode {
             loop_identity: None,
             cached_class_attr: None,
             cached_classes: Vec::new(),
+            surface_root: false,
             authored: Arc::new(WidgetNodeAuthored {
                 tag: tag.into(),
                 attributes: AttributeMap::new(),
@@ -306,6 +311,22 @@ impl WidgetNode {
 
     pub fn has_mesh_key(&self) -> bool {
         self.mesh_key().is_some()
+    }
+
+    /// Mark this node as the authored root of a top-level surface. The shell
+    /// still reads its computed CSS margins for layer-shell placement, while
+    /// layout keeps the synthetic surface wrapper from applying those margins
+    /// a second time inside the surface buffer.
+    pub fn mark_surface_root(&mut self) {
+        self.surface_root = true;
+    }
+
+    pub fn clear_surface_root(&mut self) {
+        self.surface_root = false;
+    }
+
+    pub fn is_surface_root(&self) -> bool {
+        self.surface_root
     }
 
     pub fn set_loop_identity(&mut self, identity: impl Into<Arc<str>>) {
@@ -446,6 +467,7 @@ mod tests {
             loop_identity: node.loop_identity.clone(),
             cached_class_attr: node.cached_class_attr.clone(),
             cached_classes: node.cached_classes.clone(),
+            surface_root: node.surface_root,
             authored: Arc::new((*node.authored).clone()),
         }
     }

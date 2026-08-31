@@ -2,6 +2,32 @@ use super::*;
 use crate::shell::PopoverTriggerReference;
 
 #[test]
+fn measured_surface_geometry_uses_root_box_margin_and_css_reservation_policy() {
+    let mut surface = WidgetNode::new("surface");
+    let mut root = WidgetNode::new("box");
+    root.layout.width = 1920.0;
+    root.layout.height = 40.0;
+    root.computed_style.margin.top = 8.0;
+    surface.children.push(root);
+
+    let geometry = measured_surface_geometry(&surface, (1, 1), Edge::Top);
+
+    assert_eq!(geometry.content_size, (1920, 40));
+    assert_eq!(geometry.margins, [8, 0, 0, 0]);
+    assert_eq!(geometry.exclusive_zone, 48);
+
+    surface.children[0].computed_style.margin.top = -8.0;
+    let negative_margin = measured_surface_geometry(&surface, (1, 1), Edge::Top);
+    assert_eq!(negative_margin.exclusive_zone, 32);
+
+    surface.children[0].computed_style.margin.top = 8.0;
+    surface.children[0].computed_style.surface_exclusive_zone = SurfaceExclusiveZone::None;
+    let overlay = measured_surface_geometry(&surface, (1, 1), Edge::Top);
+    assert_eq!(overlay.exclusive_zone, 0);
+    assert_eq!(overlay.margins, [8, 0, 0, 0]);
+}
+
+#[test]
 fn fractional_damage_scales_edges_into_physical_buffer_space() {
     let scaled = scale_damage_rect_to_buffer(
         DamageRect {

@@ -113,10 +113,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Component language
 
-- [ ] Derive surface geometry from the root component's measured CSS box and
-      delete the hand-written `mesh.surface.exclusive_zone` and
-      `mesh.surface.margins`, which duplicate it and drift silently.
-      [Design](../.planning/todos/pending/2026-08-28-css-derived-surface-geometry.md).
 - [ ] Make embedded contribution wrappers transparent to layout: the wrapper's
       assigned root style is discarded before layout, and its auto cross size
       makes a contributed root's percentage sizing collapse to content.

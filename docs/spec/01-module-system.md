@@ -92,7 +92,7 @@ identity and release metadata (`name`, `version`, `description`, `license`,
         }
       }
     },
-    "surface": { "anchor": "top", "exclusive_zone": 56 },
+    "surface": { "anchor": "top", "layer": "top" },
     "accessibility": { "role": "toolbar" },
     "i18n": { "defaultLocale": "en", "supportedLocales": ["en"] }
   }
@@ -163,7 +163,7 @@ of the other fields apply:
 
 | `role` | Protocol | Placement fields |
 | ------ | -------- | ---------------- |
-| `layer` (default) | `zwlr_layer_shell_v1` — shell chrome: panels, launchers, overlays | `anchor`, `layer`, `exclusive_zone`, `keyboard_mode`, `margins` |
+| `layer` (default) | `zwlr_layer_shell_v1` — shell chrome: panels, launchers, overlays | `anchor`, `layer`, `keyboard_mode` |
 | `window` | `xdg_toplevel` — an ordinary application window that tiles, floats, moves between workspaces, and closes | `title`, `appId`, `resizable`, `decorations` |
 
 `visible_on_start` and `blur` apply to both.

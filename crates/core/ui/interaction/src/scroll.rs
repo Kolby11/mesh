@@ -396,23 +396,20 @@ fn scrollbar_thumb_extent(raw_extent: f32, track_extent: f32) -> f32 {
 /// size, so its own box only echoes the input back — circular for content-sized
 /// surfaces, which then stick at whatever the first paint assumed (the shipped
 /// symptom: a panel permanently mapped at the 1x1 protocol clamp). For a
-/// `surface` wrapper, measure the union extent of its children instead.
+/// `surface` wrapper, measure the first component root instead; its layout box
+/// is the single CSS-authoritative surface geometry.
 pub fn measure_content_size(
     tree: &WidgetNode,
     fallback_width: u32,
     fallback_height: u32,
 ) -> (u32, u32) {
-    let (content_width, content_height) = if tree.tag == "surface" && !tree.children.is_empty() {
-        let mut max_x = 0f32;
-        let mut max_y = 0f32;
-        for child in &tree.children {
-            max_x = max_x.max(child.layout.x + child.layout.width);
-            max_y = max_y.max(child.layout.y + child.layout.height);
-        }
-        (max_x, max_y)
-    } else {
-        (tree.layout.width, tree.layout.height)
-    };
+    let root = tree
+        .tag
+        .eq("surface")
+        .then(|| tree.children.first())
+        .flatten()
+        .unwrap_or(tree);
+    let (content_width, content_height) = (root.layout.width, root.layout.height);
     let width = if content_width >= 1.0 {
         content_width.ceil() as u32
     } else {

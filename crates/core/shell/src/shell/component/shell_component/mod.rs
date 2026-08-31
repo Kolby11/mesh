@@ -14,6 +14,7 @@ use crate::shell::component::runtime::{
     merge_reloaded_props, resolved_props_json, script_has_service_read,
 };
 use crate::shell::{ServiceInterfaceEventSubscription, ServiceObservationSummary};
+use mesh_core_elements::style::SurfaceExclusiveZone;
 
 impl FrontendSurfaceComponent {
     /// Refresh the immutable motion snapshot at a settings/frame boundary.
@@ -95,6 +96,61 @@ impl FrontendSurfaceComponent {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MeasuredSurfaceGeometry {
+    content_size: (u32, u32),
+    margins: [i32; 4],
+    exclusive_zone: i32,
+}
+
+fn measured_surface_geometry(
+    tree: &WidgetNode,
+    fallback: (u32, u32),
+    edge: Edge,
+) -> MeasuredSurfaceGeometry {
+    let root = tree
+        .tag
+        .eq("surface")
+        .then(|| tree.children.first())
+        .flatten()
+        .unwrap_or(tree);
+    let content_size = measure_content_size(tree, fallback.0, fallback.1);
+    let margins = [
+        css_edge_to_i32(root.computed_style.margin.top),
+        css_edge_to_i32(root.computed_style.margin.right),
+        css_edge_to_i32(root.computed_style.margin.bottom),
+        css_edge_to_i32(root.computed_style.margin.left),
+    ];
+    let anchored_outer_extent = match edge {
+        Edge::Top => css_extent_with_margin(content_size.1, margins[0]),
+        Edge::Bottom => css_extent_with_margin(content_size.1, margins[2]),
+        Edge::Left => css_extent_with_margin(content_size.0, margins[3]),
+        Edge::Right => css_extent_with_margin(content_size.0, margins[1]),
+    };
+    let exclusive_zone = match root.computed_style.surface_exclusive_zone {
+        SurfaceExclusiveZone::Auto => anchored_outer_extent,
+        SurfaceExclusiveZone::None => 0,
+    };
+
+    MeasuredSurfaceGeometry {
+        content_size,
+        margins,
+        exclusive_zone,
+    }
+}
+
+fn css_extent_with_margin(extent: u32, margin: i32) -> i32 {
+    let extent = extent.min(i32::MAX as u32) as i64;
+    (extent + i64::from(margin)).clamp(0, i64::from(i32::MAX)) as i32
+}
+
+fn css_edge_to_i32(value: f32) -> i32 {
+    if !value.is_finite() {
+        return 0;
+    }
+    value.round().clamp(i32::MIN as f32, i32::MAX as f32) as i32
 }
 
 impl ShellComponent for FrontendSurfaceComponent {
@@ -1050,7 +1106,12 @@ impl ShellComponent for FrontendSurfaceComponent {
             effective_damage.rect
         };
         {
-            let measured_size = measure_content_size(&tree, content_width, content_height);
+            let measured_geometry = measured_surface_geometry(
+                &tree,
+                (content_width, content_height),
+                self.surface_layout.edge,
+            );
+            let measured_size = measured_geometry.content_size;
             if self.measured_size != Some(measured_size) {
                 self.measured_size = Some(measured_size);
                 // Only schedule a surface reconfigure when the measurement
@@ -1064,6 +1125,25 @@ impl ShellComponent for FrontendSurfaceComponent {
                 if measured_size != (content_width, content_height) {
                     self.invalidate_surface_config();
                 }
+            }
+            if self.surface_layout.exclusive_zone != measured_geometry.exclusive_zone
+                || [
+                    self.surface_layout.margin_top,
+                    self.surface_layout.margin_right,
+                    self.surface_layout.margin_bottom,
+                    self.surface_layout.margin_left,
+                ] != measured_geometry.margins
+            {
+                self.surface_layout.exclusive_zone = measured_geometry.exclusive_zone;
+                self.surface_layout.margin_top = measured_geometry.margins[0];
+                self.surface_layout.margin_right = measured_geometry.margins[1];
+                self.surface_layout.margin_bottom = measured_geometry.margins[2];
+                self.surface_layout.margin_left = measured_geometry.margins[3];
+                self.surface_policy = self
+                    .surface_policy_generation
+                    .update(self.surface_layout.policy_snapshot(0))
+                    .current;
+                self.invalidate_surface_config();
             }
         }
         // Element metrics depend on geometry plus ref/id/scroll attributes,
@@ -1346,6 +1426,15 @@ impl ShellComponent for FrontendSurfaceComponent {
         );
         self.settings_diagnostics = settings_state.diagnostics;
         let mut next_layout = settings_state.layout;
+        // Geometry is a paint-time product of the component root, not a
+        // settings value. Keep the last realized values while a placement
+        // setting reload waits for the next CSS measurement; otherwise a
+        // placement-only save briefly resets the layer surface to zero.
+        next_layout.exclusive_zone = self.surface_layout.exclusive_zone;
+        next_layout.margin_top = self.surface_layout.margin_top;
+        next_layout.margin_right = self.surface_layout.margin_right;
+        next_layout.margin_bottom = self.surface_layout.margin_bottom;
+        next_layout.margin_left = self.surface_layout.margin_left;
         if !mesh_core_surface_config::surface_role_change_allowed(
             self.surface_layout.role,
             next_layout.role,

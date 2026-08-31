@@ -308,18 +308,10 @@ fn doc_for(path: &str) -> &'static str {
             "Screen edge the layer surface is anchored to (`role: layer`)."
         }
         "<module>.surface.layer" => "Layer-shell layer the surface sits on (`role: layer`).",
-        "<module>.surface.exclusive_zone" => {
-            "Pixels reserved from the output for this surface. `-1` opts out of \
-             other surfaces' exclusive zones (`role: layer`)."
-        }
         "<module>.surface.keyboard_mode" => "How the surface takes keyboard focus.",
         "<module>.surface.visible_on_start" => {
             "Whether the surface is mapped when the shell starts."
         }
-        "<module>.surface.margin_top" => "Margin from the anchored edge, in logical pixels.",
-        "<module>.surface.margin_right" => "Margin from the anchored edge, in logical pixels.",
-        "<module>.surface.margin_bottom" => "Margin from the anchored edge, in logical pixels.",
-        "<module>.surface.margin_left" => "Margin from the anchored edge, in logical pixels.",
         "<module>.surface.blur" => {
             "Ask the compositor to blur behind this surface. Appends `:blur` to the \
              layer-shell namespace so one compositor rule can match every opted-in surface."

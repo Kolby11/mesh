@@ -209,7 +209,6 @@ fn compact_surface_block_normalizes_into_surface_layout() {
     "surface": {
       "anchor": "bottom",
       "layer": "overlay",
-      "exclusive_zone": 48,
       "keyboard_mode": "on_demand",
       "visible_on_start": true
     }
@@ -228,9 +227,40 @@ fn compact_surface_block_normalizes_into_surface_layout() {
         .expect("surface_layout populated from compact block");
     assert_eq!(surface.anchor.as_deref(), Some("bottom"));
     assert_eq!(surface.layer.as_deref(), Some("overlay"));
-    assert_eq!(surface.exclusive_zone, Some(48));
     assert_eq!(surface.keyboard_mode.as_deref(), Some("on_demand"));
     assert_eq!(surface.visible_on_start, Some(true));
+}
+
+#[test]
+fn surface_manifest_rejects_legacy_geometry_fields() {
+    let content = r#"
+{
+  "name": "@mesh/panel",
+  "version": "0.1.0",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "frontend",
+    "surface": {
+      "anchor": "top",
+      "exclusive_zone": 40,
+      "margins": { "top": 8, "right": 0, "bottom": 0, "left": 0 }
+    }
+  }
+}
+"#;
+
+    let error = ModuleManifest::from_json_str(content).expect_err(
+        "surface geometry must be derived from the component root instead of accepted in a manifest",
+    );
+    let ModuleManifestError::Diagnostic { diagnostic } = error else {
+        panic!("removed surface geometry should emit a migration diagnostic");
+    };
+    assert_eq!(
+        diagnostic.field_path.as_deref(),
+        Some("mesh.surface.exclusive_zone")
+    );
+    assert!(diagnostic.message.contains("removed surface geometry"));
+    assert!(diagnostic.suggested_action.contains("root component CSS"));
 }
 
 #[test]

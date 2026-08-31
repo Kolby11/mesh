@@ -1402,7 +1402,7 @@ fn contract_node() -> Node {
 fn surface_layout_node() -> Node {
     obj(
         "Surface placement for a frontend module. A `layer` surface is shell \
-         chrome placed by anchor/layer/exclusive_zone/margins; a `window` \
+         chrome placed by anchor/layer; a `window` \
          surface is an xdg_toplevel placed by the compositor and configured by \
          title/appId/resizable/decorations. Fields belonging to the other role \
          are rejected as graph diagnostics, unless `promotable` says the surface \
@@ -1488,11 +1488,6 @@ fn surface_layout_node() -> Node {
                 ),
             ),
             field(
-                "exclusive_zone",
-                false,
-                scalar("Reserved compositor space in px.", "number"),
-            ),
-            field(
                 "visible_on_start",
                 false,
                 scalar("Whether the surface starts visible at boot.", "boolean"),
@@ -1514,19 +1509,6 @@ fn surface_layout_node() -> Node {
                      `:blur` namespace suffix a single compositor rule can target \
                      (Hyprland: `layerrule = blur, :blur$`).",
                     "boolean",
-                ),
-            ),
-            field(
-                "margins",
-                false,
-                obj(
-                    "Per-edge surface margins (px).",
-                    vec![
-                        field("top", false, scalar("Top margin.", "number")),
-                        field("right", false, scalar("Right margin.", "number")),
-                        field("bottom", false, scalar("Bottom margin.", "number")),
-                        field("left", false, scalar("Left margin.", "number")),
-                    ],
                 ),
             ),
         ],

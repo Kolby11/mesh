@@ -215,6 +215,8 @@ end
        tiling, interactive resize). The state rules further down handle the
        cases where it does. */
     .settings-shell {
+        margin: 12px 12px 12px 0;
+        exclusive-zone: none;
         width: 920px;
         height: 700px;
         min-width: 920px;

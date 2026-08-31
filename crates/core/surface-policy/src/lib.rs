@@ -26,9 +26,7 @@ pub enum SurfaceRoleField {
     Decorations,
     Anchor,
     Layer,
-    ExclusiveZone,
     KeyboardMode,
-    Margins,
     Blur,
 }
 
@@ -59,10 +57,7 @@ const RESIZABLE_SETTINGS_KEYS: &[&str] = &["resizable"];
 const DECORATIONS_SETTINGS_KEYS: &[&str] = &["decorations"];
 const ANCHOR_SETTINGS_KEYS: &[&str] = &["anchor"];
 const LAYER_SETTINGS_KEYS: &[&str] = &["layer"];
-const EXCLUSIVE_ZONE_SETTINGS_KEYS: &[&str] = &["exclusive_zone"];
 const KEYBOARD_MODE_SETTINGS_KEYS: &[&str] = &["keyboard_mode"];
-const MARGIN_SETTINGS_KEYS: &[&str] =
-    &["margin_top", "margin_right", "margin_bottom", "margin_left"];
 const BLUR_SETTINGS_KEYS: &[&str] = &["blur"];
 
 /// The one role-field vocabulary shared by authoring, settings, ejection, and
@@ -106,22 +101,10 @@ pub const SURFACE_ROLE_FIELD_METADATA: &[SurfaceRoleFieldMetadata] = &[
         settings_keys: LAYER_SETTINGS_KEYS,
     },
     SurfaceRoleFieldMetadata {
-        field: SurfaceRoleField::ExclusiveZone,
-        scope: SurfaceFieldScope::Layer,
-        manifest_key: "exclusiveZone",
-        settings_keys: EXCLUSIVE_ZONE_SETTINGS_KEYS,
-    },
-    SurfaceRoleFieldMetadata {
         field: SurfaceRoleField::KeyboardMode,
         scope: SurfaceFieldScope::Layer,
         manifest_key: "keyboardMode",
         settings_keys: KEYBOARD_MODE_SETTINGS_KEYS,
-    },
-    SurfaceRoleFieldMetadata {
-        field: SurfaceRoleField::Margins,
-        scope: SurfaceFieldScope::Layer,
-        manifest_key: "margins",
-        settings_keys: MARGIN_SETTINGS_KEYS,
     },
     SurfaceRoleFieldMetadata {
         field: SurfaceRoleField::Blur,
@@ -915,7 +898,7 @@ mod tests {
 
     #[test]
     fn role_field_metadata_covers_every_role_specific_field() {
-        assert_eq!(SURFACE_ROLE_FIELD_METADATA.len(), 10);
+        assert_eq!(SURFACE_ROLE_FIELD_METADATA.len(), 8);
         for metadata in SURFACE_ROLE_FIELD_METADATA {
             assert!(!metadata.manifest_key.is_empty());
             assert!(!metadata.settings_keys.is_empty());
@@ -926,16 +909,6 @@ mod tests {
 
     #[test]
     fn role_field_metadata_distinguishes_layer_and_window_fields() {
-        assert!(role_field_applies(
-            SurfaceRoleField::Margins,
-            SurfaceRoleKind::Layer,
-            false
-        ));
-        assert!(!role_field_applies(
-            SurfaceRoleField::Margins,
-            SurfaceRoleKind::Window,
-            false
-        ));
         assert!(role_field_applies(
             SurfaceRoleField::Decorations,
             SurfaceRoleKind::Window,

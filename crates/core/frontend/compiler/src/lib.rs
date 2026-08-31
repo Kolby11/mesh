@@ -613,6 +613,13 @@ impl CompiledFrontendModule {
                     }
                 })
                 .collect();
+            if let Some(surface_root) = root.children.first_mut() {
+                if mode == FrontendRenderMode::Surface {
+                    surface_root.mark_surface_root();
+                } else {
+                    surface_root.clear_surface_root();
+                }
+            }
         }
 
         // Embedded trees are laid out after composition, against the embedded
@@ -1633,6 +1640,16 @@ mod tests {
             960,
             "nav-shell should span the surface width, got {:?}",
             nav_shell.layout
+        );
+        assert_eq!(
+            nav_shell.layout.x.round() as u32,
+            0,
+            "surface margin must not shift the pixels inside the buffer",
+        );
+        assert_eq!(
+            nav_shell.layout.y.round() as u32,
+            0,
+            "surface margin must be lowered to compositor placement",
         );
         assert_eq!(
             nav_shell.layout.height.round() as u32,

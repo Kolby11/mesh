@@ -1224,7 +1224,7 @@ mod tests {
         written.set_namespace("shell", json!({ "i18n": { "locale": "sk" } }));
         written.set_namespace(
             "@mesh/navigation-bar",
-            json!({ "surface": { "exclusive_zone": 48 } }),
+            json!({ "surface": { "anchor": "bottom" } }),
         );
         written.save().expect("write settings");
 
@@ -1234,8 +1234,8 @@ mod tests {
         assert_eq!(loaded.shell().i18n.locale, "sk");
         assert_eq!(loaded.shell().i18n.fallback_locale, "en");
         assert_eq!(
-            loaded.namespace("@mesh/navigation-bar")["surface"]["exclusive_zone"],
-            json!(48)
+            loaded.namespace("@mesh/navigation-bar")["surface"]["anchor"],
+            json!("bottom")
         );
     }
 

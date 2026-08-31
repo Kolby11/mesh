@@ -106,6 +106,23 @@ box.card { padding: 3px; }
 }
 
 #[test]
+fn resolves_surface_exclusive_zone_as_a_root_css_policy() {
+    let theme = mesh_core_theme::default_theme();
+    let resolver = StyleResolver::new(&theme);
+    let rules = parse_fixture_style(
+        r#"
+<style>
+.panel { exclusive-zone: none; }
+</style>
+"#,
+    );
+
+    let (style, diagnostics) = resolve_class(&resolver, &rules, "panel");
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(style.surface_exclusive_zone, SurfaceExclusiveZone::None);
+}
+
+#[test]
 fn parse_hex_colors() {
     assert_eq!(
         Color::from_hex("#fff"),
@@ -230,6 +247,7 @@ fn supported_css_properties_cover_phase_8_contract() {
         "row-gap",
         "column-gap",
         "position",
+        "exclusive-zone",
         "z-index",
         "inset",
         "top",
@@ -279,6 +297,7 @@ fn style_profile_matrix_classifies_supported_visual_properties() {
         ("font-size", StyleProfileStatus::Implemented),
         ("animation-duration", StyleProfileStatus::Implemented),
         ("transition-property", StyleProfileStatus::Implemented),
+        ("exclusive-zone", StyleProfileStatus::Implemented),
     ] {
         assert_eq!(
             style_profile_status(property),

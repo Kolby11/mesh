@@ -67,6 +67,7 @@ end
 .proof-shell {
     width: 380px;
     height: 220px;
+    exclusive-zone: none;
     padding: var(--spacing-md);
     background: transparent;
 }

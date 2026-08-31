@@ -242,9 +242,6 @@ pub fn surface_layout_from_manifest(manifest: &Manifest) -> SurfaceLayoutSetting
     if let Some(layer) = surface.layer.as_deref().and_then(parse_surface_layer) {
         layout.layer = layer;
     }
-    if let Some(zone) = surface.exclusive_zone {
-        layout.exclusive_zone = zone;
-    }
     if let Some(mode) = surface
         .keyboard_mode
         .as_deref()
@@ -254,12 +251,6 @@ pub fn surface_layout_from_manifest(manifest: &Manifest) -> SurfaceLayoutSetting
     }
     if let Some(visible) = surface.visible_on_start {
         layout.visible_on_start = visible;
-    }
-    if let Some(margins) = &surface.margins {
-        layout.margin_top = margins.top;
-        layout.margin_right = margins.right;
-        layout.margin_bottom = margins.bottom;
-        layout.margin_left = margins.left;
     }
     if let Some(blur) = surface.blur {
         layout.blur = blur;
@@ -353,14 +344,6 @@ pub fn resolve_frontend_module_settings_with_props(
         layout.layer = layer;
     }
 
-    if let Some(zone) = surface
-        .and_then(|value| value.get("exclusive_zone"))
-        .and_then(serde_json::Value::as_i64)
-        .and_then(|value| i32::try_from(value).ok())
-    {
-        layout.exclusive_zone = zone;
-    }
-
     if let Some(mode) = surface
         .and_then(|value| value.get("keyboard_mode"))
         .and_then(serde_json::Value::as_str)
@@ -376,34 +359,6 @@ pub fn resolve_frontend_module_settings_with_props(
         layout.visible_on_start = visible_on_start;
     }
 
-    if let Some(v) = surface
-        .and_then(|value| value.get("margin_top"))
-        .and_then(serde_json::Value::as_i64)
-        .and_then(|v| i32::try_from(v).ok())
-    {
-        layout.margin_top = v;
-    }
-    if let Some(v) = surface
-        .and_then(|value| value.get("margin_right"))
-        .and_then(serde_json::Value::as_i64)
-        .and_then(|v| i32::try_from(v).ok())
-    {
-        layout.margin_right = v;
-    }
-    if let Some(v) = surface
-        .and_then(|value| value.get("margin_bottom"))
-        .and_then(serde_json::Value::as_i64)
-        .and_then(|v| i32::try_from(v).ok())
-    {
-        layout.margin_bottom = v;
-    }
-    if let Some(v) = surface
-        .and_then(|value| value.get("margin_left"))
-        .and_then(serde_json::Value::as_i64)
-        .and_then(|v| i32::try_from(v).ok())
-    {
-        layout.margin_left = v;
-    }
     if let Some(blur) = surface
         .and_then(|value| value.get("blur"))
         .and_then(serde_json::Value::as_bool)
@@ -526,9 +481,6 @@ pub fn surface_layout_to_json(layout: &SurfaceLayoutSettings) -> serde_json::Val
     if role_field_applies_to_layout(layout, SurfaceRoleField::Layer) {
         block.insert("layer".into(), surface_layer_name(layout.layer).into());
     }
-    if role_field_applies_to_layout(layout, SurfaceRoleField::ExclusiveZone) {
-        block.insert("exclusive_zone".into(), layout.exclusive_zone.into());
-    }
     if role_field_applies_to_layout(layout, SurfaceRoleField::Blur) {
         block.insert("blur".into(), layout.blur.into());
     }
@@ -540,12 +492,6 @@ pub fn surface_layout_to_json(layout: &SurfaceLayoutSettings) -> serde_json::Val
         );
     }
     block.insert("visible_on_start".into(), layout.visible_on_start.into());
-    if role_field_applies_to_layout(layout, SurfaceRoleField::Margins) {
-        block.insert("margin_top".into(), layout.margin_top.into());
-        block.insert("margin_right".into(), layout.margin_right.into());
-        block.insert("margin_bottom".into(), layout.margin_bottom.into());
-        block.insert("margin_left".into(), layout.margin_left.into());
-    }
 
     serde_json::Value::Object(block)
 }
@@ -776,7 +722,6 @@ pub const SURFACE_FIELDS: &[FieldSpec] = &[
             values: SURFACE_LAYER_VALUES,
         },
     ),
-    FieldSpec::new("exclusive_zone", FieldKind::Int32),
     FieldSpec::new(
         "keyboard_mode",
         FieldKind::Enum {
@@ -785,10 +730,6 @@ pub const SURFACE_FIELDS: &[FieldSpec] = &[
         },
     ),
     FieldSpec::new("visible_on_start", FieldKind::Bool),
-    FieldSpec::new("margin_top", FieldKind::Int32),
-    FieldSpec::new("margin_right", FieldKind::Int32),
-    FieldSpec::new("margin_bottom", FieldKind::Int32),
-    FieldSpec::new("margin_left", FieldKind::Int32),
     FieldSpec::new("blur", FieldKind::Bool),
 ];
 
@@ -1143,7 +1084,6 @@ mod tests {
             serde_json::json!({
                 "surface": {
                     "blur": true,
-                    "margin_left": 12
                 }
             }),
             &manifest,
@@ -1151,7 +1091,7 @@ mod tests {
 
         assert_eq!(settings.declared_policy.snapshot.blur, false);
         assert_eq!(settings.effective_policy.snapshot.blur, true);
-        assert_eq!(settings.effective_policy.snapshot.margins[3], 12);
+        assert_eq!(settings.effective_policy.snapshot.margins, [0; 4]);
         assert_eq!(settings.policy, settings.effective_policy.snapshot);
         assert!(settings.effective_policy.diagnostics.is_empty());
     }
@@ -1313,7 +1253,6 @@ mod tests {
     fn an_empty_namespace_leaves_every_manifest_default_intact() {
         let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
             anchor: Some("bottom".into()),
-            exclusive_zone: Some(56),
             ..Default::default()
         });
         let settings =
@@ -1321,7 +1260,7 @@ mod tests {
 
         assert_eq!(settings.layout, surface_layout_from_manifest(&manifest));
         assert_eq!(settings.layout.edge, Edge::Bottom);
-        assert_eq!(settings.layout.exclusive_zone, 56);
+        assert_eq!(settings.layout.exclusive_zone, 0);
     }
 
     #[test]
@@ -1329,7 +1268,6 @@ mod tests {
         let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
             anchor: Some("top".into()),
             layer: Some("top".into()),
-            exclusive_zone: Some(56),
             visible_on_start: Some(true),
             ..Default::default()
         });
@@ -1341,7 +1279,7 @@ mod tests {
 
         assert_eq!(settings.layout.edge, Edge::Bottom);
         assert_eq!(settings.layout.layer, Layer::Top);
-        assert_eq!(settings.layout.exclusive_zone, 56);
+        assert_eq!(settings.layout.exclusive_zone, 0);
         assert!(settings.layout.visible_on_start);
     }
 
@@ -1380,7 +1318,6 @@ mod tests {
         let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
             anchor: Some("bottom".into()),
             layer: Some("overlay".into()),
-            exclusive_zone: Some(48),
             visible_on_start: Some(true),
             keyboard_mode: Some("none".into()),
             ..Default::default()
@@ -1390,7 +1327,7 @@ mod tests {
 
         assert_eq!(layout.edge, Edge::Bottom);
         assert_eq!(layout.layer, Layer::Overlay);
-        assert_eq!(layout.exclusive_zone, 48);
+        assert_eq!(layout.exclusive_zone, 0);
         assert!(layout.visible_on_start);
         assert_eq!(layout.keyboard_mode, KeyboardMode::None);
     }
@@ -1400,7 +1337,6 @@ mod tests {
         let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
             anchor: Some("bottom".into()),
             layer: Some("overlay".into()),
-            exclusive_zone: Some(56),
             keyboard_mode: Some("on_demand".into()),
             visible_on_start: Some(true),
             blur: Some(true),
@@ -1503,14 +1439,7 @@ mod tests {
             role: Some("window".into()),
             anchor: Some("bottom".into()),
             layer: Some("overlay".into()),
-            exclusive_zone: Some(48),
             keyboard_mode: Some("exclusive".into()),
-            margins: Some(mesh_core_module::manifest::SurfaceMargins {
-                top: 1,
-                right: 2,
-                bottom: 3,
-                left: 4,
-            }),
             blur: Some(true),
             title: Some(LocalizedText::Literal("Settings".into())),
             app_id: Some("mesh.settings".into()),
@@ -1520,17 +1449,7 @@ mod tests {
         });
         let block = surface_layout_to_json(&surface_layout_from_manifest(&manifest));
 
-        for key in [
-            "anchor",
-            "layer",
-            "exclusive_zone",
-            "keyboard_mode",
-            "margin_top",
-            "margin_right",
-            "margin_bottom",
-            "margin_left",
-            "blur",
-        ] {
+        for key in ["anchor", "layer", "keyboard_mode", "blur"] {
             assert!(block.get(key).is_none(), "{key} is inert for a window");
         }
         assert_eq!(block["title"], serde_json::json!("Settings"));
@@ -1618,17 +1537,15 @@ mod tests {
     #[test]
     fn a_wrong_type_is_reported_and_the_default_stands() {
         let manifest = manifest_with_surface_layout(SurfaceLayoutSection {
-            exclusive_zone: Some(56),
             ..Default::default()
         });
         let (layout, diagnostics) =
             diagnose(serde_json::json!({ "exclusive_zone": "56" }), &manifest);
 
         let diagnostic = only(&diagnostics);
-        assert!(diagnostic.is_error());
+        assert!(!diagnostic.is_error());
         assert_eq!(diagnostic.key_path, "surface.exclusive_zone");
-        assert!(diagnostic.message.contains("an integer"));
-        assert_eq!(layout.exclusive_zone, 56);
+        assert_eq!(layout.exclusive_zone, 0);
     }
 
     #[test]
@@ -1682,12 +1599,7 @@ mod tests {
             serde_json::json!({
                 "anchor": "bottom",
                 "layer": "overlay",
-                "exclusive_zone": 48,
                 "keyboard_mode": "exclusive",
-                "margin_top": 1,
-                "margin_right": 2,
-                "margin_bottom": 3,
-                "margin_left": 4,
                 "blur": true,
             }),
             &window_manifest,
@@ -1701,12 +1613,7 @@ mod tests {
             vec![
                 "surface.anchor",
                 "surface.layer",
-                "surface.exclusive_zone",
                 "surface.keyboard_mode",
-                "surface.margin_top",
-                "surface.margin_right",
-                "surface.margin_bottom",
-                "surface.margin_left",
                 "surface.blur",
             ]
         );
@@ -1919,7 +1826,7 @@ mod tests {
         let state = resolve_frontend_module_settings(
             "@mesh/navigation-bar",
             serde_json::json!({
-                "surface": { "anchor": "bottom", "exclusive_zone": 48, "blur": true },
+                "surface": { "anchor": "bottom", "blur": true },
                 "i18n": { "default_locale": "sk" },
                 "icons": { "overrides": { "settings": "lucide/settings" } }
             }),

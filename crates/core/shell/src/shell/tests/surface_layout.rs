@@ -24,7 +24,18 @@ fn content_size_falls_back_when_root_has_no_extent() {
 }
 
 #[test]
-fn frontend_settings_override_surface_layout_defaults() {
+fn synthetic_surface_content_size_uses_only_the_component_root_box() {
+    let mut surface = node("surface", 0.0, 0.0, 1.0, 1.0);
+    surface.children.push(node("box", 0.0, 0.0, 320.0, 40.0));
+    surface
+        .children
+        .push(node("tooltip", 0.0, 0.0, 1920.0, 1080.0));
+
+    assert_eq!(measure_content_size(&surface, 1, 1), (320, 40));
+}
+
+#[test]
+fn frontend_settings_override_surface_placement_without_geometry_fields() {
     let manifest = minimal_manifest("@mesh/base-surface");
     let mut store = mesh_core_config::SettingsStore::default();
     store.set_namespace(
@@ -33,7 +44,6 @@ fn frontend_settings_override_surface_layout_defaults() {
             "surface": {
                 "anchor": "left",
                 "layer": "overlay",
-                "exclusive_zone": 12,
                 "keyboard_mode": "exclusive",
                 "visible_on_start": true
             }
@@ -48,7 +58,7 @@ fn frontend_settings_override_surface_layout_defaults() {
 
     assert_eq!(settings.layout.edge, mesh_core_wayland::Edge::Left);
     assert_eq!(settings.layout.layer, mesh_core_wayland::Layer::Overlay);
-    assert_eq!(settings.layout.exclusive_zone, 12);
+    assert_eq!(settings.layout.exclusive_zone, 0);
     assert_eq!(
         settings.layout.keyboard_mode,
         mesh_core_wayland::KeyboardMode::Exclusive

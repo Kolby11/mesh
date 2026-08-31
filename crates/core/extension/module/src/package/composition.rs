@@ -362,9 +362,7 @@ fn merge_surface(
         promotable,
         anchor,
         layer,
-        exclusive_zone,
         keyboard_mode,
-        margins,
         visible_on_start,
         blur,
         title,
@@ -510,7 +508,7 @@ mod tests {
             "@alice/desk",
             None,
             r#"{"roots":{"@mesh/panel#top":{"module":"@mesh/panel",
-                 "surface":{"anchor":"top","exclusive_zone":56}}},
+                 "surface":{"anchor":"top","layer":"top"}}},
                 "settings":{"shell":{"i18n":{"locale":"en-US"},"theme":{"mode":"dark"}}}}"#,
         );
         let resolved = resolve_composition(
@@ -529,7 +527,7 @@ mod tests {
         let surface = root.surface.as_ref().unwrap();
         assert_eq!(surface.anchor.as_deref(), Some("bottom"));
         // A per-field surface merge keeps the composition's other placement.
-        assert_eq!(surface.exclusive_zone, Some(56));
+        assert_eq!(surface.layer.as_deref(), Some("top"));
         // Settings merge per key, not per section.
         assert_eq!(resolved.spec.settings["shell"]["i18n"]["locale"], "sk-SK");
         assert_eq!(resolved.spec.settings["shell"]["theme"]["mode"], "dark");

@@ -45,13 +45,6 @@ fn graph_diagnostics_reject_layer_placement_on_a_window_surface() {
         role: Some("window".into()),
         anchor: Some("right".into()),
         layer: Some("overlay".into()),
-        exclusive_zone: Some(48),
-        margins: Some(crate::manifest::SurfaceMargins {
-            top: 1,
-            right: 2,
-            bottom: 3,
-            left: 4,
-        }),
         keyboard_mode: Some("exclusive".into()),
         blur: Some(true),
         ..Default::default()
@@ -64,8 +57,6 @@ fn graph_diagnostics_reject_layer_placement_on_a_window_surface() {
             && diagnostic.status == "surface_role_field_mismatch"
             && diagnostic.message.contains("anchor")
             && diagnostic.message.contains("layer")
-            && diagnostic.message.contains("exclusiveZone")
-            && diagnostic.message.contains("margins")
             && diagnostic.message.contains("keyboardMode")
             && diagnostic.message.contains("blur")
     }));

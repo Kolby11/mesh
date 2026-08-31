@@ -24,6 +24,7 @@ impl ModuleManifest {
         let path = PathBuf::from("<inline>");
         reject_legacy_top_level_fields(input, &path)?;
         reject_legacy_surface_layout(input, &path)?;
+        reject_legacy_surface_geometry(input, &path)?;
         let mut parsed: Self = serde_json::from_str(input)
             .map_err(|source| ModuleManifestError::Json { path, source })?;
         parsed.normalize();
@@ -39,6 +40,7 @@ impl ModuleManifest {
         })?;
         reject_legacy_top_level_fields(&content, path)?;
         reject_legacy_surface_layout(&content, path)?;
+        reject_legacy_surface_geometry(&content, path)?;
         let mut parsed: Self =
             serde_json::from_str(&content).map_err(|source| ModuleManifestError::Json {
                 path: path.to_path_buf(),
@@ -329,6 +331,42 @@ fn reject_legacy_surface_layout(input: &str, path: &Path) -> Result<(), ModuleMa
             Some(format!("mesh.{field}")),
             format!("mesh.{field} is a legacy surface declaration and is not supported"),
             "replace mesh.surfaceLayout with mesh.surface",
+        ),
+    })
+}
+
+fn reject_legacy_surface_geometry(input: &str, path: &Path) -> Result<(), ModuleManifestError> {
+    let document: serde_json::Value =
+        serde_json::from_str(input).map_err(|source| ModuleManifestError::Json {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let Some(surface) = document
+        .get("mesh")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|mesh| mesh.get("surface"))
+        .and_then(serde_json::Value::as_object)
+    else {
+        return Ok(());
+    };
+    let Some(field) = ["exclusive_zone", "exclusiveZone", "margins"]
+        .into_iter()
+        .find(|field| surface.contains_key(*field))
+    else {
+        return Ok(());
+    };
+    let module_id = document
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    let field_path = format!("mesh.surface.{field}");
+    Err(ModuleManifestError::Diagnostic {
+        diagnostic: ModuleManifestDiagnostic::error(
+            path,
+            module_id,
+            Some(field_path.clone()),
+            format!("{field_path} is a removed surface geometry field and is not supported"),
+            "move sizing and margin to the root component CSS; use exclusive-zone: none for overlays",
         ),
     })
 }

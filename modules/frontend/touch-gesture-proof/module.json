@@ -15,7 +15,6 @@
     "surface": {
       "anchor": "right",
       "layer": "top",
-      "exclusive_zone": 0,
       "keyboard_mode": "none",
       "visible_on_start": true
     },

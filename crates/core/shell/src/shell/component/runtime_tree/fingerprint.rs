@@ -152,6 +152,7 @@ pub(super) fn hash_style_fields(style: &ComputedStyle, hasher: &mut impl Hasher)
     hash_dimension(style.max_height, hasher);
     hash_edges(style.padding, hasher);
     hash_edges(style.margin, hasher);
+    style.surface_exclusive_zone.hash(hasher);
     hash_edges(style.border_width, hasher);
     hash_color(style.background_color, hasher);
     match &style.background_paint {

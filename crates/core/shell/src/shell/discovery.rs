@@ -1636,13 +1636,8 @@ fn module_settings_properties() -> serde_json::Map<String, serde_json::Value> {
                 "decorations": { "type": "string" },
                 "anchor": { "type": "string" },
                 "layer": { "type": "string" },
-                "exclusive_zone": { "type": "integer" },
                 "keyboard_mode": { "type": "string" },
                 "visible_on_start": { "type": "boolean" },
-                "margin_top": { "type": "integer" },
-                "margin_right": { "type": "integer" },
-                "margin_bottom": { "type": "integer" },
-                "margin_left": { "type": "integer" },
                 "blur": { "type": "boolean" }
             }
         },

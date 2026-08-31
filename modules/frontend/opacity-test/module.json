@@ -15,11 +15,9 @@
     "surface": {
       "anchor": "top",
       "layer": "overlay",
-      "exclusive_zone": 0,
       "keyboard_mode": "none",
       "visible_on_start": true,
-      "blur": false,
-      "margins": { "top": 90, "right": 0, "bottom": 0, "left": 0 }
+      "blur": false
     },
     "accessibility": {
       "role": "status",

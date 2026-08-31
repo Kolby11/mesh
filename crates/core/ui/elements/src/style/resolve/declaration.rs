@@ -836,6 +836,11 @@ fn apply_declaration_with_context(
             style.margin.top = v;
             style.margin.bottom = v;
         }
+        "exclusive-zone" => {
+            style.surface_exclusive_zone = resolver.with_resolved_str(value, variables, |resolved| {
+                SurfaceExclusiveZone::from_css(resolved).unwrap_or_default()
+            });
+        }
         "gap" => style.gap = resolver.resolve_number_with_variables(value, variables),
         "column-gap" | "row-gap" | "gap-x" => {
             style.gap = resolver.resolve_number_with_variables(value, variables)

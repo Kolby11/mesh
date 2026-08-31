@@ -354,6 +354,7 @@ pub(super) fn prop_css_domain(property: &str) -> PropCssDomain {
         property,
         "display"
             | "position"
+            | "exclusive-zone"
             | "visibility"
             | "overflow"
             | "overflow-x"

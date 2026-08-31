@@ -19,6 +19,8 @@
 .opacity-test-shell {
     width: 640px;
     height: 286px;
+    margin-top: 90px;
+    exclusive-zone: none;
     padding: 0;
     background: transparent;
 }

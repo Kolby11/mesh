@@ -140,11 +140,24 @@ pub(super) fn taffy_style_for_node(
             width: taffy_dimension(style.max_width),
             height: taffy_dimension(style.max_height),
         },
-        margin: TaffyRect {
-            left: taffy_style::LengthPercentageAuto::length(style.margin.left),
-            right: taffy_style::LengthPercentageAuto::length(style.margin.right),
-            top: taffy_style::LengthPercentageAuto::length(style.margin.top),
-            bottom: taffy_style::LengthPercentageAuto::length(style.margin.bottom),
+        margin: if node.is_surface_root() {
+            // A top-level component root has no authored parent box. Its CSS
+            // margins are surface placement, lowered by the shell after
+            // layout; applying them here would both move the pixels inside
+            // the buffer and apply the compositor margin a second time.
+            TaffyRect {
+                left: taffy_style::LengthPercentageAuto::auto(),
+                right: taffy_style::LengthPercentageAuto::auto(),
+                top: taffy_style::LengthPercentageAuto::auto(),
+                bottom: taffy_style::LengthPercentageAuto::auto(),
+            }
+        } else {
+            TaffyRect {
+                left: taffy_style::LengthPercentageAuto::length(style.margin.left),
+                right: taffy_style::LengthPercentageAuto::length(style.margin.right),
+                top: taffy_style::LengthPercentageAuto::length(style.margin.top),
+                bottom: taffy_style::LengthPercentageAuto::length(style.margin.bottom),
+            }
         },
         padding: TaffyRect {
             left: taffy_length(style.padding.left),

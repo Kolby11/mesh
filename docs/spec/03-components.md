@@ -73,6 +73,15 @@ CSS re-consumes it next frame — one shared named value, no geometry fight.
 Imperative `refs` geometry writes are the documented last-writer-wins escape
 hatch, not the default path.
 
+For a top-level layer surface, the component root's measured border box is also
+the compositor geometry. Its resolved CSS `margin` edges become layer-shell
+margins, and the anchored outer edge (border-box extent plus that edge's
+margin) becomes the exclusive zone. The root may set
+`exclusive-zone: none` for an overlay or HUD; the default is `auto`. These
+values are derived after layout, so a CSS or prop-driven size change updates
+the compositor request together with the pixels. `mesh.surface` contains no
+exclusive-zone or margin numbers.
+
 ### 2.1 Author-declared customizable slots
 
 **Status: shipped.** A component may expose selected regions to profile-level
