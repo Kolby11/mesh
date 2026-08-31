@@ -1419,14 +1419,16 @@ impl FrontendSurfaceComponent {
     }
 
     /// Retain requests produced between two completed frame publications. The
-    /// requests are copied into the next immutable frame and returned to the
+    /// requests are copied into the next immutable frame with the exact
+    /// catalog/runtime revision that produced them, and returned to the
     /// existing shell request queue unchanged.
     pub(super) fn record_frontend_host_effects(
         &mut self,
         requests: Vec<CoreRequest>,
     ) -> Vec<CoreRequest> {
+        let revision = self.current_frontend_effect_revision();
         self.pending_frontend_effects
-            .extend_host_requests(requests.iter().cloned());
+            .extend_host_requests_at(requests.iter().cloned(), revision);
         requests
     }
 
@@ -1461,7 +1463,16 @@ impl FrontendSurfaceComponent {
             tree.revision(),
             self.service_revision.get(),
         );
-        let frame = FrontendFrame::new(
+        let mut effects = std::mem::take(&mut self.pending_frontend_effects);
+        if let Err(error) = effects.bind_revision(revisions.effect_revision()) {
+            tracing::warn!(
+                component_id = %self.compiled.manifest.package.id,
+                error = %error,
+                "discarding stale frontend host effects before frame publication"
+            );
+            effects = FrontendFrameEffects::default();
+        }
+        let frame = match FrontendFrame::try_new(
             mesh_core_frontend_abi::EffectSource::new(
                 self.compiled.manifest.package.id.clone(),
                 Some(self.surface_id.clone()),
@@ -1471,13 +1482,23 @@ impl FrontendSurfaceComponent {
             FrontendServiceSnapshot::new(self.service_revision.get(), observations),
             FrontendInvalidation::new(self.frame_revision, self.invalidation_snapshot.clone()),
             diagnostics,
-            std::mem::take(&mut self.pending_frontend_effects),
+            effects,
             child_surface_requests,
             FrontendPaintMetadata::new(
                 self.retained_display_list.generation(),
                 self.last_present_damage_rects.clone(),
             ),
-        );
+        ) {
+            Ok(frame) => frame,
+            Err(error) => {
+                tracing::error!(
+                    component_id = %self.compiled.manifest.package.id,
+                    error = %error,
+                    "frontend frame publication rejected"
+                );
+                return;
+            }
+        };
         self.last_frontend_frame = Some(frame);
     }
 

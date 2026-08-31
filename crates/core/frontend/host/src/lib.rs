@@ -661,12 +661,26 @@ pub enum CoreRequest {
 #[derive(Debug, Clone, Default)]
 pub struct FrontendFrameEffects {
     host_requests: Vec<CoreRequest>,
+    host_request_revisions: Vec<Option<FrontendEffectRevision>>,
     typed_effects: Vec<ScopedFrontendEffect>,
 }
 
 impl FrontendFrameEffects {
     pub fn from_host_requests(requests: Vec<CoreRequest>) -> Self {
+        let request_count = requests.len();
         Self {
+            host_requests: requests,
+            host_request_revisions: vec![None; request_count],
+            typed_effects: Vec::new(),
+        }
+    }
+
+    pub fn from_host_requests_at(
+        requests: Vec<CoreRequest>,
+        revision: FrontendEffectRevision,
+    ) -> Self {
+        Self {
+            host_request_revisions: vec![Some(revision); requests.len()],
             host_requests: requests,
             typed_effects: Vec::new(),
         }
@@ -675,6 +689,7 @@ impl FrontendFrameEffects {
     pub fn from_typed_effects(batch: FrontendEffectBatch) -> Self {
         Self {
             host_requests: Vec::new(),
+            host_request_revisions: Vec::new(),
             typed_effects: batch.into_scoped().collect(),
         }
     }
@@ -684,6 +699,20 @@ impl FrontendFrameEffects {
         I: IntoIterator<Item = CoreRequest>,
     {
         self.host_requests.extend(requests);
+        self.host_request_revisions.extend(
+            std::iter::repeat(None)
+                .take(self.host_requests.len() - self.host_request_revisions.len()),
+        );
+    }
+
+    pub fn extend_host_requests_at<I>(&mut self, requests: I, revision: FrontendEffectRevision)
+    where
+        I: IntoIterator<Item = CoreRequest>,
+    {
+        let requests = requests.into_iter().collect::<Vec<_>>();
+        self.host_requests.extend(requests.iter().cloned());
+        self.host_request_revisions
+            .extend(std::iter::repeat(Some(revision)).take(requests.len()));
     }
 
     pub fn extend_typed_effects<I>(&mut self, effects: I)
@@ -700,6 +729,18 @@ impl FrontendFrameEffects {
         &mut self,
         revision: FrontendEffectRevision,
     ) -> Result<(), EffectRejection> {
+        for actual in self.host_request_revisions.iter().flatten() {
+            if *actual != revision {
+                return Err(EffectRejection::StaleRevision {
+                    effect: "host-request".to_owned(),
+                    expected_catalog: revision.catalog(),
+                    expected_runtime: revision.runtime(),
+                    actual_catalog: actual.catalog(),
+                    actual_runtime: actual.runtime(),
+                });
+            }
+        }
+        self.host_request_revisions.fill(Some(revision));
         for effect in &self.typed_effects {
             if let Some(actual) = effect.revision()
                 && actual != revision
@@ -723,6 +764,10 @@ impl FrontendFrameEffects {
 
     pub fn host_requests(&self) -> &[CoreRequest] {
         &self.host_requests
+    }
+
+    pub fn host_request_revisions(&self) -> &[Option<FrontendEffectRevision>] {
+        &self.host_request_revisions
     }
 
     pub fn typed_effects(&self) -> &[ScopedFrontendEffect] {
@@ -952,13 +997,28 @@ impl ShellEffectAdapter {
                 actual_runtime: frame_revision.runtime(),
             }));
         }
-        frame
-            .effects()
-            .typed_effects()
-            .iter()
-            .cloned()
-            .map(|effect| Self::lower_at(effect, revision))
-            .collect()
+        for actual in frame.effects().host_request_revisions().iter().flatten() {
+            if *actual != revision {
+                return Err(ShellEffectError::Rejected(EffectRejection::StaleRevision {
+                    effect: "host-request".to_owned(),
+                    expected_catalog: revision.catalog(),
+                    expected_runtime: revision.runtime(),
+                    actual_catalog: actual.catalog(),
+                    actual_runtime: actual.runtime(),
+                }));
+            }
+        }
+        let mut requests = frame.effects().host_requests().to_vec();
+        requests.extend(
+            frame
+                .effects()
+                .typed_effects()
+                .iter()
+                .cloned()
+                .map(|effect| Self::lower_at(effect, revision))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+        Ok(requests)
     }
 
     fn lower_authorized(effect: ScopedFrontendEffect) -> Result<CoreRequest, ShellEffectError> {
@@ -1205,6 +1265,10 @@ mod frontend_frame_tests {
         assert_eq!(frame.services().revision(), 3);
         assert_eq!(frame.services().observations(), &observations);
         assert_eq!(frame.effects().host_requests().len(), 1);
+        assert_eq!(
+            frame.effects().host_request_revisions(),
+            &[Some(FrontendEffectRevision::new(4, 9))]
+        );
         assert_eq!(frame.paint().display_list_generation(), 12);
     }
 
@@ -1287,6 +1351,63 @@ mod frontend_frame_tests {
                 FrontendEffectRevision::new(4, 9)
             ),
             Ok(requests) if matches!(requests.as_slice(), [CoreRequest::ShowSurface { .. }])
+        ));
+    }
+
+    #[test]
+    fn frontend_frame_rejects_stale_host_requests() {
+        let frame = FrontendFrame::try_new(
+            EffectSource::new("@mesh/test", Some("surface".into())),
+            FrontendFrameRevisions::new(1, 5, 9, 0, 0),
+            None,
+            FrontendServiceSnapshot::new(0, ServiceObservationSummary::default()),
+            FrontendInvalidation::default(),
+            Vec::new(),
+            FrontendFrameEffects::from_host_requests_at(
+                vec![CoreRequest::ShowSurface {
+                    surface_id: "@mesh/test".into(),
+                }],
+                FrontendEffectRevision::new(4, 9),
+            ),
+            Vec::new(),
+            FrontendPaintMetadata::default(),
+        )
+        .expect_err("host requests from an older catalog must be rejected");
+
+        assert!(matches!(
+            frame,
+            FrontendFrameError::EffectRevisionMismatch { message }
+                if message.contains("host-request")
+                    && message.contains("expected catalog/runtime 5/9")
+        ));
+    }
+
+    #[test]
+    fn frontend_frame_rejects_host_requests_from_an_old_runtime() {
+        let frame = FrontendFrame::try_new(
+            EffectSource::new("@mesh/test", Some("surface".into())),
+            FrontendFrameRevisions::new(1, 5, 9, 0, 0),
+            None,
+            FrontendServiceSnapshot::new(0, ServiceObservationSummary::default()),
+            FrontendInvalidation::default(),
+            Vec::new(),
+            FrontendFrameEffects::from_host_requests_at(
+                vec![CoreRequest::ShowSurface {
+                    surface_id: "@mesh/test".into(),
+                }],
+                FrontendEffectRevision::new(5, 8),
+            ),
+            Vec::new(),
+            FrontendPaintMetadata::default(),
+        )
+        .expect_err("host requests from an older runtime must be rejected");
+
+        assert!(matches!(
+            frame,
+            FrontendFrameError::EffectRevisionMismatch { message }
+                if message.contains("host-request")
+                    && message.contains("expected catalog/runtime 5/9")
+                    && message.contains("got 5/8")
         ));
     }
 }

@@ -119,9 +119,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Frontend compiler and host
 
-- [ ] Gate service payload publication on capabilities and replace the
-      revision-light host effects with a coherent, typed frontend frame/effect
-      boundary that rejects stale catalog/runtime requests.
 - [ ] Complete frontend runtime lifecycle and recovery: dispatch mount/unmount,
       make prop publication transactional, and preserve truthful typed,
       source-located diagnostics on failures.
