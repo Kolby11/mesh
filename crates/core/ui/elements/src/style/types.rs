@@ -754,6 +754,10 @@ pub struct ComputedStyle {
     pub backdrop_filter: VisualFilter,
     pub mix_blend_mode: BlendMode,
     pub transitions: Vec<TransitionStyle>,
+    /// The independently authored transition longhand lists used to rebuild
+    /// `transitions` while declarations are being applied. Keeping the source
+    /// lists preserves their values when a later property list changes length.
+    pub transition_longhands: TransitionLonghands,
     pub animations: Vec<AnimationStyle>,
     pub overflow_x: Overflow,
     pub overflow_y: Overflow,
@@ -836,6 +840,7 @@ impl Default for ComputedStyle {
             backdrop_filter: VisualFilter::NONE,
             mix_blend_mode: BlendMode::Normal,
             transitions: vec![TransitionStyle::default()],
+            transition_longhands: TransitionLonghands::default(),
             animations: vec![AnimationStyle::default()],
             overflow_x: Overflow::Visible,
             overflow_y: Overflow::Visible,
@@ -1464,6 +1469,73 @@ impl Default for TransformOrigin {
             x: TransformOriginValue::Percent(50.0),
             y: TransformOriginValue::Percent(50.0),
         }
+    }
+}
+
+/// Independently authored CSS transition longhand lists.
+///
+/// The resolved [`ComputedStyle::transitions`] vector is the runtime form.
+/// These source lists are retained separately so each longhand can be applied
+/// in cascade order without losing values that were temporarily truncated by a
+/// different `transition-property` list.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TransitionLonghands {
+    pub properties: Option<Vec<TransitionProperties>>,
+    pub durations_ms: Option<Vec<u32>>,
+    pub delays_ms: Option<Vec<u32>>,
+    pub easings: Option<Vec<TransitionEasing>>,
+}
+
+impl TransitionLonghands {
+    pub fn from_shorthand(entries: &[TransitionStyle]) -> Self {
+        Self {
+            properties: Some(entries.iter().map(|entry| entry.properties).collect()),
+            durations_ms: Some(entries.iter().map(|entry| entry.duration_ms).collect()),
+            delays_ms: Some(entries.iter().map(|entry| entry.delay_ms).collect()),
+            easings: Some(entries.iter().map(|entry| entry.easing).collect()),
+        }
+    }
+
+    /// Resolve the independent lists using CSS's repeat-shorter/truncate-
+    /// longer list matching rule. The property list determines the number of
+    /// transition entries whenever it is present; otherwise the longest
+    /// authored longhand list does.
+    pub fn resolve(&self) -> Vec<TransitionStyle> {
+        let list_len = |len: usize| len.max(1);
+        let property_len = self.properties.as_ref().map_or(0, |values| values.len());
+        let duration_len = self.durations_ms.as_ref().map_or(0, |values| values.len());
+        let delay_len = self.delays_ms.as_ref().map_or(0, |values| values.len());
+        let easing_len = self.easings.as_ref().map_or(0, |values| values.len());
+        let entry_count = if self.properties.is_some() {
+            list_len(property_len)
+        } else {
+            list_len(
+                property_len
+                    .max(duration_len)
+                    .max(delay_len)
+                    .max(easing_len),
+            )
+        };
+
+        (0..entry_count)
+            .map(|index| TransitionStyle {
+                properties: Self::value_at(
+                    self.properties.as_ref(),
+                    index,
+                    TransitionProperties::none(),
+                ),
+                duration_ms: Self::value_at(self.durations_ms.as_ref(), index, 0),
+                delay_ms: Self::value_at(self.delays_ms.as_ref(), index, 0),
+                easing: Self::value_at(self.easings.as_ref(), index, TransitionEasing::EaseOut),
+            })
+            .collect()
+    }
+
+    fn value_at<T: Copy>(values: Option<&Vec<T>>, index: usize, default: T) -> T {
+        values
+            .filter(|values| !values.is_empty())
+            .map(|values| values[index % values.len()])
+            .unwrap_or(default)
     }
 }
 

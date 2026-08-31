@@ -37,8 +37,8 @@ at graph commit, frontend/backend activation, candidate failure, recovery,
 quarantine, and teardown boundaries. The module lock now uses schema v3 with
 validated versions, direct dependency requirements, reverse requesters,
 composition provenance, and rollback metadata rebuilt from restored manifests.
-The next open item is giving the `transition-*` longhands their own comma
-lists so each longhand entry can carry independent timing values.
+The next open item is implementing or safely gating the public `box-shadow`
+parser and adding the Section 9 interaction/render/animation regression matrix.
 Host icon/font resources now use one explicit immutable graph/profile candidate
 catalog and copy-on-write registry handle, with failed preparation, recovery,
 and package rollback retaining the last-known-good snapshot. Icon resolution
@@ -53,8 +53,8 @@ to layer-shell placement, and the anchored outer edge supplies the exclusive
 zone; overlays opt out with `exclusive-zone: none`.
 
 The transition animator now runs one in-flight instance per entry of a
-comma-separated `transition`, so entries with different durations, delays, and
-easings animate on independent timelines. The remaining gap there is the
-`transition-*` longhands, which still collapse into a single entry.
+comma-separated `transition`, and the `transition-*` longhands now retain
+independent comma lists with CSS-style repeat/truncate matching. Entries with
+different durations, delays, and easings animate on independent timelines.
 See
 [`.planning/log/2026-08.md`](log/2026-08.md).

@@ -1225,10 +1225,7 @@ fn animation_keyword_properties_resolve_borrowed_tokens() {
         &variables,
     );
 
-    assert_eq!(
-        first_transition_mut(&mut style.transitions).easing,
-        TransitionEasing::EaseInOut
-    );
+    assert_eq!(style.transitions[0].easing, TransitionEasing::EaseInOut);
     let animation = first_animation_mut(&mut style.animations);
     assert_eq!(animation.easing, TransitionEasing::EaseInOut);
     assert_eq!(animation.direction, AnimationDirection::Reverse);

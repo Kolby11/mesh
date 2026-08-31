@@ -276,6 +276,18 @@ pub(super) fn parse_transition_properties(value: &str) -> TransitionProperties {
     properties
 }
 
+pub(super) fn parse_transition_property_list(value: &str) -> Vec<TransitionProperties> {
+    let properties = split_paren_aware(value, ',')
+        .iter()
+        .map(|item| parse_transition_properties(item.trim()))
+        .collect::<Vec<_>>();
+    if properties.is_empty() {
+        vec![TransitionProperties::none()]
+    } else {
+        properties
+    }
+}
+
 pub(super) fn first_comma_item(value: &str) -> &str {
     let mut depth: i32 = 0;
     let mut split_at = value.len();
@@ -295,6 +307,56 @@ pub(super) fn first_comma_item(value: &str) -> &str {
 
 pub(super) fn parse_first_time_ms(value: &str) -> u32 {
     parse_time_ms(first_comma_item(value))
+}
+
+pub(super) fn parse_transition_time_list(value: &str) -> Vec<u32> {
+    let times = split_paren_aware(value, ',')
+        .iter()
+        .map(|item| parse_time_ms(item.trim()))
+        .collect::<Vec<_>>();
+    if times.is_empty() { vec![0] } else { times }
+}
+
+pub(super) fn parse_transition_easing_list(value: &str) -> Vec<TransitionEasing> {
+    let easings = split_paren_aware(value, ',')
+        .iter()
+        .map(|item| parse_easing_keyword(item.trim()))
+        .collect::<Vec<_>>();
+    if easings.is_empty() {
+        vec![TransitionEasing::EaseOut]
+    } else {
+        easings
+    }
+}
+
+fn rebuild_transitions(style: &mut ComputedStyle) {
+    style.transitions = style.transition_longhands.resolve();
+}
+
+pub(super) fn apply_transition_property_longhand(style: &mut ComputedStyle, value: &str) {
+    style.transition_longhands.properties = Some(parse_transition_property_list(value));
+    rebuild_transitions(style);
+}
+
+pub(super) fn apply_transition_duration_longhand(style: &mut ComputedStyle, value: &str) {
+    style.transition_longhands.durations_ms = Some(parse_transition_time_list(value));
+    rebuild_transitions(style);
+}
+
+pub(super) fn apply_transition_delay_longhand(style: &mut ComputedStyle, value: &str) {
+    style.transition_longhands.delays_ms = Some(parse_transition_time_list(value));
+    rebuild_transitions(style);
+}
+
+pub(super) fn apply_transition_timing_function_longhand(style: &mut ComputedStyle, value: &str) {
+    style.transition_longhands.easings = Some(parse_transition_easing_list(value));
+    rebuild_transitions(style);
+}
+
+pub(super) fn apply_transition_shorthand(style: &mut ComputedStyle, value: &str) {
+    let entries = parse_transition_shorthand(value);
+    style.transition_longhands = TransitionLonghands::from_shorthand(&entries);
+    style.transitions = entries;
 }
 
 pub(super) fn split_paren_aware(value: &str, delim: char) -> Vec<String> {
@@ -461,15 +523,6 @@ fn parse_transition_shorthand_uncached(value: &str) -> Vec<TransitionStyle> {
     } else {
         items
     }
-}
-
-/// Helper to get a mutable reference to the first transition entry,
-/// inserting a default entry if the vec is empty.
-pub(super) fn first_transition_mut(transitions: &mut Vec<TransitionStyle>) -> &mut TransitionStyle {
-    if transitions.is_empty() {
-        transitions.push(TransitionStyle::default());
-    }
-    &mut transitions[0]
 }
 
 /// Helper to get a mutable reference to the first animation entry,

@@ -117,11 +117,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Interaction and motion
 
-- [ ] Give the `transition-*` longhands their own comma lists. The animator now
-      runs one instance per entry, but `transition-duration`, `-delay`, and
-      `-timing-function` still write a single value into entry 0 through
-      `first_transition_mut`, so longhand authors cannot give two properties
-      different timing the way the shorthand can.
 - [ ] Implement or safely gate the public `box-shadow` parser and add the
       Section 9 interaction/render/animation regression matrix.
 

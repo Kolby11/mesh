@@ -66,7 +66,7 @@ Shorthands are practical shell shorthands rather than full browser-compatible sh
 
 `transition-timing-function` accepts `linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out`, and `cubic-bezier(x1, y1, x2, y2)`.
 
-Every entry of a comma-separated `transition` runs on its own timeline, with its own duration, delay, and easing. Where two entries name the same property, the later one wins it. The `transition-*` longhands still describe a single entry, so use the shorthand when two properties need different timing.
+Every entry of a comma-separated `transition` runs on its own timeline, with its own duration, delay, and easing. The `transition-*` longhands also accept comma-separated lists: the property list determines the entry count, shorter timing lists repeat, and longer timing lists are truncated. Where two entries name the same property, the later one wins it.
 
 The current shell animator interpolates this practical visual set:
 

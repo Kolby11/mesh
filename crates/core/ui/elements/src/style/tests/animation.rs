@@ -56,6 +56,80 @@ fn resolve_single_decl(property: &str, value: &str) -> ComputedStyle {
     )
 }
 
+fn resolve_transition_declarations(
+    declarations: Vec<mesh_core_component::style::Declaration>,
+) -> ComputedStyle {
+    let theme = mesh_core_theme::default_theme();
+    let resolver = StyleResolver::new(&theme);
+    resolver.resolve_node_style(
+        &[StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations,
+            container_query: None,
+        }],
+        "box",
+        &["panel".to_string()],
+        None,
+        StyleContext::default(),
+        ElementState::default(),
+    )
+}
+
+fn declaration(property: &str, value: &str) -> mesh_core_component::style::Declaration {
+    mesh_core_component::style::Declaration {
+        property: property.to_string(),
+        value: StyleValue::Literal(value.to_string()),
+    }
+}
+
+#[test]
+fn transition_longhands_build_independent_entries() {
+    let style = resolve_transition_declarations(vec![
+        declaration("transition-property", "opacity, transform"),
+        declaration("transition-duration", "100ms, 250ms"),
+        declaration("transition-delay", "10ms, 20ms"),
+        declaration("transition-timing-function", "ease-in, ease-out"),
+    ]);
+
+    assert_eq!(style.transitions.len(), 2);
+    assert_eq!(style.transitions[0].duration_ms, 100);
+    assert_eq!(style.transitions[1].duration_ms, 250);
+    assert_eq!(style.transitions[0].delay_ms, 10);
+    assert_eq!(style.transitions[1].delay_ms, 20);
+    assert_eq!(style.transitions[0].easing, TransitionEasing::EaseIn);
+    assert_eq!(style.transitions[1].easing, TransitionEasing::EaseOut);
+    assert!(style.transitions[0].properties.animates_opacity());
+    assert!(style.transitions[1].properties.animates_transform());
+}
+
+#[test]
+fn transition_longhands_repeat_short_lists_and_preserve_values_across_property_changes() {
+    let style = resolve_transition_declarations(vec![
+        declaration("transition-property", "opacity"),
+        declaration("transition-duration", "100ms, 200ms"),
+        declaration("transition-delay", "5ms"),
+        declaration("transition-timing-function", "linear, ease-in, ease-out"),
+        declaration("transition-property", "opacity, transform, width"),
+    ]);
+
+    assert_eq!(style.transitions.len(), 3);
+    assert_eq!(
+        style
+            .transitions
+            .iter()
+            .map(|entry| entry.duration_ms)
+            .collect::<Vec<_>>(),
+        vec![100, 200, 100]
+    );
+    assert!(style.transitions.iter().all(|entry| entry.delay_ms == 5));
+    assert_eq!(style.transitions[0].easing, TransitionEasing::Linear);
+    assert_eq!(style.transitions[1].easing, TransitionEasing::EaseIn);
+    assert_eq!(style.transitions[2].easing, TransitionEasing::EaseOut);
+    assert!(style.transitions[0].properties.animates_opacity());
+    assert!(style.transitions[1].properties.animates_transform());
+    assert!(style.transitions[2].properties.animates_width());
+}
+
 #[test]
 fn transition_shorthand_parses_steps_with_position() {
     let style = resolve_single_decl("transition", "opacity 200ms steps(4, jump-end)");

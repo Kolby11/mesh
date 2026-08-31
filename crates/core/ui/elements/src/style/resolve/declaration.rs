@@ -902,28 +902,28 @@ fn apply_declaration_with_context(
                 resolver.with_resolved_str(value, variables, |resolved| parse_filter(resolved))
         }
         "transition-duration" => {
-            first_transition_mut(&mut style.transitions).duration_ms =
-                resolver.with_resolved_str(value, variables, |resolved| parse_first_time_ms(resolved))
+            resolver.with_resolved_str(value, variables, |resolved| {
+                apply_transition_duration_longhand(style, resolved)
+            })
         }
         "transition-delay" => {
-            first_transition_mut(&mut style.transitions).delay_ms =
-                resolver.with_resolved_str(value, variables, |resolved| parse_first_time_ms(resolved))
+            resolver.with_resolved_str(value, variables, |resolved| {
+                apply_transition_delay_longhand(style, resolved)
+            })
         }
         "transition-timing-function" => {
-            first_transition_mut(&mut style.transitions).easing =
-                resolver.with_resolved_str(value, variables, |resolved| {
-                    parse_easing_keyword(first_comma_item(resolved))
-                })
+            resolver.with_resolved_str(value, variables, |resolved| {
+                apply_transition_timing_function_longhand(style, resolved)
+            })
         }
         "transition-property" => {
-            first_transition_mut(&mut style.transitions).properties =
-                resolver.with_resolved_str(value, variables, |resolved| {
-                    parse_transition_properties(resolved)
-                })
+            resolver.with_resolved_str(value, variables, |resolved| {
+                apply_transition_property_longhand(style, resolved)
+            })
         }
         "transition" => {
             let resolved = resolver.resolve_value_with_variables(value, variables);
-            style.transitions = parse_transition_shorthand(&resolved);
+            apply_transition_shorthand(style, &resolved);
         }
         "animation-name" => {
             first_animation_mut(&mut style.animations).name =
