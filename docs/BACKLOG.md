@@ -113,9 +113,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Component language
 
-- [ ] Make component compilation resolve imports per owner, enforce module-root
-      path containment, detect alias collisions/cycles, and validate child prop
-      names, visibility, values, and `prop()` references before runtime.
 - [ ] Make the `<props>` contract one normalized typed value pipeline: reject
       invalid constraints/coercions and retain the highest valid precedence value
       when a later settings or instance override is invalid.
