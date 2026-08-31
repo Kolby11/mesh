@@ -743,16 +743,17 @@ fn node_visual_bounds_at_with_transform(
     node: &WidgetNode,
     world_transform: AffineTransform,
 ) -> Option<FloatBounds> {
-    (node.layout.width > 0.0 && node.layout.height > 0.0).then(|| {
-        let paint_node = build_paint_node_with_previous_transform(node, world_transform, None);
-        let visual = visual_clip_for(&paint_node);
-        FloatBounds {
-            left: visual.x as f32,
-            top: visual.y as f32,
-            right: (visual.x + visual.width) as f32,
-            bottom: (visual.y + visual.height) as f32,
-        }
-    })
+    (node.layout.width > 0.0 && node.layout.height > 0.0 && world_transform.inverse().is_some())
+        .then(|| {
+            let paint_node = build_paint_node_with_previous_transform(node, world_transform, None);
+            let visual = visual_clip_for(&paint_node);
+            FloatBounds {
+                left: visual.x as f32,
+                top: visual.y as f32,
+                right: (visual.x + visual.width) as f32,
+                bottom: (visual.y + visual.height) as f32,
+            }
+        })
 }
 
 pub(super) fn count_pruned_subtree(

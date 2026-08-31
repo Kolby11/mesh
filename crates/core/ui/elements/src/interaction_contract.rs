@@ -80,6 +80,10 @@ impl AffineTransform {
         )
     }
 
+    pub fn transform_vector(self, x: f32, y: f32) -> (f32, f32) {
+        (self.m11 * x + self.m21 * y, self.m12 * x + self.m22 * y)
+    }
+
     pub fn inverse(self) -> Option<Self> {
         let determinant = self.m11 * self.m22 - self.m21 * self.m12;
         if !determinant.is_finite() || determinant.abs() <= f32::EPSILON {
@@ -98,12 +102,7 @@ impl AffineTransform {
 
     /// Transform an axis-aligned local rectangle and return its surface AABB.
     pub fn transform_rect(self, rect: LayoutRect) -> LayoutRect {
-        let points = [
-            self.transform_point(rect.x, rect.y),
-            self.transform_point(rect.x + rect.width, rect.y),
-            self.transform_point(rect.x, rect.y + rect.height),
-            self.transform_point(rect.x + rect.width, rect.y + rect.height),
-        ];
+        let points = self.transform_rect_corners(rect);
         let (mut min_x, mut max_x) = (points[0].0, points[0].0);
         let (mut min_y, mut max_y) = (points[0].1, points[0].1);
         for (x, y) in points.into_iter().skip(1) {
@@ -118,6 +117,15 @@ impl AffineTransform {
             width: (max_x - min_x).max(0.0),
             height: (max_y - min_y).max(0.0),
         }
+    }
+
+    pub fn transform_rect_corners(self, rect: LayoutRect) -> [(f32, f32); 4] {
+        [
+            self.transform_point(rect.x, rect.y),
+            self.transform_point(rect.x + rect.width, rect.y),
+            self.transform_point(rect.x + rect.width, rect.y + rect.height),
+            self.transform_point(rect.x, rect.y + rect.height),
+        ]
     }
 }
 
@@ -153,6 +161,13 @@ impl AffineClip {
             })
             .unwrap_or(false)
     }
+
+    pub fn intersects_rect(self, transform: AffineTransform, rect: LayoutRect) -> bool {
+        convex_polygons_intersect(
+            &self.transform.transform_rect_corners(self.rect),
+            &transform.transform_rect_corners(rect),
+        )
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -182,6 +197,12 @@ impl AffineClipStack {
         self.clips.iter().all(|clip| clip.contains(x, y))
     }
 
+    pub fn intersects_rect(&self, transform: AffineTransform, rect: LayoutRect) -> bool {
+        self.clips
+            .iter()
+            .all(|clip| clip.intersects_rect(transform, rect))
+    }
+
     pub fn bounds(&self) -> Option<LayoutRect> {
         let mut bounds = None;
         for clip in &self.clips {
@@ -192,6 +213,43 @@ impl AffineClipStack {
         }
         bounds
     }
+}
+
+fn convex_polygons_intersect(left: &[(f32, f32); 4], right: &[(f32, f32); 4]) -> bool {
+    if left.iter().any(|(x, y)| !x.is_finite() || !y.is_finite())
+        || right.iter().any(|(x, y)| !x.is_finite() || !y.is_finite())
+    {
+        return false;
+    }
+
+    for polygon in [left, right] {
+        for index in 0..polygon.len() {
+            let (x1, y1) = polygon[index];
+            let (x2, y2) = polygon[(index + 1) % polygon.len()];
+            let axis = (y1 - y2, x2 - x1);
+            let axis_length = axis.0 * axis.0 + axis.1 * axis.1;
+            if axis_length <= f32::EPSILON {
+                continue;
+            }
+            let (left_min, left_max) = project_polygon(left, axis);
+            let (right_min, right_max) = project_polygon(right, axis);
+            if left_max <= right_min || right_max <= left_min {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn project_polygon(polygon: &[(f32, f32); 4], axis: (f32, f32)) -> (f32, f32) {
+    let first = polygon[0].0 * axis.0 + polygon[0].1 * axis.1;
+    polygon
+        .iter()
+        .skip(1)
+        .fold((first, first), |(min, max), point| {
+            let projection = point.0 * axis.0 + point.1 * axis.1;
+            (min.min(projection), max.max(projection))
+        })
 }
 
 fn intersect_layout_rect(current: Option<LayoutRect>, next: LayoutRect) -> Option<LayoutRect> {
@@ -641,6 +699,32 @@ mod tests {
         assert!(clip.contains(50.0, 50.0));
         assert!(!clip.contains(50.0 - 14.0, 50.0 + 14.0));
         assert!(clip.bounds().width > 20.0);
+    }
+
+    #[test]
+    fn affine_clip_intersection_does_not_use_conservative_aabb_overlap() {
+        let clip = AffineClip {
+            transform: AffineTransform::translation(50.0, 50.0)
+                .then(AffineTransform::rotation(std::f32::consts::FRAC_PI_4)),
+            rect: LayoutRect {
+                x: 0.0,
+                y: 0.0,
+                width: 20.0,
+                height: 20.0,
+            },
+        };
+        let outside = AffineTransform::translation(60.0, 50.0);
+        let inside = AffineTransform::translation(50.0, 50.0);
+        let target = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 4.0,
+            height: 4.0,
+        };
+
+        assert!(!clip.intersects_rect(outside, target));
+        assert!(clip.intersects_rect(inside, target));
+        assert!(AffineClipStack::default().intersects_rect(outside, target));
     }
 
     #[test]

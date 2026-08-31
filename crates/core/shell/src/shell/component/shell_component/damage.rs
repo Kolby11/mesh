@@ -1,7 +1,10 @@
 #![allow(dead_code)] // Alternate damage-bound helpers remain for paint fixtures.
 
 use super::*;
-use mesh_core_elements::{AffineTransform, child_transform, node_transform, root_transform};
+use mesh_core_elements::{
+    AffineTransform, InteractionTarget, NodeEligibility, child_transform, node_eligibility,
+    node_transform, root_transform,
+};
 
 pub(super) fn scale_damage_rect_to_buffer(
     rect: DamageRect,
@@ -237,17 +240,35 @@ pub(super) fn collect_damage_rects_for_node_ids(
     surface: DamageRect,
     damage: &mut Vec<DamageRect>,
 ) {
+    collect_damage_rects_for_node_ids_with_policy(
+        node,
+        node_ids,
+        surface,
+        damage,
+        NodeEligibility::ROOT,
+    );
+}
+
+fn collect_damage_rects_for_node_ids_with_policy(
+    node: &WidgetNode,
+    node_ids: &HashSet<mesh_core_elements::NodeId>,
+    surface: DamageRect,
+    damage: &mut Vec<DamageRect>,
+    parent_policy: NodeEligibility,
+) {
     if node_ids.is_empty() {
         return;
     }
+    let policy = parent_policy.child(node);
     if node_ids.contains(&node.id)
+        && policy.allows(InteractionTarget::Paint)
         && let Some(bounds) = damage_rect_for_widget_node(node, surface)
     {
         push_damage_rect(damage, bounds, surface);
     }
 
     for child in &node.children {
-        collect_damage_rects_for_node_ids(child, node_ids, surface, damage);
+        collect_damage_rects_for_node_ids_with_policy(child, node_ids, surface, damage, policy);
     }
 }
 
@@ -315,6 +336,9 @@ fn node_visual_bounds_with_transform(
         return None;
     }
     let world = node_transform(parent_transform, node);
+    if world.inverse().is_none() {
+        return None;
+    }
     let local = mesh_core_elements::LayoutRect {
         x: 0.0,
         y: 0.0,
@@ -374,6 +398,9 @@ pub(super) fn visual_damage_rect_for_widget_node(
     node: &WidgetNode,
     surface: DamageRect,
 ) -> Option<DamageRect> {
+    if !node_eligibility(node).allows(InteractionTarget::Paint) {
+        return None;
+    }
     let (left, top, right, bottom) = node_visual_bounds(node)?;
     let rect = mesh_core_render::FractionalScale::identity()
         .device_layout_rect(mesh_core_elements::LayoutRect {
@@ -400,14 +427,24 @@ pub(super) fn accumulate_subtree_visual_bounds(
     node: &WidgetNode,
     bounds: &mut (f32, f32, f32, f32),
 ) {
-    accumulate_subtree_visual_bounds_with_transform(node, root_transform(0.0, 0.0), bounds);
+    accumulate_subtree_visual_bounds_with_transform(
+        node,
+        root_transform(0.0, 0.0),
+        NodeEligibility::ROOT,
+        bounds,
+    );
 }
 
 fn accumulate_subtree_visual_bounds_with_transform(
     node: &WidgetNode,
     parent_transform: AffineTransform,
+    parent_policy: NodeEligibility,
     bounds: &mut (f32, f32, f32, f32),
 ) {
+    let policy = parent_policy.child(node);
+    if !policy.allows(InteractionTarget::Paint) {
+        return;
+    }
     if let Some(rect) = node_visual_bounds_with_transform(node, parent_transform) {
         let (left, top, right, bottom) = layout_bounds_tuple(rect);
         bounds.0 = bounds.0.min(left);
@@ -419,7 +456,7 @@ fn accumulate_subtree_visual_bounds_with_transform(
     let scroll = node.resolved_scroll_metrics();
     let child_transform = child_transform(world, node, scroll.x, scroll.y);
     for child in &node.children {
-        accumulate_subtree_visual_bounds_with_transform(child, child_transform, bounds);
+        accumulate_subtree_visual_bounds_with_transform(child, child_transform, policy, bounds);
     }
 }
 
@@ -447,7 +484,7 @@ pub(super) fn collect_visual_damage_rects(
     surface: DamageRect,
 ) -> HashMap<mesh_core_elements::NodeId, DamageRect> {
     let mut damage = HashMap::new();
-    collect_visual_damage_rects_into(node, surface, &mut damage);
+    collect_visual_damage_rects_with_policy(node, surface, &mut damage, NodeEligibility::ROOT);
     damage
 }
 
@@ -456,11 +493,24 @@ pub(super) fn collect_visual_damage_rects_into(
     surface: DamageRect,
     damage: &mut HashMap<mesh_core_elements::NodeId, DamageRect>,
 ) {
+    collect_visual_damage_rects_with_policy(node, surface, damage, NodeEligibility::ROOT);
+}
+
+fn collect_visual_damage_rects_with_policy(
+    node: &WidgetNode,
+    surface: DamageRect,
+    damage: &mut HashMap<mesh_core_elements::NodeId, DamageRect>,
+    parent_policy: NodeEligibility,
+) {
+    let policy = parent_policy.child(node);
+    if !policy.allows(InteractionTarget::Paint) {
+        return;
+    }
     if let Some(bounds) = visual_damage_rect_for_widget_node(node, surface) {
         damage.insert(node.id, bounds);
     }
     for child in &node.children {
-        collect_visual_damage_rects_into(child, surface, damage);
+        collect_visual_damage_rects_with_policy(child, surface, damage, policy);
     }
 }
 

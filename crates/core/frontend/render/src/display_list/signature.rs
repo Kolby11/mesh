@@ -121,7 +121,8 @@ pub(super) fn damage_rect_for_node_with_transform(
     node: &WidgetNode,
     world_transform: AffineTransform,
 ) -> Option<DamageRect> {
-    if node.layout.width <= 0.0 || node.layout.height <= 0.0 {
+    if node.layout.width <= 0.0 || node.layout.height <= 0.0 || world_transform.inverse().is_none()
+    {
         return None;
     }
     let layout = visual_bounds_for_node_with_transform(node, world_transform);

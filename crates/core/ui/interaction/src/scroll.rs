@@ -28,6 +28,12 @@ pub enum ScrollbarAxis {
 pub struct ScrollbarHit {
     pub node_id: NodeId,
     pub axis: ScrollbarAxis,
+    /// Pointer coordinate projected onto the scrollbar's transformed main axis.
+    /// For an untransformed node this is the screen-space x/y coordinate used
+    /// by the original scrollbar interaction contract.
+    pub pointer_coordinate: f32,
+    pub axis_origin: (f32, f32),
+    pub axis_direction: (f32, f32),
     pub track_start: f32,
     pub track_extent: f32,
     pub thumb_start: f32,
@@ -326,6 +332,9 @@ fn scrollbar_hit_for_node(
             return Some(ScrollbarHit {
                 node_id: node.id,
                 axis: ScrollbarAxis::Vertical,
+                pointer_coordinate: y - top,
+                axis_origin: (left, top),
+                axis_direction: (0.0, 1.0),
                 track_start,
                 track_extent,
                 thumb_start,
@@ -366,6 +375,9 @@ fn scrollbar_hit_for_node(
             return Some(ScrollbarHit {
                 node_id: node.id,
                 axis: ScrollbarAxis::Horizontal,
+                pointer_coordinate: x - left,
+                axis_origin: (left, top),
+                axis_direction: (1.0, 0.0),
                 track_start,
                 track_extent,
                 thumb_start,
@@ -555,10 +567,7 @@ fn find_scrollbar_at_affine(
     if !inside && node_clips_children(node) {
         return None;
     }
-    if inside
-        && let Some(bounds) = clipped_node_bounds(node, world, clips)
-        && let Some(hit) = scrollbar_hit_for_node(node, x, y, bounds)
-    {
+    if inside && let Some(hit) = scrollbar_hit_for_node_with_transform(node, x, y, world, clips) {
         return Some(hit);
     }
     let child_world = child_world_transform(world, node);
@@ -569,11 +578,184 @@ fn find_scrollbar_at_affine(
         .find_map(|child| find_scrollbar_at_affine(child, x, y, child_world, &child_clips))
 }
 
+fn scrollbar_hit_for_node_with_transform(
+    node: &WidgetNode,
+    x: f32,
+    y: f32,
+    world: AffineTransform,
+    clips: &AffineClipStack,
+) -> Option<ScrollbarHit> {
+    if node_has_layout_geometry(node) && !clips.intersects_rect(world, node_local_rect(node)) {
+        return None;
+    }
+
+    let inverse = world.inverse()?;
+    let (local_x, local_y) = inverse.transform_point(x, y);
+    let scroll = node.resolved_scroll_metrics();
+    let show_vertical = node.computed_style.overflow_y.always_shows_scrollbar()
+        || (node
+            .computed_style
+            .overflow_y
+            .shows_scrollbar_when_overflowing()
+            && scroll.max_y > f32::EPSILON);
+    let show_horizontal = node.computed_style.overflow_x.always_shows_scrollbar()
+        || (node
+            .computed_style
+            .overflow_x
+            .shows_scrollbar_when_overflowing()
+            && scroll.max_x > f32::EPSILON);
+    if !show_vertical && !show_horizontal {
+        return None;
+    }
+
+    let width = node.layout.width.max(1.0);
+    let height = node.layout.height.max(1.0);
+    let thickness = SCROLLBAR_THICKNESS;
+    let inset = SCROLLBAR_INSET;
+    let local_slop = SCROLLBAR_HIT_SLOP;
+
+    if show_vertical {
+        let track_extent = (height
+            - inset * 2.0
+            - if show_horizontal {
+                thickness + inset
+            } else {
+                0.0
+            })
+        .max(thickness);
+        let track_start = inset;
+        let track_cross = width - inset - thickness;
+        if local_x >= track_cross - local_slop
+            && local_x <= track_cross + thickness + local_slop
+            && local_y >= track_start
+            && local_y <= track_start + track_extent
+        {
+            let thumb_extent = scrollbar_thumb_extent(
+                (height / scroll.content_height.max(height)) * track_extent,
+                track_extent,
+            );
+            let thumb_range = (track_extent - thumb_extent).max(0.0);
+            let thumb_start = track_start
+                + if scroll.max_y <= f32::EPSILON {
+                    0.0
+                } else {
+                    (scroll.y / scroll.max_y) * thumb_range
+                };
+            return transformed_scrollbar_hit(
+                node,
+                x,
+                y,
+                world,
+                ScrollbarAxis::Vertical,
+                track_start,
+                track_extent,
+                thumb_start,
+                thumb_extent,
+                scroll.max_y,
+                local_y >= thumb_start && local_y <= thumb_start + thumb_extent,
+            );
+        }
+    }
+
+    if show_horizontal {
+        let track_extent = (width
+            - inset * 2.0
+            - if show_vertical {
+                thickness + inset
+            } else {
+                0.0
+            })
+        .max(thickness);
+        let track_start = inset;
+        let track_cross = height - inset - thickness;
+        if local_y >= track_cross - local_slop
+            && local_y <= track_cross + thickness + local_slop
+            && local_x >= track_start
+            && local_x <= track_start + track_extent
+        {
+            let thumb_extent = scrollbar_thumb_extent(
+                (width / scroll.content_width.max(width)) * track_extent,
+                track_extent,
+            );
+            let thumb_range = (track_extent - thumb_extent).max(0.0);
+            let thumb_start = track_start
+                + if scroll.max_x <= f32::EPSILON {
+                    0.0
+                } else {
+                    (scroll.x / scroll.max_x) * thumb_range
+                };
+            return transformed_scrollbar_hit(
+                node,
+                x,
+                y,
+                world,
+                ScrollbarAxis::Horizontal,
+                track_start,
+                track_extent,
+                thumb_start,
+                thumb_extent,
+                scroll.max_x,
+                local_x >= thumb_start && local_x <= thumb_start + thumb_extent,
+            );
+        }
+    }
+    None
+}
+
+#[allow(clippy::too_many_arguments)]
+fn transformed_scrollbar_hit(
+    node: &WidgetNode,
+    x: f32,
+    y: f32,
+    world: AffineTransform,
+    axis: ScrollbarAxis,
+    local_track_start: f32,
+    local_track_extent: f32,
+    local_thumb_start: f32,
+    local_thumb_extent: f32,
+    max_scroll: f32,
+    on_thumb: bool,
+) -> Option<ScrollbarHit> {
+    let (axis_origin, axis_vector) = match axis {
+        ScrollbarAxis::Vertical => (
+            world.transform_point(0.0, 0.0),
+            world.transform_vector(0.0, 1.0),
+        ),
+        ScrollbarAxis::Horizontal => (
+            world.transform_point(0.0, 0.0),
+            world.transform_vector(1.0, 0.0),
+        ),
+    };
+    let axis_scale = (axis_vector.0 * axis_vector.0 + axis_vector.1 * axis_vector.1).sqrt();
+    if !axis_scale.is_finite() || axis_scale <= f32::EPSILON {
+        return None;
+    }
+    let axis_direction = (axis_vector.0 / axis_scale, axis_vector.1 / axis_scale);
+    let base_coordinate = axis_origin.0 * axis_direction.0 + axis_origin.1 * axis_direction.1;
+    let pointer_coordinate = x * axis_direction.0 + y * axis_direction.1;
+    Some(ScrollbarHit {
+        node_id: node.id,
+        axis,
+        pointer_coordinate,
+        axis_origin,
+        axis_direction,
+        track_start: base_coordinate + local_track_start * axis_scale,
+        track_extent: local_track_extent * axis_scale,
+        thumb_start: base_coordinate + local_thumb_start * axis_scale,
+        thumb_extent: local_thumb_extent * axis_scale,
+        max_scroll,
+        on_thumb,
+    })
+}
+
 fn clipped_node_bounds(
     node: &WidgetNode,
     world: AffineTransform,
     clips: &AffineClipStack,
 ) -> Option<ContentBounds> {
+    if node_has_layout_geometry(node) && !clips.intersects_rect(world, node_local_rect(node)) {
+        return None;
+    }
     let rect = node_rect_with_transform(node, world);
     if clips.is_empty() {
         Some(rect)
@@ -1090,5 +1272,52 @@ mod scroll_into_view_tests {
         assert_eq!(new_offsets.len(), 1);
         assert!(old_offsets.len() > new_offsets.len());
         assert!(new_time < old_time);
+    }
+}
+
+#[cfg(test)]
+mod scrollbar_tests {
+    use super::*;
+    use mesh_core_elements::{WidgetNode, WidgetScrollMetrics, node_transform, root_transform};
+
+    fn node(key: &str, tag: &str, x: f32, y: f32, width: f32, height: f32) -> WidgetNode {
+        let mut node = WidgetNode::new(tag);
+        node.attributes.insert("_mesh_key".into(), key.into());
+        node.layout.x = x;
+        node.layout.y = y;
+        node.layout.width = width;
+        node.layout.height = height;
+        node
+    }
+
+    #[test]
+    fn transformed_scrollbar_hit_uses_painted_axis_geometry() {
+        let mut root = node("root", "surface", 0.0, 0.0, 300.0, 200.0);
+        let mut scroll = node("scroll", "box", 40.0, 20.0, 100.0, 100.0);
+        scroll.computed_style.overflow_y = mesh_core_elements::style::Overflow::Auto;
+        scroll.scroll_metrics = Some(WidgetScrollMetrics {
+            max_y: 200.0,
+            content_height: 300.0,
+            ..Default::default()
+        });
+        scroll.computed_style.transform.rotation = std::f32::consts::FRAC_PI_2;
+        let world = node_transform(root_transform(0.0, 0.0), &scroll);
+        let pointer = world.transform_point(92.0, 30.0);
+        root.children.push(scroll);
+
+        let hit = find_scrollbar_at(&root, pointer.0, pointer.1).expect("vertical scrollbar hit");
+        assert_eq!(hit.axis, ScrollbarAxis::Vertical);
+        assert!(hit.on_thumb);
+
+        let (origin_x, origin_y) = world.transform_point(0.0, 0.0);
+        let (vector_x, vector_y) = world.transform_vector(0.0, 1.0);
+        let length = (vector_x * vector_x + vector_y * vector_y).sqrt();
+        let direction = (vector_x / length, vector_y / length);
+        let expected_pointer = pointer.0 * direction.0 + pointer.1 * direction.1;
+        let expected_track_start =
+            origin_x * direction.0 + origin_y * direction.1 + SCROLLBAR_INSET * length;
+        assert!((hit.pointer_coordinate - expected_pointer).abs() < 0.001);
+        assert!((hit.track_start - expected_track_start).abs() < 0.001);
+        assert_eq!(hit.axis_direction, direction);
     }
 }

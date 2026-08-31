@@ -664,19 +664,18 @@ impl FrontendSurfaceComponent {
         }
     }
 
-    /// Remove hover, focus, and active targets that no longer exist in the final
-    /// post-restyle tree. Call this after every `build_tree` to ensure that nodes
-    /// removed by a conditional render or hidden by `display:none` no longer
-    /// receive interaction styling on the next frame.
+    /// Remove hover, focus, capture, gesture, and scroll targets that are no
+    /// longer eligible in the final post-restyle tree. Call this after every
+    /// `build_tree` so hidden, disabled, and inert nodes cannot retain
+    /// interaction styling or continue a captured operation into the next frame.
     ///
-    /// Sibling and ancestor state is preserved: only targets whose exact key is
-    /// absent from the final tree are cleared. Input, slider, checked, and scroll
-    /// maps are never pruned here — their cleanup rules are deliberate and covered
-    /// by separate logic when elements are explicitly removed by the user.
+    /// Input, slider, checked, and scroll value maps are retained; they are
+    /// state caches rather than target ownership and are reconciled when a node
+    /// becomes eligible again.
     pub(super) fn prune_stale_interaction_targets(&mut self, tree: &WidgetNode) {
         self.reconcile_interaction_state(tree);
         if let Some(key) = &self.focused_key {
-            if find_node_by_key(tree, key).is_none() {
+            if !node_can_receive_interaction(tree, key, InteractionTarget::Focus) {
                 self.focused_key = None;
                 self.focus_visible_key = None;
                 self.focused_id = None;
@@ -685,14 +684,14 @@ impl FrontendSurfaceComponent {
         }
 
         if let Some(key) = &self.focus_visible_key
-            && find_node_by_key(tree, key).is_none()
+            && !node_can_receive_interaction(tree, key, InteractionTarget::Focus)
         {
             self.focus_visible_key = None;
             self.focus_visible_id = None;
         }
 
         if let Some(key) = &self.hovered_key {
-            if find_node_by_key(tree, key).is_none() {
+            if !node_can_receive_interaction(tree, key, InteractionTarget::Pointer) {
                 self.hovered_key = None;
                 self.hovered_path.clear();
                 self.hovered_event_path.clear();
@@ -705,7 +704,7 @@ impl FrontendSurfaceComponent {
         }
 
         if let Some(node_id) = self.pointer_down_id {
-            if find_node_by_id(tree, node_id).is_none() {
+            if !tree_target_is_eligible(tree, node_id, InteractionTarget::Pointer) {
                 self.pointer_down_id = None;
                 self.pointer_down_bounds = None;
                 self.pointer_down_target = None;
@@ -713,10 +712,24 @@ impl FrontendSurfaceComponent {
         }
 
         if let Some(node_id) = self.active_slider_id {
-            if find_node_by_id(tree, node_id).is_none() {
+            if !tree_target_is_eligible(tree, node_id, InteractionTarget::Pointer) {
                 self.active_slider_id = None;
             }
         }
+
+        if self.active_scrollbar_drag.is_some_and(|drag| {
+            !tree_target_is_eligible(tree, drag.node_id, InteractionTarget::Scroll)
+        }) {
+            self.active_scrollbar_drag = None;
+            self.release_scroll_owner(None);
+        }
+
+        self.scroll_animations.retain(|node_id, _| {
+            tree_target_is_eligible(tree, *node_id, InteractionTarget::Scroll)
+        });
+        self.scroll_inertia.retain(|node_id, _| {
+            tree_target_is_eligible(tree, *node_id, InteractionTarget::Scroll)
+        });
 
         let gesture_target_missing = self.gesture_capture.as_ref().is_some_and(|capture| {
             let key = match capture {
@@ -724,27 +737,29 @@ impl FrontendSurfaceComponent {
                 | GestureCapture::Pinch { target, .. }
                 | GestureCapture::Hold { target } => &target.node_key,
             };
-            find_node_by_key(tree, key).is_none()
+            !node_can_receive_interaction(tree, key, InteractionTarget::Gesture)
         });
         if gesture_target_missing {
             self.gesture_capture = None;
         }
         self.touch_targets
-            .retain(|_, key| find_node_by_key(tree, key).is_some());
-        self.touch_gestures
-            .retain(|_, touch| find_node_by_key(tree, &touch.node_key).is_some());
-        if self
-            .last_tap
-            .as_ref()
-            .is_some_and(|tap| find_node_by_key(tree, &tap.node_key).is_none())
-        {
+            .retain(|_, key| node_can_receive_interaction(tree, key, InteractionTarget::Gesture));
+        self.touch_gestures.retain(|_, touch| {
+            node_can_receive_interaction(tree, &touch.node_key, InteractionTarget::Gesture)
+        });
+        if self.last_tap.as_ref().is_some_and(|tap| {
+            !node_can_receive_interaction(tree, &tap.node_key, InteractionTarget::Pointer)
+        }) {
             self.last_tap = None;
         }
 
-        let should_clear_selection = self
-            .selection
-            .as_ref()
-            .is_some_and(|selection| find_node_by_key(tree, &selection.anchor.node_key).is_none());
+        let should_clear_selection = self.selection.as_ref().is_some_and(|selection| {
+            !node_can_receive_interaction(
+                tree,
+                &selection.anchor.node_key,
+                InteractionTarget::Pointer,
+            )
+        });
         if should_clear_selection {
             self.selection = None;
         }

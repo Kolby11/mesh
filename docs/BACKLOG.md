@@ -117,9 +117,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Interaction and motion
 
-- [ ] Unify visibility, transformed geometry, disabled/inert eligibility, and
-      target filtering across interaction, rendering, focus, scrolling,
-      tooltips, and accessibility. [Audit](../.planning/log/sections/09-interaction-and-motion/improvements.md).
 - [ ] Define a canonical interaction transaction for focus, pointer capture,
       press origin, gesture/scroll ownership, and typed invalidation instead of
       splitting policy between `mesh-core-interaction` and the shell.

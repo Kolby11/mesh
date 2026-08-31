@@ -673,16 +673,12 @@ fn find_container_bounds_inner(
 
 /// Find tooltip text for a specific node key in the tree.
 pub fn find_tooltip_text_by_key(node: &WidgetNode, key: &str) -> Option<String> {
-    find_tooltip_by_key_with_inherited(node, key, None)
-        .flatten()
-        .map(|tooltip| tooltip.text.to_owned())
+    find_tooltip_target_by_key(node, key).map(|tooltip| tooltip.text.to_owned())
 }
 
 /// Find the tooltip owner key and text for a specific node key in the tree.
 pub fn find_tooltip_by_key(node: &WidgetNode, key: &str) -> Option<(String, String)> {
-    find_tooltip_by_key_with_inherited(node, key, None)
-        .flatten()
-        .map(TooltipRef::into_owned)
+    find_tooltip_target_by_key(node, key).map(TooltipTarget::into_owned)
 }
 
 fn find_tooltip_by_key_with_inherited<'a>(
@@ -756,7 +752,8 @@ fn find_tooltip_target_by_key_inner<'a>(
 
 pub fn is_input_key(tree: &WidgetNode, key: &str) -> bool {
     find_node_by_key(tree, key).is_some_and(|node| {
-        node.tag == "input"
+        node_can_receive_target(tree, node.id, InteractionTarget::Focus)
+            && node.tag == "input"
             && node_is_source(
                 node,
                 &[
@@ -777,7 +774,9 @@ pub fn is_input_key(tree: &WidgetNode, key: &str) -> bool {
 }
 
 pub fn is_slider_key(tree: &WidgetNode, key: &str) -> bool {
-    find_node_by_key(tree, key).is_some_and(|node| node.tag == "slider")
+    find_node_by_key(tree, key).is_some_and(|node| {
+        node.tag == "slider" && node_can_receive_target(tree, node.id, InteractionTarget::Focus)
+    })
 }
 
 pub fn find_click_handler(tree: &WidgetNode, key: &str) -> Option<HandlerTarget> {
@@ -791,7 +790,7 @@ pub fn find_event_handler(tree: &WidgetNode, key: &str, event_name: &str) -> Opt
         _ => InteractionTarget::Focus,
     };
     find_node_by_key(tree, key)
-        .filter(|node| node_allows(node, target))
+        .filter(|node| node_can_receive_target(tree, node.id, target))
         .and_then(|node| node.event_handlers.get(event_name))
         .cloned()
 }
@@ -814,6 +813,12 @@ fn clipped_node_bounds(
     world: AffineTransform,
     clips: &AffineClipStack,
 ) -> Option<ContentBounds> {
+    if node_has_layout_geometry(node) && world.inverse().is_none() {
+        return None;
+    }
+    if node_has_layout_geometry(node) && !clips.intersects_rect(world, node_local_rect(node)) {
+        return None;
+    }
     let bounds = node_rect_with_transform(node, world);
     if clips.is_empty() {
         Some(bounds)
@@ -1095,6 +1100,11 @@ fn find_container_bounds_affine(
     }
     let world = node_world_transform(parent_transform, node);
     if node.mesh_key().is_some_and(|value| value == key) {
+        if node_has_layout_geometry(node)
+            && (world.inverse().is_none() || !clips.intersects_rect(world, node_local_rect(node)))
+        {
+            return None;
+        }
         return Some(nearest_clip);
     }
     let nearest_clip = if node_clips_children(node) {
@@ -1129,6 +1139,11 @@ fn find_tooltip_target_by_key_affine<'a>(
     });
     let inherited = owner_tooltip.or(inherited);
     if node.mesh_key().is_some_and(|value| value == key) {
+        if node_has_layout_geometry(node)
+            && (world.inverse().is_none() || !clips.intersects_rect(world, node_local_rect(node)))
+        {
+            return None;
+        }
         return Some(inherited);
     }
     let child_world = child_world_transform(world, node);
@@ -1170,7 +1185,7 @@ mod tests {
                 );
                 cell.layout = LayoutRect {
                     x: column_index as f32 * 20.0,
-                    y: 0.0,
+                    y: row_index as f32 * 20.0,
                     width: 20.0,
                     height: 20.0,
                 };
@@ -1577,6 +1592,37 @@ mod tests {
     }
 
     #[test]
+    fn collapsed_transforms_are_not_targetable_or_focusable() {
+        let mut root = WidgetNode::new("surface");
+        root.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 80.0,
+        };
+        let mut button = WidgetNode::new("button");
+        button
+            .attributes
+            .insert("_mesh_key".into(), "collapsed".into());
+        button.layout = LayoutRect {
+            x: 20.0,
+            y: 20.0,
+            width: 30.0,
+            height: 20.0,
+        };
+        button.computed_style.transform.scale_x = 0.0;
+        root.children.push(button);
+
+        assert_eq!(find_node_bounds_by_key(&root, "collapsed", 0.0, 0.0), None);
+        assert_eq!(find_focusable_at(&root, 25.0, 25.0), None);
+        assert!(
+            !collect_focus_traversal(&root)
+                .iter()
+                .any(|key| key == "collapsed")
+        );
+    }
+
+    #[test]
     fn nested_rotation_uses_one_transform_for_hit_focus_and_clip_geometry() {
         let mut root = WidgetNode::new("surface");
         root.layout = LayoutRect {
@@ -1687,6 +1733,8 @@ mod tests {
 
         assert!(pointer_press_hit(&root, 20.0, 20.0).target.is_none());
         assert!(pointer_event_handler_hit(&root, 20.0, 20.0, "click").is_none());
+        assert_eq!(find_event_handler(&root, "disabled", "click"), None);
+        assert_eq!(find_event_handler(&root, "inert-descendant", "click"), None);
         assert_eq!(find_focusable_at(&root, 20.0, 20.0), None);
         assert!(
             !collect_focus_traversal(&root)

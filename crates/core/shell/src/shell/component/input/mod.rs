@@ -217,15 +217,14 @@ impl FrontendSurfaceComponent {
                     if let Some(hit) = find_scrollbar_at(tree, x, y) {
                         self.scroll_animations.remove(&hit.node_id);
                         self.scroll_inertia.remove(&hit.node_id);
-                        let pointer = match hit.axis {
-                            ScrollbarAxis::Horizontal => x,
-                            ScrollbarAxis::Vertical => y,
-                        };
+                        let pointer = hit.pointer_coordinate;
                         if hit.on_thumb {
                             self.stage_scrollbar_press(hit.node_id, button);
                             self.active_scrollbar_drag = Some(ScrollbarDragState {
                                 node_id: hit.node_id,
                                 axis: hit.axis,
+                                axis_origin: hit.axis_origin,
+                                axis_direction: hit.axis_direction,
                                 grab_offset: pointer - hit.thumb_start,
                                 track_start: hit.track_start,
                                 track_extent: hit.track_extent,
@@ -457,10 +456,7 @@ impl FrontendSurfaceComponent {
             }
             ComponentInput::PointerMove { x, y } => {
                 if let Some(drag) = self.active_scrollbar_drag {
-                    let pointer = match drag.axis {
-                        ScrollbarAxis::Horizontal => x,
-                        ScrollbarAxis::Vertical => y,
-                    };
+                    let pointer = x * drag.axis_direction.0 + y * drag.axis_direction.1;
                     let thumb_range = (drag.track_extent - drag.thumb_extent).max(0.0);
                     let ratio = if thumb_range <= f32::EPSILON {
                         0.0

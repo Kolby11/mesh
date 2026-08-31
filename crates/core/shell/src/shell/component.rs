@@ -430,6 +430,8 @@ pub(super) struct ScrollAnimation {
 pub(super) struct ScrollbarDragState {
     pub(super) node_id: NodeId,
     pub(super) axis: ScrollbarAxis,
+    pub(super) axis_origin: (f32, f32),
+    pub(super) axis_direction: (f32, f32),
     pub(super) grab_offset: f32,
     pub(super) track_start: f32,
     pub(super) track_extent: f32,

@@ -113,6 +113,12 @@ fn collect_focus_traversal_with_transform(
 
     let world = node_world_transform(parent_transform, node);
     let rect = node_rect_with_transform(node, world);
+    if node_has_layout_geometry(node) && world.inverse().is_none() {
+        return;
+    }
+    if node_has_layout_geometry(node) && !clips.intersects_rect(world, node_local_rect(node)) {
+        return;
+    }
     let visible_rect = if clips.is_empty() {
         Some(rect)
     } else {

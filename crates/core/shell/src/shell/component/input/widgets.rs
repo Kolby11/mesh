@@ -1571,16 +1571,6 @@ impl FrontendSurfaceComponent {
     }
 }
 
-fn node_disabled(node: &WidgetNode) -> bool {
-    node.attributes
-        .get("disabled")
-        .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1" | "disabled"))
-        || node
-            .attributes
-            .get("aria-disabled")
-            .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1" | "disabled"))
-}
-
 fn ancestor_source_target(
     tree: &WidgetNode,
     key: &str,
@@ -1606,7 +1596,12 @@ fn sibling_source_key(
     let candidates: Vec<&str> = siblings
         .children
         .iter()
-        .filter(|child| node_is_source(child, source_tags) && !node_disabled(child))
+        .filter(|child| {
+            node_is_source(child, source_tags)
+                && child.mesh_key().is_some_and(|key| {
+                    node_can_receive_interaction(tree, key, InteractionTarget::Focus)
+                })
+        })
         .filter_map(WidgetNode::mesh_key)
         .collect();
     if candidates.is_empty() {
@@ -1637,7 +1632,7 @@ fn rove_aria_menu_focus(tree: &WidgetNode, key: &str, backward: bool) -> Option<
         })
     })?;
     let mut candidates = Vec::new();
-    collect_aria_menu_item_keys(menu, &mut candidates);
+    collect_aria_menu_item_keys(tree, menu, &mut candidates);
     let index = candidates.iter().position(|candidate| *candidate == key)?;
     let next_index = if backward {
         index.checked_sub(1).unwrap_or(candidates.len() - 1)
@@ -1649,19 +1644,25 @@ fn rove_aria_menu_focus(tree: &WidgetNode, key: &str, backward: bool) -> Option<
         .map(|candidate| (*candidate).to_owned())
 }
 
-fn collect_aria_menu_item_keys<'a>(node: &'a WidgetNode, keys: &mut Vec<&'a str>) {
+fn collect_aria_menu_item_keys<'a>(
+    tree: &WidgetNode,
+    node: &'a WidgetNode,
+    keys: &mut Vec<&'a str>,
+) {
     let is_menu_item = node
         .attributes
         .get("role")
         .is_some_and(|role| role.starts_with("menuitem"));
     if is_menu_item
-        && !node_disabled(node)
+        && node
+            .mesh_key()
+            .is_some_and(|key| node_can_receive_interaction(tree, key, InteractionTarget::Focus))
         && let Some(key) = node.mesh_key()
     {
         keys.push(key);
     }
     for child in &node.children {
-        collect_aria_menu_item_keys(child, keys);
+        collect_aria_menu_item_keys(tree, child, keys);
     }
 }
 
@@ -1797,6 +1798,8 @@ mod navigation_performance_tests {
         fn keyed_node(tag: &str, key: &str) -> WidgetNode {
             let mut node = WidgetNode::new(tag);
             node.attributes.insert("_mesh_key".into(), key.into());
+            node.layout.width = 100.0;
+            node.layout.height = 20.0;
             node
         }
 

@@ -37,9 +37,9 @@ at graph commit, frontend/backend activation, candidate failure, recovery,
 quarantine, and teardown boundaries. The module lock now uses schema v3 with
 validated versions, direct dependency requirements, reverse requesters,
 composition provenance, and rollback metadata rebuilt from restored manifests.
-The next open item is unifying visibility, transformed geometry, disabled/inert
-eligibility, and target filtering across interaction, rendering, focus,
-scrolling, tooltips, and accessibility.
+The next open item is defining a canonical interaction transaction for focus,
+pointer capture, press origin, gesture/scroll ownership, and typed invalidation
+instead of splitting policy between `mesh-core-interaction` and the shell.
 Host icon/font resources now use one explicit immutable graph/profile candidate
 catalog and copy-on-write registry handle, with failed preparation, recovery,
 and package rollback retaining the last-known-good snapshot. Icon resolution

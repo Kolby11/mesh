@@ -39,6 +39,22 @@ pub use transaction::{
 
 pub type ContentBounds = (f32, f32, f32, f32);
 
+pub(crate) fn node_local_rect(node: &WidgetNode) -> mesh_core_elements::LayoutRect {
+    mesh_core_elements::LayoutRect {
+        x: 0.0,
+        y: 0.0,
+        width: node.layout.width.max(0.0),
+        height: node.layout.height.max(0.0),
+    }
+}
+
+pub(crate) fn node_has_layout_geometry(node: &WidgetNode) -> bool {
+    node.layout.width.is_finite()
+        && node.layout.height.is_finite()
+        && node.layout.width > 0.0
+        && node.layout.height > 0.0
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ScrollOffsetState {
     pub x: f32,
