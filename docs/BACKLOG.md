@@ -115,9 +115,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## UI element core
 
-- [ ] Normalize ARIA/visibility/name semantics after child construction and
-      invalidate text measurement caches on font/measurer generation changes.
-
 ## Interaction and motion
 
 - [ ] Unify visibility, transformed geometry, disabled/inert eligibility, and

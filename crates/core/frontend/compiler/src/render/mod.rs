@@ -903,6 +903,10 @@ fn build_element_node(
         inherit_text_style(&mut node.computed_style, parent_style, inherited_mask);
     }
     node.accessibility = accessibility_for_element(source_tag, tag, &node.attributes);
+    let mut accessibility_baseline = mesh_core_elements::AccessibilityInfo::default();
+    accessibility_baseline.role = node.accessibility.role.clone();
+    accessibility_baseline.focusable = node.accessibility.focusable;
+    node.set_accessibility_baseline(accessibility_baseline);
 
     if let Some(id) = id {
         node.attributes.insert("id".into(), id);

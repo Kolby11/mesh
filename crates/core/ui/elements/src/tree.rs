@@ -254,6 +254,11 @@ pub struct WidgetNodeAuthored {
     pub attributes: AttributeMap,
     pub event_handlers: BTreeMap<String, HandlerTarget>,
     pub event_handler_calls: BTreeMap<String, EventHandlerCall>,
+    /// Static semantic metadata supplied by the compiler or an embedding
+    /// caller. The live `WidgetNode::accessibility` value is a normalized
+    /// projection and must not become the source for the next normalization
+    /// pass, or removed ARIA attributes can leave stale values behind.
+    accessibility_baseline: Option<AccessibilityInfo>,
     module_id: Option<Arc<str>>,
     pub service_field_reads: Vec<(String, String)>,
     /// Shell-owned composition flags that must survive memoized subtree reuse.
@@ -326,6 +331,7 @@ impl WidgetNode {
                 attributes: AttributeMap::new(),
                 event_handlers: BTreeMap::new(),
                 event_handler_calls: BTreeMap::new(),
+                accessibility_baseline: None,
                 module_id: None,
                 service_field_reads: Vec::new(),
                 composition: WidgetCompositionMetadata::default(),
@@ -353,6 +359,21 @@ impl WidgetNode {
     #[doc(hidden)]
     pub fn authored_payload(&self) -> &WidgetNodeAuthored {
         &self.authored
+    }
+
+    /// Store the static semantic metadata used to rebuild the live
+    /// accessibility projection. Runtime normalization and annotations stay
+    /// in `accessibility` and never overwrite this baseline.
+    #[doc(hidden)]
+    pub fn set_accessibility_baseline(&mut self, info: AccessibilityInfo) {
+        self.accessibility_baseline = Some(info);
+    }
+
+    /// Return static semantic metadata, when the compiler or an embedding
+    /// caller supplied it explicitly.
+    #[doc(hidden)]
+    pub fn accessibility_baseline(&self) -> Option<&AccessibilityInfo> {
+        self.accessibility_baseline.as_ref()
     }
 
     pub fn mark_promoted_popover(&mut self) {

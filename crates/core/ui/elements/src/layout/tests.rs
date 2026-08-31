@@ -220,6 +220,72 @@ fn retained_layout_remeasures_when_measurer_revision_changes() {
 }
 
 #[test]
+fn retained_layout_does_not_reuse_an_older_measurement_generation() {
+    let mut root = make_node("row", Dimension::Content, Dimension::Auto);
+    let mut text = make_node("text", Dimension::Auto, Dimension::Auto);
+    text.attributes.insert("content".into(), "hello".into());
+    root.children.push(text);
+
+    let measurer = RevisionedMeasurer {
+        revisions: Cell::new(TextMeasureRevisions {
+            resource_revision: 1,
+            measurer_revision: 1,
+        }),
+        calls: Cell::new(0),
+    };
+    let mut state = PerSurfaceLayoutState::default();
+    let mut cache = IntrinsicLayoutCache::default();
+
+    LayoutEngine::compute_incremental(
+        &mut root,
+        &mut state,
+        300.0,
+        40.0,
+        false,
+        false,
+        &mut cache,
+        Some(&measurer),
+    );
+    let first_calls = measurer.calls.get();
+
+    measurer.revisions.set(TextMeasureRevisions {
+        resource_revision: 2,
+        measurer_revision: 2,
+    });
+    LayoutEngine::compute_incremental(
+        &mut root,
+        &mut state,
+        300.0,
+        40.0,
+        false,
+        false,
+        &mut cache,
+        Some(&measurer),
+    );
+    let second_calls = measurer.calls.get();
+
+    // Returning to a previous revision must still measure again. Revisions
+    // identify the live resource generation, not a reusable value cache.
+    measurer.revisions.set(TextMeasureRevisions {
+        resource_revision: 1,
+        measurer_revision: 1,
+    });
+    LayoutEngine::compute_incremental(
+        &mut root,
+        &mut state,
+        300.0,
+        40.0,
+        false,
+        false,
+        &mut cache,
+        Some(&measurer),
+    );
+
+    assert!(second_calls > first_calls);
+    assert!(measurer.calls.get() > second_calls);
+}
+
+#[test]
 fn simple_row_layout() {
     let mut root = make_node("row", Dimension::Px(300.0), Dimension::Px(50.0));
     root.computed_style.direction = FlexDirection::Row;

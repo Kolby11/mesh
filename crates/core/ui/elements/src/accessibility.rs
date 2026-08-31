@@ -278,6 +278,16 @@ struct SnapshotReferenceText {
 }
 
 fn normalize_node(node: &mut WidgetNode, parent_policy: NodeEligibility) -> String {
+    let authored = if let Some(info) = node.accessibility_baseline() {
+        info.clone()
+    } else {
+        // Preserve metadata assigned directly to a newly constructed node for
+        // compatibility with embedding callers, then keep it separate from
+        // the derived projection on subsequent passes.
+        let info = node.accessibility.clone();
+        node.set_accessibility_baseline(info.clone());
+        info
+    };
     let policy = parent_policy.child(node);
     let hidden = !policy.allows(InteractionTarget::Semantics);
     let mut child_text = Vec::new();
@@ -288,7 +298,7 @@ fn normalize_node(node: &mut WidgetNode, parent_policy: NodeEligibility) -> Stri
         }
     }
     let child_text = child_text.join(" ");
-    let mut info = normalized_info(node, hidden, &child_text);
+    let mut info = normalized_info(node, hidden, &child_text, &authored);
     info.state.disabled |= policy.is_disabled();
     let name_text = semantic_text(
         &info,
@@ -315,7 +325,11 @@ fn build_snapshot_node(node: &WidgetNode, parent_policy: NodeEligibility) -> Opt
         .filter(|text| !text.is_empty())
         .collect::<Vec<_>>()
         .join(" ");
-    let mut info = normalized_info(node, false, &child_text);
+    let authored = node
+        .accessibility_baseline()
+        .cloned()
+        .unwrap_or_else(|| node.accessibility.clone());
+    let mut info = normalized_info(node, false, &child_text, &authored);
     info.state.disabled |= policy.is_disabled();
     let visible_text = semantic_text(&info, visible_text(node, &child_text, false), false);
     Some(SnapshotNode {
@@ -329,8 +343,13 @@ fn build_snapshot_node(node: &WidgetNode, parent_policy: NodeEligibility) -> Opt
     })
 }
 
-fn normalized_info(node: &WidgetNode, hidden: bool, child_text: &str) -> AccessibilityInfo {
-    let mut info = node.accessibility.clone();
+fn normalized_info(
+    node: &WidgetNode,
+    hidden: bool,
+    child_text: &str,
+    authored: &AccessibilityInfo,
+) -> AccessibilityInfo {
+    let mut info = authored.clone();
     let attributes = &node.attributes;
 
     if !attributes.contains_key("aria-role")
@@ -368,9 +387,8 @@ fn normalized_info(node: &WidgetNode, hidden: bool, child_text: &str) -> Accessi
         .get("alt")
         .filter(|value| !value.trim().is_empty())
         .cloned();
-    let existing_label = info.label.clone();
     let preserved_label = (!hidden && (node.tag == "surface" || node.children.is_empty()))
-        .then_some(existing_label)
+        .then_some(info.label.clone())
         .flatten();
     info.label = if hidden {
         None
@@ -388,9 +406,8 @@ fn normalized_info(node: &WidgetNode, hidden: bool, child_text: &str) -> Accessi
             .or(preserved_label)
     };
 
-    let existing_description = info.description.clone();
     let preserved_description = (!hidden && (node.tag == "surface" || node.children.is_empty()))
-        .then_some(existing_description)
+        .then_some(info.description.clone())
         .flatten();
     info.description = if hidden {
         None
@@ -810,6 +827,27 @@ mod tests {
         attr(&mut icon_button.children[0], "aria-hidden", "true");
         normalize_accessibility(&mut icon_button);
         assert_eq!(icon_button.accessibility.label, None);
+    }
+
+    #[test]
+    fn normalization_rebuilds_removed_aria_metadata_from_current_attributes() {
+        let mut button = WidgetNode::new("button");
+        attr(&mut button, "aria-role", "switch");
+        attr(&mut button, "aria-label", "Mute");
+        attr(&mut button, "aria-pressed", "true");
+        normalize_accessibility(&mut button);
+        assert_eq!(button.accessibility.role, AccessibilityRole::Switch);
+        assert_eq!(button.accessibility.label.as_deref(), Some("Mute"));
+        assert!(button.accessibility.state.pressed);
+
+        button.attributes.remove("aria-role");
+        button.attributes.remove("aria-label");
+        button.attributes.remove("aria-pressed");
+        normalize_accessibility(&mut button);
+
+        assert_eq!(button.accessibility.role, AccessibilityRole::Button);
+        assert_eq!(button.accessibility.label, None);
+        assert!(!button.accessibility.state.pressed);
     }
 
     #[test]

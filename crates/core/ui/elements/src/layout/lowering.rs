@@ -348,6 +348,7 @@ pub(super) fn measure_taffy_node(
             .or_else(|| available_space_to_option(available_space.width))
     };
     let revisions = measurer.revisions();
+    intrinsic_cache.invalidate_text_measurements_if_needed(revisions);
     let context = text.context(max_width, revisions);
     let measure_key = TextMeasureKey::new(&context);
     let (measured_width, measured_height) =

@@ -10,8 +10,8 @@ use mesh_core_component::ComponentFile;
 #[cfg(test)]
 use mesh_core_elements::HandlerTarget;
 use mesh_core_elements::{
-    ComponentCompositionProps, EventHandlerCall, LayoutEngine, NodeId, StyleContext, StyleResolver,
-    VariableStore, WidgetNode, validate_widget_tree,
+    AccessibilityInfo, ComponentCompositionProps, EventHandlerCall, LayoutEngine, NodeId,
+    StyleContext, StyleResolver, VariableStore, WidgetNode, validate_widget_tree,
 };
 use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
@@ -543,6 +543,11 @@ impl CompiledFrontendModule {
             root.accessibility.label = accessibility.label.clone();
             root.accessibility.description = accessibility.description.clone();
         }
+        let mut accessibility_baseline = AccessibilityInfo::default();
+        accessibility_baseline.role = root.accessibility.role.clone();
+        accessibility_baseline.label = root.accessibility.label.clone();
+        accessibility_baseline.description = root.accessibility.description.clone();
+        root.set_accessibility_baseline(accessibility_baseline);
 
         let resolver = StyleResolver::new(theme).with_props(render::resolve_css_props(
             self.component.props.as_ref(),

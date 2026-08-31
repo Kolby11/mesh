@@ -1178,6 +1178,7 @@ impl TextEngine {
         self.measurer_revision = self.measurer_revision.saturating_add(1);
         self.layout_cache.clear();
         GLYPH_ATLAS.with(|atlas| atlas.borrow_mut().clear());
+        NAMED_FONT_AVAILABILITY.with(|cache| cache.borrow_mut().clear());
         self.metrics.layout_invalidations = self.metrics.layout_invalidations.saturating_add(1);
     }
 

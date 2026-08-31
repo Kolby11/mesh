@@ -156,6 +156,7 @@ const INTRINSIC_TEXT_CACHE_MAX_BYTES: usize = 512 * 1024;
 #[derive(Debug)]
 pub struct IntrinsicLayoutCache {
     text_measurements: ByteLruCache<TextMeasureKey, (f32, f32)>,
+    text_measure_revisions: Option<TextMeasureRevisions>,
 }
 
 impl Default for IntrinsicLayoutCache {
@@ -165,11 +166,20 @@ impl Default for IntrinsicLayoutCache {
                 INTRINSIC_TEXT_CACHE_CAPACITY,
                 INTRINSIC_TEXT_CACHE_MAX_BYTES,
             ),
+            text_measure_revisions: None,
         }
     }
 }
 
 impl IntrinsicLayoutCache {
+    fn invalidate_text_measurements_if_needed(&mut self, revisions: TextMeasureRevisions) {
+        if self.text_measure_revisions == Some(revisions) {
+            return;
+        }
+        self.text_measurements.clear();
+        self.text_measure_revisions = Some(revisions);
+    }
+
     fn get_text_measurement(&mut self, key: &TextMeasureKey) -> Option<(f32, f32)> {
         self.text_measurements.get(key).copied()
     }
@@ -342,6 +352,10 @@ impl LayoutEngine {
             );
             return;
         }
+        let text_measure_revisions = measurer
+            .map(|measurer| measurer.revisions())
+            .unwrap_or_default();
+        intrinsic_cache.invalidate_text_measurements_if_needed(text_measure_revisions);
         Self::compute_taffy_layout_with_cache(
             root,
             available_width,
@@ -532,6 +546,7 @@ impl LayoutEngine {
         let text_measure_revisions = measurer
             .map(|measurer| measurer.revisions())
             .unwrap_or_default();
+        intrinsic_cache.invalidate_text_measurements_if_needed(text_measure_revisions);
         if !state.valid {
             compute_fresh_retained_layout(
                 root,
