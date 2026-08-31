@@ -1400,7 +1400,17 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn watched_source_paths(&self) -> Vec<PathBuf> {
-        self.compiled.watched_paths.clone()
+        let mut paths = self.compiled.watched_paths.clone();
+        let validation_graph = self.frontend_catalog_handle.snapshot().validation_graph;
+        for path in self
+            .frontend_catalog
+            .watched_source_paths_for_host(self.id(), validation_graph.as_deref())
+        {
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
+        paths
     }
 
     fn apply_settings(

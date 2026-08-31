@@ -461,7 +461,8 @@ impl Shell {
                     return Err(error);
                 }
             };
-            self.frontend_catalog.replace(catalog, None);
+            self.frontend_catalog
+                .replace_with_graph(catalog, None, &new_graph);
             self.sync_frontend_catalog_components();
         }
 

@@ -2043,6 +2043,154 @@ fn source_reload_recompiles_primary_and_contribution_roots_atomically() {
 }
 
 #[test]
+fn source_reload_recompiles_contributions_consumed_from_other_modules() {
+    use crate::shell::component::catalog::{
+        FrontendCatalog, FrontendCatalogEntry, ResolvedExtensionPointContribution,
+        contribution_entry_key, extension_point_key,
+    };
+    use mesh_core_component::template::{AttributeValue, TemplateNode};
+    use mesh_core_frontend::{compile_frontend_entrypoint, compile_frontend_module};
+    use std::path::PathBuf;
+
+    fn static_content(compiled: &CompiledFrontendModule) -> Option<String> {
+        let root = compiled.component.template.as_ref()?.root.first()?;
+        let TemplateNode::Element(root) = root else {
+            return None;
+        };
+        let attribute = root
+            .attributes
+            .iter()
+            .find(|attribute| attribute.name == "content")?;
+        match &attribute.value {
+            AttributeValue::Static(value) => Some(value.clone()),
+            _ => None,
+        }
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let host_dir = temp.path().join("host");
+    let contributor_dir = temp.path().join("contributor");
+    std::fs::create_dir_all(host_dir.join("src")).unwrap();
+    std::fs::create_dir_all(contributor_dir.join("src")).unwrap();
+    std::fs::write(
+        host_dir.join("src/main.mesh"),
+        "<template><slot extension-point=\"test.cross-module.slot\" /></template>",
+    )
+    .unwrap();
+    std::fs::write(
+        contributor_dir.join("src/main.mesh"),
+        "<template><text content=\"contributor\" /></template>",
+    )
+    .unwrap();
+    let contribution_path = contributor_dir.join("src/contribution.mesh");
+    std::fs::write(
+        &contribution_path,
+        "<template><text content=\"before\" /></template>",
+    )
+    .unwrap();
+
+    let host_id = "@test/cross-module-host";
+    let contributor_id = "@test/cross-module-contributor";
+    let mut host_manifest = minimal_test_manifest(host_id);
+    let mut contributor_manifest = minimal_test_manifest(contributor_id);
+    contributor_manifest.extension_point_contributions.insert(
+        "test.cross-module.slot".into(),
+        vec![mesh_core_module::manifest::ExtensionPointContribution {
+            id: "contribution".into(),
+            entry: "src/contribution.mesh".into(),
+            order: Some(0),
+            props: Default::default(),
+        }],
+    );
+    host_manifest.extension_point_contributions.clear();
+
+    let host_compiled = compile_frontend_module(&host_manifest, &host_dir).unwrap();
+    let contributor_compiled =
+        compile_frontend_module(&contributor_manifest, &contributor_dir).unwrap();
+    let contribution = compile_frontend_entrypoint(
+        &contributor_manifest,
+        &contributor_dir,
+        "src/contribution.mesh",
+    )
+    .unwrap();
+    let catalog = FrontendCatalog {
+        modules: HashMap::from([
+            (
+                host_id.into(),
+                FrontendCatalogEntry {
+                    module_dir: host_dir.clone(),
+                    compiled: host_compiled.clone().into(),
+                },
+            ),
+            (
+                contributor_id.into(),
+                FrontendCatalogEntry {
+                    module_dir: contributor_dir.clone(),
+                    compiled: contributor_compiled.into(),
+                },
+            ),
+        ]),
+        diagnostics: Default::default(),
+        extension_point_contributions: HashMap::from([(
+            extension_point_key(host_id, "test.cross-module.slot"),
+            vec![ResolvedExtensionPointContribution {
+                source_module_id: contributor_id.into(),
+                contribution_id: "contribution".into(),
+                order: 0,
+                props_fingerprint: 0,
+                props: Default::default(),
+            }],
+        )]),
+        extension_point_entries: HashMap::from([(
+            contribution_entry_key(contributor_id, "contribution"),
+            contribution.clone().into(),
+        )]),
+        node_slot_placements: Default::default(),
+    };
+    let mut component = FrontendSurfaceComponent::new(
+        host_compiled,
+        PathBuf::from(&host_dir),
+        catalog,
+        mesh_core_service::InterfaceCatalog::default(),
+        test_settings_store(),
+    );
+    component
+        .mount(ComponentContext {
+            component_id: host_id.into(),
+            surface_id: host_id.into(),
+            diagnostics: Diagnostics::new(host_id),
+        })
+        .unwrap();
+
+    assert!(
+        component
+            .watched_source_paths()
+            .contains(&contribution_path)
+    );
+    let before_version = component.frontend_catalog_handle.snapshot().version;
+    assert_eq!(static_content(&contribution), Some("before".into()));
+
+    std::fs::write(
+        &contribution_path,
+        "<template><text content=\"after\" /></template>",
+    )
+    .unwrap();
+    assert!(component.reload_source().unwrap());
+
+    let state = component.frontend_catalog_handle.snapshot();
+    assert_eq!(state.version, before_version + 1);
+    assert_eq!(
+        static_content(
+            state
+                .catalog
+                .contribution_entry(contributor_id, "contribution")
+                .unwrap()
+        ),
+        Some("after".into())
+    );
+}
+
+#[test]
 fn contribution_only_import_dependency_invalidates_its_host() {
     use crate::shell::component::catalog::{
         FrontendCatalog, FrontendCatalogEntry, FrontendCatalogHandle,

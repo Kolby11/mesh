@@ -2036,7 +2036,8 @@ impl Shell {
             }
         }
 
-        self.frontend_catalog.replace(plan.catalog.clone(), None);
+        self.frontend_catalog
+            .replace_with_graph(plan.catalog.clone(), None, &plan.graph);
         for prepared in &mut pending.prepared_frontends {
             prepared
                 .component

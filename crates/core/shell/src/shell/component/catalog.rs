@@ -240,6 +240,7 @@ fn compile_catalog_entry_from_parts(
             source,
         }
     })?;
+    validate_interface_import_declarations(module_id, &compiled, manifest)?;
     // Contributions are indexed independently below, but their entry files
     // still belong to the host's watch set. This lets a later source edit
     // retry a contribution that was previously rejected without reparsing the
@@ -292,7 +293,43 @@ fn compile_contribution_entry_from_parts(
             source,
         }
     })?;
+    validate_interface_import_declarations(module_id, &compiled, manifest)?;
     Ok(compiled.into())
+}
+
+/// Source reloads do not rebuild the installed graph. Keep their compiler
+/// boundary aligned with graph-backed catalog construction by still enforcing
+/// that every interface imported by a root is declared by its owning module.
+/// Availability and provider/version compatibility remain graph validation
+/// responsibilities; the graph has already validated the unchanged manifest
+/// before this source-only path is entered.
+fn validate_interface_import_declarations(
+    module_id: &str,
+    compiled: &CompiledFrontendModule,
+    manifest: &Manifest,
+) -> Result<(), ShellRunError> {
+    for (interface, requested_version) in compiled_interface_imports(compiled) {
+        let declared = manifest.dependencies.interfaces.iter().any(|dependency| {
+            mesh_core_service::canonical_interface_name(&dependency.name) == interface
+        });
+        if !declared {
+            return Err(ShellRunError::FrontendComposition {
+                message: format!(
+                    "module '{module_id}' imports interface '{interface}' but does not declare it in mesh.uses.interfaces or mesh.uses.optionalInterfaces"
+                ),
+            });
+        }
+        if let Some(version) = requested_version {
+            if mesh_core_service::parse_version_req(&version).is_none() {
+                return Err(ShellRunError::FrontendComposition {
+                    message: format!(
+                        "module '{module_id}' imports interface '{interface}' with invalid version range '{version}'"
+                    ),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Copy-on-write handle for a compiled frontend module.
@@ -352,6 +389,10 @@ pub(in crate::shell) struct FrontendCatalogState {
     pub(in crate::shell) catalog: Arc<FrontendCatalog>,
     pub(in crate::shell) changed_modules: Arc<HashSet<String>>,
     pub(in crate::shell) affected_modules: Arc<HashSet<String>>,
+    /// The graph used to validate source-only reloads. Keeping it in the
+    /// published state prevents a reload from validating against a different
+    /// graph generation than the catalog it replaces.
+    pub(in crate::shell) validation_graph: Option<Arc<InstalledModuleGraph>>,
 }
 
 impl Default for FrontendCatalogHandle {
@@ -374,6 +415,7 @@ impl From<Arc<FrontendCatalog>> for FrontendCatalogHandle {
                 catalog,
                 changed_modules: Arc::new(HashSet::new()),
                 affected_modules: Arc::new(HashSet::new()),
+                validation_graph: None,
             })),
         }
     }
@@ -391,16 +433,40 @@ impl FrontendCatalogHandle {
         catalog: FrontendCatalog,
         changed_module: Option<&str>,
     ) -> FrontendCatalogState {
+        self.publish(catalog, changed_module, None)
+    }
+
+    /// Publish a catalog together with the graph that authorized its
+    /// interface imports. Graph-backed replacements use this as one state
+    /// transition so later source-only reloads retain the same validation
+    /// context.
+    pub(in crate::shell) fn replace_with_graph(
+        &self,
+        catalog: FrontendCatalog,
+        changed_module: Option<&str>,
+        graph: &InstalledModuleGraph,
+    ) -> FrontendCatalogState {
+        self.publish(catalog, changed_module, Some(Arc::new(graph.clone())))
+    }
+
+    fn publish(
+        &self,
+        catalog: FrontendCatalog,
+        changed_module: Option<&str>,
+        validation_graph: Option<Arc<InstalledModuleGraph>>,
+    ) -> FrontendCatalogState {
         let mut state = self.state.write().unwrap();
         let previous = state.clone();
         let catalog = Arc::new(catalog);
         let (changed_modules, affected_modules) =
             catalog_changes(&state.catalog, &catalog, changed_module);
+        let validation_graph = validation_graph.or_else(|| state.validation_graph.clone());
         *state = FrontendCatalogState {
             version: state.version.wrapping_add(1),
             catalog,
             changed_modules: Arc::new(changed_modules),
             affected_modules: Arc::new(affected_modules),
+            validation_graph,
         };
         previous
     }
@@ -432,9 +498,12 @@ impl FrontendCatalogHandle {
         module_dir: &Path,
     ) -> Result<(FrontendCatalogState, FrontendCatalogState), ShellRunError> {
         let previous = self.snapshot();
-        let catalog = previous
-            .catalog
-            .reload_module(module_id, manifest, module_dir)?;
+        let catalog = previous.catalog.reload_module(
+            module_id,
+            manifest,
+            module_dir,
+            previous.validation_graph.as_deref(),
+        )?;
         self.replace(catalog, Some(module_id));
         let published = self.snapshot();
         Ok((previous, published))
@@ -636,45 +705,133 @@ impl FrontendCatalog {
         module_id: &str,
         manifest: &Manifest,
         module_dir: &Path,
+        validation_graph: Option<&InstalledModuleGraph>,
     ) -> Result<Self, ShellRunError> {
         let mut next = self.clone();
         let primary = compile_catalog_entry_from_parts(module_id, manifest, module_dir)?;
+        for target_module_id in primary.compiled.module_component_imports.values() {
+            next.validate_component_module_import(&primary.compiled.manifest, target_module_id)
+                .map_err(|message| ShellRunError::FrontendComposition { message })?;
+        }
+        next.validate_imported_component_props(module_id, &primary.compiled)?;
+        for component_tag in primary.compiled.referenced_component_tags() {
+            if primary.compiled.has_local_component(None, &component_tag) {
+                continue;
+            }
+            if primary
+                .compiled
+                .module_component_imports
+                .contains_key(&component_tag)
+            {
+                continue;
+            }
+            return Err(ShellRunError::FrontendComposition {
+                message: format!(
+                    "module '{module_id}' references <{component_tag}> but no explicit component import was compiled for that tag"
+                ),
+            });
+        }
+        if let Some(graph) = validation_graph {
+            next.validate_interface_imports(module_id, &primary.compiled, graph)
+                .map_err(|message| ShellRunError::FrontendComposition { message })?;
+        }
         next.modules.insert(module_id.to_string(), primary);
 
-        let contribution_keys = next
+        // A mounted host owns the reload transaction for every contribution
+        // it renders, even when those roots belong to another module. Also
+        // include roots owned by the reloaded module that are consumed by a
+        // different host, so one source revision never mixes old and new
+        // contribution compilations.
+        let owner_prefix = format!("{module_id}\u{1}");
+        let mut contribution_keys = next
             .extension_point_entries
             .keys()
-            .filter(|key| key.starts_with(&format!("{module_id}\u{1}")))
+            .filter(|key| key.starts_with(&owner_prefix))
             .cloned()
-            .collect::<Vec<_>>();
+            .collect::<HashSet<_>>();
+        for (point_key, contributions) in &next.extension_point_contributions {
+            let Some((host_module_id, _)) = point_key.split_once('\u{1}') else {
+                continue;
+            };
+            if host_module_id != module_id {
+                continue;
+            }
+            contribution_keys.extend(contributions.iter().map(|contribution| {
+                contribution_entry_key(
+                    &contribution.source_module_id,
+                    &contribution.contribution_id,
+                )
+            }));
+        }
+        if let Some(graph) = validation_graph {
+            for ((host_module_id, _), contributions) in graph.all_extension_point_contributions() {
+                if host_module_id == module_id
+                    || contributions
+                        .iter()
+                        .any(|contribution| contribution.source_module_id == module_id)
+                {
+                    contribution_keys.extend(contributions.iter().map(|contribution| {
+                        contribution_entry_key(
+                            &contribution.source_module_id,
+                            &contribution.contribution_id,
+                        )
+                    }));
+                }
+            }
+        }
+        let mut contribution_keys = contribution_keys.into_iter().collect::<Vec<_>>();
+        contribution_keys.sort();
         for key in contribution_keys {
-            let contribution_id = key
+            let (source_module_id, contribution_id) = key
                 .split_once('\u{1}')
-                .map(|(_, contribution_id)| contribution_id)
                 .ok_or_else(|| ShellRunError::FrontendComposition {
                     message: format!(
                         "invalid contribution catalog key '{key}' while reloading module '{module_id}'"
                     ),
                 })?;
-            let contribution = manifest
+            let source = next.modules.get(source_module_id).ok_or_else(|| {
+                ShellRunError::FrontendComposition {
+                    message: format!(
+                        "contribution '{source_module_id}:{contribution_id}' has no compiled source module"
+                    ),
+                }
+            })?;
+            let (source_manifest, source_module_dir) = if source_module_id == module_id {
+                (manifest, module_dir)
+            } else {
+                (&source.compiled.manifest, source.module_dir.as_path())
+            };
+            let contribution = source_manifest
                 .extension_point_contributions
                 .values()
                 .flat_map(Vec::as_slice)
                 .find(|contribution| contribution.id == contribution_id)
                 .ok_or_else(|| ShellRunError::FrontendComposition {
                     message: format!(
-                        "contribution '{module_id}:{contribution_id}' is missing from the module manifest"
+                        "contribution '{source_module_id}:{contribution_id}' is missing from the module manifest"
                     ),
                 })?;
             let compiled = compile_contribution_entry_from_parts(
-                module_id,
-                manifest,
-                module_dir,
+                source_module_id,
+                source_manifest,
+                source_module_dir,
                 &contribution.entry,
             )?;
+            if let Some(graph) = validation_graph {
+                next.validate_interface_imports(source_module_id, &compiled, graph)
+                    .map_err(|message| ShellRunError::FrontendComposition { message })?;
+            }
+            next.validate_imported_component_props(source_module_id, &compiled)?;
+            validate_contribution_props(
+                &format!("{source_module_id}:{contribution_id}"),
+                &contribution.props,
+                &compiled,
+            )
+            .map_err(|message| ShellRunError::FrontendComposition { message })?;
             next.extension_point_entries.insert(key, compiled);
         }
 
+        next.validate_node_slot_placements()?;
         Ok(next)
     }
 
@@ -1151,6 +1308,93 @@ impl FrontendCatalog {
             }
         }
         entries
+    }
+
+    /// Every source path used by a mounted host, including contribution roots
+    /// owned by other modules. The host must poll these paths because a
+    /// contributor may not have a mounted primary surface of its own.
+    pub(super) fn watched_source_paths_for_host(
+        &self,
+        host_module_id: &str,
+        validation_graph: Option<&InstalledModuleGraph>,
+    ) -> Vec<PathBuf> {
+        let mut paths = self
+            .modules
+            .get(host_module_id)
+            .map(|entry| entry.compiled.watched_paths.clone())
+            .unwrap_or_default();
+        for compiled in self.contribution_entries_for_host(host_module_id) {
+            for path in &compiled.watched_paths {
+                if !paths.contains(path) {
+                    paths.push(path.clone());
+                }
+            }
+        }
+        // Keep rejected contributions in the watch set as well. The resolved
+        // metadata is retained even when a root failed compilation or
+        // validation, so the next edit can retry it without a graph restart.
+        let host_prefix = format!("{host_module_id}\u{1}");
+        for (point_key, contributions) in &self.extension_point_contributions {
+            if !point_key.starts_with(&host_prefix) {
+                continue;
+            }
+            for contribution in contributions {
+                let Some(source) = self.modules.get(&contribution.source_module_id) else {
+                    continue;
+                };
+                let Some(declaration) = source
+                    .compiled
+                    .manifest
+                    .extension_point_contributions
+                    .values()
+                    .flat_map(Vec::as_slice)
+                    .find(|entry| entry.id == contribution.contribution_id)
+                else {
+                    continue;
+                };
+                if let Ok(path) = mesh_core_module::package::resolve_contained_module_file(
+                    &source.module_dir,
+                    &declaration.entry,
+                    "frontend contribution entry",
+                ) && !paths.contains(&path)
+                {
+                    paths.push(path);
+                }
+            }
+        }
+        if let Some(graph) = validation_graph {
+            for ((graph_host_module_id, _), contributions) in
+                graph.all_extension_point_contributions()
+            {
+                if graph_host_module_id != host_module_id {
+                    continue;
+                }
+                for contribution in contributions {
+                    let module_dir = self
+                        .modules
+                        .get(&contribution.source_module_id)
+                        .map(|source| source.module_dir.clone())
+                        .or_else(|| {
+                            graph
+                                .module(&contribution.source_module_id)
+                                .and_then(|source| source.manifest_path.parent())
+                                .map(Path::to_path_buf)
+                        });
+                    let Some(module_dir) = module_dir else {
+                        continue;
+                    };
+                    if let Ok(path) = mesh_core_module::package::resolve_contained_module_file(
+                        &module_dir,
+                        &contribution.entry,
+                        "frontend contribution entry",
+                    ) && !paths.contains(&path)
+                    {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+        paths
     }
 
     pub(in crate::shell) fn contribution_entry(
@@ -1661,6 +1905,91 @@ local audio = require("mesh.audio@>=2.0")
                 && diagnostic.contribution_id.as_deref() == Some("navigation-bar")
                 && diagnostic.message.contains("versions are incompatible")
         }));
+    }
+
+    #[test]
+    fn source_reload_rejects_incompatible_contribution_interface_ranges() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let graph = mesh_core_module::package::load_authoring_snapshot(
+            &workspace_root.join("config/module.json"),
+        )
+        .expect("shipped graph loads");
+        let (temp, catalog) = catalog_with_navigation_contribution_source(
+            r#"
+<props>
+namespace: { type: "string" }
+title: { type: "string" }
+</props>
+<template><text /></template>
+"#,
+        );
+        let manifest = catalog
+            .module("@mesh/navigation-bar")
+            .expect("navigation module is catalogued")
+            .compiled
+            .manifest
+            .clone();
+        let handle = FrontendCatalogHandle::from(catalog.clone());
+        handle.replace_with_graph(catalog, None, &graph);
+        let before = handle.snapshot();
+        assert!(before.validation_graph.is_some());
+        assert!(before.catalog.modules.contains_key("@mesh/navigation-bar"));
+        assert!(
+            before
+                .catalog
+                .extension_point_entries
+                .contains_key(&contribution_entry_key(
+                    "@mesh/navigation-bar",
+                    "navigation-bar"
+                ))
+        );
+
+        std::fs::write(
+            temp.path().join("src/settings.mesh"),
+            r#"
+<props>
+namespace: { type: "string" }
+title: { type: "string" }
+</props>
+<template><text /></template>
+<script lang="luau">
+local audio = require("mesh.audio@>=2.0")
+</script>
+"#,
+        )
+        .unwrap();
+        let reloaded_contribution =
+            compile_frontend_entrypoint(&manifest, temp.path(), "src/settings.mesh")
+                .expect("reloaded contribution compiles");
+        assert_eq!(
+            compiled_interface_imports(&reloaded_contribution),
+            vec![("mesh.audio".into(), Some(">=2.0".into()))]
+        );
+        assert!(
+            handle
+                .snapshot()
+                .catalog
+                .validate_interface_imports("@mesh/navigation-bar", &reloaded_contribution, &graph,)
+                .is_err(),
+            "incompatible contribution should fail graph validation"
+        );
+        let error = handle
+            .reload_module("@mesh/navigation-bar", &manifest, temp.path())
+            .expect_err("incompatible contribution interface range was reloaded");
+        assert!(error.to_string().contains("versions are incompatible"));
+        let after = handle.snapshot();
+        assert_eq!(after.version, before.version);
+        assert_eq!(
+            after
+                .catalog
+                .contribution_entry("@mesh/navigation-bar", "navigation-bar")
+                .expect("last-known-good contribution remains published")
+                .source_path,
+            temp.path()
+                .join("src/settings.mesh")
+                .canonicalize()
+                .expect("contribution path canonicalizes")
+        );
     }
 
     #[test]

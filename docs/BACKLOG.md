@@ -119,9 +119,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Frontend compiler and host
 
-- [ ] Compile, validate, watch, invalidate, and reload primary and
-      extension-point roots as one atomic frontend catalog revision, including
-      contribution interface checks and contribution-only dependencies. [Audit](../.planning/log/sections/10-frontend-compiler-and-host/improvements.md).
 - [ ] Gate service payload publication on capabilities and replace the
       revision-light host effects with a coherent, typed frontend frame/effect
       boundary that rejects stale catalog/runtime requests.

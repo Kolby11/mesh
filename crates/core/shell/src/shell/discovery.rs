@@ -1,4 +1,5 @@
 use super::component::{FrontendCatalog, FrontendCatalogHandle, FrontendSurfaceComponent};
+use super::types::watched_source_mtime;
 use super::*;
 use mesh_core_module::ModuleHealthRecord;
 #[cfg(test)]
@@ -2562,7 +2563,8 @@ impl Shell {
 
         let graph = self.load_installed_module_graph_cached()?.clone();
         let frontend_catalog = FrontendCatalog::from_modules(&self.modules, Some(&graph))?;
-        self.frontend_catalog.replace(frontend_catalog, None);
+        self.frontend_catalog
+            .replace_with_graph(frontend_catalog, None, &graph);
         let frontend_catalog = self.frontend_catalog.snapshot().catalog;
         let enabled_frontends = self.installed_enabled_frontend_ids();
         let locale_snapshot = self.locale.snapshot();
@@ -2642,7 +2644,9 @@ impl Shell {
             .top_level_surfaces()
             .into_iter()
             .find(|entry| entry.compiled.manifest.package.id == module_id);
-        let previous_catalog = self.frontend_catalog.replace(catalog, None);
+        let previous_catalog = self
+            .frontend_catalog
+            .replace_with_graph(catalog, None, graph);
 
         let Some(entry) = entry else {
             // Widgets and component-only frontend packages own no surface.
@@ -2779,7 +2783,12 @@ impl Shell {
         let previous_catalog = self.frontend_catalog.snapshot().catalog;
         let catalog =
             FrontendCatalog::from_modules_reusing(&self.modules, graph, Some(&previous_catalog))?;
-        self.frontend_catalog.replace(catalog, None);
+        if let Some(graph) = graph {
+            self.frontend_catalog
+                .replace_with_graph(catalog, None, graph);
+        } else {
+            self.frontend_catalog.replace(catalog, None);
+        }
         self.sync_frontend_catalog_components();
 
         let indices = self
@@ -2890,7 +2899,19 @@ impl Shell {
     pub(in crate::shell) fn sync_frontend_catalog_components(&mut self) -> bool {
         let mut invalidated = false;
         for runtime in &mut self.components {
-            invalidated |= runtime.component.frontend_catalog_changed();
+            let changed = runtime.component.frontend_catalog_changed();
+            if changed {
+                runtime.source_paths = runtime
+                    .component
+                    .watched_source_paths()
+                    .into_iter()
+                    .map(|path| {
+                        let mtime = watched_source_mtime(&path);
+                        (path, mtime)
+                    })
+                    .collect();
+            }
+            invalidated |= changed;
         }
         if invalidated {
             self.service_delivery_index.mark_dirty();
