@@ -119,9 +119,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Frontend compiler and host
 
-- [ ] Split the renderer/Wayland/package/debug policy out of the
-      compiler-facing frontend host ABI.
-
 ## Shell core and orchestration
 
 - [ ] Replace split profile/runtime mutation with one revisioned activation

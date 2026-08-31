@@ -1,5 +1,5 @@
 use super::*;
-use mesh_core_frontend_host::ShellComponent;
+use mesh_core_frontend_shell_adapter::ShellComponent;
 
 #[test]
 fn pointer_button_identity_reaches_click_event_without_secondary_activation() {

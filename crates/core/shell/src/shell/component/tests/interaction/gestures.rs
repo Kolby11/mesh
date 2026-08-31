@@ -1,5 +1,5 @@
 use super::*;
-use mesh_core_frontend_host::ShellComponent;
+use mesh_core_frontend_shell_adapter::ShellComponent;
 
 #[test]
 fn swipe_keeps_begin_target_and_reports_terminal_direction() {

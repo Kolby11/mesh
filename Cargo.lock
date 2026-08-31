@@ -1996,12 +1996,19 @@ dependencies = [
 name = "mesh-core-frontend-host"
 version = "0.1.0"
 dependencies = [
+ "mesh-core-frontend-abi",
+]
+
+[[package]]
+name = "mesh-core-frontend-shell-adapter"
+version = "0.1.0"
+dependencies = [
  "mesh-core-capability",
  "mesh-core-config",
  "mesh-core-debug",
  "mesh-core-diagnostics",
  "mesh-core-elements",
- "mesh-core-frontend-abi",
+ "mesh-core-frontend-host",
  "mesh-core-locale",
  "mesh-core-render",
  "mesh-core-scripting",
@@ -2188,7 +2195,7 @@ dependencies = [
  "mesh-core-expression",
  "mesh-core-frontend",
  "mesh-core-frontend-abi",
- "mesh-core-frontend-host",
+ "mesh-core-frontend-shell-adapter",
  "mesh-core-icon",
  "mesh-core-interaction",
  "mesh-core-locale",

@@ -16,8 +16,10 @@ This workspace keeps browser-like concerns split by crate:
   owning declarations.
 - `mesh-core-frontend-abi` owns renderer-neutral frontend effects, caller
   identity, and capability-scoped host contracts.
-- `mesh-core-frontend-host` owns the component host lifecycle and shell-side
-  adapters that lower the neutral ABI into renderer and surface operations.
+- `mesh-core-frontend-host` owns only renderer-neutral frontend host contracts.
+- `mesh-core-frontend-shell-adapter` owns the component host lifecycle and
+  shell-side adapters that lower the neutral ABI into renderer and surface
+  operations.
 - `mesh-core-shell` glues these crates to modules, services, theme, locale, diagnostics, and the event loop.
 
 Normal dependency direction should remain:
@@ -27,7 +29,8 @@ surface-policy -> no runtime boundary crates
 render -> elements + icon
 frontend -> component + elements + module + theme
 frontend-abi -> capability
-frontend-host -> frontend-abi + capability + elements + locale + render + theme + wayland
+frontend-host -> frontend-abi
+frontend-shell-adapter -> frontend-host + capability + config + debug + diagnostics + elements + locale + render + scripting + theme + wayland
 animation -> elements
 interaction -> elements + module
 surface-config -> component + module + wayland + config + surface-policy

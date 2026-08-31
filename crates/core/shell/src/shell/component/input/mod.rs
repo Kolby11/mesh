@@ -40,7 +40,7 @@ fn hover_path_suffixes<'a>(
 impl FrontendSurfaceComponent {
     pub(in crate::shell::component) fn text_input_state(
         &self,
-    ) -> Option<mesh_core_frontend_host::TextInputState> {
+    ) -> Option<mesh_core_frontend_shell_adapter::TextInputState> {
         let focused_key = self.focused_key.as_deref()?;
         let tree = self.last_tree.as_ref()?;
         if !is_input_key(tree, focused_key) {
@@ -72,7 +72,7 @@ impl FrontendSurfaceComponent {
         } else {
             (surrounding_text, cursor)
         };
-        Some(mesh_core_frontend_host::TextInputState {
+        Some(mesh_core_frontend_shell_adapter::TextInputState {
             surrounding_text,
             cursor,
             anchor: cursor,

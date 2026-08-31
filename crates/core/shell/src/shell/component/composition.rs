@@ -20,7 +20,7 @@ impl FrontendSurfaceComponent {
         };
         mesh_core_debug::allocation::with_tracking_suspended(|| {
             self.profiling_records.borrow_mut().push(
-                mesh_core_frontend_host::ComponentProfilingRecord {
+                mesh_core_frontend_shell_adapter::ComponentProfilingRecord {
                     stage: mesh_core_debug::ProfilingStage::TreeBuild,
                     duration: started.elapsed(),
                     module_id: Some(module_id.to_owned()),
@@ -36,7 +36,7 @@ impl FrontendSurfaceComponent {
         }
         mesh_core_debug::allocation::with_tracking_suspended(|| {
             self.profiling_records.borrow_mut().push(
-                mesh_core_frontend_host::ComponentProfilingRecord {
+                mesh_core_frontend_shell_adapter::ComponentProfilingRecord {
                     stage: mesh_core_debug::ProfilingStage::TreeBuild,
                     duration: std::time::Duration::ZERO,
                     module_id: Some(self.compiled.manifest.package.id.clone()),

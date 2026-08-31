@@ -1,22 +1,9 @@
 [package]
 name = "mesh-core-frontend-host"
-description = "Frontend component host contract types for MESH"
+description = "Renderer-neutral frontend host ABI for MESH"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 mesh-core-frontend-abi = { workspace = true }
-mesh-core-capability = { workspace = true }
-mesh-core-config = { workspace = true }
-mesh-core-debug = { workspace = true }
-mesh-core-diagnostics = { workspace = true }
-mesh-core-elements = { workspace = true }
-mesh-core-locale = { workspace = true }
-mesh-core-render = { workspace = true }
-mesh-core-scripting = { workspace = true }
-mesh-core-theme = { workspace = true }
-mesh-core-wayland = { workspace = true }
-
-serde_json = { workspace = true }
-thiserror = { workspace = true }

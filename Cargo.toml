@@ -19,6 +19,7 @@ members = [
     "crates/core/ui/interaction",
     "crates/core/runtime/scripting",
     "crates/core/frontend/host",
+    "crates/core/frontend/shell-adapter",
     "crates/core/frontend/abi",
     "crates/core/frontend/compiler",
     "crates/core/surface-policy",
@@ -70,6 +71,7 @@ mesh-core-animation = { path = "crates/core/ui/animation" }
 mesh-core-interaction = { path = "crates/core/ui/interaction" }
 mesh-core-scripting = { path = "crates/core/runtime/scripting" }
 mesh-core-frontend-host = { path = "crates/core/frontend/host" }
+mesh-core-frontend-shell-adapter = { path = "crates/core/frontend/shell-adapter" }
 mesh-core-frontend-abi = { path = "crates/core/frontend/abi" }
 mesh-core-frontend = { path = "crates/core/frontend/compiler" }
 mesh-core-surface-policy = { path = "crates/core/surface-policy" }

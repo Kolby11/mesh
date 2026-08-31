@@ -1,5 +1,5 @@
 pub(super) use mesh_core_backend::BackendIdentity;
-pub use mesh_core_frontend_host::{
+pub use mesh_core_frontend_shell_adapter::{
     ChildSurfaceDiagnostic, ChildSurfaceKind, ChildSurfaceRequest, ComponentContext,
     ComponentError, ComponentInput, ComponentProfilingRecord, CoreEvent, CoreRequest,
     FrontendEffectRevision, FrontendFrame, FrontendFrameEffects, FrontendFrameError,

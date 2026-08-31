@@ -1744,7 +1744,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             .is_some()
     }
 
-    fn text_input_state(&self) -> Option<mesh_core_frontend_host::TextInputState> {
+    fn text_input_state(&self) -> Option<mesh_core_frontend_shell_adapter::TextInputState> {
         FrontendSurfaceComponent::text_input_state(self)
     }
 

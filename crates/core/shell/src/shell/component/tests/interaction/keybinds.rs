@@ -1,5 +1,5 @@
 use super::*;
-use mesh_core_frontend_host::ShellComponent;
+use mesh_core_frontend_shell_adapter::ShellComponent;
 
 #[test]
 fn keyboard_shortcuts_surface_handler_runs_and_metadata_matches_binding() {

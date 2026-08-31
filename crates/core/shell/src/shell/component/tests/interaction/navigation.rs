@@ -1,5 +1,5 @@
 use super::*;
-use mesh_core_frontend_host::ShellComponent;
+use mesh_core_frontend_shell_adapter::ShellComponent;
 
 #[test]
 fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() {

@@ -6,7 +6,7 @@ use mesh_core_frontend_abi::{
     DebugEffect, EffectScope, EffectSource, FrontendEffect, FrontendEffectRevision,
     ScopedFrontendEffect, ServiceEffect, SurfaceEffect, SurfaceRole,
 };
-use mesh_core_frontend_host::ShellEffectAdapter;
+use mesh_core_frontend_shell_adapter::ShellEffectAdapter;
 use mesh_core_scripting::{OperationRegistry, OperationRejection, PublishedEvent, ScriptState};
 pub(super) use mesh_core_service::service_name_from_interface;
 pub(super) use mesh_core_service::service_name_from_interface_cow;

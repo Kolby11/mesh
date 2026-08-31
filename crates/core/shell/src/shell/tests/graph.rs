@@ -599,11 +599,22 @@ fn core_crate_boundaries_do_not_regress() {
     assert!(!frontend.contains("mesh-core-presentation"));
 
     let frontend_host = manifest_dependencies(&root.join("crates/core/frontend/host/Cargo.toml"));
-    assert!(frontend_host.contains("mesh-core-render"));
-    assert!(frontend_host.contains("mesh-core-wayland"));
+    assert!(frontend_host.contains("mesh-core-frontend-abi"));
+    assert!(!frontend_host.contains("mesh-core-render"));
+    assert!(!frontend_host.contains("mesh-core-wayland"));
+    assert!(!frontend_host.contains("mesh-core-debug"));
+    assert!(!frontend_host.contains("mesh-core-config"));
     assert!(!frontend_host.contains("mesh-core-shell"));
-    assert!(!frontend_host.contains("mesh-core-frontend"));
     assert!(!frontend_host.contains("mesh-core-presentation"));
+
+    let frontend_adapter =
+        manifest_dependencies(&root.join("crates/core/frontend/shell-adapter/Cargo.toml"));
+    assert!(frontend_adapter.contains("mesh-core-frontend-host"));
+    assert!(frontend_adapter.contains("mesh-core-render"));
+    assert!(frontend_adapter.contains("mesh-core-wayland"));
+    assert!(frontend_adapter.contains("mesh-core-debug"));
+    assert!(frontend_adapter.contains("mesh-core-config"));
+    assert!(!frontend_adapter.contains("mesh-core-presentation"));
 
     let animation = manifest_dependencies(&root.join("crates/core/ui/animation/Cargo.toml"));
     assert!(animation.contains("mesh-core-elements"));

@@ -1,0 +1,22 @@
+[package]
+name = "mesh-core-frontend-shell-adapter"
+description = "Shell-side frontend host and policy adapters for MESH"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mesh-core-frontend-host = { workspace = true }
+mesh-core-capability = { workspace = true }
+mesh-core-config = { workspace = true }
+mesh-core-debug = { workspace = true }
+mesh-core-diagnostics = { workspace = true }
+mesh-core-elements = { workspace = true }
+mesh-core-locale = { workspace = true }
+mesh-core-render = { workspace = true }
+mesh-core-scripting = { workspace = true }
+mesh-core-theme = { workspace = true }
+mesh-core-wayland = { workspace = true }
+
+serde_json = { workspace = true }
+thiserror = { workspace = true }
