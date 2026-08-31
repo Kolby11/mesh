@@ -37,9 +37,8 @@ at graph commit, frontend/backend activation, candidate failure, recovery,
 quarantine, and teardown boundaries. The module lock now uses schema v3 with
 validated versions, direct dependency requirements, reverse requesters,
 composition provenance, and rollback metadata rebuilt from restored manifests.
-The next open item is completing motion semantics: pause/resume, stable
-animation identity, cancellation/reversal, reduced-motion policy, discrete
-visibility timing, and per-keyframe easing propagation.
+The next open item is giving the `transition-*` longhands their own comma
+lists so each longhand entry can carry independent timing values.
 Host icon/font resources now use one explicit immutable graph/profile candidate
 catalog and copy-on-write registry handle, with failed preparation, recovery,
 and package rollback retaining the last-known-good snapshot. Icon resolution

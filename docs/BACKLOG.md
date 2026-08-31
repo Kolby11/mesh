@@ -117,9 +117,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
 
 ## Interaction and motion
 
-- [ ] Complete motion semantics: pause/resume, stable animation identity,
-      cancellation/reversal, reduced-motion policy, discrete visibility timing,
-      and per-keyframe easing propagation.
 - [ ] Give the `transition-*` longhands their own comma lists. The animator now
       runs one instance per entry, but `transition-duration`, `-delay`, and
       `-timing-function` still write a single value into entry 0 through
