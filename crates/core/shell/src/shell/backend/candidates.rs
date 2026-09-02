@@ -3,6 +3,8 @@
 use super::super::*;
 use super::{BackendLaunchCandidate, BackendLifecycleStatusRecord};
 use crate::shell::core_provider::CoreServiceRegistry;
+#[cfg(test)]
+use mesh_core_capability::CapabilityPolicy;
 use mesh_core_capability::EffectiveCapabilities;
 use mesh_core_module::package::{BackendProviderNode, binary_available};
 
@@ -44,6 +46,7 @@ impl ServiceCatalogView for mesh_core_service::ResolvedServiceCatalogHandle {
     }
 }
 
+#[cfg(test)]
 pub(in crate::shell) fn backend_launch_candidates_from_graph<T: ServiceCatalogView + ?Sized>(
     graph: &InstalledModuleGraph,
     modules: &HashMap<String, ModuleInstance>,
@@ -53,8 +56,13 @@ pub(in crate::shell) fn backend_launch_candidates_from_graph<T: ServiceCatalogVi
     Vec<BackendLaunchCandidate>,
     Vec<BackendLifecycleStatusRecord>,
 ) {
+    let effective_capabilities = test_effective_capabilities(modules);
     backend_launch_candidates_from_graph_with_capabilities(
-        graph, modules, settings, interfaces, None,
+        graph,
+        modules,
+        settings,
+        interfaces,
+        &effective_capabilities,
     )
 }
 
@@ -65,7 +73,7 @@ pub(in crate::shell) fn backend_launch_candidates_from_graph_with_capabilities<
     modules: &HashMap<String, ModuleInstance>,
     settings: &SettingsStore,
     interfaces: &T,
-    effective_capabilities: Option<&HashMap<String, EffectiveCapabilities>>,
+    effective_capabilities: &HashMap<String, EffectiveCapabilities>,
 ) -> (
     Vec<BackendLaunchCandidate>,
     Vec<BackendLifecycleStatusRecord>,
@@ -107,21 +115,6 @@ pub(in crate::shell) fn backend_launch_candidates_from_graph_with_capabilities<
     (candidates, statuses)
 }
 
-/// Build the launch candidate for one concrete provider of an interface,
-/// validating manifest state, contract registration, required binaries, and
-/// the entrypoint script. Shared by startup launch and supervised restarts.
-pub(in crate::shell) fn launch_candidate_for_provider<T: ServiceCatalogView + ?Sized>(
-    graph: &InstalledModuleGraph,
-    modules: &HashMap<String, ModuleInstance>,
-    settings: &SettingsStore,
-    interfaces: &T,
-    provider: &BackendProviderNode,
-) -> Result<BackendLaunchCandidate, BackendLifecycleStatusRecord> {
-    launch_candidate_for_provider_with_capabilities(
-        graph, modules, settings, interfaces, provider, None,
-    )
-}
-
 pub(in crate::shell) fn launch_candidate_for_provider_with_capabilities<
     T: ServiceCatalogView + ?Sized,
 >(
@@ -130,7 +123,7 @@ pub(in crate::shell) fn launch_candidate_for_provider_with_capabilities<
     settings: &SettingsStore,
     interfaces: &T,
     provider: &BackendProviderNode,
-    effective_capabilities: Option<&HashMap<String, EffectiveCapabilities>>,
+    effective_capabilities: &HashMap<String, EffectiveCapabilities>,
 ) -> Result<BackendLaunchCandidate, BackendLifecycleStatusRecord> {
     let interface = provider.interface.clone();
     let Some(module) = graph.module(&provider.module_id) else {
@@ -234,30 +227,18 @@ pub(in crate::shell) fn launch_candidate_for_provider_with_capabilities<
         });
     };
 
-    let capabilities = match effective_capabilities {
-        Some(effective_capabilities) => {
-            let Some(effective) = effective_capabilities.get(&provider.module_id) else {
-                return Err(BackendLifecycleStatusRecord {
-                    interface,
-                    provider_id: Some(provider.module_id.clone()),
-                    status: "missing_capability",
-                    message: format!(
-                        "backend provider {} has no activation-resolved capability grant",
-                        provider.module_id
-                    ),
-                });
-            };
-            effective.granted_ids().map(str::to_string).collect()
-        }
-        None => module
-            .manifest
-            .capabilities
-            .required
-            .iter()
-            .chain(module.manifest.capabilities.optional.iter())
-            .cloned()
-            .collect::<Vec<_>>(),
+    let Some(effective) = effective_capabilities.get(&provider.module_id) else {
+        return Err(BackendLifecycleStatusRecord {
+            interface,
+            provider_id: Some(provider.module_id.clone()),
+            status: "missing_capability",
+            message: format!(
+                "backend provider {} has no activation-resolved capability grant",
+                provider.module_id
+            ),
+        });
     };
+    let capabilities = effective.granted_ids().map(str::to_string).collect();
     let settings = settings.namespace(&provider.module_id);
     let command_registry = interfaces
         .resolve(&interface, None)
@@ -280,6 +261,40 @@ pub(in crate::shell) fn launch_candidate_for_provider_with_capabilities<
         command_registry,
         event_registry,
     })
+}
+
+#[cfg(test)]
+fn test_effective_capabilities(
+    modules: &HashMap<String, ModuleInstance>,
+) -> HashMap<String, EffectiveCapabilities> {
+    let approvals = modules
+        .values()
+        .map(|module| {
+            let capabilities = module
+                .manifest
+                .capabilities
+                .required
+                .iter()
+                .chain(module.manifest.capabilities.optional.iter())
+                .cloned()
+                .collect();
+            (module.manifest.package.id.clone(), capabilities)
+        })
+        .collect::<Vec<_>>();
+    let policy = CapabilityPolicy::from_approvals(approvals);
+    modules
+        .iter()
+        .map(|(module_id, module)| {
+            let effective = policy
+                .resolve(
+                    module_id,
+                    &module.manifest.capabilities.required,
+                    &module.manifest.capabilities.optional,
+                )
+                .expect("test backend manifests must use known capabilities");
+            (module_id.clone(), effective)
+        })
+        .collect()
 }
 
 fn backend_requirement_statuses<T: ServiceCatalogView + ?Sized>(

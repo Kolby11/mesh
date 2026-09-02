@@ -26,9 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 The following Section 1 findings remain open; IDs preserve their audit evidence
 for a future report or rerun.
 
-- [ ] **S01-LOGIC-004 (P2):** Fail activation closed when resolved effective
-      capabilities are absent; remove production fallbacks that grant raw required
-      and optional manifest capabilities.
 - [ ] **S01-DEAD-002 / S01-LOGIC-009 (P2/P3):** Make the closed capability
       catalog the only production authority; deprecate the fail-open legacy
       privilege classifier and restrict raw mutable `CapabilitySet` construction.

@@ -1584,7 +1584,7 @@ fn source_reload_drops_stale_retained_tree_before_next_paint() {
         extension_point_entries: Default::default(),
         node_slot_placements: Default::default(),
     };
-    let mut component = FrontendSurfaceComponent::new(
+    let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
         module_dir.to_path_buf(),
         catalog,
@@ -1680,7 +1680,7 @@ end
         extension_point_entries: Default::default(),
         node_slot_placements: Default::default(),
     };
-    let mut component = FrontendSurfaceComponent::new(
+    let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
         module_dir.to_path_buf(),
         catalog,
@@ -1787,7 +1787,7 @@ end
         extension_point_entries: Default::default(),
         node_slot_placements: Default::default(),
     };
-    let mut component = FrontendSurfaceComponent::new(
+    let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
         module_dir.to_path_buf(),
         catalog,
@@ -1891,7 +1891,7 @@ end
         extension_point_entries: Default::default(),
         node_slot_placements: Default::default(),
     };
-    let mut component = FrontendSurfaceComponent::new(
+    let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
         module_dir.to_path_buf(),
         catalog,
@@ -2009,7 +2009,7 @@ fn source_reload_recompiles_primary_and_contribution_roots_atomically() {
         )]),
         node_slot_placements: Default::default(),
     };
-    let mut component = FrontendSurfaceComponent::new(
+    let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
         module_dir.to_path_buf(),
         catalog,
@@ -2172,7 +2172,7 @@ fn source_reload_recompiles_contributions_consumed_from_other_modules() {
         )]),
         node_slot_placements: Default::default(),
     };
-    let mut component = FrontendSurfaceComponent::new(
+    let mut component = FrontendSurfaceComponent::new_for_test(
         host_compiled,
         PathBuf::from(&host_dir),
         catalog,
@@ -2364,7 +2364,7 @@ local Child = require("./components/child.mesh")
         extension_point_entries: Default::default(),
         node_slot_placements: Default::default(),
     };
-    let mut component = FrontendSurfaceComponent::new(
+    let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
         module_dir.to_path_buf(),
         catalog,

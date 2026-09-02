@@ -624,11 +624,31 @@ impl FrontendSurfaceComponent {
         source_path: &Path,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<EmbeddedFrontendRuntime, ComponentError> {
-        let capabilities = self
-            .effective_capabilities
-            .get(&manifest.package.id)
-            .map(EffectiveCapabilities::into_capability_set)
-            .unwrap_or_else(|| grant_capabilities_from_manifest(manifest));
+        let capabilities = match self.effective_capabilities.get(&manifest.package.id) {
+            Some(effective) => effective.into_capability_set(),
+            None => {
+                #[cfg(test)]
+                if self.test_capability_fallback {
+                    grant_capabilities_from_manifest(manifest)
+                } else {
+                    return Err(ComponentError::Failed {
+                        component_id,
+                        message: format!(
+                            "frontend component {} has no activation-resolved capability grant",
+                            manifest.package.id
+                        ),
+                    });
+                }
+                #[cfg(not(test))]
+                return Err(ComponentError::Failed {
+                    component_id,
+                    message: format!(
+                        "frontend component {} has no activation-resolved capability grant",
+                        manifest.package.id
+                    ),
+                });
+            }
+        };
         let mut script_ctx = ScriptContext::new_for_instance(
             manifest.package.id.clone(),
             component_id.clone(),

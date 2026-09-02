@@ -51,7 +51,7 @@ use runtime_tree::{
     runtime_node_id_for_key,
 };
 
-use mesh_core_capability::{Capability, CapabilitySet, EffectiveCapabilities};
+use mesh_core_capability::EffectiveCapabilities;
 use mesh_core_component::template::{AttributeValue, TemplateNode};
 use mesh_core_config::TooltipSettings;
 use mesh_core_diagnostics::{DiagnosticSourceSpan, Diagnostics};
@@ -759,6 +759,11 @@ pub(super) struct FrontendSurfaceComponent {
     /// components use their own entry rather than inheriting the host's
     /// capabilities.
     effective_capabilities: Arc<HashMap<String, EffectiveCapabilities>>,
+    #[cfg(test)]
+    /// Direct component fixtures opt into this compatibility adapter because
+    /// they do not run through shell graph resolution. Production instances
+    /// always receive the activation-resolved map explicitly.
+    test_capability_fallback: bool,
     pub(super) visible: bool,
     surface_exiting: bool,
     surface_entering: bool,
@@ -1226,6 +1231,8 @@ impl FrontendSurfaceComponent {
             frontend_catalog_handle,
             frontend_catalog_version: frontend_catalog_state.version,
             effective_capabilities: Arc::new(HashMap::new()),
+            #[cfg(test)]
+            test_capability_fallback: false,
             visible: settings_state.layout.visible_on_start,
             surface_exiting: false,
             surface_entering: false,
@@ -1387,6 +1394,25 @@ impl FrontendSurfaceComponent {
         }
     }
 
+    #[cfg(test)]
+    pub(super) fn new_for_test(
+        compiled: impl Into<SharedCompiledFrontendModule>,
+        module_dir: PathBuf,
+        frontend_catalog: impl Into<FrontendCatalogHandle>,
+        interface_catalog: impl Into<Arc<mesh_core_service::ResolvedServiceCatalog>>,
+        settings: impl Into<Arc<SettingsStore>>,
+    ) -> Self {
+        let mut component = Self::new(
+            compiled,
+            module_dir,
+            frontend_catalog,
+            interface_catalog,
+            settings,
+        );
+        component.test_capability_fallback = true;
+        component
+    }
+
     /// Bind this compiled module to a named profile instance. The instance key
     /// scopes surface identity and settings while the compiled module remains
     /// reusable by other profiles or sibling instances.
@@ -1412,6 +1438,10 @@ impl FrontendSurfaceComponent {
         effective_capabilities: Arc<HashMap<String, EffectiveCapabilities>>,
     ) -> Self {
         self.effective_capabilities = effective_capabilities;
+        #[cfg(test)]
+        {
+            self.test_capability_fallback = false;
+        }
         self
     }
 
@@ -2008,9 +2038,12 @@ pub(super) fn json_field_diff(
     changed
 }
 
-pub(super) fn grant_capabilities_from_manifest(
+#[cfg(test)]
+fn grant_capabilities_from_manifest(
     manifest: &mesh_core_module::Manifest,
-) -> CapabilitySet {
+) -> mesh_core_capability::CapabilitySet {
+    use mesh_core_capability::{Capability, CapabilitySet};
+
     let mut granted = CapabilitySet::new();
 
     for capability in &manifest.capabilities.required {

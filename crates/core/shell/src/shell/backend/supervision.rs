@@ -270,7 +270,7 @@ impl Shell {
             &self.settings_store,
             self.interfaces.snapshot().as_ref(),
             &provider,
-            Some(&self.effective_capabilities),
+            &self.effective_capabilities,
         ) {
             Ok(mut candidate) => {
                 tracing::info!(

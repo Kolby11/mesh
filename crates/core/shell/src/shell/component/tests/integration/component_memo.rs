@@ -39,7 +39,7 @@ fn memo_surface(parent_src: &str, locals: &[(&str, &str)]) -> FrontendSurfaceCom
         extension_point_entries: HashMap::new(),
         node_slot_placements: Default::default(),
     };
-    let mut component = FrontendSurfaceComponent::new(
+    let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
         PathBuf::from("."),
         catalog,
@@ -528,7 +528,7 @@ fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
             .collect(),
         node_slot_placements: Default::default(),
     };
-    let mut component = FrontendSurfaceComponent::new(
+    let mut component = FrontendSurfaceComponent::new_for_test(
         parent_compiled,
         PathBuf::from("."),
         catalog,
@@ -894,7 +894,7 @@ import MenuPopover from "@mesh/menu-popover"
         extension_point_entries: HashMap::new(),
         node_slot_placements: Default::default(),
     };
-    let mut component = FrontendSurfaceComponent::new(
+    let mut component = FrontendSurfaceComponent::new_for_test(
         parent_compiled,
         PathBuf::from("."),
         catalog,

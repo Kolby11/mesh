@@ -667,7 +667,7 @@ pub(super) fn test_frontend_component_with_local_components(
         extension_point_entries: HashMap::new(),
         node_slot_placements: Default::default(),
     };
-    let mut component = FrontendSurfaceComponent::new(
+    let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
         PathBuf::from("."),
         catalog,
@@ -706,7 +706,7 @@ pub(super) fn test_frontend_component_with_manifest(
         extension_point_entries: HashMap::new(),
         node_slot_placements: Default::default(),
     };
-    let mut component = FrontendSurfaceComponent::new(
+    let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
         PathBuf::from("."),
         catalog,
@@ -781,7 +781,7 @@ pub(super) fn test_frontend_component_with_required_icons(
         extension_point_entries: HashMap::new(),
         node_slot_placements: Default::default(),
     };
-    let mut component = FrontendSurfaceComponent::new(
+    let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
         PathBuf::from("."),
         catalog,
@@ -826,7 +826,7 @@ pub(super) fn test_frontend_component_with_catalog(
         extension_point_entries: HashMap::new(),
         node_slot_placements: Default::default(),
     };
-    let mut component = FrontendSurfaceComponent::new(
+    let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
         PathBuf::from("."),
         catalog,
@@ -1272,7 +1272,7 @@ pub(super) fn real_frontend_module_component(
         (navigation_compiled, navigation_dir)
     };
 
-    let mut component = FrontendSurfaceComponent::new(
+    let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
         module_dir,
         catalog,

@@ -251,7 +251,7 @@ end
         extension_point_entries: HashMap::new(),
         node_slot_placements: Default::default(),
     };
-    let mut component = FrontendSurfaceComponent::new(
+    let mut component = FrontendSurfaceComponent::new_for_test(
         root_compiled,
         PathBuf::from("."),
         catalog,

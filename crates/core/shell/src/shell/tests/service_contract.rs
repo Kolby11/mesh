@@ -1,5 +1,6 @@
 use super::common::*;
 use super::*;
+use crate::shell::backend::backend_launch_candidates_from_graph_with_capabilities;
 use mesh_core_backend::BackendIdentity;
 
 #[test]
@@ -145,6 +146,60 @@ fn backend_lifecycle_accepts_valid_provider_with_contract() {
             .iter()
             .all(|status| status.status != "missing_capability")
     );
+}
+
+#[test]
+fn backend_lifecycle_rejects_provider_without_activation_resolved_capabilities() {
+    let graph = graph_from_json(
+        r#"{
+              "schemaVersion": 1,
+              "modulesDir": "modules",
+              "modules": {
+                "@mesh/backend": { "kind": "backend", "path": "@mesh/backend", "enabled": true }
+              },
+              "providers": { "mesh.example": "@mesh/backend" }
+            }"#,
+        vec![
+            r#"{
+                  "name": "@mesh/backend",
+                  "version": "0.1.0",
+                  "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "backend",
+                    "capabilities": {
+                      "required": ["exec.argv:example:*"],
+                      "optional": ["service.example.read"]
+                    },
+                    "entrypoints": { "main": "src/main.luau" },
+                    "implements": [{ "interface": "mesh.example", "provider": "test" }]
+                  }
+                }"#,
+        ],
+    );
+    let (_dir, mut module) = module_instance("@mesh/backend", Some("src/main.luau"));
+    module.manifest.capabilities.required = vec!["exec.argv:example:*".to_string()];
+    module.manifest.capabilities.optional = vec!["service.example.read".to_string()];
+    let modules = HashMap::from([("@mesh/backend".to_string(), module)]);
+    let interfaces = ResolvedServiceCatalogHandle::new();
+    interfaces.register_contract(test_contract("mesh.example"));
+    register_test_provider(&interfaces, "mesh.example", "@mesh/backend");
+
+    let (candidates, statuses) = backend_launch_candidates_from_graph_with_capabilities(
+        &graph,
+        &modules,
+        &test_settings(),
+        &interfaces,
+        &HashMap::new(),
+    );
+
+    assert!(candidates.is_empty());
+    assert!(statuses.iter().any(|status| {
+        status.status == "missing_capability"
+            && status.provider_id.as_deref() == Some("@mesh/backend")
+            && status
+                .message
+                .contains("activation-resolved capability grant")
+    }));
 }
 
 #[test]

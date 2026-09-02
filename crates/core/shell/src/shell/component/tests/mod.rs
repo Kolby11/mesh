@@ -8,6 +8,34 @@ mod invalidation;
 mod restyle;
 
 #[test]
+fn frontend_runtime_rejects_missing_activation_resolved_capabilities() {
+    let component_id = "@test/capability-surface";
+    let component_manifest = common::minimal_test_manifest(component_id);
+    let mut component = common::test_frontend_component_with_manifest(
+        "<template><box /></template>",
+        component_manifest,
+    );
+    component = component.with_effective_capabilities(Arc::new(HashMap::new()));
+
+    component
+        .mount(ComponentContext {
+            component_id: component_id.into(),
+            surface_id: component_id.into(),
+            diagnostics: Diagnostics::new(component_id),
+        })
+        .unwrap();
+
+    assert!(component.runtimes.lock().unwrap().is_empty());
+    assert!(
+        component
+            .runtime_failure
+            .borrow()
+            .as_deref()
+            .is_some_and(|message| message.contains("activation-resolved capability grant"))
+    );
+}
+
+#[test]
 fn markup_expressions_run_as_full_luau_in_component_scope() {
     let mut component = common::test_frontend_component(
         r#"

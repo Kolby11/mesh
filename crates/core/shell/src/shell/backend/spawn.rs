@@ -37,7 +37,7 @@ impl Shell {
                     &self.modules,
                     &self.settings_store,
                     self.interfaces.snapshot().as_ref(),
-                    Some(&self.effective_capabilities),
+                    &self.effective_capabilities,
                 );
                 for status in statuses {
                     self.record_backend_runtime_status(

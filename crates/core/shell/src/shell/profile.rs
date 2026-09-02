@@ -1642,7 +1642,7 @@ impl Shell {
             &self.modules,
             &settings,
             candidate_interfaces,
-            Some(&effective_capabilities),
+            &effective_capabilities,
         );
         if let Some(status) = statuses.iter().find(|status| {
             !matches!(
@@ -1695,7 +1695,7 @@ impl Shell {
                     &self.modules,
                     &self.settings_store,
                     current_interface_catalog.as_ref(),
-                    Some(&self.effective_capabilities),
+                    &self.effective_capabilities,
                 );
                 for candidate in &mut current {
                     self.apply_shell_runtime_settings(candidate);
