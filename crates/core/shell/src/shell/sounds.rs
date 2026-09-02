@@ -5,7 +5,7 @@ use super::types::CoreRequest;
 ///
 /// Core maps semantic shell events to a typed service request. Normal interface
 /// routing selects and invokes the active provider; the module does playback.
-use mesh_core_capability::{Capability, CapabilitySet};
+use mesh_core_capability::CapabilityCatalog;
 use mesh_core_config::ShellSounds;
 
 pub(super) enum SoundKind {
@@ -29,8 +29,9 @@ pub(super) fn shell_sound_request(kind: SoundKind, sounds: &ShellSounds) -> Opti
     };
 
     let path = path?;
-    let mut source_capabilities = CapabilitySet::new();
-    source_capabilities.grant(Capability::new("service.audio.control"));
+    let source_capabilities = CapabilityCatalog::builtin()
+        .capability_set(["service.audio.control"])
+        .expect("built-in sound routing capability must remain in the catalog");
 
     Some(CoreRequest::ServiceCommand {
         interface: "mesh.audio".to_string(),
@@ -44,6 +45,7 @@ pub(super) fn shell_sound_request(kind: SoundKind, sounds: &ShellSounds) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mesh_core_capability::Capability;
 
     #[test]
     fn configured_sound_becomes_a_generic_service_request() {

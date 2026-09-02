@@ -452,7 +452,7 @@ fn shell_theme_backend_candidate_receives_resolved_active_theme_setting() {
         service_name: "theme".to_string(),
         entrypoint_path: PathBuf::from("src/main.luau"),
         script_source: String::new(),
-        capabilities: Vec::new(),
+        capabilities: mesh_core_capability::CapabilitySet::default(),
         settings: serde_json::json!({}),
         command_registry: None,
         event_registry: None,
@@ -483,7 +483,7 @@ fn shell_theme_fallback_backend_restart_keeps_latest_state_on_resolved_theme() {
         service_name: "theme".to_string(),
         entrypoint_path: PathBuf::from("src/main.luau"),
         script_source: String::new(),
-        capabilities: Vec::new(),
+        capabilities: mesh_core_capability::CapabilitySet::default(),
         settings: serde_json::json!({}),
         command_registry: None,
         event_registry: None,
@@ -1121,10 +1121,7 @@ fn selected_ui_font_reaches_component_text_defaults() {
 fn a_capable_module_may_publish_the_theme_service_methods() {
     let shell = Shell::new();
     let catalog = shell.interfaces.resolved_catalog();
-    let mut capabilities = mesh_core_capability::CapabilitySet::new();
-    capabilities.grant(mesh_core_capability::Capability::new(
-        "service.theme.control",
-    ));
+    let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.theme.control"]);
 
     let outcome = mesh_core_scripting::OperationRegistry::builtin().authorize_event_with_catalog(
         "mesh.theme.set_theme",

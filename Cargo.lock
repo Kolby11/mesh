@@ -1881,6 +1881,7 @@ dependencies = [
 name = "mesh-core-backend"
 version = "0.1.0"
 dependencies = [
+ "mesh-core-capability",
  "mesh-core-runtime",
  "mesh-core-scripting",
  "serde_json",

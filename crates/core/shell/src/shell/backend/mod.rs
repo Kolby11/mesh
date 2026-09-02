@@ -106,7 +106,7 @@ pub(in crate::shell) struct BackendLaunchCandidate {
     pub(in crate::shell) service_name: String,
     pub(in crate::shell) entrypoint_path: PathBuf,
     pub(in crate::shell) script_source: String,
-    pub(in crate::shell) capabilities: Vec<String>,
+    pub(in crate::shell) capabilities: mesh_core_capability::CapabilitySet,
     pub(in crate::shell) settings: serde_json::Value,
     pub(in crate::shell) command_registry: Option<mesh_core_scripting::BackendCommandRegistry>,
     pub(in crate::shell) event_registry: Option<mesh_core_scripting::BackendEventRegistry>,

@@ -5,7 +5,7 @@ use crate::shell::component::catalog::{
     FrontendCatalogEntry, ResolvedExtensionPointContribution, contribution_entry_key,
     extension_point_key,
 };
-use mesh_core_capability::{Capability, CapabilitySet};
+use mesh_core_capability::CapabilitySet;
 use mesh_core_component::parse_component;
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_elements::style::Display;
@@ -548,19 +548,18 @@ pub(super) fn debug_catalog() -> InterfaceCatalog {
 }
 
 pub(super) fn make_audio_ctx() -> ScriptContext {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
-    caps.grant(Capability::new("service.audio.control"));
+    let caps = CapabilitySet::from_ids(["service.audio.read", "service.audio.control"]);
     let mut ctx = ScriptContext::new("@mesh/panel", caps).unwrap();
     ctx.set_interface_catalog(audio_network_catalog());
     ctx
 }
 
 pub(super) fn make_network_ctx() -> ScriptContext {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("shell.surface"));
-    caps.grant(Capability::new("service.network.read"));
-    caps.grant(Capability::new("service.network.control"));
+    let caps = CapabilitySet::from_ids([
+        "shell.surface",
+        "service.network.read",
+        "service.network.control",
+    ]);
     let mut ctx = ScriptContext::new("@mesh/quick-settings", caps).unwrap();
     ctx.set_interface_catalog(audio_network_catalog());
     ctx

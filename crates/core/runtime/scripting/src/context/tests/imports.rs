@@ -1,6 +1,6 @@
 use super::super::*;
 use super::common::*;
-use mesh_core_capability::{Capability, CapabilitySet};
+use mesh_core_capability::CapabilitySet;
 use mesh_core_elements::VariableStore;
 use mesh_core_locale::{LocaleEngine, TranslationSet};
 use serde_json::Value;
@@ -8,8 +8,7 @@ use std::collections::HashMap;
 
 #[test]
 fn require_import_installs_proxy() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -25,8 +24,7 @@ end
 
 #[test]
 fn explicit_interface_import_installs_proxy_global() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script_with_interface_imports(
@@ -59,8 +57,7 @@ end
 
 #[test]
 fn require_imports_interface_proxy() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
 
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
@@ -77,8 +74,7 @@ end
 
 #[test]
 fn require_resolves_existing_host_api_tables() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("locale.read"));
+    let caps = CapabilitySet::from_ids(["locale.read"]);
     let mut ctx = ScriptContext::new("@mesh/host-api-test", caps).unwrap();
     ctx.load_script(
         r#"
@@ -112,8 +108,7 @@ end
 
 #[test]
 fn locale_host_exposes_locale_aware_formatters() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("locale.read"));
+    let caps = CapabilitySet::from_ids(["locale.read"]);
     let mut ctx = ScriptContext::new("@mesh/locale-format-test", caps).unwrap();
     let locale = LocaleEngine::new("en-US");
     let translator = locale.module_translator("@mesh/locale-format-test");
@@ -144,8 +139,7 @@ end
 
 #[test]
 fn locale_current_reads_the_host_owned_translation_snapshot() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("locale.read"));
+    let caps = CapabilitySet::from_ids(["locale.read"]);
     let mut ctx = ScriptContext::new("@mesh/locale-test", caps).unwrap();
     let mut locale = LocaleEngine::with_fallback_locale("sk-SK", "en");
     locale.load_module_translations(
@@ -223,19 +217,17 @@ set_type = type(mesh.locale.set)
     }
 
     assert_eq!(
-        member_types(CapabilitySet::new()),
+        member_types(CapabilitySet::default()),
         (serde_json::json!("nil"), serde_json::json!("nil"))
     );
 
-    let mut read = CapabilitySet::new();
-    read.grant(Capability::new("locale.read"));
+    let read = CapabilitySet::from_ids(["locale.read"]);
     assert_eq!(
         member_types(read),
         (serde_json::json!("function"), serde_json::json!("nil"))
     );
 
-    let mut write = CapabilitySet::new();
-    write.grant(Capability::new("locale.write"));
+    let write = CapabilitySet::from_ids(["locale.write"]);
     assert_eq!(
         member_types(write),
         (serde_json::json!("nil"), serde_json::json!("function"))
@@ -244,7 +236,8 @@ set_type = type(mesh.locale.set)
 
 #[test]
 fn locale_and_i18n_requires_are_denied_without_locale_capabilities() {
-    let mut ctx = ScriptContext::new("@mesh/locale-capability-test", CapabilitySet::new()).unwrap();
+    let mut ctx =
+        ScriptContext::new("@mesh/locale-capability-test", CapabilitySet::default()).unwrap();
     ctx.load_script(
         r#"
 function init()
@@ -262,8 +255,7 @@ end
 
 #[test]
 fn locale_write_capability_exposes_only_the_write_operation() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("locale.write"));
+    let caps = CapabilitySet::from_ids(["locale.write"]);
     let mut ctx = ScriptContext::new("@mesh/locale-write-test", caps).unwrap();
     ctx.load_script(
         r#"
@@ -283,8 +275,7 @@ end
 
 #[test]
 fn named_locale_imports_enforce_read_and_write_members() {
-    let mut write = CapabilitySet::new();
-    write.grant(Capability::new("locale.write"));
+    let write = CapabilitySet::from_ids(["locale.write"]);
     let mut write_ctx = ScriptContext::new("@mesh/locale-write-import", write).unwrap();
     write_ctx
         .load_script(
@@ -303,8 +294,7 @@ end
     );
     assert_eq!(write_ctx.state.get("set_ok"), Some(serde_json::json!(true)));
 
-    let mut read = CapabilitySet::new();
-    read.grant(Capability::new("locale.read"));
+    let read = CapabilitySet::from_ids(["locale.read"]);
     let mut read_ctx = ScriptContext::new("@mesh/locale-read-import", read).unwrap();
     read_ctx
         .load_script(
@@ -326,8 +316,7 @@ end
 
 #[test]
 fn require_resolves_mesh_i18n_library_alias() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("locale.read"));
+    let caps = CapabilitySet::from_ids(["locale.read"]);
     let mut ctx = ScriptContext::new("@mesh/i18n-test", caps).unwrap();
     ctx.set_i18n_translations(HashMap::from([(
         "nav.volume".to_string(),
@@ -351,8 +340,7 @@ end
 
 #[test]
 fn missing_i18n_keys_are_visible_and_carry_owner_and_snapshot_metadata() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("locale.read"));
+    let caps = CapabilitySet::from_ids(["locale.read"]);
     let mut ctx = ScriptContext::new("@mesh/i18n-miss", caps).unwrap();
     ctx.set_i18n_translations(HashMap::new());
     ctx.load_script(
@@ -381,7 +369,7 @@ end
 
 #[test]
 fn require_component_definition_specifier_returns_placeholder() {
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut ctx = ScriptContext::new("@mesh/component-host", caps).unwrap();
     ctx.load_script(
         r#"
@@ -402,8 +390,7 @@ module_source = ModuleChild.source
 
 #[test]
 fn import_named_returns_selected_field() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("locale.read"));
+    let caps = CapabilitySet::from_ids(["locale.read"]);
     let mut ctx = ScriptContext::new("@mesh/import-test", caps).unwrap();
     ctx.set_i18n_translations(HashMap::from([(
         "nav.volume".to_string(),
@@ -426,9 +413,7 @@ end
 
 #[test]
 fn import_multiple_named_returns_in_order() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("locale.read"));
-    caps.grant(Capability::new("locale.write"));
+    let caps = CapabilitySet::from_ids(["locale.read", "locale.write"]);
     let mut ctx = ScriptContext::new("@mesh/import-multi", caps).unwrap();
     ctx.load_script(
         r#"
@@ -455,8 +440,7 @@ end
 
 #[test]
 fn import_with_no_names_is_equivalent_to_require() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("locale.read"));
+    let caps = CapabilitySet::from_ids(["locale.read"]);
     let mut ctx = ScriptContext::new("@mesh/import-default", caps).unwrap();
     ctx.set_i18n_translations(HashMap::from([(
         "nav.audio".to_string(),
@@ -479,8 +463,7 @@ end
 
 #[test]
 fn import_renames_freely() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("locale.read"));
+    let caps = CapabilitySet::from_ids(["locale.read"]);
     let mut ctx = ScriptContext::new("@mesh/import-rename", caps).unwrap();
     ctx.set_i18n_translations(HashMap::from([(
         "nav.battery".to_string(),
@@ -503,8 +486,7 @@ end
 
 #[test]
 fn mesh_i18n_updates_existing_function_after_catalog_refresh() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("locale.read"));
+    let caps = CapabilitySet::from_ids(["locale.read"]);
     let mut ctx = ScriptContext::new("@mesh/i18n-refresh", caps).unwrap();
     ctx.set_i18n_translations(HashMap::from([(
         "nav.volume".to_string(),
@@ -534,8 +516,7 @@ end
 
 #[test]
 fn import_interface_command_member_is_callable() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@mesh/import-iface", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -562,7 +543,7 @@ end
 
 #[test]
 fn import_component_definition_member() {
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut ctx = ScriptContext::new("@mesh/import-component", caps).unwrap();
     ctx.load_script(
         r#"
@@ -580,7 +561,7 @@ child_source = source
 
 #[test]
 fn import_requires_string_specifier() {
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut ctx = ScriptContext::new("@mesh/import-bad-spec", caps).unwrap();
     ctx.load_script(
         r#"
@@ -598,7 +579,7 @@ end
 
 #[test]
 fn pcall_unsupported_require_is_false_without_diagnostic() {
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut ctx = ScriptContext::new("@mesh/unsupported-test", caps).unwrap();
     ctx.load_script(
         r#"
@@ -617,8 +598,7 @@ end
 
 #[test]
 fn rejects_missing_interface_contract() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.load_script(
         r#"
@@ -635,8 +615,7 @@ end
 
 #[test]
 fn require_missing_interface_emits_visible_diagnostic() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@mesh/diagnostic-test", caps).unwrap();
     ctx.load_script(
         r#"
@@ -659,8 +638,7 @@ end
 
 #[test]
 fn pcall_require_still_emits_interface_diagnostic() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@mesh/pcall-test", caps).unwrap();
     ctx.load_script(
         r#"
@@ -683,8 +661,7 @@ end
 
 #[test]
 fn provider_only_require_creates_read_only_proxy() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("theme.read"));
+    let caps = CapabilitySet::from_ids(["theme.read"]);
     let mut ctx = ScriptContext::new("@test/theme-widget", caps).unwrap();
     ctx.set_interface_catalog(theme_provider_only_catalog());
     ctx.load_script(
@@ -714,8 +691,7 @@ end
 
 #[test]
 fn rejects_legacy_mesh_require_syntax() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(

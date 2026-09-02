@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 #[test]
 fn if_then_end_executes_conditionally() {
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut ctx = ScriptContext::new("@test/if", caps).unwrap();
     ctx.load_script(
         r#"
@@ -36,7 +36,8 @@ end
 
 #[test]
 fn template_expressions_use_component_lexical_scope_and_full_luau() {
-    let mut ctx = ScriptContext::new("@test/template-expressions", CapabilitySet::new()).unwrap();
+    let mut ctx =
+        ScriptContext::new("@test/template-expressions", CapabilitySet::default()).unwrap();
     let expressions = vec![
         "add(secret, 2)".to_string(),
         "0 or 5".to_string(),
@@ -82,8 +83,11 @@ fn compiled_template_semantics_match_preview_and_live_runtime() {
     let preview =
         evaluate_preview(&expression, &variables, &serde_json::Map::new(), |_| None).unwrap();
 
-    let mut ctx =
-        ScriptContext::new("@test/compiled-template-semantics", CapabilitySet::new()).unwrap();
+    let mut ctx = ScriptContext::new(
+        "@test/compiled-template-semantics",
+        CapabilitySet::default(),
+    )
+    .unwrap();
     ctx.compile_and_execute_component_with_compiled(
         "enabled = true\ncount = 7\nfallback = 9",
         &[],
@@ -110,8 +114,7 @@ fn compiled_translation_semantics_match_preview_and_live_runtime() {
     )
     .unwrap();
 
-    let mut capabilities = CapabilitySet::new();
-    capabilities.grant(mesh_core_capability::Capability::new("locale.read"));
+    let capabilities = CapabilitySet::from_ids(["locale.read"]);
     let mut ctx = ScriptContext::new("@test/compiled-translation-semantics", capabilities).unwrap();
     ctx.set_i18n_translations(HashMap::from([(
         "nav.open".to_string(),
@@ -134,7 +137,8 @@ fn compiled_translation_semantics_match_preview_and_live_runtime() {
 
 #[test]
 fn template_expression_reads_gate_unbound_public_member_writes() {
-    let mut ctx = ScriptContext::new("@test/template-member-reads", CapabilitySet::new()).unwrap();
+    let mut ctx =
+        ScriptContext::new("@test/template-member-reads", CapabilitySet::default()).unwrap();
     ctx.compile_and_execute_component(
         "label = 'ready'\ntelemetry = 0\nfunction update_label() label = 'done' end\nfunction update_telemetry() telemetry = telemetry + 1 end",
         &[],
@@ -159,7 +163,7 @@ fn template_expression_reads_gate_unbound_public_member_writes() {
 #[test]
 #[ignore = "release-only template dependency gate microbenchmark"]
 fn template_dependency_rust_gate_beats_lua_table_lookup() {
-    let mut ctx = ScriptContext::new("@mesh/dependency-gate", CapabilitySet::new()).unwrap();
+    let mut ctx = ScriptContext::new("@mesh/dependency-gate", CapabilitySet::default()).unwrap();
     ctx.load_script("label = 'visible'\ntelemetry = 0").unwrap();
     let iterations = 1_000_000;
     let (lua_time, rust_time, lua_hits, rust_hits) =
@@ -179,8 +183,11 @@ fn template_dependency_rust_gate_beats_lua_table_lookup() {
 
 #[test]
 fn template_member_dependencies_are_conservative_until_first_evaluation_finishes() {
-    let mut ctx =
-        ScriptContext::new("@test/template-dependency-readiness", CapabilitySet::new()).unwrap();
+    let mut ctx = ScriptContext::new(
+        "@test/template-dependency-readiness",
+        CapabilitySet::default(),
+    )
+    .unwrap();
     ctx.compile_and_execute_component(
         "label = 'ready'; function update() label = label == 'ready' and 'done' or 'ready' end",
         &[],
@@ -203,7 +210,8 @@ fn template_member_dependencies_are_conservative_until_first_evaluation_finishes
 
 #[test]
 fn pure_public_member_expressions_reuse_unchanged_values() {
-    let mut ctx = ScriptContext::new("@test/template-value-cache", CapabilitySet::new()).unwrap();
+    let mut ctx =
+        ScriptContext::new("@test/template-value-cache", CapabilitySet::default()).unwrap();
     let expressions = vec![
         "left".to_string(),
         "right".to_string(),
@@ -252,7 +260,8 @@ fn pure_public_member_expressions_reuse_unchanged_values() {
 
 #[test]
 fn template_expression_cache_accumulates_changes_until_template_evaluation() {
-    let mut ctx = ScriptContext::new("@test/template-value-cache", CapabilitySet::new()).unwrap();
+    let mut ctx =
+        ScriptContext::new("@test/template-value-cache", CapabilitySet::default()).unwrap();
     let expressions = vec!["left".to_string(), "right".to_string()];
     ctx.compile_and_execute_component(
         "left = 'a'; right = 'b'; function update_left() left = 'c' end; function update_right() right = 'd' end",

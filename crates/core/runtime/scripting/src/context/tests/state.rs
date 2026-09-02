@@ -1,6 +1,6 @@
 use super::super::*;
 use super::common::*;
-use mesh_core_capability::{Capability, CapabilitySet};
+use mesh_core_capability::CapabilitySet;
 use mesh_core_elements::VariableStore;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -11,7 +11,7 @@ use std::sync::{
 
 #[test]
 fn unchanged_member_state_write_is_skipped() {
-    let mut ctx = ScriptContext::new("@mesh/member-state", CapabilitySet::new()).unwrap();
+    let mut ctx = ScriptContext::new("@mesh/member-state", CapabilitySet::default()).unwrap();
     ctx.set_member_state("label", serde_json::json!("stable"))
         .unwrap();
     let generation = ctx.state().mutation_generation();
@@ -56,9 +56,10 @@ fn unchanged_member_state_write_benchmark() {
         "enabled": true
     });
     let iterations = 100_000usize;
-    let mut eager = ScriptContext::new("@mesh/eager-member", CapabilitySet::new()).unwrap();
-    let mut gated = ScriptContext::new("@mesh/gated-member", CapabilitySet::new()).unwrap();
-    let mut borrowed = ScriptContext::new("@mesh/borrowed-member", CapabilitySet::new()).unwrap();
+    let mut eager = ScriptContext::new("@mesh/eager-member", CapabilitySet::default()).unwrap();
+    let mut gated = ScriptContext::new("@mesh/gated-member", CapabilitySet::default()).unwrap();
+    let mut borrowed =
+        ScriptContext::new("@mesh/borrowed-member", CapabilitySet::default()).unwrap();
     eager.set_member_state("config", value.clone()).unwrap();
     gated.set_member_state("config", value.clone()).unwrap();
     borrowed.set_member_state("config", value.clone()).unwrap();
@@ -101,7 +102,7 @@ fn unchanged_member_state_write_benchmark() {
 
 #[test]
 fn host_seeded_global_is_visible_before_script_runs() {
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.seed_context_global("seeded", serde_json::json!("ready"))
         .unwrap();
@@ -120,7 +121,7 @@ fn shared_vm_keeps_host_seeded_globals_local_across_templates_and_handlers() {
     let vm = SurfaceVm::new();
     let expression = "this.package.id".to_string();
 
-    let mut first = ScriptContext::new("@mesh/first", CapabilitySet::new()).unwrap();
+    let mut first = ScriptContext::new("@mesh/first", CapabilitySet::default()).unwrap();
     first.attach_shared_vm(&vm);
     first
         .seed_context_global(
@@ -136,7 +137,7 @@ fn shared_vm_keeps_host_seeded_globals_local_across_templates_and_handlers() {
         )
         .unwrap();
 
-    let mut second = ScriptContext::new("@mesh/second", CapabilitySet::new()).unwrap();
+    let mut second = ScriptContext::new("@mesh/second", CapabilitySet::default()).unwrap();
     second.attach_shared_vm(&vm);
     second
         .seed_context_global(
@@ -187,7 +188,7 @@ fn removed_legacy_module_state_mirror_avoids_proxy_snapshot_serialization() {
     use std::time::Instant;
 
     let mut ctx =
-        ScriptContext::new("@mesh/module-mirror-benchmark", CapabilitySet::new()).unwrap();
+        ScriptContext::new("@mesh/module-mirror-benchmark", CapabilitySet::default()).unwrap();
     ctx.load_script("").unwrap();
     for index in 0..64 {
         ctx.state_mut().set(
@@ -233,8 +234,7 @@ fn removed_legacy_module_state_mirror_avoids_proxy_snapshot_serialization() {
 fn unknown_method_reads_state_field_as_nil() {
     // Unknown keys fall through to the service proxy. When no service has
     // emitted yet the Rust-owned context store is empty, so the result is nil.
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -254,7 +254,7 @@ end
 
 #[test]
 fn globals_are_reactive_state() {
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut ctx = ScriptContext::new("@test/local", caps).unwrap();
     ctx.load_script(
         r#"
@@ -281,7 +281,7 @@ end
 #[test]
 fn reactive_globals_preserve_scalar_table_transitions() {
     let mut ctx =
-        ScriptContext::new("@test/reactive-type-transition", CapabilitySet::new()).unwrap();
+        ScriptContext::new("@test/reactive-type-transition", CapabilitySet::default()).unwrap();
     ctx.load_script(
         r#"
 value = 1

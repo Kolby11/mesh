@@ -357,8 +357,7 @@ mod tests {
 
     #[test]
     fn surface_effects_are_authorized_by_the_scope_not_the_variant() {
-        let mut capabilities = CapabilitySet::new();
-        capabilities.grant(Capability::new("shell.surface"));
+        let capabilities = CapabilitySet::from_ids(["shell.surface"]);
         let effect = ScopedFrontendEffect::new(
             EffectScope::new(EffectSource::new("@mesh/panel", None), capabilities),
             FrontendEffect::Surface(SurfaceEffect::Show {
@@ -372,7 +371,10 @@ mod tests {
     #[test]
     fn service_effects_reject_missing_control_capability() {
         let effect = ScopedFrontendEffect::new(
-            EffectScope::new(EffectSource::new("@mesh/panel", None), CapabilitySet::new()),
+            EffectScope::new(
+                EffectSource::new("@mesh/panel", None),
+                CapabilitySet::default(),
+            ),
             FrontendEffect::Service(ServiceEffect::Command {
                 interface: "mesh.audio".into(),
                 command: "set_volume".into(),
@@ -392,8 +394,7 @@ mod tests {
 
     #[test]
     fn revisioned_effects_reject_obsolete_catalog_or_runtime_inputs() {
-        let mut capabilities = CapabilitySet::new();
-        capabilities.grant(Capability::new("shell.surface"));
+        let capabilities = CapabilitySet::from_ids(["shell.surface"]);
         let effect = ScopedFrontendEffect::new(
             EffectScope::new(EffectSource::new("@mesh/panel", None), capabilities)
                 .with_revision(FrontendEffectRevision::new(4, 9)),

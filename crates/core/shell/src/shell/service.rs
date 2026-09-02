@@ -597,10 +597,9 @@ mod tests {
 
     #[test]
     fn script_events_to_requests_maps_named_proxy_commands() {
-        let mut audio_caps = mesh_core_capability::CapabilitySet::new();
-        audio_caps.grant(Capability::new("service.audio.control"));
-        let mut network_caps = mesh_core_capability::CapabilitySet::new();
-        network_caps.grant(Capability::new("service.network.control"));
+        let audio_caps = mesh_core_capability::CapabilitySet::from_ids(["service.audio.control"]);
+        let network_caps =
+            mesh_core_capability::CapabilitySet::from_ids(["service.network.control"]);
         let requests = script_events_to_requests(vec![
             PublishedEvent {
                 channel: "mesh.audio.set_volume".into(),
@@ -659,8 +658,7 @@ mod tests {
 
     #[test]
     fn script_events_to_requests_preserves_ticket_route_identity() {
-        let mut capabilities = mesh_core_capability::CapabilitySet::new();
-        capabilities.grant(Capability::new("service.audio.control"));
+        let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.audio.control"]);
         let requests = script_events_to_requests(vec![PublishedEvent {
             channel: "mesh.audio.set_volume".into(),
             payload: serde_json::json!({ "percent": 55 }),
@@ -754,10 +752,7 @@ mod tests {
         module: &str,
         granted: &[&str],
     ) -> PublishedEvent {
-        let mut capabilities = mesh_core_capability::CapabilitySet::new();
-        for capability in granted {
-            capabilities.grant(Capability::new(*capability));
-        }
+        let capabilities = mesh_core_capability::CapabilitySet::from_ids(granted.iter().copied());
         PublishedEvent {
             channel: channel.into(),
             payload,
@@ -949,8 +944,7 @@ mod tests {
 
     #[test]
     fn script_events_to_requests_maps_popover_focus_option() {
-        let mut capabilities = mesh_core_capability::CapabilitySet::new();
-        capabilities.grant(Capability::new("shell.surface"));
+        let capabilities = mesh_core_capability::CapabilitySet::from_ids(["shell.surface"]);
         let requests = script_events_to_requests(vec![PublishedEvent {
             channel: "shell.activate-popover".into(),
             payload: serde_json::json!({
@@ -985,8 +979,7 @@ mod tests {
 
     #[test]
     fn script_events_to_requests_maps_popover_hover_bridge_hide() {
-        let mut capabilities = mesh_core_capability::CapabilitySet::new();
-        capabilities.grant(Capability::new("shell.surface"));
+        let capabilities = mesh_core_capability::CapabilitySet::from_ids(["shell.surface"]);
         let requests = script_events_to_requests(vec![PublishedEvent {
             channel: "shell.hide-popover".into(),
             payload: serde_json::json!({
@@ -1015,8 +1008,7 @@ mod tests {
 
     #[test]
     fn script_events_to_requests_rejects_unknown_shell_channels() {
-        let mut caps = mesh_core_capability::CapabilitySet::new();
-        caps.grant(Capability::new("service.shell.control"));
+        let caps = mesh_core_capability::CapabilitySet::from_ids(["service.shell.control"]);
         let requests = script_events_to_requests(vec![PublishedEvent {
             channel: "shell.brightness-down".into(),
             payload: serde_json::json!({ "step": 10 }),
@@ -1039,8 +1031,7 @@ mod tests {
 
     #[test]
     fn script_events_to_requests_denies_uncontrolled_service_command() {
-        let mut caps = mesh_core_capability::CapabilitySet::new();
-        caps.grant(Capability::new("service.audio.read"));
+        let caps = mesh_core_capability::CapabilitySet::from_ids(["service.audio.read"]);
         let requests = script_events_to_requests(vec![PublishedEvent {
             channel: "mesh.audio.set_volume".into(),
             payload: serde_json::json!({ "percent": 55 }),
@@ -1060,8 +1051,8 @@ mod tests {
 
     #[test]
     fn script_events_to_requests_maps_debug_control_events() {
-        let mut debug_capabilities = mesh_core_capability::CapabilitySet::new();
-        debug_capabilities.grant(Capability::new("service.debug.read"));
+        let debug_capabilities =
+            mesh_core_capability::CapabilitySet::from_ids(["service.debug.read"]);
         let requests = script_events_to_requests(vec![
             PublishedEvent {
                 channel: "shell.toggle-debug-overlay".into(),
@@ -1130,8 +1121,7 @@ mod tests {
 
     #[test]
     fn script_events_to_requests_rejects_malformed_position_margins() {
-        let mut capabilities = mesh_core_capability::CapabilitySet::new();
-        capabilities.grant(Capability::new("shell.surface"));
+        let capabilities = mesh_core_capability::CapabilitySet::from_ids(["shell.surface"]);
         let requests = script_events_to_requests(vec![
             PublishedEvent {
                 channel: "shell.position-surface".into(),
@@ -1464,7 +1454,7 @@ mod tests {
             channel: "mesh.audio.set_volume".into(),
             payload: serde_json::json!({ "percent": 55 }),
             source_module_id: "@mesh/benchmark".into(),
-            source_capabilities: mesh_core_capability::CapabilitySet::new(),
+            source_capabilities: mesh_core_capability::CapabilitySet::default(),
             call_id: None,
             source_instance_id: None,
         };

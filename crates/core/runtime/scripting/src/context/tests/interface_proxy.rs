@@ -7,8 +7,7 @@ use std::collections::HashMap;
 
 #[test]
 fn interface_proxy_tracks_top_level_field_reads() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -61,8 +60,7 @@ end
 
 #[test]
 fn interface_proxy_repeated_field_reads_track_once_per_proxy() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -134,8 +132,7 @@ fn repeated_interface_field_reads_use_proxy_seen_cache() {
 
 #[test]
 fn interface_proxy_exposes_state_table() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -160,8 +157,7 @@ end
 
 #[test]
 fn interface_proxy_state_reads_latest_payload() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -188,8 +184,7 @@ end
 
 #[test]
 fn interface_proxy_direct_field_read_remains_compatibility_alias() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -215,8 +210,7 @@ end
 
 #[test]
 fn interface_method_returns_ticket_and_receives_completion() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.control"));
+    let caps = CapabilitySet::from_ids(["service.audio.control"]);
     let mut ctx = ScriptContext::new_for_instance(
         "@test/audio-widget",
         "@test/audio-widget",
@@ -269,8 +263,7 @@ end
 
 #[test]
 fn interface_proxy_validates_method_arity_and_types_without_confusing_table_args() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.control"));
+    let caps = CapabilitySet::from_ids(["service.audio.control"]);
     let mut ctx = ScriptContext::new_for_instance(
         "@test/audio-widget",
         "@test/audio-widget",
@@ -308,8 +301,7 @@ end
 
 #[test]
 fn service_ticket_cancel_publishes_correlated_cancellation() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.control"));
+    let caps = CapabilitySet::from_ids(["service.audio.control"]);
     let mut ctx = ScriptContext::new_for_instance(
         "@test/audio-widget",
         "@test/audio-widget",
@@ -344,8 +336,7 @@ end
 
 #[test]
 fn service_state_is_context_local_capability_filtered_and_generation_stamped() {
-    let mut read_caps = CapabilitySet::new();
-    read_caps.grant(Capability::new("service.audio.read"));
+    let read_caps = CapabilitySet::from_ids(["service.audio.read"]);
     let vm = SurfaceVm::new();
 
     let mut first = ScriptContext::new("@test/first-audio", read_caps.clone()).unwrap();
@@ -388,7 +379,7 @@ end
         )
         .unwrap();
 
-    let mut denied = ScriptContext::new("@test/denied-audio", CapabilitySet::new()).unwrap();
+    let mut denied = ScriptContext::new("@test/denied-audio", CapabilitySet::default()).unwrap();
     denied.attach_shared_vm(&vm);
     denied
         .load_script(
@@ -452,8 +443,7 @@ end
 
 #[test]
 fn equal_service_payloads_do_not_advance_context_generation() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@test/audio-generation", caps).unwrap();
     let payload = serde_json::json!({ "percent": 64 });
 
@@ -468,8 +458,7 @@ fn equal_service_payloads_do_not_advance_context_generation() {
 
 #[test]
 fn stale_versioned_service_snapshots_cannot_replace_context_state() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@test/audio-stale-generation", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -509,8 +498,7 @@ end
 
 #[test]
 fn interface_proxy_reads_state_fields_without_callbacks() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -541,8 +529,7 @@ end
 
 #[test]
 fn interface_proxy_reads_latest_emitted_fields_after_repeated_updates() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -596,8 +583,7 @@ end
 
 #[test]
 fn shared_vm_reuses_equal_service_payload_conversion_marker() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let vm = SurfaceVm::new();
     let payload = serde_json::json!({ "percent": 64, "muted": false });
 
@@ -655,7 +641,7 @@ end
 #[test]
 #[ignore = "release-only service payload marker microbenchmark"]
 fn binary_service_payload_markers_beat_formatted_strings() {
-    let mut ctx = ScriptContext::new("@mesh/marker-bench", CapabilitySet::new()).unwrap();
+    let mut ctx = ScriptContext::new("@mesh/marker-bench", CapabilitySet::default()).unwrap();
     let iterations = 1_000_000usize;
     let (formatted, binary, formatted_hits, binary_hits) =
         ctx.benchmark_service_payload_marker_probes(iterations);
@@ -675,8 +661,7 @@ fn binary_service_payload_markers_beat_formatted_strings() {
 fn shared_service_payload_fingerprint_beats_per_context_hashing() {
     fn make_contexts(count: usize) -> Vec<ScriptContext> {
         let vm = SurfaceVm::new();
-        let mut caps = CapabilitySet::new();
-        caps.grant(Capability::new("service.audio.read"));
+        let caps = CapabilitySet::from_ids(["service.audio.read"]);
         (0..count)
             .map(|index| {
                 let mut ctx =
@@ -739,8 +724,7 @@ fn shared_service_payload_fingerprint_beats_per_context_hashing() {
 fn cached_service_payload_fingerprint_beats_runtime_seed_rehashing() {
     fn make_contexts(count: usize) -> Vec<ScriptContext> {
         let vm = SurfaceVm::new();
-        let mut caps = CapabilitySet::new();
-        caps.grant(Capability::new("service.audio.read"));
+        let caps = CapabilitySet::from_ids(["service.audio.read"]);
         (0..count)
             .map(|index| {
                 let mut ctx =
@@ -798,9 +782,7 @@ fn cached_service_payload_fingerprint_beats_runtime_seed_rehashing() {
 
 #[test]
 fn interface_proxy_method_publishes_service_command() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
-    caps.grant(Capability::new("service.audio.control"));
+    let caps = CapabilitySet::from_ids(["service.audio.read", "service.audio.control"]);
     let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -833,8 +815,7 @@ end
 
 #[test]
 fn control_only_proxy_can_command_without_receiving_service_state() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.control"));
+    let caps = CapabilitySet::from_ids(["service.audio.control"]);
     let mut ctx = ScriptContext::new("@test/control-only-audio", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -865,8 +846,7 @@ end
 
 #[test]
 fn popover_activate_publishes_focus_option_and_trigger_target() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("shell.surface"));
+    let caps = CapabilitySet::from_ids(["shell.surface"]);
     let mut ctx = ScriptContext::new("@test/nav", caps).unwrap();
     ctx.load_script(
         r#"
@@ -898,7 +878,7 @@ end
 
 #[test]
 fn raw_shell_event_requires_the_registry_capability() {
-    let mut ctx = ScriptContext::new("@test/unprivileged", CapabilitySet::new()).unwrap();
+    let mut ctx = ScriptContext::new("@test/unprivileged", CapabilitySet::default()).unwrap();
     ctx.load_script(
         r#"
 function init()
@@ -920,8 +900,7 @@ end
 
 #[test]
 fn mesh_popover_hide_can_request_hover_bridge_deferral() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("shell.surface"));
+    let caps = CapabilitySet::from_ids(["shell.surface"]);
     let mut ctx = ScriptContext::new("@test/popover", caps).unwrap();
     ctx.load_script(
         r#"
@@ -948,9 +927,7 @@ end
 
 #[test]
 fn interface_proxy_method_returns_queued_result() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
-    caps.grant(Capability::new("service.audio.control"));
+    let caps = CapabilitySet::from_ids(["service.audio.read", "service.audio.control"]);
     let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -979,8 +956,7 @@ end
 
 #[test]
 fn read_only_interface_proxy_returns_capability_denied_result() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@test/read-only-audio", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(

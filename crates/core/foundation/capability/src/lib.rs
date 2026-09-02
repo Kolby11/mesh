@@ -18,6 +18,9 @@ impl Capability {
         &self.0
     }
 
+    #[deprecated(
+        note = "use CapabilityCatalog::builtin().privilege_level(...) or catalog_privilege_level()"
+    )]
     pub fn privilege_level(&self) -> PrivilegeLevel {
         match self.0.as_str() {
             // High privilege
@@ -44,10 +47,9 @@ impl Capability {
 
     /// Look up this capability in the closed host capability catalog.
     ///
-    /// `privilege_level()` is retained for compatibility with callers that
-    /// already hold a validated capability. New manifest and activation paths
-    /// must use this catalog-backed lookup so an unclassified name cannot
-    /// silently acquire the default `standard` level.
+    /// New manifest and activation paths must use this catalog-backed lookup so
+    /// an unclassified name cannot silently acquire the default `standard`
+    /// level.
     pub fn catalog_privilege_level(&self) -> Option<PrivilegeLevel> {
         CapabilityCatalog::builtin().privilege_level(self.id())
     }
@@ -162,6 +164,21 @@ impl CapabilityCatalog {
                 capability: id.to_string(),
             })
     }
+
+    /// Build a runtime capability proof set from ids validated by this closed
+    /// catalog. Activation normally uses `EffectiveCapabilities` instead;
+    /// this path is for host-owned requests that are not module activations.
+    pub fn capability_set<I, S>(&self, ids: I) -> Result<CapabilitySet, CapabilityPolicyError>
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let ids = ids.into_iter().map(Into::into).collect::<Vec<_>>();
+        for id in &ids {
+            self.validate(id)?;
+        }
+        Ok(CapabilitySet::from_validated_ids(ids))
+    }
 }
 
 fn valid_exec_argv_capability(value: &str) -> bool {
@@ -215,7 +232,7 @@ impl EffectiveCapabilities {
     /// Adapt the immutable policy result to the runtime's capability proof
     /// container. The runtime receives only the resolved grant set.
     pub fn into_capability_set(&self) -> CapabilitySet {
-        CapabilitySet::from_ids(self.granted.iter().cloned())
+        CapabilitySet::from_validated_ids(self.granted.iter().cloned())
     }
 }
 
@@ -356,13 +373,27 @@ pub struct CapabilitySet {
 }
 
 impl CapabilitySet {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             granted: HashSet::new(),
         }
     }
 
+    /// Construct a proof set for an already-resolved grant list.
+    ///
+    /// Production activation must use `EffectiveCapabilities::into_capability_set`
+    /// and host-owned requests must use `CapabilityCatalog::capability_set`.
+    /// This immutable adapter remains public for runtime fixtures and external
+    /// integrations that already receive resolved grants.
     pub fn from_ids<I>(ids: I) -> Self
+    where
+        I: IntoIterator,
+        I::Item: Into<String>,
+    {
+        Self::from_validated_ids(ids.into_iter().map(Into::into))
+    }
+
+    fn from_validated_ids<I>(ids: I) -> Self
     where
         I: IntoIterator<Item = String>,
     {
@@ -371,7 +402,8 @@ impl CapabilitySet {
         }
     }
 
-    pub fn grant(&mut self, capability: Capability) -> CapabilityHandle {
+    #[allow(dead_code)]
+    pub(crate) fn grant(&mut self, capability: Capability) -> CapabilityHandle {
         self.granted.insert(capability.clone());
         CapabilityHandle { capability }
     }
@@ -397,24 +429,26 @@ mod tests {
 
     #[test]
     fn capability_privilege_levels() {
+        #[allow(deprecated)]
+        fn legacy_privilege_level(id: &str) -> PrivilegeLevel {
+            Capability::new(id).privilege_level()
+        }
+
         assert_eq!(
-            Capability::new("theme.read").privilege_level(),
+            legacy_privilege_level("theme.read"),
             PrivilegeLevel::Standard
         );
         assert_eq!(
-            Capability::new("service.network.control").privilege_level(),
+            legacy_privilege_level("service.network.control"),
             PrivilegeLevel::Elevated
         );
+        assert_eq!(legacy_privilege_level("exec.command"), PrivilegeLevel::High);
         assert_eq!(
-            Capability::new("exec.command").privilege_level(),
+            legacy_privilege_level("exec.argv:wpctl:[\"get-volume\"]"),
             PrivilegeLevel::High
         );
         assert_eq!(
-            Capability::new("exec.argv:wpctl:[\"get-volume\"]").privilege_level(),
-            PrivilegeLevel::High
-        );
-        assert_eq!(
-            Capability::new("exec.launch-app").privilege_level(),
+            legacy_privilege_level("exec.launch-app"),
             PrivilegeLevel::Elevated
         );
     }
@@ -487,5 +521,23 @@ mod tests {
             .unwrap();
         assert!(effective.is_granted_id("locale.read"));
         assert_eq!(effective.into_capability_set().granted().len(), 2);
+    }
+
+    #[test]
+    fn catalog_capability_set_rejects_unknown_ids() {
+        let catalog = CapabilityCatalog::builtin();
+        assert!(
+            catalog
+                .capability_set(["service.audio.control"])
+                .unwrap()
+                .is_granted(&Capability::new("service.audio.control"))
+        );
+        assert!(matches!(
+            catalog.capability_set(["service.unknown.control"]),
+            Err(CapabilityPolicyError::UnknownCapability {
+                module_id,
+                capability
+            }) if module_id.is_empty() && capability == "service.unknown.control"
+        ));
     }
 }

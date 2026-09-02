@@ -1,3 +1,4 @@
+use mesh_core_capability::CapabilitySet;
 pub use mesh_core_runtime::BackendIdentity;
 use mesh_core_scripting::{
     BackendScriptContext, BackendScriptError, StreamEvent, StreamEventKind, StreamHandle,
@@ -345,7 +346,7 @@ impl BackendEventSender {
 pub async fn spawn_backend_service(
     module_id: String,
     service_name: String,
-    capabilities: Vec<String>,
+    capabilities: CapabilitySet,
     settings: JsonValue,
     script_source: String,
     tx: mpsc::UnboundedSender<BackendServiceEvent>,
@@ -376,7 +377,7 @@ pub async fn spawn_backend_service(
 pub async fn spawn_backend_service_bounded(
     module_id: String,
     service_name: String,
-    capabilities: Vec<String>,
+    capabilities: CapabilitySet,
     settings: JsonValue,
     script_source: String,
     tx: mpsc::UnboundedSender<BackendServiceEvent>,
@@ -404,7 +405,7 @@ pub async fn spawn_backend_service_bounded(
 pub async fn spawn_backend_service_bounded_with_events(
     module_id: String,
     service_name: String,
-    capabilities: Vec<String>,
+    capabilities: CapabilitySet,
     settings: JsonValue,
     script_source: String,
     tx: mpsc::UnboundedSender<BackendServiceEvent>,
@@ -438,7 +439,7 @@ pub async fn spawn_backend_service_bounded_with_events(
 pub async fn spawn_backend_service_bounded_with_events_and_queue(
     module_id: String,
     service_name: String,
-    capabilities: Vec<String>,
+    capabilities: CapabilitySet,
     settings: JsonValue,
     script_source: String,
     tx: mpsc::Sender<BackendServiceEvent>,
@@ -473,7 +474,7 @@ pub async fn spawn_backend_service_bounded_with_events_and_queue(
 pub async fn spawn_backend_service_bounded_with_events_and_queue_with_identity(
     module_id: String,
     service_name: String,
-    capabilities: Vec<String>,
+    capabilities: CapabilitySet,
     settings: JsonValue,
     script_source: String,
     tx: mpsc::Sender<BackendServiceEvent>,
@@ -525,7 +526,7 @@ impl CommandReceiver {
 async fn spawn_backend_service_inner(
     module_id: String,
     service_name: String,
-    capabilities: Vec<String>,
+    capabilities: CapabilitySet,
     settings: JsonValue,
     script_source: String,
     tx: BackendEventSender,
@@ -1447,7 +1448,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service_bounded(
             "@test/stale-generation".to_string(),
             "audio".to_string(),
-            Vec::new(),
+            CapabilitySet::default(),
             serde_json::json!({}),
             "function start()\nend\nfunction on_command_ping()\nreturn { ok = true }\nend"
                 .to_string(),
@@ -1492,7 +1493,7 @@ mod tests {
             spawn_backend_service_bounded_with_events_and_queue_with_identity(
                 "@test/identity".to_string(),
                 "audio".to_string(),
-                Vec::new(),
+                CapabilitySet::default(),
                 serde_json::json!({}),
                 "state = { available = true }\nfunction start()\nend".to_string(),
                 event_tx,
@@ -1594,7 +1595,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/settings".to_string(),
             "settings".to_string(),
-            Vec::new(),
+            CapabilitySet::default(),
             serde_json::json!({
                 "label": "demo",
                 "nested": { "enabled": true }
@@ -1633,7 +1634,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/exported-init".to_string(),
             "audio".to_string(),
-            Vec::new(),
+            CapabilitySet::default(),
             serde_json::json!({}),
             "state = { available = false }\n\
              function start()\n\
@@ -1673,7 +1674,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/ordered-startup".to_string(),
             "audio".to_string(),
-            Vec::new(),
+            CapabilitySet::default(),
             serde_json::json!({}),
             concat!(
                 "state = { available = false }\n",
@@ -1721,7 +1722,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/audio".to_string(),
             "audio".to_string(),
-            Vec::new(),
+            CapabilitySet::default(),
             serde_json::json!({}),
             "state = { available = true, percent = 40 }\n\
              function start()\nmesh.service.set_poll_interval(1000)\nend\n\
@@ -1769,7 +1770,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/exported-poll".to_string(),
             "audio".to_string(),
-            Vec::new(),
+            CapabilitySet::default(),
             serde_json::json!({}),
             "state = { tick = 0 }\n\
              function start()\nmesh.service.set_poll_interval(50)\nend\n\
@@ -1804,7 +1805,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/exported-command".to_string(),
             "audio".to_string(),
-            Vec::new(),
+            CapabilitySet::default(),
             serde_json::json!({}),
             "state = { percent = 0 }\n\
              function start()\nmesh.service.set_poll_interval(1000)\nend\n\
@@ -1854,7 +1855,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/polling".to_string(),
             "polling".to_string(),
-            Vec::new(),
+            CapabilitySet::default(),
             serde_json::json!({}),
             "local tick = 0\n\
              function start()\nmesh.service.set_poll_interval(1000)\nend\n\
@@ -1900,7 +1901,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/command-polling".to_string(),
             "polling".to_string(),
-            Vec::new(),
+            CapabilitySet::default(),
             serde_json::json!({}),
             "local tick = 0\n\
              function start()\nmesh.service.set_poll_interval(1000)\nend\n\
@@ -1970,7 +1971,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/stream-polling".to_string(),
             "polling".to_string(),
-            vec!["exec.argv:sh:*".to_string()],
+            CapabilitySet::from_ids(["exec.argv:sh:*"]),
             serde_json::json!({}),
             "function start()\n\
                mesh.service.set_poll_interval(1000)\n\
@@ -2036,7 +2037,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@mesh/shell-theme".to_string(),
             "theme".to_string(),
-            vec!["service.theme.read".to_string()],
+            CapabilitySet::from_ids(["service.theme.read"]),
             serde_json::json!({}),
             script,
             update_tx,
@@ -2092,7 +2093,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/audio".to_string(),
             "audio".to_string(),
-            Vec::new(),
+            CapabilitySet::default(),
             serde_json::json!({}),
             "function start()\nmesh.service.set_poll_interval(1000)\nend\n\
              function on_command_set_volume()\n\
@@ -2147,7 +2148,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/command-error".to_string(),
             "audio".to_string(),
-            Vec::new(),
+            CapabilitySet::default(),
             serde_json::json!({}),
             "function start()\nmesh.service.set_poll_interval(1000)\nend\n\
              function on_command_fail()\nerror(\"command boom\")\nend"
@@ -2227,7 +2228,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@mesh/pipewire-audio".to_string(),
             "audio".to_string(),
-            Vec::new(),
+            CapabilitySet::default(),
             serde_json::json!({}),
             script,
             event_tx,
@@ -2286,7 +2287,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/init-fails".to_string(),
             "audio".to_string(),
-            Vec::new(),
+            CapabilitySet::default(),
             serde_json::json!({}),
             "function start()\nerror(\"init boom\")\nend\n\
              function on_poll()\nmesh.service.emit({ polled = true })\nend\n\
@@ -2344,7 +2345,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/load-fails".to_string(),
             "audio".to_string(),
-            Vec::new(),
+            CapabilitySet::default(),
             serde_json::json!({}),
             "this is not valid Luau".to_string(),
             event_tx,
@@ -2383,7 +2384,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/stop-fails".to_string(),
             "audio".to_string(),
-            Vec::new(),
+            CapabilitySet::default(),
             serde_json::json!({}),
             "function start()\nmesh.service.set_poll_interval(1000)\nend\n\
              function stop()\nerror(\"stop boom\")\nend"
@@ -2432,7 +2433,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/cancelled".to_string(),
             "audio".to_string(),
-            Vec::new(),
+            CapabilitySet::default(),
             serde_json::json!({}),
             "function start()\nmesh.service.set_poll_interval(1000)\nend".to_string(),
             event_tx,
@@ -2473,7 +2474,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/no-handler".to_string(),
             "audio".to_string(),
-            Vec::new(),
+            CapabilitySet::default(),
             serde_json::json!({}),
             "function start()\nmesh.service.set_poll_interval(1000)\nend".to_string(),
             event_tx,
@@ -2546,7 +2547,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/snapshot-fail".to_string(),
             "audio".to_string(),
-            Vec::new(),
+            CapabilitySet::default(),
             serde_json::json!({}),
             // The handler sets state to a function, which cannot be serialized to JSON.
             // run_command_with_result -> take_service_state_snapshot -> SnapshotFailed.
@@ -2599,7 +2600,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/cmd-err".to_string(),
             "audio".to_string(),
-            Vec::new(),
+            CapabilitySet::default(),
             serde_json::json!({}),
             "function start()\nmesh.service.set_poll_interval(1000)\nend\n\
              function on_command_fail()\nerror(\"handler boom\")\nend"
@@ -2667,7 +2668,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/poll-fails".to_string(),
             "audio".to_string(),
-            Vec::new(),
+            CapabilitySet::default(),
             serde_json::json!({}),
             "function start()\nmesh.service.set_poll_interval(50)\nend\n\
              function on_poll()\nerror(\"poll boom\")\nend"
@@ -2727,10 +2728,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@mesh/reference-media".to_string(),
             "media".to_string(),
-            vec![
-                "service.media.read".to_string(),
-                "service.media.control".to_string(),
-            ],
+            CapabilitySet::from_ids(["service.media.read", "service.media.control"]),
             serde_json::json!({
                 "seed_title": "Initial Track",
                 "seed_artist": "Initial Artist",
@@ -2786,10 +2784,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@mesh/reference-media".to_string(),
             "media".to_string(),
-            vec![
-                "service.media.read".to_string(),
-                "service.media.control".to_string(),
-            ],
+            CapabilitySet::from_ids(["service.media.read", "service.media.control"]),
             serde_json::json!({}),
             script,
             event_tx,
@@ -2873,10 +2868,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@mesh/reference-media".to_string(),
             "media".to_string(),
-            vec![
-                "service.media.read".to_string(),
-                "service.media.control".to_string(),
-            ],
+            CapabilitySet::from_ids(["service.media.read", "service.media.control"]),
             serde_json::json!({}),
             script,
             event_tx,

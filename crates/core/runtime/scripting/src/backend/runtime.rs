@@ -119,13 +119,13 @@ impl BackendScriptContext {
         Self::new_with_settings_and_capabilities(
             module_id,
             serde_json::json!({}),
-            Vec::<String>::new(),
+            CapabilitySet::default(),
         )
     }
 
     #[cfg(test)]
     pub fn new_with_settings(module_id: impl Into<String>, settings: JsonValue) -> Self {
-        Self::new_with_settings_and_capabilities(module_id, settings, Vec::<String>::new())
+        Self::new_with_settings_and_capabilities(module_id, settings, CapabilitySet::default())
     }
 
     #[cfg(test)]
@@ -133,13 +133,17 @@ impl BackendScriptContext {
         module_id: impl Into<String>,
         capabilities: impl IntoIterator<Item = String>,
     ) -> Self {
-        Self::new_with_settings_and_capabilities(module_id, serde_json::json!({}), capabilities)
+        Self::new_with_settings_and_capabilities(
+            module_id,
+            serde_json::json!({}),
+            CapabilitySet::from_ids(capabilities),
+        )
     }
 
     pub fn new_with_settings_and_capabilities(
         module_id: impl Into<String>,
         settings: JsonValue,
-        capabilities: impl IntoIterator<Item = String>,
+        capabilities: CapabilitySet,
     ) -> Self {
         Self::new_with_settings_capabilities_and_storage_root(
             module_id,
@@ -157,7 +161,7 @@ impl BackendScriptContext {
         Self::new_with_settings_capabilities_and_storage_root(
             module_id,
             serde_json::json!({}),
-            Vec::<String>::new(),
+            CapabilitySet::default(),
             storage_root,
         )
     }
@@ -170,18 +174,18 @@ impl BackendScriptContext {
     fn new_with_settings_capabilities_and_storage_root(
         module_id: impl Into<String>,
         settings: JsonValue,
-        capabilities: impl IntoIterator<Item = String>,
+        capabilities: CapabilitySet,
         storage_root: impl Into<PathBuf>,
     ) -> Self {
         let module_id = module_id.into();
-        let capabilities = capabilities.into_iter().collect::<HashSet<_>>();
-        let exec_policy = ExecutableCapabilityPolicy::new(&capabilities);
+        let capability_ids = capabilities
+            .granted()
+            .iter()
+            .map(|capability| capability.id().to_string())
+            .collect::<HashSet<_>>();
+        let exec_policy = ExecutableCapabilityPolicy::new(&capability_ids);
         let policy = RuntimePolicy::default();
-        let session = RuntimeSession::from_policy(
-            module_id.clone(),
-            CapabilitySet::from_ids(capabilities.iter().cloned()),
-            policy.clone(),
-        );
+        let session = RuntimeSession::from_policy(module_id.clone(), capabilities, policy.clone());
         let storage =
             StorageManager::new_with_limit(storage_root.into(), policy.storage_budget()).open(
                 StorageScope::backend(module_id.clone(), module_id.clone(), module_id.clone()),
@@ -202,7 +206,7 @@ impl BackendScriptContext {
 
         Self {
             module_id,
-            capabilities,
+            capabilities: capability_ids,
             lua: None,
             script_environment: None,
             cached_self_table: None,

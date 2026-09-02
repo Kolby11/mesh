@@ -416,7 +416,7 @@ mod tests {
 
     #[test]
     fn failed_member_state_write_preserves_luau_and_rust_snapshots() {
-        let mut context = ScriptContext::new("@mesh/transactional-props", CapabilitySet::new())
+        let mut context = ScriptContext::new("@mesh/transactional-props", CapabilitySet::default())
             .expect("script context");
         context
             .ensure_initialized()

@@ -26,9 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 The following Section 1 findings remain open; IDs preserve their audit evidence
 for a future report or rerun.
 
-- [ ] **S01-DEAD-002 / S01-LOGIC-009 (P2/P3):** Make the closed capability
-      catalog the only production authority; deprecate the fail-open legacy
-      privilege classifier and restrict raw mutable `CapabilitySet` construction.
 - [ ] **S01-DEAD-003 (P2):** Either make `CapabilityHandle` a proof required by
       protected APIs or remove the currently unconsumed token abstraction after
       downstream API review.

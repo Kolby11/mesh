@@ -1,12 +1,11 @@
 use super::super::*;
 use super::common::*;
-use mesh_core_capability::{Capability, CapabilitySet};
+use mesh_core_capability::CapabilitySet;
 use mesh_core_elements::VariableStore;
 
 #[test]
 fn interface_event_proxy_is_subscription_only() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -38,8 +37,7 @@ end
 
 #[test]
 fn raw_service_event_publication_uses_the_interface_contract_boundary() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.control"));
+    let caps = CapabilitySet::from_ids(["service.audio.control"]);
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -58,7 +56,7 @@ end
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].channel, "mesh.audio.set_volume");
 
-    let mut ctx = ScriptContext::new("@mesh/test", CapabilitySet::new()).unwrap();
+    let mut ctx = ScriptContext::new("@mesh/test", CapabilitySet::default()).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
         r#"
@@ -74,8 +72,7 @@ end
 
 #[test]
 fn interface_event_proxy_receives_host_delivered_event() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -111,8 +108,7 @@ end
 
 #[test]
 fn event_only_subscription_cannot_read_service_state() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.events"));
+    let caps = CapabilitySet::from_ids(["service.audio.events"]);
     let mut ctx = ScriptContext::new("@mesh/event-only", caps).unwrap();
     ctx.set_interface_catalog(event_only_audio_catalog());
     ctx.load_script(
@@ -150,8 +146,7 @@ end
 
 #[test]
 fn interface_named_event_channel_subscribes_with_on_alias() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -181,8 +176,7 @@ end
 
 #[test]
 fn interface_event_subscription_registry_tracks_subscribe_and_unsubscribe() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -206,8 +200,7 @@ end
 
 #[test]
 fn interface_event_subscription_registry_clears_on_reload() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -229,7 +222,7 @@ end
 
 #[test]
 fn self_named_event_channel_supports_on_and_fire() {
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.load_script(
         r#"
@@ -252,7 +245,7 @@ end
 
 #[test]
 fn module_events_subscribe_emit_and_unsubscribe() {
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.load_script(
         r#"
@@ -280,7 +273,7 @@ end
 
 #[test]
 fn module_event_unsubscribing_first_keeps_later_subscriber() {
-    let mut ctx = ScriptContext::new("@mesh/test", CapabilitySet::new()).unwrap();
+    let mut ctx = ScriptContext::new("@mesh/test", CapabilitySet::default()).unwrap();
     ctx.load_script(
         r#"
 first_count = 0
@@ -308,8 +301,7 @@ end
 
 #[test]
 fn interface_event_unsubscribing_first_keeps_later_subscriber() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(
@@ -341,8 +333,7 @@ end
 
 #[test]
 fn interface_event_callback_failure_does_not_suppress_later_subscriber() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
     ctx.load_script(

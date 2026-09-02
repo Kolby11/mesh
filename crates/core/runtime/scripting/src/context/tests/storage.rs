@@ -7,7 +7,7 @@ use std::sync::atomic::Ordering;
 #[test]
 fn frontend_storage_flushes_on_unmount_and_loads_before_init() {
     let root = temp_storage_root("frontend-flush");
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut writer =
         ScriptContext::new_with_storage_root("@mesh/storage-lifecycle", caps.clone(), &root)
             .unwrap();
@@ -55,7 +55,7 @@ end
 #[test]
 fn frontend_storage_flushes_when_unmount_hook_fails() {
     let root = temp_storage_root("frontend-flush-error");
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut writer =
         ScriptContext::new_with_storage_root("@mesh/storage-lifecycle-error", caps.clone(), &root)
             .unwrap();
@@ -84,7 +84,7 @@ end
 #[test]
 fn frontend_storage_is_isolated_by_component_instance() {
     let root = temp_storage_root("frontend-instance-scope");
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut first = ScriptContext::new_with_storage_scope(
         "@mesh/module",
         "@mesh/component",
@@ -118,7 +118,7 @@ fn frontend_storage_is_isolated_by_component_instance() {
 fn frontend_storage_persistence_failure_is_diagnostic_and_keeps_memory_state() {
     let root = temp_storage_root("frontend-failure");
     std::fs::write(&root, "not a directory").unwrap();
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut ctx =
         ScriptContext::new_with_storage_root("@mesh/storage-failure", caps, &root).unwrap();
     ctx.load_script(
@@ -152,7 +152,7 @@ end
 
 #[test]
 fn frontend_storage_render_reads_track_only_watched_key_writes() {
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut ctx = ScriptContext::new("@mesh/storage-watch", caps).unwrap();
     ctx.load_script(
         r#"

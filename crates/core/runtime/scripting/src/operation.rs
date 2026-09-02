@@ -650,11 +650,7 @@ mod tests {
     use super::*;
 
     fn capabilities(ids: &[&str]) -> CapabilitySet {
-        let mut capabilities = CapabilitySet::new();
-        for id in ids {
-            capabilities.grant(Capability::new(*id));
-        }
-        capabilities
+        CapabilitySet::from_ids(ids.iter().copied())
     }
 
     #[test]
@@ -663,7 +659,7 @@ mod tests {
             "shell.not-real",
             &serde_json::json!({}),
             "@mesh/widget",
-            &CapabilitySet::new(),
+            &CapabilitySet::default(),
         );
         assert!(matches!(
             result,
@@ -680,7 +676,7 @@ mod tests {
                 "shell.show-surface",
                 &payload,
                 "@mesh/widget",
-                &CapabilitySet::new(),
+                &CapabilitySet::default(),
             ),
             Err(OperationRejection::Unauthorized { .. })
         ));

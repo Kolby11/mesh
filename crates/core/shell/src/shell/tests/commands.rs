@@ -5,10 +5,7 @@ use mesh_core_backend::BackendIdentity;
 #[test]
 fn a_core_debug_provider_command_is_applied_by_the_generic_dispatcher() {
     let mut shell = Shell::new();
-    let mut capabilities = mesh_core_capability::CapabilitySet::new();
-    capabilities.grant(mesh_core_capability::Capability::new(
-        "service.debug.control",
-    ));
+    let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.debug.control"]);
 
     let result = shell.dispatch_service_command(
         "mesh.debug",
@@ -35,10 +32,7 @@ fn set_muted_command_broadcasts_bound_audio_state_until_backend_confirms() {
     shell.replace_backend_runtime("mesh.audio".to_string(), slot);
     let events = Arc::new(Mutex::new(Vec::new()));
     shell.register_component(Box::new(RecordingComponent::new(events.clone())));
-    let mut capabilities = mesh_core_capability::CapabilitySet::new();
-    capabilities.grant(mesh_core_capability::Capability::new(
-        "service.audio.control",
-    ));
+    let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.audio.control"]);
 
     shell
         .broadcast_service_event(service_update(
@@ -163,10 +157,7 @@ fn set_volume_updates_canonical_audio_percent_until_backend_confirms() {
             state,
         )));
     }
-    let mut capabilities = mesh_core_capability::CapabilitySet::new();
-    capabilities.grant(mesh_core_capability::Capability::new(
-        "service.audio.control",
-    ));
+    let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.audio.control"]);
 
     shell
         .broadcast_service_event(service_update(
@@ -280,10 +271,7 @@ fn failed_bound_write_rolls_back_and_older_failure_cannot_override_newer_write()
             serde_json::json!({ "available": true, "percent": 42.0, "muted": false }),
         ))
         .unwrap();
-    let mut capabilities = mesh_core_capability::CapabilitySet::new();
-    capabilities.grant(mesh_core_capability::Capability::new(
-        "service.audio.control",
-    ));
+    let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.audio.control"]);
 
     let first = shell.dispatch_service_command(
         "mesh.audio",
@@ -385,10 +373,7 @@ fn command_state_binding_updates_non_audio_service() {
     register_test_provider(&shell.interfaces, interface, provider);
     let (slot, mut rx) = backend_runtime_slot(&runtime, interface, provider);
     shell.replace_backend_runtime(interface.to_string(), slot);
-    let mut capabilities = mesh_core_capability::CapabilitySet::new();
-    capabilities.grant(mesh_core_capability::Capability::new(
-        "service.lighting.control",
-    ));
+    let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.lighting.control"]);
 
     shell
         .broadcast_service_event(service_update(
@@ -462,10 +447,7 @@ fn a_core_provided_command_is_applied_by_the_shell_itself() {
         "mesh-default-light",
         "theme.css",
     ));
-    let mut capabilities = mesh_core_capability::CapabilitySet::new();
-    capabilities.grant(mesh_core_capability::Capability::new(
-        "service.theme.control",
-    ));
+    let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.theme.control"]);
     let before = shell.theme.active().id.clone();
 
     let result = shell.dispatch_service_command(
@@ -499,10 +481,7 @@ fn coalescable_service_commands_use_a_backend_cost_budget() {
     register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
     let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
     shell.replace_backend_runtime("mesh.audio".to_string(), slot);
-    let mut capabilities = mesh_core_capability::CapabilitySet::new();
-    capabilities.grant(mesh_core_capability::Capability::new(
-        "service.audio.control",
-    ));
+    let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.audio.control"]);
 
     let first = shell.dispatch_service_command(
         "mesh.audio",
@@ -552,7 +531,7 @@ fn a_core_provided_command_without_its_capability_is_denied() {
         "set_theme",
         &serde_json::json!({ "theme_id": "mesh-default-light" }),
         "@mesh/settings",
-        &mesh_core_capability::CapabilitySet::new(),
+        &mesh_core_capability::CapabilitySet::default(),
     );
 
     assert_eq!(result["ok"], serde_json::json!(false));
@@ -569,10 +548,7 @@ fn a_core_provided_command_without_its_capability_is_denied() {
 #[test]
 fn a_core_provided_command_with_a_malformed_payload_changes_nothing() {
     let mut shell = Shell::new();
-    let mut capabilities = mesh_core_capability::CapabilitySet::new();
-    capabilities.grant(mesh_core_capability::Capability::new(
-        "service.theme.control",
-    ));
+    let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.theme.control"]);
     let before = shell.theme.active().id.clone();
 
     let result = shell.dispatch_service_command(

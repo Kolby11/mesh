@@ -330,8 +330,7 @@ end
 #[test]
 fn frontend_missing_service_keeps_visible_fallback_copy() {
     // Intentionally use an empty catalog so the require will fail.
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@mesh/panel", caps).unwrap();
     // No interface registered → pcall(require, ...) will catch the error.
 
@@ -570,9 +569,7 @@ end
 
 #[test]
 fn quick_settings_missing_services_keep_visible_fallback_copy() {
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.audio.read"));
-    caps.grant(Capability::new("service.network.read"));
+    let caps = CapabilitySet::from_ids(["service.audio.read", "service.network.read"]);
     let mut ctx = ScriptContext::new("@mesh/quick-settings", caps).unwrap();
 
     ctx.load_script(

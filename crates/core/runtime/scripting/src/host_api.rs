@@ -252,8 +252,7 @@ mod tests {
     #[test]
     fn custom_contract_policy_is_used_for_all_operations() {
         let contract = thermal_contract();
-        let mut observe = CapabilitySet::new();
-        observe.grant(Capability::new("alice.thermal.observe"));
+        let observe = CapabilitySet::from_ids(["alice.thermal.observe"]);
         assert!(InterfaceProxy::can_read_contract(&observe, &contract));
         assert!(!InterfaceProxy::can_subscribe_contract_event(
             &observe, &contract, "Changed"
@@ -264,8 +263,7 @@ mod tests {
             "calibrate"
         ));
 
-        let mut control = CapabilitySet::new();
-        control.grant(Capability::new("alice.thermal.calibrate"));
+        let control = CapabilitySet::from_ids(["alice.thermal.calibrate"]);
         assert!(InterfaceProxy::can_call_contract_method(
             &control,
             &contract,
@@ -275,8 +273,7 @@ mod tests {
         assert!(InterfaceProxy::can_control_contract(&control, &contract));
         assert!(InterfaceProxy::can_access_contract(&control, &contract));
 
-        let mut subscribe = CapabilitySet::new();
-        subscribe.grant(Capability::new("alice.thermal.subscribe"));
+        let subscribe = CapabilitySet::from_ids(["alice.thermal.subscribe"]);
         assert!(InterfaceProxy::can_access_contract(&subscribe, &contract));
         assert!(!InterfaceProxy::can_read_contract(&subscribe, &contract));
     }
@@ -287,8 +284,7 @@ mod tests {
     /// must reach `mesh.theme.set_theme`.
     #[test]
     fn theme_control_uses_the_service_capability_name() {
-        let mut control = CapabilitySet::new();
-        control.grant(Capability::new("service.theme.control"));
+        let control = CapabilitySet::from_ids(["service.theme.control"]);
         assert!(InterfaceProxy::can_control(&control, "mesh.theme"));
 
         let contract = parse_interface_contract(
@@ -306,8 +302,7 @@ mod tests {
             "set_theme"
         ));
 
-        let mut read_only = CapabilitySet::new();
-        read_only.grant(Capability::new("theme.read"));
+        let read_only = CapabilitySet::from_ids(["theme.read"]);
         assert!(!InterfaceProxy::can_control(&read_only, "mesh.theme"));
         assert!(!InterfaceProxy::can_call_contract_method(
             &read_only,
@@ -318,8 +313,7 @@ mod tests {
 
     #[test]
     fn service_control_grant_does_not_imply_state_read() {
-        let mut control = CapabilitySet::new();
-        control.grant(Capability::new("service.audio.control"));
+        let control = CapabilitySet::from_ids(["service.audio.control"]);
 
         assert!(!InterfaceProxy::can_read(&control, "mesh.audio"));
         assert!(!InterfaceProxy::can_read_service(&control, "audio"));

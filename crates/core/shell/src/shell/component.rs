@@ -2042,19 +2042,16 @@ pub(super) fn json_field_diff(
 fn grant_capabilities_from_manifest(
     manifest: &mesh_core_module::Manifest,
 ) -> mesh_core_capability::CapabilitySet {
-    use mesh_core_capability::{Capability, CapabilitySet};
+    use mesh_core_capability::CapabilitySet;
 
-    let mut granted = CapabilitySet::new();
-
-    for capability in &manifest.capabilities.required {
-        granted.grant(Capability::new(capability.clone()));
-    }
-
-    for capability in &manifest.capabilities.optional {
-        granted.grant(Capability::new(capability.clone()));
-    }
-
-    granted
+    CapabilitySet::from_ids(
+        manifest
+            .capabilities
+            .required
+            .iter()
+            .chain(manifest.capabilities.optional.iter())
+            .cloned(),
+    )
 }
 
 #[cfg(test)]

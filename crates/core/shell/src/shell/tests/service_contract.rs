@@ -137,9 +137,12 @@ fn backend_lifecycle_accepts_valid_provider_with_contract() {
 
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0].interface, "mesh.example");
-    assert_eq!(
-        candidates[0].capabilities,
-        vec!["exec.argv:example:*".to_string()]
+    assert!(
+        candidates[0]
+            .capabilities
+            .is_granted(&mesh_core_capability::Capability::new(
+                "exec.argv:example:*"
+            ))
     );
     assert!(
         statuses
@@ -250,10 +253,7 @@ fn service_contract_unknown_service_command_returns_failure_result() {
     register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
     let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
     shell.replace_backend_runtime("mesh.audio".to_string(), slot);
-    let mut capabilities = mesh_core_capability::CapabilitySet::new();
-    capabilities.grant(mesh_core_capability::Capability::new(
-        "service.audio.control",
-    ));
+    let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.audio.control"]);
 
     let result = shell.dispatch_service_command(
         "mesh.audio",
@@ -288,10 +288,7 @@ fn service_command_dispatch_records_debug_method_call() {
     register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
     let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
     shell.replace_backend_runtime("mesh.audio".to_string(), slot);
-    let mut capabilities = mesh_core_capability::CapabilitySet::new();
-    capabilities.grant(mesh_core_capability::Capability::new(
-        "service.audio.control",
-    ));
+    let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.audio.control"]);
 
     let result = shell.dispatch_service_command(
         "mesh.audio",
@@ -332,10 +329,7 @@ fn service_command_rejects_invalid_contract_payload_before_queueing() {
     register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
     let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
     shell.replace_backend_runtime("mesh.audio".to_string(), slot);
-    let mut capabilities = mesh_core_capability::CapabilitySet::new();
-    capabilities.grant(mesh_core_capability::Capability::new(
-        "service.audio.control",
-    ));
+    let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.audio.control"]);
 
     let result = shell.dispatch_service_command(
         "mesh.audio",
@@ -606,10 +600,7 @@ fn closed_service_command_channel_returns_unavailable_result() {
     let (slot, rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
     drop(rx);
     shell.replace_backend_runtime("mesh.audio".to_string(), slot);
-    let mut capabilities = mesh_core_capability::CapabilitySet::new();
-    capabilities.grant(mesh_core_capability::Capability::new(
-        "service.audio.control",
-    ));
+    let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.audio.control"]);
 
     let result = shell.dispatch_service_command(
         "mesh.audio",
@@ -636,10 +627,7 @@ fn profiling_service_command_attributes_active_provider_dispatch() {
     register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
     let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
     shell.replace_backend_runtime("mesh.audio".to_string(), slot);
-    let mut capabilities = mesh_core_capability::CapabilitySet::new();
-    capabilities.grant(mesh_core_capability::Capability::new(
-        "service.audio.control",
-    ));
+    let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.audio.control"]);
 
     let result = shell.dispatch_service_command(
         "mesh.audio",
@@ -682,10 +670,7 @@ fn profiling_service_command_stays_silent_when_disabled() {
     register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
     let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
     shell.replace_backend_runtime("mesh.audio".to_string(), slot);
-    let mut capabilities = mesh_core_capability::CapabilitySet::new();
-    capabilities.grant(mesh_core_capability::Capability::new(
-        "service.audio.control",
-    ));
+    let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.audio.control"]);
 
     let result = shell.dispatch_service_command(
         "mesh.audio",

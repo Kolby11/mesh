@@ -126,9 +126,7 @@ fn shipped_workspace_button_publishes_focus_workspace_request() {
         priority: 100,
     });
 
-    let mut caps = CapabilitySet::new();
-    caps.grant(Capability::new("service.wm.read"));
-    caps.grant(Capability::new("service.wm.control"));
+    let caps = CapabilitySet::from_ids(["service.wm.read", "service.wm.control"]);
     let mut ctx = mesh_core_scripting::ScriptContext::new("@mesh/navigation-bar", caps).unwrap();
     ctx.set_interface_catalog(catalog);
     ctx.load_script(&shipped_component_script(include_str!(concat!(

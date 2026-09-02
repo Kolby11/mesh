@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+mesh-core-capability = { workspace = true }
 mesh-core-scripting = { workspace = true }
 mesh-core-runtime = { workspace = true }
 

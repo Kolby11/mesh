@@ -238,7 +238,7 @@ pub(in crate::shell) fn launch_candidate_for_provider_with_capabilities<
             ),
         });
     };
-    let capabilities = effective.granted_ids().map(str::to_string).collect();
+    let capabilities = effective.into_capability_set();
     let settings = settings.namespace(&provider.module_id);
     let command_registry = interfaces
         .resolve(&interface, None)

@@ -1157,8 +1157,7 @@ mod effect_adapter_tests {
     use serde_json::json;
 
     fn scope(capability: &str) -> EffectScope {
-        let mut capabilities = mesh_core_capability::CapabilitySet::new();
-        capabilities.grant(Capability::new(capability));
+        let capabilities = mesh_core_capability::CapabilitySet::from_ids([capability]);
         EffectScope::new(
             EffectSource::new("@mesh/test", Some("instance".into())),
             capabilities,
@@ -1171,7 +1170,7 @@ mod effect_adapter_tests {
         let effect = ScopedFrontendEffect::new(
             EffectScope::new(
                 EffectSource::new("@mesh/test", Some("instance".into())),
-                mesh_core_capability::CapabilitySet::new(),
+                mesh_core_capability::CapabilitySet::default(),
             )
             .with_revision(FrontendEffectRevision::new(4, 9)),
             FrontendEffect::Service(ServiceEffect::Command {
@@ -1228,8 +1227,7 @@ mod frontend_frame_tests {
     use mesh_core_elements::WidgetNode;
 
     fn effect_scope(capability: &str) -> EffectScope {
-        let mut capabilities = mesh_core_capability::CapabilitySet::new();
-        capabilities.grant(Capability::new(capability));
+        let capabilities = mesh_core_capability::CapabilitySet::from_ids([capability]);
         EffectScope::new(
             EffectSource::new("@mesh/test", Some("surface".into())),
             capabilities,

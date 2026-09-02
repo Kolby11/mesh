@@ -5,7 +5,7 @@ use serde_json::Value;
 
 #[test]
 fn module_object_keeps_events_without_legacy_state_and_exports() {
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.load_script(
         r#"
@@ -26,7 +26,7 @@ module.events.changed:emit("ready")
 
 #[test]
 fn lifecycle_self_meta_is_passed_to_init_and_render() {
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut ctx = ScriptContext::new("@mesh/test-component", caps).unwrap();
     ctx.load_script(
         r#"
@@ -73,7 +73,7 @@ fn lifecycle_self_meta_keeps_module_component_instance_and_generation_distinct()
         "@mesh/module",
         "@mesh/component",
         "@mesh/component#one",
-        CapabilitySet::new(),
+        CapabilitySet::default(),
     )
     .unwrap();
     ctx.load_script(
@@ -119,7 +119,7 @@ end
 
 #[test]
 fn lifecycle_self_storage_supports_json_values_snapshot_and_diagnostics() {
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut ctx = ScriptContext::new("@mesh/storage-component", caps).unwrap();
     ctx.load_script(
         r#"
@@ -179,7 +179,7 @@ end
 
 #[test]
 fn legacy_on_render_is_not_a_render_lifecycle_fallback() {
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut ctx = ScriptContext::new("@mesh/legacy-component", caps).unwrap();
     ctx.load_script(
         r#"
@@ -205,7 +205,7 @@ end
 
 #[test]
 fn public_member_inspection_keeps_locals_private_and_hooks_reserved() {
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut ctx = ScriptContext::new("@mesh/member-test", caps).unwrap();
     ctx.load_script(
         r#"
@@ -241,7 +241,7 @@ end
 
 #[test]
 fn lifecycle_handlers_reuse_self_table() {
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut ctx = ScriptContext::new("@test/self-cache", caps).unwrap();
     ctx.load_script(
         r#"
@@ -279,7 +279,8 @@ end
 "#;
     let iterations = 20_000usize;
 
-    let mut rebuild_ctx = ScriptContext::new("@test/self-rebuild", CapabilitySet::new()).unwrap();
+    let mut rebuild_ctx =
+        ScriptContext::new("@test/self-rebuild", CapabilitySet::default()).unwrap();
     rebuild_ctx.load_script(source).unwrap();
     let rebuild_start = Instant::now();
     for _ in 0..iterations {
@@ -288,7 +289,7 @@ end
     }
     let rebuild_ns = rebuild_start.elapsed().as_nanos().max(1);
 
-    let mut cached_ctx = ScriptContext::new("@test/self-cached", CapabilitySet::new()).unwrap();
+    let mut cached_ctx = ScriptContext::new("@test/self-cached", CapabilitySet::default()).unwrap();
     cached_ctx.load_script(source).unwrap();
     let cached_start = Instant::now();
     for _ in 0..iterations {
@@ -305,7 +306,7 @@ end
 
 #[test]
 fn handler_receives_event_payload_argument() {
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut ctx = ScriptContext::new("@test/click", caps).unwrap();
     ctx.load_script(
         r#"

@@ -5,7 +5,7 @@ use serde_json::Value;
 
 #[test]
 fn mesh_request_redraw_marks_dirty_without_global_change() {
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut ctx = ScriptContext::new("@test/redraw", caps).unwrap();
     ctx.load_script(
         r#"
@@ -33,7 +33,7 @@ fn atomic_redraw_idle_check_beats_lua_global_read() {
     use std::time::Instant;
 
     let iterations = 1_000_000usize;
-    let mut old_ctx = ScriptContext::new("@test/redraw-old", CapabilitySet::new()).unwrap();
+    let mut old_ctx = ScriptContext::new("@test/redraw-old", CapabilitySet::default()).unwrap();
     old_ctx.load_script("function noop() end").unwrap();
     let old_started = Instant::now();
     for _ in 0..iterations {
@@ -41,7 +41,7 @@ fn atomic_redraw_idle_check_beats_lua_global_read() {
     }
     let old_time = old_started.elapsed();
 
-    let new_ctx = ScriptContext::new("@test/redraw-new", CapabilitySet::new()).unwrap();
+    let new_ctx = ScriptContext::new("@test/redraw-new", CapabilitySet::default()).unwrap();
     let new_started = Instant::now();
     let mut pending_count = 0usize;
     for _ in 0..iterations {
@@ -65,7 +65,7 @@ fn assigned_global_pending_flag_beats_empty_mutex_drain() {
     use std::time::Instant;
 
     let iterations = 1_000_000usize;
-    let mut ctx = ScriptContext::new("@test/assigned-empty", CapabilitySet::new()).unwrap();
+    let mut ctx = ScriptContext::new("@test/assigned-empty", CapabilitySet::default()).unwrap();
     ctx.load_script("value = 1\nfunction noop() end").unwrap();
 
     let drain_started = Instant::now();
@@ -92,7 +92,7 @@ fn assigned_global_pending_flag_beats_empty_mutex_drain() {
 
 #[test]
 fn sync_state_from_lua_discovers_new_globals_from_write_log() {
-    let caps = CapabilitySet::new();
+    let caps = CapabilitySet::default();
     let mut ctx = ScriptContext::new("@test/write-log", caps).unwrap();
     ctx.load_script(
         r#"
@@ -113,7 +113,8 @@ end
 
 #[test]
 fn handler_only_context_discovers_late_global_without_repeating_full_scan() {
-    let mut ctx = ScriptContext::new("@test/handler-only-write-log", CapabilitySet::new()).unwrap();
+    let mut ctx =
+        ScriptContext::new("@test/handler-only-write-log", CapabilitySet::default()).unwrap();
     ctx.load_script(
         r#"
 function add_later()
@@ -131,7 +132,7 @@ end
 
 #[test]
 fn nil_writes_remove_public_state_and_invalidate_template_dependencies() {
-    let mut ctx = ScriptContext::new("@test/nil-deletion", CapabilitySet::new()).unwrap();
+    let mut ctx = ScriptContext::new("@test/nil-deletion", CapabilitySet::default()).unwrap();
     ctx.compile_and_execute_component(
         "visible = 'shown'\ndetails = { title = 'ready' }\nfunction clear() visible = nil; details = nil end\nfunction restore() visible = 'restored' end",
         &[],
@@ -176,7 +177,7 @@ fn handler_only_discovery_flag_beats_repeated_env_scan() {
     let iterations = 20_000;
 
     let mut repeated_scan =
-        ScriptContext::new("@test/handler-only-scan", CapabilitySet::new()).unwrap();
+        ScriptContext::new("@test/handler-only-scan", CapabilitySet::default()).unwrap();
     repeated_scan.load_script(&source).unwrap();
     let scan_started = Instant::now();
     for _ in 0..iterations {
@@ -188,7 +189,7 @@ fn handler_only_discovery_flag_beats_repeated_env_scan() {
     let scan_time = scan_started.elapsed();
 
     let mut discovered =
-        ScriptContext::new("@test/handler-only-discovered", CapabilitySet::new()).unwrap();
+        ScriptContext::new("@test/handler-only-discovered", CapabilitySet::default()).unwrap();
     discovered.load_script(&source).unwrap();
     let discovered_started = Instant::now();
     for _ in 0..iterations {
@@ -223,7 +224,7 @@ end
     );
 
     let iterations = 2_000usize;
-    let mut old_ctx = ScriptContext::new("@test/old-sync", CapabilitySet::new()).unwrap();
+    let mut old_ctx = ScriptContext::new("@test/old-sync", CapabilitySet::default()).unwrap();
     old_ctx.load_script(&source).unwrap();
     let old_start = Instant::now();
     for _ in 0..iterations {
@@ -234,7 +235,7 @@ end
     }
     let old_ns = old_start.elapsed().as_nanos().max(1);
 
-    let mut new_ctx = ScriptContext::new("@test/new-sync", CapabilitySet::new()).unwrap();
+    let mut new_ctx = ScriptContext::new("@test/new-sync", CapabilitySet::default()).unwrap();
     new_ctx.load_script(&source).unwrap();
     let new_start = Instant::now();
     for _ in 0..iterations {
@@ -263,7 +264,7 @@ fn scalar_write_log_beats_known_global_reads() {
     let iterations = 5_000usize;
 
     let mut known_reads =
-        ScriptContext::new("@test/scalar-known-reads", CapabilitySet::new()).unwrap();
+        ScriptContext::new("@test/scalar-known-reads", CapabilitySet::default()).unwrap();
     known_reads.load_script(&source).unwrap();
     let known_reads_started = Instant::now();
     for _ in 0..iterations {
@@ -275,7 +276,7 @@ fn scalar_write_log_beats_known_global_reads() {
     let known_reads_time = known_reads_started.elapsed();
 
     let mut write_logged =
-        ScriptContext::new("@test/scalar-write-log", CapabilitySet::new()).unwrap();
+        ScriptContext::new("@test/scalar-write-log", CapabilitySet::default()).unwrap();
     write_logged.load_script(&source).unwrap();
     let write_logged_started = Instant::now();
     for _ in 0..iterations {
@@ -292,8 +293,7 @@ fn scalar_write_log_beats_known_global_reads() {
 
 #[test]
 fn side_channel_pending_flag_drains_published_events() {
-    let mut capabilities = CapabilitySet::new();
-    capabilities.grant(mesh_core_capability::Capability::new("shell.surface"));
+    let capabilities = CapabilitySet::from_ids(["shell.surface"]);
     let mut ctx = ScriptContext::new("@test/side-channel-flag", capabilities).unwrap();
     ctx.load_script(
         r#"
@@ -323,14 +323,14 @@ fn empty_side_channel_pending_flag_beats_lock_drains() {
     use std::time::Instant;
 
     let iterations = 1_000_000usize;
-    let mut old_ctx = ScriptContext::new("@test/old-side", CapabilitySet::new()).unwrap();
+    let mut old_ctx = ScriptContext::new("@test/old-side", CapabilitySet::default()).unwrap();
     let old_start = Instant::now();
     for _ in 0..iterations {
         old_ctx.old_sync_side_channels_for_benchmark();
     }
     let old_ns = old_start.elapsed().as_nanos().max(1);
 
-    let mut new_ctx = ScriptContext::new("@test/new-side", CapabilitySet::new()).unwrap();
+    let mut new_ctx = ScriptContext::new("@test/new-side", CapabilitySet::default()).unwrap();
     let new_start = Instant::now();
     for _ in 0..iterations {
         new_ctx.sync_side_channels_for_benchmark();

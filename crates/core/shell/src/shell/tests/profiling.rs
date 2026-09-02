@@ -367,10 +367,7 @@ fn profiling_disabled_backend_paths_do_not_fabricate_snapshots() {
     let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
     shell.replace_backend_runtime("mesh.audio".to_string(), slot);
     let mut pending = std::collections::VecDeque::new();
-    let mut capabilities = mesh_core_capability::CapabilitySet::new();
-    capabilities.grant(mesh_core_capability::Capability::new(
-        "service.audio.control",
-    ));
+    let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.audio.control"]);
 
     shell
         .handle_shell_message(
@@ -511,10 +508,7 @@ fn profiling_snapshot_groups_backend_stage_proof_under_expected_provider_identit
     let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
     shell.replace_backend_runtime("mesh.audio".to_string(), slot);
     let mut pending = std::collections::VecDeque::new();
-    let mut capabilities = mesh_core_capability::CapabilitySet::new();
-    capabilities.grant(mesh_core_capability::Capability::new(
-        "service.audio.control",
-    ));
+    let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.audio.control"]);
 
     shell
         .handle_shell_message(

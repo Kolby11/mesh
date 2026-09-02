@@ -52,8 +52,10 @@ validated versions, direct dependency requirements, reverse requesters,
 composition provenance, and rollback metadata rebuilt from restored manifests.
 Activation now requires graph/profile-resolved effective capability grants;
 production frontend and backend paths no longer fall back to raw manifest
-capability declarations. The next open item is making the closed capability
-catalog the only production authority.
+capability declarations. The closed capability catalog is now the only
+production authority, and raw mutable `CapabilitySet` construction is
+restricted. The next open item is reviewing or removing the unconsumed
+`CapabilityHandle` abstraction.
 Host icon/font resources now use one explicit immutable graph/profile candidate
 catalog and copy-on-write registry handle, with failed preparation, recovery,
 and package rollback retaining the last-known-good snapshot. Icon resolution

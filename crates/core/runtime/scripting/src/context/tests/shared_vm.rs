@@ -1,6 +1,6 @@
 use super::super::*;
 use super::common::*;
-use mesh_core_capability::{Capability, CapabilitySet};
+use mesh_core_capability::CapabilitySet;
 use mesh_core_elements::VariableStore;
 
 #[test]
@@ -10,14 +10,14 @@ fn components_sharing_one_vm_keep_isolated_public_members() {
     // bare globals (that only happens through an explicit bind:this reference).
     let vm = SurfaceVm::new();
 
-    let mut ctx_a = ScriptContext::new("@mesh/comp-a", CapabilitySet::new()).unwrap();
+    let mut ctx_a = ScriptContext::new("@mesh/comp-a", CapabilitySet::default()).unwrap();
     ctx_a.attach_shared_vm(&vm);
     ctx_a
         .load_script("secret = \"a-value\"\nfunction init() end")
         .unwrap();
     ctx_a.call_init().unwrap();
 
-    let mut ctx_b = ScriptContext::new("@mesh/comp-b", CapabilitySet::new()).unwrap();
+    let mut ctx_b = ScriptContext::new("@mesh/comp-b", CapabilitySet::default()).unwrap();
     ctx_b.attach_shared_vm(&vm);
     ctx_b
         .load_script("secret = \"b-value\"\nfunction init() end")
@@ -41,13 +41,13 @@ fn separate_surface_handles_share_thread_vm_without_state_bleed() {
     let first_surface = SurfaceVm::new();
     let second_surface = SurfaceVm::new();
 
-    let mut first = ScriptContext::new("@mesh/first-surface", CapabilitySet::new()).unwrap();
+    let mut first = ScriptContext::new("@mesh/first-surface", CapabilitySet::default()).unwrap();
     first.attach_shared_vm(&first_surface);
     first
         .load_script("surface_value = 'first'\nfunction read() return surface_value end")
         .unwrap();
 
-    let mut second = ScriptContext::new("@mesh/second-surface", CapabilitySet::new()).unwrap();
+    let mut second = ScriptContext::new("@mesh/second-surface", CapabilitySet::default()).unwrap();
     second.attach_shared_vm(&second_surface);
     second
         .load_script("surface_value = 'second'\nfunction read() return surface_value end")
@@ -67,9 +67,9 @@ fn separate_surface_handles_share_thread_vm_without_state_bleed() {
 fn standalone_contexts_share_thread_vm_without_state_bleed() {
     // Backend/test contexts that do not attach a SurfaceVm use the same
     // thread-owned realm and the same _ENV isolation contract.
-    let mut first = ScriptContext::new("@mesh/standalone-a", CapabilitySet::new()).unwrap();
+    let mut first = ScriptContext::new("@mesh/standalone-a", CapabilitySet::default()).unwrap();
     first.load_script("value = 1").unwrap();
-    let mut second = ScriptContext::new("@mesh/standalone-b", CapabilitySet::new()).unwrap();
+    let mut second = ScriptContext::new("@mesh/standalone-b", CapabilitySet::default()).unwrap();
     second.load_script("value = 2").unwrap();
 
     assert_eq!(first.state.get("value"), Some(serde_json::json!(1)));
@@ -87,7 +87,7 @@ fn thread_vm_reclaims_dropped_context_environments() {
             .map(|index| {
                 let mut context = ScriptContext::new(
                     format!("@mesh/gc-{index}"),
-                    CapabilitySet::new(),
+                    CapabilitySet::default(),
                 )
                 .unwrap();
                 context
@@ -112,7 +112,7 @@ fn thread_vm_reclaims_dropped_context_environments() {
         let second_wave: Vec<_> = (0..64)
             .map(|index| {
                 let mut context =
-                    ScriptContext::new(format!("@mesh/gc-{index}"), CapabilitySet::new()).unwrap();
+                    ScriptContext::new(format!("@mesh/gc-{index}"), CapabilitySet::default()).unwrap();
                 context
                     .load_script(&format!(
                         "payload = {{ name = 'context-{index}', values = table.create(128, {index}) }}"
@@ -140,8 +140,7 @@ fn interface_event_subscriptions_are_independent_on_shared_vm() {
     // subscription on one component must not register on another sharing the VM.
     let vm = SurfaceVm::new();
 
-    let mut subscriber_caps = CapabilitySet::new();
-    subscriber_caps.grant(Capability::new("service.audio.read"));
+    let subscriber_caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut subscriber = ScriptContext::new("@mesh/subscriber", subscriber_caps).unwrap();
     subscriber.attach_shared_vm(&vm);
     subscriber.set_interface_catalog(audio_catalog());
@@ -157,8 +156,7 @@ end
         .unwrap();
     subscriber.call_init().unwrap();
 
-    let mut idle_caps = CapabilitySet::new();
-    idle_caps.grant(Capability::new("service.audio.read"));
+    let idle_caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut idle = ScriptContext::new("@mesh/idle", idle_caps).unwrap();
     idle.attach_shared_vm(&vm);
     idle.set_interface_catalog(audio_catalog());
@@ -177,7 +175,7 @@ fn same_component_on_shared_vm_has_independent_self_channels() {
     let vm = SurfaceVm::new();
 
     fn instance(vm: &SurfaceVm) -> ScriptContext {
-        let mut ctx = ScriptContext::new("@mesh/item-row", CapabilitySet::new()).unwrap();
+        let mut ctx = ScriptContext::new("@mesh/item-row", CapabilitySet::default()).unwrap();
         ctx.attach_shared_vm(vm);
         ctx.load_script(
             r#"
@@ -209,7 +207,7 @@ fn live_binding_reads_and_calls_child_in_same_tick() {
     // function synchronously, with the real return value — no snapshot, no queue.
     let vm = SurfaceVm::new();
 
-    let mut child = ScriptContext::new("@mesh/slider", CapabilitySet::new()).unwrap();
+    let mut child = ScriptContext::new("@mesh/slider", CapabilitySet::default()).unwrap();
     child.attach_shared_vm(&vm);
     child
         .load_script(
@@ -225,7 +223,7 @@ function init() end
         .unwrap();
     child.call_init().unwrap();
 
-    let mut parent = ScriptContext::new("@mesh/host", CapabilitySet::new()).unwrap();
+    let mut parent = ScriptContext::new("@mesh/host", CapabilitySet::default()).unwrap();
     parent.attach_shared_vm(&vm);
     parent
         .load_script(
@@ -262,14 +260,14 @@ fn live_binding_does_not_expose_host_internals() {
     // only the child's public members do.
     let vm = SurfaceVm::new();
 
-    let mut child = ScriptContext::new("@mesh/child", CapabilitySet::new()).unwrap();
+    let mut child = ScriptContext::new("@mesh/child", CapabilitySet::default()).unwrap();
     child.attach_shared_vm(&vm);
     child
         .load_script("public_value = 5\nfunction init() end")
         .unwrap();
     child.call_init().unwrap();
 
-    let mut parent = ScriptContext::new("@mesh/parent", CapabilitySet::new()).unwrap();
+    let mut parent = ScriptContext::new("@mesh/parent", CapabilitySet::default()).unwrap();
     parent.attach_shared_vm(&vm);
     parent
         .load_script(
@@ -313,7 +311,7 @@ fn live_binding_routes_child_self_event_to_parent_in_same_tick() {
     // channel table in the shared VM, no marshalling.
     let vm = SurfaceVm::new();
 
-    let mut child = ScriptContext::new("@mesh/emitter", CapabilitySet::new()).unwrap();
+    let mut child = ScriptContext::new("@mesh/emitter", CapabilitySet::default()).unwrap();
     child.attach_shared_vm(&vm);
     child
         .load_script(
@@ -330,7 +328,7 @@ end
         .unwrap();
     child.call_init().unwrap();
 
-    let mut parent = ScriptContext::new("@mesh/listener", CapabilitySet::new()).unwrap();
+    let mut parent = ScriptContext::new("@mesh/listener", CapabilitySet::default()).unwrap();
     parent.attach_shared_vm(&vm);
     parent
         .load_script(
