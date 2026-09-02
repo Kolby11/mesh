@@ -26,9 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 The following Section 1 findings remain open; IDs preserve their audit evidence
 for a future report or rerun.
 
-- [ ] **S01-DEAD-003 (P2):** Either make `CapabilityHandle` a proof required by
-      protected APIs or remove the currently unconsumed token abstraction after
-      downstream API review.
 - [ ] **S01-DEAD-004 (P2):** Remove inert `ShellSection.default_surface` with a
       migration diagnostic, since profiles/root graphs own root surface selection.
 - [ ] **S01-PERF-002 (P2, measurement required):** Stop rebuilding and JSON-

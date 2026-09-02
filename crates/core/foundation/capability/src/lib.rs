@@ -354,31 +354,12 @@ impl CapabilityPolicyError {
     }
 }
 
-/// Proof that a capability was granted. APIs take the handle as a parameter,
-/// making unauthorized access a compile-time error for Rust modules.
-#[derive(Debug, Clone)]
-pub struct CapabilityHandle {
-    capability: Capability,
-}
-
-impl CapabilityHandle {
-    pub fn capability(&self) -> &Capability {
-        &self.capability
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct CapabilitySet {
     granted: HashSet<Capability>,
 }
 
 impl CapabilitySet {
-    pub(crate) fn new() -> Self {
-        Self {
-            granted: HashSet::new(),
-        }
-    }
-
     /// Construct a proof set for an already-resolved grant list.
     ///
     /// Production activation must use `EffectiveCapabilities::into_capability_set`
@@ -402,12 +383,6 @@ impl CapabilitySet {
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn grant(&mut self, capability: Capability) -> CapabilityHandle {
-        self.granted.insert(capability.clone());
-        CapabilityHandle { capability }
-    }
-
     pub fn is_granted(&self, capability: &Capability) -> bool {
         self.granted.contains(capability)
     }
@@ -419,7 +394,9 @@ impl CapabilitySet {
 
 impl Default for CapabilitySet {
     fn default() -> Self {
-        Self::new()
+        Self {
+            granted: HashSet::new(),
+        }
     }
 }
 
@@ -451,15 +428,6 @@ mod tests {
             legacy_privilege_level("exec.launch-app"),
             PrivilegeLevel::Elevated
         );
-    }
-
-    #[test]
-    fn capability_set_grant_and_check() {
-        let mut set = CapabilitySet::new();
-        let cap = Capability::new("theme.read");
-        let _handle = set.grant(cap.clone());
-        assert!(set.is_granted(&cap));
-        assert!(!set.is_granted(&Capability::new("exec.command")));
     }
 
     #[test]

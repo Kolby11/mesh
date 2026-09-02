@@ -1223,7 +1223,6 @@ mod effect_adapter_tests {
 #[cfg(test)]
 mod frontend_frame_tests {
     use super::*;
-    use mesh_core_capability::Capability;
     use mesh_core_elements::WidgetNode;
 
     fn effect_scope(capability: &str) -> EffectScope {
