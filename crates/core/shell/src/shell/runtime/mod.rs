@@ -16,6 +16,18 @@ mod wayland;
 pub(in crate::shell) use request::EffectScheduler;
 pub(in crate::shell) use theme::ControlPlaneSettingsCommit;
 
+pub(in crate::shell) struct PendingControlPlaneCommit {
+    pub(in crate::shell) worker: std::thread::JoinHandle<()>,
+    pub(in crate::shell) theme: Option<(ThemeEngine, ThemeWatchState)>,
+    pub(in crate::shell) locale: Option<LocaleEngine>,
+    pub(in crate::shell) theme_effect: bool,
+    pub(in crate::shell) locale_effect: bool,
+}
+
+pub(in crate::shell) struct PendingProfileWrite {
+    pub(in crate::shell) worker: std::thread::JoinHandle<()>,
+}
+
 const MAX_SHELL_MESSAGE_DRAIN_PER_FRAME: usize = 256;
 const DEV_WINDOW_POLL_SLEEP: Duration = Duration::from_millis(16);
 
@@ -120,6 +132,37 @@ impl Shell {
         self.components
             .get(index)
             .is_some_and(|runtime| runtime.quarantined)
+    }
+
+    pub(in crate::shell) fn start_profile_write<F>(
+        &mut self,
+        operation: ProfileWriteOperation,
+        write: F,
+    ) -> Result<(), ShellRunError>
+    where
+        F: FnOnce() -> Result<DurableProfileWriteResult, String> + Send + 'static,
+    {
+        if self.pending_profile_write.is_some() || self.pending_control_plane_commit.is_some() {
+            return Err(ShellRunError::Package(
+                "profile mutation rejected while another durable control-plane write is pending"
+                    .into(),
+            ));
+        }
+        let Some(tx) = self.file_watcher_tx.clone() else {
+            return Err(ShellRunError::Package(
+                "profile mutation worker is unavailable".into(),
+            ));
+        };
+        let wake = self.wake_handle.clone();
+        let worker = std::thread::spawn(move || {
+            let result = write();
+            let _ = tx.send(ShellMessage::ProfileWriteFinished { operation, result });
+            if let Some(wake) = wake {
+                wake.wake();
+            }
+        });
+        self.pending_profile_write = Some(PendingProfileWrite { worker });
+        Ok(())
     }
 
     /// Presentation reports the compositor-facing buffer size. Parent layer
@@ -563,6 +606,22 @@ impl Shell {
                 }
             });
         }
+        if let Some(pending) = self.pending_control_plane_commit.take() {
+            if pending.worker.join().is_err() {
+                first_error.get_or_insert_with(|| {
+                    ShellRunError::Package(
+                        "durable settings worker panicked during shutdown".into(),
+                    )
+                });
+            }
+        }
+        if let Some(pending) = self.pending_profile_write.take() {
+            if pending.worker.join().is_err() {
+                first_error.get_or_insert_with(|| {
+                    ShellRunError::Package("profile write worker panicked during shutdown".into())
+                });
+            }
+        }
         if let Some(ipc_server) = self.ipc_server.take() {
             runtime.block_on(ipc_server.shutdown());
         }
@@ -655,6 +714,10 @@ impl Shell {
             ShellMessage::FileWatcherStopped { .. } => "file_watcher_stopped",
             ShellMessage::Ipc(_) => "ipc",
             ShellMessage::IpcProfileSwitch { .. } => "ipc_profile_switch",
+            ShellMessage::ControlPlaneSettingsCommitFinished { .. } => {
+                "control_plane_settings_commit_finished"
+            }
+            ShellMessage::ProfileWriteFinished { .. } => "profile_write_finished",
         };
         match message {
             ShellMessage::BackendServiceUpdate {
@@ -918,6 +981,53 @@ impl Shell {
                 response,
             } => {
                 pending.extend(self.apply_switch_profile_with_ack(&profile_id, Some(response)));
+            }
+            ShellMessage::ControlPlaneSettingsCommitFinished { result } => {
+                let Some(pending_commit) = self.pending_control_plane_commit.take() else {
+                    tracing::warn!("ignored durable settings completion without a pending commit");
+                    return Ok(());
+                };
+                if pending_commit.worker.join().is_err() {
+                    self.diagnostics.record_lifecycle_error(
+                        "@mesh/settings",
+                        "control_plane_commit_worker_panicked",
+                        "durable settings worker panicked before acknowledgement",
+                    );
+                    return Ok(());
+                }
+                match result {
+                    Ok(commit) => {
+                        pending.extend(self.commit_control_plane_batch(
+                            commit,
+                            pending_commit.theme,
+                            pending_commit.locale,
+                            pending_commit.theme_effect,
+                            pending_commit.locale_effect,
+                        )?);
+                    }
+                    Err(error) => {
+                        self.diagnostics.record_lifecycle_error(
+                            "@mesh/settings",
+                            "control_plane_commit_rejected",
+                            error,
+                        );
+                    }
+                }
+            }
+            ShellMessage::ProfileWriteFinished { operation, result } => {
+                let Some(pending_write) = self.pending_profile_write.take() else {
+                    tracing::warn!("ignored profile write completion without a pending write");
+                    return Ok(());
+                };
+                if pending_write.worker.join().is_err() {
+                    self.diagnostics.record_lifecycle_error(
+                        "@mesh/settings",
+                        "profile_write_worker_panicked",
+                        "profile write worker panicked before acknowledgement",
+                    );
+                    return Ok(());
+                }
+                pending.extend(self.complete_profile_write(operation, result));
             }
         }
         if let Some(started) = message_started {

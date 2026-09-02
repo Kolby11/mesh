@@ -706,6 +706,23 @@ fn profile_paths() -> mesh_core_module::package::ProfilePaths {
         .unwrap_or_else(|error| exit_error(error.to_string()))
 }
 
+fn save_profile_revision(
+    paths: &mesh_core_module::package::ProfilePaths,
+    profile_id: &str,
+    profile: &mesh_core_module::package::ShellProfile,
+) -> Result<(), mesh_core_module::package::ModuleManifestError> {
+    paths
+        .save_if_revision(profile_id, profile, profile.revision)
+        .map(|_| ())
+}
+
+fn save_settings_revision(
+    store: &mut mesh_core_config::SettingsStore,
+) -> Result<(), mesh_core_config::ConfigError> {
+    let expected_revision = store.revision();
+    store.save_if_revision(expected_revision)
+}
+
 fn exit_error(message: impl std::fmt::Display) -> ! {
     eprintln!("{message}");
     std::process::exit(1);
@@ -739,9 +756,12 @@ fn cmd_profile(args: &[String]) {
             if path.exists() {
                 exit_error(format!("profile {profile_id} already exists"));
             }
-            paths
-                .save(profile_id, &mesh_core_module::package::ShellProfile::new())
-                .unwrap_or_else(|error| exit_error(error));
+            save_profile_revision(
+                &paths,
+                profile_id,
+                &mesh_core_module::package::ShellProfile::new(),
+            )
+            .unwrap_or_else(|error| exit_error(error));
             println!("created profile {profile_id}; add roots, then select it with 'profile use'");
         }
         Some("use") => {
@@ -816,8 +836,7 @@ fn cmd_profile(args: &[String]) {
             let instance_id = profile
                 .add_frontend(&module.manifest)
                 .unwrap_or_else(|error| exit_error(error));
-            paths
-                .save(profile_id, &profile)
+            save_profile_revision(&paths, profile_id, &profile)
                 .unwrap_or_else(|error| exit_error(error));
             println!("added active instance {instance_id} to profile {profile_id}");
             println!("placement and props inherit the module's declared defaults");
@@ -833,8 +852,7 @@ fn cmd_profile(args: &[String]) {
             profile
                 .set_instance_active(instance_id, active)
                 .unwrap_or_else(|error| exit_error(error));
-            paths
-                .save(profile_id, &profile)
+            save_profile_revision(&paths, profile_id, &profile)
                 .unwrap_or_else(|error| exit_error(error));
             println!(
                 "{} {instance_id} in profile {profile_id}",
@@ -860,8 +878,7 @@ fn cmd_profile(args: &[String]) {
                     "profile {profile_id} has no instance {instance_id}"
                 ));
             }
-            paths
-                .save(profile_id, &profile)
+            save_profile_revision(&paths, profile_id, &profile)
                 .unwrap_or_else(|error| exit_error(error));
             println!("removed {instance_id} from profile {profile_id}");
         }
@@ -890,8 +907,7 @@ fn cmd_profile(args: &[String]) {
                 .load(profile_id)
                 .unwrap_or_else(|error| exit_error(error));
             profile.settings.insert(namespace.to_string(), value);
-            paths
-                .save(profile_id, &profile)
+            save_profile_revision(&paths, profile_id, &profile)
                 .unwrap_or_else(|error| exit_error(error));
             println!("updated {namespace} settings in profile {profile_id}");
         }
@@ -903,8 +919,7 @@ fn cmd_profile(args: &[String]) {
                 .load(profile_id)
                 .unwrap_or_else(|error| exit_error(error));
             profile.settings.remove(namespace);
-            paths
-                .save(profile_id, &profile)
+            save_profile_revision(&paths, profile_id, &profile)
                 .unwrap_or_else(|error| exit_error(error));
             println!("removed {namespace} settings from profile {profile_id}");
         }
@@ -933,8 +948,7 @@ fn cmd_profile(args: &[String]) {
                 profile.settings.remove(instance_id);
                 println!("pruned {instance_id}");
             }
-            paths
-                .save(profile_id, &profile)
+            save_profile_revision(&paths, profile_id, &profile)
                 .unwrap_or_else(|error| exit_error(error));
         }
         Some(other) => exit_error(format!(
@@ -1903,7 +1917,7 @@ fn cmd_config_eject(module_id: &str) {
         ejected["props"] = serde_json::json!({ "global": props });
     }
     store.merge_namespace(module_id, &ejected);
-    if let Err(err) = store.save() {
+    if let Err(err) = save_settings_revision(&mut store) {
         eprintln!("failed to write settings: {err}");
         std::process::exit(1);
     }
@@ -1925,7 +1939,7 @@ fn cmd_config_reset(namespace: &str) {
         return;
     }
     store.reset_namespace(namespace);
-    if let Err(err) = store.save() {
+    if let Err(err) = save_settings_revision(&mut store) {
         eprintln!("failed to write settings: {err}");
         std::process::exit(1);
     }

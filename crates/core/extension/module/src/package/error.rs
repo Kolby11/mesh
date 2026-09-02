@@ -69,6 +69,9 @@ pub enum ModuleManifestError {
     #[error("invalid MESH_HOME: {0}")]
     InvalidMeshHome(String),
 
+    #[error("profile revision exhausted at {current}")]
+    RevisionExhausted { current: u64 },
+
     #[error("invalid module manifest: {0}")]
     Validation(String),
 

@@ -17,6 +17,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::sync::oneshot;
 
+use super::module_config::ModuleConfigRollback;
+
 pub(super) fn watched_source_mtime(path: &Path) -> Option<SystemTime> {
     std::fs::symlink_metadata(path)
         .ok()
@@ -517,6 +519,42 @@ pub(super) enum ShellMessage {
         profile_id: String,
         response: IpcProfileSwitchResponseSender,
     },
+    ControlPlaneSettingsCommitFinished {
+        result: Result<super::runtime::ControlPlaneSettingsCommit, String>,
+    },
+    ProfileWriteFinished {
+        operation: ProfileWriteOperation,
+        result: Result<DurableProfileWriteResult, String>,
+    },
+}
+
+#[derive(Debug)]
+pub(super) enum ProfileWriteOperation {
+    NodeSlot {
+        profile_id: String,
+        apply_switch: bool,
+    },
+    BackendProviderSelection {
+        interface: String,
+        provider_id: String,
+    },
+    ProviderSelection {
+        graph_path: PathBuf,
+        interface: String,
+        provider_id: String,
+    },
+    ModuleEnabled {
+        graph_path: PathBuf,
+        module_id: String,
+        enabled: bool,
+        active_profile_id: Option<String>,
+    },
+}
+
+#[derive(Debug)]
+pub(super) enum DurableProfileWriteResult {
+    Complete,
+    Rollback(ModuleConfigRollback),
 }
 
 #[derive(Debug, Default)]

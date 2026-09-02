@@ -6,7 +6,7 @@ use crate::manifest::SurfaceLayoutSection;
 use mesh_core_service::{canonical_interface_name, parse_contract_version, parse_version_req};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -15,6 +15,7 @@ pub const PROFILE_SCHEMA_VERSION: u32 = 3;
 pub const DEFAULT_PROFILE_ID: &str = "default";
 
 static PROFILE_TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+const CONTROL_PLANE_LOCK_FILE: &str = ".mesh-control-plane.lock";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -795,13 +796,22 @@ impl ProfilePaths {
     ) -> Result<(), ModuleManifestError> {
         profile.validate()?;
         let path = self.profile_path(profile_id)?;
+        let _lock = self.acquire_control_plane_lock()?;
+        self.save_unlocked(&path, profile)
+    }
+
+    fn save_unlocked(
+        &self,
+        path: &Path,
+        profile: &ShellProfile,
+    ) -> Result<(), ModuleManifestError> {
         let mut content =
             serde_json::to_string_pretty(profile).map_err(|source| ModuleManifestError::Json {
-                path: path.clone(),
+                path: path.to_path_buf(),
                 source,
             })?;
         content.push('\n');
-        atomic_write(&path, content.as_bytes())
+        atomic_write_unlocked(path, content.as_bytes())
     }
 
     /// Persist a profile candidate only if the on-disk profile still has the
@@ -820,6 +830,7 @@ impl ProfilePaths {
             )));
         }
 
+        let _lock = self.acquire_control_plane_lock()?;
         let current_revision = match self.load(profile_id) {
             Ok(current) => current.revision,
             Err(ModuleManifestError::Io { source, .. })
@@ -836,9 +847,45 @@ impl ProfilePaths {
         }
 
         let mut committed = profile.clone();
-        committed.revision = expected_revision.saturating_add(1);
-        self.save(profile_id, &committed)?;
+        committed.revision =
+            expected_revision
+                .checked_add(1)
+                .ok_or(ModuleManifestError::RevisionExhausted {
+                    current: expected_revision,
+                })?;
+        let path = self.profile_path(profile_id)?;
+        self.save_unlocked(&path, &committed)?;
         Ok(committed)
+    }
+
+    fn acquire_control_plane_lock(&self) -> Result<ControlPlaneLock, ModuleManifestError> {
+        let path = self.config_dir.join(CONTROL_PLANE_LOCK_FILE);
+        let mut options = OpenOptions::new();
+        options.create(true).read(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+
+            options.mode(0o600);
+        }
+        let file = options
+            .open(&path)
+            .map_err(|source| ModuleManifestError::Io {
+                path: path.clone(),
+                source,
+            })?;
+        #[cfg(unix)]
+        {
+            let result =
+                unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&file), libc::LOCK_EX) };
+            if result != 0 {
+                return Err(ModuleManifestError::Io {
+                    path,
+                    source: std::io::Error::last_os_error(),
+                });
+            }
+        }
+        Ok(ControlPlaneLock(file))
     }
 
     /// Restore the active-profile pointer to a previously observed value.
@@ -953,7 +1000,48 @@ fn validate_profile_id(profile_id: &str) -> Result<(), ModuleManifestError> {
     Ok(())
 }
 
+struct ControlPlaneLock(File);
+
+impl Drop for ControlPlaneLock {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        {
+            let _ = unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&self.0), libc::LOCK_UN) };
+        }
+    }
+}
+
 pub(super) fn atomic_write(path: &Path, content: &[u8]) -> Result<(), ModuleManifestError> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).map_err(|source| ModuleManifestError::Io {
+        path: parent.to_path_buf(),
+        source,
+    })?;
+    let lock_path = parent.join(CONTROL_PLANE_LOCK_FILE);
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|source| ModuleManifestError::Io {
+            path: lock_path.clone(),
+            source,
+        })?;
+    #[cfg(unix)]
+    {
+        let result =
+            unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&lock_file), libc::LOCK_EX) };
+        if result != 0 {
+            return Err(ModuleManifestError::Io {
+                path: lock_path,
+                source: std::io::Error::last_os_error(),
+            });
+        }
+    }
+    atomic_write_unlocked(path, content)
+}
+
+fn atomic_write_unlocked(path: &Path, content: &[u8]) -> Result<(), ModuleManifestError> {
     super::validate_no_symlink_path(path, "package write target")?;
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent).map_err(|source| ModuleManifestError::Io {
@@ -1400,6 +1488,86 @@ mod tests {
         assert!(error.to_string().contains("profile revision conflict"));
         assert_eq!(paths.load("work").unwrap().revision, 2);
         std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn concurrent_revision_checked_profile_writers_have_one_winner() {
+        let root = std::env::temp_dir().join(format!(
+            "mesh-profile-cas-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let graph_path = root.join("module.json");
+        fs::write(&graph_path, "{}").unwrap();
+        let paths = ProfilePaths::from_root_graph(&graph_path).unwrap();
+        paths
+            .save_if_revision("work", &ShellProfile::new(), 0)
+            .unwrap();
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let workers = ["cs", "de"].into_iter().map(|locale| {
+            let paths = paths.clone();
+            let barrier = barrier.clone();
+            let mut candidate = paths.load("work").unwrap();
+            candidate.settings.insert(
+                "shell".into(),
+                serde_json::json!({ "i18n": { "locale": locale } }),
+            );
+            std::thread::spawn(move || {
+                barrier.wait();
+                paths.save_if_revision("work", &candidate, 1)
+            })
+        });
+        let workers = workers.collect::<Vec<_>>();
+        let results = workers
+            .into_iter()
+            .map(|worker| worker.join().expect("profile CAS writer must not panic"))
+            .collect::<Vec<_>>();
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| {
+                    result
+                        .as_ref()
+                        .is_err_and(|error| error.to_string().contains("profile revision conflict"))
+                })
+                .count(),
+            1
+        );
+        let committed = paths.load("work").unwrap();
+        assert_eq!(committed.revision, 2);
+        assert!(matches!(
+            committed.settings["shell"]["i18n"]["locale"].as_str(),
+            Some("cs" | "de")
+        ));
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn profile_revision_cannot_wrap() {
+        let root = std::env::temp_dir().join(format!(
+            "mesh-profile-revision-exhausted-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let graph_path = root.join("module.json");
+        fs::write(&graph_path, "{}").unwrap();
+        let paths = ProfilePaths::from_root_graph(&graph_path).unwrap();
+        let profile =
+            ShellProfile::from_json_str(&format!("{{\"revision\":{}}}", u64::MAX)).unwrap();
+        paths.save("work", &profile).unwrap();
+        let error = paths
+            .save_if_revision("work", &profile, u64::MAX)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ModuleManifestError::RevisionExhausted { .. }
+        ));
+        assert_eq!(paths.load("work").unwrap().revision, u64::MAX);
+        fs::remove_dir_all(root).ok();
     }
 
     #[test]

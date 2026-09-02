@@ -10,9 +10,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+#[derive(Debug)]
 pub(super) struct ModuleConfigRollback {
-    path: PathBuf,
-    content: Vec<u8>,
+    pub(super) path: PathBuf,
+    pub(super) content: Vec<u8>,
 }
 
 impl ModuleConfigRollback {

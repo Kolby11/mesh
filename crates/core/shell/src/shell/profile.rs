@@ -1085,8 +1085,25 @@ impl Shell {
             Some(&previous_catalog),
         )?;
 
+        let apply_switch = self.active_profile_id.as_deref() == Some(profile_id);
+        if self.file_watcher_tx.is_some() {
+            let write_profile_id = profile_id.to_string();
+            self.start_profile_write(
+                super::types::ProfileWriteOperation::NodeSlot {
+                    profile_id: write_profile_id.clone(),
+                    apply_switch,
+                },
+                move || {
+                    paths
+                        .save_if_revision(&write_profile_id, &profile, expected_revision)
+                        .map(|_| super::types::DurableProfileWriteResult::Complete)
+                        .map_err(|error| error.to_string())
+                },
+            )?;
+            return Ok(VecDeque::new());
+        }
         paths.save_if_revision(profile_id, &profile, expected_revision)?;
-        if self.active_profile_id.as_deref() == Some(profile_id) {
+        if apply_switch {
             return Ok(self.apply_switch_profile(profile_id));
         }
         Ok(VecDeque::new())
@@ -1315,9 +1332,8 @@ impl Shell {
             }
             Ok(())
         })?;
-        let commit = self.commit_control_plane_settings(candidate)?;
         self.components_want_render = true;
-        self.commit_control_plane_batch(commit, None, None, false, false)
+        self.commit_control_plane_settings(candidate, None, None, false, false)
     }
 
     pub(in crate::shell) fn apply_switch_profile(
@@ -1332,6 +1348,14 @@ impl Shell {
         profile_id: &str,
         profile_switch_ack: Option<super::types::IpcProfileSwitchResponseSender>,
     ) -> VecDeque<CoreRequest> {
+        if self.pending_profile_write.is_some() || self.pending_control_plane_commit.is_some() {
+            self.reject_profile_switch_with_ack(
+                profile_id,
+                "profile switch rejected while a durable control-plane mutation is pending".into(),
+                profile_switch_ack,
+            );
+            return VecDeque::new();
+        }
         if self.pending_profile_switch.is_some() {
             self.reject_profile_switch_with_ack(
                 profile_id,

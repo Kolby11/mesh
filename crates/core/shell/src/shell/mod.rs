@@ -166,10 +166,10 @@ use surface_layout::{
 };
 use types::{
     BackendIdentity, CommandThrottleState, CompiledContractField, ComponentRuntime,
-    ContractValidationCache, IpcProfileSwitchResponse, LatestServiceState,
-    PendingBoundServiceState, PendingServiceCommand, ServiceCallRoute, ServiceCommandMsg,
-    ServiceDeliveryIndex, SettingsWatchState, ShellCoreState, ShellMessage, SurfaceState,
-    TargetRef, ThemeWatchState,
+    ContractValidationCache, DurableProfileWriteResult, IpcProfileSwitchResponse,
+    LatestServiceState, PendingBoundServiceState, PendingServiceCommand, ProfileWriteOperation,
+    ServiceCallRoute, ServiceCommandMsg, ServiceDeliveryIndex, SettingsWatchState, ShellCoreState,
+    ShellMessage, SurfaceState, TargetRef, ThemeWatchState,
 };
 
 /// An owned duplicate of the shell wake descriptor. Workers keep this handle
@@ -870,6 +870,8 @@ pub struct Shell {
     pending_backend_runtimes: HashMap<String, PendingBackendRuntime>,
     pending_resource_preparation: Option<profile::PendingResourcePreparation>,
     pending_profile_switch: Option<profile::PendingProfileSwitch>,
+    pending_control_plane_commit: Option<runtime::PendingControlPlaneCommit>,
+    pending_profile_write: Option<runtime::PendingProfileWrite>,
     /// Prepared activation surfaces remain isolated from the live presentation
     /// maps until their candidate becomes the active snapshot.
     candidate_preview: Option<Arc<profile::CandidatePreview>>,
@@ -933,6 +935,12 @@ impl Drop for Shell {
         self.pending_backend_runtimes.clear();
         self.candidate_preview = None;
         self.pending_profile_switch = None;
+        if let Some(pending) = self.pending_control_plane_commit.take() {
+            let _ = pending.worker.join();
+        }
+        if let Some(pending) = self.pending_profile_write.take() {
+            let _ = pending.worker.join();
+        }
         self.retiring_backend_runtimes.clear();
         self.ipc_server.take();
         self.file_watcher_tx = None;

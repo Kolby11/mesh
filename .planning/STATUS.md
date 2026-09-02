@@ -12,6 +12,11 @@ snapshots, and pending watcher revisions. Per-instance settings now resolve
 through each module owner's validated projection; invalid instance overrides
 remain available in raw storage for repair and are diagnosed.
 
+Settings and profile revisions now use serialized checked commits with checked
+overflow handling; CLI mutations route through those commits, and shell
+control-plane/profile durable writes complete off the shell loop before live
+state is acknowledged.
+
 Section 15's first twelve items and Section 16's path-safe uninstall, atomic
 package mutation, typed live profile switching, shared CLI/shell package
 ownership contract, shared CLI/shell package transaction engine, canonical
@@ -45,8 +50,8 @@ at graph commit, frontend/backend activation, candidate failure, recovery,
 quarantine, and teardown boundaries. The module lock now uses schema v3 with
 validated versions, direct dependency requirements, reverse requesters,
 composition provenance, and rollback metadata rebuilt from restored manifests.
-The next open item is replacing split profile/runtime mutation with one
-revisioned activation coordinator.
+The next open item is failing activation closed when resolved effective
+capabilities are absent.
 Host icon/font resources now use one explicit immutable graph/profile candidate
 catalog and copy-on-write registry handle, with failed preparation, recovery,
 and package rollback retaining the last-known-good snapshot. Icon resolution

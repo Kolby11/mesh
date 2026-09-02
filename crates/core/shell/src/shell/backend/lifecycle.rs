@@ -852,7 +852,85 @@ impl Shell {
     }
 
     fn complete_backend_runtime_switch(&mut self, interface: &str, provider_id: &str) {
+        let Some(pending) = self.pending_backend_runtimes.get(interface) else {
+            return;
+        };
+        if pending.slot.provider_id != provider_id {
+            return;
+        }
+
+        let Some(graph_path) = pending.graph_path.clone() else {
+            let pending = self
+                .pending_backend_runtimes
+                .remove(interface)
+                .expect("pending backend runtime was just observed");
+            self.finish_backend_runtime_switch(interface, provider_id, pending);
+            return;
+        };
+
+        if self.file_watcher_tx.is_some() {
+            let operation = ProfileWriteOperation::BackendProviderSelection {
+                interface: interface.to_string(),
+                provider_id: provider_id.to_string(),
+            };
+            let write_interface = interface.to_string();
+            let write_provider_id = provider_id.to_string();
+            let write_path = graph_path.clone();
+            if let Err(error) = self.start_profile_write(operation, move || {
+                crate::shell::module_config::write_composed_provider_selection(
+                    &write_path,
+                    &write_interface,
+                    &write_provider_id,
+                )
+                .map(|()| DurableProfileWriteResult::Complete)
+                .map_err(|error| error.to_string())
+            }) {
+                self.fail_backend_runtime_switch(
+                    interface,
+                    provider_id,
+                    format!(
+                        "provider {provider_id} became ready for {interface}, but its selection worker could not start: {error}"
+                    ),
+                );
+            }
+            return;
+        }
+
+        let pending = self
+            .pending_backend_runtimes
+            .remove(interface)
+            .expect("pending backend runtime was just observed");
+        if let Err(error) = crate::shell::module_config::write_composed_provider_selection(
+            &graph_path,
+            interface,
+            provider_id,
+        ) {
+            self.fail_pending_backend_runtime_switch(
+                interface,
+                provider_id,
+                pending,
+                format!(
+                    "provider {provider_id} became ready for {interface}, but its selection could not be saved: {error}"
+                ),
+            );
+            return;
+        }
+        self.finish_backend_runtime_switch(interface, provider_id, pending);
+    }
+
+    pub(in crate::shell) fn complete_backend_runtime_switch_after_persistence(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+    ) {
         let Some(pending) = self.pending_backend_runtimes.remove(interface) else {
+            self.diagnostics.record_lifecycle_error(
+                "@mesh/settings",
+                "provider_selection_pending_runtime_missing",
+                format!(
+                    "provider {provider_id} became ready for {interface}, but its pending runtime was missing"
+                ),
+            );
             return;
         };
         if pending.slot.provider_id != provider_id {
@@ -861,67 +939,40 @@ impl Shell {
             return;
         }
 
-        if let Some(graph_path) = pending.graph_path.as_ref() {
-            let identity = *pending
-                .slot
-                .identity
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if let Err(error) = crate::shell::module_config::write_composed_provider_selection(
-                graph_path,
+        let candidate_graph = match self.load_installed_module_graph_candidate() {
+            Ok(graph) => graph,
+            Err(error) => {
+                self.fail_pending_backend_runtime_switch(
+                    interface,
+                    provider_id,
+                    pending,
+                    format!(
+                        "provider selection was saved but the candidate graph could not be refreshed: {error}"
+                    ),
+                );
+                return;
+            }
+        };
+        if let Err(error) = self.commit_installed_module_graph(candidate_graph) {
+            self.fail_pending_backend_runtime_switch(
                 interface,
                 provider_id,
-            ) {
-                self.retire_backend_runtime_slot(pending.slot);
-                let message = format!(
-                    "provider {provider_id} became ready for {interface}, but its selection could not be saved: {error}"
-                );
-                self.record_backend_runtime_status_with_identity_and_lifecycle(
-                    interface.to_string(),
-                    provider_id.to_string(),
-                    identity,
-                    BackendRuntimeStatus::Failed,
-                    message.clone(),
-                    true,
-                    false,
-                );
-                self.diagnostics.record_lifecycle_error(
-                    "@mesh/settings".to_string(),
-                    "provider_selection_write_failed",
-                    message.clone(),
-                );
-                tracing::warn!(interface, provider_id, "{message}");
-                return;
-            }
-            let candidate_graph = match self.load_installed_module_graph_candidate() {
-                Ok(graph) => graph,
-                Err(error) => {
-                    self.retire_backend_runtime_slot(pending.slot);
-                    let message = format!(
-                        "provider selection was saved but the candidate graph could not be refreshed: {error}"
-                    );
-                    tracing::warn!(interface, provider_id, "{message}");
-                    self.diagnostics.record_lifecycle_error(
-                        "@mesh/shell".to_string(),
-                        "provider_selection_graph_reload_failed",
-                        message,
-                    );
-                    return;
-                }
-            };
-            if let Err(error) = self.commit_installed_module_graph(candidate_graph) {
-                self.retire_backend_runtime_slot(pending.slot);
-                let message = format!(
+                pending,
+                format!(
                     "provider selection was saved but locale catalogs could not be committed: {error}"
-                );
-                self.diagnostics.record_lifecycle_error(
-                    "@mesh/shell",
-                    "provider_selection_locale_commit_failed",
-                    message,
-                );
-                return;
-            }
+                ),
+            );
+            return;
         }
+        self.finish_backend_runtime_switch(interface, provider_id, pending);
+    }
+
+    fn finish_backend_runtime_switch(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        pending: PendingBackendRuntime,
+    ) {
         self.backend_supervision.remove(interface);
         let identity = *pending
             .slot
@@ -949,6 +1000,53 @@ impl Shell {
             provider_id,
             "switched active backend provider live"
         );
+    }
+
+    pub(in crate::shell) fn fail_pending_backend_runtime_switch(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        pending: PendingBackendRuntime,
+        message: String,
+    ) {
+        let identity = *pending
+            .slot
+            .identity
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.retire_backend_runtime_slot(pending.slot);
+        self.record_backend_runtime_status_with_identity_and_lifecycle(
+            interface.to_string(),
+            provider_id.to_string(),
+            identity,
+            BackendRuntimeStatus::Failed,
+            message.clone(),
+            true,
+            false,
+        );
+        self.diagnostics.record_lifecycle_error(
+            "@mesh/settings",
+            "provider_selection_write_failed",
+            message.clone(),
+        );
+        tracing::warn!(interface, provider_id, "{message}");
+    }
+
+    pub(in crate::shell) fn fail_backend_runtime_switch(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        message: String,
+    ) {
+        let Some(pending) = self.pending_backend_runtimes.remove(interface) else {
+            return;
+        };
+        if pending.slot.provider_id != provider_id {
+            self.pending_backend_runtimes
+                .insert(interface.to_string(), pending);
+            return;
+        }
+        self.fail_pending_backend_runtime_switch(interface, provider_id, pending, message);
     }
 
     pub(in crate::shell) fn handle_backend_lifecycle(

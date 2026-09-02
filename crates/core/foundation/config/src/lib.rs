@@ -586,6 +586,8 @@ pub enum ConfigError {
 
     #[error("settings revision conflict: expected {expected}, found {actual}")]
     RevisionConflict { expected: u64, actual: u64 },
+    #[error("settings revision exhausted at {current}")]
+    RevisionExhausted { current: u64 },
 }
 
 pub fn default_config_path() -> PathBuf {

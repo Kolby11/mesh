@@ -3772,3 +3772,22 @@ PixelBuffer, glyph, text, painter, layout-cache, icon, and SHM slices passed.
 The broad `mesh-core-elements` and `mesh-core-presentation` suites report
 unrelated failures in unchanged tests (10 and 2 tests respectively); those
 failures are recorded in the implementation handoff.
+
+## 2026-09-02 — serialize settings/profile CAS and move shell durable writes
+
+Settings and profile revision-checked replacements now use a stable
+`.mesh-control-plane.lock` advisory lock around the on-disk read/check/write
+boundary, with checked revision increments that reject exhaustion rather than
+wrapping. CLI profile and settings mutations route through those CAS methods.
+Shell control-plane, profile node, provider, and module-enable writes run on a
+worker and publish their live completion only after the durable write is
+acknowledged; backend provider handoff persistence uses the same worker path.
+
+No performance measurement was run and no speedup claim is made. Verification
+included `cargo fmt --all`, `nix develop -c cargo check -p mesh-core-shell
+-p mesh-tools-cli`, all 55 `mesh-core-config` library tests, focused profile
+CAS tests, focused shell settings/theme/locale tests, and backend persistence
+tests. The full 952-test shell library run completed with 774 passed, 47
+failed, and 131 ignored; its failures were unrelated geometry/rendering,
+fixture, and retained-layout tests. The two focused navigation geometry tests
+also fail independently with existing anchor mismatches.

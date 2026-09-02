@@ -29,6 +29,8 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+const CONTROL_PLANE_LOCK_FILE: &str = ".mesh-control-plane.lock";
+
 pub const SETTINGS_SCHEMA_VERSION: u64 = 1;
 
 /// Namespace holding core shell preferences (theme, locale, icons, keyboard,
@@ -435,6 +437,71 @@ impl SettingsStore {
     pub fn save(&self) -> Result<(), ConfigError> {
         let parent = settings_parent(&self.path);
         ensure_settings_directory(parent)?;
+        let _lock = acquire_control_plane_lock(parent)?;
+        self.save_unlocked(parent)
+    }
+
+    /// Persist this candidate only if the file still has `expected_revision`.
+    ///
+    /// Callers prepare and validate a complete candidate first, then use this
+    /// method as the durable commit boundary. The in-memory store advances to
+    /// the committed revision only after the atomic replace succeeds.
+    pub fn save_if_revision(&mut self, expected_revision: u64) -> Result<(), ConfigError> {
+        if self.revision != expected_revision {
+            return Err(ConfigError::RevisionConflict {
+                expected: expected_revision,
+                actual: self.revision,
+            });
+        }
+
+        let parent = settings_parent(&self.path);
+        ensure_settings_directory(parent)?;
+        let _lock = acquire_control_plane_lock(parent)?;
+        let actual_revision = Self::load_from(&self.path)?.revision;
+        if actual_revision != expected_revision {
+            return Err(ConfigError::RevisionConflict {
+                expected: expected_revision,
+                actual: actual_revision,
+            });
+        }
+        let next_revision =
+            expected_revision
+                .checked_add(1)
+                .ok_or(ConfigError::RevisionExhausted {
+                    current: expected_revision,
+                })?;
+        let mut committed = self.clone();
+        committed.revision = next_revision;
+        committed.save_unlocked(parent)?;
+        self.revision = next_revision;
+        Ok(())
+    }
+
+    /// Check both the candidate and its backing document without writing it.
+    /// This lets a profile-scoped transaction ensure that shared fallback
+    /// settings did not change while its profile candidate was prepared.
+    pub fn check_revision(&self, expected_revision: u64) -> Result<(), ConfigError> {
+        if self.revision != expected_revision {
+            return Err(ConfigError::RevisionConflict {
+                expected: expected_revision,
+                actual: self.revision,
+            });
+        }
+
+        let parent = settings_parent(&self.path);
+        ensure_settings_directory(parent)?;
+        let _lock = acquire_control_plane_lock(parent)?;
+        let actual_revision = Self::load_from(&self.path)?.revision;
+        if actual_revision != expected_revision {
+            return Err(ConfigError::RevisionConflict {
+                expected: expected_revision,
+                actual: actual_revision,
+            });
+        }
+        Ok(())
+    }
+
+    fn save_unlocked(&self, parent: &Path) -> Result<(), ConfigError> {
         let mut content = serde_json::to_string_pretty(&self.to_value())?;
         content.push('\n');
         let (temporary, mut file) = create_settings_temporary(&self.path, parent)?;
@@ -451,43 +518,6 @@ impl SettingsStore {
         if let Err(error) = result {
             let _ = fs::remove_file(&temporary);
             return Err(error.into());
-        }
-        Ok(())
-    }
-
-    /// Persist this candidate only if the file still has `expected_revision`.
-    ///
-    /// Callers prepare and validate a complete candidate first, then use this
-    /// method as the durable commit boundary. The in-memory store advances to
-    /// the committed revision only after the atomic replace succeeds.
-    pub fn save_if_revision(&mut self, expected_revision: u64) -> Result<(), ConfigError> {
-        self.check_revision(expected_revision)?;
-
-        let next_revision = expected_revision.saturating_add(1);
-        let mut committed = self.clone();
-        committed.revision = next_revision;
-        committed.save()?;
-        self.revision = next_revision;
-        Ok(())
-    }
-
-    /// Check both the candidate and its backing document without writing it.
-    /// This lets a profile-scoped transaction ensure that shared fallback
-    /// settings did not change while its profile candidate was prepared.
-    pub fn check_revision(&self, expected_revision: u64) -> Result<(), ConfigError> {
-        if self.revision != expected_revision {
-            return Err(ConfigError::RevisionConflict {
-                expected: expected_revision,
-                actual: self.revision,
-            });
-        }
-
-        let actual_revision = Self::load_from(&self.path)?.revision;
-        if actual_revision != expected_revision {
-            return Err(ConfigError::RevisionConflict {
-                expected: expected_revision,
-                actual: actual_revision,
-            });
         }
         Ok(())
     }
@@ -559,6 +589,38 @@ fn ensure_settings_directory(parent: &Path) -> io::Result<()> {
         fs::create_dir_all(parent)?;
     }
     Ok(())
+}
+
+struct ControlPlaneLock(File);
+
+fn acquire_control_plane_lock(parent: &Path) -> Result<ControlPlaneLock, ConfigError> {
+    let path = parent.join(CONTROL_PLANE_LOCK_FILE);
+    let mut options = OpenOptions::new();
+    options.create(true).read(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        options.mode(0o600);
+    }
+    let file = options.open(&path)?;
+    #[cfg(unix)]
+    {
+        let result = unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&file), libc::LOCK_EX) };
+        if result != 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+    }
+    Ok(ControlPlaneLock(file))
+}
+
+impl Drop for ControlPlaneLock {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        {
+            let _ = unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&self.0), libc::LOCK_UN) };
+        }
+    }
 }
 
 fn create_settings_temporary(path: &Path, parent: &Path) -> io::Result<(PathBuf, File)> {
@@ -1333,6 +1395,70 @@ mod tests {
         std::fs::remove_dir_all(root).ok();
     }
 
+    #[test]
+    fn concurrent_revision_checked_settings_writers_have_one_winner() {
+        let root = std::env::temp_dir().join(format!(
+            "mesh-settings-cas-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let path = root.join("settings.json");
+        let mut initial = SettingsStore::from_value(&path, json!({})).unwrap();
+        initial.save_if_revision(0).unwrap();
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let candidates = ["cs", "de"].into_iter().map(|locale| {
+            let candidate = SettingsStore::load_from(&path).unwrap();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                let mut candidate = candidate;
+                candidate.set_namespace("shell", json!({ "i18n": { "locale": locale } }));
+                barrier.wait();
+                candidate.save_if_revision(1).map(|()| candidate)
+            })
+        });
+
+        let workers = candidates.collect::<Vec<_>>();
+        let results = workers
+            .into_iter()
+            .map(|worker| worker.join().expect("CAS writer must not panic"))
+            .collect::<Vec<_>>();
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| matches!(result, Err(ConfigError::RevisionConflict { .. })))
+                .count(),
+            1
+        );
+        let committed = SettingsStore::load_from(&path).unwrap();
+        assert_eq!(committed.revision(), 2);
+        assert!(matches!(
+            committed.shell().i18n.locale.as_str(),
+            "cs" | "de"
+        ));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn settings_revision_cannot_wrap() {
+        let root = std::env::temp_dir().join(format!(
+            "mesh-settings-revision-exhausted-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let path = root.join("settings.json");
+        let mut store = SettingsStore::from_value(&path, json!({ "revision": u64::MAX })).unwrap();
+        store.save().unwrap();
+        let error = store.save_if_revision(u64::MAX).unwrap_err();
+        assert!(matches!(error, ConfigError::RevisionExhausted { .. }));
+        assert_eq!(
+            SettingsStore::load_from(&path).unwrap().revision(),
+            u64::MAX
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
     #[cfg(unix)]
     #[test]
     fn save_uses_owner_only_file_and_directory_permissions() {
@@ -1361,6 +1487,7 @@ mod tests {
             std::fs::read_dir(&parent)
                 .unwrap()
                 .filter_map(Result::ok)
+                .filter(|entry| entry.file_name() != CONTROL_PLANE_LOCK_FILE)
                 .count(),
             1,
             "the unique temporary file must be removed by the rename"
@@ -1411,6 +1538,7 @@ mod tests {
             std::fs::read_dir(&root)
                 .unwrap()
                 .filter_map(Result::ok)
+                .filter(|entry| entry.file_name() != CONTROL_PLANE_LOCK_FILE)
                 .count(),
             1,
             "unique temporary files must not remain after concurrent saves"

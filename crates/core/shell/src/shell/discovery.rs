@@ -2093,6 +2093,8 @@ impl Shell {
             pending_backend_runtimes: HashMap::new(),
             pending_resource_preparation: None,
             pending_profile_switch: None,
+            pending_control_plane_commit: None,
+            pending_profile_write: None,
             candidate_preview: None,
             activation_generation: 0,
             active_snapshot: None,

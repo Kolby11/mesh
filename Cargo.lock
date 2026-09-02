@@ -1916,6 +1916,7 @@ dependencies = [
 name = "mesh-core-config"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "mesh-core-locale",
  "mesh-core-theme",
  "serde",

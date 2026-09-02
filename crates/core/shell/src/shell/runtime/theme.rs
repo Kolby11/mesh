@@ -1,4 +1,5 @@
 use super::super::*;
+use super::PendingControlPlaneCommit;
 
 const THEME_RELOAD_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
 const SHELL_SETTINGS_RELOAD_POLL_INTERVAL: std::time::Duration =
@@ -54,9 +55,39 @@ pub(in crate::shell) struct ControlPlaneSettingsCandidate {
     )>,
 }
 
+#[derive(Debug)]
 pub(in crate::shell) struct ControlPlaneSettingsCommit {
     pub(in crate::shell) store: SettingsStore,
     pub(in crate::shell) revision: DurableControlPlaneRevision,
+}
+
+fn persist_control_plane_settings(
+    candidate: ControlPlaneSettingsCandidate,
+) -> Result<ControlPlaneSettingsCommit, ShellRunError> {
+    let ControlPlaneSettingsCandidate {
+        mut store,
+        shared_revision,
+        profile_commit,
+    } = candidate;
+    let shared = SettingsStore::load_from(store.path())
+        .map_err(|error| ShellRunError::Package(format!("failed to reload settings: {error}")))?;
+    shared
+        .check_revision(shared_revision)
+        .map_err(|error| ShellRunError::Package(error.to_string()))?;
+
+    let revision = if let Some((paths, profile_id, profile, expected_revision)) = profile_commit {
+        let committed = paths
+            .save_if_revision(&profile_id, &profile, expected_revision)
+            .map_err(|error| ShellRunError::Package(error.to_string()))?;
+        DurableControlPlaneRevision::new(shared_revision, Some(committed.revision))
+    } else {
+        store
+            .save_if_revision(shared_revision)
+            .map_err(|error| ShellRunError::Package(error.to_string()))?;
+        DurableControlPlaneRevision::new(store.revision(), None)
+    };
+
+    Ok(ControlPlaneSettingsCommit { store, revision })
 }
 
 fn theme_source_fingerprint(shell: &Shell) -> Result<u64, mesh_core_theme::ThemeError> {
@@ -187,41 +218,51 @@ impl Shell {
     }
 
     /// Commit a prepared candidate through the owning file's revision check.
-    /// No live state is changed until the atomic persistence operation returns.
+    /// Durable serialization and fsync happen on a worker while the shell loop
+    /// continues processing compositor and component work. The completion
+    /// message is the acknowledgement that permits the live snapshot swap.
     pub(in crate::shell) fn commit_control_plane_settings(
         &mut self,
         candidate: ControlPlaneSettingsCandidate,
-    ) -> Result<ControlPlaneSettingsCommit, ShellRunError> {
-        let ControlPlaneSettingsCandidate {
-            mut store,
-            shared_revision,
-            profile_commit,
-        } = candidate;
-        let shared_path = self.settings_watch.path.clone();
-        let shared = SettingsStore::load_from(&shared_path).map_err(|error| {
-            ShellRunError::Package(format!("failed to reload settings: {error}"))
-        })?;
-        shared
-            .check_revision(shared_revision)
-            .map_err(|error| ShellRunError::Package(error.to_string()))?;
+        theme: Option<(ThemeEngine, ThemeWatchState)>,
+        locale: Option<LocaleEngine>,
+        theme_effect: bool,
+        locale_effect: bool,
+    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        if self.pending_control_plane_commit.is_some() || self.pending_profile_write.is_some() {
+            return Err(ShellRunError::Package(
+                "settings mutation rejected while another durable control-plane write is pending"
+                    .into(),
+            ));
+        }
 
-        let revision = if let Some((paths, profile_id, profile, expected_revision)) = profile_commit
-        {
-            let committed = paths
-                .save_if_revision(&profile_id, &profile, expected_revision)
-                .map_err(|error| ShellRunError::Package(error.to_string()))?;
-            DurableControlPlaneRevision::new(shared_revision, Some(committed.revision))
-        } else {
-            store
-                .save_if_revision(shared_revision)
-                .map_err(|error| ShellRunError::Package(error.to_string()))?;
-            DurableControlPlaneRevision::new(store.revision(), None)
+        let commit = move || persist_control_plane_settings(candidate);
+        let Some(tx) = self.file_watcher_tx.clone() else {
+            let commit = commit()?;
+            return self.commit_control_plane_batch(
+                commit,
+                theme,
+                locale,
+                theme_effect,
+                locale_effect,
+            );
         };
-
-        self.settings_watch.modified_at = std::fs::metadata(&shared_path)
-            .ok()
-            .and_then(|metadata| metadata.modified().ok());
-        Ok(ControlPlaneSettingsCommit { store, revision })
+        let wake = self.wake_handle.clone();
+        let worker = std::thread::spawn(move || {
+            let result = commit().map_err(|error| error.to_string());
+            let _ = tx.send(ShellMessage::ControlPlaneSettingsCommitFinished { result });
+            if let Some(wake) = wake {
+                wake.wake();
+            }
+        });
+        self.pending_control_plane_commit = Some(PendingControlPlaneCommit {
+            worker,
+            theme,
+            locale,
+            theme_effect,
+            locale_effect,
+        });
+        Ok(VecDeque::new())
     }
 
     /// Publish the effective settings snapshot through the ordinary interface
@@ -492,10 +533,9 @@ impl Shell {
         theme.update_active(|active| {
             crate::shell::discovery::apply_font_registry_tokens(active, &self.font_registry);
         });
-        let commit = self.commit_control_plane_settings(settings_candidate)?;
         tracing::info!("active theme changed to '{theme_id}'");
-        self.commit_control_plane_batch(
-            commit,
+        self.commit_control_plane_settings(
+            settings_candidate,
             Some((theme, prepared_theme.watch)),
             None,
             true,
@@ -545,10 +585,9 @@ impl Shell {
         theme.update_active(|active| {
             crate::shell::discovery::apply_font_registry_tokens(active, &self.font_registry);
         });
-        let commit = self.commit_control_plane_settings(settings_candidate)?;
         tracing::info!("active theme mode changed to '{mode}'");
-        self.commit_control_plane_batch(
-            commit,
+        self.commit_control_plane_settings(
+            settings_candidate,
             Some((theme, prepared_theme.watch)),
             None,
             true,
@@ -592,8 +631,7 @@ impl Shell {
             }
             Ok(())
         })?;
-        let commit = self.commit_control_plane_settings(candidate)?;
-        self.commit_control_plane_batch(commit, None, None, true, false)
+        self.commit_control_plane_settings(candidate, None, None, true, false)
     }
 
     pub(in crate::shell) fn apply_set_font_family(
@@ -629,8 +667,7 @@ impl Shell {
         theme.update_active(|active| apply_font_family(active, Some(&family)));
         let mut watch = self.theme_watch.clone();
         watch.revision = theme.active_snapshot().revision;
-        let commit = self.commit_control_plane_settings(candidate)?;
-        self.commit_control_plane_batch(commit, Some((theme, watch)), None, true, false)
+        self.commit_control_plane_settings(candidate, Some((theme, watch)), None, true, false)
     }
 
     /// Build the only service state allowed to describe the rendered theme.
@@ -1059,8 +1096,7 @@ impl Shell {
         };
 
         tracing::info!("active locale changed to '{}'", locale.current());
-        let commit = self.commit_control_plane_settings(candidate)?;
-        self.commit_control_plane_batch(commit, None, Some(locale), false, true)
+        self.commit_control_plane_settings(candidate, None, Some(locale), false, true)
     }
 
     /// Prepare the normalized locale and complete catalog before committing a

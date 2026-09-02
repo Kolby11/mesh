@@ -1,6 +1,9 @@
 use super::super::*;
 use super::service_state;
-use crate::shell::types::{PopoverSurfaceRelationship, PopoverTriggerReference, TabFocusTarget};
+use crate::shell::types::{
+    DurableProfileWriteResult, PopoverSurfaceRelationship, PopoverTriggerReference,
+    ProfileWriteOperation, TabFocusTarget,
+};
 use mesh_core_debug::{
     BenchmarkScenarioId, BenchmarkScenarioStatus, DebugBenchmarkRunState, ProfilingBackendStage,
 };
@@ -580,6 +583,149 @@ impl Shell {
         self.effect_scheduler.discard_pending()
     }
 
+    pub(in crate::shell) fn complete_profile_write(
+        &mut self,
+        operation: ProfileWriteOperation,
+        result: Result<DurableProfileWriteResult, String>,
+    ) -> VecDeque<CoreRequest> {
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => {
+                if let ProfileWriteOperation::BackendProviderSelection {
+                    interface,
+                    provider_id,
+                } = &operation
+                {
+                    self.fail_backend_runtime_switch(
+                        interface,
+                        provider_id,
+                        format!(
+                            "provider {provider_id} became ready for {interface}, but its selection could not be saved: {error}"
+                        ),
+                    );
+                }
+                self.diagnostics.record_lifecycle_error(
+                    "@mesh/settings",
+                    "profile_write_rejected",
+                    error,
+                );
+                return VecDeque::new();
+            }
+        };
+        match operation {
+            ProfileWriteOperation::NodeSlot {
+                profile_id,
+                apply_switch,
+            } => {
+                if apply_switch {
+                    self.apply_switch_profile(&profile_id)
+                } else {
+                    VecDeque::new()
+                }
+            }
+            ProfileWriteOperation::BackendProviderSelection {
+                interface,
+                provider_id,
+            } => {
+                if !matches!(&result, DurableProfileWriteResult::Complete) {
+                    self.fail_backend_runtime_switch(
+                        &interface,
+                        &provider_id,
+                        format!(
+                            "provider {provider_id} became ready for {interface}, but its selection worker returned an invalid result"
+                        ),
+                    );
+                    return VecDeque::new();
+                }
+                self.complete_backend_runtime_switch_after_persistence(&interface, &provider_id);
+                VecDeque::new()
+            }
+            ProfileWriteOperation::ProviderSelection {
+                graph_path: _,
+                interface,
+                provider_id,
+            } => {
+                if !matches!(result, DurableProfileWriteResult::Complete) {
+                    self.diagnostics.record_lifecycle_error(
+                        "@mesh/settings",
+                        "provider_selection_write_invalid_result",
+                        format!(
+                            "provider selection for {interface} returned an unexpected rollback"
+                        ),
+                    );
+                    return VecDeque::new();
+                }
+                let candidate = match self.load_installed_module_graph_candidate() {
+                    Ok(candidate) => candidate,
+                    Err(error) => {
+                        let message = format!(
+                            "provider selection for {interface} was saved but the candidate graph could not be loaded: {error}"
+                        );
+                        self.diagnostics.record_lifecycle_error(
+                            "@mesh/settings",
+                            "provider_selection_graph_reload_failed",
+                            message,
+                        );
+                        return VecDeque::new();
+                    }
+                };
+                if let Err(error) = self.commit_installed_module_graph(candidate) {
+                    let message = format!(
+                        "provider selection for {interface} was saved but locale catalogs could not be committed: {error}"
+                    );
+                    self.diagnostics.record_lifecycle_error(
+                        "@mesh/settings",
+                        "provider_selection_locale_reload_failed",
+                        message,
+                    );
+                }
+                tracing::info!(
+                    interface,
+                    provider_id,
+                    "saved selection for the already-running provider"
+                );
+                VecDeque::new()
+            }
+            ProfileWriteOperation::ModuleEnabled {
+                graph_path: _,
+                module_id,
+                enabled: _,
+                active_profile_id,
+            } => {
+                let DurableProfileWriteResult::Rollback(rollback) = result else {
+                    self.diagnostics.record_lifecycle_error(
+                        "@mesh/settings",
+                        "module_enabled_write_invalid_result",
+                        format!("enabled state write for {module_id} returned no rollback"),
+                    );
+                    return VecDeque::new();
+                };
+                if let Some(profile_id) = active_profile_id {
+                    return self.begin_profile_activation(&profile_id, Some(rollback));
+                }
+                let graph = match self.load_installed_module_graph_candidate() {
+                    Ok(graph) => graph,
+                    Err(error) => {
+                        let restore_error = rollback.restore().err();
+                        let message = format!(
+                            "module {module_id} update produced an unloadable graph: {error}{}",
+                            restore_error
+                                .map(|error| format!("; rollback also failed: {error}"))
+                                .unwrap_or_default()
+                        );
+                        self.diagnostics.record_lifecycle_error(
+                            "@mesh/settings",
+                            "module_enabled_graph_reload_failed",
+                            message,
+                        );
+                        return VecDeque::new();
+                    }
+                };
+                self.begin_legacy_graph_activation(graph, Some(rollback))
+            }
+        }
+    }
+
     fn apply_set_module_enabled(
         &mut self,
         module_id: &str,
@@ -684,6 +830,33 @@ impl Shell {
             .and_then(|graph| graph.module(module_id))
             .map(|module| module.kind)
             .expect("module existence was validated above");
+        if self.file_watcher_tx.is_some() {
+            let operation = ProfileWriteOperation::ModuleEnabled {
+                graph_path: graph_path.clone(),
+                module_id: module_id.to_string(),
+                enabled,
+                active_profile_id: active_profile_id.clone(),
+            };
+            let write_path = graph_path.clone();
+            let write_module_id = module_id.to_string();
+            if let Err(error) = self.start_profile_write(operation, move || {
+                crate::shell::module_config::write_composed_module_enabled(
+                    &write_path,
+                    &write_module_id,
+                    module_kind,
+                    enabled,
+                )
+                .map(DurableProfileWriteResult::Rollback)
+                .map_err(|error| error.to_string())
+            }) {
+                self.diagnostics.record_lifecycle_error(
+                    "@mesh/settings",
+                    "module_enabled_write_failed",
+                    error.to_string(),
+                );
+            }
+            return VecDeque::new();
+        }
         let rollback = match crate::shell::module_config::write_composed_module_enabled(
             &graph_path,
             module_id,
@@ -838,6 +1011,32 @@ impl Shell {
                 .is_some_and(|active| active.module_id == provider_id)
             {
                 tracing::debug!(interface, provider_id, "backend provider is already active");
+                return;
+            }
+            if self.file_watcher_tx.is_some() {
+                let operation = ProfileWriteOperation::ProviderSelection {
+                    graph_path: graph_path.clone(),
+                    interface: interface.to_string(),
+                    provider_id: provider_id.to_string(),
+                };
+                let write_path = graph_path.clone();
+                let write_interface = interface.to_string();
+                let write_provider_id = provider_id.to_string();
+                if let Err(error) = self.start_profile_write(operation, move || {
+                    crate::shell::module_config::write_composed_provider_selection(
+                        &write_path,
+                        &write_interface,
+                        &write_provider_id,
+                    )
+                    .map(|()| DurableProfileWriteResult::Complete)
+                    .map_err(|error| error.to_string())
+                }) {
+                    self.diagnostics.record_lifecycle_error(
+                        "@mesh/settings",
+                        "provider_selection_write_failed",
+                        error.to_string(),
+                    );
+                }
                 return;
             }
             match crate::shell::module_config::write_composed_provider_selection(
