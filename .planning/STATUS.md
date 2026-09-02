@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-09-01
+**Updated:** 2026-09-02
 
 ## Now
 
@@ -8,7 +8,9 @@ The 2026-09-01 whole-codebase audit is complete as a synthesis of the dated
 Sections 01–15 reports, the historical Section 16 report, and a fresh
 cross-section review. It accounts for 648 in-scope files with zero unassigned;
 new cross-section backlog items cover candidate identity, stale active
-snapshots, and pending watcher revisions. No production fixes were made.
+snapshots, and pending watcher revisions. Per-instance settings now resolve
+through each module owner's validated projection; invalid instance overrides
+remain available in raw storage for repair and are diagnosed.
 
 Section 15's first twelve items and Section 16's path-safe uninstall, atomic
 package mutation, typed live profile switching, shared CLI/shell package

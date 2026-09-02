@@ -500,7 +500,8 @@ impl SettingsStore {
     }
 
     fn resolved_stored(&self, name: &str) -> JsonValue {
-        if self.schemas.get(name).is_some() {
+        let owner = name.split_once('#').map_or(name, |(owner, _)| owner);
+        if self.schemas.get(owner).is_some() {
             return self
                 .validated_root
                 .get(name)
@@ -981,6 +982,59 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn invalid_instance_override_is_filtered_from_owner_projection() {
+        let mut store = store(json!({
+            "@mesh/test": {
+                "enabled": true,
+                "limit": 2
+            },
+            "@mesh/test#alternate": {
+                "enabled": "wrong",
+                "label": 7
+            }
+        }));
+        let schema = SettingsNamespaceSchema::new(
+            "@mesh/test",
+            "@mesh/test",
+            json!({
+                "type": "object",
+                "properties": {
+                    "enabled": { "type": "boolean" },
+                    "limit": { "type": "integer", "minimum": 1 },
+                    "label": { "type": "string" }
+                },
+                "additionalProperties": false
+            }),
+        )
+        .unwrap();
+
+        store
+            .replace_namespace_schemas_transactionally([schema])
+            .unwrap();
+
+        assert_eq!(
+            store.namespace("@mesh/test#alternate"),
+            json!({ "enabled": true, "limit": 2 }),
+            "invalid instance values must not reach the runtime projection"
+        );
+        assert_eq!(
+            store.to_value()["@mesh/test#alternate"],
+            json!({ "enabled": "wrong", "label": 7 }),
+            "raw instance values must remain available for repair"
+        );
+        assert!(store.diagnostics().iter().any(|diagnostic| {
+            diagnostic.namespace == "@mesh/test#alternate"
+                && diagnostic.key_path == "enabled"
+                && diagnostic.is_error()
+        }));
+        assert!(store.diagnostics().iter().any(|diagnostic| {
+            diagnostic.namespace == "@mesh/test#alternate"
+                && diagnostic.key_path == "label"
+                && diagnostic.is_error()
+        }));
     }
 
     #[test]

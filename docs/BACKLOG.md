@@ -26,9 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 The following Section 1 findings remain open; IDs preserve their audit evidence
 for a future report or rerun.
 
-- [ ] **S01-LOGIC-002 (P1):** Make per-instance settings resolve from the
-      owner-schema-validated projection rather than raw `#instance` storage;
-      add an invalid-instance-override regression test.
 - [ ] **S01-LOGIC-003 / S01-PERF-001 (P1):** Put settings and profile revision
       checks plus replacement behind one real serialized CAS boundary, route CLI
       mutations through it, and move the resulting durable I/O off the shell loop.
