@@ -26,8 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 The following Section 1 findings remain open; IDs preserve their audit evidence
 for a future report or rerun.
 
-- [ ] **S01-DEAD-004 (P2):** Remove inert `ShellSection.default_surface` with a
-      migration diagnostic, since profiles/root graphs own root surface selection.
 - [ ] **S01-PERF-002 (P2, measurement required):** Stop rebuilding and JSON-
       serializing the full debug snapshot every enabled frame; benchmark a
       generation-cached, bounded-cadence publisher with graph-size workloads.

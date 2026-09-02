@@ -19,6 +19,48 @@ pub use validate::{
     new_settings_diagnostics, validate_json_schema, validate_object,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigDiagnosticSeverity {
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigDiagnostic {
+    pub severity: ConfigDiagnosticSeverity,
+    pub path: PathBuf,
+    pub field_path: Option<String>,
+    pub message: String,
+    pub suggested_action: String,
+}
+
+impl ConfigDiagnostic {
+    pub fn error(
+        path: impl Into<PathBuf>,
+        field_path: Option<String>,
+        message: impl Into<String>,
+        suggested_action: impl Into<String>,
+    ) -> Self {
+        Self {
+            severity: ConfigDiagnosticSeverity::Error,
+            path: path.into(),
+            field_path,
+            message: message.into(),
+            suggested_action: suggested_action.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for ConfigDiagnostic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.path.display())?;
+        if let Some(field_path) = &self.field_path {
+            write!(f, ": {field_path}")?;
+        }
+        write!(f, ": {} — {}", self.message, self.suggested_action)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShellConfig {
     #[serde(default)]
@@ -480,16 +522,10 @@ fn default_tooltip_cursor_offset_y() -> f32 {
     18.0
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ShellSection {
-    #[serde(default = "default_surface")]
-    pub default_surface: String,
     #[serde(default)]
     pub discovery_paths: Vec<String>,
-}
-
-fn default_surface() -> String {
-    "@mesh/launcher".to_string()
 }
 
 fn default_theme_id() -> String {
@@ -518,15 +554,6 @@ fn default_slider_decrement_keys() -> Vec<String> {
 
 fn default_slider_increment_keys() -> Vec<String> {
     vec!["ArrowRight".into(), "ArrowUp".into()]
-}
-
-impl Default for ShellSection {
-    fn default() -> Self {
-        Self {
-            default_surface: default_surface(),
-            discovery_paths: Vec::new(),
-        }
-    }
 }
 
 pub fn resolve_discovery_paths(workspace_root: &Path, configured_paths: &[String]) -> Vec<PathBuf> {
@@ -584,6 +611,9 @@ pub enum ConfigError {
     #[error("validation error: {0}")]
     Validation(String),
 
+    #[error("configuration diagnostic: {diagnostic}")]
+    Diagnostic { diagnostic: ConfigDiagnostic },
+
     #[error("settings revision conflict: expected {expected}, found {actual}")]
     RevisionConflict { expected: u64, actual: u64 },
     #[error("settings revision exhausted at {current}")]
@@ -601,8 +631,28 @@ pub fn load_config(path: &Path) -> Result<ShellConfig, ConfigError> {
         });
     }
     let content = std::fs::read_to_string(path)?;
-    let config: ShellConfig = toml::from_str(&content)?;
+    let document: toml::Value = toml::from_str(&content)?;
+    reject_removed_config_fields(&document, path)?;
+    let config: ShellConfig = document.try_into()?;
     Ok(config)
+}
+
+fn reject_removed_config_fields(document: &toml::Value, path: &Path) -> Result<(), ConfigError> {
+    let Some(shell) = document.get("shell").and_then(toml::Value::as_table) else {
+        return Ok(());
+    };
+    if !shell.contains_key("default_surface") {
+        return Ok(());
+    }
+
+    Err(ConfigError::Diagnostic {
+        diagnostic: ConfigDiagnostic::error(
+            path,
+            Some("shell.default_surface".into()),
+            "default_surface is a removed root surface selection",
+            "remove shell.default_surface; select root surfaces through the active profile or root graph",
+        ),
+    })
 }
 
 fn dirs_path(kind: &str) -> PathBuf {
@@ -638,6 +688,52 @@ fn mesh_home_path() -> PathBuf {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn shell_section_has_no_implicit_root_surface() {
+        let section = ShellSection::default();
+        assert!(section.discovery_paths.is_empty());
+
+        let serialized = toml::to_string(&section).unwrap();
+        assert!(!serialized.contains("default_surface"));
+    }
+
+    #[test]
+    fn removed_default_surface_gets_a_migration_diagnostic() {
+        let path = std::env::temp_dir().join(format!(
+            "mesh-config-removed-default-surface-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::write(
+            &path,
+            "[shell]\ndefault_surface = \"@mesh/launcher\"\ndiscovery_paths = [\"modules\"]\n",
+        )
+        .unwrap();
+
+        let error = load_config(&path).expect_err("removed surface selection must not be accepted");
+        let ConfigError::Diagnostic { diagnostic } = error else {
+            panic!("expected a migration diagnostic for shell.default_surface");
+        };
+        assert_eq!(diagnostic.severity, ConfigDiagnosticSeverity::Error);
+        assert_eq!(
+            diagnostic.field_path.as_deref(),
+            Some("shell.default_surface")
+        );
+        assert!(
+            diagnostic
+                .message
+                .contains("removed root surface selection")
+        );
+        assert!(
+            diagnostic
+                .suggested_action
+                .contains("active profile or root graph")
+        );
+        assert_eq!(diagnostic.path, path);
+
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn empty_xdg_directory_values_are_absent() {
