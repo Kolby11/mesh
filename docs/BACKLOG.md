@@ -21,103 +21,223 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ---
 
-## Section audit feature checklist
+## 2026-08-31 read-only audit findings — Section 1
 
-These are the feature-level items extracted from the section improvement audits.
-The audit files retain the process maps, evidence, design detail, and regression
-matrices; this checklist is the canonical place to track implementation.
+The following Section 1 findings remain open; IDs preserve their audit evidence
+for a future report or rerun.
 
-### 1. Core foundation contracts
+- [ ] **S01-LOGIC-002 (P1):** Make per-instance settings resolve from the
+      owner-schema-validated projection rather than raw `#instance` storage;
+      add an invalid-instance-override regression test.
+- [ ] **S01-LOGIC-003 / S01-PERF-001 (P1):** Put settings and profile revision
+      checks plus replacement behind one real serialized CAS boundary, route CLI
+      mutations through it, and move the resulting durable I/O off the shell loop.
+- [ ] **S01-LOGIC-004 (P2):** Fail activation closed when resolved effective
+      capabilities are absent; remove production fallbacks that grant raw required
+      and optional manifest capabilities.
+- [ ] **S01-DEAD-002 / S01-LOGIC-009 (P2/P3):** Make the closed capability
+      catalog the only production authority; deprecate the fail-open legacy
+      privilege classifier and restrict raw mutable `CapabilitySet` construction.
+- [ ] **S01-DEAD-003 (P2):** Either make `CapabilityHandle` a proof required by
+      protected APIs or remove the currently unconsumed token abstraction after
+      downstream API review.
+- [ ] **S01-DEAD-004 (P2):** Remove inert `ShellSection.default_surface` with a
+      migration diagnostic, since profiles/root graphs own root surface selection.
+- [ ] **S01-PERF-002 (P2, measurement required):** Stop rebuilding and JSON-
+      serializing the full debug snapshot every enabled frame; benchmark a
+      generation-cached, bounded-cadence publisher with graph-size workloads.
+- [ ] **S01-PERF-003 / S01-DEAD-011 (P2/P3):** Produce diagnostics health,
+      history, and active issues from one coherent locked snapshot and one sort;
+      benchmark lock count, allocations, and payload parity.
+- [ ] **S01-LOGIC-005 (P2):** Sort debug snapshot modules and active surfaces by
+      stable identity so identical state produces deterministic serialized output.
+- [ ] **S01-LOGIC-006 (P2):** Bound diagnostic issue count, code/message bytes,
+      health summaries, and debug payload growth per module instance, with an
+      explicit overflow diagnostic.
+- [ ] **S01-LOGIC-008 (P2):** Share theme-schedule clock validation between
+      configuration and the theme engine so malformed or duplicate times are
+      rejected before runtime theme preparation.
+- [ ] **S01-DEAD-014 (P2 candidate):** Decide whether module
+      `i18n.default_locale` is a host-applied setting or arbitrary script data;
+      prove its behavior end to end, then implement or remove the inert schema/example.
+- [ ] **S01-PERF-005 (P3, measurement required):** Benchmark settings schema
+      validation across realistic namespace/schema sizes before considering borrowed
+      schema maps, reusable paths, or output reservation.
+- [ ] **S01-PERF-006 (P3, measurement required):** Measure activation-time
+      capability-set cloning across many instances and grants before considering
+      shared immutable resolved grants.
+- [ ] **S01-PERF-004 (P3):** Add a realistic retained-render workload to the
+      allocation-profiler overhead gate; the existing allocator microbenchmark
+      passes but does not measure frame-level impact.
+- [ ] **S01-DEAD-001 / S01-LOGIC-001 (P3):** Update the package concern map to
+      remove the deleted `mesh-core-events` crate and name the current event owners;
+      do not recreate the unused EventBus.
+- [ ] **S01-DEAD-005 (P3):** Remove unreachable `ConfigError::Validation`, or
+      deliberately route a real validation failure through it after confirming the
+      intended recoverable-settings contract.
+- [ ] **S01-DEAD-006 (P3):** Keep complete transactional schema replacement as
+      the canonical graph path and prune or privatize unused incremental schema
+      registration/introspection APIs after downstream review.
+- [ ] **S01-DEAD-007 (P3):** Remove unused direct `tracing`,
+      `tracing-subscriber`, and `thiserror` dependencies from
+      `mesh-core-diagnostics`, verified by focused check/test and dependency tree.
+- [ ] **S01-DEAD-008 (P3):** Remove unused diagnostics `ModuleMetrics` or
+      explicitly migrate its intended role into the current debug profiling DTOs.
+- [ ] **S01-DEAD-009 (P3):** Remove or formalize the test-only
+      `LifecycleErrorRecord` compatibility projection so the canonical diagnostics
+      snapshot is the sole lifecycle representation.
+- [ ] **S01-DEAD-010 (P3):** Either connect `Lifecycle`, `Configuration`, and
+      `Resource` diagnostic categories to their real producers or document them as
+      reserved wire values before considering removal.
+- [ ] **S01-DEAD-012 (P3):** Remove legacy `DebugTab`, `active_tab`, and
+      `from_legacy_tab` state after downstream compatibility review; the shell uses
+      `DebugInspectorView`.
+- [ ] **S01-DEAD-013 (P3):** Review downstream use, then prune unused public
+      capability introspection accessors that have no in-repository production
+      consumers.
+- [ ] **S01-DEAD-015 (P3 candidate):** Confirm whether `FieldKind::Int32` is a
+      supported extension point or unused reserved vocabulary before retaining or
+      removing it.
+- [ ] **S01-LOGIC-007 (P3):** Give lifecycle diagnostics an explicit module or
+      generation identity instead of attaching them to the first registered
+      instance; test multi-instance record and resolution behavior.
 
-The six primary findings in this audit shipped on 2026-08-20 and are recorded in
-the monthly log, so they are intentionally absent from the open backlog.
-[Audit](../.planning/log/sections/01-core-foundation-contracts/improvements.md)
+## 2026-09-01 whole-codebase audit — new open tasks
 
-### 2. Module system and installation
+New findings from the 2026-09-01 audit synthesis, sorted by audit section and
+grouped where one implementation should resolve several findings. Detailed
+evidence and test workloads are in the linked reports.
 
-[Audit](../.planning/log/sections/02-module-system-and-installation/improvements.md)
+### Section 01 — Core foundation contracts
 
+- [ ] **S01-LOGIC-003 / S01-DEAD-003:** Route debug-inspector access through
+      the closed capability catalog and make graph/surface schema ownership
+      canonical, with parity fixtures for activation and validation. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/01-core-foundation-contracts.md)
+- [ ] **S01-LOGIC-004 / S01-LOGIC-005:** Reject invalid array members without
+      compacting sparse settings, and resolve tooltip state from effective
+      settings rather than durable storage. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/01-core-foundation-contracts.md)
 
-### 3. Service contracts
+### Section 02 — Module system and installation
 
-[Audit](../.planning/log/sections/03-service-contracts/improvements.md)
+- [ ] **S02-LOGIC-001 / S02-LOGIC-002:** Preserve omitted versus explicit
+      profile overlays so inactive roots stay inactive and explicit empty
+      icon/font/language chains clear inherited values. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
+- [ ] **S02-LOGIC-003 / S02-LOGIC-008 / S02-LOGIC-011:** Bind graph diffs and
+      activation candidates to the same store, manifest/content revision, and
+      lock identity so same-version edits or mismatched objects cannot publish. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
+- [ ] **S02-LOGIC-004 / S02-LOGIC-005 / S02-LOGIC-006 / S02-LOGIC-007:** Make
+      forced slot removal, Git/profile rollback, lock paths, and active-profile
+      pointers fail closed and recover against the intended generation. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
+- [ ] **S02-LOGIC-009 / S02-LOGIC-010 / S02-LOGIC-012:** Resolve the required-
+      provider rule conflict and isolate invalid or unreadable modules with
+      durable diagnostics instead of aborting or silently shrinking discovery. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
+- [ ] **S02-LOGIC-013:** Add generation-aware package garbage collection that
+      retains active, rollback, and in-flight journal objects while reclaiming
+      only unreferenced immutable content. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
+- [ ] **S02-DEAD-002:** Centralize install capability/trust review in the module
+      core and make shell and CLI consume the same typed result. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
+- [ ] **S02-PERF-001 / S02-PERF-002 / S02-PERF-004 / S02-PERF-005:** Move
+      blocking package/Git preparation off the shell request path, avoid broad
+      no-op backups, share parsed manifests/passes, and enforce measured source
+      size budgets. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
+- [ ] **S02-PERF-003:** Replace whole-catalog authoring refresh hashing with
+      watcher/content-index revisions and retain full hashing as a recovery
+      fallback. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
 
+### Section 03 — Service contracts
 
-### 4. Themes
+- [ ] **S03-PERF-001 / S03-PERF-002 / S03-PERF-003 / S03-PERF-004:** Publish immutable service catalogs once per graph
+      generation, reuse compiled dispatch/schema data and per-turn service
+      views, and bound pending calls/events; add the specified fan-out/load
+      measurements before changing representations. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/03-service-contracts.md)
+- [ ] **S03-DEAD-001 / S03-DEAD-003:** Make compiled contracts the canonical
+      source for runtime, Luau, and documentation projections, retaining raw
+      declarations only behind explicit compatibility/tooling adapters. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/03-service-contracts.md)
 
-[Audit](../.planning/log/sections/04-themes/improvements.md)
+### Section 04 — Themes
 
-### 5. Localization and i18n
+- [ ] **S04-PERF-002 / S04-PERF-003 / S04-DEAD-003:** Share one bounded CSS,
+      token, and keyframe representation across theme and component paths, then
+      measure typed token dependency resolution and reload reuse. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/04-themes.md)
 
-[Audit](../.planning/log/sections/05-localization-i18n/improvements.md)
+### Section 05 — Localization and i18n
 
-### 6. Host resources and icon packs
+- [ ] **S05-PERF-001 / S05-PERF-002 / S05-PERF-003 / S05-DEAD-002:** Make bulk and point translation
+      lookup share one effective-catalog precedence traversal, and measure
+      catalog parsing, projection, and translator identifier allocation at
+      realistic sizes. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/05-localization-i18n.md)
 
-[Audit](../.planning/log/sections/06-host-resources-and-icon-packs/improvements.md)
+### Section 06 — Host resources and icon packs
 
-### 7. Component language
+- [ ] **S06-PERF-001 / S06-PERF-002 / S06-PERF-003:** Measure and narrow icon/font resolution and resource
+      invalidation by pack, alias, revision, and requesting owner while keeping
+      deterministic fallback order. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/06-host-resources-and-icon-packs.md)
 
-[Audit](../.planning/log/sections/07-component-language/improvements.md)
+### Section 07 — Component language
 
-### 8. UI element core
+- [ ] **S07-PERF-001 / S07-PERF-002 / S07-DEAD-002:** Share lexical/component
+      AST work and CSS value/selector lowering between runtime and tooling,
+      measuring incremental parse and dependency/style validation workloads. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/07-component-language.md)
 
-[Audit](../.planning/log/sections/08-ui-element-core/improvements.md)
+### Section 08 — UI element core
 
-### 9. Interaction and motion
+- [ ] **S08-PERF-001 / S08-PERF-002 / S08-PERF-003:** Measure and narrow retained layout/style work,
+      text measurement caching, and semantic/layout snapshot traversal for
+      localized changes while preserving stale-geometry safety. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/08-ui-element-core.md)
 
-[Audit](../.planning/log/sections/09-interaction-and-motion/improvements.md)
+### Section 09 — Interaction and motion
 
-### 10. Frontend compiler and host
+- [ ] **S09-PERF-001 / S09-PERF-002 / S09-PERF-003:** Measure repeated hit-test/dispatch traversal,
+      compiled animation timelines, and reduced-motion/visibility invalidation;
+      share dirty revisions with rendering. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/09-interaction-and-motion.md)
 
-[Audit](../.planning/log/sections/10-frontend-compiler-and-host/improvements.md)
+### Section 10 — Frontend compiler and host
 
-### 11. Luau runtime and sandbox
+- [ ] **S10-PERF-001 / S10-PERF-002 / S10-PERF-003:** Cache tree/style preparation and recursive imports by
+      content revision, and narrow effect/state observation summaries after
+      measuring rebuild and service-update workloads. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/10-frontend-compiler-and-host.md)
 
-[Audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md)
+### Section 11 — Luau runtime and sandbox
 
-### 12. Rendering and paint
+- [ ] **S11-PERF-001 / S11-PERF-002 / S11-PERF-003:** Measure shared-realm contention, host-boundary JSON
+      conversion, and stream lock/overflow behavior under bounded workloads
+      before changing runtime sharing or conversion paths. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/11-luau-runtime-and-sandbox.md)
+- [ ] **S11-DEAD-001:** Review repository callers and make the authorized stream
+      launch function the only production entry point, retaining any wrapper
+      only as an explicit test adapter. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/11-luau-runtime-and-sandbox.md)
 
-[Audit](../.planning/log/sections/12-rendering-and-paint/improvements.md)
+### Section 12 — Rendering and paint
 
-### 13. Surface policy and configuration
+- [ ] **S12-PERF-002 / S12-DEAD-001:** Measure sparse retained display-list
+      invalidation and consolidate proof, profiling, and production frame
+      evidence into one bounded metrics model. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/12-rendering-and-paint.md)
 
-[Audit](../.planning/log/sections/13-surface-policy-and-configuration/improvements.md)
+### Section 13 — Surface policy and configuration
 
+- [ ] **S13-PERF-001 / S13-PERF-002:** Compile effective surface policy by
+      revision and expose field-group diffs so geometry-only changes do not
+      trigger unrelated downstream work; measure merge, commit, and damage cost. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/13-surface-policy-and-configuration.md)
 
-### 14. Wayland platform and presentation
+### Section 14 — Wayland platform and presentation
 
-[Audit](../.planning/log/sections/14-wayland-platform-and-presentation/improvements.md)
+- [ ] **S14-PERF-002 / S14-PERF-003:** Separate region/geometry-only protocol
+      work from paint and measure bounded input conversion/queue behavior while
+      preserving ordering, damage, and acknowledgement semantics. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/14-wayland-platform-and-presentation.md)
 
-### 15. Shell core and orchestration
+### Section 15 — Shell core and orchestration
 
-[Audit](../.planning/log/sections/15-shell-core-and-orchestration/improvements.md)
-
-### 16. Developer and authoring tools
-
-[Audit](../.planning/log/sections/16-developer-and-authoring-tools/improvements.md)
-
-
-## Foundation contracts
-
-## Module system
-
-The 2026-06-18 redesign largely shipped: canonical `module.json` with
-`mesh.uses` / `mesh.provides` / `mesh.implements`, the graph as single source of
-truth, typed graph diagnostics, library modules, and resource packs. Remaining:
-
-## Service contracts
-
-## Themes
-
-## Host resources and icon packs
-
-## Component language
-
-## UI element core
-
-## Interaction and motion
-
-## Frontend compiler and host
+- [ ] **S15-LOGIC-001:** Close the post-commit control-plane failure seam so
+      settings, theme, locale, graph, pointer, runtime, and diagnostics either
+      commit as one generation or expose a typed degraded/recovery state. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/15-shell-core-and-orchestration.md)
+- [ ] **X-LOGIC-02 / X-LOGIC-03:** Bind candidate module identities and
+      `ActiveSnapshot` to committed activation/control-plane revisions, and
+      refresh or replace retained roots when policy or catalog state changes. [Cross-section audit](../.planning/codebase/audits/2026-09-01-whole-codebase/cross-section-findings.md)
+- [ ] **X-LOGIC-04:** Retain the newest filesystem graph revision while
+      activation is pending and retry reconciliation after candidate completion
+      or abort. [Cross-section audit](../.planning/codebase/audits/2026-09-01-whole-codebase/cross-section-findings.md)
+- [ ] **S15-PERF-001 / S15-PERF-002:** Benchmark shell-loop fairness and
+      profile/catalog preparation across module, surface, provider, and message
+      loads before changing scheduling or sharing. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/15-shell-core-and-orchestration.md)
 
 ## Shell core and orchestration
 
@@ -125,47 +245,6 @@ truth, typed graph diagnostics, library modules, and resource packs. Remaining:
       coordinator: immutable candidate graph/interfaces/resources, full root and
       provider identities, ready hidden replacements, atomic commit, and
       post-commit retirement. [Audit](../.planning/log/sections/15-shell-core-and-orchestration/improvements.md).
-- [ ] Reconcile every live graph delta, including backend module enable/disable;
-      buffer provider readiness state and generation-tag all runtime messages,
-      events, results, and restart deadlines.
-- [ ] Add explicit frontend unmount and graceful backend stop/join, then route
-      normal shutdown and every shell-loop error through one bounded lifecycle
-      supervisor that owns workers, IPC, eventfd, storage, and surfaces.
-- [ ] Replace the static startup watcher with a healthy, generation-aware watch
-      set covering graph/profile/catalog/contribution/resource/import changes,
-      with immediate bounded-poll fallback and last-known-good reloads.
-- [ ] Centralize CoreRequest effects in one fair bounded scheduler and isolate
-      component callback/tick/build failures into errored placeholders instead
-      of allowing cycles or one module to terminate the shell.
-- [ ] Make shell control-plane propagation coherent: publish provider
-      unavailable/recovery transitions, settings revisions, theme/locale effects,
-      and invalid graph/profile diagnostics through the committed generation.
-
-## Developer and authoring tools
-
-- [ ] Move CLI install/update/rollback/uninstall/profile mutations behind one
-      journaled, path-contained package transaction with typed live-activation
-      acknowledgements and exact-generation recovery. [Section 16 audit](../.planning/log/sections/16-developer-and-authoring-tools/improvements.md).
-- [ ] Derive and refresh one canonical graph-authoring snapshot for CLI, doctor,
-      and LSP; eliminate duplicated manifest/schema validation and stale or
-      silently lossy module/service indexes. [Section 16 audit](../.planning/log/sections/16-developer-and-authoring-tools/improvements.md).
-- [ ] Make LSP parsing and protocol boundaries correct and syntax-aware:
-      UTF-16 positions, workspace folders, Unicode JSON, versioned updates,
-      secure definitions, and recoverable Luau/component AST diagnostics.
-      [Section 16 audit](../.planning/log/sections/16-developer-and-authoring-tools/improvements.md).
-
-## Settings
-
-The single sparse store shipped 2026-07-30: one `config/settings.json`
-namespaced by `shell` / module id / interface id, replacing `shell-settings.json`,
-`settings-default.json`, and the per-module `config/settings.json` files.
-
-## Popovers
-
-In-tree `<popover>` nodes are promoted to `xdg_popup` child surfaces, with core
-owning the hover bridge, one-open-per-trigger exclusivity, and compositor
-dismiss sync. _(detail: "Embeddable popovers via `<popover>` surface
-promotion")_
 
 ## Performance
 
@@ -199,11 +278,6 @@ gate where the win is structural.
       still flattened per ancestor. Replay must consume segments directly
       instead of eagerly re-flattening them — an eager reconstruction was tried
       and reverted (see log).
-- [ ] Close the Section 12 correctness gaps before further paint optimization:
-      unify paint fingerprints and topology generations, implement complete
-      transforms/effect compositing/border lowering, and revision text/icon
-      caches. [Section 12 audit](../.planning/log/sections/12-rendering-and-paint/improvements.md)
-
 ### Style
 
 - [ ] Typed style declarations end-to-end: resolve theme tokens to typed values
@@ -228,8 +302,6 @@ gate where the win is structural.
       dominant remaining build cost in style resolution, not further attribute
       work. _(detail: "P2 — typing & interning")_
 
-### Composition
-
 ### Threading
 
 - [ ] Parallelize paint across surfaces: phase-split `render_components` into a
@@ -242,25 +314,6 @@ gate where the win is structural.
       paint path — via `spawn_blocking` plus completion events.
 
 ### Runtime boundary
-
-- [ ] Apply one authoritative sandbox/resource policy to every Luau realm:
-      enforce instruction, memory, output, queue, storage, and child-process
-      budgets, with timeout cleanup and quarantine. [Section 11 audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md).
-- [ ] Replace backend task aborts and early-return cleanup with an idempotent
-      lifecycle supervisor that stages provider generations, flushes storage,
-      reaps streams, and publishes one truthful terminal result. [Section 11 audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md).
-- [ ] Move `mesh.exec` and stream handling behind bounded cancellable workers
-      with stable stream IDs, exit/reap events, output limits, and executable
-      path/argument policy. [Section 11 audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md).
-- [ ] Make backend commands and events typed, correlated, generation-aware,
-      transactional, and bounded; define explicit coalescing keys and terminal
-      overflow/timeout results. [Section 11 audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md).
-- [ ] Move default runtime storage to secure durable XDG state with user-only
-      permissions, quotas, recovery, and single-writer/revision semantics.
-      [Section 11 audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md).
-- [ ] Make reload transactional and backend callback handles generation-stable:
-      replace stale Lua environments, preserve one backend `self`, and prevent
-      pre-ready or old-generation updates from reaching consumers. [Section 11 audit](../.planning/log/sections/11-luau-runtime-and-sandbox/improvements.md).
 
 - [ ] Push-based backend host API primitives (D-Bus signal subscribe, fd/socket
       watch, stream adoption) so providers are event-driven and polling is the
@@ -276,24 +329,6 @@ gate where the win is structural.
 - [ ] Storage reads still clone per Lua access. Needs shared immutable JSON
       values or lock avoidance — two cache designs were measured and reverted
       (I; see log).
-
-### Surface policy and configuration
-
-- [ ] Validate manifest surface enums and role-specific fields before
-      resolution; invalid declarations must produce diagnostics instead of
-      silently falling back. [Section 13 audit](../.planning/log/sections/13-surface-policy-and-configuration/improvements.md).
-- [ ] Protect the author-only `promotable` contract and route settings-driven
-      role changes through the same transactional transition path as explicit
-      promotion requests. [Section 13 audit](../.planning/log/sections/13-surface-policy-and-configuration/improvements.md).
-- [ ] Unify role-field metadata, settings/ejection semantics, and manifest
-      diagnostics so inert window/layer fields are handled consistently.
-      [Section 13 audit](../.planning/log/sections/13-surface-policy-and-configuration/improvements.md).
-- [ ] Replace split surface-config field lists with a revisioned semantic
-      policy diff that includes blur, decorations, padding, geometry, keyboard
-      mode, and role transitions. [Section 13 audit](../.planning/log/sections/13-surface-policy-and-configuration/improvements.md).
-- [ ] Make unmeasured/content/padded/physical surface extents typed at the
-      shell/presentation seam, with checked geometry and transactional reload
-      regressions. [Section 13 audit](../.planning/log/sections/13-surface-policy-and-configuration/improvements.md).
 
 ### Rendering and paint
 
@@ -312,21 +347,6 @@ gate where the win is structural.
 
 ### Presentation
 
-- [ ] Make presentation lifecycle transactional and observable: typed
-      create/configure/present/lost results, last-known-good role replacement,
-      and one idempotent close/dismiss/destroy teardown path. [Section 14 audit](../.planning/log/sections/14-wayland-platform-and-presentation/improvements.md).
-- [ ] Replace presentation fingerprints and warm region caches with typed diffs
-      and object/configure/frame generations so state-only changes and recreated
-      objects commit compositor state. [Section 14 audit](../.planning/log/sections/14-wayland-platform-and-presentation/improvements.md).
-- [ ] Make popup promotion capability- and identity-safe: carry click seat/serial,
-      gate reposition by xdg-shell version, validate role/parent/reparenting, and
-      correlate reactive configures. [Section 14 audit](../.planning/log/sections/14-wayland-platform-and-presentation/improvements.md).
-- [ ] Unify resolved logical/physical surface extents and make SHM buffer-release
-      backpressure, callback generations, output membership, and input ownership
-      explicit without hot retries or stale routing. [Section 14 audit](../.planning/log/sections/14-wayland-platform-and-presentation/improvements.md).
-- [ ] Replace the recording-only presentation test backend with a deterministic
-      lifecycle simulator and a small live compositor conformance matrix covering
-      close, popup, scaling, occlusion, and multi-output behavior. [Section 14 audit](../.planning/log/sections/14-wayland-platform-and-presentation/improvements.md).
 - [ ] Direct Skia paint into the mapped SHM canvas for full-present frames,
       keeping `PixelBuffer` as the retained compare copy (H). Design:
       [`.planning/todos/pending/2026-08-02-direct-shm-paint.md`](../.planning/todos/pending/2026-08-02-direct-shm-paint.md).
