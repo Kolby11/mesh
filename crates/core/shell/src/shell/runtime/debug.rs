@@ -128,7 +128,7 @@ impl Shell {
         // metadata resolution can discover misses that belong in this same
         // point-in-time debug snapshot.
         let module_graph = self.module_graph_entries();
-        let modules = self
+        let mut modules: Vec<ModuleEntry> = self
             .modules
             .values()
             .map(|inst| ModuleEntry {
@@ -238,13 +238,14 @@ impl Shell {
                 .then_with(|| a.provider_id.cmp(&b.provider_id))
         });
 
-        let active_surfaces: Vec<String> = self
+        let mut active_surfaces: Vec<String> = self
             .core
             .surfaces
             .iter()
             .filter(|(_, s)| s.visible)
             .map(|(id, _)| id.clone())
             .collect();
+        sort_debug_snapshot_identity_collections(&mut modules, &mut active_surfaces);
 
         let profiling = self.debug.profiling_enabled.then(|| {
             let mut profiling = self.profiling.snapshot(self.debug.profiling_session_id);
@@ -302,6 +303,14 @@ impl Shell {
     }
 }
 
+fn sort_debug_snapshot_identity_collections(
+    modules: &mut [ModuleEntry],
+    active_surfaces: &mut [String],
+) {
+    modules.sort_by(|left, right| left.id.cmp(&right.id));
+    active_surfaces.sort();
+}
+
 fn debug_diagnostic_from_issue(
     issue: mesh_core_diagnostics::DiagnosticIssue,
 ) -> DebugDiagnosticEntry {
@@ -316,6 +325,47 @@ fn debug_diagnostic_from_issue(
         source_span: issue.source_span,
         count: issue.count,
         active: issue.active,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_snapshot_identity_order_is_insertion_order_independent() {
+        let mut first_modules = vec![debug_module_entry("@mesh/z"), debug_module_entry("@mesh/a")];
+        let mut first_surfaces = vec!["@mesh/z-surface".to_string(), "@mesh/a-surface".to_string()];
+        let mut second_modules = vec![debug_module_entry("@mesh/a"), debug_module_entry("@mesh/z")];
+        let mut second_surfaces =
+            vec!["@mesh/a-surface".to_string(), "@mesh/z-surface".to_string()];
+
+        sort_debug_snapshot_identity_collections(&mut first_modules, &mut first_surfaces);
+        sort_debug_snapshot_identity_collections(&mut second_modules, &mut second_surfaces);
+
+        let first_payload = serde_json::json!({
+            "modules": first_modules,
+            "active_surfaces": first_surfaces,
+        });
+        let second_payload = serde_json::json!({
+            "modules": second_modules,
+            "active_surfaces": second_surfaces,
+        });
+        assert_eq!(first_payload, second_payload);
+    }
+
+    fn debug_module_entry(id: &str) -> ModuleEntry {
+        ModuleEntry {
+            id: id.to_string(),
+            module_type: "frontend".to_string(),
+            state: "running".to_string(),
+            health: "healthy".to_string(),
+            static_health: "healthy".to_string(),
+            runtime_health: "healthy".to_string(),
+            quarantined: false,
+            error_count: 0,
+            last_error: None,
+        }
     }
 }
 
