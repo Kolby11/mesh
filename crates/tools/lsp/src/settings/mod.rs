@@ -160,6 +160,12 @@ mod tests {
     }
 
     #[test]
+    fn does_not_complete_module_locale_override() {
+        let labels = complete_at(r#"{ "@who/knows": { "|" } }"#);
+        assert!(!labels.contains(&"i18n".to_string()));
+    }
+
+    #[test]
     fn flags_an_unknown_shell_key() {
         let d = diagnose(r#"{ "shell": { "tooltip": { "dely_ms": 200 } } }"#);
         assert!(

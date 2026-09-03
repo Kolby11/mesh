@@ -26,9 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 The following Section 1 findings remain open; IDs preserve their audit evidence
 for a future report or rerun.
 
-- [ ] **S01-DEAD-014 (P2 candidate):** Decide whether module
-      `i18n.default_locale` is a host-applied setting or arbitrary script data;
-      prove its behavior end to end, then implement or remove the inert schema/example.
 - [ ] **S01-PERF-005 (P3, measurement required):** Benchmark settings schema
       validation across realistic namespace/schema sizes before considering borrowed
       schema maps, reusable paths, or output reservation.

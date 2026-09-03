@@ -753,10 +753,6 @@ pub const MODULE_NAMESPACE_FIELDS: &[FieldSpec] = &[
             FieldSpec::new("ignore_shell_default", FieldKind::Bool),
         ]),
     ),
-    FieldSpec::new(
-        "i18n",
-        FieldKind::Section(&[FieldSpec::new("default_locale", FieldKind::Str)]),
-    ),
 ];
 
 /// Validate one module's stored namespace, returning the `surface` block
@@ -1827,13 +1823,26 @@ mod tests {
             "@mesh/navigation-bar",
             serde_json::json!({
                 "surface": { "anchor": "bottom", "blur": true },
-                "i18n": { "default_locale": "sk" },
                 "icons": { "overrides": { "settings": "lucide/settings" } }
             }),
             &manifest,
         );
 
         assert!(state.diagnostics.is_empty(), "{:#?}", state.diagnostics);
+    }
+
+    #[test]
+    fn module_default_locale_is_not_a_host_setting() {
+        let manifest = manifest_with_surface_layout(SurfaceLayoutSection::default());
+        let raw = serde_json::json!({
+            "i18n": { "default_locale": "sk" }
+        });
+        let state = resolve_frontend_module_settings("@mesh/navigation-bar", raw, &manifest);
+
+        assert_eq!(state.layout, surface_layout_from_manifest(&manifest));
+        assert_eq!(state.diagnostics.len(), 1);
+        assert_eq!(state.diagnostics[0].key_path, "i18n");
+        assert!(state.diagnostics[0].message.contains("unknown key"));
     }
 
     #[test]

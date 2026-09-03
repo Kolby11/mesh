@@ -1674,16 +1674,20 @@ fn module_settings_properties() -> serde_json::Map<String, serde_json::Value> {
                 }
             }
         },
-        "i18n": {
-            "type": "object",
-            "properties": {
-                "default_locale": { "type": "string" }
-            }
-        }
     })
     .as_object()
     .cloned()
     .expect("module settings schema is an object")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::module_settings_properties;
+
+    #[test]
+    fn module_schema_does_not_expose_module_default_locale() {
+        assert!(!module_settings_properties().contains_key("i18n"));
+    }
 }
 
 #[cfg(test)]

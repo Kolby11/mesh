@@ -1,9 +1,4 @@
 {
-  "@mesh/navigation-bar": {
-    "i18n": {
-      "default_locale": "sk"
-    }
-  },
   "revision": 85,
   "schemaVersion": 1,
   "shell": {

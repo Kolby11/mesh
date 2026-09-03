@@ -328,9 +328,6 @@ fn doc_for(path: &str) -> &'static str {
         "<module>.icons.ignore_shell_default" => {
             "Drop `shell.icons.default_pack` from this module's chain."
         }
-        "<module>.i18n" => "This module's localization overrides (spec 07).",
-        "<module>.i18n.default_locale" => "Locale this module falls back to.",
-
         _ => "",
     }
 }
