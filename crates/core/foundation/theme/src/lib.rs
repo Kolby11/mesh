@@ -292,6 +292,87 @@ pub struct ThemeModeSchedule {
     pub mode: String,
 }
 
+/// A schedule clock error reported by the shared configuration and theme
+/// validation boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ThemeScheduleValidationError {
+    InvalidTime {
+        index: usize,
+        value: String,
+        reason: String,
+    },
+    DuplicateTime {
+        index: usize,
+        previous_index: usize,
+        minute: u16,
+    },
+}
+
+impl ThemeScheduleValidationError {
+    /// Index of the schedule entry that makes the schedule invalid.
+    pub fn entry_index(&self) -> usize {
+        match self {
+            Self::InvalidTime { index, .. } | Self::DuplicateTime { index, .. } => *index,
+        }
+    }
+}
+
+impl fmt::Display for ThemeScheduleValidationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidTime { value, reason, .. } => {
+                write!(formatter, "theme schedule time '{value}' {reason}")
+            }
+            Self::DuplicateTime { minute, .. } => write!(
+                formatter,
+                "theme schedule contains duplicate time {:02}:{:02}",
+                minute / 60,
+                minute % 60
+            ),
+        }
+    }
+}
+
+/// Parse and validate all local wall-clock times in a theme schedule.
+///
+/// The returned minutes retain the input order so callers can associate them
+/// with their original entries. Duplicate detection is performed after
+/// parsing, independent of the order in which entries were declared.
+pub fn validate_theme_schedule_times(
+    entries: &[ThemeModeSchedule],
+) -> Result<Vec<u16>, ThemeScheduleValidationError> {
+    let mut minutes = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let minute = parse_clock_minute(&entry.at).map_err(|reason| {
+            ThemeScheduleValidationError::InvalidTime {
+                index,
+                value: entry.at.clone(),
+                reason,
+            }
+        })?;
+        minutes.push(minute);
+    }
+
+    let mut ordered = minutes
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, minute)| (minute, index))
+        .collect::<Vec<_>>();
+    ordered.sort_by_key(|(minute, _)| *minute);
+    for pair in ordered.windows(2) {
+        if pair[0].0 == pair[1].0 {
+            return Err(ThemeScheduleValidationError::DuplicateTime {
+                index: pair[1].1,
+                previous_index: pair[0].1,
+                minute: pair[0].0,
+            });
+        }
+    }
+
+    Ok(minutes)
+}
+
 impl ThemeModePolicy {
     /// Resolve one declared mode from the policy inputs. Keeping this pure
     /// makes manual settings, system changes, and schedule ticks share the
@@ -340,10 +421,13 @@ impl ThemeModePolicy {
                 if entries.is_empty() {
                     return Err("theme schedule must contain at least one entry".into());
                 }
+                let minutes =
+                    validate_theme_schedule_times(entries).map_err(|error| error.to_string())?;
                 let mut parsed = entries
                     .iter()
+                    .zip(minutes)
                     .map(|entry| {
-                        let minute = parse_clock_minute(&entry.at)?;
+                        let (entry, minute) = entry;
                         if !modes.contains_key(&entry.mode) {
                             return Err(format!(
                                 "theme schedule mode '{}' is not declared",
@@ -354,15 +438,6 @@ impl ThemeModePolicy {
                     })
                     .collect::<Result<Vec<_>, String>>()?;
                 parsed.sort_by_key(|(minute, _)| *minute);
-                for pair in parsed.windows(2) {
-                    if pair[0].0 == pair[1].0 {
-                        return Err(format!(
-                            "theme schedule contains duplicate time {:02}:{:02}",
-                            pair[0].0 / 60,
-                            pair[0].0 % 60
-                        ));
-                    }
-                }
                 let Some((_, selected)) = parsed
                     .iter()
                     .rev()
@@ -381,17 +456,15 @@ fn parse_clock_minute(value: &str) -> Result<u16, String> {
     let (hour, minute) = value
         .trim()
         .split_once(':')
-        .ok_or_else(|| format!("theme schedule time '{value}' must use HH:MM"))?;
+        .ok_or_else(|| "must use HH:MM".to_string())?;
     let hour = hour
         .parse::<u16>()
-        .map_err(|_| format!("theme schedule time '{value}' has an invalid hour"))?;
+        .map_err(|_| "has an invalid hour".to_string())?;
     let minute = minute
         .parse::<u16>()
-        .map_err(|_| format!("theme schedule time '{value}' has an invalid minute"))?;
+        .map_err(|_| "has an invalid minute".to_string())?;
     if hour >= 24 || minute >= 60 {
-        return Err(format!(
-            "theme schedule time '{value}' is outside 24-hour time"
-        ));
+        return Err("is outside 24-hour time".into());
     }
     Ok(hour * 60 + minute)
 }
@@ -2777,6 +2850,56 @@ mod tests {
                     .is_err()
             );
         }
+    }
+
+    #[test]
+    fn theme_schedule_clock_validation_preserves_input_order_and_reports_entries() {
+        let entries = vec![
+            ThemeModeSchedule {
+                at: "18:00".into(),
+                mode: "dark".into(),
+            },
+            ThemeModeSchedule {
+                at: "06:30".into(),
+                mode: "light".into(),
+            },
+        ];
+        assert_eq!(
+            validate_theme_schedule_times(&entries).unwrap(),
+            [1080, 390]
+        );
+
+        let invalid = vec![ThemeModeSchedule {
+            at: "not-a-time".into(),
+            mode: "dark".into(),
+        }];
+        assert_eq!(
+            validate_theme_schedule_times(&invalid),
+            Err(ThemeScheduleValidationError::InvalidTime {
+                index: 0,
+                value: "not-a-time".into(),
+                reason: "must use HH:MM".into(),
+            })
+        );
+
+        let duplicate = vec![
+            ThemeModeSchedule {
+                at: "18:00".into(),
+                mode: "dark".into(),
+            },
+            ThemeModeSchedule {
+                at: "18:00".into(),
+                mode: "light".into(),
+            },
+        ];
+        assert_eq!(
+            validate_theme_schedule_times(&duplicate),
+            Err(ThemeScheduleValidationError::DuplicateTime {
+                index: 1,
+                previous_index: 0,
+                minute: 1080,
+            })
+        );
     }
 
     #[test]

@@ -1273,6 +1273,48 @@ mod tests {
     }
 
     #[test]
+    fn theme_mode_policy_rejects_invalid_and_duplicate_schedule_times() {
+        for (entries, key_path, message) in [
+            (
+                json!([{ "at": "not-a-time", "mode": "dark" }]),
+                "theme.mode_policy.entries.0.at",
+                "must use HH:MM",
+            ),
+            (
+                json!([
+                    { "at": "18:00", "mode": "dark" },
+                    { "at": "18:00", "mode": "dark" }
+                ]),
+                "theme.mode_policy.entries.1.at",
+                "duplicate time 18:00",
+            ),
+        ] {
+            let store = store(json!({
+                "shell": {
+                    "theme": {
+                        "mode_policy": {
+                            "kind": "scheduled",
+                            "entries": entries,
+                        }
+                    }
+                }
+            }));
+
+            assert_eq!(
+                store.shell().theme.mode_policy,
+                mesh_core_theme::ThemeModePolicy::Manual
+            );
+            let diagnostic = store
+                .diagnostics()
+                .iter()
+                .find(|diagnostic| diagnostic.location() == format!("shell.{key_path}"))
+                .expect("invalid schedule time must be diagnosed at its entry");
+            assert!(diagnostic.is_error());
+            assert!(diagnostic.message.contains(message));
+        }
+    }
+
+    #[test]
     fn setting_the_shell_namespace_reresolves_shell_settings() {
         let mut store = store(json!({}));
         store.set_namespace("shell", json!({ "theme": { "active": "gruvbox-dark" } }));

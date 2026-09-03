@@ -55,9 +55,9 @@ production frontend and backend paths no longer fall back to raw manifest
 capability declarations. The closed capability catalog is now the only
 production authority, and raw mutable `CapabilitySet` construction is
 restricted; the unconsumed `CapabilityHandle` abstraction has been removed.
-The next open item is S01-LOGIC-008: sharing theme-schedule clock validation
-between configuration and the theme engine so malformed or duplicate times are
-rejected before runtime theme preparation.
+The next open item is S01-DEAD-014: decide whether module `i18n.default_locale`
+is a host-applied setting or arbitrary script data, then implement or remove
+the inert schema/example after proving its behavior end to end.
 Host icon/font resources now use one explicit immutable graph/profile candidate
 catalog and copy-on-write registry handle, with failed preparation, recovery,
 and package rollback retaining the last-known-good snapshot. Icon resolution

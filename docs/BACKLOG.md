@@ -26,9 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 The following Section 1 findings remain open; IDs preserve their audit evidence
 for a future report or rerun.
 
-- [ ] **S01-LOGIC-008 (P2):** Share theme-schedule clock validation between
-      configuration and the theme engine so malformed or duplicate times are
-      rejected before runtime theme preparation.
 - [ ] **S01-DEAD-014 (P2 candidate):** Decide whether module
       `i18n.default_locale` is a host-applied setting or arbitrary script data;
       prove its behavior end to end, then implement or remove the inert schema/example.

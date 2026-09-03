@@ -6,6 +6,7 @@
 //! a namespace against a declarative schema ([`FieldSpec`] / [`FieldKind`]),
 //! drops what it cannot accept, and says so.
 
+use mesh_core_theme::{ThemeModeSchedule, validate_theme_schedule_times};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 
 /// A wrong type or unrecognized enum value is an error: the user meant to
@@ -587,6 +588,7 @@ fn validate_theme_mode_policy(
         return None;
     };
     let mut accepted_entries = Vec::with_capacity(entries.len());
+    let mut schedule_entries = Vec::with_capacity(entries.len());
     for (index, entry) in entries.iter().enumerate() {
         let entry_path = join_path(&join_path(key_path, "entries"), &index.to_string());
         let Some(entry) = entry.as_object() else {
@@ -625,7 +627,24 @@ fn validate_theme_mode_policy(
             ));
             return None;
         }
+        schedule_entries.push(ThemeModeSchedule {
+            at: at.to_string(),
+            mode: mode.to_string(),
+        });
         accepted_entries.push(serde_json::json!({ "at": at, "mode": mode }));
+    }
+    if let Err(error) = validate_theme_schedule_times(&schedule_entries) {
+        let entry_path = join_path(
+            &join_path(key_path, "entries"),
+            &error.entry_index().to_string(),
+        );
+        diagnostics.push(SettingsDiagnostic::error(
+            namespace,
+            join_path(&entry_path, "at"),
+            error.to_string(),
+            "use a valid, unique time in HH:MM form",
+        ));
+        return None;
     }
     accepted.insert("entries".into(), JsonValue::Array(accepted_entries));
     Some(JsonValue::Object(accepted))
