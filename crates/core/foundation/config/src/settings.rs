@@ -931,8 +931,276 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[derive(Clone, Copy, Debug, Default)]
+    struct AllocationCounters {
+        count: u64,
+        allocated_bytes: u64,
+        deallocated_bytes: u64,
+        live_bytes: u64,
+    }
+
+    mod test_alloc {
+        use super::AllocationCounters;
+        use std::alloc::{GlobalAlloc, Layout, System};
+        use std::cell::{Cell, RefCell};
+
+        thread_local! {
+            static TRACKING: Cell<bool> = const { Cell::new(false) };
+            static COUNTERS: RefCell<AllocationCounters> =
+                const { RefCell::new(AllocationCounters { count: 0, allocated_bytes: 0, deallocated_bytes: 0, live_bytes: 0 }) };
+        }
+
+        pub(super) fn begin() {
+            TRACKING.with(|tracking| tracking.set(false));
+            COUNTERS.with(|counters| counters.replace(AllocationCounters::default()));
+            TRACKING.with(|tracking| tracking.set(true));
+        }
+
+        pub(super) fn end() -> AllocationCounters {
+            TRACKING.with(|tracking| tracking.set(false));
+            COUNTERS.with(|counters| *counters.borrow())
+        }
+
+        pub(super) fn reset_activity() {
+            COUNTERS.with(|counters| {
+                let mut counters = counters.borrow_mut();
+                counters.count = 0;
+                counters.allocated_bytes = 0;
+                counters.deallocated_bytes = 0;
+            });
+        }
+
+        pub(super) fn snapshot() -> AllocationCounters {
+            COUNTERS.with(|counters| *counters.borrow())
+        }
+
+        fn with_tracking(mut update: impl FnMut(&mut AllocationCounters)) {
+            TRACKING.with(|tracking| {
+                if tracking.get() {
+                    COUNTERS.with(|counters| update(&mut counters.borrow_mut()));
+                }
+            });
+        }
+
+        unsafe impl GlobalAlloc for CountingAllocator {
+            unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+                let pointer = unsafe { System.alloc(layout) };
+                if !pointer.is_null() {
+                    with_tracking(|counters| {
+                        counters.count += 1;
+                        counters.allocated_bytes += layout.size() as u64;
+                        counters.live_bytes += layout.size() as u64;
+                    });
+                }
+                pointer
+            }
+
+            unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+                let pointer = unsafe { System.alloc_zeroed(layout) };
+                if !pointer.is_null() {
+                    with_tracking(|counters| {
+                        counters.count += 1;
+                        counters.allocated_bytes += layout.size() as u64;
+                        counters.live_bytes += layout.size() as u64;
+                    });
+                }
+                pointer
+            }
+
+            unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+                unsafe { System.dealloc(pointer, layout) };
+                with_tracking(|counters| {
+                    counters.deallocated_bytes += layout.size() as u64;
+                    counters.live_bytes = counters.live_bytes.saturating_sub(layout.size() as u64);
+                });
+            }
+
+            unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+                let new_pointer = unsafe { System.realloc(pointer, layout, new_size) };
+                if !new_pointer.is_null() {
+                    with_tracking(|counters| {
+                        counters.count += 1;
+                        counters.allocated_bytes += new_size as u64;
+                        counters.deallocated_bytes += layout.size() as u64;
+                        counters.live_bytes = counters
+                            .live_bytes
+                            .saturating_sub(layout.size() as u64)
+                            .saturating_add(new_size as u64);
+                    });
+                }
+                new_pointer
+            }
+        }
+
+        pub(super) struct CountingAllocator;
+    }
+
+    #[global_allocator]
+    static TEST_ALLOCATOR: test_alloc::CountingAllocator = test_alloc::CountingAllocator;
+
     fn store(value: JsonValue) -> SettingsStore {
         SettingsStore::from_value("/tmp/mesh-test-settings.json", value).expect("valid store")
+    }
+
+    // cargo test -p mesh-core-config --release -- settings_schema_validation_release_benchmark --ignored --nocapture
+    #[test]
+    #[ignore = "release-only settings schema validation scaling benchmark"]
+    fn settings_schema_validation_release_benchmark() {
+        for &namespace_count in &[1, 32, 256] {
+            for &field_count in &[8, 32, 128] {
+                let mut samples = Vec::with_capacity(30);
+                let mut allocations = Vec::with_capacity(30);
+                test_alloc::begin();
+                let (mut store, schemas, schema_bytes, settings_bytes) =
+                    settings_schema_benchmark_fixture(namespace_count, field_count);
+                test_alloc::reset_activity();
+
+                for _ in 0..3 {
+                    store
+                        .replace_namespace_schemas_transactionally(schemas.iter().cloned())
+                        .expect("benchmark schemas should remain valid");
+                }
+                test_alloc::reset_activity();
+
+                for _ in 0..30 {
+                    test_alloc::reset_activity();
+                    let started = std::time::Instant::now();
+                    let result =
+                        store.replace_namespace_schemas_transactionally(schemas.iter().cloned());
+                    let elapsed = started.elapsed().as_nanos();
+                    let counters = test_alloc::snapshot();
+                    result.expect("benchmark schemas should remain valid");
+                    samples.push(elapsed);
+                    allocations.push(counters);
+                }
+                test_alloc::end();
+                samples.sort_unstable();
+
+                let min_ns = samples[0];
+                let median_ns = samples[samples.len() / 2];
+                let p95_ns = samples[(samples.len() * 95) / 100];
+                let max_ns = *samples.last().expect("benchmark has samples");
+                let min_allocations = allocations.iter().map(|item| item.count).min().unwrap();
+                let max_allocations = allocations.iter().map(|item| item.count).max().unwrap();
+                let min_allocated_bytes = allocations
+                    .iter()
+                    .map(|item| item.allocated_bytes)
+                    .min()
+                    .unwrap();
+                let max_allocated_bytes = allocations
+                    .iter()
+                    .map(|item| item.allocated_bytes)
+                    .max()
+                    .unwrap();
+                let min_retained_bytes = allocations
+                    .iter()
+                    .map(|item| item.live_bytes)
+                    .min()
+                    .unwrap();
+                let max_retained_bytes = allocations
+                    .iter()
+                    .map(|item| item.live_bytes)
+                    .max()
+                    .unwrap();
+
+                assert_eq!(store.schema_registry().iter().count(), namespace_count);
+                assert_eq!(store.namespace_names().count(), namespace_count);
+                assert!(store.diagnostics().is_empty());
+                eprintln!(
+                    "MESH_PERF metric=settings_schema_validation namespaces={namespace_count} fields={field_count} iterations=30 schema_bytes={schema_bytes} settings_bytes={settings_bytes} latency_ns={min_ns}..{max_ns} median_ns={median_ns} p95_ns={p95_ns} allocations={min_allocations}..{max_allocations} allocated_bytes={min_allocated_bytes}..{max_allocated_bytes} retained_bytes={min_retained_bytes}..{max_retained_bytes}"
+                );
+            }
+        }
+    }
+
+    fn settings_schema_benchmark_fixture(
+        namespace_count: usize,
+        field_count: usize,
+    ) -> (SettingsStore, Vec<SettingsNamespaceSchema>, usize, usize) {
+        let mut root = serde_json::Map::new();
+        let mut schemas = Vec::with_capacity(namespace_count);
+        for namespace_index in 0..namespace_count {
+            let namespace = format!("@bench/settings-{namespace_index:03}");
+            let mut properties = serde_json::Map::new();
+            let mut values = serde_json::Map::new();
+            for field_index in 0..field_count {
+                let key = format!("field_{field_index:03}");
+                let (schema, value) = match field_index % 8 {
+                    0 => (json!({ "type": "boolean" }), json!(field_index % 2 == 0)),
+                    1 => (
+                        json!({ "type": "integer", "minimum": 0, "maximum": field_count }),
+                        json!(field_index),
+                    ),
+                    2 => (
+                        json!({
+                            "type": "string",
+                            "enum": ["compact", "comfortable", "spacious"]
+                        }),
+                        json!("compact"),
+                    ),
+                    3 => (
+                        json!({ "type": "array", "items": { "type": "string" } }),
+                        json!([format!("value-{field_index}")]),
+                    ),
+                    4 => (
+                        json!({
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": field_count
+                        }),
+                        json!(field_index as f64 + 0.5),
+                    ),
+                    5 => (
+                        json!({
+                            "type": "object",
+                            "properties": {
+                                "enabled": { "type": "boolean" },
+                                "label": { "type": "string" },
+                                "limit": { "type": "integer", "minimum": 0, "maximum": 100 }
+                            },
+                            "additionalProperties": false
+                        }),
+                        json!({
+                            "enabled": true,
+                            "label": format!("field-{field_index}"),
+                            "limit": field_index % 101
+                        }),
+                    ),
+                    _ => (
+                        json!({ "type": "string" }),
+                        json!(format!("value-{field_index}")),
+                    ),
+                };
+                properties.insert(key.clone(), schema);
+                values.insert(key, value);
+            }
+
+            let schema = SettingsNamespaceSchema::new(
+                namespace.clone(),
+                namespace.clone(),
+                json!({
+                    "type": "object",
+                    "properties": properties,
+                    "additionalProperties": false
+                }),
+            )
+            .expect("benchmark fixture schema should be valid");
+            schemas.push(schema);
+            root.insert(namespace, JsonValue::Object(values));
+        }
+
+        let store = SettingsStore::from_value(
+            "/tmp/mesh-settings-schema-benchmark.json",
+            JsonValue::Object(root),
+        )
+        .expect("benchmark fixture settings should be valid");
+        let schema_documents = schemas
+            .iter()
+            .map(|schema| &schema.schema)
+            .collect::<Vec<_>>();
+        let schema_bytes = serde_json::to_vec(&schema_documents).unwrap().len();
+        let settings_bytes = serde_json::to_vec(&store.to_value()).unwrap().len();
+        (store, schemas, schema_bytes, settings_bytes)
     }
 
     #[test]

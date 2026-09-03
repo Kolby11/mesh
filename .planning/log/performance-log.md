@@ -3884,3 +3884,46 @@ The focused coherent-snapshot test and shell debug publication tests passed.
 The full shell library suite reported 779 passed, 47 unrelated baseline
 failures, and 132 ignored; those failures remain in existing rendering,
 interaction, fixture, lifecycle, and profiling tests.
+
+## 2026-09-03 — benchmark settings schema validation
+
+`working tree` · area: settings schema validation
+
+Added the ignored release-only gate
+`settings_schema_validation_release_benchmark` to the settings unit-test
+module. It exercises the public transactional schema replacement path over the
+required 1/32/256 namespace × 8/32/128 declared-field matrix. Each synthetic
+namespace uses a mixed schema of booleans, bounded integers, enums, string
+arrays, bounded numbers, strings, and nested objects. The settings document has
+one valid value for every declared field. The gate performs three warmup
+replacements and 30 measured replacements per shape, and reports fixture
+schema/settings bytes, latency, allocation count, allocated bytes, and tracked
+live retained bytes. A thread-local test allocator keeps counters isolated from
+other unit tests.
+
+**Measured.** Machine: Linux 6.12.93 x86_64, Intel Core i5-6200U (2 cores / 4
+threads); `nix develop`; rustc/cargo 1.94.0; repository-default optimized
+release profile (thin LTO, one codegen unit). Gate command:
+`nix develop -c cargo test -p mesh-core-config --release --
+settings_schema_validation_release_benchmark --ignored --nocapture`. Each row
+below reports the minimum–maximum median and p95 from three complete gate runs;
+allocation values are stable for all 30 samples and all three runs.
+
+| Namespaces × fields | Schema bytes | Settings bytes | Median ns | p95 ns | Allocations | Allocated bytes | Retained bytes |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 × 8 | 574 | 237 | 111,726–124,982 | 140,564–176,760 | 426 | 49,973 | 25,788 |
+| 1 × 32 | 2,115 | 839 | 375,690–446,080 | 416,921–582,650 | 1,314 | 159,677 | 93,182 |
+| 1 × 128 | 8,303 | 3,271 | 1,440,461–1,696,985 | 1,485,872–3,334,967 | 4,866 | 597,386 | 362,020 |
+| 32 × 8 | 18,337 | 6,995 | 2,925,749–3,254,377 | 3,172,816–3,918,615 | 10,149 | 1,202,382 | 750,508 |
+| 32 × 32 | 67,649 | 26,259 | 12,289,193–14,022,618 | 13,026,731–20,390,894 | 38,565 | 4,712,910 | 2,907,116 |
+| 32 × 128 | 265,665 | 104,083 | 56,103,052–60,919,406 | 62,593,335–65,524,311 | 152,229 | 18,719,598 | 11,509,932 |
+| 256 × 8 | 146,689 | 55,827 | 27,233,236–27,363,239 | 29,876,185–36,242,652 | 80,446 | 9,562,534 | 6,006,180 |
+| 256 × 32 | 541,185 | 209,939 | 118,446,208–124,054,311 | 132,070,773–149,376,242 | 307,774 | 37,646,758 | 23,259,044 |
+| 256 × 128 | 2,125,313 | 832,531 | 499,894,319–519,039,295 | 550,854,113–597,393,335 | 1,217,086 | 149,700,262 | 92,081,572 |
+
+No before/after comparison or optimization is claimed; this establishes the
+current validation baseline before considering borrowed schema maps, reusable
+paths, or output reservation. The first harness revision incorrectly reset
+live-byte accounting for each replacement and reported zero retained bytes; it
+was corrected before the three final runs above, and those preliminary numbers
+are not used.

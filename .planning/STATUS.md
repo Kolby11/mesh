@@ -55,9 +55,10 @@ production frontend and backend paths no longer fall back to raw manifest
 capability declarations. The closed capability catalog is now the only
 production authority, and raw mutable `CapabilitySet` construction is
 restricted; the unconsumed `CapabilityHandle` abstraction has been removed.
-The next open item is S01-PERF-005: benchmark settings schema validation across
-realistic namespace/schema sizes before considering borrowed schema maps,
-reusable paths, or output reservation.
+The settings schema validation baseline is recorded in
+[`.planning/log/performance-log.md`](log/performance-log.md). The next open item
+is S01-PERF-006: measure activation-time capability-set cloning across many
+instances and grants before considering shared immutable resolved grants.
 Host icon/font resources now use one explicit immutable graph/profile candidate
 catalog and copy-on-write registry handle, with failed preparation, recovery,
 and package rollback retaining the last-known-good snapshot. Icon resolution
