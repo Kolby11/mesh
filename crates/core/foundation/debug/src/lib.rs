@@ -8,6 +8,9 @@ use serde::{Serialize, Serializer};
 /// Version of the JSON telemetry DTO carried by the `mesh.debug` service.
 /// Shell overlay/controller state is deliberately kept outside this DTO.
 pub const DEBUG_TELEMETRY_SCHEMA_VERSION: u32 = 1;
+/// Maximum serialized diagnostic-entry bytes contributed by one module
+/// instance to a debug snapshot.
+pub const MAX_DEBUG_DIAGNOSTIC_BYTES_PER_INSTANCE: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct DebugSnapshot {

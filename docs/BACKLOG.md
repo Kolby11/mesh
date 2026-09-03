@@ -26,9 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 The following Section 1 findings remain open; IDs preserve their audit evidence
 for a future report or rerun.
 
-- [ ] **S01-LOGIC-006 (P2):** Bound diagnostic issue count, code/message bytes,
-      health summaries, and debug payload growth per module instance, with an
-      explicit overflow diagnostic.
 - [ ] **S01-LOGIC-008 (P2):** Share theme-schedule clock validation between
       configuration and the theme engine so malformed or duplicate times are
       rejected before runtime theme preparation.

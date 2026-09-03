@@ -8,6 +8,23 @@ use std::time::{Duration, SystemTime};
 
 use serde::Serialize;
 
+/// Maximum number of retained issue records for one module instance. One
+/// record is reserved for [`DIAGNOSTIC_OVERFLOW_ISSUE_CODE`].
+pub const MAX_ISSUES_PER_INSTANCE: usize = 256;
+/// Maximum UTF-8 byte length retained for an issue identity.
+pub const MAX_ISSUE_CODE_BYTES: usize = 256;
+/// Maximum UTF-8 byte length retained for an issue message.
+pub const MAX_ISSUE_MESSAGE_BYTES: usize = 4 * 1024;
+/// Maximum UTF-8 byte length retained for diagnostic source paths.
+pub const MAX_ISSUE_SOURCE_PATH_BYTES: usize = 4 * 1024;
+/// Maximum UTF-8 byte length of a generated health summary.
+pub const MAX_HEALTH_SUMMARY_BYTES: usize = 8 * 1024;
+/// Stable issue identity used when any diagnostic budget is exceeded.
+pub const DIAGNOSTIC_OVERFLOW_ISSUE_CODE: &str = "diagnostics:overflow";
+/// Stable, bounded overflow text shared by health and debug consumers.
+pub const DIAGNOSTIC_OVERFLOW_MESSAGE: &str =
+    "diagnostic budget exceeded; some issues were truncated or dropped";
+
 #[cfg(test)]
 mod test_alloc {
     use std::alloc::{GlobalAlloc, Layout, System};
@@ -345,8 +362,21 @@ impl Diagnostics {
         source_path: Option<String>,
         source_span: Option<DiagnosticSourceSpan>,
     ) -> bool {
+        let (issue_code, code_truncated) = truncate_owned(issue_code, MAX_ISSUE_CODE_BYTES);
+        let (message, message_truncated) = truncate_owned(message, MAX_ISSUE_MESSAGE_BYTES);
+        let (source_path, source_path_truncated) = source_path
+            .map(|path| truncate_owned(path, MAX_ISSUE_SOURCE_PATH_BYTES))
+            .map_or((None, false), |(path, truncated)| (Some(path), truncated));
+        let input_truncated = code_truncated || message_truncated || source_path_truncated;
         let now = SystemTime::now();
         let mut state = self.lock_state();
+        if issue_code == DIAGNOSTIC_OVERFLOW_ISSUE_CODE {
+            self.record_overflow_locked(&mut state, now);
+            drop(state);
+            self.generation.fetch_add(1, Ordering::Relaxed);
+            return false;
+        }
+        let mut capacity_exceeded = false;
         let newly_active = if let Some(issue) = state.issues.get_mut(&issue_code) {
             let newly_active = !issue.active;
             let previous_severity = issue.severity;
@@ -374,6 +404,10 @@ impl Diagnostics {
                 state.error_count = state.error_count.saturating_add(1);
             }
             newly_active
+        } else if state.issues.len() >= MAX_ISSUES_PER_INSTANCE.saturating_sub(1) {
+            self.record_overflow_locked(&mut state, now);
+            capacity_exceeded = true;
+            false
         } else {
             if severity == IssueSeverity::Error {
                 state.error_count = state.error_count.saturating_add(1);
@@ -397,6 +431,9 @@ impl Diagnostics {
             );
             true
         };
+        if input_truncated && !capacity_exceeded {
+            self.record_overflow_locked(&mut state, now);
+        }
         drop(state);
         self.generation.fetch_add(1, Ordering::Relaxed);
         newly_active
@@ -595,6 +632,56 @@ impl Diagnostics {
     pub fn error_count(&self) -> u64 {
         self.lock_state().error_count
     }
+
+    fn record_overflow_locked(&self, state: &mut DiagnosticsState, now: SystemTime) {
+        if let Some(issue) = state.issues.get_mut(DIAGNOSTIC_OVERFLOW_ISSUE_CODE) {
+            issue.last_seen = now;
+            issue.count = issue.count.saturating_add(1);
+            issue.active = true;
+            return;
+        }
+
+        if state.issues.len() >= MAX_ISSUES_PER_INSTANCE {
+            let evicted = state
+                .issues
+                .keys()
+                .filter(|code| code.as_str() != DIAGNOSTIC_OVERFLOW_ISSUE_CODE)
+                .max()
+                .cloned();
+            if let Some(evicted) = evicted {
+                state.issues.remove(&evicted);
+            }
+        }
+        state.issues.insert(
+            DIAGNOSTIC_OVERFLOW_ISSUE_CODE.to_string(),
+            DiagnosticIssue {
+                module_id: self.module_id.clone(),
+                instance_id: self.instance_id.clone(),
+                issue_code: DIAGNOSTIC_OVERFLOW_ISSUE_CODE.to_string(),
+                category: DiagnosticCategory::Runtime,
+                severity: IssueSeverity::Warning,
+                message: DIAGNOSTIC_OVERFLOW_MESSAGE.to_string(),
+                source_path: None,
+                source_span: None,
+                first_seen: now,
+                last_seen: now,
+                count: 1,
+                active: true,
+            },
+        );
+    }
+}
+
+fn truncate_owned(mut value: String, max_bytes: usize) -> (String, bool) {
+    if value.len() <= max_bytes {
+        return (value, false);
+    }
+    let mut boundary = max_bytes;
+    while !value.is_char_boundary(boundary) {
+        boundary = boundary.saturating_sub(1);
+    }
+    value.truncate(boundary);
+    (value, true)
 }
 
 fn lifecycle_issue_code(provider_id: &str, stage: &str) -> String {
@@ -612,11 +699,7 @@ fn health_from_issues<'a>(issues: impl Iterator<Item = &'a DiagnosticIssue>) -> 
     let Some(first) = issues.first() else {
         return HealthStatus::Healthy;
     };
-    let details = issues
-        .iter()
-        .map(|issue| format!("{}: {}", issue.issue_code, issue.message))
-        .collect::<Vec<_>>()
-        .join("; ");
+    let details = bounded_health_details(issues.iter().copied());
     match first.severity {
         IssueSeverity::Warning => HealthStatus::Degraded(details),
         IssueSeverity::Error => HealthStatus::Error(details),
@@ -635,24 +718,68 @@ fn health_from_sorted_issues(issues: &[DiagnosticIssue]) -> HealthStatus {
         return HealthStatus::Healthy;
     };
 
-    let mut details = issues
+    let details = issues
         .iter()
         .filter(|issue| issue.active && issue.severity == severity)
-        .map(|issue| format!("{}: {}", issue.issue_code, issue.message))
-        .collect::<Vec<_>>();
-    if has_error {
-        details.extend(
-            issues
-                .iter()
-                .filter(|issue| issue.active && issue.severity == IssueSeverity::Warning)
-                .map(|issue| format!("{}: {}", issue.issue_code, issue.message)),
+        .chain(
+            has_error
+                .then(|| {
+                    issues
+                        .iter()
+                        .filter(|issue| issue.active && issue.severity == IssueSeverity::Warning)
+                })
+                .into_iter()
+                .flatten(),
         );
-    }
-    let details = details.join("; ");
+    let details = bounded_health_details(details);
     match severity {
         IssueSeverity::Warning => HealthStatus::Degraded(details),
         IssueSeverity::Error => HealthStatus::Error(details),
     }
+}
+
+fn bounded_health_details<'a>(issues: impl Iterator<Item = &'a DiagnosticIssue>) -> String {
+    let detail_limit = MAX_HEALTH_SUMMARY_BYTES.saturating_sub("degraded: ".len());
+    let mut details = String::new();
+    let mut truncated = false;
+    for issue in issues {
+        let detail = format!("{}: {}", issue.issue_code, issue.message);
+        let separator = if details.is_empty() { "" } else { "; " };
+        if details
+            .len()
+            .saturating_add(separator.len())
+            .saturating_add(detail.len())
+            <= detail_limit
+        {
+            details.push_str(separator);
+            details.push_str(&detail);
+        } else {
+            truncated = true;
+        }
+    }
+
+    if truncated {
+        let marker = format!(
+            "{}: {}",
+            DIAGNOSTIC_OVERFLOW_ISSUE_CODE, DIAGNOSTIC_OVERFLOW_MESSAGE
+        );
+        let separator = if details.is_empty() { "" } else { "; " };
+        let required = separator.len().saturating_add(marker.len());
+        if required > detail_limit {
+            details.clear();
+            details.push_str(&marker[..detail_limit]);
+        } else {
+            let available = detail_limit.saturating_sub(required);
+            if details.len() > available {
+                details = truncate_owned(details, available).0;
+            }
+            if !details.is_empty() {
+                details.push_str(separator);
+            }
+            details.push_str(&marker);
+        }
+    }
+    details
 }
 
 #[derive(Debug)]
@@ -1039,6 +1166,76 @@ mod tests {
         );
         assert!(matches!(snapshot.health, HealthStatus::Error(message) if
             message == "error: error message"));
+    }
+
+    #[test]
+    fn diagnostic_history_is_bounded_and_reports_issue_overflow() {
+        let diagnostics = Diagnostics::new_instance("@test/module", "instance");
+        for index in 0..100_000 {
+            diagnostics.record_issue(
+                format!("issue-{index:06}"),
+                IssueSeverity::Warning,
+                "diagnostic message",
+            );
+        }
+
+        let snapshot = diagnostics.snapshot();
+        assert_eq!(snapshot.issues.len(), MAX_ISSUES_PER_INSTANCE);
+        assert!(
+            snapshot
+                .issues
+                .iter()
+                .any(|issue| issue.issue_code == DIAGNOSTIC_OVERFLOW_ISSUE_CODE)
+        );
+        assert!(
+            snapshot
+                .issues
+                .iter()
+                .all(|issue| issue.issue_code.len() <= MAX_ISSUE_CODE_BYTES)
+        );
+        assert!(
+            snapshot
+                .issues
+                .iter()
+                .all(|issue| issue.message.len() <= MAX_ISSUE_MESSAGE_BYTES)
+        );
+        assert!(snapshot.health.to_string().len() <= MAX_HEALTH_SUMMARY_BYTES);
+    }
+
+    #[test]
+    fn oversized_issue_fields_are_truncated_and_reported() {
+        let diagnostics = Diagnostics::new_instance("@test/module", "instance");
+        let code = "é".repeat(MAX_ISSUE_CODE_BYTES);
+        let message = "message ".repeat(MAX_ISSUE_MESSAGE_BYTES);
+        let source_path = "path/".repeat(MAX_ISSUE_SOURCE_PATH_BYTES);
+
+        diagnostics.record_issue_with_source(
+            code,
+            DiagnosticCategory::Runtime,
+            IssueSeverity::Error,
+            message,
+            Some(source_path),
+            None,
+        );
+
+        let snapshot = diagnostics.snapshot();
+        let issue = snapshot
+            .issues
+            .iter()
+            .find(|issue| issue.issue_code != DIAGNOSTIC_OVERFLOW_ISSUE_CODE)
+            .expect("the bounded issue should remain visible");
+        assert_eq!(issue.issue_code.len(), MAX_ISSUE_CODE_BYTES);
+        assert_eq!(issue.message.len(), MAX_ISSUE_MESSAGE_BYTES);
+        assert_eq!(
+            issue.source_path.as_ref().map(String::len),
+            Some(MAX_ISSUE_SOURCE_PATH_BYTES)
+        );
+        assert!(
+            snapshot
+                .issues
+                .iter()
+                .any(|issue| issue.issue_code == DIAGNOSTIC_OVERFLOW_ISSUE_CODE)
+        );
     }
 
     // cargo test -p mesh-core-diagnostics --release -- diagnostics_snapshot_release_benchmark --ignored --nocapture

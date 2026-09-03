@@ -1,6 +1,7 @@
 #![allow(dead_code)] // Debug snapshots are used by optional profiling integrations.
 
 use super::super::*;
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 const DEBUG_SNAPSHOT_PUBLISH_INTERVAL: Duration = Duration::from_millis(100);
@@ -182,32 +183,43 @@ impl Shell {
         let catalog = self.frontend_catalog.snapshot().catalog;
         diagnostics.extend(catalog.diagnostics.iter().map(|diagnostic| {
             DebugDiagnosticEntry {
-                module_id: diagnostic.module_id.clone(),
-                instance_id: diagnostic.contribution_id.clone(),
-                issue_code: format!(
-                    "frontend-source:{}:{}",
-                    diagnostic.category.as_str(),
-                    diagnostic.source_path.display()
+                module_id: truncate_debug_string(
+                    diagnostic.module_id.clone(),
+                    mesh_core_diagnostics::MAX_ISSUE_CODE_BYTES,
+                ),
+                instance_id: diagnostic.contribution_id.clone().map(|instance_id| {
+                    truncate_debug_string(instance_id, mesh_core_diagnostics::MAX_ISSUE_CODE_BYTES)
+                }),
+                issue_code: truncate_debug_string(
+                    format!(
+                        "frontend-source:{}:{}",
+                        diagnostic.category.as_str(),
+                        diagnostic.source_path.display()
+                    ),
+                    mesh_core_diagnostics::MAX_ISSUE_CODE_BYTES,
                 ),
                 category: diagnostic.category,
                 severity: mesh_core_diagnostics::IssueSeverity::Error,
-                message: diagnostic.message.clone(),
+                message: truncate_debug_string(
+                    diagnostic.message.clone(),
+                    mesh_core_diagnostics::MAX_ISSUE_MESSAGE_BYTES,
+                ),
                 source_path: diagnostic
                     .source_file
                     .as_ref()
                     .or(Some(&diagnostic.source_path))
-                    .map(|path| path.display().to_string()),
+                    .map(|path| {
+                        truncate_debug_string(
+                            path.display().to_string(),
+                            mesh_core_diagnostics::MAX_ISSUE_SOURCE_PATH_BYTES,
+                        )
+                    }),
                 source_span: diagnostic.source_span,
                 count: 1,
                 active: true,
             }
         }));
-        diagnostics.sort_by(|left, right| {
-            left.module_id
-                .cmp(&right.module_id)
-                .then_with(|| left.issue_code.cmp(&right.issue_code))
-                .then_with(|| left.message.cmp(&right.message))
-        });
+        diagnostics = bound_debug_diagnostics(diagnostics);
 
         let mut keybinds = self
             .components
@@ -315,17 +327,143 @@ fn debug_diagnostic_from_issue(
     issue: mesh_core_diagnostics::DiagnosticIssue,
 ) -> DebugDiagnosticEntry {
     DebugDiagnosticEntry {
-        module_id: issue.module_id,
-        instance_id: (!issue.instance_id.is_empty()).then_some(issue.instance_id),
-        issue_code: issue.issue_code,
+        module_id: truncate_debug_string(
+            issue.module_id,
+            mesh_core_diagnostics::MAX_ISSUE_CODE_BYTES,
+        ),
+        instance_id: (!issue.instance_id.is_empty()).then_some(truncate_debug_string(
+            issue.instance_id,
+            mesh_core_diagnostics::MAX_ISSUE_CODE_BYTES,
+        )),
+        issue_code: truncate_debug_string(
+            issue.issue_code,
+            mesh_core_diagnostics::MAX_ISSUE_CODE_BYTES,
+        ),
         category: issue.category,
         severity: issue.severity,
-        message: issue.message,
-        source_path: issue.source_path,
+        message: truncate_debug_string(
+            issue.message,
+            mesh_core_diagnostics::MAX_ISSUE_MESSAGE_BYTES,
+        ),
+        source_path: issue.source_path.map(|path| {
+            truncate_debug_string(path, mesh_core_diagnostics::MAX_ISSUE_SOURCE_PATH_BYTES)
+        }),
         source_span: issue.source_span,
         count: issue.count,
         active: issue.active,
     }
+}
+
+fn truncate_debug_string(mut value: String, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value;
+    }
+    let mut boundary = max_bytes;
+    while !value.is_char_boundary(boundary) {
+        boundary = boundary.saturating_sub(1);
+    }
+    value.truncate(boundary);
+    value
+}
+
+fn bound_debug_diagnostics(
+    entries: impl IntoIterator<Item = DebugDiagnosticEntry>,
+) -> Vec<DebugDiagnosticEntry> {
+    let mut by_instance = BTreeMap::<(String, String), Vec<DebugDiagnosticEntry>>::new();
+    for entry in entries {
+        let key = (
+            entry.module_id.clone(),
+            entry.instance_id.clone().unwrap_or_default(),
+        );
+        by_instance.entry(key).or_default().push(entry);
+    }
+
+    let mut bounded = Vec::new();
+    for ((module_id, instance_id), mut entries) in by_instance {
+        entries.sort_by(|left, right| {
+            left.issue_code
+                .cmp(&right.issue_code)
+                .then_with(|| left.message.cmp(&right.message))
+        });
+        let existing_overflow = entries
+            .iter()
+            .find(|entry| entry.issue_code == mesh_core_diagnostics::DIAGNOSTIC_OVERFLOW_ISSUE_CODE)
+            .cloned();
+        let mut selected = Vec::new();
+        let mut bytes = 2usize;
+        let mut dropped = false;
+        for entry in entries.into_iter().filter(|entry| {
+            entry.issue_code != mesh_core_diagnostics::DIAGNOSTIC_OVERFLOW_ISSUE_CODE
+        }) {
+            let entry_bytes = serde_json::to_vec(&entry)
+                .expect("debug diagnostic DTO serializes")
+                .len();
+            let separator = usize::from(!selected.is_empty());
+            if bytes.saturating_add(separator).saturating_add(entry_bytes)
+                <= mesh_core_debug::MAX_DEBUG_DIAGNOSTIC_BYTES_PER_INSTANCE
+            {
+                bytes = bytes.saturating_add(separator).saturating_add(entry_bytes);
+                selected.push(entry);
+            } else {
+                dropped = true;
+            }
+        }
+
+        if dropped || existing_overflow.is_some() {
+            let overflow = existing_overflow.unwrap_or_else(|| DebugDiagnosticEntry {
+                module_id: module_id.clone(),
+                instance_id: (!instance_id.is_empty()).then_some(instance_id.clone()),
+                issue_code: mesh_core_diagnostics::DIAGNOSTIC_OVERFLOW_ISSUE_CODE.to_string(),
+                category: mesh_core_diagnostics::DiagnosticCategory::Runtime,
+                severity: mesh_core_diagnostics::IssueSeverity::Warning,
+                message: mesh_core_diagnostics::DIAGNOSTIC_OVERFLOW_MESSAGE.to_string(),
+                source_path: None,
+                source_span: None,
+                count: 1,
+                active: true,
+            });
+            let overflow_bytes = serde_json::to_vec(&overflow)
+                .expect("debug overflow diagnostic DTO serializes")
+                .len();
+            while !selected.is_empty()
+                && bytes.saturating_add(1).saturating_add(overflow_bytes)
+                    > mesh_core_debug::MAX_DEBUG_DIAGNOSTIC_BYTES_PER_INSTANCE
+            {
+                selected.pop();
+                bytes = serialized_debug_diagnostic_array_bytes(&selected);
+            }
+            if bytes
+                .saturating_add(usize::from(!selected.is_empty()))
+                .saturating_add(overflow_bytes)
+                <= mesh_core_debug::MAX_DEBUG_DIAGNOSTIC_BYTES_PER_INSTANCE
+            {
+                selected.push(overflow);
+            }
+        }
+        bounded.extend(selected);
+    }
+
+    bounded.sort_by(|left, right| {
+        left.module_id
+            .cmp(&right.module_id)
+            .then_with(|| left.instance_id.cmp(&right.instance_id))
+            .then_with(|| left.issue_code.cmp(&right.issue_code))
+            .then_with(|| left.message.cmp(&right.message))
+    });
+    bounded
+}
+
+fn serialized_debug_diagnostic_array_bytes(entries: &[DebugDiagnosticEntry]) -> usize {
+    entries
+        .iter()
+        .enumerate()
+        .fold(2usize, |bytes, (index, entry)| {
+            bytes.saturating_add(usize::from(index > 0)).saturating_add(
+                serde_json::to_vec(entry)
+                    .expect("debug diagnostic DTO serializes")
+                    .len(),
+            )
+        })
 }
 
 #[cfg(test)]
@@ -352,6 +490,31 @@ mod tests {
             "active_surfaces": second_surfaces,
         });
         assert_eq!(first_payload, second_payload);
+    }
+
+    #[test]
+    fn debug_diagnostic_payload_is_bounded_per_instance() {
+        let entries = (0..100).map(|index| DebugDiagnosticEntry {
+            module_id: "@test/module".to_string(),
+            instance_id: Some("instance".to_string()),
+            issue_code: format!("issue-{index:03}"),
+            category: mesh_core_diagnostics::DiagnosticCategory::Runtime,
+            severity: mesh_core_diagnostics::IssueSeverity::Warning,
+            message: "diagnostic message ".repeat(256),
+            source_path: None,
+            source_span: None,
+            count: 1,
+            active: true,
+        });
+
+        let bounded = bound_debug_diagnostics(entries);
+        let payload_bytes = serde_json::to_vec(&bounded)
+            .expect("bounded debug diagnostics should serialize")
+            .len();
+        assert!(payload_bytes <= mesh_core_debug::MAX_DEBUG_DIAGNOSTIC_BYTES_PER_INSTANCE);
+        assert!(bounded.iter().any(|entry| {
+            entry.issue_code == mesh_core_diagnostics::DIAGNOSTIC_OVERFLOW_ISSUE_CODE
+        }));
     }
 
     fn debug_module_entry(id: &str) -> ModuleEntry {
