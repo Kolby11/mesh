@@ -3,10 +3,72 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
 
 use serde::Serialize;
+
+#[cfg(test)]
+mod test_alloc {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static ALLOCATION_COUNT: AtomicU64 = AtomicU64::new(0);
+    static ALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
+
+    pub(super) struct CountingAllocator;
+
+    pub(super) fn reset() {
+        ALLOCATION_COUNT.store(0, Ordering::Relaxed);
+        ALLOCATED_BYTES.store(0, Ordering::Relaxed);
+    }
+
+    pub(super) fn snapshot() -> (u64, u64) {
+        (
+            ALLOCATION_COUNT.load(Ordering::Relaxed),
+            ALLOCATED_BYTES.load(Ordering::Relaxed),
+        )
+    }
+
+    fn record(bytes: usize) {
+        ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
+        ALLOCATED_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
+    }
+
+    unsafe impl GlobalAlloc for CountingAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            let pointer = unsafe { System.alloc(layout) };
+            if !pointer.is_null() {
+                record(layout.size());
+            }
+            pointer
+        }
+
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            let pointer = unsafe { System.alloc_zeroed(layout) };
+            if !pointer.is_null() {
+                record(layout.size());
+            }
+            pointer
+        }
+
+        unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+            unsafe { System.dealloc(pointer, layout) };
+        }
+
+        unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            let new_pointer = unsafe { System.realloc(pointer, layout, new_size) };
+            if !new_pointer.is_null() {
+                record(new_size);
+            }
+            new_pointer
+        }
+    }
+}
+
+#[cfg(test)]
+#[global_allocator]
+static TEST_ALLOCATOR: test_alloc::CountingAllocator = test_alloc::CountingAllocator;
 
 /// Stable categories shared by runtime and debug diagnostics.
 ///
@@ -105,7 +167,7 @@ pub enum IssueSeverity {
     Error,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiagnosticIssue {
     pub module_id: String,
     pub instance_id: String,
@@ -121,7 +183,7 @@ pub struct DiagnosticIssue {
     pub active: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiagnosticInstanceSnapshot {
     pub instance_id: String,
     pub health: HealthStatus,
@@ -129,7 +191,7 @@ pub struct DiagnosticInstanceSnapshot {
     pub active_issues: Vec<DiagnosticIssue>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiagnosticModuleSnapshot {
     pub module_id: String,
     pub health: HealthStatus,
@@ -142,6 +204,8 @@ pub struct Diagnostics {
     instance_id: String,
     state: Arc<Mutex<DiagnosticsState>>,
     generation: Arc<AtomicU64>,
+    #[cfg(test)]
+    lock_acquisitions: Arc<AtomicU64>,
 }
 
 /// Compatibility view for callers that inspect backend lifecycle rows.
@@ -183,7 +247,30 @@ impl Diagnostics {
                 issues: HashMap::new(),
             })),
             generation,
+            #[cfg(test)]
+            lock_acquisitions: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    fn lock_state(&self) -> MutexGuard<'_, DiagnosticsState> {
+        #[cfg(test)]
+        self.lock_acquisitions.fetch_add(1, Ordering::Relaxed);
+        self.state.lock().unwrap()
+    }
+
+    fn cloned_issues(&self) -> Vec<DiagnosticIssue> {
+        let state = self.lock_state();
+        state.issues.values().cloned().collect()
+    }
+
+    #[cfg(test)]
+    fn reset_lock_acquisitions(&self) {
+        self.lock_acquisitions.store(0, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    fn lock_acquisition_count(&self) -> u64 {
+        self.lock_acquisitions.load(Ordering::Relaxed)
     }
 
     pub fn module_id(&self) -> &str {
@@ -259,7 +346,7 @@ impl Diagnostics {
         source_span: Option<DiagnosticSourceSpan>,
     ) -> bool {
         let now = SystemTime::now();
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.lock_state();
         let newly_active = if let Some(issue) = state.issues.get_mut(&issue_code) {
             let newly_active = !issue.active;
             let previous_severity = issue.severity;
@@ -316,7 +403,7 @@ impl Diagnostics {
     }
 
     pub fn resolve_issue(&self, issue_code: &str) -> bool {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.lock_state();
         let resolved = state.issues.get_mut(issue_code).is_some_and(|issue| {
             if !issue.active {
                 return false;
@@ -431,9 +518,7 @@ impl Diagnostics {
     pub fn resolve_lifecycle_errors(&self, provider_id: &str) -> usize {
         let prefix = format!("lifecycle:{provider_id}:");
         let codes = self
-            .state
-            .lock()
-            .unwrap()
+            .lock_state()
             .issues
             .keys()
             .filter(|code| code.starts_with(&prefix))
@@ -443,7 +528,7 @@ impl Diagnostics {
     }
 
     pub fn lifecycle_error_records(&self) -> Vec<LifecycleErrorRecord> {
-        let state = self.state.lock().unwrap();
+        let state = self.lock_state();
         let mut records = state
             .issues
             .values()
@@ -469,7 +554,7 @@ impl Diagnostics {
     }
 
     pub fn health(&self) -> HealthStatus {
-        let state = self.state.lock().unwrap();
+        let state = self.lock_state();
         health_from_issues(state.issues.values().filter(|issue| issue.active))
     }
 
@@ -481,14 +566,34 @@ impl Diagnostics {
     }
 
     pub fn issues(&self) -> Vec<DiagnosticIssue> {
-        let state = self.state.lock().unwrap();
-        let mut issues = state.issues.values().cloned().collect::<Vec<_>>();
-        issues.sort_by(|left, right| left.issue_code.cmp(&right.issue_code));
+        let mut issues = self.cloned_issues();
+        issues.sort_unstable_by(|left, right| left.issue_code.cmp(&right.issue_code));
         issues
     }
 
+    /// Capture one coherent point-in-time view of this module instance.
+    /// History, active issues, and health all derive from the same cloned and
+    /// once-sorted issue list, so they cannot disagree because an issue changed
+    /// between independent lock acquisitions.
+    pub fn snapshot(&self) -> DiagnosticInstanceSnapshot {
+        let mut issues = self.cloned_issues();
+        issues.sort_unstable_by(|left, right| left.issue_code.cmp(&right.issue_code));
+        let active_issues = issues
+            .iter()
+            .filter(|issue| issue.active)
+            .cloned()
+            .collect();
+        let health = health_from_sorted_issues(&issues);
+        DiagnosticInstanceSnapshot {
+            instance_id: self.instance_id.clone(),
+            health,
+            issues,
+            active_issues,
+        }
+    }
+
     pub fn error_count(&self) -> u64 {
-        self.state.lock().unwrap().error_count
+        self.lock_state().error_count
     }
 }
 
@@ -513,6 +618,38 @@ fn health_from_issues<'a>(issues: impl Iterator<Item = &'a DiagnosticIssue>) -> 
         .collect::<Vec<_>>()
         .join("; ");
     match first.severity {
+        IssueSeverity::Warning => HealthStatus::Degraded(details),
+        IssueSeverity::Error => HealthStatus::Error(details),
+    }
+}
+
+fn health_from_sorted_issues(issues: &[DiagnosticIssue]) -> HealthStatus {
+    let has_error = issues
+        .iter()
+        .any(|issue| issue.active && issue.severity == IssueSeverity::Error);
+    let severity = if has_error {
+        IssueSeverity::Error
+    } else if issues.iter().any(|issue| issue.active) {
+        IssueSeverity::Warning
+    } else {
+        return HealthStatus::Healthy;
+    };
+
+    let mut details = issues
+        .iter()
+        .filter(|issue| issue.active && issue.severity == severity)
+        .map(|issue| format!("{}: {}", issue.issue_code, issue.message))
+        .collect::<Vec<_>>();
+    if has_error {
+        details.extend(
+            issues
+                .iter()
+                .filter(|issue| issue.active && issue.severity == IssueSeverity::Warning)
+                .map(|issue| format!("{}: {}", issue.issue_code, issue.message)),
+        );
+    }
+    let details = details.join("; ");
+    match severity {
         IssueSeverity::Warning => HealthStatus::Degraded(details),
         IssueSeverity::Error => HealthStatus::Error(details),
     }
@@ -699,35 +836,26 @@ impl DiagnosticsCollector {
 
     /// Return deterministic module aggregates with instance issue detail.
     pub fn snapshot(&self) -> Vec<DiagnosticModuleSnapshot> {
-        let mut modules = BTreeMap::<String, Vec<&Diagnostics>>::new();
+        let mut modules = BTreeMap::<String, Vec<DiagnosticInstanceSnapshot>>::new();
         for ((module_id, _), diagnostics) in &self.modules {
             modules
                 .entry(module_id.clone())
                 .or_default()
-                .push(diagnostics);
+                .push(diagnostics.snapshot());
         }
 
         modules
             .into_iter()
             .map(|(module_id, instances)| {
-                let instance_snapshots = instances
-                    .iter()
-                    .map(|diagnostics| DiagnosticInstanceSnapshot {
-                        instance_id: diagnostics.instance_id().to_string(),
-                        health: diagnostics.health(),
-                        issues: diagnostics.issues(),
-                        active_issues: diagnostics.active_issues(),
-                    })
-                    .collect::<Vec<_>>();
                 let health = health_from_issues(
-                    instance_snapshots
+                    instances
                         .iter()
                         .flat_map(|instance| instance.active_issues.iter()),
                 );
                 DiagnosticModuleSnapshot {
                     module_id,
                     health,
-                    instances: instance_snapshots,
+                    instances,
                 }
             })
             .collect()
@@ -873,5 +1001,223 @@ mod tests {
         assert!(collector.unregister("@test/module", "a"));
         assert!(!collector.unregister("@test/module", "a"));
         assert_eq!(collector.snapshot()[0].instances.len(), 1);
+    }
+
+    #[test]
+    fn instance_snapshot_keeps_history_active_issues_and_health_coherent() {
+        let diagnostics = Diagnostics::new_instance("@test/module", "instance");
+        diagnostics.record_issue("warning", IssueSeverity::Warning, "warning message");
+        diagnostics.record_issue("error", IssueSeverity::Error, "error message");
+
+        let all_active_snapshot = diagnostics.snapshot();
+        assert!(matches!(
+            all_active_snapshot.health,
+            HealthStatus::Error(message)
+                if message == "error: error message; warning: warning message"
+        ));
+        diagnostics.resolve_issue("warning");
+
+        diagnostics.reset_lock_acquisitions();
+        let snapshot = diagnostics.snapshot();
+
+        assert_eq!(diagnostics.lock_acquisition_count(), 1);
+        assert_eq!(
+            snapshot
+                .issues
+                .iter()
+                .map(|issue| issue.issue_code.as_str())
+                .collect::<Vec<_>>(),
+            vec!["error", "warning"]
+        );
+        assert_eq!(
+            snapshot
+                .active_issues
+                .iter()
+                .map(|issue| issue.issue_code.as_str())
+                .collect::<Vec<_>>(),
+            vec!["error"]
+        );
+        assert!(matches!(snapshot.health, HealthStatus::Error(message) if
+            message == "error: error message"));
+    }
+
+    // cargo test -p mesh-core-diagnostics --release -- diagnostics_snapshot_release_benchmark --ignored --nocapture
+    #[test]
+    #[ignore = "release-only diagnostics snapshot lock/allocation benchmark"]
+    fn diagnostics_snapshot_release_benchmark() {
+        for &issue_count in &[0, 10, 100] {
+            let (collector, diagnostics) = benchmark_collector(issue_count);
+            let legacy = measure_snapshot(&diagnostics, || legacy_collector_snapshot(&diagnostics));
+            let optimized = measure_snapshot(&diagnostics, || collector.snapshot());
+            let legacy_payload = snapshot_payload(&legacy.snapshot);
+            let optimized_payload = snapshot_payload(&optimized.snapshot);
+
+            assert_eq!(legacy_payload, optimized_payload);
+            assert_eq!(legacy.lock_acquisitions, diagnostics.len() as u64 * 3 * 100);
+            assert_eq!(optimized.lock_acquisitions, diagnostics.len() as u64 * 100);
+            eprintln!(
+                "diagnostics snapshot: modules=128 instances_per_module=4 issues={issue_count} legacy_ns={}/{}, optimized_ns={}/{} speedup={:.2}x locks={}/{} allocations={}/{} allocated_bytes={}/{} payload_bytes={}",
+                legacy.median_ns,
+                legacy.p95_ns,
+                optimized.median_ns,
+                optimized.p95_ns,
+                legacy.median_ns as f64 / optimized.median_ns.max(1) as f64,
+                legacy.lock_acquisitions,
+                optimized.lock_acquisitions,
+                legacy.allocation_count,
+                optimized.allocation_count,
+                legacy.allocated_bytes,
+                optimized.allocated_bytes,
+                serde_json::to_vec(&optimized_payload)
+                    .expect("diagnostics payload should serialize")
+                    .len(),
+            );
+        }
+    }
+
+    struct SnapshotBenchmarkResult {
+        snapshot: Vec<DiagnosticModuleSnapshot>,
+        median_ns: u128,
+        p95_ns: u128,
+        lock_acquisitions: u64,
+        allocation_count: u64,
+        allocated_bytes: u64,
+    }
+
+    fn benchmark_collector(issue_count: usize) -> (DiagnosticsCollector, Vec<Diagnostics>) {
+        let mut collector = DiagnosticsCollector::new();
+        let mut diagnostics = Vec::with_capacity(128 * 4);
+        for module_index in 0..128 {
+            for instance_index in 0..4 {
+                let module_id = format!("@bench/module-{module_index}");
+                let instance_id = format!("instance-{instance_index}");
+                let instance = collector.register_instance(&module_id, &instance_id);
+                for issue_index in 0..issue_count {
+                    instance.record_issue(
+                        format!("issue-{issue_index:03}"),
+                        IssueSeverity::Warning,
+                        format!("benchmark issue {issue_index}"),
+                    );
+                }
+                diagnostics.push(instance);
+            }
+        }
+        (collector, diagnostics)
+    }
+
+    fn measure_snapshot(
+        diagnostics: &[Diagnostics],
+        mut operation: impl FnMut() -> Vec<DiagnosticModuleSnapshot>,
+    ) -> SnapshotBenchmarkResult {
+        const ITERATIONS: usize = 100;
+
+        for instance in diagnostics {
+            instance.reset_lock_acquisitions();
+        }
+        test_alloc::reset();
+        let allocation_before = test_alloc::snapshot();
+        let mut samples = Vec::with_capacity(ITERATIONS);
+        let mut last_snapshot = None;
+        for _ in 0..ITERATIONS {
+            let started = std::time::Instant::now();
+            let snapshot = operation();
+            samples.push(started.elapsed().as_nanos());
+            std::hint::black_box(&snapshot);
+            last_snapshot = Some(snapshot);
+        }
+        samples.sort_unstable();
+        let allocation_after = test_alloc::snapshot();
+        let snapshot = last_snapshot.expect("benchmark should produce a snapshot");
+        SnapshotBenchmarkResult {
+            snapshot,
+            median_ns: samples[samples.len() / 2],
+            p95_ns: samples[(samples.len() * 95) / 100],
+            lock_acquisitions: diagnostics
+                .iter()
+                .map(Diagnostics::lock_acquisition_count)
+                .sum(),
+            allocation_count: allocation_after.0.saturating_sub(allocation_before.0),
+            allocated_bytes: allocation_after.1.saturating_sub(allocation_before.1),
+        }
+    }
+
+    fn legacy_collector_snapshot(diagnostics: &[Diagnostics]) -> Vec<DiagnosticModuleSnapshot> {
+        let mut modules = BTreeMap::<String, Vec<DiagnosticInstanceSnapshot>>::new();
+        for diagnostics in diagnostics {
+            let health = {
+                let state = diagnostics.lock_state();
+                health_from_issues(state.issues.values().filter(|issue| issue.active))
+            };
+            let issues = diagnostics.issues();
+            let active_issues = diagnostics
+                .issues()
+                .into_iter()
+                .filter(|issue| issue.active)
+                .collect();
+            modules
+                .entry(diagnostics.module_id().to_string())
+                .or_default()
+                .push(DiagnosticInstanceSnapshot {
+                    instance_id: diagnostics.instance_id().to_string(),
+                    health,
+                    issues,
+                    active_issues,
+                });
+        }
+
+        modules
+            .into_iter()
+            .map(|(module_id, instances)| {
+                let health = health_from_issues(
+                    instances
+                        .iter()
+                        .flat_map(|instance| instance.active_issues.iter()),
+                );
+                DiagnosticModuleSnapshot {
+                    module_id,
+                    health,
+                    instances,
+                }
+            })
+            .collect()
+    }
+
+    fn snapshot_payload(snapshot: &[DiagnosticModuleSnapshot]) -> serde_json::Value {
+        serde_json::json!({
+            "modules": snapshot.iter().map(|module| {
+                serde_json::json!({
+                    "module_id": module.module_id,
+                    "health": module.health.to_string(),
+                    "instances": module.instances.iter().map(|instance| {
+                        serde_json::json!({
+                            "instance_id": instance.instance_id,
+                            "health": instance.health.to_string(),
+                            "issues": instance.issues.iter().map(issue_payload).collect::<Vec<_>>(),
+                            "active_issues": instance.active_issues.iter().map(issue_payload).collect::<Vec<_>>(),
+                        })
+                    }).collect::<Vec<_>>(),
+                })
+            }).collect::<Vec<_>>(),
+        })
+    }
+
+    fn issue_payload(issue: &DiagnosticIssue) -> serde_json::Value {
+        serde_json::json!({
+            "module_id": issue.module_id,
+            "instance_id": issue.instance_id,
+            "issue_code": issue.issue_code,
+            "category": issue.category.as_str(),
+            "severity": format!("{:?}", issue.severity).to_lowercase(),
+            "message": issue.message,
+            "source_path": issue.source_path,
+            "source_span": issue.source_span.map(|span| serde_json::json!({
+                "start": span.start,
+                "end": span.end,
+            })),
+            "first_seen": format!("{:?}", issue.first_seen),
+            "last_seen": format!("{:?}", issue.last_seen),
+            "count": issue.count,
+            "active": issue.active,
+        })
     }
 }

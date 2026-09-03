@@ -3842,3 +3842,45 @@ and the allocation-enabled release gate passed. The full shell library suite
 reported 779 passed, 47 unrelated baseline failures, and 132 ignored; the
 failures remain in existing rendering, interaction, fixture, lifecycle, and
 profiling tests (including the legacy `mesh.surfaceLayout` fixture).
+
+## 2026-09-03 — coherent diagnostics snapshot publication
+
+area: diagnostics health/history/debug publication
+
+`Diagnostics::snapshot` now takes one state lock, clones and sorts the issue
+history once, and derives active issues and health from that immutable view.
+The collector builds module aggregates from those per-instance snapshots, and
+shell debug publication reuses one collector snapshot for health and issue
+payloads instead of collecting diagnostics twice.
+
+**Measured.** Machine: Linux 6.12.93 x86_64, Intel Core i5-6200U (2 cores / 4
+threads); `nix develop`; rustc/cargo 1.94.0; repository-default `--release`
+profile (thin LTO, one codegen unit). The benchmark ran 100 repeated snapshot
+operations for each workload: 128 modules × 4 instances, with 0, 10, or 100
+retained issues per instance. The legacy column models the former collector's
+three per-instance lock acquisitions (health, history, and active history);
+the snapshot column takes one lock and one issue-code sort per instance.
+
+| Issues/instance | Legacy p50/p95 ns | Snapshot p50/p95 ns | Locks/100 operations | Allocations | Allocated bytes | Payload bytes |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 473,056 / 898,928 | 409,962 / 497,839 | 153,600 / 51,200 | 117,301 / 117,401 | 8,805,600 / 8,860,000 | 48,927 |
+| 10 | 20,350,866 / 29,340,088 | 20,099,855 / 23,701,751 | 153,600 / 51,200 | 7,707,701 / 7,759,001 | 397,122,400 / 584,773,600 | 4,002,623 |
+| 100 | 208,554,743 / 247,797,441 | 168,812,011 / 195,522,694 | 153,600 / 51,200 | 72,373,301 / 72,578,201 | 3,900,088,800 / 5,477,922,400 | 39,773,663 |
+
+Values in paired columns are legacy / snapshot. Across the three workloads,
+p50 improved 1.01–1.24x and p95 improved 1.02–1.81x; lock acquisitions fell
+from 153,600 to 51,200 for every shape, and the serialized payloads were
+byte-for-byte equal. The owned `active_issues` compatibility field means this
+snapshot representation allocates slightly more in the measured shapes:
+117,301–72,373,301 to 117,401–72,578,201 allocations and
+8,805,600–3,900,088,800 to 8,860,000–5,477,922,400 allocated bytes. Those
+allocation results are recorded rather than hidden behind a gate.
+
+Gate: `diagnostics_snapshot_release_benchmark`, run with
+`nix develop -c cargo test -p mesh-core-diagnostics --release --
+diagnostics_snapshot_release_benchmark --ignored --nocapture`.
+
+The focused coherent-snapshot test and shell debug publication tests passed.
+The full shell library suite reported 779 passed, 47 unrelated baseline
+failures, and 132 ignored; those failures remain in existing rendering,
+interaction, fixture, lifecycle, and profiling tests.

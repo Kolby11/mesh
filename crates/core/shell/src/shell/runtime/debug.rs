@@ -164,22 +164,19 @@ impl Shell {
             .collect();
         interfaces.sort_by(|a, b| a.name.cmp(&b.name));
 
-        let health = self
-            .diagnostics
-            .snapshot()
-            .into_iter()
+        let diagnostic_modules = self.diagnostics.snapshot();
+        let health = diagnostic_modules
+            .iter()
             .map(|entry| HealthEntry {
-                module_id: entry.module_id,
+                module_id: entry.module_id.clone(),
                 status: entry.health.to_string(),
             })
             .collect();
 
-        let mut diagnostics = self
-            .diagnostics
-            .snapshot()
-            .into_iter()
-            .flat_map(|module| module.instances)
-            .flat_map(|instance| instance.issues)
+        let mut diagnostics = diagnostic_modules
+            .iter()
+            .flat_map(|module| module.instances.iter())
+            .flat_map(|instance| instance.issues.iter().cloned())
             .map(debug_diagnostic_from_issue)
             .collect::<Vec<_>>();
         let catalog = self.frontend_catalog.snapshot().catalog;

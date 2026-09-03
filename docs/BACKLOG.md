@@ -26,9 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 The following Section 1 findings remain open; IDs preserve their audit evidence
 for a future report or rerun.
 
-- [ ] **S01-PERF-003 / S01-DEAD-011 (P2/P3):** Produce diagnostics health,
-      history, and active issues from one coherent locked snapshot and one sort;
-      benchmark lock count, allocations, and payload parity.
 - [ ] **S01-LOGIC-005 (P2):** Sort debug snapshot modules and active surfaces by
       stable identity so identical state produces deterministic serialized output.
 - [ ] **S01-LOGIC-006 (P2):** Bound diagnostic issue count, code/message bytes,
