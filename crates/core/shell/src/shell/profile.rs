@@ -2271,6 +2271,7 @@ impl Shell {
     }
 
     fn remove_profile_component(&mut self, index: usize) {
+        self.invalidate_debug_snapshot_cache();
         let surface_id = self.components[index].surface_id.clone();
         let module_id = self.components[index].component.id().to_string();
         if let Err(error) = self.components[index].unmount() {

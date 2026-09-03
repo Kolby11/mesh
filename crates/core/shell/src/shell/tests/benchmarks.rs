@@ -1,4 +1,7 @@
+use super::common::{graph_from_json, module_instance};
+use super::types::SurfaceState;
 use super::*;
+use std::time::Instant;
 
 #[test]
 fn benchmark_snapshot_exposes_canonical_and_interaction_scenarios() {
@@ -861,5 +864,182 @@ fn benchmark_run_request_rejects_unknown_scenario() {
             assert!(message.contains("not_a_scenario"));
         }
         other => panic!("expected diagnostic for unknown benchmark scenario, got {other:?}"),
+    }
+}
+
+// cargo test -p mesh-core-shell --release -- debug_snapshot_generation_cache_release_benchmark --ignored --nocapture
+#[test]
+#[ignore = "release-only debug snapshot generation/cadence benchmark"]
+fn debug_snapshot_generation_cache_release_benchmark() {
+    for &module_count in &[16, 128, 512] {
+        for &surface_count in &[4, 32] {
+            for &diagnostic_count in &[0, 100] {
+                for &profiling in &[false, true] {
+                    let uncached = measure_debug_snapshot_publisher(
+                        debug_snapshot_benchmark_shell(
+                            module_count,
+                            surface_count,
+                            diagnostic_count,
+                            profiling,
+                        ),
+                        true,
+                    );
+                    let cached = measure_debug_snapshot_publisher(
+                        debug_snapshot_benchmark_shell(
+                            module_count,
+                            surface_count,
+                            diagnostic_count,
+                            profiling,
+                        ),
+                        false,
+                    );
+                    eprintln!(
+                        "debug snapshot: modules={module_count} surfaces={surface_count} diagnostics={diagnostic_count} profiling={profiling} uncached_ns={}/{}, cached_ns={}/{} speedup={:.1}x payload_bytes={} rebuilds={}/{} publications={}/{} allocations={}/{} allocated_bytes={}/{}",
+                        uncached.median_ns,
+                        uncached.p95_ns,
+                        cached.median_ns,
+                        cached.p95_ns,
+                        uncached.median_ns as f64 / cached.median_ns.max(1) as f64,
+                        cached.payload_bytes,
+                        uncached.rebuilds,
+                        cached.rebuilds,
+                        uncached.publications,
+                        cached.publications,
+                        uncached.allocation_count,
+                        cached.allocation_count,
+                        uncached.allocated_bytes,
+                        cached.allocated_bytes,
+                    );
+                    assert!(cached.rebuilds < uncached.rebuilds);
+                    assert!(cached.publications < uncached.publications);
+                    assert!(cached.allocation_count <= uncached.allocation_count);
+                    assert!(cached.allocated_bytes <= uncached.allocated_bytes);
+                }
+            }
+        }
+    }
+}
+
+struct DebugSnapshotBenchmarkResult {
+    median_ns: u128,
+    p95_ns: u128,
+    payload_bytes: usize,
+    rebuilds: u64,
+    publications: u64,
+    allocation_count: u64,
+    allocated_bytes: u64,
+}
+
+fn debug_snapshot_benchmark_shell(
+    module_count: usize,
+    surface_count: usize,
+    diagnostic_count: usize,
+    profiling: bool,
+) -> (Shell, Vec<tempfile::TempDir>) {
+    let mut root_modules = String::new();
+    let mut module_packages = Vec::with_capacity(module_count);
+    for index in 0..module_count {
+        let id = format!("@bench/module-{index}");
+        if index > 0 {
+            root_modules.push(',');
+        }
+        root_modules.push_str(&format!(
+            "\"{id}\":{{\"kind\":\"backend\",\"path\":\"{id}\",\"enabled\":true}}"
+        ));
+        module_packages.push(format!(
+            r#"{{
+                "name": "{id}",
+                "version": "0.1.0",
+                "mesh": {{
+                    "apiVersion": "0.1",
+                    "kind": "backend",
+                    "entrypoints": {{ "main": "main.luau" }}
+                }}
+            }}"#
+        ));
+    }
+    let root = format!(
+        r#"{{
+            "schemaVersion": 1,
+            "modulesDir": "modules",
+            "modules": {{{root_modules}}}
+        }}"#
+    );
+    let graph = graph_from_json(&root, module_packages.iter().map(String::as_str).collect());
+
+    let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph);
+    shell.debug.enabled = true;
+    shell.debug.profiling_enabled = profiling;
+    shell.debug.profiling_session_id = profiling as u64;
+
+    let mut module_dirs = Vec::with_capacity(module_count);
+    for index in 0..module_count {
+        let id = format!("@bench/module-{index}");
+        let (module_dir, module) = module_instance(&id, Some("main.luau"));
+        shell.modules.insert(id, module);
+        module_dirs.push(module_dir);
+    }
+    for index in 0..surface_count {
+        shell.core.surfaces.insert(
+            format!("@bench/surface-{index}"),
+            SurfaceState {
+                visible: true,
+                closing_until: None,
+            },
+        );
+    }
+    if diagnostic_count > 0 {
+        let diagnostics = shell
+            .diagnostics
+            .register_instance("@bench/diagnostics", "benchmark");
+        for index in 0..diagnostic_count {
+            diagnostics.record_issue(
+                format!("benchmark-{index}"),
+                mesh_core_diagnostics::IssueSeverity::Warning,
+                format!("benchmark diagnostic {index}"),
+            );
+        }
+    }
+    (shell, module_dirs)
+}
+
+fn measure_debug_snapshot_publisher(
+    (mut shell, _module_dirs): (Shell, Vec<tempfile::TempDir>),
+    force_uncached: bool,
+) -> DebugSnapshotBenchmarkResult {
+    const FRAMES: usize = 1_000;
+
+    if !force_uncached {
+        shell.publish_debug_snapshot().unwrap();
+    }
+    let mut samples = Vec::with_capacity(FRAMES);
+    let allocations_before = mesh_core_debug::allocation::snapshot();
+    for _ in 0..FRAMES {
+        if force_uncached {
+            shell.invalidate_debug_snapshot_cache();
+        }
+        let started = Instant::now();
+        std::hint::black_box(shell.publish_debug_snapshot().unwrap());
+        samples.push(started.elapsed().as_nanos());
+    }
+    samples.sort_unstable();
+    let median_ns = samples[samples.len() / 2];
+    let p95_ns = samples[(samples.len() * 95) / 100];
+    let cache = shell
+        .debug_snapshot_cache
+        .as_ref()
+        .expect("benchmark publication should populate the cache");
+    let allocations = mesh_core_debug::allocation::snapshot().saturating_delta(allocations_before);
+    DebugSnapshotBenchmarkResult {
+        median_ns,
+        p95_ns,
+        payload_bytes: serde_json::to_vec(&cache.payload)
+            .expect("debug payload should serialize")
+            .len(),
+        rebuilds: cache.rebuild_count,
+        publications: cache.publication_count,
+        allocation_count: allocations.allocation_count,
+        allocated_bytes: allocations.allocated_bytes,
     }
 }

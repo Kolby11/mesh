@@ -1,19 +1,126 @@
 #![allow(dead_code)] // Debug snapshots are used by optional profiling integrations.
 
 use super::super::*;
+use std::time::{Duration, Instant};
+
+const DEBUG_SNAPSHOT_PUBLISH_INTERVAL: Duration = Duration::from_millis(100);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DebugSnapshotCacheKey {
+    shell_generation: u64,
+    graph_revision: u64,
+    interface_generation: u64,
+    frontend_catalog_version: u64,
+    resource_revision: u64,
+    resource_explanation_revision: u64,
+    settings_revision: u64,
+    theme_revision: u64,
+    locale_revision: u64,
+    diagnostics_generation: u64,
+}
+
+#[derive(Debug)]
+pub(in crate::shell) struct DebugSnapshotCache {
+    key: DebugSnapshotCacheKey,
+    pub(in crate::shell) payload: serde_json::Value,
+    last_published: Option<Instant>,
+    pub(in crate::shell) rebuild_count: u64,
+    pub(in crate::shell) publication_count: u64,
+}
 
 impl Shell {
     pub(in crate::shell) fn build_debug_snapshot(&mut self) -> DebugSnapshot {
         let snapshot = self.debug_snapshot();
-        self.record_debug_snapshot_state(&snapshot);
+        let payload = debug_service_payload(&self.debug, &snapshot);
+        self.record_debug_snapshot_state(payload);
         snapshot
     }
 
     pub(in crate::shell) fn publish_debug_snapshot(
         &mut self,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
-        let snapshot = self.debug_snapshot();
-        self.broadcast_service_event(self.debug_snapshot_event(&snapshot))
+        let now = Instant::now();
+        let key = self.debug_snapshot_cache_key();
+        let cache_matches = self
+            .debug_snapshot_cache
+            .as_ref()
+            .is_some_and(|cache| cache.key == key);
+        let cadence_due = cache_matches
+            && self.debug.profiling_enabled
+            && self.debug_snapshot_cache.as_ref().is_some_and(|cache| {
+                cache.last_published.is_some_and(|last_published| {
+                    now.duration_since(last_published) >= DEBUG_SNAPSHOT_PUBLISH_INTERVAL
+                })
+            });
+        let refresh = !cache_matches || cadence_due;
+        let publish_cached = cache_matches
+            && !cadence_due
+            && self
+                .debug_snapshot_cache
+                .as_ref()
+                .is_some_and(|cache| cache.last_published.is_none());
+        if !refresh && !publish_cached {
+            return Ok(VecDeque::new());
+        }
+
+        let payload = if refresh {
+            let snapshot = self.debug_snapshot();
+            let payload = debug_service_payload(&self.debug, &snapshot);
+            self.store_debug_snapshot_payload(payload.clone());
+            payload
+        } else {
+            self.debug_snapshot_cache
+                .as_ref()
+                .map(|cache| cache.payload.clone())
+                .expect("matching debug snapshot cache")
+        };
+
+        let requests =
+            self.broadcast_service_event(self.debug_snapshot_event_from_payload(payload))?;
+        if let Some(cache) = self.debug_snapshot_cache.as_mut() {
+            cache.last_published = Some(now);
+            cache.publication_count = cache.publication_count.saturating_add(1);
+        }
+        Ok(requests)
+    }
+
+    fn debug_snapshot_cache_key(&self) -> DebugSnapshotCacheKey {
+        DebugSnapshotCacheKey {
+            shell_generation: self.debug_snapshot_generation,
+            graph_revision: self
+                .installed_module_graph
+                .as_ref()
+                .map_or(0, InstalledModuleGraph::revision),
+            interface_generation: self.interfaces.snapshot().generation(),
+            frontend_catalog_version: self.frontend_catalog.snapshot().version,
+            resource_revision: self.resource_snapshot.revision,
+            resource_explanation_revision: self.resource_explanation.revision,
+            settings_revision: self.settings_store.revision(),
+            theme_revision: self.theme.active_snapshot().revision,
+            locale_revision: self.locale.revision(),
+            diagnostics_generation: self.diagnostics.generation(),
+        }
+    }
+
+    fn store_debug_snapshot_payload(&mut self, payload: serde_json::Value) {
+        let key = self.debug_snapshot_cache_key();
+        let (publication_count, rebuild_count) = self
+            .debug_snapshot_cache
+            .as_ref()
+            .map(|cache| {
+                (
+                    cache.publication_count,
+                    cache.rebuild_count.saturating_add(1),
+                )
+            })
+            .unwrap_or((0, 1));
+        self.debug_snapshot_cache = Some(DebugSnapshotCache {
+            key,
+            payload,
+            last_published: None,
+            rebuild_count,
+            publication_count,
+        });
     }
 
     fn debug_snapshot(&mut self) -> DebugSnapshot {
@@ -178,22 +285,22 @@ impl Shell {
         }
     }
 
-    fn record_debug_snapshot_state(&mut self, snapshot: &DebugSnapshot) {
+    fn record_debug_snapshot_state(&mut self, payload: serde_json::Value) {
         // Synchronous snapshot reads need the latest state before the next
         // render tick, but they must still use the normal service-state path
         // for provider filtering, contract validation, and deduplication.
-        let event = self.debug_snapshot_event(snapshot);
+        let event = self.debug_snapshot_event_from_payload(payload);
         self.record_latest_service_state(&event);
     }
 
-    fn debug_snapshot_event(&self, snapshot: &DebugSnapshot) -> ServiceEvent {
+    fn debug_snapshot_event_from_payload(&self, payload: serde_json::Value) -> ServiceEvent {
         ServiceEvent::Updated {
             service: mesh_core_debug::DEBUG_INTERFACE.to_string(),
             source_module: self.active_service_provider_or(
                 mesh_core_debug::DEBUG_INTERFACE,
                 mesh_core_debug::DEBUG_SOURCE_MODULE_ID,
             ),
-            payload: debug_service_payload(&self.debug, snapshot),
+            payload,
         }
     }
 }
@@ -717,6 +824,7 @@ impl Shell {
 
     pub(in crate::shell) fn record_method_call(&mut self, entry: mesh_core_debug::MethodCallEntry) {
         const MAX_METHOD_CALLS: usize = 50;
+        self.invalidate_debug_snapshot_cache();
         self.debug.recent_method_calls.push(entry);
         if self.debug.recent_method_calls.len() > MAX_METHOD_CALLS {
             let overflow = self.debug.recent_method_calls.len() - MAX_METHOD_CALLS;
@@ -733,6 +841,7 @@ impl Shell {
         result: serde_json::Value,
         outcome: mesh_core_backend::BackendCommandOutcome,
     ) {
+        self.invalidate_debug_snapshot_cache();
         let error = result
             .get("error")
             .and_then(|value| value.as_str())

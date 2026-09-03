@@ -1416,6 +1416,9 @@ impl Shell {
             tracing::debug!(phase = ?self.shutdown_phase, "rejected request after shutdown quiescing");
             return Ok(VecDeque::new());
         }
+        if request_changes_debug_snapshot(&request) {
+            self.invalidate_debug_snapshot_cache();
+        }
         let trigger_kind = profiling_trigger_for_request(&request);
         let profiling_started = self.profiling_enabled().then(std::time::Instant::now);
         let result = match request {
@@ -2599,6 +2602,7 @@ impl Shell {
         surface_id: SurfaceId,
         role: mesh_core_wayland::SurfaceRole,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        self.invalidate_debug_snapshot_cache();
         let Some(index) = self.component_index_for_surface(&surface_id) else {
             tracing::warn!(%surface_id, "cannot change surface role: no such surface");
             return Ok(VecDeque::new());
@@ -3061,6 +3065,7 @@ impl Shell {
         surface_id: SurfaceId,
         visible: bool,
     ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+        self.invalidate_debug_snapshot_cache();
         if !visible {
             let is_window = self
                 .surfaces
@@ -3258,6 +3263,19 @@ fn core_service_request(
         }),
         _ => None,
     }
+}
+
+fn request_changes_debug_snapshot(request: &CoreRequest) -> bool {
+    !matches!(
+        request,
+        CoreRequest::PositionSurface { .. }
+            | CoreRequest::PublishDiagnostics { .. }
+            | CoreRequest::WriteClipboard { .. }
+            | CoreRequest::OpenDebugSource { .. }
+            | CoreRequest::SetChildSurfaceRole { .. }
+            | CoreRequest::TransferTabFocus { .. }
+            | CoreRequest::Shutdown
+    )
 }
 
 fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {

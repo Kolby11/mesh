@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-09-02
+**Updated:** 2026-09-03
 
 ## Now
 
@@ -55,8 +55,9 @@ production frontend and backend paths no longer fall back to raw manifest
 capability declarations. The closed capability catalog is now the only
 production authority, and raw mutable `CapabilitySet` construction is
 restricted; the unconsumed `CapabilityHandle` abstraction has been removed.
-The next open item is S01-PERF-002: measuring a generation-cached,
-bounded-cadence debug snapshot publisher.
+The next open item is S01-PERF-003 / S01-DEAD-011: producing diagnostics
+health, history, and active issues from one coherent locked snapshot and one
+sort.
 Host icon/font resources now use one explicit immutable graph/profile candidate
 catalog and copy-on-write registry handle, with failed preparation, recovery,
 and package rollback retaining the last-known-good snapshot. Icon resolution

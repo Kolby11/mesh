@@ -228,6 +228,7 @@ impl Shell {
         publish_health: bool,
         update_module_lifecycle: bool,
     ) {
+        self.invalidate_debug_snapshot_cache();
         let is_failure = matches!(
             status,
             BackendRuntimeStatus::InvalidManifest
@@ -729,6 +730,7 @@ impl Shell {
         interface: String,
         slot: BackendRuntimeSlot,
     ) {
+        self.invalidate_debug_snapshot_cache();
         if let Some(state) = self.backend_supervision.get_mut(&interface) {
             state.invalidate_pending_restart();
         }

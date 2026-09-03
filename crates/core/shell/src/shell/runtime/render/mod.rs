@@ -1002,6 +1002,7 @@ impl Shell {
             .surface_id
             .clone();
         let kind = self.components[index].children[child_index].kind;
+        self.invalidate_debug_snapshot_cache();
         self.pending_popover_hides.remove(&surface_id);
         self.components[index].children.remove(child_index);
         if kind == ChildSurfaceKind::Window {

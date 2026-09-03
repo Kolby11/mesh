@@ -191,6 +191,7 @@ impl Shell {
                     last_paint_content_offset: None,
                     pending_present_damage: Vec::new(),
                 });
+                self.invalidate_debug_snapshot_cache();
                 self.rebuild_component_surface_index();
                 TargetRef::Child(self.components[index].children.len() - 1)
             };
@@ -241,6 +242,11 @@ impl Shell {
                 request.content_size.0 + pad_left + pad_right,
                 request.content_size.1 + pad_top + pad_bottom,
             );
+            let surface_state_changed = self
+                .core
+                .surfaces
+                .get(&child_surface_id)
+                .is_none_or(|state| !state.visible || state.closing_until.is_some());
             self.core
                 .surfaces
                 .entry(child_surface_id.clone())
@@ -252,6 +258,9 @@ impl Shell {
                     visible: true,
                     closing_until: None,
                 });
+            if surface_state_changed {
+                self.invalidate_debug_snapshot_cache();
+            }
             let parent_window = self
                 .surfaces
                 .get(parent_surface_id)

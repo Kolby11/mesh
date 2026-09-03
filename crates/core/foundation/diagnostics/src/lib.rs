@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -140,6 +141,7 @@ pub struct Diagnostics {
     module_id: String,
     instance_id: String,
     state: Arc<Mutex<DiagnosticsState>>,
+    generation: Arc<AtomicU64>,
 }
 
 /// Compatibility view for callers that inspect backend lifecycle rows.
@@ -165,6 +167,14 @@ impl Diagnostics {
     }
 
     pub fn new_instance(module_id: impl Into<String>, instance_id: impl Into<String>) -> Self {
+        Self::new_instance_with_generation(module_id, instance_id, Arc::new(AtomicU64::new(0)))
+    }
+
+    fn new_instance_with_generation(
+        module_id: impl Into<String>,
+        instance_id: impl Into<String>,
+        generation: Arc<AtomicU64>,
+    ) -> Self {
         Self {
             module_id: module_id.into(),
             instance_id: instance_id.into(),
@@ -172,6 +182,7 @@ impl Diagnostics {
                 error_count: 0,
                 issues: HashMap::new(),
             })),
+            generation,
         }
     }
 
@@ -249,7 +260,7 @@ impl Diagnostics {
     ) -> bool {
         let now = SystemTime::now();
         let mut state = self.state.lock().unwrap();
-        if let Some(issue) = state.issues.get_mut(&issue_code) {
+        let newly_active = if let Some(issue) = state.issues.get_mut(&issue_code) {
             let newly_active = !issue.active;
             let previous_severity = issue.severity;
             if newly_active {
@@ -275,43 +286,50 @@ impl Diagnostics {
             {
                 state.error_count = state.error_count.saturating_add(1);
             }
-            return newly_active;
-        }
-
-        if severity == IssueSeverity::Error {
-            state.error_count = state.error_count.saturating_add(1);
-        }
-        state.issues.insert(
-            issue_code.clone(),
-            DiagnosticIssue {
-                module_id: self.module_id.clone(),
-                instance_id: self.instance_id.clone(),
-                issue_code,
-                category: category.unwrap_or(DiagnosticCategory::Runtime),
-                severity,
-                message,
-                source_path,
-                source_span,
-                first_seen: now,
-                last_seen: now,
-                count: 1,
-                active: true,
-            },
-        );
-        true
+            newly_active
+        } else {
+            if severity == IssueSeverity::Error {
+                state.error_count = state.error_count.saturating_add(1);
+            }
+            state.issues.insert(
+                issue_code.clone(),
+                DiagnosticIssue {
+                    module_id: self.module_id.clone(),
+                    instance_id: self.instance_id.clone(),
+                    issue_code,
+                    category: category.unwrap_or(DiagnosticCategory::Runtime),
+                    severity,
+                    message,
+                    source_path,
+                    source_span,
+                    first_seen: now,
+                    last_seen: now,
+                    count: 1,
+                    active: true,
+                },
+            );
+            true
+        };
+        drop(state);
+        self.generation.fetch_add(1, Ordering::Relaxed);
+        newly_active
     }
 
     pub fn resolve_issue(&self, issue_code: &str) -> bool {
         let mut state = self.state.lock().unwrap();
-        let Some(issue) = state.issues.get_mut(issue_code) else {
-            return false;
-        };
-        if !issue.active {
-            return false;
+        let resolved = state.issues.get_mut(issue_code).is_some_and(|issue| {
+            if !issue.active {
+                return false;
+            }
+            issue.active = false;
+            issue.last_seen = SystemTime::now();
+            true
+        });
+        drop(state);
+        if resolved {
+            self.generation.fetch_add(1, Ordering::Relaxed);
         }
-        issue.active = false;
-        issue.last_seen = SystemTime::now();
-        true
+        resolved
     }
 
     pub fn record_handler_error(
@@ -500,14 +518,31 @@ fn health_from_issues<'a>(issues: impl Iterator<Item = &'a DiagnosticIssue>) -> 
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct DiagnosticsCollector {
     modules: BTreeMap<(String, String), Diagnostics>,
+    generation: Arc<AtomicU64>,
+}
+
+impl Default for DiagnosticsCollector {
+    fn default() -> Self {
+        Self {
+            modules: BTreeMap::new(),
+            generation: Arc::new(AtomicU64::new(0)),
+        }
+    }
 }
 
 impl DiagnosticsCollector {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Monotonic revision of all registered diagnostic state. Runtime
+    /// snapshots use this as a cheap cache key instead of rebuilding the
+    /// complete issue projection just to discover whether it changed.
+    pub fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Relaxed)
     }
 
     /// Registering an existing identity replaces its old issue set. This
@@ -524,16 +559,26 @@ impl DiagnosticsCollector {
     ) -> Diagnostics {
         let module_id = module_id.into();
         let instance_id = instance_id.into();
-        let diagnostics = Diagnostics::new_instance(module_id.clone(), instance_id.clone());
+        let diagnostics = Diagnostics::new_instance_with_generation(
+            module_id.clone(),
+            instance_id.clone(),
+            Arc::clone(&self.generation),
+        );
         self.modules
             .insert((module_id, instance_id), diagnostics.clone());
+        self.generation.fetch_add(1, Ordering::Relaxed);
         diagnostics
     }
 
     pub fn unregister(&mut self, module_id: &str, instance_id: &str) -> bool {
-        self.modules
+        let removed = self
+            .modules
             .remove(&(module_id.to_string(), instance_id.to_string()))
-            .is_some()
+            .is_some();
+        if removed {
+            self.generation.fetch_add(1, Ordering::Relaxed);
+        }
+        removed
     }
 
     pub fn record_lifecycle_error(

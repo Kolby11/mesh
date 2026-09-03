@@ -26,9 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 The following Section 1 findings remain open; IDs preserve their audit evidence
 for a future report or rerun.
 
-- [ ] **S01-PERF-002 (P2, measurement required):** Stop rebuilding and JSON-
-      serializing the full debug snapshot every enabled frame; benchmark a
-      generation-cached, bounded-cadence publisher with graph-size workloads.
 - [ ] **S01-PERF-003 / S01-DEAD-011 (P2/P3):** Produce diagnostics health,
       history, and active issues from one coherent locked snapshot and one sort;
       benchmark lock count, allocations, and payload parity.

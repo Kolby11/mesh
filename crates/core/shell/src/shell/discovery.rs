@@ -1050,6 +1050,7 @@ impl Shell {
         default_icon_pack: Option<String>,
         publish_theme_effects: bool,
     ) -> Result<(), ShellRunError> {
+        self.invalidate_debug_snapshot_cache();
         let current = prepared.resource_lease.as_ref().map_or_else(
             || self.resource_preparation.is_current(prepared.generation),
             mesh_core_resources::ResourcePreparationLease::is_current,
@@ -2081,6 +2082,8 @@ impl Shell {
             next_frontend_reload_check: now,
             file_watcher_active: false,
             debug: DebugOverlayState::default(),
+            debug_snapshot_generation: 0,
+            debug_snapshot_cache: None,
             debug_overlay: DebugOverlay::new(),
             active_key_modifiers: KeyModifiers::default(),
             keyboard_focus_surface: None,
@@ -2124,6 +2127,7 @@ impl Shell {
     }
 
     pub(in crate::shell) fn enter_composition_recovery(&mut self, reason: impl Into<String>) {
+        self.invalidate_debug_snapshot_cache();
         let reason = reason.into();
         let component_surfaces = self
             .components
@@ -2359,6 +2363,7 @@ impl Shell {
         &mut self,
         graph: InstalledModuleGraph,
     ) -> Result<(), ShellRunError> {
+        self.invalidate_debug_snapshot_cache();
         let locale = self.prepare_locale_for_graph(&graph)?;
         let interface_catalog =
             super::profile::interface_catalog_for_graph(&self.builtin_interface_catalog, &graph);
@@ -2866,6 +2871,7 @@ impl Shell {
     }
 
     pub(super) fn unmount_components(&mut self) -> VecDeque<CoreRequest> {
+        self.invalidate_debug_snapshot_cache();
         let mut requests = VecDeque::new();
         let module_ids = self
             .components
@@ -2937,6 +2943,7 @@ impl Shell {
     }
 
     pub(super) fn register_component(&mut self, component: Box<dyn ShellComponent>) {
+        self.invalidate_debug_snapshot_cache();
         let surface_id = component.surface_id().to_string();
         let initial_visibility = component
             .initial_visibility()

@@ -653,6 +653,79 @@ fn debug_snapshot_publish_delivers_mesh_debug_service_event() {
 }
 
 #[test]
+fn debug_snapshot_publisher_reuses_unchanged_generation() {
+    let mut shell = Shell::new();
+    shell.debug.enabled = true;
+
+    shell.publish_debug_snapshot().unwrap();
+    shell.publish_debug_snapshot().unwrap();
+
+    let cache = shell
+        .debug_snapshot_cache
+        .as_ref()
+        .expect("first debug publication should populate the cache");
+    assert_eq!(cache.rebuild_count, 1);
+    assert_eq!(cache.publication_count, 1);
+
+    let diagnostics = shell.diagnostics.register_instance("@test/module", "test");
+    diagnostics.record_issue(
+        "test-issue",
+        mesh_core_diagnostics::IssueSeverity::Warning,
+        "changed diagnostic state",
+    );
+    shell.publish_debug_snapshot().unwrap();
+
+    let cache = shell
+        .debug_snapshot_cache
+        .as_ref()
+        .expect("diagnostic change should retain the cache");
+    assert_eq!(cache.rebuild_count, 2);
+    assert_eq!(cache.publication_count, 2);
+}
+
+#[test]
+fn debug_snapshot_publisher_refreshes_after_debug_state_change() {
+    let mut shell = Shell::new();
+    shell.debug.enabled = true;
+
+    shell.publish_debug_snapshot().unwrap();
+    shell
+        .apply_request(CoreRequest::ToggleDebugLayoutBounds)
+        .unwrap();
+    shell.publish_debug_snapshot().unwrap();
+
+    let cache = shell
+        .debug_snapshot_cache
+        .as_ref()
+        .expect("debug state change should retain the cache");
+    assert_eq!(cache.rebuild_count, 2);
+    assert_eq!(cache.publication_count, 2);
+    assert_eq!(
+        cache.payload["layout_bounds_enabled"],
+        serde_json::json!(true)
+    );
+}
+
+#[test]
+fn debug_snapshot_publisher_refreshes_profiling_on_bounded_cadence() {
+    let mut shell = Shell::new();
+    shell.debug.enabled = true;
+    shell.debug.profiling_enabled = true;
+    shell.debug.profiling_session_id = 1;
+
+    shell.publish_debug_snapshot().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(110));
+    shell.publish_debug_snapshot().unwrap();
+
+    let cache = shell
+        .debug_snapshot_cache
+        .as_ref()
+        .expect("profiling publication should populate the cache");
+    assert_eq!(cache.rebuild_count, 2);
+    assert_eq!(cache.publication_count, 2);
+}
+
+#[test]
 fn debug_snapshot_payload_includes_resolved_keybind_metadata() {
     let mut shell = Shell::new();
     shell.debug.enabled = true;

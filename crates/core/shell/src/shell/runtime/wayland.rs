@@ -322,6 +322,7 @@ impl Shell {
                     {
                         inspected["source_line"] = serde_json::json!(line);
                     }
+                    self.invalidate_debug_snapshot_cache();
                     self.debug.inspected_element = Some(inspected);
                 }
                 if selected {

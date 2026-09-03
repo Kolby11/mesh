@@ -13,6 +13,7 @@ mod service_state;
 mod theme;
 mod wayland;
 
+pub(in crate::shell) use debug::DebugSnapshotCache;
 pub(in crate::shell) use request::EffectScheduler;
 pub(in crate::shell) use theme::ControlPlaneSettingsCommit;
 
@@ -41,6 +42,7 @@ impl Shell {
         phase: &str,
         error: impl std::fmt::Display,
     ) {
+        self.invalidate_debug_snapshot_cache();
         let message = error.to_string();
         let Some((module_id, instance_id, was_quarantined, newly_quarantined, component_recorded)) =
             self.components.get_mut(index).map(|runtime| {
@@ -117,6 +119,7 @@ impl Shell {
         runtime.clear_failure_state();
         runtime.component.clear_runtime_failure();
         if was_unhealthy {
+            self.invalidate_debug_snapshot_cache();
             let another_instance_unhealthy = self.components.iter().any(|other| {
                 other.component.id() == module_id && (other.failure_count != 0 || other.quarantined)
             });
@@ -658,6 +661,7 @@ impl Shell {
     }
 
     fn destroy_presentation_surfaces(&mut self) {
+        self.invalidate_debug_snapshot_cache();
         for index in (0..self.components.len()).rev() {
             self.destroy_all_child_surfaces(index);
             let surface_id = self.components[index].surface_id.clone();

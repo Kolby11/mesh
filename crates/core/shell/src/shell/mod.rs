@@ -855,6 +855,12 @@ pub struct Shell {
     next_frontend_reload_check: std::time::Instant,
     file_watcher_active: bool,
     debug: DebugOverlayState,
+    /// Generation of shell-owned state represented by debug telemetry. The
+    /// publisher combines this with immutable subsystem revisions so a
+    /// steady frame can reuse its serialized payload without walking the
+    /// module/surface/diagnostic collections again.
+    debug_snapshot_generation: u64,
+    debug_snapshot_cache: Option<runtime::DebugSnapshotCache>,
     debug_overlay: DebugOverlay,
     active_key_modifiers: KeyModifiers,
     keyboard_focus_surface: Option<SurfaceId>,
@@ -972,6 +978,10 @@ impl Shell {
 
     pub fn shutdown_phase(&self) -> ShellShutdownPhase {
         self.shutdown_phase
+    }
+
+    pub(in crate::shell) fn invalidate_debug_snapshot_cache(&mut self) {
+        self.debug_snapshot_generation = self.debug_snapshot_generation.saturating_add(1);
     }
 
     pub(in crate::shell) fn begin_shutdown(&mut self) -> bool {

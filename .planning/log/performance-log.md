@@ -3791,3 +3791,54 @@ tests. The full 952-test shell library run completed with 774 passed, 47
 failed, and 131 ignored; its failures were unrelated geometry/rendering,
 fixture, and retained-layout tests. The two focused navigation geometry tests
 also fail independently with existing anchor mismatches.
+
+## 2026-09-03 — generation-cached debug snapshot publication
+
+area: shell debug telemetry publication
+
+The shell now keys the serialized debug service payload by shell-owned state,
+module-graph, interface, frontend-catalog, resource, settings, theme, locale,
+and diagnostics generations. Unchanged non-profiling frames reuse the payload
+without rebuilding or publishing it. Profiling keeps a bounded 100ms
+publication cadence, and state changes invalidate the cache at lifecycle,
+surface, request, resource, component, and diagnostic boundaries. A release
+benchmark covers both cache behavior and serialized payload size across the
+requested graph shapes.
+
+**Measured.** Machine: Linux 6.12.93 x86_64, Intel Core i5-6200U (2 cores / 4
+threads); `nix develop`; rustc/cargo 1.94.0. Gate:
+`debug_snapshot_generation_cache_release_benchmark`, with
+`--release --features allocation-profiling`, `CARGO_PROFILE_RELEASE_LTO=off`,
+and `CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16`. The gate runs 24 workload shapes
+(16/128/512 modules × 4/32 surfaces × 0/100 diagnostics × profiling off/on),
+with 1,000 repeated frames for forced-rebuild publication and 1,000 repeated
+frames for steady-generation publication per shape. Ranges below are the
+minimum and maximum across those shapes; p50/p95 are the per-shape sample
+percentiles.
+
+| Measurement | Forced rebuild/publication | Generation cache |
+| --- | ---: | ---: |
+| p50 frame time | 2,749,031–93,685,204 ns | 496–592 ns |
+| p95 frame time | 3,017,630–112,437,903 ns | 504–824 ns |
+| Speedup range | — | 4,998.2–167,894.6x |
+| Serialized payload | — | 21,766–564,525 bytes |
+| Snapshot rebuilds | 1,000/shape | 1/shape |
+| Publications | 1,000/shape | 1/shape |
+| Allocations | 4,721,568–159,251,553 | 0 |
+| Allocated bytes | 361,442,058–12,922,522,912 | 0 |
+
+At the largest shape (512 modules, 32 surfaces, 100 diagnostics, profiling
+on), p50/p95 fell from 93,685,204/112,437,903 ns to 558/566 ns, allocations
+from 159,251,553 to 0, and allocated bytes from 12,922,522,912 to 0; rebuilds
+and publications fell from 1,000 to 1. The focused publisher tests also pass,
+including the 110ms profiling-cadence case. The repository-default thin-LTO
+release build was stopped after more than 15 minutes before benchmark
+execution; the LTO-disabled release profile above is the completed, recorded
+measurement fallback.
+
+**Verified.** `cargo fmt --all -- --check`, `git diff --check`,
+`nix develop -c cargo check --workspace`, the three focused publisher tests,
+and the allocation-enabled release gate passed. The full shell library suite
+reported 779 passed, 47 unrelated baseline failures, and 132 ignored; the
+failures remain in existing rendering, interaction, fixture, lifecycle, and
+profiling tests (including the legacy `mesh.surfaceLayout` fixture).
