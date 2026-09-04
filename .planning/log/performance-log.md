@@ -3928,6 +3928,43 @@ live-byte accounting for each replacement and reported zero retained bytes; it
 was corrected before the three final runs above, and those preliminary numbers
 are not used.
 
+## 2026-09-03 — capability activation grant materialization
+
+area: activation-time capability-set cloning
+
+Added the ignored release-only gate
+`capability_activation_release_benchmark` to the capability foundation test
+module. It follows the current activation boundary: each restart resolves a
+fresh effective-grant map for 500 modules, then materializes the runtime
+`CapabilitySet` for four distinct active root instances. Every module declares
+10 catalog capabilities (five required and five optional), and all ten are
+approved. The fixture and the final activation snapshot remain live while the
+allocator records per-restart activity, so retained bytes report the activation
+snapshot above the fixture baseline.
+
+**Measured.** Machine: Linux 6.12.93 x86_64, 4 logical CPUs; rustc/cargo
+1.95.0; repository-default optimized release profile (thin LTO, one codegen
+unit). Gate command:
+`cargo test -p mesh-core-capability --release --
+capability_activation_release_benchmark --ignored --nocapture`. Each gate run
+uses three warmups and 50 measured restart cycles; the ranges below span three
+complete gate runs.
+
+| Measurement | Run 1 | Run 2 | Run 3 | Three-run range |
+| --- | ---: | ---: | ---: | ---: |
+| Latency min–max ns | 3,625,588–6,759,164 | 3,633,419–4,362,411 | 3,660,816–5,145,725 | 3,625,588–6,759,164 |
+| Latency median ns | 3,684,253 | 3,681,029 | 4,791,732 | 3,681,029–4,791,732 |
+| Latency p95 ns | 4,366,496 | 4,133,607 | 5,056,627 | 4,133,607–5,056,627 |
+| Allocations/restart | 17,546 | 17,546 | 17,546 | 17,546 |
+| Allocated bytes/restart | 820,456 | 820,456 | 820,456 | 820,456 |
+| Retained activation bytes | 735,456 | 735,456 | 735,456 | 735,456 |
+
+The fixture retained 517,580 bytes, and the final activation retained the same
+735,456-byte activation delta in every run. No before/after comparison or
+optimization is claimed; this records the current capability-resolution and
+runtime grant-copying baseline before considering shared immutable resolved
+grants.
+
 ## 2026-09-05 — retained-render allocation-profiler workload
 
 area: retained rendering and allocation profiling
@@ -3970,3 +4007,4 @@ The existing direct 64-byte allocator gate also passed at 1.307x. The aggregate
 `tools/check-performance` run could not reach this new gate because the
 pre-existing `stable_child_id_reuse_beats_rewriting_slots` gate stopped the
 sequence at 1.023x against its 1.25x direct requirement; the focused new gate
+passed independently.

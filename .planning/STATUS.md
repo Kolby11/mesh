@@ -55,7 +55,8 @@ production frontend and backend paths no longer fall back to raw manifest
 capability declarations. The closed capability catalog is now the only
 production authority, and raw mutable `CapabilitySet` construction is
 restricted; the unconsumed `CapabilityHandle` abstraction has been removed.
-The settings schema validation baseline is recorded in
+The settings schema validation, capability activation cloning, and retained
+render allocation-profiler baselines are recorded in
 [`.planning/log/performance-log.md`](log/performance-log.md). The next open item
 is S01-DEAD-001 / S01-LOGIC-001: update the package concern map to remove the
 deleted `mesh-core-events` crate and name the current event owners.

@@ -26,9 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 The following Section 1 findings remain open; IDs preserve their audit evidence
 for a future report or rerun.
 
-- [ ] **S01-PERF-006 (P3, measurement required):** Measure activation-time
-      capability-set cloning across many instances and grants before considering
-      shared immutable resolved grants.
 - [ ] **S01-DEAD-001 / S01-LOGIC-001 (P3):** Update the package concern map to
       remove the deleted `mesh-core-events` crate and name the current event owners;
       do not recreate the unused EventBus.

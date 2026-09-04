@@ -404,6 +404,109 @@ impl Default for CapabilitySet {
 mod tests {
     use super::*;
 
+    #[derive(Clone, Copy, Debug, Default)]
+    struct AllocationCounters {
+        count: u64,
+        allocated_bytes: u64,
+        live_bytes: u64,
+    }
+
+    mod test_alloc {
+        use super::AllocationCounters;
+        use std::alloc::{GlobalAlloc, Layout, System};
+        use std::cell::{Cell, RefCell};
+
+        thread_local! {
+            static TRACKING: Cell<bool> = const { Cell::new(false) };
+            static COUNTERS: RefCell<AllocationCounters> =
+                const { RefCell::new(AllocationCounters { count: 0, allocated_bytes: 0, live_bytes: 0 }) };
+        }
+
+        pub(super) fn begin() {
+            TRACKING.with(|tracking| tracking.set(false));
+            COUNTERS.with(|counters| counters.replace(AllocationCounters::default()));
+            TRACKING.with(|tracking| tracking.set(true));
+        }
+
+        pub(super) fn end() -> AllocationCounters {
+            TRACKING.with(|tracking| tracking.set(false));
+            COUNTERS.with(|counters| *counters.borrow())
+        }
+
+        pub(super) fn reset_activity() {
+            COUNTERS.with(|counters| {
+                let mut counters = counters.borrow_mut();
+                counters.count = 0;
+                counters.allocated_bytes = 0;
+            });
+        }
+
+        pub(super) fn snapshot() -> AllocationCounters {
+            COUNTERS.with(|counters| *counters.borrow())
+        }
+
+        fn record(update: impl FnOnce(&mut AllocationCounters)) {
+            TRACKING.with(|tracking| {
+                if tracking.get() {
+                    COUNTERS.with(|counters| update(&mut counters.borrow_mut()));
+                }
+            });
+        }
+
+        pub(super) struct CountingAllocator;
+
+        unsafe impl GlobalAlloc for CountingAllocator {
+            unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+                let pointer = unsafe { System.alloc(layout) };
+                if !pointer.is_null() {
+                    record(|counters| {
+                        counters.count += 1;
+                        counters.allocated_bytes += layout.size() as u64;
+                        counters.live_bytes += layout.size() as u64;
+                    });
+                }
+                pointer
+            }
+
+            unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+                let pointer = unsafe { System.alloc_zeroed(layout) };
+                if !pointer.is_null() {
+                    record(|counters| {
+                        counters.count += 1;
+                        counters.allocated_bytes += layout.size() as u64;
+                        counters.live_bytes += layout.size() as u64;
+                    });
+                }
+                pointer
+            }
+
+            unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+                unsafe { System.dealloc(pointer, layout) };
+                record(|counters| {
+                    counters.live_bytes = counters.live_bytes.saturating_sub(layout.size() as u64);
+                });
+            }
+
+            unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+                let new_pointer = unsafe { System.realloc(pointer, layout, new_size) };
+                if !new_pointer.is_null() {
+                    record(|counters| {
+                        counters.count += 1;
+                        counters.allocated_bytes += new_size as u64;
+                        counters.live_bytes = counters
+                            .live_bytes
+                            .saturating_sub(layout.size() as u64)
+                            .saturating_add(new_size as u64);
+                    });
+                }
+                new_pointer
+            }
+        }
+    }
+
+    #[global_allocator]
+    static TEST_ALLOCATOR: test_alloc::CountingAllocator = test_alloc::CountingAllocator;
+
     #[test]
     fn capability_privilege_levels() {
         #[allow(deprecated)]
@@ -507,5 +610,187 @@ mod tests {
                 capability
             }) if module_id.is_empty() && capability == "service.unknown.control"
         ));
+    }
+
+    // cargo test -p mesh-core-capability --release -- capability_activation_release_benchmark --ignored --nocapture
+    #[test]
+    #[ignore = "release-only capability activation allocation benchmark"]
+    fn capability_activation_release_benchmark() {
+        const MODULE_COUNT: usize = 500;
+        const GRANTS_PER_MODULE: usize = 10;
+        const ROOT_COUNT: usize = 4;
+        const RESTART_COUNT: usize = 50;
+        const WARMUP_COUNT: usize = 3;
+        const REQUIRED_GRANTS: usize = 5;
+        const GRANTS: [&str; GRANTS_PER_MODULE] = [
+            "shell.surface",
+            "shell.widget",
+            "theme.read",
+            "locale.read",
+            "service.audio.read",
+            "service.brightness.read",
+            "service.bluetooth.read",
+            "service.composition.read",
+            "service.debug.read",
+            "service.device.read",
+        ];
+
+        let mut samples = Vec::with_capacity(RESTART_COUNT);
+        let mut allocations = Vec::with_capacity(RESTART_COUNT);
+        test_alloc::begin();
+        let fixture = capability_activation_benchmark_fixture(
+            MODULE_COUNT,
+            &GRANTS,
+            REQUIRED_GRANTS,
+            ROOT_COUNT,
+        );
+        let fixture_live_bytes = test_alloc::snapshot().live_bytes;
+        let mut last_activation = None;
+
+        for _ in 0..WARMUP_COUNT {
+            drop(last_activation.take());
+            last_activation = Some(activate_capabilities(&fixture));
+        }
+        drop(last_activation.take());
+        test_alloc::reset_activity();
+
+        for _ in 0..RESTART_COUNT {
+            drop(last_activation.take());
+            test_alloc::reset_activity();
+            let started = std::time::Instant::now();
+            let activation = activate_capabilities(&fixture);
+            let elapsed = started.elapsed().as_nanos();
+            last_activation = Some(activation);
+            let counters = test_alloc::snapshot();
+            samples.push(elapsed);
+            allocations.push(counters);
+        }
+
+        let final_counters = test_alloc::end();
+        samples.sort_unstable();
+
+        let min_ns = samples[0];
+        let median_ns = samples[samples.len() / 2];
+        let p95_ns = samples[(samples.len() * 95) / 100];
+        let max_ns = *samples.last().expect("benchmark has samples");
+        let min_allocations = allocations.iter().map(|item| item.count).min().unwrap();
+        let max_allocations = allocations.iter().map(|item| item.count).max().unwrap();
+        let min_allocated_bytes = allocations
+            .iter()
+            .map(|item| item.allocated_bytes)
+            .min()
+            .unwrap();
+        let max_allocated_bytes = allocations
+            .iter()
+            .map(|item| item.allocated_bytes)
+            .max()
+            .unwrap();
+        let min_retained_bytes = allocations
+            .iter()
+            .map(|item| item.live_bytes.saturating_sub(fixture_live_bytes))
+            .min()
+            .unwrap();
+        let max_retained_bytes = allocations
+            .iter()
+            .map(|item| item.live_bytes.saturating_sub(fixture_live_bytes))
+            .max()
+            .unwrap();
+        let activation = last_activation
+            .as_ref()
+            .expect("benchmark should retain its final activation");
+
+        assert_eq!(activation.effective.len(), MODULE_COUNT);
+        assert_eq!(
+            activation
+                .effective
+                .values()
+                .map(|effective| effective.granted_ids().count())
+                .sum::<usize>(),
+            MODULE_COUNT * GRANTS_PER_MODULE
+        );
+        assert_eq!(activation.roots.len(), ROOT_COUNT);
+        assert!(
+            activation
+                .roots
+                .iter()
+                .all(|capabilities| capabilities.granted().len() == GRANTS_PER_MODULE)
+        );
+
+        eprintln!(
+            "MESH_PERF metric=capability_activation modules={MODULE_COUNT} grants_per_module={GRANTS_PER_MODULE} roots={ROOT_COUNT} restarts={RESTART_COUNT} warmups={WARMUP_COUNT} latency_ns={min_ns}..{max_ns} median_ns={median_ns} p95_ns={p95_ns} allocations={min_allocations}..{max_allocations} allocated_bytes={min_allocated_bytes}..{max_allocated_bytes} retained_bytes={min_retained_bytes}..{max_retained_bytes} fixture_retained_bytes={} final_retained_bytes={}",
+            fixture_live_bytes,
+            final_counters.live_bytes.saturating_sub(fixture_live_bytes)
+        );
+    }
+
+    struct CapabilityBenchmarkModule {
+        id: String,
+        required: Vec<String>,
+        optional: Vec<String>,
+    }
+
+    struct CapabilityBenchmarkFixture {
+        policy: CapabilityPolicy,
+        modules: Vec<CapabilityBenchmarkModule>,
+        root_modules: Vec<usize>,
+    }
+
+    struct CapabilityActivation {
+        effective: std::collections::HashMap<String, EffectiveCapabilities>,
+        roots: Vec<CapabilitySet>,
+    }
+
+    fn capability_activation_benchmark_fixture(
+        module_count: usize,
+        grants: &[&str],
+        required_count: usize,
+        root_count: usize,
+    ) -> CapabilityBenchmarkFixture {
+        let modules = (0..module_count)
+            .map(|index| CapabilityBenchmarkModule {
+                id: format!("@mesh/benchmark-{index:03}"),
+                required: grants[..required_count]
+                    .iter()
+                    .map(|grant| (*grant).to_string())
+                    .collect(),
+                optional: grants[required_count..]
+                    .iter()
+                    .map(|grant| (*grant).to_string())
+                    .collect(),
+            })
+            .collect::<Vec<_>>();
+        let approvals = modules
+            .iter()
+            .map(|module| {
+                (
+                    module.id.clone(),
+                    grants.iter().map(|grant| (*grant).to_string()).collect(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        CapabilityBenchmarkFixture {
+            policy: CapabilityPolicy::from_approvals(approvals),
+            modules,
+            root_modules: (0..root_count).collect(),
+        }
+    }
+
+    fn activate_capabilities(fixture: &CapabilityBenchmarkFixture) -> CapabilityActivation {
+        let mut effective = std::collections::HashMap::with_capacity(fixture.modules.len());
+        for module in &fixture.modules {
+            let resolved = fixture
+                .policy
+                .resolve(&module.id, &module.required, &module.optional)
+                .expect("benchmark declarations should be approved");
+            effective.insert(module.id.clone(), resolved);
+        }
+
+        let roots = fixture
+            .root_modules
+            .iter()
+            .map(|&module_index| effective[&fixture.modules[module_index].id].into_capability_set())
+            .collect();
+        CapabilityActivation { effective, roots }
     }
 }
