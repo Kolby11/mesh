@@ -26,9 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 The following Section 1 findings remain open; IDs preserve their audit evidence
 for a future report or rerun.
 
-- [ ] **S01-DEAD-001 / S01-LOGIC-001 (P3):** Update the package concern map to
-      remove the deleted `mesh-core-events` crate and name the current event owners;
-      do not recreate the unused EventBus.
 - [ ] **S01-DEAD-005 (P3):** Remove unreachable `ConfigError::Validation`, or
       deliberately route a real validation failure through it after confirming the
       intended recoverable-settings contract.

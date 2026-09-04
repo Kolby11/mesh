@@ -25,7 +25,7 @@ dated log and [`performance-log.md`](performance-log.md).
 
 | Concern | Workspace package(s) | Primary isolation seam |
 | --- | --- | --- |
-| Core foundation contracts | `mesh-core-capability`, `mesh-core-config`, `mesh-core-diagnostics`, `mesh-core-events`, `mesh-core-debug` | serializable contracts, diagnostics, events, and policy types |
+| Core foundation contracts | `mesh-core-capability`, `mesh-core-config`, `mesh-core-diagnostics`, `mesh-core-debug` | serializable contracts, diagnostics, and policy types |
 | Module system and installation | `mesh-core-module` | canonical manifests, graph, lifecycle, package state |
 | Service contracts | `mesh-core-service` | interfaces, providers, typed state/method/event records |
 | Themes | `mesh-core-theme` | token/default/keyframe/theme-engine API |
@@ -50,18 +50,25 @@ these packages provide reusable mechanisms and contracts.
 ## 1. Core foundation contracts
 
 **Packages:** `mesh-core-capability`, `mesh-core-config`,
-`mesh-core-diagnostics`, `mesh-core-events`, and `mesh-core-debug`.
+`mesh-core-diagnostics`, and `mesh-core-debug`.
 
 **Owns:** capability values and privilege checks; settings/config models and
-validation; health/lifecycle diagnostics; the typed event bus; debug, profiling,
-allocation, invalidation, and inspection snapshots.
+validation; health/lifecycle diagnostics; debug, profiling, allocation,
+invalidation, and inspection snapshots.
+
+**Event ownership:** `mesh-core-elements` owns raw input and targeted UI event
+dispatch; `mesh-core-service` owns interface event declarations and compiled
+payload schemas; `mesh-core-scripting` owns script-published and runtime
+transaction events; `mesh-core-backend` owns backend service-event emission; and
+`mesh-core-shell` owns core/service event routing and component delivery. No
+foundation event bus is part of this map.
 
 **Isolation seam:** These packages should expose data and policy contracts, not
 shell composition or service-specific behavior. They are the lowest-level
 cross-cutting core and should remain usable without rendering or Wayland.
 
 **Source roots:**
-`crates/core/foundation/{capability,config,diagnostics,events,debug}/`.
+`crates/core/foundation/{capability,config,diagnostics,debug}/`.
 
 **Review:** [`improvements.md`](sections/01-core-foundation-contracts/improvements.md)
 records the 2026-08-16 logical-flow, correctness, and security audit for this
