@@ -29,9 +29,6 @@ for a future report or rerun.
 - [ ] **S01-PERF-006 (P3, measurement required):** Measure activation-time
       capability-set cloning across many instances and grants before considering
       shared immutable resolved grants.
-- [ ] **S01-PERF-004 (P3):** Add a realistic retained-render workload to the
-      allocation-profiler overhead gate; the existing allocator microbenchmark
-      passes but does not measure frame-level impact.
 - [ ] **S01-DEAD-001 / S01-LOGIC-001 (P3):** Update the package concern map to
       remove the deleted `mesh-core-events` crate and name the current event owners;
       do not recreate the unused EventBus.

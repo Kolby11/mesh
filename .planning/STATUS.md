@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-09-03
+**Updated:** 2026-09-05
 
 ## Now
 
@@ -57,8 +57,8 @@ production authority, and raw mutable `CapabilitySet` construction is
 restricted; the unconsumed `CapabilityHandle` abstraction has been removed.
 The settings schema validation baseline is recorded in
 [`.planning/log/performance-log.md`](log/performance-log.md). The next open item
-is S01-PERF-006: measure activation-time capability-set cloning across many
-instances and grants before considering shared immutable resolved grants.
+is S01-DEAD-001 / S01-LOGIC-001: update the package concern map to remove the
+deleted `mesh-core-events` crate and name the current event owners.
 Host icon/font resources now use one explicit immutable graph/profile candidate
 catalog and copy-on-write registry handle, with failed preparation, recovery,
 and package rollback retaining the last-known-good snapshot. Icon resolution

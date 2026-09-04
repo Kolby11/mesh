@@ -3927,3 +3927,46 @@ paths, or output reservation. The first harness revision incorrectly reset
 live-byte accounting for each replacement and reported zero retained bytes; it
 was corrected before the three final runs above, and those preliminary numbers
 are not used.
+
+## 2026-09-05 — retained-render allocation-profiler workload
+
+area: retained rendering and allocation profiling
+
+Added `allocation_profiler_retained_render_overhead` to the shell's
+allocation-profiler performance gate and registered it in
+`tools/check-performance`. The workload builds a 1,026-node retained display
+tree (five groups with 204 items each), runs 12 warmup and 120 measured frames,
+and changes one group transform every sixth frame. Each frame updates the
+retained display list, selects minimal-damage paint commands, clears damage, and
+replays the selected commands. Five samples interleave normal profiling with a
+tracking-suspended control, keeping the real render and paint work identical.
+
+**Measured.** Linux 6.12.93 x86_64, 4 logical CPUs; `nix develop`; rustc/cargo
+1.94.0; optimized release with LTO disabled and 16 codegen units because the
+repository-default thin-LTO shell test build did not finish within 17 minutes.
+The gate command was
+`nix develop -c env CARGO_PROFILE_RELEASE_LTO=off
+CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 cargo test -p mesh-core-shell
+--features allocation-profiling --release --
+allocation_profiler_retained_render_overhead --ignored --nocapture`. The
+ranges below span three complete runs; each run contains five interleaved
+tracked/control samples.
+
+| Measurement | Run 1 | Run 2 | Run 3 | Three-run range |
+| --- | ---: | ---: | ---: | ---: |
+| Tracked frame-loop ns | 359,487,565–378,735,110 | 361,258,662–370,259,040 | 352,072,692–380,220,570 | 352,072,692–380,220,570 |
+| Tracking-suspended frame-loop ns | 353,002,744–375,372,870 | 352,758,460–380,869,722 | 350,732,369–387,721,775 | 350,732,369–387,721,775 |
+| Tracked median ns | 360,972,153 | 363,627,102 | 363,817,555 | 360,972,153–363,817,555 |
+| Tracking-suspended median ns | 353,532,542 | 355,180,534 | 356,319,275 | 353,532,542–356,319,275 |
+| Overhead ratio | 1.018x | 1.027x | 1.009x | 1.009–1.027x |
+| Tracked allocations/120 frames | 87,460 | 87,460 | 87,460 | 87,460 |
+| Tracked allocated bytes/120 frames | 69,864,360 | 69,864,360 | 69,864,360 | 69,864,360 |
+
+The gate reports the median overhead ratio and requires it to remain below
+4.0x; the configured `allocation_profiler_retained_render_overhead` baseline
+is 1.10x with 25% tolerance. The retained workload rebuilt 5,120 entries over
+20 dirty frames, retained 100 clean frames, and selected 4,120 paint commands.
+The existing direct 64-byte allocator gate also passed at 1.307x. The aggregate
+`tools/check-performance` run could not reach this new gate because the
+pre-existing `stable_child_id_reuse_beats_rewriting_slots` gate stopped the
+sequence at 1.023x against its 1.25x direct requirement; the focused new gate
