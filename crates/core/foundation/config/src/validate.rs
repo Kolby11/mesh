@@ -156,8 +156,6 @@ pub enum FieldKind {
     Locale,
     Bool,
     UInt,
-    /// Signed integer that must survive the trip into `i32`.
-    Int32,
     /// Unsigned integer constrained by an inclusive range.
     UIntRange {
         min: u64,
@@ -200,7 +198,6 @@ impl FieldKind {
             Self::Locale => "a valid BCP 47 locale tag".to_string(),
             Self::Bool => "a boolean".to_string(),
             Self::UInt => "a non-negative integer".to_string(),
-            Self::Int32 => "an integer".to_string(),
             Self::UIntRange { min, max } => format!("an integer from {min} through {max}"),
             Self::FloatRange { min, max } => match max {
                 Some(max) => format!("a number from {min} through {max}"),
@@ -447,10 +444,6 @@ pub fn validate_value(
             .map(JsonValue::String),
         FieldKind::Bool => value.is_boolean().then(|| value.clone()),
         FieldKind::UInt => value.as_u64().map(|_| value.clone()),
-        FieldKind::Int32 => value
-            .as_i64()
-            .filter(|n| i32::try_from(*n).is_ok())
-            .map(|_| value.clone()),
         FieldKind::UIntRange { min, max } => value
             .as_u64()
             .filter(|n| (*min..=*max).contains(n))

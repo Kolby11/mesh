@@ -58,8 +58,9 @@ restricted; the unconsumed `CapabilityHandle` abstraction has been removed.
 The settings schema validation, capability activation cloning, and retained
 render allocation-profiler baselines are recorded in
 [`.planning/log/performance-log.md`](log/performance-log.md). The next open item
-is S01-DEAD-015: confirm whether `FieldKind::Int32` is a supported extension
-point or unused reserved vocabulary before retaining or removing it.
+is S01-LOGIC-007: give lifecycle diagnostics an explicit module or generation
+identity instead of attaching them to the first registered instance; test
+multi-instance record and resolution behavior.
 Host icon/font resources now use one explicit immutable graph/profile candidate
 catalog and copy-on-write registry handle, with failed preparation, recovery,
 and package rollback retaining the last-known-good snapshot. Icon resolution

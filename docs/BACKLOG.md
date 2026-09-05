@@ -26,9 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 The following Section 1 findings remain open; IDs preserve their audit evidence
 for a future report or rerun.
 
-- [ ] **S01-DEAD-015 (P3 candidate):** Confirm whether `FieldKind::Int32` is a
-      supported extension point or unused reserved vocabulary before retaining or
-      removing it.
 - [ ] **S01-LOGIC-007 (P3):** Give lifecycle diagnostics an explicit module or
       generation identity instead of attaching them to the first registered
       instance; test multi-instance record and resolution behavior.
