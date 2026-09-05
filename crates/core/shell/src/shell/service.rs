@@ -2,6 +2,8 @@
 
 use super::types::CoreRequest;
 use mesh_core_capability::Capability;
+#[cfg(test)]
+use mesh_core_capability::CapabilityCatalog;
 use mesh_core_frontend_abi::{
     DebugEffect, EffectScope, EffectSource, FrontendEffect, FrontendEffectRevision,
     ScopedFrontendEffect, ServiceEffect, SurfaceEffect, SurfaceRole,
@@ -461,7 +463,7 @@ fn script_event_to_request_at(
             FrontendEffect::Debug(DebugEffect::ToggleElementPicker),
             revision,
         )),
-        "shell.open-debug-source" if event.source_module_id == "@mesh/debug-inspector" => {
+        "shell.open-debug-source" => {
             let path = event.payload.get("path").and_then(|value| value.as_str())?;
             let line = event
                 .payload
@@ -1051,8 +1053,9 @@ mod tests {
 
     #[test]
     fn script_events_to_requests_maps_debug_control_events() {
-        let debug_capabilities =
-            mesh_core_capability::CapabilitySet::from_ids(["service.debug.read"]);
+        let debug_capabilities = CapabilityCatalog::builtin()
+            .capability_set(["service.debug.control"])
+            .expect("debug control must be cataloged");
         let requests = script_events_to_requests(vec![
             PublishedEvent {
                 channel: "shell.toggle-debug-overlay".into(),
@@ -1116,6 +1119,26 @@ mod tests {
         assert!(matches!(
             requests.get(4),
             Some(CoreRequest::ToggleDebugProfiling)
+        ));
+    }
+
+    #[test]
+    fn script_events_to_requests_rejects_debug_read_access_for_control() {
+        let requests = script_events_to_requests(vec![PublishedEvent {
+            channel: "shell.toggle-debug-overlay".into(),
+            payload: serde_json::json!({}),
+            source_module_id: "@mesh/debug-inspector".into(),
+            source_capabilities: CapabilityCatalog::builtin()
+                .capability_set(["service.debug.read"])
+                .expect("debug read must be cataloged"),
+            call_id: None,
+            source_instance_id: None,
+        }]);
+
+        assert!(matches!(
+            requests.as_slice(),
+            [CoreRequest::PublishDiagnostics { message }]
+                if message.contains("service.debug.control")
         ));
     }
 

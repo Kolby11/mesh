@@ -57,6 +57,7 @@ pub const KNOWN_CAPABILITIES: &[&str] = &[
     "service.hyprland.read",
     "service.hyprland.control",
     "service.debug.read",
+    "service.debug.control",
     "service.settings.read",
     "service.settings.control",
     "service.packages.read",

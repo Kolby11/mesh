@@ -656,6 +656,7 @@ fn validate_schema_definition(schema: &JsonValue, path: &str) -> Result<(), Sett
                 | "array"
                 | "string"
                 | "str"
+                | "localized-text"
                 | "size"
                 | "duration"
                 | "color"

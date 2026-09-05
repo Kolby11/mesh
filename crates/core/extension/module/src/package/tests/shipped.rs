@@ -237,6 +237,33 @@ fn shipped_graph_approves_hyprland_event_stream_capabilities() {
 }
 
 #[test]
+fn shipped_debug_inspector_resolves_its_cataloged_activation_capabilities() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let root =
+        RootModuleGraphManifest::from_path(&workspace_root.join("config/module.json")).unwrap();
+    let loaded =
+        load_module_manifest(&workspace_root.join("modules/frontend/debug-inspector")).unwrap();
+    let policy = mesh_core_capability::CapabilityPolicy::from_approvals(root.capability_approvals);
+    let effective = policy
+        .resolve(
+            &loaded.manifest.name,
+            &loaded.manifest.mesh.capabilities.required,
+            &loaded.manifest.mesh.capabilities.optional,
+        )
+        .expect("shipped debug inspector capabilities should activate");
+
+    assert_eq!(
+        effective.granted_ids().collect::<Vec<_>>(),
+        vec![
+            "locale.read",
+            "service.debug.control",
+            "service.debug.read",
+            "shell.surface"
+        ]
+    );
+}
+
+#[test]
 fn shipped_module_graph_preserves_navigation_localized_keybind_text() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
     let graph = load_installed_module_graph(&workspace_root.join("config/module.json")).unwrap();

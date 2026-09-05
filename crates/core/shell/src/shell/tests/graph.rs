@@ -119,6 +119,63 @@ fn installed_module_graph_exposes_shell_package_choices() {
 }
 
 #[test]
+fn graph_settings_reject_the_same_surface_enum_values_as_surface_config() {
+    let graph = graph_from_json(
+        r#"{
+            "modulesDir": "modules",
+            "modules": {
+                "@test/frontend": {
+                    "kind": "frontend",
+                    "path": "frontend",
+                    "enabled": true
+                }
+            }
+        }"#,
+        vec![
+            r#"{
+                "name": "@test/frontend",
+                "version": "0.1.0",
+                "mesh": {
+                    "apiVersion": "0.1",
+                    "kind": "frontend",
+                    "entry": "src/main.mesh"
+                }
+            }"#,
+        ],
+    );
+    let mut store = mesh_core_config::SettingsStore::from_value(
+        "/tmp/mesh-graph-surface-schema-parity.json",
+        serde_json::json!({
+            "@test/frontend": {
+                "surface": {
+                    "role": "popup",
+                    "anchor": "botom",
+                    "layer": "overly",
+                    "keyboard_mode": "exclusive-ish"
+                }
+            }
+        }),
+    )
+    .unwrap();
+
+    crate::shell::discovery::register_graph_settings_schemas(&mut store, &graph).unwrap();
+
+    assert_eq!(
+        store.namespace("@test/frontend")["surface"],
+        serde_json::json!({})
+    );
+    for key in ["role", "anchor", "layer", "keyboard_mode"] {
+        assert!(
+            store
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.key_path == format!("surface.{key}")),
+            "graph schema should diagnose invalid surface.{key}"
+        );
+    }
+}
+
+#[test]
 fn graph_interface_catalog_replaces_stale_providers_and_excludes_disabled_candidates() {
     let first = graph_from_json(
         r#"{

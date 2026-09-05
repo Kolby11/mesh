@@ -753,6 +753,13 @@ pub const MODULE_NAMESPACE_FIELDS: &[FieldSpec] = &[
             FieldSpec::new("ignore_shell_default", FieldKind::Bool),
         ]),
     ),
+    FieldSpec::new(
+        "fonts",
+        FieldKind::Section(&[
+            FieldSpec::new("use_packs", FieldKind::StrArray),
+            FieldSpec::new("overrides", FieldKind::Map(&FieldKind::Str)),
+        ]),
+    ),
 ];
 
 /// Validate one module's stored namespace, returning the `surface` block
@@ -1516,6 +1523,26 @@ mod tests {
             "use one of: top, bottom, left, right"
         );
         assert_eq!(layout.edge, Edge::Top);
+    }
+
+    #[test]
+    fn all_surface_enum_fixtures_use_the_canonical_contract() {
+        let manifest = manifest_with_surface_layout(SurfaceLayoutSection::default());
+        for (key, value) in [
+            ("role", "popup"),
+            ("decorations", "native"),
+            ("anchor", "botom"),
+            ("layer", "overly"),
+            ("keyboard_mode", "exclusive-ish"),
+        ] {
+            let (_, diagnostics) = diagnose(serde_json::json!({ key: value }), &manifest);
+            let diagnostic = diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.is_error())
+                .expect("invalid enum should produce an error diagnostic");
+            assert!(diagnostic.is_error(), "surface.{key} should be rejected");
+            assert_eq!(diagnostic.key_path, format!("surface.{key}"));
+        }
     }
 
     #[test]

@@ -7,7 +7,7 @@
 //! authorization rules.
 
 use crate::policy::ResourceBudget;
-use mesh_core_capability::{Capability, CapabilitySet};
+use mesh_core_capability::{Capability, CapabilityCatalog, CapabilitySet};
 use mesh_core_service::{InterfaceContract, InterfaceMethod, ResolvedServiceCatalog, TypeExpr};
 use serde_json::{Map, Value};
 use std::fmt;
@@ -124,14 +124,17 @@ impl OperationRegistry {
                 module_id: module_id.to_string(),
             });
         }
-        if let Some(capability) = capability
-            && !capabilities.is_granted(&Capability::new(capability))
-        {
-            return Err(OperationRejection::Unauthorized {
-                channel: channel.to_string(),
-                module_id: module_id.to_string(),
-                capability: capability.to_string(),
-            });
+        if let Some(capability) = capability {
+            let capability = CapabilityCatalog::builtin()
+                .capability(capability)
+                .expect("shell operation capability must be in the closed catalog");
+            if !capabilities.is_granted(&capability) {
+                return Err(OperationRejection::Unauthorized {
+                    channel: channel.to_string(),
+                    module_id: module_id.to_string(),
+                    capability: capability.to_string(),
+                });
+            }
         }
         validate_payload(channel, operation, payload)?;
         Ok(Some(operation))
@@ -409,32 +412,32 @@ fn definition(
         "shell.set-locale" => (ShellOperation::SetLocale, Some("locale.write"), None),
         "shell.toggle-debug-overlay" => (
             ShellOperation::ToggleDebugOverlay,
-            Some("service.debug.read"),
+            Some("service.debug.control"),
             Some("@mesh/debug-inspector"),
         ),
         "shell.toggle-debug-layout-bounds" => (
             ShellOperation::ToggleDebugLayoutBounds,
-            Some("service.debug.read"),
+            Some("service.debug.control"),
             Some("@mesh/debug-inspector"),
         ),
         "shell.toggle-debug-element-picker" => (
             ShellOperation::ToggleDebugElementPicker,
-            Some("service.debug.read"),
+            Some("service.debug.control"),
             Some("@mesh/debug-inspector"),
         ),
         "shell.open-debug-source" => (
             ShellOperation::OpenDebugSource,
-            Some("service.debug.read"),
+            Some("service.debug.control"),
             Some("@mesh/debug-inspector"),
         ),
         "shell.toggle-debug-profiling" => (
             ShellOperation::ToggleDebugProfiling,
-            Some("service.debug.read"),
+            Some("service.debug.control"),
             Some("@mesh/debug-inspector"),
         ),
         "shell.run-debug-benchmark" => (
             ShellOperation::RunDebugBenchmark,
-            Some("service.debug.read"),
+            Some("service.debug.control"),
             Some("@mesh/debug-inspector"),
         ),
         "shell.schedule-handler" => (ShellOperation::ScheduleHandler, None, None),
@@ -773,7 +776,7 @@ mod tests {
                 "shell.toggle-debug-overlay",
                 &payload,
                 "@mesh/widget",
-                &capabilities(&["service.debug.read"]),
+                &capabilities(&["service.debug.control"]),
             ),
             Err(OperationRejection::CallerNotAllowed { .. })
         ));
@@ -783,10 +786,26 @@ mod tests {
                     "shell.toggle-debug-overlay",
                     &payload,
                     "@mesh/debug-inspector",
-                    &capabilities(&["service.debug.read"]),
+                    &capabilities(&["service.debug.control"]),
                 )
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn debug_operations_do_not_treat_read_access_as_control() {
+        let result = OperationRegistry::builtin().authorize_event(
+            "shell.toggle-debug-overlay",
+            &serde_json::json!({}),
+            "@mesh/debug-inspector",
+            &capabilities(&["service.debug.read"]),
+        );
+
+        assert!(matches!(
+            result,
+            Err(OperationRejection::Unauthorized { capability, .. })
+                if capability == "service.debug.control"
+        ));
     }
 
     #[test]

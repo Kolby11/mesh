@@ -1627,57 +1627,65 @@ fn merge_schema_property(
 }
 
 fn module_settings_properties() -> serde_json::Map<String, serde_json::Value> {
-    serde_json::json!({
-        "surface": {
-            "type": "object",
-            "properties": {
-                "role": { "type": "string" },
-                "title": { "type": "string" },
-                "app_id": { "type": "string" },
-                "resizable": { "type": "boolean" },
-                "decorations": { "type": "string" },
-                "anchor": { "type": "string" },
-                "layer": { "type": "string" },
-                "keyboard_mode": { "type": "string" },
-                "visible_on_start": { "type": "boolean" },
-                "blur": { "type": "boolean" }
+    mesh_core_surface_config::MODULE_NAMESPACE_FIELDS
+        .iter()
+        .map(|field| (field.key.to_string(), field_kind_schema(&field.kind)))
+        .collect()
+}
+
+fn field_kind_schema(kind: &mesh_core_config::FieldKind) -> serde_json::Value {
+    match kind {
+        mesh_core_config::FieldKind::Str | mesh_core_config::FieldKind::Locale => {
+            serde_json::json!({ "type": "string" })
+        }
+        mesh_core_config::FieldKind::LocalizedText => serde_json::json!({
+            "type": "localized-text"
+        }),
+        mesh_core_config::FieldKind::Bool => serde_json::json!({ "type": "boolean" }),
+        mesh_core_config::FieldKind::UInt => serde_json::json!({
+            "type": "integer",
+            "minimum": 0
+        }),
+        mesh_core_config::FieldKind::UIntRange { min, max } => serde_json::json!({
+            "type": "integer",
+            "minimum": min,
+            "maximum": max
+        }),
+        mesh_core_config::FieldKind::FloatRange { min, max } => {
+            let mut schema = serde_json::json!({
+                "type": "number",
+                "minimum": min
+            });
+            if let Some(max) = max {
+                schema["maximum"] = serde_json::json!(max);
             }
-        },
-        "props": {
+            schema
+        }
+        mesh_core_config::FieldKind::Float => serde_json::json!({ "type": "number" }),
+        mesh_core_config::FieldKind::StrArray => serde_json::json!({
+            "type": "array",
+            "items": { "type": "string" }
+        }),
+        mesh_core_config::FieldKind::Enum { values, .. } => serde_json::json!({
+            "type": "string",
+            "enum": values
+        }),
+        mesh_core_config::FieldKind::Section(fields) => serde_json::json!({
             "type": "object",
-            "properties": {
-                "global": { "type": "object" },
-                "instances": {
-                    "type": "object",
-                    "additionalProperties": { "type": "object" }
-                }
-            }
-        },
-        "icons": {
+            "properties": fields
+                .iter()
+                .map(|field| (field.key.to_string(), field_kind_schema(&field.kind)))
+                .collect::<serde_json::Map<_, _>>()
+        }),
+        mesh_core_config::FieldKind::Map(inner) => serde_json::json!({
             "type": "object",
-            "properties": {
-                "use_packs": { "type": "array", "items": { "type": "string" } },
-                "overrides": {
-                    "type": "object",
-                    "additionalProperties": { "type": "string" }
-                },
-                "ignore_shell_default": { "type": "boolean" }
-            }
-        },
-        "fonts": {
-            "type": "object",
-            "properties": {
-                "use_packs": { "type": "array", "items": { "type": "string" } },
-                "overrides": {
-                    "type": "object",
-                    "additionalProperties": { "type": "string" }
-                }
-            }
-        },
-    })
-    .as_object()
-    .cloned()
-    .expect("module settings schema is an object")
+            "additionalProperties": field_kind_schema(inner)
+        }),
+        mesh_core_config::FieldKind::Opaque => serde_json::json!({ "type": "object" }),
+        mesh_core_config::FieldKind::ThemeModePolicy | mesh_core_config::FieldKind::Token => {
+            serde_json::json!({ "type": "any" })
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1687,6 +1695,38 @@ mod tests {
     #[test]
     fn module_schema_does_not_expose_module_default_locale() {
         assert!(!module_settings_properties().contains_key("i18n"));
+    }
+
+    #[test]
+    fn module_schema_uses_surface_config_fields_and_canonical_enums() {
+        let properties = module_settings_properties();
+        let surface = properties["surface"]["properties"]
+            .as_object()
+            .expect("surface schema properties");
+
+        for field in mesh_core_surface_config::SURFACE_FIELDS {
+            assert!(
+                surface.contains_key(field.key),
+                "missing surface field {}",
+                field.key
+            );
+        }
+        for (key, values) in [
+            ("role", mesh_core_surface_config::SURFACE_ROLE_VALUES),
+            (
+                "decorations",
+                mesh_core_surface_config::WINDOW_DECORATIONS_VALUES,
+            ),
+            ("anchor", mesh_core_surface_config::SURFACE_EDGE_VALUES),
+            ("layer", mesh_core_surface_config::SURFACE_LAYER_VALUES),
+            (
+                "keyboard_mode",
+                mesh_core_surface_config::KEYBOARD_MODE_VALUES,
+            ),
+        ] {
+            assert_eq!(surface[key]["enum"], serde_json::json!(values));
+        }
+        assert!(properties.contains_key("fonts"));
     }
 }
 

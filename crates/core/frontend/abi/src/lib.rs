@@ -5,7 +5,7 @@
 //! with the identity and capability proof of its caller; a host adapter owns
 //! the policy-specific lowering of those effects into shell operations.
 
-use mesh_core_capability::{Capability, CapabilitySet};
+use mesh_core_capability::{Capability, CapabilityCatalog, CapabilitySet};
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,7 +193,11 @@ impl FrontendEffect {
             ))],
             Self::SetLocale { .. } => vec![Capability::new("locale.write")],
             Self::WriteClipboard { .. } => vec![Capability::new("shell.clipboard.write")],
-            Self::Debug(_) => vec![Capability::new("service.debug.read")],
+            Self::Debug(_) => vec![
+                CapabilityCatalog::builtin()
+                    .capability("service.debug.control")
+                    .expect("debug effects must use a cataloged capability"),
+            ],
         }
     }
 }
@@ -390,6 +394,34 @@ mod tests {
                 required: vec!["service.audio.control".into()],
             })
         );
+    }
+
+    #[test]
+    fn debug_effects_require_control_capability() {
+        let read_only = ScopedFrontendEffect::new(
+            EffectScope::new(
+                EffectSource::new("@mesh/debug-inspector", None),
+                CapabilitySet::from_ids(["service.debug.read"]),
+            ),
+            FrontendEffect::Debug(DebugEffect::ToggleOverlay),
+        );
+        assert_eq!(
+            read_only.authorize(),
+            Err(EffectRejection::MissingCapability {
+                module_id: "@mesh/debug-inspector".into(),
+                effect: "debug-overlay".into(),
+                required: vec!["service.debug.control".into()],
+            })
+        );
+
+        let control = ScopedFrontendEffect::new(
+            EffectScope::new(
+                EffectSource::new("@mesh/debug-inspector", None),
+                CapabilitySet::from_ids(["service.debug.control"]),
+            ),
+            FrontendEffect::Debug(DebugEffect::ToggleOverlay),
+        );
+        assert!(control.authorize().is_ok());
     }
 
     #[test]

@@ -34,9 +34,6 @@ evidence and test workloads are in the linked reports.
 
 ### Section 01 — Core foundation contracts
 
-- [ ] **S01-LOGIC-003 / S01-DEAD-003:** Route debug-inspector access through
-      the closed capability catalog and make graph/surface schema ownership
-      canonical, with parity fixtures for activation and validation. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/01-core-foundation-contracts.md)
 - [ ] **S01-LOGIC-004 / S01-LOGIC-005:** Reject invalid array members without
       compacting sparse settings, and resolve tooltip state from effective
       settings rather than durable storage. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/01-core-foundation-contracts.md)

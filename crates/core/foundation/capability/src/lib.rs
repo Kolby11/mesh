@@ -88,6 +88,7 @@ impl CapabilityCatalog {
             | "service.brightness.control"
             | "service.bluetooth.control"
             | "service.composition.control"
+            | "service.debug.control"
             | "service.media.control"
             | "service.network.control"
             | "service.packages.control"
@@ -112,6 +113,13 @@ impl CapabilityCatalog {
                 module_id: String::new(),
                 capability: id.to_string(),
             })
+    }
+
+    /// Build one runtime capability proof after checking that the id belongs
+    /// to the closed host catalog.
+    pub fn capability(&self, id: &str) -> Result<Capability, CapabilityPolicyError> {
+        self.validate(id)?;
+        Ok(Capability::new(id))
     }
 
     /// Build a runtime capability proof set from ids validated by this closed
@@ -497,6 +505,50 @@ mod tests {
                 capability
             }) if module_id.is_empty() && capability == "service.unknown.control"
         ));
+    }
+
+    #[test]
+    fn shipped_debug_capabilities_have_explicit_catalog_privileges() {
+        let catalog = CapabilityCatalog::builtin();
+        assert_eq!(
+            catalog.validate("service.debug.read"),
+            Ok(PrivilegeLevel::Standard)
+        );
+        assert_eq!(
+            catalog.validate("service.debug.control"),
+            Ok(PrivilegeLevel::Elevated)
+        );
+
+        let policy = CapabilityPolicy::from_approvals([(
+            "@mesh/debug-inspector".into(),
+            vec![
+                "locale.read".into(),
+                "service.debug.control".into(),
+                "service.debug.read".into(),
+                "shell.surface".into(),
+            ],
+        )]);
+        let effective = policy
+            .resolve(
+                "@mesh/debug-inspector",
+                &[
+                    "shell.surface".into(),
+                    "service.debug.read".into(),
+                    "service.debug.control".into(),
+                    "locale.read".into(),
+                ],
+                &[],
+            )
+            .expect("the shipped debug inspector approval should resolve");
+        assert_eq!(
+            effective.granted_ids().collect::<Vec<_>>(),
+            vec![
+                "locale.read",
+                "service.debug.control",
+                "service.debug.read",
+                "shell.surface"
+            ]
+        );
     }
 
     // cargo test -p mesh-core-capability --release -- capability_activation_release_benchmark --ignored --nocapture
