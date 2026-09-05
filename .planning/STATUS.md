@@ -58,9 +58,9 @@ restricted; the unconsumed `CapabilityHandle` abstraction has been removed.
 The settings schema validation, capability activation cloning, and retained
 render allocation-profiler baselines are recorded in
 [`.planning/log/performance-log.md`](log/performance-log.md). The next open item
-is S01-DEAD-005: remove unreachable `ConfigError::Validation`, or deliberately
-route a real validation failure through it after confirming the intended
-recoverable-settings contract.
+is S01-DEAD-006: keep complete transactional schema replacement as the
+canonical graph path and prune or privatize unused incremental
+schema-registration/introspection APIs after downstream review.
 Host icon/font resources now use one explicit immutable graph/profile candidate
 catalog and copy-on-write registry handle, with failed preparation, recovery,
 and package rollback retaining the last-known-good snapshot. Icon resolution

@@ -26,9 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 The following Section 1 findings remain open; IDs preserve their audit evidence
 for a future report or rerun.
 
-- [ ] **S01-DEAD-005 (P3):** Remove unreachable `ConfigError::Validation`, or
-      deliberately route a real validation failure through it after confirming the
-      intended recoverable-settings contract.
 - [ ] **S01-DEAD-006 (P3):** Keep complete transactional schema replacement as
       the canonical graph path and prune or privatize unused incremental schema
       registration/introspection APIs after downstream review.

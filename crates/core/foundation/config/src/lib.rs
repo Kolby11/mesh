@@ -608,9 +608,6 @@ pub enum ConfigError {
     #[error("failed to parse json config: {0}")]
     Json(#[from] serde_json::Error),
 
-    #[error("validation error: {0}")]
-    Validation(String),
-
     #[error("configuration diagnostic: {diagnostic}")]
     Diagnostic { diagnostic: ConfigDiagnostic },
 
