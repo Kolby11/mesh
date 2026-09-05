@@ -4,78 +4,24 @@
 
 ## Now
 
-The 2026-09-01 whole-codebase audit is complete as a synthesis of the dated
-Sections 01–15 reports, the historical Section 16 report, and a fresh
-cross-section review. It accounts for 648 in-scope files with zero unassigned;
-new cross-section backlog items cover candidate identity, stale active
-snapshots, and pending watcher revisions. Per-instance settings now resolve
-through each module owner's validated projection; invalid instance overrides
-remain available in raw storage for repair and are diagnosed.
+The accepted platform direction is consolidated in
+[Platform Philosophy](../docs/spec/00-philosophy.md). Core owns platform
+invariants and built-in settings/storage, inspection, and management mechanisms;
+ordinary components provide their UIs. Luau is current; TypeScript/JavaScript
+remains undecided. The public specs and audit prompt use this single authority.
 
-Settings and profile revisions now use serialized checked commits with checked
-overflow handling; CLI mutations route through those commits, and shell
-control-plane/profile durable writes complete off the shell loop before live
-state is acknowledged.
+The documentation work is complete. Four resulting implementation gaps are
+tracked in [the backlog](../docs/BACKLOG.md): component profile roots, mandatory
+typed service contracts, interface-defined service permissions, and props-layer
+introspection. They are targets, not newly shipped behavior.
 
-Section 15's first twelve items and Section 16's path-safe uninstall, atomic
-package mutation, typed live profile switching, shared CLI/shell package
-ownership contract, shared CLI/shell package transaction engine, canonical
-graph-authoring snapshot, typed update flags with clean replace behavior, and
-syntax-aware LSP analysis are complete. Package operations now share one
-core-owned typed owner/operation contract, locked durable transaction journal,
-fsynced snapshots, staged source writes, root/profile/lock persistence, exact
-rollback reconciliation, startup recovery, and failure-injection regressions;
-the CLI and shell abort failed mutations through that boundary, and new
-journals record their package authority and operation while schema-v1 journals
-remain recoverable. Live
-profile switches now wait for a typed committed/rejected generation
-acknowledgement, and failed pre-commit activation restores the exact prior
-active-profile pointer without overwriting a newer external change. CLI,
-doctor, LSP, and runtime consumers now share the resolved canonical graph
-snapshot and its content revision. LSP manifest diagnostics now run the same
-canonical module and root runtime contracts as activation while retaining
-source-aware editor diagnostics; component tooling now retains partial
-template/script ASTs and reports parser-owned Luau member spans during edits.
-JSON authoring now uses standards-aware tokenization and strict parsed code
-maps for decoded values and source-accurate spans, while Luau completion
-contexts use the full_moon token stream for comment- and string-safe recovery.
-The active runtime publishes immutable
-activation snapshots, prepared frontends remain hidden until commit, and
-shutdown advances through explicit quiescing, teardown, flushing, and stopped
-phases. Module activation now rejects unsatisfied required dependency closures,
-incompatible module/interface versions, invalid composition pins, and duplicate
-contract identities before runtime contributions are indexed. Module lifecycle
-and health are now reconciled
-at graph commit, frontend/backend activation, candidate failure, recovery,
-quarantine, and teardown boundaries. The module lock now uses schema v3 with
-validated versions, direct dependency requirements, reverse requesters,
-composition provenance, and rollback metadata rebuilt from restored manifests.
-Activation now requires graph/profile-resolved effective capability grants;
-production frontend and backend paths no longer fall back to raw manifest
-capability declarations. The closed capability catalog is now the only
-production authority, and raw mutable `CapabilitySet` construction is
-restricted; the unconsumed `CapabilityHandle` abstraction has been removed.
-The settings schema validation, capability activation cloning, and retained
-render allocation-profiler baselines are recorded in
-[`.planning/log/performance-log.md`](log/performance-log.md). The Section 1
-settings findings S01-LOGIC-004 / S01-LOGIC-005 are complete; the next open
-item is S02-LOGIC-001 / S02-LOGIC-002 in `docs/BACKLOG.md`.
-Host icon/font resources now use one explicit immutable graph/profile candidate
-catalog and copy-on-write registry handle, with failed preparation, recovery,
-and package rollback retaining the last-known-good snapshot. Icon resolution
-now validates canonical module identities, keeps vocabulary mappings scoped to
-their requesting owner, preserves typed color policy and chain order, and
-reports effective requirement provenance from that snapshot.
-`aspect-ratio` is now part of the bounded style profile, and the shipped
-navigation bar derives its control sizing from the bar root through it rather
-than restating px sizes per component. Surface geometry now follows the same
-CSS authority: the measured root box supplies content size, its margins lower
-to layer-shell placement, and the anchored outer edge supplies the exclusive
-zone; overlays opt out with `exclusive-zone: none`.
+The 2026-09-01 audit synthesis is complete with 648 in-scope files and zero
+unassigned. The next audit implementation item remains S02-LOGIC-001 /
+S02-LOGIC-002. Current foundations include revision-checked settings/profile
+commits, shared package transactions and recovery, immutable activation and
+resource snapshots, canonical authoring contracts, resolved capability grants,
+and CSS-derived surface geometry. The capability catalog is still closed.
 
-The transition animator now runs one in-flight instance per entry of a
-comma-separated `transition`, and the `transition-*` longhands now retain
-independent comma lists with CSS-style repeat/truncate matching. Entries with
-different durations, delays, and easings animate on independent timelines.
-See
-[`.planning/log/2026-08.md`](log/2026-08.md).
+Recent implementation evidence, validation limits, and known baseline failures
+are in [September's log](log/2026-09.md) and [August's log](log/2026-08.md).
+Measurements remain in [the performance log](log/performance-log.md).

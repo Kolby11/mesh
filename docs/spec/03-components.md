@@ -6,10 +6,17 @@
 
 A **component** is a user-authored reusable `.mesh` unit composed from core
 elements and other components. A component module exports one primary public
-component and may contain private internal components. A shell profile may
-mount that component as a top-level surface or another component may embed it.
+component and may contain private internal components and explicitly declared
+public contributions. Frontend and component module kinds use the same UI
+model. **Target:** a shell profile may mount either kind as a root; the current
+root activation path requires `frontend`. A `component` module has no default
+`mesh.surface` declaration. See [01 §3.2](01-module-system.md#32-module-kinds).
 Configuration belongs to the component's source as a typed `<props>` public
 API; packaging stays in the manifest.
+
+The [platform philosophy](00-philosophy.md#4-elements-enforce-shared-standards)
+defines which behavior belongs in elements and which belongs in components.
+Settings and devtools UIs use this same component model and built-in core APIs.
 
 ## 0.1. Incremental source indexing
 
@@ -42,7 +49,7 @@ Component rules (shipped):
   bind `{name}`. `local` is private. Hooks receive `self` (`self.meta`,
   `self.storage`).
 - `bind:this={ref}` is a **live reference** into the child's environment (all
-  components of one surface share a single Lua realm, each in its own
+  current same-thread contexts share a single Lua realm, each in its own
   `_ENV`): reads see current values, calls are synchronous, and named event
   channels cross the boundary (`ref.Changed:on(fn)`). Host internals and
   lifecycle hooks stay private.
@@ -176,15 +183,29 @@ Lowest → highest:
 2. **User global setting** — "all mixers compact"; the primary user knob.
 3. **Author instance prop** — `<VolumeMixer width="320px"/>`; protects the
    layout the author built here.
-4. **User per-instance setting** — this exact placement; the user is never
-   trapped by an author instance value.
+4. **User per-instance setting** — overrides the author's value at this exact
+   placement, while remaining available beneath temporary runtime overrides.
 5. **Script assignment** — `props.width = computed` (reactive).
 6. **Imperative `refs` geometry write** — advanced, last-writer-wins.
 
-Same model as CSS and layered config: *more specific wins*. Script-only layer
-introspection: `props.source(name)` → winning layer;
+Scripts have final control of effective props, subject to type validation and
+core invariants. A runtime assignment does not overwrite a persisted user
+preference; persistence requires the settings service. Scripts must be able to
+inspect the underlying user value even while their assignment wins, so they
+can honor it, constrain it, or temporarily override it intentionally. Neither
+script writes nor imperative geometry bypass permission or surface constraints.
+
+**Target — layer introspection:** `props.source(name)` → winning layer;
 `props.at(name, scope)` → raw value at
 `"default" | "global" | "instance" | "per_instance" | "script"` or `nil`.
+These named introspection helpers are not currently exposed by the Luau props
+binding. They are the contract for reading user intent separately from the
+effective value, not evidence that the API is shipped.
+
+For example, a component can read a requested width from the user layer, clamp
+it to the available area, and assign the result to `props.width` while leaving
+the saved request intact. Settings and inspection UI should distinguish the
+saved preference from the runtime result and its winning layer.
 
 Storage shape and namespace rules live in [08 — Settings](08-settings.md);
 per-instance keys reuse the existing composition instance key

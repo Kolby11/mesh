@@ -8,6 +8,11 @@ platform. It supersedes the older scattered design docs (`module-system.md`,
 been deleted. If an older document or commit message contradicts this spec,
 this spec wins.
 
+Start with [00 — Platform Philosophy](00-philosophy.md), the canonical source
+for vocabulary and ownership rules confirmed on 2026-09-05. Detailed chapters
+define schemas and implementation status; they do not maintain a separate
+philosophy. An undecided option is not a committed target.
+
 Each part is marked with an implementation status per section:
 
 - **Shipped** — implemented and tested in the current tree.
@@ -20,15 +25,18 @@ load-time theme cascade, minimal font packs, automation IPC, and thin MCP.
 
 The 2026-07-16 platform direction further establishes MESH as a shell-building
 platform: directly editable modules provide components and services; one module
-exports one primary public unit; named profiles compose root components and
+exports one primary public unit with explicitly declared public contributions;
+named profiles compose root components and
 service choices; configuration is profile-scoped while durable service data is
 shared; and settings, developer tools, and package experiences are replaceable
-modules rather than privileged core UI.
+modules using built-in core services. The September clarification separates
+replaceable UI from core-owned settings/storage and management mechanisms.
 
 ## Parts
 
 | Part | Covers |
 | ---- | ------ |
+| [00 — Platform Philosophy](00-philosophy.md) | Core/module boundary, vocabulary, element standards, configuration ownership, isolation, and language direction |
 | [01 — Module System](01-module-system.md) | Vocabulary, `module.json`, kinds, contracts, providers, profiles, capabilities, lifecycle, trust |
 | [02 — Installation & Health](02-installation.md) | Installer v1 (path + git), directories, doctor, health states, diagnostics |
 | [03 — Components & Props](03-components.md) | `.mesh` component model, the `<props>` block, projections, precedence |
@@ -45,7 +53,7 @@ modules rather than privileged core UI.
 ## How the parts compose
 
 ```
-                 shell profile (01, target)
+                 shell profile (01)
                               │
                               ▼
                        module.json  (01)
@@ -71,21 +79,11 @@ modules rather than privileged core UI.
                                         automation IPC (11) ──► mesh-mcp (12)
 ```
 
-One mental model repeats everywhere:
-
-1. **Semantic names, not concrete assets.** Templates use logical icon names,
-   font roles, theme tokens, and i18n keys; packs map them to real assets.
-2. **Ordered chains with fallback** for multi-active resources (icons, fonts,
-   language packs); **winner-takes-all** for coherence-critical ones (theme).
-3. **Declared defaults, sparse user overrides.** Modules and packs declare
-   defaults; the settings store holds only what the user changed.
-4. **More specific wins.** Author default → user global → author instance →
-   user per-instance, everywhere a value can be layered.
-5. **The core wires, modules work.** Rust routes generic records; behavior
-   lives in Luau modules and declarative JSON contracts.
-6. **Profiles compose; they do not supervise.** A profile selects roots,
-   providers, resources, and scoped configuration without becoming a process
-   manager or privilege system.
+The shared principles live in [00](00-philosophy.md): core owns platform
+invariants, modules own experiences, elements enforce shared standards, and
+profiles compose. Settings remain sparse while scripts control effective props
+with access to user-layer values. Resource resolution uses semantic names and
+declared fallback rules. See the detailed chapters for each resolution ladder.
 
 ## Related reference docs (not part of this spec)
 

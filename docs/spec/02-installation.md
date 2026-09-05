@@ -15,8 +15,10 @@ validation, `mesh.lock` v3 (version, direct dependency requirements, source,
 resolved revision, content digest, requesters, and active composition),
 `update`/`rollback`/`uninstall`/`lock verify`, the interface
 compatibility gate, and capability re-approval are available through
-`mesh-shell` and the typed `mesh.packages` service. A CLI or package component
-is a client of that service, not a privileged management layer.
+`mesh-shell` and the typed `mesh.packages` service. The authoritative transaction
+machinery is core-owned; CLI adapters and ordinary package/settings components
+consume that boundary. UI module identity confers no management privilege. See
+[Platform Philosophy §2](00-philosophy.md#2-core-owns-platform-invariants-modules-own-experiences).
 
 v1 deliberately ships without a registry or package archives. Detached module
 signing is supported through `module.sig` and root-graph trust anchors; the

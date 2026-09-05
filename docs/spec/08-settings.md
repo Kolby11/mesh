@@ -2,6 +2,10 @@
 
 > Part of the [MESH Specification](README.md).
 
+Ownership follows [00 §2](00-philosophy.md#2-core-owns-platform-invariants-modules-own-experiences):
+the authoritative settings service is built into core. Its UI is ordinary,
+replaceable `.mesh` components, as are devtools and package UI.
+
 One logical settings service, sparse and namespaced. **Defaults never live in
 stored overrides**
 — they come from `<props>` declarations, in-script backend props, interface
@@ -29,8 +33,10 @@ in the generated settings UI (§5), the current shell CLI (§7), and the
 writes are the capability-gated `set_prop`/`unset_prop` methods
 ([01 §5.4](01-module-system.md)); **target** for retiring the injected
 `settings` prop (components still receive their namespace as a prop rather than
-reading the service they declare), custom/per-instance settings UI, and the
-service-backed CLI. This replaced the previous multi-file model (`settings-default.json`,
+reading the service they declare), script-side layer introspection
+([03 §4](03-components.md#4-precedence--one-specificity-ladder)), and the
+remaining service-backed CLI surface. This replaced the previous multi-file
+model (`settings-default.json`,
 `shell-settings.json`, per-module `config/settings.json`, six-layer stack) —
 those files and their readers are deleted. Schemas no longer come from
 `mesh.provides.settings` (deleted); they derive from props
@@ -43,11 +49,12 @@ those files and their readers are deleted. Schemas no longer come from
 Loaded once into `mesh_core_config::SettingsStore` and shared with every
 component; the shell watches the file and re-applies changes live.
 
-**Target storage representation.** The default settings-service provider may
-store JSON under the MESH dotfiles/state layout, but consumers will use the
-`mesh.settings` service contract rather than depending on that file. Alternate
-providers may use another persistence implementation while preserving the same
-typed behavior. Every logical top-level key is a namespace:
+**Storage ownership.** Core owns persistence and effective-value resolution.
+API consumers use the built-in `mesh.settings` contract instead of depending on
+its files; human-editable configuration remains supported. Replaceable settings
+UI does not imply a third-party replacement for the settings engine or storage
+backend. Core may evolve persistence behind the same contract. Every logical
+top-level key is a namespace:
 
 ```json
 {
@@ -113,11 +120,11 @@ Rules:
   [03 §5](03-components.md#5-props-everywhere-non-mesh-modules).
 - **Service-written.** Modules read effective values and subscribe to changes;
   they never mutate another module's settings directly. Settings components,
-  CLI adapters, and automation clients write through the selected
-  `mesh.settings` service provider. The core exposes generic validated storage
-  and transport primitives rather than settings policy. (Durable
-  module-*internal* state is
-  `self.storage`, which is a different, module-writable surface.)
+  CLI adapters, and automation clients write through the built-in
+  `mesh.settings` service. Core owns validation, precedence, persistence, and
+  transaction semantics. Durable module-*internal* data uses `self.storage`,
+  a separately scoped module-writable API; a storage write is not a settings
+  mutation. Neither path confers access to another module's private state.
 - Profile composition owns root instances and ambiguous provider choices
   ([01 §5.2](01-module-system.md)); the settings service holds preference
   *values*, not module-graph topology.
@@ -178,7 +185,11 @@ gets a user-facing dial:
 
 The full ladder is defined once, in [03 §4](03-components.md): author default
 → user global → author instance → user per-instance → script → imperative.
-The store contributes exactly the two user layers. Per-instance keys are the
+The store contributes the two user layers; scripts can inspect them and their
+provenance separately from the effective result (introspection remains target
+API work in [03 §4](03-components.md#4-precedence--one-specificity-ladder)).
+Script/imperative overrides are runtime state and do not persist preferences
+implicitly. Per-instance keys are the
 composition instance key, prefixed by the root-graph instance id when one
 exists (`@mesh/navigation-bar#top/import:audio`).
 
@@ -239,7 +250,11 @@ that now has a contract-keyed one.
 
 ## 6. Reading settings from modules
 
-Effective values only — a module never knows which layer supplied a value:
+Normal prop reads return effective values. This does not hide user intent:
+scripts may explicitly inspect the underlying layers through the target
+introspection API in [03 §4](03-components.md#4-precedence--one-specificity-ladder).
+Scripts decide how to apply preferences within the platform's validation and
+permission boundaries.
 
 ```luau
 -- component/backend config: the props projection

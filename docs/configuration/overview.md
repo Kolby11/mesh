@@ -6,15 +6,25 @@ The checked-in shell currently uses these files:
 
 | File | Purpose |
 | --- | --- |
-| `config/module.json` | Installed module directory, disabled modules, provider choices, and root layout |
-| `config/settings.json` | Every user setting, in one namespaced document |
+| `config/module.json` | Installed catalog, grants/trust configuration, and legacy provider/layout fallback |
+| `config/active-profile` | Optional pointer selecting the active profile |
+| `config/profiles/<id>.json` | Root instances, provider/resource choices, and sparse profile overrides |
+| `config/settings.json` | Shared namespaced preference overrides beneath profile-specific values |
 
 The root graph is also a canonical `module.json`; `mesh.schemaVersion`
 distinguishes it from an installable module manifest.
 
-The two split them: the **root graph** decides which modules exist and which
-provider implements each interface; the **settings file** holds preference
-values for the modules that do. See [Settings](../spec/08-settings.md).
+With an active profile, the installed catalog supplies availability and the
+profile supplies composition. Without it, root-graph provider/layout decisions
+remain the legacy fallback. Core resolves shared preferences, profile overrides,
+and instance values without copying defaults into storage. See
+[Settings](../spec/08-settings.md) and [Profiles](../spec/01-module-system.md#53-shell-profiles-and-live-switching).
+
+The settings engine and scoped storage are built-in core services. Settings and
+devtools UI are ordinary components using their APIs. Module-owned saved data
+(`self.storage`), persisted user preferences, and script-controlled runtime props
+are distinct; a temporary prop assignment does not save a preference. See
+[Platform Philosophy](../spec/00-philosophy.md#6-user-preferences-and-runtime-control).
 
 ## The settings file
 
@@ -88,16 +98,17 @@ directory, the module package layer expects:
 └── themes/
 ```
 
-The running development shell currently resolves its installed graph from the
-repository `config/module.json`, so the complete dotfiles/profile design is not
-yet wired through the shell entrypoint.
+The running development shell resolves its installed graph from the repository
+`config/module.json`; `config/active-profile`, when present, selects the profile
+under `config/profiles/`. The profile model and live switching are shipped.
 
 ## Frontend visual-effect settings
 
 Frontend modules declare editable visual knobs in their root `<props>` block.
 Author defaults may reference theme tokens; user overrides are stored in that
-module's namespace in `config/settings.json` under `props.global`, or under
-`props.instances` for one component instance. For example:
+module's namespace under `props.global`, or under `props.instances` for one
+component instance. Shared overrides live in `config/settings.json`; generated
+settings writes use the active profile's sparse overrides. For example:
 
 ```json
 {

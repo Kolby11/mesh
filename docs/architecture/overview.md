@@ -48,6 +48,7 @@ even when it is not part of that closure.
 
 ## Platform boundary
 
+The [platform philosophy](../spec/00-philosophy.md) owns the boundary rules.
 The core owns mechanisms that must remain consistent and enforceable:
 
 - module loading, validation, graph resolution, and lifecycle;
@@ -55,11 +56,21 @@ The core owns mechanisms that must remain consistent and enforceable:
 - typed state, method, and event transport;
 - capabilities, sandbox policy, and failure isolation;
 - layout, rendering, input, accessibility, and Wayland presentation;
-- generic persistence primitives and structured diagnostics.
+- scoped persistence, authoritative settings/package/profile transactions,
+  runtime inspection, and structured diagnostics.
 
-Modules own policy and finished experiences. Settings UI, developer tools,
-package tooling, panels, launchers, themes, and system integrations should be
-replaceable modules with no hidden privilege.
+Modules own domain behavior and finished experiences. Settings UI, developer
+tools, and package UI are ordinary `.mesh` components consuming built-in core
+services. Panels, launchers, themes, and system integrations are replaceable
+modules with no hidden privilege. Core owns the management mechanisms behind
+those interfaces, including validation, precedence, and commit semantics.
+
+Module execution runs in the shell process. Current scripting contexts on the
+same thread share a sandboxed Luau realm with separate environments; public
+references and typed interfaces provide explicit communication. Environment
+privacy and capability checks do not imply a VM or a process per module.
+Script errors require local diagnostics and bounded failure handling; native
+process crashes are outside that isolation guarantee.
 
 ## Key abstractions
 
@@ -80,7 +91,10 @@ replaceable modules with no hidden privilege.
 A component depends on an interface name and compatible version rather than a
 provider module ID. Providers own their domain state and implement declared
 methods and events. The core validates and transports those records; it should
-not compute audio-, network-, power-, or settings-specific policy.
+not compute audio-, network-, or power-domain behavior or frontend display
+state. Providers normalize host-specific data into stable domain contracts.
+Built-in platform services are explicit core authorities, including settings
+resolution and configuration transactions.
 
 Provider selection is explicit when several compatible providers are enabled.
 When exactly one compatible provider exists, the current graph may select it
@@ -107,8 +121,11 @@ service-owned data remains shared while configuration is profile-scoped.
 
 The root `config/module.json` remains the installed-module inventory and
 legacy fallback for the absence of `config/active-profile`. Profiles are the
-active composition boundary once `active-profile` exists. Typed profile/package
-services for replaceable settings frontends remain target architecture.
+active composition boundary once `active-profile` exists. Core-provided
+management operations are described in
+[01 §5.4](../spec/01-module-system.md#54-core-provided-interfaces); further
+service and tooling coverage follows the detailed specs rather than a blanket
+target label for all management APIs.
 
 ## Directory structure
 

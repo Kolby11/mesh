@@ -32,16 +32,22 @@ MESH separates four public concepts:
 - A **module** is one installable unit with a canonical `module.json` manifest.
 - A **component** is reusable UI authored in a `.mesh` file with Luau behavior.
 - A **service** owns domain state and behavior behind a typed interface.
-- A **profile** is the target composition document for root components,
+- A **profile** is the composition document for root components,
   surfaces, provider choices, and profile-scoped configuration.
 
 The Rust core supplies mechanisms: loading, validation, capability enforcement,
 service transport, component execution, rendering, input, accessibility,
-Wayland integration, and diagnostics. Panels, settings, developer tools,
-package tooling, themes, and system integrations are replaceable modules.
+Wayland integration, authoritative settings/storage and management operations,
+and diagnostics. Panels, settings UI, developer tools, package UI, themes, and
+system integrations are replaceable modules. Settings and devtools use ordinary
+`.mesh` components backed by built-in core services.
+
+The [platform philosophy](docs/spec/00-philosophy.md) defines the canonical
+core/module boundary, shared element standards, and explicit state isolation.
+Luau is the current runtime; a TypeScript/JavaScript alternative is undecided.
 
 ```text
-shell profile (target)
+shell profile
         │
         ▼
 root component instances ──uses──► service interfaces
@@ -55,9 +61,10 @@ root component instances ──uses──► service interfaces
                  Wayland surfaces
 ```
 
-Today, the repository starts from `config/module.json`. The profile model and
-live distribution switching are accepted target architecture, not shipped
-behavior.
+The repository discovers available modules through `config/module.json`.
+Named profiles and transactional live switching are shipped; when
+`config/active-profile` exists, its selected profile owns active composition.
+Without that pointer, the legacy root-graph layout remains the fallback.
 
 ## Installation
 
@@ -74,7 +81,9 @@ Without Nix, use Rust `1.85` or newer and install development packages for
 Wayland, `libxkbcommon`, Fontconfig, FreeType, and `pkg-config` through the host
 distribution.
 
-MESH does not yet ship the planned module/package installer.
+Local-path and Git module installation and package operations are shipped;
+registry distribution remains target work. See the
+[installation specification](docs/spec/02-installation.md).
 
 ## Quick start
 

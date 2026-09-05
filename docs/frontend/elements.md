@@ -2,6 +2,15 @@
 
 MESH elements are shell-native retained UI primitives. They are inspired by familiar coverage categories from HTML, Qt Widgets/layouts, and Flutter, but they are not compatibility targets. MESH owns parsing, retained rendering, Luau event delivery, accessibility metadata, diagnostics, styling hooks, and shell interaction rules.
 
+The admission rule for a new element lives in
+[Platform Philosophy §4](../spec/00-philosophy.md#4-elements-enforce-shared-standards).
+Elements enforce stable interaction, layout, and accessibility standards so
+authors do not independently recreate essential behavior. Recurring visual
+patterns and desktop features belong in components: a volume control composes
+existing elements and a service interface. Settings and devtools are ordinary
+components, not new native element families. The taxonomy below describes
+existing coverage and does not make visual reuse alone a reason to expand core.
+
 ## Native Element Model
 
 Lowercase tags are built-in MESH elements. PascalCase tags are imported components. Native elements have source-level semantics, shared metadata, runtime state, style hooks, Luau event handlers, and accessibility defaults. Later behavior phases add richer rendering and interaction against this contract rather than redefining element names.

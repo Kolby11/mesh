@@ -57,8 +57,10 @@ desktop layout. See [module-system §5](../spec/01-module-system.md).
 
 ## Module anatomy
 
-An installable module contains one canonical manifest and one primary public
-unit:
+An installable module contains one canonical manifest. A UI module exports one
+primary/default public component, can declare additional public contributions,
+and can keep internal components private. Data-only modules need no script or
+component entry. A typical executable module looks like:
 
 ```text
 module-name/
@@ -71,4 +73,7 @@ module-name/
 
 Frontend and component modules use `.mesh`; backend providers use Luau;
 interfaces are declarative data; and resource packs map semantic names to
-assets. See the [module-system specification](../spec/01-module-system.md).
+assets. `frontend` and `component` share UI semantics; their default surface and
+installation behavior differs. Profile roots for `component` modules remain a
+target. See the [platform philosophy](../spec/00-philosophy.md) and
+[module-system specification](../spec/01-module-system.md).

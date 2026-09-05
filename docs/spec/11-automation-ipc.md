@@ -34,9 +34,11 @@ protocol, and the grant flow are the work.
 | `automation.act` | Element actions, surface control, settings writes | `high` |
 
 Grants are per client name, persisted as shell settings
-(`shell.automation.clients`), and prompted through core-owned trusted UI on
-first connect (modules cannot draw over the consent dialog —
-[01 §7](01-module-system.md)). A connection with no grant can call only
+(`shell.automation.clients`), with core-owned authorization and a consent flow
+on first connect. Trusted presentation needs a separately specified host or
+compositor mechanism; this target does not yet establish that a dialog cannot
+be spoofed or overlaid ([01 §7](01-module-system.md)). A connection with no
+grant can call only
 `hello`. Everything an automation client does is attributable in
 diagnostics (client name on every logged action).
 

@@ -71,5 +71,6 @@ guessing at pixels, and the permission story stays clean.
 - No raw input synthesis, no arbitrary channel publishes, no settings-file
   writes outside validation — inherited from the IPC's non-goals
   ([11 §6](11-automation-ipc.md)).
-- The consent prompt is core-owned trusted UI; a module (or an agent) cannot
-  fake or overlay it.
+- Core owns authorization and validates consent. Protection against prompt
+  spoofing or overlays requires a separately specified platform mechanism;
+  it is not guaranteed by rendering the prompt inside MESH (see [11 §2](11-automation-ipc.md#2-scopes--read-and-act-are-separate-grants)).

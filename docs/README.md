@@ -10,7 +10,9 @@ MESH uses four explicit document classes:
 
 1. **`docs/spec/` — public contract.** Each section says whether behavior is
    `Shipped` or `Target`. When implementation and target differ, both must be
-   stated explicitly.
+   stated explicitly. [Platform philosophy](spec/00-philosophy.md) is the
+   canonical home for vocabulary, ownership rules, and accepted principles;
+   detailed chapters own their concrete contracts and implementation status.
 2. **`docs/` — current guidance.** Architecture, configuration, authoring,
    testing, module indexes, and implementation references verified against the
    source tree.
@@ -30,6 +32,7 @@ are thin pointers to it so every coding tool reads one set of instructions.
 
 ## Core guides
 
+- [Platform philosophy](spec/00-philosophy.md)
 - [Architecture](architecture/overview.md)
 - [Getting started](guides/getting-started.md)
 - [Development](guides/development.md)

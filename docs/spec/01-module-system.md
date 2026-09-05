@@ -1,6 +1,7 @@
 # 01 — Module System
 
-> Part of the [MESH Specification](README.md).
+> Part of the [MESH Specification](README.md). Principles and canonical
+> vocabulary: [00 — Platform Philosophy](00-philosophy.md).
 
 A **module** is the installable MESH unit. An **interface** is the contract.
 A **provider** implements the contract. A **frontend** consumes the contract.
@@ -26,35 +27,26 @@ replacement debt, never public synonyms.
 | interface | Named, versioned contract: state fields, methods, events, types, consumer capabilities. Data, not code. |
 | extension point | Named, versioned UI contract: a region one module hosts and other modules fill (§4.3). |
 | composition | Installable module selecting roots, providers, resources, and slot arrangement (§5.2). |
-| provider | Backend module implementation of an interface. |
+| provider | Implementation of a service interface by a backend module or an explicit built-in core service (§5.4). |
 | contribution | Something a module adds to the installed graph (`mesh.provides.*` or `mesh.contributes.*`). |
 | dependency | Something a module needs (`mesh.uses.*`). |
-| capability | Host power granted to a module (`shell.surface`, `exec.wpctl`, …). |
+| capability | Permission for a host API or service operation (`shell.surface`, `service.audio.read`, …). |
 | resource pack | Module kind contributing semantic-name → asset mappings. |
 | library | Module contributing importable Luau code. |
 | entrypoint | Named launch/UI entry contributed by a module. |
 
-## 2. Design rules (non-negotiable)
+## 2. Design authority
 
-1. **Everything is a module.** One installable unit, one manifest shape. The
-   defaults shipped in `@mesh` scope hold no privileged status.
-2. **The core is a wiring layer.** It discovers modules, validates manifests,
-   routes interface/provider records, and forwards events. Service behavior
-   (audio, network, power, …) lives exclusively in Luau provider modules. A
-   `if service == "audio"` branch in Rust is a bug.
-3. **Frontends depend on contracts, never on backend module IDs.**
-4. **Modules own their derived state.** Backends emit raw data; frontends
-   compute display state (icon names, labels) in their own scripts. The core
-   never injects computed display fields into service payloads.
-5. **Capabilities are explicit.** No capability inference — auditability by
-   reading the manifest is a feature. Redundant/derivable declarations are
-   deleted from the vocabulary instead (a provider never restates its
-   interface's consumer capabilities).
-6. **One model, cheap path.** No parallel "lite" authoring modes. Where
-   ceremony hurts, the single path gets cheaper (sole-implementer
-   auto-selection, optional contract files), not duplicated.
-7. **Ergonomic-simple must not cost conceptual-simple.** Deleting boilerplate
-   is good only when the system stays explainable from what's on disk.
+[00](00-philosophy.md) defines the ownership rules: core owns platform
+invariants and built-in mechanisms; modules own desktop experiences and domain
+services. Backends expose stable domain state, frontends derive presentation,
+and access follows explicit contracts and grants. Core-provided services in
+§5.4 are platform authorities, not exceptions for privileged module names.
+
+There is one manifest and component model. Reduce ceremony within that model
+(inline contracts, sole-provider selection), while keeping dependencies,
+exports, and permissions explainable from declarations. The schemas below
+implement these principles; they do not define a second philosophy.
 
 ## 3. The manifest — `module.json`
 
@@ -110,13 +102,13 @@ Rules:
   (`resources.icons/fonts/themes/i18n`), host capabilities, runtime binaries,
   icon requirements.
 - `mesh.provides` holds general graph contributions such as layout entries,
-  settings, extension points, libraries, and fonts. The shared typed envelope
+  extension points, libraries, and fonts. The shared typed envelope
   for theme packs, icon packs, i18n catalogs, and keybind actions is
   `mesh.contributes`; each bucket keeps its domain-specific payload.
 - `mesh.implements` is only for backend provider records.
 - The validator keeps buckets strict: module/resource deps are `@scope/name`
   ids; interface deps are dotted contract names (`mesh.audio`); capabilities
-  are host-power names (`service.audio.read`, `exec.wpctl`).
+  are permission names (`service.audio.read`, `shell.surface`).
 - Old manifest inputs (`package.json`, `mesh.toml`, `plugin.json`, legacy
   top-level `id/type/api_version`) **fail loading** with a replacement
   diagnostic. Multiple manifest files in one module fail until resolved.
@@ -150,6 +142,14 @@ generations in `model.rs`) are deleted outright.
 | `icon-pack` | Semantic icon name → asset mappings | `mesh.contributes.icons` — see [05](05-icons.md) |
 | `font-pack` | Font role → installed family mappings | `mesh.font_pack` — see [06](06-fonts.md) |
 | `language-pack` | Translation catalogs for other modules | `mesh.contributes.i18n` — see [07](07-i18n.md) |
+
+Frontend and component modules share one UI component model and one primary
+public component; extra public entries are explicit contributions (§4.3).
+`frontend` supplies default surface placement and direct-install activation;
+`component` has no default surface declaration and is made available on install.
+**Target:** profiles may explicitly mount either kind with suitable placement
+and existing capability grants. Current profile root activation still requires
+`frontend`; shared component semantics do not claim that target is shipped.
 
 ### 3.3 Surface placement (`mesh.surface`)
 
@@ -295,8 +295,8 @@ Per the props model ([03](03-components.md)) and settings model
 - **No `mesh.provides.settings` schema.** Settings schemas derive from
   `<props>` (components), in-script `props {}` (backends), and interface
   props (interfaces). A module's settings namespace is its module id; an
-  interface's is its contract name. *(Target — `provides.settings` is a
-  deletion target wherever it still parses.)*
+  interface's is its contract name. *(The legacy schema is removed; backend
+  and interface props remain target work.)*
 - **No surface sizing / `display_transition` / `size_policy`.** *(Shipped —
   removed.)*
 - **No inline icon mappings in frontends.** Mappings live in icon-pack
@@ -418,6 +418,12 @@ completion use its strict Luau field, argument, return, and event-payload types.
 Provider stubs, mocks, standalone documentation, and compatibility reports
 remain target tooling.
 
+**Target contract requirement.** Every runnable service has an explicit typed
+contract, inline or external. The permissive v0 behavior below documents
+migration gaps, not a second supported design direction. Missing or invalid
+contracts must eventually reject the affected activation instead of silently
+falling back to untyped execution.
+
 - **Type grammar.** Every `type`/`returns` expression is validated at graph
   build: primitives (`string`, `int`, `float`, `boolean`, `object`, `any`),
   PascalCase named types declared under `contract.types` (plus the builtin
@@ -433,8 +439,9 @@ remain target tooling.
   provider's copy, and every conflict emits
   `duplicate_interface_declaration`. Promote an inline contract to a
   standalone interface module once a second provider exists.
-- `mesh.interface.contract` is **optional** for v0: the contract can be
-  inferred from the provider's emitted state, and a backend may implement an
+- **Current v0 fallback; removal is target work.** `mesh.interface.contract`
+  can be omitted: the contract can be inferred from the provider's emitted
+  state, and a backend may implement an
   interface with **no declaration at all** (name in `mesh.implements` with no
   `baseModule`). Interface modules without a contract report
   `missing_interface_contract`.
@@ -545,8 +552,10 @@ Rules:
   `@mesh/settings:custom-settings` is rejected. Replacing the settings frontend
   must not break every contributed page.
 - A contribution's `entry` is a `.mesh` component compiled as an **alternate
-  root of the contributing module**: its own VM, its own capabilities, its own
-  settings namespace, rendered inside the host's tree. A broken contribution
+  root of the contributing module**: its own execution environment, resolved
+  capabilities, and settings namespace, rendered inside the host's tree.
+  Current contexts may share a thread-owned VM; this does not expose their
+  private environments or grant the host's capabilities. A broken contribution
   gets the bounded error placeholder (§8) and cannot blank its host.
 - A contribution resolves into **every** enabled host of that point. Two
   settings frontends both receive the pages; that is correct, not a conflict.
@@ -582,8 +591,10 @@ named channel.** There is no second messaging mechanism.
 
   `shell.*` carries **surface and debug requests only**. Changing composition
   or configuration is not a shell channel: those are methods on core-provided
-  interfaces (§5.4), because a channel cannot express argument types, cannot
-  be capability-checked per operation, and cannot report a malformed payload.
+  interfaces (§5.4), because mutations need typed arguments, operation-specific
+  authorization, and an acknowledged success or rejection. Typed asynchronous
+  events remain suitable for reporting changes; a fire-and-forget shell publish
+  is not a substitute for a management transaction.
 
 Static analysis of `.mesh`/`.luau` sources checks emitted events against the
 provider's contract (`undeclared_interface_event_emit`) and static frontend
@@ -722,8 +733,8 @@ Rules:
 
 **Status: shipped** for profile documents, scoped preferences, multiple root
 instances, activation closure, transactional live switching, and composition
-instantiation. Typed profile/package service contracts for replaceable settings
-frontends remain target behavior.
+instantiation. Built-in management interfaces are described in §5.4; broader
+tooling and API coverage follows each detailed specification.
 
 A profile is an **instance of a composition plus the user's deltas**:
 
@@ -826,6 +837,11 @@ The shell is the provider for five interfaces. They are declared, resolved, and
 capability-checked exactly like a backend module's, and they are how a module
 changes composition or configuration:
 
+These are core-owned platform mechanisms. Settings, devtools, and package UIs
+are ordinary `.mesh` components consuming them; replacing a UI does not replace
+the authoritative settings engine or transaction machinery. See
+[00 §2](00-philosophy.md#2-core-owns-platform-invariants-modules-own-experiences).
+
 | Interface | Methods | Capability |
 | --- | --- | --- |
 | mesh.composition | apply_node_slot, reset_node_slot | service.composition.control |
@@ -892,8 +908,9 @@ tiers, lock provenance metadata, root-graph minimum-tier enforcement, and
 detached Ed25519 verification against root-graph trust anchors). Registry key
 distribution remains target work.
 
-A capability is a named permission for a host API. Required capabilities must
-all be granted or the module does not load; optional ones may be denied and
+A capability is a named permission for a host API or service operation.
+Required capabilities must all be granted or the module does not load;
+optional ones may be denied and
 the module must degrade. Enforcement is by construction: the Luau environment
 only exposes API functions for granted capabilities; there is nothing to call
 without the grant.
@@ -911,9 +928,14 @@ without the grant.
   is an explicit single-argument glob; a JSON `*` permits any argument vector.
   Basename grants such as `exec.wpctl` are not executable policy. The explicit
   high-risk `exec.command` capability remains the unrestricted override.
-- Capability names are opaque strings; contract packages may introduce new
-  ones but must classify each with a privilege level. The core refuses
-  contracts introducing unclassified capabilities.
+- **Shipped:** the core catalog explicitly enumerates both host powers and
+  service permissions; unknown names are rejected.
+- **Target:** host powers remain closed, while interface packages may declare
+  namespaced service-operation permissions with validated ownership and a
+  privilege classification. Consumers must request and receive those grants.
+  A custom service permission cannot introduce OS powers, collide with a
+  built-in permission, or enlarge its provider's host access. New service
+  contracts should not require Rust changes just to authorize their operations.
 
 Privilege levels (fixed set, part of install UX):
 
@@ -931,13 +953,17 @@ configured under the root graph's `trustPolicy.keys`; an unknown key, changed
 payload, unsupported algorithm, or malformed signature blocks the module before
 dependency, provider, or frontend contribution activation. Threats and
 mitigations: capability sandbox (no ambient fs/net/process in Luau),
-core-owned trusted chrome (modules cannot draw over permission dialogs),
-per-module budgets/isolation for resource abuse, reserved `@mesh` scope,
-capability-diff re-approval on update. The root graph may set
+core-owned grant decisions, execution budgets/isolation for resource abuse,
+reserved `@mesh` scope, capability-diff re-approval on update. The root graph may set
 `trustPolicy.minimum`; graph construction blocks lower-tier modules before
 dependency, provider, or frontend contribution activation. Lock entries retain
 the tier and detached signature metadata, and `verified` entries must carry a
 signature that a configured key verifies.
+
+Permission presentation is a separate platform concern. A core-owned decision
+does not itself make a dialog unspoofable or impossible to overlay on Wayland.
+Any stronger trusted-presentation guarantee remains target design requiring an
+identified compositor/host mechanism; ordinary management UI stays in components.
 
 ## 8. Module lifecycle
 
@@ -959,11 +985,16 @@ Discovered → Resolved → Loaded → Initialized → Running ⇄ Suspended →
   notified; repeated crashing disables the module until re-enabled.
 - Frontend modules are compiled at startup; dev hot-reload watches sources and
   settings.
-- Execution tiers: Luau sandbox is the default and recommended tier. WASM
-  (sandboxed compiled) and Rust (in-process, review-gated, toolchain-pinned)
-  are **target** tiers; interface contracts are the cross-language seam —
-  contracts are data, so per-language bindings can be generated without core
-  releases.
+- **Execution boundary:** modules run within the shell process, with private
+  environments and explicit public communication. Current same-thread Luau
+  contexts share a sandboxed VM. Script errors must be logged and displayed
+  locally with bounded failure handling; recovery, capability enforcement, and
+  resource accounting are distinct obligations. This is not a guarantee against
+  native process crashes or process-wide exhaustion.
+- **Language direction:** Luau through `mlua` is current. Whether
+  TypeScript/JavaScript replaces or supplements it is undecided. WASM and native
+  Rust module tiers are not committed targets. Contracts remain declarative
+  and language-independent; see [00 §7](00-philosophy.md#7-runtime-and-language-direction).
 
 ## 9. Diagnostics are part of the contract
 
@@ -980,11 +1011,12 @@ active provider, icons, binaries, capabilities, keybinds, health.
 
 1. `module.json` with everything under `mesh`.
 2. UI = `frontend` module consuming interfaces by contract name.
-3. Contract = `interface` module (or inferred, §4) with shared props.
+3. Contract = explicit inline declaration or `interface` module (§4); shared
+   interface props remain target work.
 4. Implementation = `backend` module with `mesh.implements` + generic host
    capabilities + declared binaries.
-5. Wiring = root graph decisions (often nothing: auto-discovery +
-   sole-implementer auto-selection).
+5. Wiring = profile roots and explicit choices, with dependency closure and
+   sole-compatible-provider resolution; the root graph retains the legacy fallback.
 6. Configuration = `<props>` / in-script props; users override through the
    settings store and generated UI.
 7. Resources = semantic names resolved through packs the user controls.

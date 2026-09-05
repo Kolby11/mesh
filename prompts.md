@@ -1,7 +1,9 @@
 # Refactor
 
-Audit the entire MESH codebase using the 16 package sections defined in `.planning/log/
-  sections.md`.
+Audit the entire MESH codebase using the 16 section identities in
+`.planning/log/sections.md`. That map is historical evidence; refresh package
+coverage from the workspace and use `docs/crate-boundaries.md` for current
+dependency direction.
 
 The audit is read-only: inspect and report findings, but do not implement fixes.
 
@@ -21,6 +23,8 @@ Before starting, read:
 - `AGENTS.md`
 - `docs/architecture/overview.md`
 - `docs/spec/README.md`
+- `docs/spec/00-philosophy.md`
+- `docs/crate-boundaries.md`
 - relevant files under `docs/spec/`
 - `.planning/log/sections.md`
 - `.planning/STATUS.md`
@@ -32,7 +36,11 @@ Before starting, read:
 Rules:
 
 - `docs/spec/` is the authoritative contract.
+- `docs/spec/00-philosophy.md` owns philosophy and vocabulary. Detailed specs
+  own schemas and shipped/target status; this prompt does not redefine them.
 - Do not report missing **Target** behavior as a current bug.
+- Distinguish accepted targets from undecided options, including a possible
+  TypeScript/JavaScript runtime. An undecided option is not implementation debt.
 - Check the rejected-experiments table before suggesting performance work.
 - Do not repeat rejected experiments without new evidence.
 - Existing section reports are historical evidence. Do not overwrite them.
@@ -68,6 +76,7 @@ sections/
   16-developer-and-authoring-tools.md
 cross-section-findings.md
 FINAL.md
+```
 
 Use apply_patch for repository writes.
 
@@ -112,7 +121,6 @@ Exclude:
 - .git;
 - vendored dependencies;
 - binary assets;
-
 Assign every included file to one of the 16 sections from .planning/log/sections.md.
 
 Write the assignment to:
@@ -213,21 +221,13 @@ Then inspect for:
 - incorrect capability enforcement;
 - better ways to structure the core mechanics.
 
-Use these MESH principles:
-
-- Core owns generic mechanisms; modules own policy and finished experiences.
-- Service-specific behavior belongs in Luau modules, not Rust shell code.
-- Frontends consume interfaces rather than concrete providers.
-- Profiles compose and select; they do not supervise or gain privileges.
-- Canonical module.json is the only accepted module format.
-- Elements are core primitives; components compose elements.
-- Prefer typed contracts and semantic names over stringly typed policy.
-- User settings remain sparse and more-specific layers win.
-- Accessibility, localization, diagnostics, capabilities, and failure isolation are required.
-- Lower-level packages must follow the dependency direction documented in .planning/log/
-  sections.md.
-
-- Runtime changes should be transactional, generation-aware, bounded, recoverable, and observable.
+Apply `docs/spec/00-philosophy.md`, especially its ownership test (§2), element
+admission test (§4), and review guidance (§8). Trace each finding to the relevant
+detailed contract and implementation status. In particular, do not classify a
+core-owned settings/storage or management transaction as misplaced domain logic,
+or shared-VM execution as a violation by itself. Inspect private environments,
+explicit communication, authorization, resource bounds, and failure handling
+individually. Use `docs/crate-boundaries.md` for dependency direction.
 
 The agent may suggest a better architecture instead of preserving the current flow, but it must
 explain the migration cost.
@@ -356,4 +356,3 @@ Before finishing:
 
 Do not implement any fixes. Continue autonomously until all sections, cross-section review, final
 report, backlog reconciliation, and coverage checks are complete.
-```

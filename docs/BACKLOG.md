@@ -18,6 +18,21 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ---
 
+## Platform philosophy
+
+- [ ] Allow explicit profile roots for `component` modules using the shared UI
+      model and profile placement; activation currently requires `frontend`.
+      [Contract](spec/01-module-system.md#32-module-kinds)
+- [ ] Require explicit typed contracts for runnable services; permissive v0
+      inference and missing/invalid-contract fallbacks still need reconciliation.
+      [Contract](spec/01-module-system.md#4-interfaces)
+- [ ] Support owned, classified service-operation permissions from interface
+      declarations without extending host powers; the catalog currently rejects new names.
+      [Contract](spec/01-module-system.md#7-capabilities--security)
+- [ ] Expose `props.source` / `props.at` so scripts can inspect user intent
+      beneath runtime overrides; the documented helpers lack runtime bindings.
+      [Contract](spec/03-components.md#4-precedence--one-specificity-ladder)
+
 ## 2026-08-31 read-only audit findings — Section 1
 
 The following Section 1 findings remain open; IDs preserve their audit evidence
