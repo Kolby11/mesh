@@ -87,14 +87,6 @@ impl DebugInspectorView {
             Self::Benchmark => "benchmark",
         }
     }
-
-    pub fn from_legacy_tab(tab: DebugTab) -> Self {
-        match tab {
-            DebugTab::Modules => Self::Modules,
-            DebugTab::Interfaces => Self::Surfaces,
-            DebugTab::Health => Self::BackendServices,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -665,7 +657,6 @@ pub struct DebugOverlayState {
     pub element_picker_enabled: bool,
     /// Last node under the picker cursor, retained after click selection.
     pub inspected_element: Option<serde_json::Value>,
-    pub active_tab: DebugTab,
     pub active_view: DebugInspectorView,
     pub profiling_enabled: bool,
     pub profiling_session_id: u64,
@@ -697,11 +688,6 @@ impl DebugOverlayState {
             DebugInspectorView::BackendServices => DebugInspectorView::Benchmark,
             DebugInspectorView::Benchmark => DebugInspectorView::Overview,
         };
-        self.active_tab = match self.active_view {
-            DebugInspectorView::Overview | DebugInspectorView::Modules => DebugTab::Modules,
-            DebugInspectorView::Surfaces => DebugTab::Interfaces,
-            DebugInspectorView::BackendServices | DebugInspectorView::Benchmark => DebugTab::Health,
-        };
     }
 
     pub fn toggle_profiling(&mut self) -> bool {
@@ -711,14 +697,6 @@ impl DebugOverlayState {
         }
         self.profiling_enabled
     }
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum DebugTab {
-    #[default]
-    Modules,
-    Interfaces,
-    Health,
 }
 
 #[cfg(test)]
@@ -739,15 +717,5 @@ mod tests {
         assert_eq!(state.active_view, DebugInspectorView::Benchmark);
         state.cycle_tab();
         assert_eq!(state.active_view, DebugInspectorView::Overview);
-    }
-}
-
-impl DebugTab {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Modules => "Modules",
-            Self::Interfaces => "Interfaces",
-            Self::Health => "Health",
-        }
     }
 }

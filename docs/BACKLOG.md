@@ -26,9 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 The following Section 1 findings remain open; IDs preserve their audit evidence
 for a future report or rerun.
 
-- [ ] **S01-DEAD-012 (P3):** Remove legacy `DebugTab`, `active_tab`, and
-      `from_legacy_tab` state after downstream compatibility review; the shell uses
-      `DebugInspectorView`.
 - [ ] **S01-DEAD-013 (P3):** Review downstream use, then prune unused public
       capability introspection accessors that have no in-repository production
       consumers.
