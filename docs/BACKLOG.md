@@ -26,10 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 The following Section 1 findings remain open; IDs preserve their audit evidence
 for a future report or rerun.
 
-- [ ] **S01-LOGIC-007 (P3):** Give lifecycle diagnostics an explicit module or
-      generation identity instead of attaching them to the first registered
-      instance; test multi-instance record and resolution behavior.
-
 ## 2026-09-01 whole-codebase audit — new open tasks
 
 New findings from the 2026-09-01 audit synthesis, sorted by audit section and

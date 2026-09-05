@@ -814,16 +814,14 @@ impl DiagnosticsCollector {
         message: impl Into<String>,
     ) -> bool {
         let provider_id = provider_id.into();
+        // Lifecycle failures are module-level unless the caller has an
+        // explicit `Diagnostics` instance. Never infer a frontend instance
+        // from map order: a provider module may also have several mounted
+        // component instances, none of which owns the backend failure.
         let diagnostics = self
             .modules
             .get(&(provider_id.clone(), String::new()))
             .cloned()
-            .or_else(|| {
-                self.modules
-                    .iter()
-                    .find(|((module_id, _), _)| module_id == &provider_id)
-                    .map(|(_, diagnostics)| diagnostics.clone())
-            })
             .unwrap_or_else(|| self.register_instance(provider_id.clone(), ""));
         diagnostics.record_lifecycle_error(provider_id, stage, message)
     }
@@ -907,20 +905,19 @@ impl DiagnosticsCollector {
 
     pub fn resolve_lifecycle_errors(&self, provider_id: &str) -> usize {
         self.modules
-            .iter()
-            .filter(|((module_id, _), _)| module_id == provider_id)
-            .map(|(_, diagnostics)| diagnostics.resolve_lifecycle_errors(provider_id))
-            .sum()
+            .get(&(provider_id.to_string(), String::new()))
+            .map(|diagnostics| diagnostics.resolve_lifecycle_errors(provider_id))
+            .unwrap_or(0)
     }
 
     /// Resolve one lifecycle stage without clearing unrelated failures owned by
-    /// the same module. Supervisors that publish independent health domains
-    /// (for example the shell's file watcher) use this for recovery.
+    /// the module-level diagnostics record. Supervisors that publish
+    /// independent health domains (for example the shell's file watcher) use
+    /// this for recovery. It intentionally does not search mounted instances.
     pub fn resolve_lifecycle_error(&self, provider_id: &str, stage: &str) -> bool {
         self.modules
-            .iter()
-            .filter(|((module_id, _), _)| module_id == provider_id)
-            .any(|(_, diagnostics)| diagnostics.resolve_lifecycle_error(provider_id, stage))
+            .get(&(provider_id.to_string(), String::new()))
+            .is_some_and(|diagnostics| diagnostics.resolve_lifecycle_error(provider_id, stage))
     }
 
     /// Return deterministic module aggregates with instance issue detail.
@@ -1110,6 +1107,58 @@ mod tests {
         assert!(collector.unregister("@test/module", "a"));
         assert!(!collector.unregister("@test/module", "a"));
         assert_eq!(collector.snapshot()[0].instances.len(), 1);
+    }
+
+    #[test]
+    fn collector_lifecycle_helpers_use_module_identity_not_first_instance() {
+        let mut collector = DiagnosticsCollector::new();
+        let first = collector.register_instance("@test/backend", "first");
+        let second = collector.register_instance("@test/backend", "second");
+        first.record_lifecycle_error("@test/backend", "poll", "first failure");
+        second.record_lifecycle_error("@test/backend", "poll", "second failure");
+
+        assert!(collector.record_lifecycle_error("@test/backend", "init", "module failure"));
+        let snapshot = collector.snapshot();
+        let instances = &snapshot[0].instances;
+        let module_instance = instances
+            .iter()
+            .find(|instance| instance.instance_id.is_empty())
+            .expect("module-level lifecycle diagnostics should use the empty instance id");
+        assert!(
+            module_instance
+                .active_issues
+                .iter()
+                .any(|issue| issue.issue_code.ends_with(":init"))
+        );
+        assert!(instances.iter().any(|instance| {
+            instance.instance_id == "first"
+                && instance
+                    .active_issues
+                    .iter()
+                    .any(|issue| issue.issue_code.ends_with(":poll"))
+        }));
+        assert!(instances.iter().any(|instance| {
+            instance.instance_id == "second"
+                && instance
+                    .active_issues
+                    .iter()
+                    .any(|issue| issue.issue_code.ends_with(":poll"))
+        }));
+
+        assert!(collector.resolve_lifecycle_error("@test/backend", "init"));
+        assert_eq!(collector.resolve_lifecycle_errors("@test/backend"), 0);
+        let snapshot = collector.snapshot();
+        let instances = &snapshot[0].instances;
+        assert!(instances.iter().any(|instance| {
+            instance.instance_id.is_empty() && instance.active_issues.is_empty()
+        }));
+        assert!(instances.iter().all(|instance| {
+            instance.instance_id.is_empty()
+                || instance
+                    .active_issues
+                    .iter()
+                    .any(|issue| issue.issue_code.ends_with(":poll"))
+        }));
     }
 
     #[test]
