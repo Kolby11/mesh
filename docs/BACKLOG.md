@@ -12,11 +12,8 @@ item lands, delete it from this file and write its record in
 Verify an older item against the source before starting it; later work
 sometimes lands without updating a checkbox.
 
-**Detail** for items carried over from before 2026-07-28 is in
-[`.planning/log/backlog-archive-2026-07-28.md`](../.planning/log/backlog-archive-2026-07-28.md)
-— a verbatim snapshot of this file with the full progress history. Items marked
-_(detail: …)_ name the section to search for there. Section letters (A–V) refer
-to [`.planning/log/sections.md`](../.planning/log/sections.md); `→ vX.Y` markers
+Section letters (A–V) refer to
+[`.planning/log/sections.md`](../.planning/log/sections.md); `→ vX.Y` markers
 are from the retired milestone scheme and are kept only as rough sequencing.
 
 ---

@@ -33,7 +33,6 @@ Rules:
 
 - `docs/spec/` is the authoritative contract.
 - Do not report missing **Target** behavior as a current bug.
-- Do not edit `.planning/archive/`.
 - Check the rejected-experiments table before suggesting performance work.
 - Do not repeat rejected experiments without new evidence.
 - Existing section reports are historical evidence. Do not overwrite them.
@@ -113,7 +112,6 @@ Exclude:
 - .git;
 - vendored dependencies;
 - binary assets;
-- .planning/archive/.
 
 Assign every included file to one of the 16 sections from .planning/log/sections.md.
 

@@ -13,7 +13,6 @@ against; rewriting one destroys the comparison that made it worth keeping.
 | `YYYY-MM.md` | The running work log. One file per month, newest entry at the top. |
 | [`performance-log.md`](performance-log.md) | Performance history back to 2026-07-02, and the rejected-experiments table. |
 | [`sections.md`](sections.md) | The current package-oriented concern map. Section letters (A–V) in older records are historical references. |
-| [`backlog-archive-2026-07-28.md`](backlog-archive-2026-07-28.md) | Verbatim snapshot of `docs/BACKLOG.md` before the 2026-07-28 split. Holds the long progress narratives for items that are still open. |
 | `<topic>-YYYY-MM-DD.md` | A single completed effort large enough to deserve its own file, e.g. `interaction-identity-2026-07-28.md`. |
 
 Performance work goes in `performance-log.md`; everything else goes in the

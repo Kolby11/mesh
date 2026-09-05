@@ -15,9 +15,9 @@ MESH uses four explicit document classes:
    testing, module indexes, and implementation references verified against the
    source tree.
 3. **[`../.planning/`](../.planning/README.md) — intent and evidence.** Current
-   status, the dated work log, experiments, and superseded design discussions.
-   These may explain why a decision was made but do not override the
-   specification.
+   status, audit evidence, pending design notes, renderer migration decisions,
+   and dated history. These may explain why a decision was made but do not
+   override the specification.
 4. **[`BACKLOG.md`](BACKLOG.md) — unfinished work.** The only active backlog;
    other documents may link to it but must not maintain competing TODO lists.
    It records what is *open* — progress narratives and measurements belong in
@@ -63,7 +63,3 @@ keyboard behavior, automation, and MCP direction.
 - [Work log](../.planning/log/README.md) — dated, append-only history including
   performance measurements and the rejected-experiments table.
 - [How the planning system works](../.planning/README.md).
-
-Historical renderer migration, UI transition, performance-roadmap, benchmark,
-and iteration narratives live under `.planning/`; superseded milestone records
-are frozen in [`.planning/archive/`](../.planning/archive/README.md).

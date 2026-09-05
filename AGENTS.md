@@ -51,8 +51,6 @@ it is not done. If it needs a design before it can be executed, write that in
   more than one never tried. Check the rejected-experiments table in
   `.planning/log/performance-log.md` *before* attempting an obvious
   optimization — several are already known dead ends.
-- **`.planning/archive/` is frozen.** Never update it, and never treat it as
-  current — where it contradicts `docs/spec/`, it is out of date.
 
 Full rules: [`.planning/README.md`](.planning/README.md).
 

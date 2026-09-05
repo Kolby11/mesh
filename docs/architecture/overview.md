@@ -130,7 +130,6 @@ docs/                current author and maintainer guidance
 docs/BACKLOG.md      the single list of open work
 .planning/STATUS.md  what is in flight now
 .planning/log/       dated, append-only history and measurements
-.planning/archive/   frozen superseded records
 ```
 
 Detailed crate dependency rules are documented in

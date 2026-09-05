@@ -258,8 +258,8 @@ Before editing:
 Implementation rules:
 - Work directly on the existing main branch. Do not create or switch branches,
   worktrees, or commits for unrelated work.
-- Implement only this one backlog item. Do not start another item, refactor
-  unrelated code, or edit frozen .planning/archive/ files.
+- Implement only this one backlog item. Do not start another item or refactor
+  unrelated code.
 - Preserve normal repository terminology and architecture boundaries.
 - Run focused tests first, then the broadest relevant validation that is
   practical. Record real failures rather than claiming success.

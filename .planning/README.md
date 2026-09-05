@@ -44,15 +44,9 @@ inside a checklist gets silently rewritten.
   README.md      this file — how the system works
   STATUS.md      current position: in flight, next, blocked
   log/           dated history; append-only
-  archive/       frozen; superseded or tool-era records
-  todos/         standalone plans too big for a backlog line
-  codebase/      structural analysis of the source tree
-  research/      external investigation feeding decisions
-  spikes/        throwaway experiments and their conclusions
-  prototypes/    working code kept for reference
-  debug/         recorded debugging investigations
-  notes/         everything that outlived its conversation
-  frontend/  renderer/  seeds/
+  todos/pending/ standalone plans too big for a backlog line
+  codebase/      current structural analysis and audit evidence
+  renderer/      current renderer migration decisions
 ```
 
 ### `log/`
@@ -63,22 +57,14 @@ entry format. Current files:
 - `2026-07.md` — the running monthly work log.
 - `performance-log.md` — performance history and the rejected-experiments
   table, back to 2026-07-02.
-- `backlog-archive-2026-07-28.md` — verbatim snapshot of the pre-split backlog,
-  holding the detailed progress narratives for items still open.
 - `sections.md` — the current package-oriented concern map; section letters
   (A–V) in older records are historical references.
-
-### `archive/`
-
-Frozen. Nothing here is maintained and nothing here is authoritative — it is
-kept because it explains how the project arrived where it is. See
-[`archive/README.md`](archive/README.md).
 
 ### `todos/`
 
 A backlog line that needs a design before it can be executed gets a file in
-`todos/pending/`, and the backlog line links to it. Moves to `todos/completed/`
-when the work lands, with the outcome appended.
+`todos/pending/`, and the backlog line links to it. When the work lands, its
+outcome goes in the current monthly log and the planning note is removed.
 
 ## Relationship to `docs/`
 
