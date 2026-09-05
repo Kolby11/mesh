@@ -224,8 +224,16 @@ fn shipped_graph_approves_hyprland_event_stream_capabilities() {
         )
         .unwrap();
 
-    assert!(effective.is_granted_id("exec.argv:nc:[\"-U\",\"*\"]"));
-    assert!(effective.is_granted_id("exec.argv:socat:[\"-\",\"UNIX-CONNECT:*\"]"));
+    assert!(
+        effective
+            .granted_ids()
+            .any(|id| id == "exec.argv:nc:[\"-U\",\"*\"]")
+    );
+    assert!(
+        effective
+            .granted_ids()
+            .any(|id| id == "exec.argv:socat:[\"-\",\"UNIX-CONNECT:*\"]")
+    );
 }
 
 #[test]

@@ -17,42 +17,6 @@ impl Capability {
     pub fn id(&self) -> &str {
         &self.0
     }
-
-    #[deprecated(
-        note = "use CapabilityCatalog::builtin().privilege_level(...) or catalog_privilege_level()"
-    )]
-    pub fn privilege_level(&self) -> PrivilegeLevel {
-        match self.0.as_str() {
-            // High privilege
-            "exec.command" | "shell.screenshot" | "dbus.system" | "net.socket" | "locale.write" => {
-                PrivilegeLevel::High
-            }
-            s if s.starts_with("exec.") && s != "exec.launch-app" => PrivilegeLevel::High,
-
-            // Elevated privilege
-            s if s.ends_with(".control") => PrivilegeLevel::Elevated,
-            "exec.launch-app"
-            | "net.http"
-            | "shell.clipboard.write"
-            | "shell.notification"
-            | "fs.write"
-            | "dbus.session"
-            | "service.notifications.post"
-            | "service.notifications.manage" => PrivilegeLevel::Elevated,
-
-            // Standard (default)
-            _ => PrivilegeLevel::Standard,
-        }
-    }
-
-    /// Look up this capability in the closed host capability catalog.
-    ///
-    /// New manifest and activation paths must use this catalog-backed lookup so
-    /// an unclassified name cannot silently acquire the default `standard`
-    /// level.
-    pub fn catalog_privilege_level(&self) -> Option<PrivilegeLevel> {
-        CapabilityCatalog::builtin().privilege_level(self.id())
-    }
 }
 
 impl fmt::Display for Capability {
@@ -81,13 +45,6 @@ impl fmt::Display for PrivilegeLevel {
     }
 }
 
-/// A capability definition in the host's closed capability vocabulary.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CapabilityDefinition {
-    pub id: String,
-    pub privilege: PrivilegeLevel,
-}
-
 /// The host capabilities understood by this MESH build.
 ///
 /// Service read/control capabilities are listed explicitly because interface
@@ -103,8 +60,8 @@ impl CapabilityCatalog {
         Self
     }
 
-    pub fn definition(&self, id: &str) -> Option<CapabilityDefinition> {
-        let privilege = match id {
+    fn privilege_level(&self, id: &str) -> Option<PrivilegeLevel> {
+        Some(match id {
             "shell.surface"
             | "shell.widget"
             | "theme.read"
@@ -146,15 +103,7 @@ impl CapabilityCatalog {
                 PrivilegeLevel::High
             }
             _ => return None,
-        };
-        Some(CapabilityDefinition {
-            id: id.to_string(),
-            privilege,
         })
-    }
-
-    pub fn privilege_level(&self, id: &str) -> Option<PrivilegeLevel> {
-        self.definition(id).map(|definition| definition.privilege)
     }
 
     pub fn validate(&self, id: &str) -> Result<PrivilegeLevel, CapabilityPolicyError> {
@@ -198,35 +147,12 @@ fn valid_exec_argv_capability(value: &str) -> bool {
 /// approvals. Only this value should cross the activation boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectiveCapabilities {
-    module_id: String,
-    required: BTreeSet<String>,
-    optional: BTreeSet<String>,
     granted: BTreeSet<String>,
 }
 
 impl EffectiveCapabilities {
-    pub fn module_id(&self) -> &str {
-        &self.module_id
-    }
-
-    pub fn is_granted(&self, capability: &Capability) -> bool {
-        self.granted.contains(capability.id())
-    }
-
-    pub fn is_granted_id(&self, capability: &str) -> bool {
-        self.granted.contains(capability)
-    }
-
     pub fn granted_ids(&self) -> impl Iterator<Item = &str> {
         self.granted.iter().map(String::as_str)
-    }
-
-    pub fn required_ids(&self) -> impl Iterator<Item = &str> {
-        self.required.iter().map(String::as_str)
-    }
-
-    pub fn optional_ids(&self) -> impl Iterator<Item = &str> {
-        self.optional.iter().map(String::as_str)
     }
 
     /// Adapt the immutable policy result to the runtime's capability proof
@@ -260,10 +186,6 @@ impl CapabilityPolicy {
         }
     }
 
-    pub fn approvals(&self) -> &BTreeMap<String, BTreeSet<String>> {
-        &self.approvals
-    }
-
     pub fn resolve(
         &self,
         module_id: &str,
@@ -293,12 +215,7 @@ impl CapabilityPolicy {
                 .filter(|capability| approved.is_some_and(|set| set.contains(*capability)))
                 .cloned(),
         );
-        Ok(EffectiveCapabilities {
-            module_id: module_id.to_string(),
-            required,
-            optional,
-            granted,
-        })
+        Ok(EffectiveCapabilities { granted })
     }
 }
 
@@ -508,37 +425,7 @@ mod tests {
     static TEST_ALLOCATOR: test_alloc::CountingAllocator = test_alloc::CountingAllocator;
 
     #[test]
-    fn capability_privilege_levels() {
-        #[allow(deprecated)]
-        fn legacy_privilege_level(id: &str) -> PrivilegeLevel {
-            Capability::new(id).privilege_level()
-        }
-
-        assert_eq!(
-            legacy_privilege_level("theme.read"),
-            PrivilegeLevel::Standard
-        );
-        assert_eq!(
-            legacy_privilege_level("service.network.control"),
-            PrivilegeLevel::Elevated
-        );
-        assert_eq!(legacy_privilege_level("exec.command"), PrivilegeLevel::High);
-        assert_eq!(
-            legacy_privilege_level("exec.argv:wpctl:[\"get-volume\"]"),
-            PrivilegeLevel::High
-        );
-        assert_eq!(
-            legacy_privilege_level("exec.launch-app"),
-            PrivilegeLevel::Elevated
-        );
-    }
-
-    #[test]
     fn unknown_capabilities_fail_closed() {
-        assert_eq!(
-            Capability::new("service.unknown.read").catalog_privilege_level(),
-            None
-        );
         assert_eq!(
             CapabilityCatalog::builtin().validate("exec.wpctl"),
             Err(CapabilityPolicyError::UnknownCapability {
@@ -566,8 +453,8 @@ mod tests {
         let required = vec!["theme.read".into()];
         let optional = vec!["locale.read".into()];
         let effective = policy.resolve("@mesh/test", &required, &optional).unwrap();
-        assert!(effective.is_granted_id("theme.read"));
-        assert!(!effective.is_granted_id("locale.read"));
+        assert!(effective.granted_ids().any(|id| id == "theme.read"));
+        assert!(!effective.granted_ids().any(|id| id == "locale.read"));
         assert_eq!(
             policy.resolve("@mesh/missing", &required, &[]),
             Err(CapabilityPolicyError::MissingRequiredApproval {
@@ -590,7 +477,7 @@ mod tests {
                 &["locale.read".into()],
             )
             .unwrap();
-        assert!(effective.is_granted_id("locale.read"));
+        assert!(effective.granted_ids().any(|id| id == "locale.read"));
         assert_eq!(effective.into_capability_set().granted().len(), 2);
     }
 

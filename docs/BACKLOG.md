@@ -26,9 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 The following Section 1 findings remain open; IDs preserve their audit evidence
 for a future report or rerun.
 
-- [ ] **S01-DEAD-013 (P3):** Review downstream use, then prune unused public
-      capability introspection accessors that have no in-repository production
-      consumers.
 - [ ] **S01-DEAD-015 (P3 candidate):** Confirm whether `FieldKind::Int32` is a
       supported extension point or unused reserved vocabulary before retaining or
       removing it.
