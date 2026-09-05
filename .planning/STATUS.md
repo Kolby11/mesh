@@ -58,9 +58,8 @@ restricted; the unconsumed `CapabilityHandle` abstraction has been removed.
 The settings schema validation, capability activation cloning, and retained
 render allocation-profiler baselines are recorded in
 [`.planning/log/performance-log.md`](log/performance-log.md). The next open item
-is S01-DEAD-007: remove unused direct `tracing`, `tracing-subscriber`, and
-`thiserror` dependencies from `mesh-core-diagnostics`, verified by focused
-check/test and dependency tree.
+is S01-DEAD-008: remove unused diagnostics `ModuleMetrics` or explicitly
+migrate its intended role into the current debug profiling DTOs.
 Host icon/font resources now use one explicit immutable graph/profile candidate
 catalog and copy-on-write registry handle, with failed preparation, recovery,
 and package rollback retaining the last-known-good snapshot. Icon resolution

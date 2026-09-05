@@ -26,9 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 The following Section 1 findings remain open; IDs preserve their audit evidence
 for a future report or rerun.
 
-- [ ] **S01-DEAD-007 (P3):** Remove unused direct `tracing`,
-      `tracing-subscriber`, and `thiserror` dependencies from
-      `mesh-core-diagnostics`, verified by focused check/test and dependency tree.
 - [ ] **S01-DEAD-008 (P3):** Remove unused diagnostics `ModuleMetrics` or
       explicitly migrate its intended role into the current debug profiling DTOs.
 - [ ] **S01-DEAD-009 (P3):** Remove or formalize the test-only
