@@ -13,42 +13,42 @@
                 </row>
 
                 <column class="settings-navigation" aria-label={t('settings.categories')}>
-                    <button class={wifi_nav_class} onclick={showWifi}>
+                    <button class={wifi_nav_class} onclick={showWifi} title={t('nav.wifi.tooltip')}>
                         <icon name="wifi" size="18" />
                         <column class="nav-copy">
                             <text class="nav-title">{t('nav.wifi')}</text>
                             <text class="nav-subtitle">{t('nav.wifi.subtitle')}</text>
                         </column>
                     </button>
-                    <button class={audio_nav_class} onclick={showAudio}>
+                    <button class={audio_nav_class} onclick={showAudio} title={t('nav.audio.tooltip')}>
                         <icon name="audio-volume-high" size="18" />
                         <column class="nav-copy">
                             <text class="nav-title">{t('nav.audio')}</text>
                             <text class="nav-subtitle">{t('nav.audio.subtitle')}</text>
                         </column>
                     </button>
-                    <button class={bluetooth_nav_class} onclick={showBluetooth}>
+                    <button class={bluetooth_nav_class} onclick={showBluetooth} title={t('nav.bluetooth.tooltip')}>
                         <icon name="bluetooth" size="18" />
                         <column class="nav-copy">
                             <text class="nav-title">{t('nav.bluetooth')}</text>
                             <text class="nav-subtitle">{t('nav.bluetooth.subtitle')}</text>
                         </column>
                     </button>
-                    <button class={appearance_nav_class} onclick={showAppearance}>
+                    <button class={appearance_nav_class} onclick={showAppearance} title={t('nav.appearance.tooltip')}>
                         <icon name="applications-graphics" size="18" />
                         <column class="nav-copy">
                             <text class="nav-title">{t('nav.appearance')}</text>
                             <text class="nav-subtitle">{t('nav.appearance.subtitle')}</text>
                         </column>
                     </button>
-                    <button class={device_nav_class} onclick={showDevice}>
+                    <button class={device_nav_class} onclick={showDevice} title={t('nav.device.tooltip')}>
                         <icon name="computer" size="18" />
                         <column class="nav-copy">
                             <text class="nav-title">{t('nav.device')}</text>
                             <text class="nav-subtitle">{t('nav.device.subtitle')}</text>
                         </column>
                     </button>
-                    <button class={advanced_nav_class} onclick={showAdvanced}>
+                    <button class={advanced_nav_class} onclick={showAdvanced} title={t('nav.advanced.tooltip')}>
                         <icon name="settings" size="18" />
                         <column class="nav-copy">
                             <text class="nav-title">{t('nav.advanced')}</text>

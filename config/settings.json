@@ -1,17 +1,17 @@
 {
-  "revision": 85,
+  "revision": 108,
   "schemaVersion": 1,
   "shell": {
     "fonts": {
-      "ui_family": "CaskaydiaCove NF"
+      "ui_family": "CaskaydiaCove NFM"
     },
     "i18n": {
       "fallback_locale": "en",
-      "locale": "en",
+      "locale": "sk",
       "policy": "manual"
     },
     "icons": {
-      "default_pack": "Bibata-Modern-Classic"
+      "default_pack": "Bibata-Original-Classic-Right"
     },
     "render": {
       "blur": {
@@ -20,7 +20,7 @@
       }
     },
     "theme": {
-      "active": "@mesh/tokyo-night:tokyo-night"
+      "active": "@mesh/gruvbox-dark:gruvbox-dark"
     }
   }
 }

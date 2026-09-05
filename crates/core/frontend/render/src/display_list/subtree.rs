@@ -15,11 +15,7 @@ pub(super) struct RetainedPaintSubtree {
     pub(super) effect_overflow_count: u64,
     pub(super) pruning: PruningMetrics,
     pub(super) command_span: Option<RetainedSubtreeSpan>,
-    pub(super) child_order: Option<Arc<[usize]>>,
-    /// This subtree's commands open and close an effect/compositing layer, so
-    /// its command range is atomic: a partial repaint may not replay part of
-    /// it.
-    pub(super) layer_scope: bool,
+    pub(super) spans: Arc<[RetainedCommandSpan]>,
 }
 
 impl Default for RetainedPaintSubtree {
@@ -31,8 +27,7 @@ impl Default for RetainedPaintSubtree {
             effect_overflow_count: 0,
             pruning: PruningMetrics::default(),
             command_span: None,
-            child_order: None,
-            layer_scope: false,
+            spans: Vec::new().into(),
         }
     }
 }
@@ -41,7 +36,6 @@ impl Default for RetainedPaintSubtree {
 pub(super) struct RetainedSubtreeSpan {
     pub(super) bounds: DamageRect,
     pub(super) local_bounds: DamageRect,
-    pub(super) command_count: usize,
     pub(super) includes_scrollbars: bool,
     pub(super) local_includes_scrollbars: bool,
 }
@@ -61,7 +55,7 @@ pub(super) struct PaintSubtreeBuilder {
     pub(super) includes_scrollbars: bool,
     pub(super) local_includes_scrollbars: bool,
     pub(super) local_command_count: usize,
-    pub(super) child_order: Option<Arc<[usize]>>,
+    pub(super) child_spans: Vec<RetainedCommandSpan>,
 }
 
 impl PaintSubtreeBuilder {
@@ -108,6 +102,15 @@ impl PaintSubtreeBuilder {
             self.includes_scrollbars |= span.includes_scrollbars;
         }
 
+        let child_offset = self.commands.len();
+        self.child_spans.reserve(child_subtree.spans.len());
+        for span in child_subtree.spans.iter() {
+            self.child_spans.push(RetainedCommandSpan {
+                start: span.start.saturating_add(child_offset),
+                end: span.end.saturating_add(child_offset),
+                ..*span
+            });
+        }
         self.commands.reserve(child_subtree.commands.len());
         self.commands.extend_from_slice(&child_subtree.commands);
         self.kinds.reserve(child_subtree.kinds.len());
@@ -201,18 +204,72 @@ impl PaintSubtreeBuilder {
         push.clip = region;
     }
 
-    pub(super) fn into_retained(self, generation: u64, layer_scope: bool) -> RetainedPaintSubtree {
+    pub(super) fn into_retained(
+        mut self,
+        generation: u64,
+        layer_scope: bool,
+        owner: NodeId,
+    ) -> RetainedPaintSubtree {
         let command_count = self.local_command_count;
+        let subtree_end = self.commands.len();
         let command_span = if command_count == 0 {
             None
         } else {
             Some(RetainedSubtreeSpan {
                 bounds: self.bounds,
                 local_bounds: self.local_bounds,
-                command_count,
                 includes_scrollbars: self.includes_scrollbars,
                 local_includes_scrollbars: self.local_includes_scrollbars,
             })
+        };
+        let spans = match command_span {
+            Some(span) if layer_scope => vec![RetainedCommandSpan {
+                owner,
+                start: 0,
+                end: subtree_end,
+                bounds: span.bounds,
+                command_count: subtree_end,
+                includes_scrollbars: span.includes_scrollbars,
+            }],
+            Some(span) => {
+                let has_children = subtree_end > command_count;
+                let leading =
+                    command_count.saturating_sub(usize::from(span.local_includes_scrollbars));
+                let mut spans = Vec::with_capacity(self.child_spans.len() + 2);
+                if !has_children {
+                    spans.push(RetainedCommandSpan {
+                        owner,
+                        start: 0,
+                        end: command_count,
+                        bounds: span.local_bounds,
+                        command_count,
+                        includes_scrollbars: span.local_includes_scrollbars,
+                    });
+                } else {
+                    spans.push(RetainedCommandSpan {
+                        owner,
+                        start: 0,
+                        end: leading,
+                        bounds: span.local_bounds,
+                        command_count: leading,
+                        includes_scrollbars: false,
+                    });
+                    if span.local_includes_scrollbars {
+                        let scrollbar_index = subtree_end.saturating_sub(1);
+                        spans.push(RetainedCommandSpan {
+                            owner,
+                            start: scrollbar_index,
+                            end: subtree_end,
+                            bounds: span.local_bounds,
+                            command_count: 1,
+                            includes_scrollbars: true,
+                        });
+                    }
+                }
+                spans.append(&mut self.child_spans);
+                spans
+            }
+            None => std::mem::take(&mut self.child_spans),
         };
         RetainedPaintSubtree {
             generation,
@@ -221,8 +278,7 @@ impl PaintSubtreeBuilder {
             effect_overflow_count: self.effect_overflow_count,
             pruning: self.pruning,
             command_span,
-            child_order: self.child_order,
-            layer_scope,
+            spans: spans.into(),
         }
     }
 }

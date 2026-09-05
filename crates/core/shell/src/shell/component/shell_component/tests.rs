@@ -635,7 +635,7 @@ fn policy_keeps_small_single_damage_minimal() {
 }
 
 #[test]
-fn policy_keeps_small_overlay_damage_as_bounding_rect() {
+fn policy_forces_full_surface_for_tooltip_damage() {
     let metrics = metrics(10_000);
     let tooltip = Some(DamageRect {
         x: 10,
@@ -643,15 +643,13 @@ fn policy_keeps_small_overlay_damage_as_bounding_rect() {
         width: 40,
         height: 20,
     });
+    let full_surface = surface(100, 100);
 
-    let effective = select_effective_damage(metrics, surface(100, 100), false, None, tooltip);
+    let effective = select_effective_damage(metrics, full_surface, false, None, tooltip);
 
-    assert_eq!(
-        effective.rect, tooltip,
-        "small tooltip invalidation should stay as a bounded repaint"
-    );
-    assert!(!effective.full_surface);
-    assert_eq!(effective.policy, DisplayListRepaintPolicy::BoundingRect);
+    assert_eq!(effective.rect, Some(full_surface));
+    assert!(effective.full_surface);
+    assert_eq!(effective.policy, DisplayListRepaintPolicy::FullSurface);
 }
 
 #[test]

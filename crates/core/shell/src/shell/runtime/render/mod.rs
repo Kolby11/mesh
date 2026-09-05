@@ -1057,8 +1057,8 @@ impl Shell {
                 let commands = self.components[index]
                     .component
                     .display_list_paint_commands();
-                let opaque_rect = surface_size.and_then(|(surface_w, surface_h)| {
-                    compute_opaque_rect_for_root(commands, surface_w, surface_h)
+                let opaque_rect = content_size.and_then(|(content_w, content_h)| {
+                    compute_opaque_rect_for_root(commands, content_w, content_h)
                 });
                 self.presentation_engine
                     .update_opaque_region(&surface_id, opaque_rect);

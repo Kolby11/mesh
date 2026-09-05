@@ -364,7 +364,7 @@ impl RetainedDisplayList {
                 );
                 self.dirty_ancestors_scratch = rebuild_ancestors;
                 self.ancestor_path_scratch = ancestor_path;
-                let command_spans = build_command_spans(root, &next_subtrees).into();
+                let command_spans = build_command_spans(root, &next_subtrees);
                 (
                     Arc::clone(&subtree.commands),
                     Arc::clone(&subtree.kinds),
@@ -395,7 +395,7 @@ impl RetainedDisplayList {
                     &mut local_metrics,
                     self.backdrop_blur_policy,
                 );
-                let command_spans = build_command_spans(root, &next_subtrees).into();
+                let command_spans = build_command_spans(root, &next_subtrees);
                 (
                     Arc::clone(&subtree.commands),
                     Arc::clone(&subtree.kinds),

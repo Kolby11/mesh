@@ -491,7 +491,6 @@ fn build_paint_subtree_with_transform(
             backdrop_blur_policy,
         );
     });
-    subtree.child_order = child_order;
 
     if display_node_may_show_scrollbars(&paint_node) {
         subtree.push_command(DisplayPaintCommand {
@@ -520,7 +519,8 @@ fn build_paint_subtree_with_transform(
         });
         metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
     }
-    let subtree = Arc::new(subtree.into_retained(generation, compositing_layer || filter_layer));
+    let subtree =
+        Arc::new(subtree.into_retained(generation, compositing_layer || filter_layer, node.id));
     next_subtrees.insert(node.id, Arc::clone(&subtree));
     subtree
 }

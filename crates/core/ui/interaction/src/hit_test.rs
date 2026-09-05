@@ -605,7 +605,7 @@ fn node_tooltip_text_ref(node: &WidgetNode) -> Option<&str> {
     // redundant tooltip repeating what's already on screen; only surface
     // these for leaf nodes that render no visible text of their own, such
     // as icon-only controls.
-    if !node.children.is_empty() {
+    if !node.children.is_empty() || renders_own_text(node) {
         return None;
     }
 
@@ -621,6 +621,14 @@ fn node_tooltip_text_ref(node: &WidgetNode) -> Option<&str> {
 
 fn non_empty_tooltip_text(value: Option<&str>) -> Option<&str> {
     value.filter(|value| !value.trim().is_empty())
+}
+
+fn renders_own_text(node: &WidgetNode) -> bool {
+    node.tag == "text"
+        && node
+            .attributes
+            .get("content")
+            .is_some_and(|content| !content.trim().is_empty())
 }
 
 /// Surface-space bounds of the innermost clipping ancestor, which tooltip
@@ -2310,6 +2318,41 @@ mod tests {
         container.children.push(child);
 
         assert_eq!(node_tooltip_text(&container), None);
+    }
+
+    #[test]
+    fn a_text_leaf_does_not_shadow_its_control_tooltip_with_its_own_content() {
+        let mut label = WidgetNode::new("text");
+        label.attributes.insert("_mesh_key".into(), "label".into());
+        label.attributes.insert("content".into(), "Wi-Fi".into());
+        label.accessibility.label = Some("Wi-Fi".into());
+        label.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 80.0,
+            height: 20.0,
+        };
+        assert_eq!(node_tooltip_text(&label), None);
+
+        let mut button = WidgetNode::new("button");
+        button.attributes.insert("_mesh_key".into(), "wifi".into());
+        button
+            .attributes
+            .insert("title".into(), "Open the Wi-Fi page".into());
+        button.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height: 56.0,
+        };
+        button.children.push(label);
+
+        let hit = pointer_hit_test(&button, 20.0, 10.0).expect("pointer over the label");
+        assert_eq!(
+            hit.tooltip,
+            Some(("wifi".to_string(), "Open the Wi-Fi page".to_string())),
+            "hovering a line of the item must keep the item's own tooltip"
+        );
     }
 
     #[test]

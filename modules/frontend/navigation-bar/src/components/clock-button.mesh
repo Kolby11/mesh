@@ -26,10 +26,10 @@ function render(self)
     clock_time = string.format("%02d:%02d", t.hour, t.min)
     clock_date = string.format("%s %02d", MONTHS[t.month], t.day)
     clock_full_date = string.format(
-        "%s, %s %d, %d",
-        DAYS[t.wday], MONTHS[t.month], t.day, t.year
+        "%s, %s %d, %d at %s",
+        DAYS[t.wday], MONTHS[t.month], t.day, t.year, clock_time
     )
-    clock_aria_label = "Time " .. clock_time .. " — " .. clock_full_date
+    clock_aria_label = clock_full_date
 end
 
 function onClockClick()

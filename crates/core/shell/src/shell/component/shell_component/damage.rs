@@ -97,12 +97,16 @@ pub(super) fn select_effective_damage_rects(
     };
 
     let damage_area = damage_rects_area(&rects);
-    let policy = select_damage_policy(
-        metrics,
-        requires_tree_rebuild,
-        has_extra_damage_sources,
-        damage_area,
-    );
+    let policy = if !tooltip_damage.is_empty() {
+        DisplayListRepaintPolicy::FullSurface
+    } else {
+        select_damage_policy(
+            metrics,
+            requires_tree_rebuild,
+            has_extra_damage_sources,
+            damage_area,
+        )
+    };
     match policy {
         DisplayListRepaintPolicy::MinimalDamage | DisplayListRepaintPolicy::BoundingRect => {
             EffectiveDamage {

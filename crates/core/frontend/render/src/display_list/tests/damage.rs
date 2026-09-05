@@ -86,7 +86,7 @@ fn display_list_records_span_metadata_and_policy_labels() {
 
     assert_eq!(
         list.command_spans.as_ref(),
-        build_command_spans(&root, &list.subtrees)
+        build_command_spans(&root, &list.subtrees).as_ref()
     );
 
     let left_spans: Vec<_> = list
@@ -812,89 +812,6 @@ fn retained_effect_count_beats_command_scan() {
     assert!(new_time < old_time);
 }
 
-// cargo test -p mesh-core-render --release -- retained_command_spans_beat_tree_walk --ignored --nocapture
-#[test]
-#[ignore = "release-only retained command-span microbenchmark"]
-fn retained_command_spans_beat_tree_walk() {
-    let tree = display_entry_benchmark_tree(120, 20);
-    let mut list = RetainedDisplayList::default();
-    list.update(&tree, 4096, 4096, false, false);
-    let traversed = build_command_spans(&tree, &list.subtrees);
-    assert_eq!(list.command_spans.as_ref(), traversed);
-    let iterations = 10_000;
-
-    let old_started = std::time::Instant::now();
-    let mut old_total = 0_usize;
-    for _ in 0..iterations {
-        old_total = old_total.saturating_add(std::hint::black_box(
-            build_command_spans(std::hint::black_box(&tree), &list.subtrees).len(),
-        ));
-    }
-    let old_time = old_started.elapsed();
-
-    let new_started = std::time::Instant::now();
-    let mut new_total = 0_usize;
-    for _ in 0..iterations {
-        let spans = std::hint::black_box(Arc::clone(&list.command_spans));
-        new_total = new_total.saturating_add(std::hint::black_box(spans.len()));
-    }
-    let new_time = new_started.elapsed();
-
-    eprintln!(
-        "command span assembly: tree walk {old_time:?}; retained root handle {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
-        old_time.as_secs_f64() / new_time.as_secs_f64()
-    );
-    assert_eq!(old_total, new_total);
-    assert!(new_time < old_time);
-}
-
-// cargo test -p mesh-core-render --release -- single_root_command_span_assembly_beats_ancestor_copying --ignored --nocapture
-#[test]
-#[ignore = "release-only retained command-span assembly microbenchmark"]
-fn single_root_command_span_assembly_beats_ancestor_copying() {
-    let tree = display_entry_benchmark_tree(120, 20);
-    let mut list = RetainedDisplayList::default();
-    list.update(&tree, 4096, 4096, false, false);
-
-    let copied = build_command_spans_with_ancestor_copying(&tree, &list.subtrees);
-    let assembled = build_command_spans(&tree, &list.subtrees);
-    assert_eq!(copied, assembled);
-
-    let iterations = 1_000;
-    let old_started = std::time::Instant::now();
-    let mut old_total = 0_usize;
-    for _ in 0..iterations {
-        old_total = old_total.saturating_add(std::hint::black_box(
-            build_command_spans_with_ancestor_copying(
-                std::hint::black_box(&tree),
-                std::hint::black_box(&list.subtrees),
-            )
-            .len(),
-        ));
-    }
-    let old_time = old_started.elapsed();
-
-    let new_started = std::time::Instant::now();
-    let mut new_total = 0_usize;
-    for _ in 0..iterations {
-        new_total = new_total.saturating_add(std::hint::black_box(
-            build_command_spans(
-                std::hint::black_box(&tree),
-                std::hint::black_box(&list.subtrees),
-            )
-            .len(),
-        ));
-    }
-    let new_time = new_started.elapsed();
-
-    eprintln!(
-        "command span construction: ancestor-copying {old_time:?}; single-root {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
-        old_time.as_secs_f64() / new_time.as_secs_f64()
-    );
-    assert_eq!(old_total, new_total);
-    assert!(new_time * 10 < old_time * 9);
-}
-
 fn frosted_node(id: NodeId, x: f32, y: f32, width: f32, height: f32) -> WidgetNode {
     let mut frosted = node(id, "box", x, y, width, height);
     frosted.computed_style.background_color = Color::TRANSPARENT;
@@ -1266,5 +1183,71 @@ fn damage_inside_a_blur_layer_grows_to_the_layer_region() {
         damage[0], region,
         "every pixel of a blur layer depends on the rest, so partial damage \
          inside it has to grow to the whole layer"
+    );
+}
+
+#[test]
+fn spans_survive_a_wholesale_subtree_reuse() {
+    let mut root = node(1, "column", 0.0, 0.0, 300.0, 200.0);
+    let mut button = node(2, "button", 0.0, 0.0, 300.0, 56.0);
+    button.children.push(node(3, "icon", 8.0, 16.0, 24.0, 24.0));
+    let mut copy = node(4, "column", 40.0, 8.0, 200.0, 40.0);
+    copy.children.push(node(5, "text", 40.0, 8.0, 200.0, 18.0));
+    copy.children.push(node(6, "text", 40.0, 28.0, 200.0, 18.0));
+    button.children.push(copy);
+    root.children.push(button);
+    root.children
+        .push(node(7, "button", 0.0, 60.0, 300.0, 56.0));
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 300, 200, true, true);
+
+    root.children[0].computed_style.background_color = Color {
+        r: 90,
+        g: 90,
+        b: 90,
+        a: 255,
+    };
+    let mut dirty = std::collections::HashSet::new();
+    dirty.insert(2 as NodeId);
+    list.update_with_dirty_nodes(
+        &root,
+        RenderObjectDirtySummary {
+            material: 1,
+            ..Default::default()
+        },
+        &dirty,
+        300,
+        200,
+        false,
+        true,
+    );
+
+    let damage = DamageRect {
+        x: 0,
+        y: 0,
+        width: 300,
+        height: 56,
+    };
+    let selected = list.select_paint_commands(Some(damage), DisplayListRepaintPolicy::BoundingRect);
+    let SelectedDisplayListSelection::Spans { spans, .. } = &selected.selection else {
+        panic!(
+            "a partial repaint must select spans, got {:?}",
+            selected.selection
+        );
+    };
+    let painted: Vec<_> = spans
+        .iter()
+        .flat_map(|span| list.paint_commands()[span.start..span.end].iter())
+        .map(|command| command.node.id)
+        .collect();
+    assert!(
+        painted.contains(&5) && painted.contains(&6),
+        "the reused label subtree lies inside the damaged button, so its text \
+         commands have to be replayed, got {painted:?}"
+    );
+    assert!(
+        !painted.contains(&7),
+        "the untouched second button is outside the damage, got {painted:?}"
     );
 }

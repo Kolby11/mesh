@@ -362,3 +362,29 @@ fn settings_active_page_switch_cost() {
         samples[samples.len() / 2].as_secs_f64() * 1000.0
     );
 }
+
+#[test]
+fn settings_nav_item_answers_with_one_tooltip_for_the_whole_row() {
+    let theme = default_theme();
+    let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
+    let mut buffer = PixelBuffer::new(920, 900);
+
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
+
+    let tree = settings.last_tree.as_ref().expect("rendered settings tree");
+    let nav_item = first_node_with_class_token(tree, "settings-nav-item").expect("nav item");
+    let title = first_node_with_class_token(nav_item, "nav-title").expect("nav title");
+    let subtitle = first_node_with_class_token(nav_item, "nav-subtitle").expect("nav subtitle");
+    let icon = first_node_by_tag(nav_item, "icon").expect("nav icon");
+
+    for (label, node) in [("title", title), ("subtitle", subtitle), ("icon", icon)] {
+        let key = node.mesh_key().expect("mesh key").to_owned();
+        assert_eq!(
+            mesh_core_interaction::find_tooltip_text_by_key(tree, &key).as_deref(),
+            Some("Open the Wi-Fi page"),
+            "hovering the nav item's {label} should answer with the row's tooltip"
+        );
+    }
+}
