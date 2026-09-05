@@ -215,17 +215,6 @@ pub struct Diagnostics {
     lock_acquisitions: Arc<AtomicU64>,
 }
 
-/// Compatibility view for callers that inspect backend lifecycle rows.
-#[derive(Debug, Clone)]
-pub struct LifecycleErrorRecord {
-    pub provider_id: String,
-    pub stage: String,
-    pub latest_message: String,
-    pub count: u64,
-    pub last_seen: SystemTime,
-    pub active: bool,
-}
-
 #[derive(Debug)]
 struct DiagnosticsState {
     error_count: u64,
@@ -552,32 +541,6 @@ impl Diagnostics {
             .cloned()
             .collect::<Vec<_>>();
         codes.iter().filter(|code| self.resolve_issue(code)).count()
-    }
-
-    pub fn lifecycle_error_records(&self) -> Vec<LifecycleErrorRecord> {
-        let state = self.lock_state();
-        let mut records = state
-            .issues
-            .values()
-            .filter_map(|issue| {
-                let rest = issue.issue_code.strip_prefix("lifecycle:")?;
-                let (provider_id, stage) = rest.rsplit_once(':')?;
-                Some(LifecycleErrorRecord {
-                    provider_id: provider_id.to_string(),
-                    stage: stage.to_string(),
-                    latest_message: issue.message.clone(),
-                    count: issue.count,
-                    last_seen: issue.last_seen,
-                    active: issue.active,
-                })
-            })
-            .collect::<Vec<_>>();
-        records.sort_by(|left, right| {
-            left.provider_id
-                .cmp(&right.provider_id)
-                .then_with(|| left.stage.cmp(&right.stage))
-        });
-        records
     }
 
     pub fn health(&self) -> HealthStatus {
@@ -1057,11 +1020,16 @@ mod tests {
         assert!(diagnostics.record_lifecycle_error("@mesh/pipewire-audio", "init", "boom"));
 
         assert_eq!(diagnostics.error_count(), 2);
-        let records = diagnostics.lifecycle_error_records();
-        assert_eq!(records.len(), 2);
-        assert_eq!(records[0].count, 1);
-        assert_eq!(records[1].count, 2);
-        assert!(records.iter().all(|record| record.active));
+        let snapshot = diagnostics.snapshot();
+        assert_eq!(snapshot.issues.len(), 2);
+        let poll = snapshot
+            .issues
+            .iter()
+            .find(|issue| issue.issue_code.ends_with(":poll"))
+            .expect("poll lifecycle issue should be present");
+        assert_eq!(poll.count, 2);
+        assert!(poll.active);
+        assert!(snapshot.active_issues.iter().all(|issue| issue.active));
     }
 
     #[test]

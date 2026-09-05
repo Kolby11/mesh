@@ -26,9 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 The following Section 1 findings remain open; IDs preserve their audit evidence
 for a future report or rerun.
 
-- [ ] **S01-DEAD-009 (P3):** Remove or formalize the test-only
-      `LifecycleErrorRecord` compatibility projection so the canonical diagnostics
-      snapshot is the sole lifecycle representation.
 - [ ] **S01-DEAD-010 (P3):** Either connect `Lifecycle`, `Configuration`, and
       `Resource` diagnostic categories to their real producers or document them as
       reserved wire values before considering removal.
