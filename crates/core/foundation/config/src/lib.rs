@@ -12,7 +12,7 @@ pub mod validate;
 
 pub use settings::{
     SETTINGS_SCHEMA_VERSION, SHELL_NAMESPACE, SettingsNamespaceSchema, SettingsSchemaError,
-    SettingsSchemaRegistry, SettingsStore, default_settings_path, load_shell_settings, merge_json,
+    SettingsStore, default_settings_path, load_shell_settings, merge_json,
 };
 pub use validate::{
     FieldKind, FieldSpec, SettingsDiagnostic, SettingsDiagnosticSeverity, log_settings_diagnostics,

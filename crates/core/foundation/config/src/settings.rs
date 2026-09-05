@@ -127,18 +127,14 @@ pub enum SettingsSchemaError {
     InvalidSchema { path: String, message: String },
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct SettingsSchemaRegistry {
+#[derive(Debug, Clone, Default)]
+struct SettingsSchemaRegistry {
     schemas: BTreeMap<String, SettingsNamespaceSchema>,
 }
 
 impl SettingsSchemaRegistry {
-    pub fn get(&self, namespace: &str) -> Option<&SettingsNamespaceSchema> {
+    fn get(&self, namespace: &str) -> Option<&SettingsNamespaceSchema> {
         self.schemas.get(namespace)
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = &SettingsNamespaceSchema> {
-        self.schemas.values()
     }
 
     fn register(&mut self, schema: SettingsNamespaceSchema) -> Result<(), SettingsSchemaError> {
@@ -280,31 +276,6 @@ impl SettingsStore {
         resolved
     }
 
-    /// Owner-registered schemas currently used to validate module settings.
-    pub fn schema_registry(&self) -> &SettingsSchemaRegistry {
-        &self.schemas
-    }
-
-    /// Register a batch of namespace schemas as one state transition.
-    ///
-    /// Validation and duplicate-owner checks happen against a staged
-    /// registry. A failure leaves the existing registry and runtime-facing
-    /// settings projection untouched.
-    pub fn register_namespace_schemas_transactionally<I>(
-        &mut self,
-        schemas: I,
-    ) -> Result<(), SettingsSchemaError>
-    where
-        I: IntoIterator<Item = SettingsNamespaceSchema>,
-    {
-        let mut candidate = self.schemas.clone();
-        for schema in schemas {
-            candidate.register(schema)?;
-        }
-        self.commit_schema_registry(candidate);
-        Ok(())
-    }
-
     /// Replace the complete owner snapshot atomically. This is used when a
     /// candidate installed graph is prepared or committed.
     pub fn replace_namespace_schemas_transactionally<I>(
@@ -330,13 +301,6 @@ impl SettingsStore {
         self.validated_root = staged.validated_root;
         self.shell = staged.shell;
         self.diagnostics = staged.diagnostics;
-    }
-
-    pub fn register_namespace_schema(
-        &mut self,
-        schema: SettingsNamespaceSchema,
-    ) -> Result<(), SettingsSchemaError> {
-        self.register_namespace_schemas_transactionally([schema])
     }
 
     /// Whether anything is stored under `name` or, for an instance key, its
@@ -1103,8 +1067,11 @@ mod tests {
                     .max()
                     .unwrap();
 
-                assert_eq!(store.schema_registry().iter().count(), namespace_count);
                 assert_eq!(store.namespace_names().count(), namespace_count);
+                assert_eq!(
+                    store.namespace("@bench/settings-000")["field_000"],
+                    json!(true)
+                );
                 assert!(store.diagnostics().is_empty());
                 eprintln!(
                     "MESH_PERF metric=settings_schema_validation namespaces={namespace_count} fields={field_count} iterations=30 schema_bytes={schema_bytes} settings_bytes={settings_bytes} latency_ns={min_ns}..{max_ns} median_ns={median_ns} p95_ns={p95_ns} allocations={min_allocations}..{max_allocations} allocated_bytes={min_allocated_bytes}..{max_allocated_bytes} retained_bytes={min_retained_bytes}..{max_retained_bytes}"
@@ -1368,34 +1335,46 @@ mod tests {
     }
 
     #[test]
-    fn schema_registration_is_atomic_across_duplicate_owners() {
+    fn schema_replacement_is_atomic_across_duplicate_owners() {
         let mut store = store(json!({
             "@mesh/test": { "enabled": "wrong" }
         }));
-        let first = SettingsNamespaceSchema::new(
+        let existing = SettingsNamespaceSchema::new(
             "@mesh/test",
             "@mesh/test",
             json!({ "enabled": { "type": "boolean" } }),
         )
         .unwrap();
-        let duplicate = SettingsNamespaceSchema::new(
+        let replacement = SettingsNamespaceSchema::new(
             "@mesh/test",
             "@mesh/test",
             json!({ "enabled": { "type": "string" } }),
         )
         .unwrap();
 
+        store
+            .replace_namespace_schemas_transactionally([existing])
+            .unwrap();
+        assert_eq!(store.namespace("@mesh/test"), json!({}));
+
         let error = store
-            .replace_namespace_schemas_transactionally([first, duplicate])
+            .replace_namespace_schemas_transactionally([replacement.clone(), replacement])
             .unwrap_err();
 
         assert!(matches!(
             error,
             SettingsSchemaError::DuplicateNamespace { .. }
         ));
-        assert!(store.schema_registry().iter().next().is_none());
-        assert_eq!(store.namespace("@mesh/test")["enabled"], json!("wrong"));
-        assert!(store.diagnostics().is_empty());
+        assert_eq!(
+            store.namespace("@mesh/test"),
+            json!({}),
+            "a rejected replacement must retain the previous schema projection"
+        );
+        assert!(store.diagnostics().iter().any(|diagnostic| {
+            diagnostic.namespace == "@mesh/test"
+                && diagnostic.key_path == "enabled"
+                && diagnostic.is_error()
+        }));
     }
 
     #[test]
