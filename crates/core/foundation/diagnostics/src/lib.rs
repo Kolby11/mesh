@@ -109,8 +109,17 @@ pub enum DiagnosticCategory {
     Compilation,
     Validation,
     Source,
+    /// Reserved wire value for lifecycle diagnostics. The current lifecycle
+    /// helpers retain their producer identity in the issue code and use the
+    /// generic runtime issue path until that contract is unified.
     Lifecycle,
+    /// Reserved wire value for configuration diagnostics. Settings and config
+    /// producers currently expose their typed `ConfigDiagnostic` and
+    /// `SettingsDiagnostic` records through their owning APIs.
     Configuration,
+    /// Reserved wire value for resource diagnostics. Resource discovery and
+    /// resolution currently expose `ResourceExplanationSnapshot` records from
+    /// the resource owner rather than shared module diagnostics.
     Resource,
 }
 
@@ -958,6 +967,21 @@ mod tests {
         assert_eq!(diagnostics.active_issues().len(), 2);
         assert!(matches!(diagnostics.health(), HealthStatus::Error(_)));
         assert_eq!(diagnostics.issues()[0].category, DiagnosticCategory::Script);
+    }
+
+    #[test]
+    fn reserved_diagnostic_categories_keep_stable_wire_values() {
+        for (category, wire_name) in [
+            (DiagnosticCategory::Lifecycle, "lifecycle"),
+            (DiagnosticCategory::Configuration, "configuration"),
+            (DiagnosticCategory::Resource, "resource"),
+        ] {
+            assert_eq!(category.as_str(), wire_name);
+            assert_eq!(
+                serde_json::to_string(&category).unwrap(),
+                format!("\"{wire_name}\"")
+            );
+        }
     }
 
     #[test]

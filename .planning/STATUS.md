@@ -58,9 +58,9 @@ restricted; the unconsumed `CapabilityHandle` abstraction has been removed.
 The settings schema validation, capability activation cloning, and retained
 render allocation-profiler baselines are recorded in
 [`.planning/log/performance-log.md`](log/performance-log.md). The next open item
-is S01-DEAD-010: either connect `Lifecycle`, `Configuration`, and `Resource`
-diagnostic categories to their real producers or document them as reserved
-wire values before considering removal.
+is S01-DEAD-012: remove legacy `DebugTab`, `active_tab`, and
+`from_legacy_tab` state after downstream compatibility review; the shell uses
+`DebugInspectorView`.
 Host icon/font resources now use one explicit immutable graph/profile candidate
 catalog and copy-on-write registry handle, with failed preparation, recovery,
 and package rollback retaining the last-known-good snapshot. Icon resolution
