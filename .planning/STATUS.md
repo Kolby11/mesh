@@ -57,9 +57,9 @@ production authority, and raw mutable `CapabilitySet` construction is
 restricted; the unconsumed `CapabilityHandle` abstraction has been removed.
 The settings schema validation, capability activation cloning, and retained
 render allocation-profiler baselines are recorded in
-[`.planning/log/performance-log.md`](log/performance-log.md). The next open
-item is the Section 1 settings finding S01-LOGIC-004 / S01-LOGIC-005 in
-`docs/BACKLOG.md`.
+[`.planning/log/performance-log.md`](log/performance-log.md). The Section 1
+settings findings S01-LOGIC-004 / S01-LOGIC-005 are complete; the next open
+item is S02-LOGIC-001 / S02-LOGIC-002 in `docs/BACKLOG.md`.
 Host icon/font resources now use one explicit immutable graph/profile candidate
 catalog and copy-on-write registry handle, with failed preparation, recovery,
 and package rollback retaining the last-known-good snapshot. Icon resolution

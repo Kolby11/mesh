@@ -46,9 +46,17 @@ impl FrontendSurfaceComponent {
     }
 
     pub(super) fn refresh_tooltip_settings(&mut self) {
-        if let Ok(settings) = mesh_core_config::load_shell_settings() {
-            self.tooltip_settings = settings.tooltip;
+        let revision = self.settings.revision();
+        if self.tooltip_settings_revision == revision {
+            return;
         }
+        self.tooltip_settings = self.settings.shell().tooltip.clone();
+        self.tooltip_settings_revision = revision;
+    }
+
+    pub(super) fn refresh_tooltip_settings_for_store_change(&mut self) {
+        self.tooltip_settings = self.settings.shell().tooltip.clone();
+        self.tooltip_settings_revision = self.settings.revision();
     }
 
     /// Like `refresh_tooltip_settings` but also merges theme component

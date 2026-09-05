@@ -1084,9 +1084,11 @@ pub(super) struct FrontendSurfaceComponent {
     last_visual_damage: HashMap<NodeId, DamageRect>,
     tooltip_damage_scratch: Vec<DamageRect>,
     dirty_node_visual_damage_scratch: Vec<DamageRect>,
-    /// Current tooltip configuration from shell settings. Refreshed while a
-    /// tooltip hover is active so settings changes apply without remounting.
+    /// Current tooltip configuration from the effective shell settings.
     tooltip_settings: TooltipSettings,
+    /// Durable/effective settings revision used to avoid reading or cloning
+    /// tooltip configuration on every interaction and paint frame.
+    tooltip_settings_revision: u64,
     /// Enter animation lowered from the active theme's CSS (`tooltip {
     /// animation: ... }` + `@keyframes`). `None` = show instantly.
     tooltip_animation: Option<tooltip::TooltipAnimation>,
@@ -1198,6 +1200,8 @@ impl FrontendSurfaceComponent {
             &compiled.manifest,
             compiled.component.props.as_ref(),
         );
+        let tooltip_settings = settings.shell().tooltip.clone();
+        let tooltip_settings_revision = settings.revision();
         let mut surface_policy_generation = SurfacePolicyGenerator::default();
         let surface_policy = surface_policy_generation
             .update(settings_state.effective_policy.snapshot.clone())
@@ -1379,7 +1383,8 @@ impl FrontendSurfaceComponent {
             last_visual_damage: HashMap::new(),
             tooltip_damage_scratch: Vec::new(),
             dirty_node_visual_damage_scratch: Vec::new(),
-            tooltip_settings: TooltipSettings::default(),
+            tooltip_settings,
+            tooltip_settings_revision,
             tooltip_animation: None,
             visual_damage_scratch: Vec::new(),
             effective_damage_scratch: Vec::new(),

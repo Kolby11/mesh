@@ -32,12 +32,6 @@ New findings from the 2026-09-01 audit synthesis, sorted by audit section and
 grouped where one implementation should resolve several findings. Detailed
 evidence and test workloads are in the linked reports.
 
-### Section 01 — Core foundation contracts
-
-- [ ] **S01-LOGIC-004 / S01-LOGIC-005:** Reject invalid array members without
-      compacting sparse settings, and resolve tooltip state from effective
-      settings rather than durable storage. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/01-core-foundation-contracts.md)
-
 ### Section 02 — Module system and installation
 
 - [ ] **S02-LOGIC-001 / S02-LOGIC-002:** Preserve omitted versus explicit

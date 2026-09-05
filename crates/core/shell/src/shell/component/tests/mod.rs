@@ -8,6 +8,53 @@ mod invalidation;
 mod restyle;
 
 #[test]
+fn tooltip_settings_follow_the_effective_store_without_durable_reload() {
+    let mut component = common::test_frontend_component("<template><box /></template>");
+    let first_settings = Arc::new(
+        mesh_core_config::SettingsStore::from_value(
+            "/tmp/mesh-effective-tooltip-settings.json",
+            serde_json::json!({
+                "revision": 1,
+                "shell": {
+                    "tooltip": {
+                        "position": "top",
+                        "delay_ms": 17
+                    }
+                }
+            }),
+        )
+        .unwrap(),
+    );
+
+    component.apply_settings(&first_settings).unwrap();
+
+    assert_eq!(component.tooltip_settings.position, "top");
+    assert_eq!(component.tooltip_settings.delay_ms, 17);
+    assert_eq!(component.tooltip_settings_revision, 1);
+
+    let second_settings = Arc::new(
+        mesh_core_config::SettingsStore::from_value(
+            "/tmp/mesh-effective-tooltip-settings.json",
+            serde_json::json!({
+                "revision": 1,
+                "shell": {
+                    "tooltip": {
+                        "position": "bottom",
+                        "delay_ms": 23
+                    }
+                }
+            }),
+        )
+        .unwrap(),
+    );
+    component.apply_settings(&second_settings).unwrap();
+
+    assert_eq!(component.tooltip_settings.position, "bottom");
+    assert_eq!(component.tooltip_settings.delay_ms, 23);
+    assert_eq!(component.tooltip_settings_revision, 1);
+}
+
+#[test]
 fn frontend_runtime_rejects_missing_activation_resolved_capabilities() {
     let component_id = "@test/capability-surface";
     let component_manifest = common::minimal_test_manifest(component_id);

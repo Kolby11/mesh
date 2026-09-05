@@ -1417,7 +1417,17 @@ impl ShellComponent for FrontendSurfaceComponent {
         &mut self,
         settings: &Arc<mesh_core_config::SettingsStore>,
     ) -> Result<bool, ComponentError> {
+        let store_changed = !Arc::ptr_eq(&self.settings, settings);
         self.settings = settings.clone();
+        if store_changed {
+            // Profile overlays produce a new effective store while retaining
+            // the shared durable revision. Refresh by snapshot identity too,
+            // otherwise a same-revision profile switch can retain stale
+            // tooltip policy.
+            self.refresh_tooltip_settings_for_store_change();
+        } else {
+            self.refresh_tooltip_settings();
+        }
         self.refresh_motion_policy(Instant::now());
         let settings_state = resolve_frontend_module_settings_with_props(
             &self.settings_namespace,

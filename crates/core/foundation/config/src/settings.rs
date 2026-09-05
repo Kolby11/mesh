@@ -720,6 +720,14 @@ fn validate_schema_definition(schema: &JsonValue, path: &str) -> Result<(), Sett
             message: "enum must be an array".into(),
         });
     }
+    if let Some(filter_invalid_items) = schema.get("filterInvalidItems")
+        && !filter_invalid_items.is_boolean()
+    {
+        return Err(SettingsSchemaError::InvalidSchema {
+            path: join_schema_path(path, "filterInvalidItems"),
+            message: "filterInvalidItems must be a boolean".into(),
+        });
+    }
     Ok(())
 }
 
@@ -1333,6 +1341,61 @@ mod tests {
                 && diagnostic.key_path == "label"
                 && diagnostic.is_error()
         }));
+    }
+
+    #[test]
+    fn invalid_pack_chain_member_rejects_the_whole_override_and_keeps_raw_data() {
+        let raw = json!({
+            "icons": { "use_packs": ["pack-a", 7, "pack-b"] },
+            "fonts": { "use_packs": ["font-a", false, "font-b"] }
+        });
+        let mut store = store(json!({ "@mesh/test": raw.clone() }));
+        let schema = SettingsNamespaceSchema::new(
+            "@mesh/test",
+            "@mesh/test",
+            json!({
+                "type": "object",
+                "properties": {
+                    "icons": {
+                        "type": "object",
+                        "properties": {
+                            "use_packs": {
+                                "type": "array",
+                                "items": { "type": "string" }
+                            }
+                        }
+                    },
+                    "fonts": {
+                        "type": "object",
+                        "properties": {
+                            "use_packs": {
+                                "type": "array",
+                                "items": { "type": "string" }
+                            }
+                        }
+                    }
+                }
+            }),
+        )
+        .unwrap();
+
+        store
+            .replace_namespace_schemas_transactionally([schema])
+            .unwrap();
+
+        assert_eq!(
+            store.namespace("@mesh/test"),
+            json!({ "icons": {}, "fonts": {} }),
+            "invalid array fields must be omitted without compacting their members"
+        );
+        assert_eq!(store.to_value()["@mesh/test"], raw);
+        for key_path in ["icons.use_packs.[1]", "fonts.use_packs.[1]"] {
+            assert!(store.diagnostics().iter().any(|diagnostic| {
+                diagnostic.namespace == "@mesh/test"
+                    && diagnostic.key_path == key_path
+                    && diagnostic.is_error()
+            }));
+        }
     }
 
     #[test]

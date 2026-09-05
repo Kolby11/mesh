@@ -378,15 +378,28 @@ pub fn validate_json_schema(
     if let Some(items_schema) = schema.get("items")
         && let Some(items) = value.as_array()
     {
-        let accepted = items
-            .iter()
-            .enumerate()
-            .filter_map(|(index, item)| {
-                let path = join_path(key_path, &format!("[{index}]"));
-                let kept = validate_json_schema(namespace, &path, items_schema, item, diagnostics);
-                (!kept.is_null()).then_some(kept)
-            })
-            .collect();
+        // Arrays represent ordered wholesale replacements in the sparse
+        // settings model. Do not silently compact a bad member out of a pack
+        // chain or key list unless an owner explicitly opts into filtering.
+        let filter_invalid_items = schema
+            .get("filterInvalidItems")
+            .and_then(JsonValue::as_bool)
+            .unwrap_or(false);
+        let mut accepted = Vec::with_capacity(items.len());
+        let mut rejected_item = false;
+        for (index, item) in items.iter().enumerate() {
+            let path = join_path(key_path, &format!("[{index}]"));
+            let diagnostics_before = diagnostics.len();
+            let kept = validate_json_schema(namespace, &path, items_schema, item, diagnostics);
+            let rejected = kept.is_null() && diagnostics.len() != diagnostics_before;
+            rejected_item |= rejected;
+            if !rejected {
+                accepted.push(kept);
+            }
+        }
+        if rejected_item && !filter_invalid_items {
+            return JsonValue::Null;
+        }
         return JsonValue::Array(accepted);
     }
 
@@ -834,5 +847,46 @@ mod tests {
             .is_none()
         );
         assert_eq!(diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn json_schema_arrays_reject_invalid_members_without_compacting() {
+        let schema = serde_json::json!({
+            "type": "array",
+            "items": { "type": "string" }
+        });
+        let mut diagnostics = Vec::new();
+
+        assert_eq!(
+            validate_json_schema(
+                "@mesh/test",
+                "icons.use_packs",
+                &schema,
+                &serde_json::json!(["pack-a", 7, "pack-b"]),
+                &mut diagnostics,
+            ),
+            serde_json::Value::Null,
+            "one invalid member rejects the whole ordered override"
+        );
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].key_path, "icons.use_packs.[1]");
+
+        let filtering_schema = serde_json::json!({
+            "type": "array",
+            "items": { "type": "string" },
+            "filterInvalidItems": true
+        });
+        let mut filtering_diagnostics = Vec::new();
+        assert_eq!(
+            validate_json_schema(
+                "@mesh/test",
+                "icons.use_packs",
+                &filtering_schema,
+                &serde_json::json!(["pack-a", 7, "pack-b"]),
+                &mut filtering_diagnostics,
+            ),
+            serde_json::json!(["pack-a", "pack-b"])
+        );
+        assert_eq!(filtering_diagnostics.len(), 1);
     }
 }
