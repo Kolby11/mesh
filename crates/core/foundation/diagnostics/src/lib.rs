@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use serde::Serialize;
 
@@ -165,16 +165,6 @@ impl fmt::Display for HealthStatus {
             Self::Error(msg) => write!(f, "error: {msg}"),
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct ModuleMetrics {
-    pub module_id: String,
-    pub avg_frame_time: Duration,
-    pub peak_frame_time: Duration,
-    pub memory_bytes: u64,
-    pub error_count: u64,
-    pub health: HealthStatus,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]

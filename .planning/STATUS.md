@@ -58,8 +58,9 @@ restricted; the unconsumed `CapabilityHandle` abstraction has been removed.
 The settings schema validation, capability activation cloning, and retained
 render allocation-profiler baselines are recorded in
 [`.planning/log/performance-log.md`](log/performance-log.md). The next open item
-is S01-DEAD-008: remove unused diagnostics `ModuleMetrics` or explicitly
-migrate its intended role into the current debug profiling DTOs.
+is S01-DEAD-009: remove or formalize the test-only `LifecycleErrorRecord`
+compatibility projection so the canonical diagnostics snapshot is the sole
+lifecycle representation.
 Host icon/font resources now use one explicit immutable graph/profile candidate
 catalog and copy-on-write registry handle, with failed preparation, recovery,
 and package rollback retaining the last-known-good snapshot. Icon resolution
