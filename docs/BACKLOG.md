@@ -289,11 +289,11 @@ gate where the win is structural.
 
 ### Architecture
 
-- [ ] GPU rendering backend after retained layout, smart invalidation, and
-      damage tracking ship → v1.25. Plan:
-      [`gpu-rendering-backend`](../.planning/todos/pending/2026-07-15-gpu-rendering-backend.md).
-      Skia-GL (Ganesh) first — same Canvas API as the shipped raster backend,
-      and EGL buffer-age partial present preserves the damage pipeline.
+- [ ] Advance GPU rendering on two measured lanes: the conservative Skia-GL/EGL
+      migration and an experimental persistent-scene/database renderer that extends
+      retained identity into raster resources and tiles. Plans:
+      [GPU backend](../.planning/todos/pending/2026-07-15-gpu-rendering-backend.md) and
+      [persistent scene renderer](../.planning/todos/pending/2026-09-20-persistent-scene-renderer.md).
 
 ---
 
