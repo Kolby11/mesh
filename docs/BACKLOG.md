@@ -201,6 +201,15 @@ gate where the win is structural.
 - [ ] Continue widening generation shortcuts to per-node dirty scoping and
       unify changed-node fingerprints across the retained, render, and display
       layers; geometry-only retained snapshots are split out now.
+- [ ] Make `FrameSnapshot` and semantic projection structurally shared and
+      dirty-node incremental; capture currently revalidates and recopies the full
+      tree, cloned attributes/styles, accessibility indexes, and semantic diff.
+- [ ] Dirty-scope or fuse the remaining `finalize_tree` passes so targeted
+      restyle/layout frames do not still pay broad annotation, shortcut,
+      promotion/error, accessibility, and string-attribute tree walks.
+- [ ] Make sparse display-list entry patching truly sparse: retain/patch batch
+      material metadata instead of traversing every node/primitive to rebuild the
+      ordered batch stream when only a small dirty-node set changed.
 - [ ] Display-list segment/rope command storage → v1.21. Command arrays are
       still flattened per ancestor. Replay must consume segments directly
       instead of eagerly re-flattening them — an eager reconstruction was tried
