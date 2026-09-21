@@ -74,6 +74,9 @@ pub(super) fn runtime_style_diagnostic_props_fingerprint(props: &SurfaceCssProps
 
 pub(super) fn apply_runtime_attribute_state(node: &mut WidgetNode) {
     apply_hidden_attribute_layout(node);
+    collapse_promoted_popover_node(node);
+    collapse_promoted_window_node(node);
+    constrain_error_placeholder_node(node);
     for child in &mut node.children {
         apply_runtime_attribute_state(child);
     }
@@ -117,6 +120,13 @@ pub(super) fn apply_runtime_attribute_state_for_ids(
 /// subtree's layout coordinates, breaking that translation.) See
 /// the node's typed composition metadata.
 pub(super) fn collapse_promoted_popover_wrappers(node: &mut WidgetNode) {
+    collapse_promoted_popover_node(node);
+    for child in &mut node.children {
+        collapse_promoted_popover_wrappers(child);
+    }
+}
+
+fn collapse_promoted_popover_node(node: &mut WidgetNode) {
     if node.is_promoted_popover() {
         node.computed_style.width = mesh_core_elements::Dimension::Px(0.0);
         node.computed_style.height = mesh_core_elements::Dimension::Px(0.0);
@@ -124,9 +134,6 @@ pub(super) fn collapse_promoted_popover_wrappers(node: &mut WidgetNode) {
         node.computed_style.min_height = mesh_core_elements::Dimension::Px(0.0);
         node.computed_style.overflow_x = mesh_core_elements::style::Overflow::Visible;
         node.computed_style.overflow_y = mesh_core_elements::style::Overflow::Visible;
-    }
-    for child in &mut node.children {
-        collapse_promoted_popover_wrappers(child);
     }
 }
 
@@ -136,6 +143,13 @@ pub(super) fn collapse_promoted_popover_wrappers(node: &mut WidgetNode) {
 /// child painter while removing the promoted node from the parent's layout and
 /// hit-test path.
 pub(super) fn collapse_promoted_window_widgets(node: &mut WidgetNode) {
+    collapse_promoted_window_node(node);
+    for child in &mut node.children {
+        collapse_promoted_window_widgets(child);
+    }
+}
+
+fn collapse_promoted_window_node(node: &mut WidgetNode) {
     if node.is_promoted_window() {
         // Keep the widget's intrinsic dimensions available to the child-window
         // request. Absolute positioning removes it from the parent's flex/grid
@@ -143,9 +157,6 @@ pub(super) fn collapse_promoted_window_widgets(node: &mut WidgetNode) {
         node.computed_style.position = mesh_core_elements::style::Position::Absolute;
         node.computed_style.overflow_x = mesh_core_elements::style::Overflow::Visible;
         node.computed_style.overflow_y = mesh_core_elements::style::Overflow::Visible;
-    }
-    for child in &mut node.children {
-        collapse_promoted_window_widgets(child);
     }
 }
 
@@ -169,6 +180,13 @@ pub(super) fn mark_promoted_window_widgets(
 /// These constraints are shell-owned and must be restored after CSS restyling,
 /// just like promoted-popover geometry above.
 pub(in crate::shell::component) fn constrain_error_placeholders(node: &mut WidgetNode) {
+    constrain_error_placeholder_node(node);
+    for child in &mut node.children {
+        constrain_error_placeholders(child);
+    }
+}
+
+fn constrain_error_placeholder_node(node: &mut WidgetNode) {
     if node
         .authored_payload()
         .attributes
@@ -182,9 +200,6 @@ pub(in crate::shell::component) fn constrain_error_placeholders(node: &mut Widge
         node.computed_style.overflow_y = mesh_core_elements::style::Overflow::Hidden;
         node.computed_style.white_space = mesh_core_elements::style::WhiteSpace::Nowrap;
         node.computed_style.text_overflow = mesh_core_elements::style::TextOverflow::Ellipsis;
-    }
-    for child in &mut node.children {
-        constrain_error_placeholders(child);
     }
 }
 

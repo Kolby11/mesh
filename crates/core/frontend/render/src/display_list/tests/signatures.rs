@@ -288,7 +288,7 @@ fn display_primitive_hashing_beats_byte_fallback() {
 fn retained_subtree_handle_beats_fieldwise_clone() {
     let subtree = RetainedPaintSubtree {
         generation: 1,
-        commands: vec![DisplayPaintCommand {
+        commands: Arc::new(PaintSequence::from(vec![DisplayPaintCommand {
             node: Arc::new(build_paint_node(
                 &node(1, "box", 0.0, 0.0, 20.0, 20.0),
                 0.0,
@@ -301,9 +301,8 @@ fn retained_subtree_handle_beats_fieldwise_clone() {
                 height: 20,
             },
             kind: DisplayPaintCommandKind::Node,
-        }]
-        .into(),
-        kinds: vec![DisplayPaintCommandKind::Node].into(),
+        }])),
+        kinds: Arc::new(PaintSequence::from(vec![DisplayPaintCommandKind::Node])),
         effect_overflow_count: 0,
         pruning: PruningMetrics::default(),
         command_span: Some(RetainedSubtreeSpan {

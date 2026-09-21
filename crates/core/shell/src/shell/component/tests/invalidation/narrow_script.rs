@@ -644,3 +644,120 @@ fn narrow_script_analysis_cost() {
     );
     assert!(gated < analysis);
 }
+
+fn derived_audio_service_component(
+    static_nodes: usize,
+    structural: bool,
+) -> FrontendSurfaceComponent {
+    let conditional = if structural {
+        "{#if visible}<text>audible</text>{/if}"
+    } else {
+        ""
+    };
+    test_frontend_component_with_catalog(
+        &format!(
+            r#"
+<template><column class="derived-root"><text>{{label}}</text>{conditional}{}</column></template>
+<style>.derived-root {{ width: 640px; height: 160px; overflow: hidden; }}</style>
+<script lang="luau">
+local audio = require("mesh.audio@>=1.0")
+label = "0%"
+visible = true
+function render()
+  label = string.format("%d%%", tonumber(audio.percent) or 0)
+  visible = not audio.muted
+end
+</script>
+"#,
+            (0..static_nodes)
+                .map(|index| format!("<text>static row {index}</text>"))
+                .collect::<String>()
+        ),
+        audio_network_catalog(),
+        &["service.audio.read"],
+    )
+}
+
+#[test]
+fn derived_service_variables_use_narrow_retained_update() {
+    let mut component = derived_audio_service_component(64, false);
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(640, 160);
+    prime_audio_component(&mut component, &theme, &mut buffer);
+    assert!(
+        component
+            .node_service_field_deps
+            .nodes_reading_field("audio", "percent")
+            .is_empty()
+    );
+    apply_audio_update(&mut component, 20, false);
+    assert!(
+        component
+            .dirty_types
+            .contains(ComponentDirtyFlags::SCRIPT_NARROW)
+    );
+    assert!(!component.surface_pixels_invalid);
+    component
+        .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
+        .unwrap();
+    assert!(rendered_text(&component).iter().any(|text| text == "20%"));
+    assert!(component.retained_tree.last_update_was_scoped());
+}
+
+#[test]
+fn derived_service_structure_changes_fall_back_to_full_retained_update() {
+    let mut component = derived_audio_service_component(64, true);
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(640, 160);
+    prime_audio_component(&mut component, &theme, &mut buffer);
+    apply_audio_update(&mut component, 20, true);
+    component
+        .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
+        .unwrap();
+    assert!(
+        !rendered_text(&component)
+            .iter()
+            .any(|text| text == "audible")
+    );
+    assert!(!component.retained_tree.last_update_was_scoped());
+}
+
+#[test]
+#[ignore = "release-only derived-service full-rebuild control benchmark"]
+fn derived_service_narrow_end_to_end_benchmark() {
+    use std::time::{Duration, Instant};
+    let theme = default_theme();
+    let mut narrow = derived_audio_service_component(1024, false);
+    let mut full = derived_audio_service_component(1024, false);
+    let mut narrow_buffer = PixelBuffer::new(640, 160);
+    let mut full_buffer = PixelBuffer::new(640, 160);
+    prime_audio_component(&mut narrow, &theme, &mut narrow_buffer);
+    prime_audio_component(&mut full, &theme, &mut full_buffer);
+    let mut times = [Duration::ZERO; 2];
+    for iteration in 0..100 {
+        for index in [iteration % 2, 1 - iteration % 2] {
+            let (component, buffer) = if index == 0 {
+                (&mut full, &mut full_buffer)
+            } else {
+                (&mut narrow, &mut narrow_buffer)
+            };
+            let start = Instant::now();
+            apply_audio_update(component, 20 + (iteration % 2) as u64, false);
+            if index == 0 {
+                component.invalidate_script_state();
+            }
+            component
+                .paint(&theme, SurfaceExtent::unpadded(640, 160), buffer, 1.0)
+                .unwrap();
+            times[index] += start.elapsed();
+        }
+        assert_eq!(narrow_buffer.data(), full_buffer.data());
+    }
+    assert!(narrow.retained_tree.last_update_was_scoped());
+    eprintln!(
+        "derived service, 1027 nodes, 100 frames, interleaved forced TREE_REBUILD {:?}, narrow {:?}, ratio {:.3}x",
+        times[0],
+        times[1],
+        times[0].as_secs_f64() / times[1].as_secs_f64()
+    );
+}

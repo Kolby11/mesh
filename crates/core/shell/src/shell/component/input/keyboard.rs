@@ -572,7 +572,7 @@ impl FrontendSurfaceComponent {
         surface_shortcut_declarations_from_settings(&self.settings_json)
     }
 
-    fn has_surface_shortcut_declarations(&self) -> bool {
+    pub(in crate::shell::component) fn has_surface_shortcut_declarations(&self) -> bool {
         !self.compiled.manifest.keybinds.actions.is_empty()
             || !self
                 .legacy_settings_surface_shortcut_declarations()
@@ -1026,6 +1026,16 @@ fn annotate_nodes_by_keybind(
     node: &mut WidgetNode,
     shortcuts_by_keybind: &HashMap<String, Vec<String>>,
 ) {
+    annotate_node_by_keybind(node, shortcuts_by_keybind);
+    for child in &mut node.children {
+        annotate_nodes_by_keybind(child, shortcuts_by_keybind);
+    }
+}
+
+pub(in crate::shell::component) fn annotate_node_by_keybind(
+    node: &mut WidgetNode,
+    shortcuts_by_keybind: &HashMap<String, Vec<String>>,
+) {
     let (mut replace_keybind_label, shortcuts) = match node.attributes.get("keybind") {
         Some(keybind_id) => (
             node.accessibility.keyboard_shortcut.as_deref() == Some(keybind_id),
@@ -1038,9 +1048,6 @@ fn annotate_nodes_by_keybind(
             apply_accessibility_shortcut(node, replace_keybind_label, shortcut);
             replace_keybind_label = false;
         }
-    }
-    for child in &mut node.children {
-        annotate_nodes_by_keybind(child, shortcuts_by_keybind);
     }
 }
 

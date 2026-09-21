@@ -902,3 +902,132 @@ fn cached_blur_metadata_beats_text_update_rescans() {
         "cached blur metadata should make text updates at least 1.02x faster"
     );
 }
+
+/// Batch metrics are a property of the whole ordered primitive stream, so the
+/// retained segment-tree index has to agree with a straight scan of that stream
+/// on every frame — including the sparse frames where the index is patched
+/// rather than rebuilt and most nodes are never visited.
+#[test]
+fn patched_batch_index_matches_a_full_ordered_scan() {
+    fn scanned_metrics(root: &WidgetNode) -> DisplayListMetrics {
+        let mut ordered = Vec::new();
+        let mut discard = HashMap::new();
+        collect_display_entries(root, 0.0, 0.0, Some(&mut ordered), None, &mut discard);
+        compute_batch_metrics(&ordered)
+    }
+
+    let mut root = node(1, "column", 0.0, 0.0, 200.0, 200.0);
+    for index in 0..12u64 {
+        let mut child = node(index + 2, "box", 0.0, index as f32 * 16.0, 40.0, 16.0);
+        // Alternating materials so the stream contains real runs and real
+        // material-change barriers rather than one uniform batch.
+        child.computed_style.background_color.r = (index % 3) as u8 * 40;
+        root.children.push(child);
+    }
+    let mut text = node(100, "text", 0.0, 192.0, 60.0, 16.0);
+    text.attributes.insert("content".into(), "label".into());
+    root.children.push(text);
+
+    let mut list = RetainedDisplayList::default();
+    let initial = list.update(&root, 200, 220, false, true);
+    assert_eq!(initial.batch_count, scanned_metrics(&root).batch_count);
+
+    // Repaint-only changes to a few nodes: exactly the shape that takes the
+    // sparse patch path.
+    for (generation, dirty_id) in [(1u64, 4u64), (2, 5), (3, 4), (4, 9)] {
+        let child = root
+            .children
+            .iter_mut()
+            .find(|child| child.id == dirty_id)
+            .expect("dirty child exists");
+        child.computed_style.background_color.r =
+            child.computed_style.background_color.r.wrapping_add(40);
+
+        let metrics = list.update_for_retained_generation(
+            &root,
+            generation,
+            RenderObjectDirtySummary {
+                material: 1,
+                ..Default::default()
+            },
+            &HashSet::from([dirty_id]),
+            200,
+            220,
+            false,
+            true,
+        );
+
+        let expected = scanned_metrics(&root);
+        assert_eq!(
+            (
+                metrics.batch_count,
+                metrics.batched_primitives,
+                metrics.barrier_count,
+                metrics.barriers,
+            ),
+            (
+                expected.batch_count,
+                expected.batched_primitives,
+                expected.barrier_count,
+                expected.barriers,
+            ),
+            "patched batch metrics diverged from the ordered scan after node {dirty_id} changed"
+        );
+    }
+}
+
+// cargo test -p mesh-core-render --release -- sparse_batch_metrics_beat_the_ordered_walk --ignored --nocapture
+/// The ordered walk visits every node and every primitive slot to rebuild the
+/// batch stream, whatever the dirty set looks like. The retained index descends
+/// to the dirty nodes by their recorded paths and repairs `O(log n)` summaries.
+#[test]
+#[ignore = "release-only sparse batch-metrics microbenchmark"]
+fn sparse_batch_metrics_beat_the_ordered_walk() {
+    let tree = display_entry_benchmark_tree(120, 20);
+    let dirty: HashSet<NodeId> = HashSet::from([3, 4, 5, 6]);
+    let iterations = 2_000;
+
+    let mut entries = HashMap::new();
+    collect_display_entries(&tree, 0.0, 0.0, None, None, &mut entries);
+    let mut index = super::super::batch_index::BatchIndex::default();
+    index.rebuild(&tree, 0.0, 0.0, &entries);
+
+    let walk_start = std::time::Instant::now();
+    let mut walked = DisplayListMetrics::default();
+    for _ in 0..iterations {
+        let mut ordered = Vec::new();
+        let mut next = HashMap::new();
+        collect_display_entries(&tree, 0.0, 0.0, Some(&mut ordered), Some(&dirty), &mut next);
+        walked = compute_batch_metrics(&ordered);
+        std::hint::black_box(next.len());
+    }
+    let walk_elapsed = walk_start.elapsed();
+
+    let index_start = std::time::Instant::now();
+    let mut patched = DisplayListMetrics::default();
+    for _ in 0..iterations {
+        let mut next = HashMap::new();
+        assert!(index.collect_dirty_entries(&tree, &dirty, &mut next));
+        assert!(index.patch(&dirty, &entries));
+        patched = index.metrics();
+        std::hint::black_box(next.len());
+    }
+    let index_elapsed = index_start.elapsed();
+
+    assert_eq!(walked.batch_count, patched.batch_count);
+    assert_eq!(walked.batched_primitives, patched.batched_primitives);
+    assert_eq!(walked.barrier_count, patched.barrier_count);
+    println!(
+        "batch metrics for {} dirty nodes of {}, {iterations} iterations: ordered walk {:?}, \
+         retained index {:?}, ratio {:.1}x",
+        dirty.len(),
+        entries.len(),
+        walk_elapsed,
+        index_elapsed,
+        walk_elapsed.as_secs_f64() / index_elapsed.as_secs_f64(),
+    );
+    assert!(
+        index_elapsed * 4 < walk_elapsed,
+        "patching a handful of nodes must beat the whole ordered walk by a wide margin"
+    );
+}

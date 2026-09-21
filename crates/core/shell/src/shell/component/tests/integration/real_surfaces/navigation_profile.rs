@@ -29,6 +29,14 @@ fn extent() -> SurfaceExtent {
     SurfaceExtent::unpadded(WIDTH, SETTLED.load(std::sync::atomic::Ordering::Relaxed))
 }
 
+/// The shape `@mesh/navigation-bar`'s volume button actually reads: its
+/// `render()` hook takes `audio.percent` and `audio.muted`, and returns early
+/// unless `audio.available` is set. Publishing any other field measures a poll
+/// the bar ignores — which is what "media poll (unread)" below is for.
+fn audio_payload(percent: u32) -> serde_json::Value {
+    serde_json::json!({ "available": true, "percent": percent, "muted": false })
+}
+
 fn publish(component: &mut FrontendSurfaceComponent, service: &str, payload: serde_json::Value) {
     component
         .handle_service_event(&ServiceEvent::Updated {
@@ -48,11 +56,7 @@ fn navigation_surface(theme: &Theme, buffer: &mut PixelBuffer) -> FrontendSurfac
         "mesh.locale",
         serde_json::json!({ "locale": "en", "current": "en" }),
     );
-    publish(
-        &mut component,
-        "mesh.audio",
-        serde_json::json!({ "volume": 40, "muted": false }),
-    );
+    publish(&mut component, "mesh.audio", audio_payload(40));
     publish(
         &mut component,
         "mesh.network",
@@ -166,11 +170,7 @@ fn navigation_frame_cost_profile() {
 
     // Settle: the first payload of each service is genuinely new.
     for volume in 0..10u32 {
-        publish(
-            &mut component,
-            "mesh.audio",
-            serde_json::json!({ "volume": volume, "muted": false }),
-        );
+        publish(&mut component, "mesh.audio", audio_payload(volume));
         component.paint(&theme, extent(), &mut buffer, 1.0).unwrap();
     }
 
@@ -178,11 +178,7 @@ fn navigation_frame_cost_profile() {
     // must not care.
     let started = Instant::now();
     for volume in 0..frames {
-        publish(
-            &mut component,
-            "mesh.audio",
-            serde_json::json!({ "volume": volume % 100, "muted": false }),
-        );
+        publish(&mut component, "mesh.audio", audio_payload(volume % 100));
         component.paint(&theme, extent(), &mut buffer, 1.0).unwrap();
     }
     let audio_poll = started.elapsed();
@@ -243,23 +239,22 @@ fn navigation_frame_cost_profile() {
     let mut full_surface_frames = 0u32;
     let sample_frames = frames.min(240);
     for volume in 0..sample_frames {
-        publish(
-            &mut component,
-            "mesh.audio",
-            serde_json::json!({ "volume": volume % 100, "muted": false }),
-        );
+        publish(&mut component, "mesh.audio", audio_payload(volume % 100));
         component.paint(&theme, extent(), &mut buffer, 1.0).unwrap();
+        let dirty = component.last_dirty_types;
+        let narrow_supported = component.selective_service_build_supported;
+        // Take rather than read: a zero-damage frame leaves the accumulator
+        // untouched, so reading it would re-report the previous loop's
+        // full-surface rect and score a frame that repainted nothing as 100%.
+        let frame_damage = component.take_present_damage();
         if volume == 0 {
             eprintln!(
-                "volume-change frame: dirty={:?} narrow_supported={} damage_rects={:?}",
-                component.last_dirty_types,
-                component.selective_service_build_supported,
-                component.last_present_damage_rects,
+                "volume-change frame: dirty={dirty:?} narrow_supported={narrow_supported} \
+                 damage_rects={frame_damage:?}"
             );
         }
-        damage_rects += component.last_present_damage_rects.len();
-        let frame_area: u64 = component
-            .last_present_damage_rects
+        damage_rects += frame_damage.len();
+        let frame_area: u64 = frame_damage
             .iter()
             .map(|rect| u64::from(rect.width) * u64::from(rect.height))
             .sum();
@@ -301,11 +296,7 @@ fn navigation_frame_cost_profile() {
 
     let _ = component.take_profiling_records();
     for volume in 0..frames {
-        publish(
-            &mut component,
-            "mesh.audio",
-            serde_json::json!({ "volume": volume % 100, "muted": false }),
-        );
+        publish(&mut component, "mesh.audio", audio_payload(volume % 100));
         component.paint(&theme, extent(), &mut buffer, 1.0).unwrap();
     }
     dump_stages(

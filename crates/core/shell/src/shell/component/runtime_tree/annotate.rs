@@ -124,6 +124,8 @@ pub(in crate::shell::component) struct RuntimeAnnotationContext<'a> {
     pub(super) checked_values: &'a HashMap<NodeId, bool>,
     pub(super) scroll_offsets: &'a mut HashMap<NodeId, ScrollOffsetState>,
     pub(super) window: WindowSurfaceState,
+    pub(super) promoted_windows: Option<&'a HashSet<String>>,
+    pub(super) shortcuts: Option<&'a HashMap<String, Vec<String>>>,
 }
 
 impl<'a> RuntimeAnnotationContext<'a> {
@@ -153,7 +155,25 @@ impl<'a> RuntimeAnnotationContext<'a> {
             checked_values,
             scroll_offsets,
             window: WindowSurfaceState::default(),
+            shortcuts: None,
+            promoted_windows: None,
         }
+    }
+
+    pub(in crate::shell::component) fn with_promoted_windows(
+        mut self,
+        keys: &'a HashSet<String>,
+    ) -> Self {
+        self.promoted_windows = Some(keys);
+        self
+    }
+
+    pub(in crate::shell::component) fn with_shortcuts(
+        mut self,
+        shortcuts: Option<&'a HashMap<String, Vec<String>>>,
+    ) -> Self {
+        self.shortcuts = shortcuts;
+        self
     }
 
     /// Ambient toplevel state for this surface, projected onto every annotated
@@ -244,7 +264,19 @@ pub(super) fn annotate_runtime_tree_inner(
     annotate_overflow: bool,
 ) -> Option<mesh_core_interaction::ContentBounds> {
     node.id = node_id;
-    node.set_mesh_key(key.clone());
+    if node.mesh_key() != Some(key.as_str()) {
+        node.set_mesh_key(key.clone());
+    }
+    if let Some(shortcuts) = context.shortcuts {
+        super::super::input::annotate_node_by_keybind(node, shortcuts);
+    }
+    if context
+        .promoted_windows
+        .is_some_and(|keys| keys.contains(key))
+    {
+        node.attributes.insert("hidden".into(), "true".into());
+        node.mark_promoted_window();
+    }
 
     let authored = node.authored_payload();
     let authored_state = mesh_core_elements::authored_element_state(&authored.attributes);
@@ -293,9 +325,17 @@ pub(super) fn annotate_runtime_tree_inner(
         );
     }
 
+    // `node.attributes` is inside the shared authored payload, so every write
+    // here — including a remove of a key that was never present — forces a
+    // copy-on-write clone and breaks memo payload sharing for the whole
+    // subtree. Both branches must check before they write.
     if node.state.focused {
-        node.attributes
-            .insert("_mesh_focused".into(), "true".into());
+        if node.attributes.get("_mesh_focused").map(String::as_str) != Some("true") {
+            node.attributes
+                .insert("_mesh_focused".into(), "true".into());
+        }
+    } else if node.attributes.get("_mesh_focused").is_some() {
+        node.attributes.remove("_mesh_focused");
     }
     // Compatibility projection for callers inspecting the live node. Semantic
     // snapshots derive focus from `node.state`, so this is not authoritative.

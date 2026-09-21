@@ -5,13 +5,14 @@ use mesh_core_elements::NodeId;
 use super::blur::*;
 use super::build::*;
 use super::paint_node::*;
+use super::sequence::PaintSequence;
 use super::types::*;
 
 #[derive(Debug, Clone)]
 pub(super) struct RetainedPaintSubtree {
     pub(super) generation: u64,
-    pub(super) commands: Arc<[DisplayPaintCommand]>,
-    pub(super) kinds: Arc<[DisplayPaintCommandKind]>,
+    pub(super) commands: Arc<PaintSequence<DisplayPaintCommand>>,
+    pub(super) kinds: Arc<PaintSequence<DisplayPaintCommandKind>>,
     pub(super) effect_overflow_count: u64,
     pub(super) pruning: PruningMetrics,
     pub(super) command_span: Option<RetainedSubtreeSpan>,
@@ -22,8 +23,8 @@ impl Default for RetainedPaintSubtree {
     fn default() -> Self {
         Self {
             generation: 0,
-            commands: Vec::new().into(),
-            kinds: Vec::new().into(),
+            commands: Arc::new(PaintSequence::default()),
+            kinds: Arc::new(PaintSequence::default()),
             effect_overflow_count: 0,
             pruning: PruningMetrics::default(),
             command_span: None,
@@ -44,6 +45,9 @@ pub(super) struct RetainedSubtreeSpan {
 pub(super) struct PaintSubtreeBuilder {
     pub(super) commands: Vec<DisplayPaintCommand>,
     pub(super) kinds: Vec<DisplayPaintCommandKind>,
+    command_children: Vec<(usize, Arc<PaintSequence<DisplayPaintCommand>>)>,
+    kind_children: Vec<(usize, Arc<PaintSequence<DisplayPaintCommandKind>>)>,
+    child_command_count: usize,
     pub(super) effect_overflow_count: u64,
     pub(super) pruning: PruningMetrics,
     pub(super) bounds: DamageRect,
@@ -102,7 +106,7 @@ impl PaintSubtreeBuilder {
             self.includes_scrollbars |= span.includes_scrollbars;
         }
 
-        let child_offset = self.commands.len();
+        let child_offset = self.commands.len() + self.child_command_count;
         self.child_spans.reserve(child_subtree.spans.len());
         for span in child_subtree.spans.iter() {
             self.child_spans.push(RetainedCommandSpan {
@@ -111,10 +115,11 @@ impl PaintSubtreeBuilder {
                 ..*span
             });
         }
-        self.commands.reserve(child_subtree.commands.len());
-        self.commands.extend_from_slice(&child_subtree.commands);
-        self.kinds.reserve(child_subtree.kinds.len());
-        self.kinds.extend_from_slice(&child_subtree.kinds);
+        self.command_children
+            .push((self.commands.len(), Arc::clone(&child_subtree.commands)));
+        self.kind_children
+            .push((self.kinds.len(), Arc::clone(&child_subtree.kinds)));
+        self.child_command_count += child_subtree.commands.len();
     }
 
     pub(super) fn append_pruning(&mut self, child_subtree: &RetainedPaintSubtree) {
@@ -211,7 +216,7 @@ impl PaintSubtreeBuilder {
         owner: NodeId,
     ) -> RetainedPaintSubtree {
         let command_count = self.local_command_count;
-        let subtree_end = self.commands.len();
+        let subtree_end = self.commands.len() + self.child_command_count;
         let command_span = if command_count == 0 {
             None
         } else {
@@ -273,8 +278,11 @@ impl PaintSubtreeBuilder {
         };
         RetainedPaintSubtree {
             generation,
-            commands: self.commands.into(),
-            kinds: self.kinds.into(),
+            commands: Arc::new(PaintSequence::assemble(
+                self.commands,
+                self.command_children,
+            )),
+            kinds: Arc::new(PaintSequence::assemble(self.kinds, self.kind_children)),
             effect_overflow_count: self.effect_overflow_count,
             pruning: self.pruning,
             command_span,

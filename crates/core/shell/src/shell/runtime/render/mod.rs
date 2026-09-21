@@ -1056,9 +1056,13 @@ impl Shell {
             if self.components[index].target(target).last_region_state != Some(region_state) {
                 let commands = self.components[index]
                     .component
-                    .display_list_paint_commands();
+                    .display_list_first_paint_command();
                 let opaque_rect = content_size.and_then(|(content_w, content_h)| {
-                    compute_opaque_rect_for_root(commands, content_w, content_h)
+                    compute_opaque_rect_for_root(
+                        commands.map(std::slice::from_ref).unwrap_or_default(),
+                        content_w,
+                        content_h,
+                    )
                 });
                 self.presentation_engine
                     .update_opaque_region(&surface_id, opaque_rect);

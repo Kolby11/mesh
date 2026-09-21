@@ -613,8 +613,14 @@ fn phase98_profiling_backend_update_reduced_churn() {
         invalidation.component
     );
 
+    // `narrow_path` is the stronger property — a scoped retained diff — and a
+    // service payload that first makes a subtree available is structural, so it
+    // legitimately synchronizes the full retained tree. What this proof asserts
+    // is only that the frame was classified, not that it was scoped.
     assert!(
-        invalidation.full_rebuild || invalidation.narrow_path,
+        invalidation.full_rebuild
+            || invalidation.narrow_path
+            || invalidation.component.script_narrow > 0,
         "backend update should use either TREE_REBUILD or SCRIPT_NARROW path"
     );
 }

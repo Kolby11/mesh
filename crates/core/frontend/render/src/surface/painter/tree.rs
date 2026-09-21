@@ -116,8 +116,17 @@ impl FrontendRenderEngine {
             true,
             true,
         );
-        self.render_display_list_for_module(
-            display_list.paint_commands(),
+        let selected = display_list.select_paint_commands(
+            Some(crate::DamageRect {
+                x: 0,
+                y: 0,
+                width: buffer.width(),
+                height: buffer.height(),
+            }),
+            crate::display_list::DisplayListRepaintPolicy::FullSurface,
+        );
+        self.render_selected_display_list_for_module(
+            &selected,
             buffer,
             scale,
             clip,

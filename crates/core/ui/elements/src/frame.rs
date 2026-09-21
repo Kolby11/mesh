@@ -10,6 +10,7 @@
 use crate::accessibility::{AccessibilityInfo, AccessibilityState, AccessibilityTree};
 use crate::attributes::AttributeMap;
 use crate::element::element_runtime_tag_for_tag;
+use crate::interaction_contract::NodeEligibility;
 use crate::layout::LayoutRect;
 use crate::style::ComputedStyle;
 use crate::tree::{
@@ -260,11 +261,14 @@ pub struct FrameNode {
     children: Box<[StableNodeIdentity]>,
     tag: Arc<str>,
     runtime_tag: Option<Arc<str>>,
-    attributes: AttributeMap,
+    attributes: Arc<AttributeMap>,
     style: Arc<ComputedStyle>,
     layout: LayoutRect,
     state: ElementState,
-    semantic: Option<FrameSemanticNode>,
+    semantic: Option<Arc<FrameSemanticNode>>,
+    local_info: Arc<AccessibilityInfo>,
+    semantic_text: Arc<str>,
+    policy: NodeEligibility,
 }
 
 impl FrameNode {
@@ -309,7 +313,7 @@ impl FrameNode {
     }
 
     pub fn semantic(&self) -> Option<&FrameSemanticNode> {
-        self.semantic.as_ref()
+        self.semantic.as_deref()
     }
 }
 
@@ -389,7 +393,7 @@ impl SemanticDiff {
                     }),
                     (Some(before), Some(after)) => {
                         let fields =
-                            semantic_fields(before.semantic.as_ref(), after.semantic.as_ref());
+                            semantic_fields(before.semantic.as_deref(), after.semantic.as_deref());
                         (!fields.is_empty()).then_some(SemanticChange {
                             identity,
                             kind: SemanticChangeKind::Updated,
@@ -431,12 +435,122 @@ impl SemanticDiff {
     }
 }
 
+/// Persistent balanced sequence. Updating one record copies only its search
+/// path; snapshots never clone a full directory of node pointers.
+#[derive(Debug, Clone)]
+enum FrameRecords {
+    Empty,
+    Leaf(FrameNode),
+    Branch {
+        left: Arc<Self>,
+        right: Arc<Self>,
+        len: usize,
+    },
+}
+
+impl FrameRecords {
+    fn from_nodes(nodes: &mut std::vec::IntoIter<FrameNode>) -> Self {
+        Self::take_nodes(nodes, nodes.len())
+    }
+    fn take_nodes(nodes: &mut std::vec::IntoIter<FrameNode>, len: usize) -> Self {
+        match len {
+            0 => Self::Empty,
+            1 => Self::Leaf(nodes.next().expect("record exists")),
+            _ => Self::Branch {
+                left: Arc::new(Self::take_nodes(nodes, len / 2)),
+                right: Arc::new(Self::take_nodes(nodes, len - len / 2)),
+                len,
+            },
+        }
+    }
+    fn len(&self) -> usize {
+        match self {
+            Self::Empty => 0,
+            Self::Leaf(_) => 1,
+            Self::Branch { len, .. } => *len,
+        }
+    }
+    fn get(&self, index: usize) -> &FrameNode {
+        match self {
+            Self::Leaf(node) if index == 0 => node,
+            Self::Branch { left, right, .. } => {
+                if index < left.len() {
+                    left.get(index)
+                } else {
+                    right.get(index - left.len())
+                }
+            }
+            _ => panic!("frame node index out of bounds"),
+        }
+    }
+    fn get_mut(&mut self, index: usize) -> &mut FrameNode {
+        match self {
+            Self::Leaf(node) if index == 0 => node,
+            Self::Branch { left, right, .. } => {
+                if index < left.len() {
+                    Arc::make_mut(left).get_mut(index)
+                } else {
+                    let offset = left.len();
+                    Arc::make_mut(right).get_mut(index - offset)
+                }
+            }
+            _ => panic!("frame node index out of bounds"),
+        }
+    }
+}
+
+/// Borrowed preorder view of a frame's structurally shared records.
+#[derive(Clone, Copy)]
+pub struct FrameNodes<'a>(&'a FrameRecords);
+impl<'a> FrameNodes<'a> {
+    pub fn len(self) -> usize {
+        self.0.len()
+    }
+    pub fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+    pub fn iter(self) -> FrameNodeIter<'a> {
+        self.into_iter()
+    }
+}
+impl<'a> IntoIterator for FrameNodes<'a> {
+    type Item = &'a FrameNode;
+    type IntoIter = FrameNodeIter<'a>;
+    fn into_iter(self) -> Self::IntoIter {
+        FrameNodeIter {
+            pending: vec![self.0],
+        }
+    }
+}
+pub struct FrameNodeIter<'a> {
+    pending: Vec<&'a FrameRecords>,
+}
+impl<'a> Iterator for FrameNodeIter<'a> {
+    type Item = &'a FrameNode;
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(records) = self.pending.pop() {
+            match records {
+                FrameRecords::Empty => {}
+                FrameRecords::Leaf(node) => return Some(node),
+                FrameRecords::Branch { left, right, .. } => {
+                    self.pending.push(right);
+                    self.pending.push(left);
+                }
+            }
+        }
+        None
+    }
+}
+
 #[derive(Debug)]
 struct FrameSnapshotData {
     revision: u64,
     phases: FramePhaseStamps,
-    nodes: Box<[FrameNode]>,
-    index: HashMap<StableNodeIdentity, usize>,
+    nodes: Arc<FrameRecords>,
+    index: Arc<HashMap<StableNodeIdentity, usize>>,
+    id_index: Arc<HashMap<NodeId, usize>>,
+    paths: Arc<Vec<Box<[usize]>>>,
+    dependents: Arc<HashMap<usize, Vec<usize>>>,
     semantic_diff: SemanticDiff,
 }
 
@@ -471,7 +585,14 @@ impl FrameSnapshot {
         let mut nodes = Vec::with_capacity(root.node_count());
         let mut node_ids = HashSet::with_capacity(root.node_count());
         let mut identities = HashSet::with_capacity(root.node_count());
-        append_node(root, None, &mut nodes, &mut node_ids, &mut identities)?;
+        append_node(
+            root,
+            None,
+            NodeEligibility::ROOT,
+            &mut nodes,
+            &mut node_ids,
+            &mut identities,
+        )?;
         let accessibility = AccessibilityTree::from_validated_widget_tree(root);
 
         let mut index = HashMap::with_capacity(nodes.len());
@@ -490,14 +611,36 @@ impl FrameSnapshot {
                     referenced_id: semantic.id,
                 });
             };
-            nodes[node_index].semantic = Some(frame_semantic_node(semantic, &identity_by_id)?);
+            nodes[node_index].semantic =
+                Some(Arc::new(frame_semantic_node(semantic, &identity_by_id)?));
         }
 
+        let mut paths = Vec::with_capacity(nodes.len());
+        collect_paths(root, &mut Vec::new(), &mut paths);
+        let mut dependents: HashMap<usize, Vec<usize>> = HashMap::new();
+        for (dependent, node) in nodes.iter().enumerate() {
+            if let Some(semantic) = node.semantic() {
+                for reference in semantic
+                    .relationships
+                    .labelled_by
+                    .iter()
+                    .chain(semantic.relationships.described_by.iter())
+                {
+                    dependents
+                        .entry(index[reference])
+                        .or_default()
+                        .push(dependent);
+                }
+            }
+        }
         let mut snapshot = Self(Arc::new(FrameSnapshotData {
             revision,
             phases,
-            nodes: nodes.into_boxed_slice(),
-            index,
+            nodes: Arc::new(FrameRecords::from_nodes(&mut nodes.into_iter())),
+            index: Arc::new(index),
+            id_index: Arc::new(node_index),
+            paths: Arc::new(paths),
+            dependents: Arc::new(dependents),
             semantic_diff: SemanticDiff::default(),
         }));
         let semantic_diff = SemanticDiff::between(previous, &snapshot);
@@ -505,6 +648,163 @@ impl FrameSnapshot {
             .expect("new frame snapshot has the only data owner")
             .semantic_diff = semantic_diff;
         Ok(snapshot)
+    }
+
+    /// Capture an authoritative set of changed nodes in a retained tree.
+    ///
+    /// The caller must include every changed node, including layout propagation
+    /// and interaction state. Structural changes require `capture`; changes to
+    /// semantic visibility or relationship indexes automatically take that path.
+    /// Only dirty records, their name-bearing ancestors, and ARIA text consumers
+    /// are projected and diffed. Clean records and all lookup indexes are shared.
+    pub fn capture_dirty(
+        root: &WidgetNode,
+        revision: u64,
+        phases: FramePhaseStamps,
+        previous: &Self,
+        dirty: &HashSet<NodeId>,
+    ) -> Result<Self, FrameSnapshotError> {
+        if !phases.is_complete() {
+            return Err(FrameSnapshotError::IncompletePhaseStamps);
+        }
+        if revision < previous.revision() {
+            return Err(FrameSnapshotError::NonMonotonicRevision {
+                revision,
+                previous: previous.revision(),
+            });
+        }
+        let fallback = || Self::capture(root, revision, phases, Some(previous));
+        if root.id != previous.root().id {
+            return fallback();
+        }
+        let mut affected = BTreeSet::new();
+        let mut changed = BTreeSet::new();
+        for id in dirty {
+            let Some(&index) = previous.0.id_index.get(id) else {
+                return fallback();
+            };
+            let Some((live, policy)) = previous.live_node(root, index) else {
+                return fallback();
+            };
+            let old = previous.0.nodes.get(index);
+            if !same_structure_and_references(live, old)
+                || policy.is_semantically_visible() != old.policy.is_semantically_visible()
+            {
+                return fallback();
+            }
+            validate_layout(live)?;
+            changed.insert(index);
+            affected.insert(index);
+            if policy.is_disabled() != old.policy.is_disabled() {
+                previous.collect_descendants(index, &mut affected);
+            }
+        }
+        // Preorder indices place children after their ancestors. Include the
+        // complete ancestor closure before recomputing text bottom-up.
+        for index in affected.clone() {
+            let mut parent = previous.0.nodes.get(index).parent();
+            while let Some(identity) = parent {
+                let parent_index = previous.0.index[identity];
+                affected.insert(parent_index);
+                parent = previous.0.nodes.get(parent_index).parent();
+            }
+        }
+        let mut nodes = previous.0.nodes.clone();
+        for &index in affected.iter().rev() {
+            let Some((live, policy)) = previous.live_node(root, index) else {
+                return fallback();
+            };
+            let old = previous.0.nodes.get(index);
+            if !same_structure_and_references(live, old)
+                || policy.is_semantically_visible() != old.policy.is_semantically_visible()
+            {
+                return fallback();
+            }
+            validate_layout(live)?;
+            let child_text = old
+                .children
+                .iter()
+                .map(|identity| nodes.get(previous.0.index[identity]).semantic_text.as_ref())
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ");
+            let (info, text) = crate::accessibility::frame_local_info(live, &child_text, policy);
+            let node = Arc::make_mut(&mut nodes).get_mut(index);
+            if changed.contains(&index) {
+                node.attributes = Arc::new(live.attributes.clone());
+                node.style = Arc::new(live.computed_style.clone());
+                node.layout = live.layout;
+                node.state = live.state;
+            }
+            node.local_info = Arc::new(info);
+            node.semantic_text = Arc::from(text);
+            node.policy = policy;
+        }
+        let mut projected = affected.clone();
+        for index in &affected {
+            if let Some(dependents) = previous.0.dependents.get(index) {
+                projected.extend(dependents.iter().copied());
+            }
+        }
+        let mut changes = Vec::new();
+        for index in projected {
+            let old = previous.0.nodes.get(index);
+            let node = nodes.get(index);
+            let semantic = old.semantic.as_ref().map(|old_semantic| {
+                let mut semantic = (**old_semantic).clone();
+                semantic.info = (*node.local_info).clone();
+                semantic.bounds = node.layout;
+                apply_frame_reference_text(&mut semantic, &nodes, &previous.0.index);
+                semantic
+            });
+            if let Some(semantic) = &semantic {
+                validate_frame_semantic(node.id, semantic)?;
+            }
+            let fields = semantic_fields(old.semantic(), semantic.as_ref());
+            if !fields.is_empty() {
+                changes.push(SemanticChange {
+                    identity: old.identity.clone(),
+                    kind: SemanticChangeKind::Updated,
+                    fields: fields.into_boxed_slice(),
+                });
+            }
+            Arc::make_mut(&mut nodes).get_mut(index).semantic = semantic.map(Arc::new);
+        }
+        changes.sort_by(|left, right| left.identity.cmp(&right.identity));
+        Ok(Self(Arc::new(FrameSnapshotData {
+            revision,
+            phases,
+            nodes,
+            index: previous.0.index.clone(),
+            id_index: previous.0.id_index.clone(),
+            paths: previous.0.paths.clone(),
+            dependents: previous.0.dependents.clone(),
+            semantic_diff: SemanticDiff {
+                changes: changes.into_boxed_slice(),
+            },
+        })))
+    }
+
+    fn live_node<'a>(
+        &self,
+        root: &'a WidgetNode,
+        index: usize,
+    ) -> Option<(&'a WidgetNode, NodeEligibility)> {
+        let mut node = root;
+        let mut policy = NodeEligibility::for_root(root);
+        for &child in self.0.paths[index].iter() {
+            node = node.children.get(child)?;
+            policy = policy.child(node);
+        }
+        (node.id == self.0.nodes.get(index).id).then_some((node, policy))
+    }
+
+    fn collect_descendants(&self, index: usize, out: &mut BTreeSet<usize>) {
+        for identity in self.0.nodes.get(index).children.iter() {
+            let child = self.0.index[identity];
+            out.insert(child);
+            self.collect_descendants(child, out);
+        }
     }
 
     pub fn complete(
@@ -528,30 +828,32 @@ impl FrameSnapshot {
         &self.0.phases
     }
 
-    pub fn nodes(&self) -> &[FrameNode] {
-        &self.0.nodes
+    pub fn nodes(&self) -> FrameNodes<'_> {
+        FrameNodes(&self.0.nodes)
     }
 
     pub fn root(&self) -> &FrameNode {
-        self.0
-            .nodes
-            .first()
-            .expect("a frame snapshot always contains its root node")
+        self.0.nodes.get(0)
     }
 
     pub fn node(&self, identity: &StableNodeIdentity) -> Option<&FrameNode> {
         self.0
             .index
             .get(identity)
-            .map(|index| &self.0.nodes[*index])
+            .map(|index| self.0.nodes.get(*index))
     }
 
     pub fn node_by_id(&self, id: NodeId) -> Option<&FrameNode> {
-        self.0.nodes.iter().find(|node| node.id == id)
+        self.0
+            .id_index
+            .get(&id)
+            .map(|index| self.0.nodes.get(*index))
     }
 
     pub fn semantic_nodes(&self) -> impl Iterator<Item = &FrameNode> {
-        self.0.nodes.iter().filter(|node| node.semantic.is_some())
+        self.nodes()
+            .into_iter()
+            .filter(|node| node.semantic.is_some())
     }
 
     pub fn semantic_diff(&self) -> &SemanticDiff {
@@ -559,9 +861,90 @@ impl FrameSnapshot {
     }
 }
 
+fn same_structure_and_references(live: &WidgetNode, old: &FrameNode) -> bool {
+    live.tag == old.tag.as_ref()
+        && StableNodeIdentity::from_node(live) == old.identity
+        && live.children.len() == old.children.len()
+        && live
+            .children
+            .iter()
+            .zip(old.children.iter())
+            .all(|(child, identity)| StableNodeIdentity::from_node(child) == *identity)
+        && [
+            "data-mesh-element",
+            "id",
+            "ref",
+            "_mesh_bind_this",
+            "aria-labelledby",
+            "aria-describedby",
+            "aria-controls",
+            "aria-owns",
+            "aria-details",
+            "aria-errormessage",
+            "tooltip-for",
+            "anchor-ref",
+            "anchor-target",
+            "anchor-element",
+            "target",
+        ]
+        .iter()
+        .all(|name| live.attributes.get(name) == old.attributes.get(name))
+}
+
+fn apply_frame_reference_text(
+    semantic: &mut FrameSemanticNode,
+    nodes: &FrameRecords,
+    index: &HashMap<StableNodeIdentity, usize>,
+) {
+    let resolve = |references: &[StableNodeIdentity], description: bool| {
+        references
+            .iter()
+            .filter_map(|identity| {
+                let node = nodes.get(index[identity]);
+                let info = &node.local_info;
+                let text = if description {
+                    info.description.as_deref().or(info.label.as_deref())
+                } else {
+                    info.label.as_deref()
+                }
+                .unwrap_or(&node.semantic_text);
+                (!text.trim().is_empty()).then_some(text)
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let labels = resolve(&semantic.relationships.labelled_by, false);
+    if !labels.is_empty() {
+        semantic.info.label = Some(labels);
+    }
+    let descriptions = resolve(&semantic.relationships.described_by, true);
+    if !descriptions.is_empty() {
+        semantic.info.description = Some(match semantic.info.description.take() {
+            Some(existing) if !existing.trim().is_empty() => format!("{existing} {descriptions}"),
+            _ => descriptions,
+        });
+    }
+}
+
+fn validate_frame_semantic(
+    id: NodeId,
+    semantic: &FrameSemanticNode,
+) -> Result<(), FrameSnapshotError> {
+    for (field, value) in [
+        ("value_min", semantic.info.state.value_min),
+        ("value_max", semantic.info.state.value_max),
+    ] {
+        if value.is_some_and(|value| !value.is_finite()) {
+            return Err(FrameSnapshotError::NonFiniteAccessibilityValue { node_id: id, field });
+        }
+    }
+    Ok(())
+}
+
 fn append_node(
     node: &WidgetNode,
     parent: Option<StableNodeIdentity>,
+    parent_policy: NodeEligibility,
     nodes: &mut Vec<FrameNode>,
     node_ids: &mut HashSet<NodeId>,
     identities: &mut HashSet<StableNodeIdentity>,
@@ -581,6 +964,8 @@ fn append_node(
         .map(StableNodeIdentity::from_node)
         .collect::<Vec<_>>()
         .into_boxed_slice();
+    let policy = parent_policy.child(node);
+    let position = nodes.len();
     nodes.push(FrameNode {
         identity: identity.clone(),
         id: node.id,
@@ -588,17 +973,46 @@ fn append_node(
         children,
         tag: Arc::from(node.tag.as_str()),
         runtime_tag: element_runtime_tag_for_tag(&node.tag).map(Arc::from),
-        attributes: node.attributes.clone(),
+        attributes: Arc::new(node.attributes.clone()),
         style: Arc::new(node.computed_style.clone()),
         layout: node.layout,
         state: node.state,
         semantic: None,
+        local_info: Arc::new(node.accessibility.clone()),
+        semantic_text: Arc::from(""),
+        policy,
     });
 
     for child in &node.children {
-        append_node(child, Some(identity.clone()), nodes, node_ids, identities)?;
+        append_node(
+            child,
+            Some(identity.clone()),
+            policy,
+            nodes,
+            node_ids,
+            identities,
+        )?;
     }
+    let child_text = nodes[position + 1..]
+        .iter()
+        .filter(|child| child.parent.as_ref() == Some(&identity))
+        .map(|child| child.semantic_text.as_ref())
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let (info, text) = crate::accessibility::frame_local_info(node, &child_text, policy);
+    nodes[position].local_info = Arc::new(info);
+    nodes[position].semantic_text = Arc::from(text);
     Ok(())
+}
+
+fn collect_paths(node: &WidgetNode, path: &mut Vec<usize>, paths: &mut Vec<Box<[usize]>>) {
+    paths.push(path.clone().into_boxed_slice());
+    for (index, child) in node.children.iter().enumerate() {
+        path.push(index);
+        collect_paths(child, path, paths);
+        path.pop();
+    }
 }
 
 fn validate_layout(node: &WidgetNode) -> Result<(), FrameSnapshotError> {
@@ -935,6 +1349,123 @@ mod tests {
             Err(FrameSnapshotError::UnknownElementTag { ref tag, .. })
                 if tag == "not-an-element"
         ));
+    }
+
+    /// `capture_dirty` shares clean records and reprojects only the dirty ones,
+    /// their name-bearing ancestors, and their ARIA text consumers. Its result
+    /// must be indistinguishable from a full capture of the same tree — the
+    /// same nodes, the same semantics, and the same semantic diff.
+    #[test]
+    fn dirty_capture_matches_a_full_capture() {
+        fn assert_equivalent(dirty: &FrameSnapshot, full: &FrameSnapshot, case: &str) {
+            assert_eq!(
+                dirty.nodes().len(),
+                full.nodes().len(),
+                "node count: {case}"
+            );
+            for (left, right) in dirty.nodes().iter().zip(full.nodes()) {
+                assert_eq!(left.identity(), right.identity(), "identity: {case}");
+                // These projections carry no `PartialEq`, and their debug form
+                // is the complete field set, so it is the comparison.
+                assert_eq!(
+                    format!("{:?}", left.layout()),
+                    format!("{:?}", right.layout()),
+                    "layout: {case}"
+                );
+                assert_eq!(
+                    format!("{:?}", left.state()),
+                    format!("{:?}", right.state()),
+                    "state: {case}"
+                );
+                assert_eq!(
+                    format!("{:?}", left.semantic()),
+                    format!("{:?}", right.semantic()),
+                    "semantics for {:?}: {case}",
+                    left.identity()
+                );
+            }
+            assert_eq!(
+                dirty.semantic_diff().changes(),
+                full.semantic_diff().changes(),
+                "semantic diff: {case}"
+            );
+        }
+
+        for seed in 1..12u64 {
+            let mut root = generated_tree(seed);
+            // A label relationship so the reprojection of ARIA text consumers
+            // is exercised, not just the changed node itself.
+            let labeller = root.children[0].mesh_key().unwrap().to_string();
+            if root.children.len() > 1 {
+                root.children[1]
+                    .attributes
+                    .insert("aria-labelledby".into(), labeller);
+            }
+            let base = FrameSnapshot::complete(&root, 1, None).expect("base snapshot");
+
+            for (revision, case) in [(2u64, "label"), (3, "layout"), (4, "state")] {
+                let target = &mut root.children[0];
+                match case {
+                    "label" => {
+                        target
+                            .attributes
+                            .insert("aria-label".into(), format!("renamed {revision}"));
+                    }
+                    "layout" => target.layout.width += 7.0,
+                    _ => target.state.hovered = !target.state.hovered,
+                }
+                let changed = HashSet::from([target.id]);
+
+                let dirty = FrameSnapshot::capture_dirty(
+                    &root,
+                    revision,
+                    FramePhaseStamps::complete(revision),
+                    &base,
+                    &changed,
+                )
+                .unwrap_or_else(|error| panic!("dirty capture for {case}: {error}"));
+                let full = FrameSnapshot::capture(
+                    &root,
+                    revision,
+                    FramePhaseStamps::complete(revision),
+                    Some(&base),
+                )
+                .expect("full capture");
+                assert_equivalent(&dirty, &full, &format!("seed {seed}, {case}"));
+            }
+        }
+    }
+
+    /// Structural edits are outside the dirty contract and must take the full
+    /// capture path rather than patching stale records.
+    #[test]
+    fn dirty_capture_falls_back_for_structural_change() {
+        let mut root = generated_tree(3);
+        let base = FrameSnapshot::complete(&root, 1, None).expect("base snapshot");
+
+        let mut added = WidgetNode::new("text");
+        added.id = 900;
+        added.set_mesh_key("root/added");
+        added.layout = LayoutRect {
+            x: 0.0,
+            y: 400.0,
+            width: 40.0,
+            height: 16.0,
+        };
+        root.children.push(added);
+
+        let dirty = FrameSnapshot::capture_dirty(
+            &root,
+            2,
+            FramePhaseStamps::complete(2),
+            &base,
+            &HashSet::from([root.id]),
+        )
+        .expect("structural change falls back rather than failing");
+        let full = FrameSnapshot::capture(&root, 2, FramePhaseStamps::complete(2), Some(&base))
+            .expect("full capture");
+        assert_eq!(dirty.nodes().len(), full.nodes().len());
+        assert_eq!(dirty.nodes().len(), base.nodes().len() + 1);
     }
 
     #[test]

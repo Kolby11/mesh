@@ -260,3 +260,42 @@ fn shipped_navigation_brightness_falls_back_for_invalid_scroll_sensitivity() {
         })
     }));
 }
+
+#[test]
+fn shipped_navigation_service_poll_uses_narrow_damage() {
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    component.visible = true;
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(960, 80);
+    for level in [50, 51, 52] {
+        component
+            .handle_service_event(&ServiceEvent::Updated {
+                service: "mesh.brightness".into(),
+                source_module: "@mesh/backlight-brightness".into(),
+                payload: serde_json::json!({"level": level}),
+            })
+            .unwrap();
+        if level == 52 {
+            assert!(
+                component
+                    .dirty_types
+                    .contains(ComponentDirtyFlags::SCRIPT_NARROW)
+            );
+            assert!(
+                !component.surface_pixels_invalid,
+                "service polls must preserve the buffer for partial repaint"
+            );
+        }
+        component
+            .paint(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
+            .unwrap();
+    }
+    assert!(component.retained_tree.last_update_was_scoped());
+    let tree = component.last_tree.as_ref().unwrap();
+    let button = first_node_by_class(tree, "brightness-button").unwrap();
+    assert_eq!(
+        find_tooltip_text_by_key(tree, button.mesh_key().unwrap()).as_deref(),
+        Some("Brightness 52%")
+    );
+}

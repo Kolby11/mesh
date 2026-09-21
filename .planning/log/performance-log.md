@@ -1,5 +1,139 @@
 # MESH Performance Log
 
+## 2026-09-21 — the narrow service path engages, and sparse frames stop paying whole-stream costs
+
+`working tree` · area: service invalidation, damage selection, display-list batch metrics
+
+Completes the render-pipeline items opened on 2026-08-08. Four changes, plus a
+correction to the harness that produced that entry's headline number.
+
+**1. Render hooks no longer escalate a narrow service update.** The 2026-08-08
+entry below diagnosed the cause correctly — shipped components read services in
+Luau and assign derived template variables from `render()`, so `narrow_nodes` is
+empty — but the fix is not to index script reads. It is that
+`call_render_hooks` unconditionally called `invalidate_script_state()`
+(`TREE_REBUILD` plus `surface_pixels_invalid`) whenever a hook wrote state. When
+the hook is running *because* a service update already raised `SCRIPT_NARROW`,
+it now keeps the frame on the narrow path: the template is still evaluated in
+full, and `narrow_script_dirty_roots` plus the retained diff decide between a
+scoped and a full synchronization. Structural changes still fall back.
+
+**2. A `backdrop-filter` grows damage by the kernel reach, not to the whole
+region.** `expand_damage_for_blur_regions` unioned any intersecting damage with
+the entire blurred region, so a surface-spanning backdrop collapsed every
+partial repaint to the full surface. Blur output at a pixel is a function of the
+backdrop within the kernel reach of it, so the expansion is now
+`inflate(damage, reach) ∩ region`. Each backdrop applies once, against the
+damage as it stood before that backdrop — re-inflating a rect the same pass grew
+cascades one reach at a time and refills the region, which is the bound being
+avoided. `filter: blur()` layers keep the whole-region rule: that layer is
+rasterized as a unit. `BackdropRegion` now carries its reach alongside the rect.
+
+**3. Sparse display-list frames patch retained batch metadata.** Batch metrics
+are a property of the whole ordered primitive stream, so `collect_display_entries`
+walked every node and every primitive slot on every frame — including sparse
+frames — purely to rebuild that stream. A new `BatchIndex` holds it as a segment
+tree over `(node, slot)` leaves in paint order, each summary carrying its leading
+and trailing run so two ranges join in constant time. A sparse frame descends to
+the dirty nodes by recorded path and repairs `O(log n)` summaries. It is valid
+only under the conditions `can_patch_sparse_entries` already requires (no
+insert/remove/reorder/transform/clip/opacity/geometry change); anything broader
+reseeds it. The old ordered-stream side channel is gone from the update path and
+`compute_batch_metrics` survives only as the differential test oracle.
+
+**4. Display-list command storage is segments, replayed directly.**
+`PaintSequence` retains child sequences by `Arc` instead of flattening command
+arrays into each ancestor. Replay consumes segments; the flat slice is built
+lazily and only for the diagnostic accessors, which no production caller now
+uses. (The eager reconstruction recorded as rejected below is not what this is.)
+
+**Measured — damage.** Release profile under `nix develop`, the settled
+1920x40 navigation bar, 60 sampled frames, `navigation_frame_cost_profile`,
+three runs each.
+
+| | before | after |
+| --- | --- | --- |
+| surface repainted per `mesh.audio` poll | 100.0% | 1.7% |
+| frames at full surface | 60/60 | 1/60 |
+| rects per frame | 1.00 | 0.05 |
+| audio frame (ms) | 5.07–7.58 | 5.21–5.82 |
+
+The one remaining full-surface frame is the first payload, which is a genuine
+first-paint rebuild. Most later frames produce *no* damage at all: percent
+40→41 changes the aria-label and the tooltip string, but the button renders an
+icon whose bucket has not changed, so nothing visible moves. Wall-clock ranges
+overlap — this harness paints into a local `PixelBuffer` and models neither the
+SHM copy nor the compositor's re-blur of a damaged blurred layer surface, which
+is where full-surface damage is actually paid.
+
+**Measured — batch metrics.** Release profile,
+`sparse_batch_metrics_beat_the_ordered_walk`, 4 dirty nodes of 4921 primitives,
+2000 iterations, three runs: ordered walk 636–662ms, retained index 7.5–7.9ms,
+**81.9–85.2x**. The same test asserts both paths report identical
+`batch_count` / `batched_primitives` / `barrier_count`, and
+`patched_batch_index_matches_a_full_ordered_scan` re-checks that equality against
+a full scan across a sequence of sparse frames.
+
+**Correction — the 2026-08-08 measurement was read through three harness bugs.**
+The entry below reports "240/240 frames full-surface" from
+`navigation_profile.rs`. That harness:
+
+1. published `{"volume": N}` to `mesh.audio`, but the bar's `render()` reads
+   `audio.percent` and returns early unless `audio.available` is set — so every
+   loop in it, including the one labelled "audio poll (read)", was measuring a
+   poll the bar ignores;
+2. read `component.last_present_damage_rects` rather than taking it. A frame
+   with zero damage leaves that accumulator untouched, so the loop re-reported
+   the *previous* loop's full-surface rect and scored a frame that repainted
+   nothing as 100%;
+3. consequently reported "audio poll (read)" and "media poll (unread)" as
+   near-identical costs, which is what an unread poll measured twice looks like.
+
+The harness is fixed here. The conclusion survives: re-measured against clean
+`main` with the corrected harness, the baseline really is 100.0% and 60/60
+full-surface. The *magnitude* of the per-frame wall-clock claims in that entry
+should not be reused — a genuine read now costs 5.0–6.0ms against 2.3–2.6ms for
+an unread poll, where the old harness reported both as the same work.
+
+**Correction — backdrop blur was not the latent amplifier it was recorded as.**
+That entry lists `.nav-shell`'s `backdrop-filter` as a latent damage amplifier
+waiting behind the narrow-path fix. With the narrow path engaged, the
+navigation bar reports **zero** backdrop and filter-layer regions on these
+frames, so it was not the next ceiling. Change 2 above is still correct and
+still bounds the collapse — it is simply not what was holding this surface back.
+
+**Not done — `FrameSnapshot::capture_dirty`.** The incremental semantic capture
+is implemented and now proven: `dirty_capture_matches_a_full_capture` runs 33
+label/layout/state mutations across 11 generated trees and asserts the
+structurally shared result is indistinguishable from a full capture, node for
+node, including the semantic diff; a second test asserts structural edits take
+the fallback. It has no production caller, because its contract requires an
+authoritative changed-node set "including layout propagation and interaction
+state", and the only authoritative source — the retained tree diff — is computed
+*after* `finalize_tree` captures the frame. Feeding it a non-exhaustive set
+would silently publish stale accessibility data. Wiring it needs the frame
+reordered so the retained diff precedes semantic capture, which is the
+changed-node-fingerprint unification still open in the backlog.
+
+**Verified.** Workspace tests under `nix develop`, `--no-fail-fast`, before and
+after: 53 failures both, all pre-existing. The three membership differences
+across runs are order-dependent or timing-dependent tests that reproduce on
+clean `main` standalone
+(`thread_vm_reclaims_dropped_context_environments`,
+`skia_effect_linear_gradient_reuses_shader_for_moving_same_size_rects`,
+`phase26_real_surface_baseline_emits_canonical_proof_measurements`, the last
+depending on a process-global icon cache warmed by earlier tests). `cargo fmt`
+clean; the two new files add no clippy warnings.
+
+**Fixed along the way.** `annotate_runtime_tree_inner` removed `_mesh_focused`
+from every unfocused node unconditionally. `attributes` lives inside the shared
+authored payload, so a remove of an absent key still forced a copy-on-write
+clone — breaking memo payload sharing for the whole subtree, and costing
+allocation on exactly the frames the rest of this work makes cheap. Both
+branches now check before writing.
+
+---
+
 ## 2026-08-26 — enable Hyprland socket events in the active graph
 
 `working tree` · area: Hyprland workspace reaction latency

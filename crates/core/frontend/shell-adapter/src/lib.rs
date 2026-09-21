@@ -1704,6 +1704,9 @@ pub trait ShellComponent: Send {
     }
     /// Return the retained display list paint commands from the most recent paint,
     /// for opaque region computation.
+    fn display_list_first_paint_command(&self) -> Option<&DisplayPaintCommand> {
+        self.display_list_paint_commands().first()
+    }
     fn display_list_paint_commands(&self) -> &[DisplayPaintCommand] {
         &[]
     }

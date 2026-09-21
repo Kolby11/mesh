@@ -843,11 +843,14 @@ fn backdrop_regions_require_painted_content_beneath() {
     list.update(&root, 100, 100, true, true);
     assert_eq!(
         list.backdrop_filter_regions(),
-        &[DamageRect {
-            x: 8,
-            y: 8,
-            width: 64,
-            height: 64,
+        &[BackdropRegion {
+            region: DamageRect {
+                x: 8,
+                y: 8,
+                width: 64,
+                height: 64,
+            },
+            reach: 12,
         }],
         "active backdrop region should be the node rect plus 12px pad"
     );
@@ -910,11 +913,14 @@ fn transformed_backdrop_regions_follow_cumulative_geometry() {
 
     assert_eq!(
         list.backdrop_filter_regions(),
-        &[DamageRect {
-            x: 17,
-            y: 0,
-            width: 45,
-            height: 62,
+        &[BackdropRegion {
+            region: DamageRect {
+                x: 17,
+                y: 0,
+                width: 45,
+                height: 62,
+            },
+            reach: 12,
         }]
     );
     assert_eq!(
@@ -1002,8 +1008,9 @@ fn expand_damage_for_blur_regions_grows_intersecting_rects() {
         }
     );
 
-    // Damage touching the read region grows to cover the whole region so
-    // the blur re-reads a consistently repainted backdrop.
+    // Damage touching the read region grows by the kernel reach, clipped to
+    // the region — not to the whole region. Blurred output further than the
+    // reach from the change is unaffected and keeps its retained pixels.
     let mut touching = [DamageRect {
         x: 0,
         y: 30,
@@ -1015,11 +1022,58 @@ fn expand_damage_for_blur_regions_grows_intersecting_rects() {
         touching[0],
         DamageRect {
             x: 0,
-            y: 8,
-            width: 72,
-            height: 64,
+            y: 18,
+            width: 22,
+            height: 34,
         },
-        "expanded damage must union the backdrop read region"
+        "expanded damage must cover the change plus one kernel reach"
+    );
+    assert!(
+        touching[0].area() * 6 < 72 * 64,
+        "the bounded expansion must stay well under the whole read region"
+    );
+}
+
+/// A `backdrop-filter` on the surface root — the shipped navigation bar has
+/// one — used to collapse every partial repaint to the full surface, because
+/// damage grew to the whole blurred region and that region is the surface.
+#[test]
+fn root_backdrop_filter_keeps_partial_damage_partial() {
+    let mut root = node(1, "box", 0.0, 0.0, 400.0, 60.0);
+    root.computed_style.background_color = Color::TRANSPARENT;
+    // Wallpaper beneath, then a surface-spanning frosted layer over it: the
+    // shape `.nav-shell` has, and the one whose region is the whole surface.
+    root.children.push(node(2, "box", 0.0, 0.0, 400.0, 60.0));
+    root.children.push(frosted_node(3, 0.0, 0.0, 400.0, 60.0));
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 400, 60, true, true);
+    assert_eq!(
+        list.backdrop_filter_regions().len(),
+        1,
+        "the root backdrop has painted content beneath it"
+    );
+
+    let surface_area = 400u64 * 60;
+    let mut damage = [DamageRect {
+        x: 180,
+        y: 20,
+        width: 20,
+        height: 20,
+    }];
+    list.expand_damage_for_blur_regions(&mut damage);
+    assert!(
+        damage[0].area() * 4 < surface_area,
+        "a root backdrop must not collapse a small repaint to the whole surface, got {:?}",
+        damage[0]
+    );
+    assert_eq!(
+        damage[0],
+        DamageRect {
+            x: 168,
+            y: 8,
+            width: 44,
+            height: 44,
+        }
     );
 }
 

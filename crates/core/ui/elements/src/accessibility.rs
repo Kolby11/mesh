@@ -343,6 +343,21 @@ fn build_snapshot_node(node: &WidgetNode, parent_policy: NodeEligibility) -> Opt
     })
 }
 
+/// Local semantic projection used by the immutable frame's dependency cache.
+/// Child text is the pre-relationship text, matching the full tree projection.
+pub(crate) fn frame_local_info(
+    node: &WidgetNode,
+    child_text: &str,
+    policy: NodeEligibility,
+) -> (AccessibilityInfo, String) {
+    let authored = node.accessibility_baseline().unwrap_or(&node.accessibility);
+    let hidden = !policy.allows(InteractionTarget::Semantics);
+    let mut info = normalized_info(node, hidden, child_text, authored);
+    info.state.disabled |= policy.is_disabled();
+    let text = semantic_text(&info, visible_text(node, child_text, hidden), hidden);
+    (info, text)
+}
+
 fn normalized_info(
     node: &WidgetNode,
     hidden: bool,

@@ -167,6 +167,52 @@ pub(super) fn collect_display_entries(
     );
 }
 
+/// Emit one node's primitive slots. `selected` decides whether the node's
+/// entries reach `next`; `batch_entries`, when present, always receives the
+/// node's materials so the ordered stream stays complete for batch metrics.
+pub(super) fn collect_node_entries(
+    node: &WidgetNode,
+    world_transform: AffineTransform,
+    mut batch_entries: Option<&mut Vec<DisplayBatchMaterial>>,
+    selected: bool,
+    next: &mut HashMap<DisplayListKey, DisplayListEntry>,
+) {
+    let Some(bounds) = damage_rect_for_node_with_transform(node, world_transform) else {
+        return;
+    };
+    for_each_primitive_slot(node, |slot| {
+        // Batch metrics need the full ordered material stream. A caller
+        // that does not request metrics may still skip unselected nodes.
+        if !selected && batch_entries.is_none() {
+            return;
+        }
+        let key = DisplayListKey {
+            node_id: node.id,
+            slot,
+        };
+        let barrier = batch_barrier(node, slot);
+        let batch_signature = barrier.map_or_else(|| batch_signature(node, slot), |_| 0);
+        if let Some(entries) = batch_entries.as_deref_mut() {
+            entries.push(DisplayBatchMaterial {
+                batch_signature,
+                barrier,
+            });
+        }
+        if !selected {
+            return;
+        }
+        next.insert(
+            key,
+            DisplayListEntry {
+                bounds,
+                signature: primitive_signature(node, slot),
+                batch_signature,
+                barrier,
+            },
+        );
+    });
+}
+
 fn collect_display_entries_with_transform(
     node: &WidgetNode,
     parent_transform: AffineTransform,
@@ -180,40 +226,14 @@ fn collect_display_entries_with_transform(
 
     let world_transform = node_transform(parent_transform, node);
 
-    if let Some(bounds) = damage_rect_for_node_with_transform(node, world_transform) {
-        let selected = selected_node_ids.is_none_or(|node_ids| node_ids.contains(&node.id));
-        for_each_primitive_slot(node, |slot| {
-            // Batch metrics need the full ordered material stream. A caller
-            // that does not request metrics may still skip unselected nodes.
-            if !selected && batch_entries.is_none() {
-                return;
-            }
-            let key = DisplayListKey {
-                node_id: node.id,
-                slot,
-            };
-            let barrier = batch_barrier(node, slot);
-            let batch_signature = barrier.map_or_else(|| batch_signature(node, slot), |_| 0);
-            if let Some(entries) = batch_entries.as_deref_mut() {
-                entries.push(DisplayBatchMaterial {
-                    batch_signature,
-                    barrier,
-                });
-            }
-            if !selected {
-                return;
-            }
-            next.insert(
-                key,
-                DisplayListEntry {
-                    bounds,
-                    signature: primitive_signature(node, slot),
-                    batch_signature,
-                    barrier,
-                },
-            );
-        });
-    }
+    let selected = selected_node_ids.is_none_or(|node_ids| node_ids.contains(&node.id));
+    collect_node_entries(
+        node,
+        world_transform,
+        batch_entries.as_deref_mut(),
+        selected,
+        next,
+    );
 
     let scroll = node.resolved_scroll_metrics();
     let child_transform = child_transform(world_transform, node, scroll.x, scroll.y);

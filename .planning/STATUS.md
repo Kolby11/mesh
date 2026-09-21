@@ -1,8 +1,24 @@
 # Status
 
-**Updated:** 2026-09-05
+**Updated:** 2026-09-21
 
 ## Now
+
+The render-pipeline batch is largely landed. Service polls on the shipped
+navigation bar now take the narrow path end to end — derived Luau state no
+longer escalates to `TREE_REBUILD` — and a `backdrop-filter` grows damage only
+by the blur kernel reach instead of collapsing the frame to the full surface.
+Sparse display-list frames patch a retained batch-material index rather than
+rebuilding the ordered primitive stream, and command storage is segments the
+replay consumes directly. Measurements, and three corrections to the harness
+that produced the original 2026-08-08 numbers, are in
+[the performance log](log/performance-log.md).
+
+What remains of that batch is in [the backlog](../docs/BACKLOG.md):
+`FrameSnapshot::capture_dirty` is implemented and proven against full capture
+but cannot be wired until the retained diff precedes semantic capture in the
+frame, and the changed-node fingerprints across the retained, render, and
+display layers are still separate.
 
 The accepted platform direction is consolidated in
 [Platform Philosophy](../docs/spec/00-philosophy.md). Core owns platform

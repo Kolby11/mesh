@@ -1,3 +1,4 @@
+use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -7,10 +8,13 @@ use crate::RenderObjectDirtySummary;
 #[cfg(debug_assertions)]
 use crate::render_object::caller_lineage_fingerprint;
 
+mod batch_index;
 mod blur;
 mod build;
 mod paint_node;
+mod sequence;
 mod signature;
+pub use sequence::PaintSequence;
 mod spans;
 mod subtree;
 mod types;
@@ -269,18 +273,30 @@ impl RetainedDisplayList {
                 surface.height,
             );
 
-        let mut batch_entries = std::mem::take(&mut self.batch_entries_scratch);
-        batch_entries.clear();
         let mut next = std::mem::take(&mut self.next_entries_scratch);
         next.clear();
-        collect_display_entries(
-            root,
-            offset_x,
-            offset_y,
-            Some(&mut batch_entries),
-            patch_sparse_entries.then_some(dirty_node_ids),
-            &mut next,
-        );
+        // A sparse frame only needs the dirty nodes' entries, but batch metrics
+        // are a property of the whole ordered stream. The retained index keeps
+        // that stream summarized, so when it applies, neither the entry
+        // collection nor the metrics has to touch a clean node. Anything the
+        // index cannot answer falls back to the tree walk below, which reseeds
+        // it from the reconciled map.
+        let patch_batch_index = patch_sparse_entries
+            && self.batch_index.matches_root(root)
+            && self
+                .batch_index
+                .collect_dirty_entries(root, dirty_node_ids, &mut next);
+        if !patch_batch_index {
+            next.clear();
+            collect_display_entries(
+                root,
+                offset_x,
+                offset_y,
+                None,
+                patch_sparse_entries.then_some(dirty_node_ids),
+                &mut next,
+            );
+        }
         if self.root_id == Some(root.id)
             && self.surface_size == Some((surface.width, surface.height))
             && self.paint_origin == paint_origin
@@ -291,10 +307,6 @@ impl RetainedDisplayList {
         {
             next.clear();
             self.next_entries_scratch = next;
-            {
-                batch_entries.clear();
-                self.batch_entries_scratch = batch_entries;
-            }
             return self.update_metrics_without_rebuild(
                 surface,
                 force_full_damage,
@@ -454,7 +466,20 @@ impl RetainedDisplayList {
         } else {
             0
         };
-        let batch_metrics = compute_batch_metrics(&batch_entries);
+        // `reconcile_entries` has merged this frame's entries, so the retained
+        // index can be repaired from the authoritative map. A sparse frame
+        // patches the dirty nodes' leaves; anything else reseeds the index from
+        // the complete map it just built.
+        let mut batch_index = std::mem::take(&mut self.batch_index);
+        if patch_sparse_entries {
+            if !(patch_batch_index && batch_index.patch(dirty_node_ids, &self.entries)) {
+                batch_index.rebuild(root, offset_x, offset_y, &self.entries);
+            }
+        } else {
+            batch_index.rebuild(root, offset_x, offset_y, &next);
+        }
+        let batch_metrics = batch_index.metrics();
+        self.batch_index = batch_index;
 
         if resource_revision_changed
             || rebuilt > 0
@@ -476,7 +501,6 @@ impl RetainedDisplayList {
         let mut previous_subtrees = std::mem::replace(&mut self.subtrees, subtrees);
         previous_subtrees.clear();
         self.next_subtrees_scratch = previous_subtrees;
-        self.batch_entries_scratch = batch_entries;
         self.command_spans = command_spans;
         self.paint_commands = paint_commands;
         self.command_kinds = command_kinds;
@@ -805,8 +829,9 @@ impl RetainedDisplayList {
     }
 
     /// Node rects, inflated by the blur kernel reach, where a `backdrop-filter`
-    /// node has painted content beneath it in paint order.
-    pub fn backdrop_filter_regions(&self) -> &[DamageRect] {
+    /// node has painted content beneath it in paint order, each with the reach
+    /// that inflated it.
+    pub fn backdrop_filter_regions(&self) -> &[BackdropRegion] {
         self.frame_plan.effects.backdrop_regions.as_ref()
     }
 
@@ -817,9 +842,19 @@ impl RetainedDisplayList {
         self.frame_plan.effects.filter_layer_regions.as_ref()
     }
 
-    /// Grows every damage rect intersecting a blur region to cover that whole
-    /// region, so a blur re-reads fresh pixels rather than mixing frames. Runs
-    /// to a fixpoint so overlapping regions cascade; returns whether any grew.
+    /// Grows damage so a blur re-reads fresh pixels rather than mixing frames,
+    /// and returns whether any rect grew. Runs to a fixpoint so overlapping
+    /// regions cascade.
+    ///
+    /// A `backdrop-filter` grows damage only by the blur kernel reach, clipped
+    /// to the region: the filter output at a pixel is a function of the
+    /// backdrop within the reach of it, so pixels further away than that are
+    /// unaffected by the change and keep their retained values. This is what
+    /// keeps a surface-spanning backdrop — the shipped navigation bar has one
+    /// on its root — from collapsing every partial repaint to the full surface.
+    ///
+    /// A `filter: blur()` layer is different: the layer is rasterized as a unit
+    /// before compositing, so any damage inside it still takes the whole region.
     pub fn expand_damage_for_blur_regions(&self, rects: &mut [DamageRect]) -> bool {
         if (self.frame_plan.effects.backdrop_regions.is_empty()
             && self.frame_plan.effects.filter_layer_regions.is_empty())
@@ -827,16 +862,44 @@ impl RetainedDisplayList {
         {
             return false;
         }
+        let mut expanded = self.expand_damage_for_filter_layers(rects);
+        // Each backdrop is applied once, against the damage as it stood before
+        // that backdrop — never against its own output. Re-inflating a rect
+        // this pass already grew would cascade one reach at a time until it
+        // filled the whole region, which is exactly the bound being avoided.
+        // Paint order is meaningful: a lower backdrop's changed output is an
+        // upper backdrop's changed input, so later regions do see earlier growth.
+        for backdrop in self.frame_plan.effects.backdrop_regions.iter() {
+            let before: SmallVec<[DamageRect; 8]> = SmallVec::from_slice(rects);
+            for (index, rect) in rects.iter_mut().enumerate() {
+                if !before[index].intersects(backdrop.region) {
+                    continue;
+                }
+                let Some(affected) =
+                    clip_rect(inflate_rect(before[index], backdrop.reach), backdrop.region)
+                else {
+                    continue;
+                };
+                let union = rect.union(affected);
+                if union != *rect {
+                    *rect = union;
+                    expanded = true;
+                }
+            }
+        }
+        // A backdrop-grown rect can reach into a filter layer it missed before.
+        expanded |= self.expand_damage_for_filter_layers(rects);
+        expanded
+    }
+
+    /// Whole-region growth for `filter: blur()` layers, to a fixpoint so
+    /// overlapping layers cascade. Unioning a region is idempotent, so the
+    /// fixpoint terminates as soon as no rect newly reaches a layer.
+    fn expand_damage_for_filter_layers(&self, rects: &mut [DamageRect]) -> bool {
         let mut expanded = false;
         loop {
             let mut changed = false;
-            for region in self
-                .frame_plan
-                .effects
-                .backdrop_regions
-                .iter()
-                .chain(self.frame_plan.effects.filter_layer_regions.iter())
-            {
+            for region in self.frame_plan.effects.filter_layer_regions.iter() {
                 for rect in rects.iter_mut() {
                     if !rect.intersects(*region) {
                         continue;
@@ -856,8 +919,12 @@ impl RetainedDisplayList {
         expanded
     }
 
+    pub fn first_paint_command(&self) -> Option<&DisplayPaintCommand> {
+        self.frame_plan.topology.commands.first()
+    }
+
     pub fn paint_commands(&self) -> &[DisplayPaintCommand] {
-        self.frame_plan.topology.commands.as_ref()
+        self.frame_plan.topology.commands.as_slice()
     }
 
     /// Derived from the full widget tree at the last rebuild and handed to
@@ -867,7 +934,7 @@ impl RetainedDisplayList {
     }
 
     pub fn paint_command_kinds(&self) -> &[DisplayPaintCommandKind] {
-        self.frame_plan.topology.kinds.as_ref()
+        self.frame_plan.topology.kinds.as_slice()
     }
 
     pub fn select_paint_commands(
@@ -1161,7 +1228,10 @@ impl RetainedDisplayList {
     }
 }
 
-fn paint_topology_changed(previous: &[DisplayPaintCommand], next: &[DisplayPaintCommand]) -> bool {
+fn paint_topology_changed(
+    previous: &PaintSequence<DisplayPaintCommand>,
+    next: &PaintSequence<DisplayPaintCommand>,
+) -> bool {
     previous.len() != next.len()
         || previous
             .iter()

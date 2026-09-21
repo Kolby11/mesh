@@ -330,7 +330,21 @@ impl FrontendSurfaceComponent {
         }
         if state_dirty {
             self.render_hooks_changed_templates = true;
-            self.invalidate_script_state();
+            // A render hook reached here because a service update invalidated
+            // this component narrowly. Shipped components read services in
+            // Luau and assign derived template variables from `render()`, so
+            // escalating that write to `TREE_REBUILD` would put every poll on
+            // the full-rebuild, full-surface-damage path. Keep the frame on the
+            // narrow path instead: the template is still evaluated, and the
+            // retained diff decides between scoped and full synchronization.
+            if self
+                .dirty_types
+                .contains(ComponentDirtyFlags::SCRIPT_NARROW)
+            {
+                self.invalidate_script_state_narrow();
+            } else {
+                self.invalidate_script_state();
+            }
         }
     }
 

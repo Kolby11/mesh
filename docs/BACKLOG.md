@@ -185,35 +185,20 @@ gate where the win is structural.
 
 ### Render pipeline
 
-- [ ] **The narrow service path never engages for real modules.** It requires a
-      template to interpolate the service field directly, but every shipped
-      component reads services in Luau and binds derived variables — so
-      `narrow_nodes` is empty, invalidation falls back to `TREE_REBUILD`, and
-      every poll is a full rebuild plus 100%-of-surface damage. Measured on the
-      navigation bar 2026-08-08: 240/240 frames full-surface, ~4 such frames per
-      second at rest. Needs script-level service reads to feed
-      `service_field_reads`, or a different narrowing signal.
-- [ ] A root-level `backdrop-filter` collapses all partial damage to the whole
-      surface (`expand_damage_for_blur_regions` unions with the full blurred
-      region), and `.nav-shell` carries one. Latent today because damage is
-      already full-surface for the reason above; it becomes the next ceiling as
-      soon as that is fixed.
+- [ ] Wire `FrameSnapshot::capture_dirty` into `finalize_tree`. The incremental
+      semantic capture is implemented and proven against full capture, but it
+      needs an authoritative changed-node set and the retained tree diff that
+      produces one runs *after* the frame is captured. Requires reordering the
+      frame so the retained diff precedes semantic capture; folds into the
+      fingerprint unification below.
 - [ ] Continue widening generation shortcuts to per-node dirty scoping and
       unify changed-node fingerprints across the retained, render, and display
       layers; geometry-only retained snapshots are split out now.
-- [ ] Make `FrameSnapshot` and semantic projection structurally shared and
-      dirty-node incremental; capture currently revalidates and recopies the full
-      tree, cloned attributes/styles, accessibility indexes, and semantic diff.
-- [ ] Dirty-scope or fuse the remaining `finalize_tree` passes so targeted
-      restyle/layout frames do not still pay broad annotation, shortcut,
-      promotion/error, accessibility, and string-attribute tree walks.
-- [ ] Make sparse display-list entry patching truly sparse: retain/patch batch
-      material metadata instead of traversing every node/primitive to rebuild the
-      ordered batch stream when only a small dirty-node set changed.
-- [ ] Display-list segment/rope command storage → v1.21. Command arrays are
-      still flattened per ancestor. Replay must consume segments directly
-      instead of eagerly re-flattening them — an eager reconstruction was tried
-      and reverted (see log).
+- [ ] Dirty-scope the `finalize_tree` passes that remain broad after the
+      annotation/promotion/error walks were fused into one: accessibility
+      normalization, selection annotation, and the string-attribute walks still
+      run over the whole tree on a targeted restyle.
+
 ### Style
 
 - [ ] Typed style declarations end-to-end: resolve theme tokens to typed values

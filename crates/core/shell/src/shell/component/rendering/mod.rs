@@ -530,6 +530,10 @@ impl FrontendSurfaceComponent {
         self.refresh_motion_policy(now);
         self.advance_scroll_animations(now);
         self.advance_scroll_inertia(now);
+        if self.has_surface_shortcut_declarations() {
+            self.resolved_surface_shortcuts(&self.current_keyboard_settings());
+        }
+        let shortcut_cache = self.resolved_surface_shortcuts_cache.borrow();
         let mut annotation_context = RuntimeAnnotationContext::new(
             self.focused_id
                 .or_else(|| self.focused_key.as_deref().map(runtime_node_id_for_key)),
@@ -548,15 +552,16 @@ impl FrontendSurfaceComponent {
             &self.checked_values,
             &mut self.scroll_offsets,
         )
-        .with_window_state(self.window_states);
+        .with_window_state(self.window_states)
+        .with_promoted_windows(&self.promoted_window_keys)
+        .with_shortcuts(
+            shortcut_cache
+                .as_ref()
+                .map(|cache| &cache.shortcuts_by_keybind),
+        );
         annotate_runtime_and_overflow_tree(tree, "root".to_string(), &mut annotation_context);
-        // Runtime keys are assigned by annotation, so apply the promotion mark
-        // afterwards. This is still before style resolution, allowing the
-        // explicit hidden attribute to keep the subtree out of the parent
-        // display list while its typed metadata preserves child-window layout.
-        if !self.promoted_window_keys.is_empty() {
-            mark_promoted_window_widgets(tree, &self.promoted_window_keys);
-        }
+        drop(annotation_context);
+        drop(shortcut_cache);
         if self.surface_exiting {
             append_class_recursive(tree, "mesh-surface-exiting");
             tree.attributes
@@ -581,7 +586,6 @@ impl FrontendSurfaceComponent {
                     .insert("_mesh_surface_entering".into(), "true".into());
             }
         }
-        self.annotate_surface_shortcuts(tree);
         if trigger_kind == "rebuild" {
             self.node_service_field_deps = NodeServiceFieldDependencies::build(tree);
         }
@@ -806,20 +810,9 @@ impl FrontendSurfaceComponent {
             };
         }
 
-        // Re-apply the out-of-flow collapse for promoted `<popover>` wrappers. The
-        // restyle pass above re-resolves `computed_style` from CSS only, dropping
-        // the `position: absolute` set when the wrapper was composed. Without this,
-        // a promoted (but hidden) popover's full-size subtree would lay out inline
-        // and push its trigger row's siblings into overlap. Must run before layout.
-        if self.has_promoted_popover_wrappers.get() {
-            collapse_promoted_popover_wrappers(tree);
-        }
-        if !self.promoted_window_keys.is_empty() {
-            collapse_promoted_window_widgets(tree);
-        }
-        if self.has_error_placeholders.get() {
-            constrain_error_placeholders(tree);
-        }
+        // Hidden attributes and shell-owned promotion/error constraints are
+        // applied together by the post-restyle state pass above. Retained
+        // subtrees that were not restyled already carry those constraints.
 
         let layout_work_required = !reused_retained_layout || !self.layout_state.valid;
         // Enter the retained layout path on every finalized tree. On

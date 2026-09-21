@@ -1674,3 +1674,5 @@ mod performance_tests {
         assert!(new_time < old_time);
     }
 }
+
+pub(in crate::shell::component) use keyboard::annotate_node_by_keybind;

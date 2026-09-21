@@ -431,6 +431,29 @@ pub(super) fn union_damage(current: Option<DamageRect>, next: DamageRect) -> Opt
     })
 }
 
+/// Grow a rect by `pad` device pixels on every side, saturating at the origin.
+pub(super) fn inflate_rect(rect: DamageRect, pad: u32) -> DamageRect {
+    if pad == 0 {
+        return rect;
+    }
+    let x = rect.x.saturating_sub(pad);
+    let y = rect.y.saturating_sub(pad);
+    DamageRect {
+        x,
+        y,
+        width: rect
+            .x
+            .saturating_add(rect.width)
+            .saturating_add(pad)
+            .saturating_sub(x),
+        height: rect
+            .y
+            .saturating_add(rect.height)
+            .saturating_add(pad)
+            .saturating_sub(y),
+    }
+}
+
 pub(super) fn clip_rect(rect: DamageRect, surface: DamageRect) -> Option<DamageRect> {
     let left = rect.x.max(surface.x);
     let top = rect.y.max(surface.y);

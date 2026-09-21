@@ -1,3 +1,4 @@
+use super::sequence::PaintSequence;
 use mesh_core_elements::style::{BackgroundPaint, Corners};
 use mesh_core_elements::{
     AffineTransform, LayoutRect, WidgetNode, child_transform, node_layout_bounds, node_transform,
@@ -290,9 +291,9 @@ pub(super) fn display_command_paints_pixels(command: &DisplayPaintCommand) -> bo
 /// order. A node with nothing beneath contributes no region, so an empty
 /// in-surface backdrop never widens sparse damage.
 pub(super) fn compute_backdrop_regions(
-    commands: &[DisplayPaintCommand],
+    commands: &PaintSequence<DisplayPaintCommand>,
     surface: DamageRect,
-) -> Vec<DamageRect> {
+) -> Vec<BackdropRegion> {
     let mut regions = Vec::new();
     for (index, command) in commands.iter().enumerate() {
         if !command.kind.is_backdrop_filter() {
@@ -301,19 +302,35 @@ pub(super) fn compute_backdrop_regions(
         let Some(region) = backdrop_read_region(&command.node, surface) else {
             continue;
         };
-        let has_backdrop_content = commands[..index].iter().any(|earlier| {
+        let has_backdrop_content = commands.iter().take(index).any(|earlier| {
             display_command_paints_pixels(earlier) && command_bounds(earlier).intersects(region)
         });
         if has_backdrop_content {
-            regions.push(region);
+            regions.push(BackdropRegion {
+                region,
+                reach: backdrop_kernel_reach(&command.node),
+            });
         }
     }
     regions
 }
 
+/// The blur kernel reach in device pixels, matching the pad
+/// [`backdrop_read_region`] inflates by. Output at a pixel depends only on the
+/// backdrop within this distance of it.
+pub(super) fn backdrop_kernel_reach(node: &DisplayPaintNode) -> u32 {
+    let pad = node.style.backdrop_filter.blur_radius * 3.0;
+    if !pad.is_finite() || pad <= 0.0 {
+        return 0;
+    }
+    pad.ceil().min(f32::from(u16::MAX)) as u32
+}
+
 /// Half-open command range per layer. Ranges nest but never interleave, since
 /// they come from a tree walk.
-pub(super) fn collect_layer_scopes(commands: &[DisplayPaintCommand]) -> Vec<(usize, usize)> {
+pub(super) fn collect_layer_scopes(
+    commands: &PaintSequence<DisplayPaintCommand>,
+) -> Vec<(usize, usize)> {
     let mut scopes = Vec::new();
     let mut open: Vec<usize> = Vec::new();
     for (index, command) in commands.iter().enumerate() {
@@ -335,7 +352,7 @@ pub(super) fn collect_layer_scopes(commands: &[DisplayPaintCommand]) -> Vec<(usi
 
 /// Taken from each push command's clip, already inflated by the kernel reach.
 pub(super) fn filter_layer_regions(
-    commands: &[DisplayPaintCommand],
+    commands: &PaintSequence<DisplayPaintCommand>,
     scopes: &[(usize, usize)],
     surface: DamageRect,
 ) -> Vec<DamageRect> {
@@ -365,7 +382,7 @@ pub(super) fn command_has_effect_overflow(command: &DisplayPaintCommand) -> bool
 }
 
 #[cfg(test)]
-pub(super) fn count_effect_overflow_commands(commands: &[DisplayPaintCommand]) -> u64 {
+pub(super) fn count_effect_overflow_commands(commands: &PaintSequence<DisplayPaintCommand>) -> u64 {
     commands
         .iter()
         .filter(|command| command_has_effect_overflow(command))

@@ -1,3 +1,4 @@
+use super::sequence::{PaintSequence, PaintSequenceIter};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -34,6 +35,16 @@ pub(super) const DISPLAY_PRIMITIVE_SLOTS: [DisplayPrimitiveSlot; 5] = [
 pub struct DisplayListKey {
     pub node_id: NodeId,
     pub slot: DisplayPrimitiveSlot,
+}
+
+/// A backdrop-filter node's read region together with the blur kernel reach
+/// that produced it. The reach is what bounds damage expansion: a partial
+/// repaint beneath a backdrop only changes the blurred output within this
+/// distance of the change, not across the whole region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BackdropRegion {
+    pub region: DamageRect,
+    pub reach: u32,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -194,8 +205,8 @@ impl FramePaintPlan {
             },
             FramePaintTopology {
                 generation: 0,
-                commands: Vec::new().into(),
-                kinds: Vec::new().into(),
+                commands: Arc::new(PaintSequence::default()),
+                kinds: Arc::new(PaintSequence::default()),
             },
             Vec::new().into(),
             FramePaintEffects {
@@ -233,8 +244,8 @@ pub struct FramePaintInputs {
 #[derive(Debug, Clone)]
 pub struct FramePaintTopology {
     pub generation: u64,
-    pub commands: Arc<[DisplayPaintCommand]>,
-    pub kinds: Arc<[DisplayPaintCommandKind]>,
+    pub commands: Arc<PaintSequence<DisplayPaintCommand>>,
+    pub kinds: Arc<PaintSequence<DisplayPaintCommandKind>>,
 }
 
 #[derive(Debug, Clone)]
@@ -248,7 +259,7 @@ pub struct FramePaintTransform {
 
 #[derive(Debug, Clone, Default)]
 pub struct FramePaintEffects {
-    pub backdrop_regions: Arc<[DamageRect]>,
+    pub backdrop_regions: Arc<[BackdropRegion]>,
     pub blur_regions: Arc<[DamageRect]>,
     pub filter_layer_regions: Arc<[DamageRect]>,
 }
@@ -369,16 +380,18 @@ pub struct RetainedDisplayList {
     /// Ordered material metadata retained so release metrics describe the
     /// same batch/barrier stream as debug diagnostics without retaining full
     /// display entries or keys.
-    pub(super) batch_entries_scratch: Vec<DisplayBatchMaterial>,
+    /// Retained batch-material summaries, patched on sparse frames instead of
+    /// rebuilt from a full ordered walk.
+    pub(super) batch_index: super::batch_index::BatchIndex,
     pub(super) next_entries_scratch: HashMap<DisplayListKey, DisplayListEntry>,
     pub(super) next_subtrees_scratch: HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     pub(super) dirty_ancestors_scratch: HashSet<NodeId>,
     pub(super) ancestor_path_scratch: Vec<NodeId>,
     pub(super) command_spans: Arc<[RetainedCommandSpan]>,
-    pub(super) paint_commands: Arc<[DisplayPaintCommand]>,
-    pub(super) command_kinds: Arc<[DisplayPaintCommandKind]>,
+    pub(super) paint_commands: Arc<PaintSequence<DisplayPaintCommand>>,
+    pub(super) command_kinds: Arc<PaintSequence<DisplayPaintCommandKind>>,
     /// In-surface read regions available to the renderer fallback.
-    pub(super) backdrop_regions: Vec<DamageRect>,
+    pub(super) backdrop_regions: Vec<BackdropRegion>,
     /// Compositor blur regions for `org_kde_kwin_blur`, computed from the full
     /// widget tree (not the scoped `paint_commands` selection). Deriving them
     /// from `paint_commands` would drop the blur nodes on partial retained
@@ -413,14 +426,14 @@ impl Default for RetainedDisplayList {
             paint_origin: (0.0_f32.to_bits(), 0.0_f32.to_bits()),
             entries: HashMap::new(),
             subtrees: HashMap::new(),
-            batch_entries_scratch: Vec::new(),
+            batch_index: super::batch_index::BatchIndex::default(),
             next_entries_scratch: HashMap::new(),
             next_subtrees_scratch: HashMap::new(),
             dirty_ancestors_scratch: HashSet::new(),
             ancestor_path_scratch: Vec::new(),
             command_spans: Vec::new().into(),
-            paint_commands: Vec::new().into(),
-            command_kinds: Vec::new().into(),
+            paint_commands: Arc::new(PaintSequence::default()),
+            command_kinds: Arc::new(PaintSequence::default()),
             backdrop_regions: Vec::new(),
             blur_regions: Vec::new(),
             filter_layer_regions: Vec::new(),
@@ -738,8 +751,8 @@ pub struct DisplayListClip {
 
 #[derive(Debug, Clone)]
 pub struct SelectedDisplayListPaint<'a> {
-    pub(super) commands: &'a [DisplayPaintCommand],
-    pub(super) kinds: &'a [DisplayPaintCommandKind],
+    pub(super) commands: &'a PaintSequence<DisplayPaintCommand>,
+    pub(super) kinds: &'a PaintSequence<DisplayPaintCommandKind>,
     pub(super) selection: SelectedDisplayListSelection,
     pub(super) metrics: DisplayListMetrics,
 }
@@ -755,18 +768,18 @@ pub(super) enum SelectedDisplayListSelection {
 }
 
 pub struct SelectedDisplayListPaintIter<'a> {
-    pub(super) commands: &'a [DisplayPaintCommand],
+    pub(super) commands: &'a PaintSequence<DisplayPaintCommand>,
     pub(super) state: SelectedDisplayListPaintIterState<'a>,
 }
 
 pub struct SelectedDisplayListPaintKindIter<'a> {
-    pub(super) commands: &'a [DisplayPaintCommand],
-    pub(super) kinds: &'a [DisplayPaintCommandKind],
+    pub(super) commands: &'a PaintSequence<DisplayPaintCommand>,
+    pub(super) kinds: &'a PaintSequence<DisplayPaintCommandKind>,
     pub(super) state: SelectedDisplayListPaintKindIterState<'a>,
 }
 
 pub(super) enum SelectedDisplayListPaintIterState<'a> {
-    All(std::slice::Iter<'a, DisplayPaintCommand>),
+    All(PaintSequenceIter<'a, DisplayPaintCommand>),
     None,
     Spans {
         spans: &'a [SelectedCommandSpan],
@@ -776,9 +789,7 @@ pub(super) enum SelectedDisplayListPaintIterState<'a> {
 }
 
 pub(super) enum SelectedDisplayListPaintKindIterState<'a> {
-    All {
-        index: usize,
-    },
+    All(PaintSequenceIter<'a, DisplayPaintCommand>),
     None,
     Spans {
         spans: &'a [SelectedCommandSpan],
@@ -822,13 +833,8 @@ impl<'a> Iterator for SelectedDisplayListPaintKindIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.state {
-            SelectedDisplayListPaintKindIterState::All { index } => {
-                let command_index = *index;
-                *index = index.saturating_add(1);
-                Some((
-                    self.commands.get(command_index)?,
-                    *self.kinds.get(command_index)?,
-                ))
+            SelectedDisplayListPaintKindIterState::All(iter) => {
+                iter.next().map(|command| (command, command.kind))
             }
             SelectedDisplayListPaintKindIterState::None => None,
             SelectedDisplayListPaintKindIterState::Spans {
@@ -882,7 +888,7 @@ impl<'a> SelectedDisplayListPaint<'a> {
             kinds: self.kinds,
             state: match &self.selection {
                 SelectedDisplayListSelection::All => {
-                    SelectedDisplayListPaintKindIterState::All { index: 0 }
+                    SelectedDisplayListPaintKindIterState::All(self.commands.iter())
                 }
                 SelectedDisplayListSelection::None => SelectedDisplayListPaintKindIterState::None,
                 SelectedDisplayListSelection::Spans { spans, .. } => {

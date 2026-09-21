@@ -480,7 +480,12 @@ impl ShellComponent for FrontendSurfaceComponent {
                 HashSet::new()
             };
             if narrow_nodes.is_empty() {
-                self.invalidate_script_state();
+                // Luau render hooks usually derive template variables from
+                // services, so direct template field reads are not an exhaustive
+                // dependency index. Evaluate those scripts and compare the
+                // resulting tree through the normal narrow-script path. Its
+                // structural validation retains the full-update fallback.
+                self.invalidate_script_state_narrow();
             } else {
                 self.invalidate_service_template_nodes(narrow_nodes);
             }
@@ -2205,6 +2210,9 @@ impl ShellComponent for FrontendSurfaceComponent {
         changed
     }
 
+    fn display_list_first_paint_command(&self) -> Option<&DisplayPaintCommand> {
+        self.retained_display_list.first_paint_command()
+    }
     fn display_list_paint_commands(&self) -> &[DisplayPaintCommand] {
         self.retained_display_list.paint_commands()
     }
