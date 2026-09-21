@@ -788,3 +788,93 @@ fn slot_aware_batch_signature_skips_irrelevant_material_hashes() {
     assert_ne!(new_accumulator, 0);
     assert!(new_time < old_time);
 }
+
+#[test]
+fn retained_fingerprints_match_fresh_display_entries_and_reject_stale_resources() {
+    let mut tree = node(1, "column", 0.0, 0.0, 120.0, 80.0);
+    let mut text = node(2, "text", 0.0, 0.0, 120.0, 40.0);
+    text.attributes
+        .insert("content".into(), "shared paint inputs".into());
+    tree.children.push(text);
+    tree.children
+        .push(node(3, "checkbox", 0.0, 40.0, 20.0, 20.0));
+    let mut fingerprints: HashMap<_, _> = std::iter::once(&tree)
+        .chain(tree.children.iter())
+        .map(|node| (node.id, RenderObjectFingerprint::for_node(node, None)))
+        .collect();
+    for stale in [false, true] {
+        if stale {
+            for fingerprint in fingerprints.values_mut() {
+                fingerprint.paint.resource_revision = u64::MAX;
+                fingerprint.paint.material = 123;
+            }
+        }
+        let mut expected = HashMap::new();
+        collect_display_entries(&tree, 0.0, 0.0, None, None, &mut expected);
+        let mut actual = HashMap::new();
+        collect_display_entries_with_fingerprints(
+            &tree,
+            0.0,
+            0.0,
+            None,
+            None,
+            &mut actual,
+            Some(&|id| fingerprints.get(&id)),
+        );
+        assert_eq!(actual, expected, "stale resources: {stale}");
+        let mut index = batch_index::BatchIndex::default();
+        index.rebuild(&tree, 0.0, 0.0, &expected);
+        actual.clear();
+        assert!(index.collect_dirty_entries_with_fingerprints(
+            &tree,
+            &HashSet::from([2]),
+            &mut actual,
+            Some(&|id| fingerprints.get(&id))
+        ));
+        assert!(
+            actual
+                .iter()
+                .all(|(key, entry)| expected.get(key) == Some(entry))
+        );
+    }
+}
+
+#[test]
+#[ignore = "release-only shared retained/display fingerprint benchmark"]
+fn shared_retained_display_fingerprint_benchmark() {
+    let mut tree = node(1, "column", 0.0, 0.0, 240.0, 20480.0);
+    for index in 0..1024 {
+        let mut text = node(index + 2, "text", 0.0, index as f32 * 20.0, 240.0, 20.0);
+        text.attributes
+            .insert("content".into(), format!("Label {index}"));
+        tree.children.push(text);
+    }
+    let fingerprints: HashMap<_, _> = std::iter::once(&tree)
+        .chain(tree.children.iter())
+        .map(|node| (node.id, RenderObjectFingerprint::for_node(node, None)))
+        .collect();
+    let mut entries = HashMap::new();
+    let start = std::time::Instant::now();
+    for _ in 0..100 {
+        entries.clear();
+        collect_display_entries(&tree, 0.0, 0.0, None, None, &mut entries);
+        std::hint::black_box(&entries);
+    }
+    let fresh = start.elapsed();
+    let start = std::time::Instant::now();
+    for _ in 0..100 {
+        entries.clear();
+        collect_display_entries_with_fingerprints(
+            &tree,
+            0.0,
+            0.0,
+            None,
+            None,
+            &mut entries,
+            Some(&|id| fingerprints.get(&id)),
+        );
+        std::hint::black_box(&entries);
+    }
+    let shared = start.elapsed();
+    eprintln!("display entries: 1025 nodes, 100 collections: fresh {fresh:?}, shared {shared:?}");
+}

@@ -14,11 +14,13 @@ replay consumes directly. Measurements, and three corrections to the harness
 that produced the original 2026-08-08 numbers, are in
 [the performance log](log/performance-log.md).
 
-What remains of that batch is in [the backlog](../docs/BACKLOG.md):
-`FrameSnapshot::capture_dirty` is implemented and proven against full capture
-but cannot be wired until the retained diff precedes semantic capture in the
-frame, and the changed-node fingerprints across the retained, render, and
-display layers are still separate.
+The remaining frame-pipeline work is landed: semantic capture follows animation
+and the authoritative retained diff, display signatures consume the retained
+render fingerprints, and targeted finalization scopes accessibility and runtime
+annotation work while retaining selection projections. Differential tests and
+release measurements are recorded in [the performance log](log/performance-log.md).
+Validation matches the unchanged revision's 32 shell and 10 elements fixture
+failures; the renderer suite passes.
 
 The accepted platform direction is consolidated in
 [Platform Philosophy](../docs/spec/00-philosophy.md). Core owns platform

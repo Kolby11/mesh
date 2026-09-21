@@ -329,7 +329,7 @@ pub struct RenderObjectFingerprint {
     transform: TransformSlot,
     clip: ClipSlot,
     geometry: GeometrySlot,
-    paint: PaintInput,
+    pub(crate) paint: PaintInput,
     accessibility: AccessibilitySlot,
 }
 

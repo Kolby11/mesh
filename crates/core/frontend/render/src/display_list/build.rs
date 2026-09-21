@@ -158,12 +158,33 @@ pub(super) fn collect_display_entries(
     selected_node_ids: Option<&HashSet<NodeId>>,
     next: &mut HashMap<DisplayListKey, DisplayListEntry>,
 ) {
+    collect_display_entries_with_fingerprints(
+        node,
+        offset_x,
+        offset_y,
+        batch_entries,
+        selected_node_ids,
+        next,
+        None,
+    );
+}
+
+pub(super) fn collect_display_entries_with_fingerprints(
+    node: &WidgetNode,
+    offset_x: f32,
+    offset_y: f32,
+    batch_entries: Option<&mut Vec<DisplayBatchMaterial>>,
+    selected_node_ids: Option<&HashSet<NodeId>>,
+    next: &mut HashMap<DisplayListKey, DisplayListEntry>,
+    fingerprints: Option<&super::RetainedFingerprintLookup<'_>>,
+) {
     collect_display_entries_with_transform(
         node,
         root_transform(offset_x, offset_y),
         batch_entries,
         selected_node_ids,
         next,
+        fingerprints,
     );
 }
 
@@ -176,10 +197,21 @@ pub(super) fn collect_node_entries(
     mut batch_entries: Option<&mut Vec<DisplayBatchMaterial>>,
     selected: bool,
     next: &mut HashMap<DisplayListKey, DisplayListEntry>,
+    fingerprints: Option<&super::RetainedFingerprintLookup<'_>>,
 ) {
     let Some(bounds) = damage_rect_for_node_with_transform(node, world_transform) else {
         return;
     };
+    let retained = fingerprints
+        .and_then(|lookup| lookup(node.id))
+        .filter(|fingerprint| {
+            fingerprint.paint.resource_revision == mesh_core_resources::resource_revision()
+        });
+    let fresh = (selected && retained.is_none())
+        .then(|| crate::paint_input::PaintInput::for_node(node, None));
+    let paint = retained
+        .map(|fingerprint| &fingerprint.paint)
+        .or(fresh.as_ref());
     for_each_primitive_slot(node, |slot| {
         // Batch metrics need the full ordered material stream. A caller
         // that does not request metrics may still skip unselected nodes.
@@ -205,7 +237,7 @@ pub(super) fn collect_node_entries(
             key,
             DisplayListEntry {
                 bounds,
-                signature: primitive_signature(node, slot),
+                signature: primitive_signature_for_paint(paint.expect("selected node paint"), slot),
                 batch_signature,
                 barrier,
             },
@@ -219,6 +251,7 @@ fn collect_display_entries_with_transform(
     mut batch_entries: Option<&mut Vec<DisplayBatchMaterial>>,
     selected_node_ids: Option<&HashSet<NodeId>>,
     next: &mut HashMap<DisplayListKey, DisplayListEntry>,
+    fingerprints: Option<&super::RetainedFingerprintLookup<'_>>,
 ) {
     if node_is_explicitly_hidden(node) {
         return;
@@ -233,6 +266,7 @@ fn collect_display_entries_with_transform(
         batch_entries.as_deref_mut(),
         selected,
         next,
+        fingerprints,
     );
 
     let scroll = node.resolved_scroll_metrics();
@@ -245,6 +279,7 @@ fn collect_display_entries_with_transform(
             batch_entries.as_deref_mut(),
             selected_node_ids,
             next,
+            fingerprints,
         );
     }
 }

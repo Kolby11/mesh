@@ -4142,3 +4142,71 @@ The existing direct 64-byte allocator gate also passed at 1.307x. The aggregate
 pre-existing `stable_child_id_reuse_beats_rewriting_slots` gate stopped the
 sequence at 1.023x against its 1.25x direct requirement; the focused new gate
 passed independently.
+
+
+## 2026-09-21 — semantic capture after retained diff and shared display fingerprints
+
+`working tree` · area: frame finalization, semantic snapshots, retained rendering
+
+Completes the three remaining render-pipeline backlog items. `finalize_tree`
+prepares live annotations and layout; the paint boundary samples animation,
+refreshes affected semantics/selection, runs the authoritative retained diff,
+then publishes `FrameSnapshot::capture_dirty`. Insert/remove/reorder frames use
+full capture, and the existing visibility/reference fallback remains in place.
+Snapshots now contain sampled animation styles and geometry. This supersedes
+the earlier entry's **Not done — `FrameSnapshot::capture_dirty`** status without
+changing that historical record.
+
+Retained updates distinguish subtree roots from individual annotation changes
+and normalized ancestors. Focus/hover without selector dependencies therefore
+still reaches semantic capture without promoting an ancestor's entire subtree.
+Accessibility normalization uses the previous frame's indexed paths and cached
+child text; inherited visibility/disabled changes include descendants, and
+restyled subtrees are explicitly included. Full normalization remains the
+structural/broad fallback. Runtime string projection skips unchanged ordinary
+retained nodes; mutable controls and shortcut/promotion candidates remain
+conservative. Selection projection is retained across unchanged frames, clears
+the old target on move/removal, and refreshes its origin after animation.
+Geometry and overflow traversal are still required; this is not a claim that
+all frame work is proportional only to dirty nodes.
+
+Display entry signatures consume the retained `RenderObjectFingerprint` paint
+inputs through a lookup, including sparse batch-index collection. Missing
+fingerprints or stale resource revisions reconstruct paint inputs. Callers
+without retained fingerprints construct paint inputs once per selected node,
+rather than once per primitive slot.
+
+**Measured.** Local AMD Ryzen 7 7840HS, x86_64 Linux, release profile built in
+`nix develop`; three paired samples per workload. These are isolated stage
+comparisons, not end-to-end shell frame timings; concurrent build/desktop load
+contributed to the ranges. No speed threshold gate was added.
+
+- `dirty_semantic_finalization_benchmark`: 1,025 nodes (one column, 1,024 text
+  leaves), 100 frames changing one leaf's focus. Full normalization plus full
+  capture: **270.829–322.552 ms**; scoped normalization plus dirty capture:
+  **12.746–15.680 ms**. Paired ratios: **18.7–24.5x**.
+- `shared_retained_display_fingerprint_benchmark`: the same 1,025-node shape,
+  100 display-entry collections with precomputed retained fingerprints.
+  Fresh per-node paint inputs: **43.060–92.610 ms**; shared retained inputs:
+  **19.058–39.040 ms**. Paired ratios: **2.26–2.37x**. Retained fingerprint
+  construction is outside both collection timings because the shell already
+  performs that authoritative pass.
+
+**Validation.** Added differential coverage for inherited semantic policy,
+child-derived names, restyled descendants, structural fallback, exact-node
+retained updates with geometry propagation, reused/stale-resource display
+fingerprints, and complete snapshots across focus/hover/checked/selection
+changes without state selectors. The animation regression also checks captured
+styles/layout against the sampled live tree. New and augmented tests pass.
+`cargo check -p mesh-core-shell` and `git diff --check` pass.
+
+Full debug suites: elements **268 passed / 10 failed**, renderer **257 passed /
+0 failed**, shell **806 passed / 32 failed**. A detached checkout of unchanged
+`1e734133` reproduced the identical ten elements fixture failures and 32 shell
+failures (267 and 804 passing respectively); renderer passed 256 tests there.
+An initial renderer run hit an icon-worker assertion followed by poisoned-lock
+failures; the full rerun passed. During implementation, recording full-build
+annotation candidates as exact dirty nodes regressed two narrow-service scope
+checks; restricting that tracking to retained annotation restored the baseline.
+The temporary baseline checkout was removed and test-written font settings
+were restored to their initial contents.

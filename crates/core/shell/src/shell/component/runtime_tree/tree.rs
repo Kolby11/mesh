@@ -221,6 +221,20 @@ impl RetainedWidgetTree {
         RetainedTreeDirtySummary,
         Option<SmallVec<[&'a WidgetNode; 8]>>,
     ) {
+        self.update_for_dirty_roots_and_nodes_collect(root, dirty_roots, &HashSet::new())
+    }
+
+    /// Style roots include their descendants; local runtime/semantic changes
+    /// only refresh the named nodes. Geometry propagation is detected for both.
+    pub(in crate::shell::component) fn update_for_dirty_roots_and_nodes_collect<'a>(
+        &mut self,
+        root: &'a WidgetNode,
+        dirty_roots: &HashSet<NodeId>,
+        dirty_nodes: &HashSet<NodeId>,
+    ) -> (
+        RetainedTreeDirtySummary,
+        Option<SmallVec<[&'a WidgetNode; 8]>>,
+    ) {
         if self.nodes.is_empty() || (self.nodes.len() >= 64 && dirty_roots.contains(&root.id)) {
             return (self.update(root), None);
         }
@@ -230,6 +244,7 @@ impl RetainedWidgetTree {
             root,
             false,
             dirty_roots,
+            dirty_nodes,
             &self.nodes,
             &self.node_keys,
             &mut update_nodes,
@@ -314,6 +329,16 @@ impl RetainedWidgetTree {
     /// downstream synchronization path and do not consume this sparse set.
     pub(in crate::shell::component) fn dirty_node_ids(&self) -> &HashSet<NodeId> {
         &self.dirty_node_ids
+    }
+
+    pub(in crate::shell::component) fn render_fingerprint(
+        &self,
+        id: NodeId,
+    ) -> Option<&RenderObjectFingerprint> {
+        self.node_keys
+            .get(&id)
+            .and_then(|key| self.nodes.get(*key))
+            .map(|node| &node.render)
     }
 
     pub(in crate::shell::component) fn render_dirty(&self) -> RenderObjectDirtySummary {
@@ -699,6 +724,7 @@ pub(super) fn collect_scoped_update_nodes<'a>(
     node: &'a WidgetNode,
     ancestor_is_dirty: bool,
     dirty_roots: &HashSet<NodeId>,
+    dirty_nodes: &HashSet<NodeId>,
     nodes: &SlotMap<RetainedNodeKey, RetainedNodeSnapshot>,
     node_keys: &HashMap<NodeId, RetainedNodeKey>,
     update_nodes: &mut Vec<(&'a WidgetNode, bool)>,
@@ -717,14 +743,16 @@ pub(super) fn collect_scoped_update_nodes<'a>(
     }
 
     let node_is_dirty = ancestor_is_dirty || dirty_roots.contains(&node.id);
-    if node_is_dirty || previous.layout != layout_fingerprint(node) {
-        update_nodes.push((node, !node_is_dirty));
+    let full_fingerprint = node_is_dirty || dirty_nodes.contains(&node.id);
+    if full_fingerprint || previous.layout != layout_fingerprint(node) {
+        update_nodes.push((node, !full_fingerprint));
     }
     node.children.iter().all(|child| {
         collect_scoped_update_nodes(
             child,
             node_is_dirty,
             dirty_roots,
+            dirty_nodes,
             nodes,
             node_keys,
             update_nodes,

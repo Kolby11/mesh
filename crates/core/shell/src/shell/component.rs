@@ -970,6 +970,11 @@ pub(super) struct FrontendSurfaceComponent {
     /// Authoritative roots touched by the latest targeted retained restyle.
     /// Consumed by the retained-tree fingerprint pass in the same paint.
     retained_update_dirty_roots: Option<HashSet<NodeId>>,
+    /// Local annotation changes and semantic ancestors. Unlike dirty roots,
+    /// these IDs do not invalidate every descendant's fingerprint.
+    retained_update_dirty_nodes: HashSet<NodeId>,
+    /// Last selection projection, including layout origin and theme colors.
+    selection_annotation: Option<(TextSelectionState, [u32; 4], String, String)>,
     #[cfg(test)]
     force_full_retained_update: bool,
     /// True only when the pending style frame was requested exclusively by
@@ -1332,6 +1337,8 @@ impl FrontendSurfaceComponent {
             layout_state: PerSurfaceLayoutState::default(),
             retained_tree: RetainedWidgetTree::default(),
             retained_update_dirty_roots: None,
+            retained_update_dirty_nodes: HashSet::new(),
+            selection_annotation: None,
             #[cfg(test)]
             force_full_retained_update: false,
             animation_only_dirty: false,

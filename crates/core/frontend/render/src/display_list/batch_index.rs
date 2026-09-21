@@ -224,11 +224,22 @@ impl BatchIndex {
     /// its recorded path instead of walking the tree. Returns `false` when any
     /// node has moved, disappeared, or flipped visibility, in which case the
     /// caller must fall back to a full collection.
+    #[cfg(test)]
     pub(super) fn collect_dirty_entries(
         &self,
         root: &WidgetNode,
         dirty: &HashSet<NodeId>,
         next: &mut HashMap<DisplayListKey, DisplayListEntry>,
+    ) -> bool {
+        self.collect_dirty_entries_with_fingerprints(root, dirty, next, None)
+    }
+
+    pub(super) fn collect_dirty_entries_with_fingerprints(
+        &self,
+        root: &WidgetNode,
+        dirty: &HashSet<NodeId>,
+        next: &mut HashMap<DisplayListKey, DisplayListEntry>,
+        fingerprints: Option<&super::RetainedFingerprintLookup<'_>>,
     ) -> bool {
         for node_id in dirty {
             let Some(location) = self.nodes.get(node_id) else {
@@ -257,6 +268,7 @@ impl BatchIndex {
                     None,
                     true,
                     next,
+                    fingerprints,
                 );
             }
         }

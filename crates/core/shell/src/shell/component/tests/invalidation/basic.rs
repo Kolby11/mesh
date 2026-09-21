@@ -622,6 +622,85 @@ fn targeted_interaction_restyle_uses_scoped_retained_fingerprinting() {
 }
 
 #[test]
+fn finalized_dirty_frames_match_full_capture_without_state_selectors() {
+    let mut component = test_frontend_component(
+        r#"<template><column><button>First</button><checkbox /><text selectable="true">Select me</text><box /></column></template>"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(180, 120);
+    for step in 0..7 {
+        let previous = component.last_frame_snapshot.clone();
+        match step {
+            1 => {
+                component.hovered_path = ["root", "root/0", "root/0/0"]
+                    .map(runtime_node_id_for_key)
+                    .to_vec();
+            }
+            2 => {
+                component.focused_id = Some(runtime_node_id_for_key("root/0/0"));
+            }
+            3 => {
+                component
+                    .checked_values
+                    .insert(runtime_node_id_for_key("root/0/1"), true);
+            }
+            4 => {
+                component.selection = Some(TextSelectionState {
+                    anchor: TextSelectionPoint {
+                        node_key: "root/0/2".into(),
+                        x: 1.0,
+                        y: 1.0,
+                    },
+                    focus: TextSelectionPoint {
+                        node_key: "root/0/2".into(),
+                        x: 30.0,
+                        y: 1.0,
+                    },
+                    dragging: false,
+                });
+            }
+            5 => {
+                component.selection = None;
+            }
+            6 => {
+                component.hovered_path.clear();
+                component.focused_id = None;
+            }
+            _ => {}
+        }
+        if step > 0 {
+            component.invalidate_interaction_restyle();
+        }
+        component
+            .paint(&theme, SurfaceExtent::unpadded(180, 120), &mut buffer, 1.0)
+            .unwrap();
+        let tree = component.last_tree.as_ref().unwrap();
+        let actual = component.last_frame_snapshot.as_ref().unwrap();
+        let expected = FrameSnapshot::complete(tree, actual.revision(), previous.as_ref()).unwrap();
+        for (actual, expected) in actual.nodes().iter().zip(expected.nodes()) {
+            assert_eq!(
+                format!("{actual:?}"),
+                format!("{expected:?}"),
+                "step {step}"
+            );
+        }
+        assert_eq!(
+            actual.semantic_diff().changes(),
+            expected.semantic_diff().changes(),
+            "step {step}"
+        );
+        if step == 5 {
+            let selected = find_node_by_key(tree, "root/0/2").unwrap();
+            assert!(
+                !selected
+                    .attributes
+                    .contains_key("_mesh_selection_background")
+            );
+        }
+    }
+}
+
+#[test]
 fn targeted_interaction_animation_merges_scoped_retained_roots() {
     let mut component = test_frontend_component(
         r#"
@@ -652,6 +731,24 @@ fn targeted_interaction_animation_merges_scoped_retained_roots() {
         .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
+    let actual = component.last_frame_snapshot.as_ref().unwrap();
+    let expected = FrameSnapshot::complete(
+        component.last_tree.as_ref().unwrap(),
+        actual.revision(),
+        None,
+    )
+    .unwrap();
+    for (actual, expected) in actual.nodes().iter().zip(expected.nodes()) {
+        assert_eq!(
+            actual.style(),
+            expected.style(),
+            "snapshot must contain sampled animation styles"
+        );
+        assert_eq!(
+            format!("{:?}", actual.layout()),
+            format!("{:?}", expected.layout())
+        );
+    }
     assert!(component.transitions.has_active(Instant::now()));
     assert!(component.retained_tree.last_update_was_scoped());
 }

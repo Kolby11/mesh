@@ -28,6 +28,10 @@ use signature::*;
 use spans::*;
 use subtree::*;
 
+/// Lookup into the caller's authoritative retained diff for this generation.
+pub type RetainedFingerprintLookup<'a> =
+    dyn Fn(NodeId) -> Option<&'a crate::RenderObjectFingerprint> + 'a;
+
 impl RetainedDisplayList {
     pub fn generation(&self) -> u64 {
         self.generation
@@ -71,6 +75,7 @@ impl RetainedDisplayList {
             surface_height,
             force_full_damage,
             partial_present_supported,
+            None,
         )
     }
 
@@ -99,6 +104,7 @@ impl RetainedDisplayList {
             surface_height,
             force_full_damage,
             partial_present_supported,
+            None,
         )
     }
 
@@ -126,6 +132,7 @@ impl RetainedDisplayList {
             surface_height,
             force_full_damage,
             partial_present_supported,
+            None,
         )
     }
 
@@ -154,6 +161,7 @@ impl RetainedDisplayList {
             surface_height,
             force_full_damage,
             partial_present_supported,
+            None,
         )
     }
 
@@ -178,6 +186,7 @@ impl RetainedDisplayList {
             surface_height,
             force_full_damage,
             partial_present_supported,
+            None,
         )
     }
 
@@ -203,6 +212,38 @@ impl RetainedDisplayList {
             surface_height,
             force_full_damage,
             partial_present_supported,
+            None,
+        )
+    }
+
+    /// Consume fingerprints from the same authoritative diff as the dirty IDs.
+    /// Every supplied fingerprint must describe the corresponding node in
+    /// `root` at `retained_tree_generation`. Missing entries and resource
+    /// revision changes rebuild paint inputs from the live node.
+    pub fn update_for_retained_fingerprints<'a>(
+        &mut self,
+        root: &WidgetNode,
+        retained_tree_generation: u64,
+        dirty_summary: RenderObjectDirtySummary,
+        dirty_node_ids: &HashSet<NodeId>,
+        fingerprints: &RetainedFingerprintLookup<'a>,
+        surface_width: u32,
+        surface_height: u32,
+        force_full_damage: bool,
+        partial_present_supported: bool,
+    ) -> DisplayListMetrics {
+        self.update_inner(
+            root,
+            Some(retained_tree_generation),
+            Some(dirty_summary),
+            Some(dirty_node_ids),
+            0.0,
+            0.0,
+            surface_width,
+            surface_height,
+            force_full_damage,
+            partial_present_supported,
+            Some(fingerprints),
         )
     }
 
@@ -218,6 +259,7 @@ impl RetainedDisplayList {
         surface_height: u32,
         force_full_damage: bool,
         partial_present_supported: bool,
+        fingerprints: Option<&RetainedFingerprintLookup<'_>>,
     ) -> DisplayListMetrics {
         let surface = DamageRect {
             x: 0,
@@ -283,18 +325,22 @@ impl RetainedDisplayList {
         // it from the reconciled map.
         let patch_batch_index = patch_sparse_entries
             && self.batch_index.matches_root(root)
-            && self
-                .batch_index
-                .collect_dirty_entries(root, dirty_node_ids, &mut next);
+            && self.batch_index.collect_dirty_entries_with_fingerprints(
+                root,
+                dirty_node_ids,
+                &mut next,
+                fingerprints,
+            );
         if !patch_batch_index {
             next.clear();
-            collect_display_entries(
+            collect_display_entries_with_fingerprints(
                 root,
                 offset_x,
                 offset_y,
                 None,
                 patch_sparse_entries.then_some(dirty_node_ids),
                 &mut next,
+                fingerprints,
             );
         }
         if self.root_id == Some(root.id)

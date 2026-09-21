@@ -112,6 +112,8 @@ pub(super) fn clone_or_take_last_metric(
 }
 
 pub(in crate::shell::component) struct RuntimeAnnotationContext<'a> {
+    pub(in crate::shell::component) changed: HashSet<NodeId>,
+    retained: bool,
     pub(super) focused_id: Option<NodeId>,
     pub(super) focus_visible_id: Option<NodeId>,
     pub(super) hovered_ids: HashSet<NodeId>,
@@ -143,6 +145,8 @@ impl<'a> RuntimeAnnotationContext<'a> {
         scroll_offsets: &'a mut HashMap<NodeId, ScrollOffsetState>,
     ) -> Self {
         Self {
+            changed: HashSet::new(),
+            retained: false,
             focused_id,
             focus_visible_id,
             hovered_ids: hovered_path.iter().copied().collect(),
@@ -158,6 +162,11 @@ impl<'a> RuntimeAnnotationContext<'a> {
             shortcuts: None,
             promoted_windows: None,
         }
+    }
+
+    pub(in crate::shell::component) fn with_retained_tree(mut self, retained: bool) -> Self {
+        self.retained = retained;
+        self
     }
 
     pub(in crate::shell::component) fn with_promoted_windows(
@@ -263,154 +272,179 @@ pub(super) fn annotate_runtime_tree_inner(
     context: &mut RuntimeAnnotationContext<'_>,
     annotate_overflow: bool,
 ) -> Option<mesh_core_interaction::ContentBounds> {
-    node.id = node_id;
-    if node.mesh_key() != Some(key.as_str()) {
-        node.set_mesh_key(key.clone());
-    }
-    if let Some(shortcuts) = context.shortcuts {
-        super::super::input::annotate_node_by_keybind(node, shortcuts);
-    }
-    if context
-        .promoted_windows
-        .is_some_and(|keys| keys.contains(key))
-    {
-        node.attributes.insert("hidden".into(), "true".into());
-        node.mark_promoted_window();
-    }
-
-    let authored = node.authored_payload();
-    let authored_state = mesh_core_elements::authored_element_state(&authored.attributes);
-    let is_input = authored.tag == "input";
-    let is_slider = authored.tag == "slider";
-    let is_switch_or_checkbox = matches!(authored.tag.as_str(), "switch" | "checkbox");
-    let authored_value = authored.attributes.get("value").cloned();
-    let source_tag = authored
-        .attributes
-        .get("data-mesh-element")
-        .map(String::as_str)
-        .unwrap_or(authored.tag.as_str());
-    let checkable_choice = matches!(source_tag, "switch" | "checkbox" | "radio" | "option");
-    let selects_choice = matches!(source_tag, "radio" | "option");
-    let selectable_group = matches!(source_tag, "select" | "radio-group");
-    let trace_tag = context
-        .hovered_ids
-        .contains(&node_id)
-        .then(|| authored.tag.clone());
-    let checked = context
-        .checked_values
-        .get(&node_id)
-        .copied()
-        .or(Some(
-            mesh_core_elements::PseudoState::Checked.value(authored_state),
-        ))
-        .unwrap_or(false);
-
-    node.state = ElementState {
-        focused: context.focused_id == Some(node_id),
-        focus_visible: context.focus_visible_id == Some(node_id)
-            || (context.focus_visible_id.is_none()
-                && context.focused_id == Some(node_id)
-                && is_input),
-        hovered: context.hovered_ids.contains(&node_id),
-        active: context.active_id == Some(node_id),
-        window: context.window,
-        ..authored_state
-    };
-    // Runtime widget state is authoritative over the authored fallback.
-    mesh_core_elements::PseudoState::Checked.set_value(&mut node.state, checked);
-    if node.state.hovered {
-        tracing::trace!(
-            "[hover] annotate: key={key} tag={} set hovered=true",
-            trace_tag.as_deref().unwrap_or_default()
-        );
-    }
-
-    // `node.attributes` is inside the shared authored payload, so every write
-    // here — including a remove of a key that was never present — forces a
-    // copy-on-write clone and breaks memo payload sharing for the whole
-    // subtree. Both branches must check before they write.
-    if node.state.focused {
-        if node.attributes.get("_mesh_focused").map(String::as_str) != Some("true") {
-            node.attributes
-                .insert("_mesh_focused".into(), "true".into());
+    // A retained node already has its stable key and authored projection.
+    // Only interaction transitions and widgets with mutable values need the
+    // string-attribute projection again; overflow remains a geometry pass.
+    let needs_projection = !context.retained
+        || node.state.focused != (context.focused_id == Some(node_id))
+        || node.state.focus_visible
+            != (context.focus_visible_id == Some(node_id)
+                || (context.focus_visible_id.is_none()
+                    && context.focused_id == Some(node_id)
+                    && node.tag == "input"))
+        || node.state.hovered != context.hovered_ids.contains(&node_id)
+        || node.state.active != (context.active_id == Some(node_id))
+        || node.state.window != context.window
+        || matches!(node.tag.as_str(), "input" | "slider")
+        || context.checked_values.contains_key(&node_id)
+        || context.input_values.contains_key(&node_id)
+        || node.attributes.contains_key("keybind")
+        || context
+            .promoted_windows
+            .is_some_and(|keys| keys.contains(key));
+    if needs_projection {
+        if context.retained {
+            context.changed.insert(node_id);
         }
-    } else if node.attributes.get("_mesh_focused").is_some() {
-        node.attributes.remove("_mesh_focused");
-    }
-    // Compatibility projection for callers inspecting the live node. Semantic
-    // snapshots derive focus from `node.state`, so this is not authoritative.
-    node.accessibility.focused = node.state.focused;
+        node.id = node_id;
+        if node.mesh_key() != Some(key.as_str()) {
+            node.set_mesh_key(key.clone());
+        }
+        if let Some(shortcuts) = context.shortcuts {
+            super::super::input::annotate_node_by_keybind(node, shortcuts);
+        }
+        if context
+            .promoted_windows
+            .is_some_and(|keys| keys.contains(key))
+        {
+            node.attributes.insert("hidden".into(), "true".into());
+            node.mark_promoted_window();
+        }
 
-    if is_input {
-        let value = context
-            .input_values
+        let authored = node.authored_payload();
+        let authored_state = mesh_core_elements::authored_element_state(&authored.attributes);
+        let is_input = authored.tag == "input";
+        let is_slider = authored.tag == "slider";
+        let is_switch_or_checkbox = matches!(authored.tag.as_str(), "switch" | "checkbox");
+        let authored_value = authored.attributes.get("value").cloned();
+        let source_tag = authored
+            .attributes
+            .get("data-mesh-element")
+            .map(String::as_str)
+            .unwrap_or(authored.tag.as_str());
+        let checkable_choice = matches!(source_tag, "switch" | "checkbox" | "radio" | "option");
+        let selects_choice = matches!(source_tag, "radio" | "option");
+        let selectable_group = matches!(source_tag, "select" | "radio-group");
+        let trace_tag = context
+            .hovered_ids
+            .contains(&node_id)
+            .then(|| authored.tag.clone());
+        let checked = context
+            .checked_values
             .get(&node_id)
-            .cloned()
-            .or(authored_value.clone())
-            .unwrap_or_default();
-        let preedit = (context.focused_id == Some(node_id))
-            .then(|| context.input_preedits.get(&node_id))
-            .flatten();
-        let (value, preedit_projection) = compose_input_value(&value, preedit);
-        node.attributes.insert("value".into(), value);
-        for attribute in [
-            "_mesh_preedit_start",
-            "_mesh_preedit_end",
-            "_mesh_preedit_cursor_begin",
-            "_mesh_preedit_cursor_end",
-        ] {
-            node.attributes.remove(attribute);
-        }
-        if let Some(projection) = preedit_projection {
-            node.attributes
-                .insert("_mesh_preedit_start".into(), projection.start.to_string());
-            node.attributes
-                .insert("_mesh_preedit_end".into(), projection.end.to_string());
-            node.attributes.insert(
-                "_mesh_preedit_cursor_begin".into(),
-                projection.cursor_begin.to_string(),
-            );
-            node.attributes.insert(
-                "_mesh_preedit_cursor_end".into(),
-                projection.cursor_end.to_string(),
-            );
-        }
-    } else if is_slider {
-        annotate_slider_node(node, node_id, context);
-    } else if is_switch_or_checkbox {
-        node.attributes.insert(
-            "checked".into(),
-            if checked { "true" } else { "false" }.into(),
-        );
-    }
+            .copied()
+            .or(Some(
+                mesh_core_elements::PseudoState::Checked.value(authored_state),
+            ))
+            .unwrap_or(false);
 
-    if checkable_choice {
-        node.attributes.insert(
-            "checked".into(),
-            if checked { "true" } else { "false" }.into(),
-        );
-        if selects_choice {
+        node.state = ElementState {
+            focused: context.focused_id == Some(node_id),
+            focus_visible: context.focus_visible_id == Some(node_id)
+                || (context.focus_visible_id.is_none()
+                    && context.focused_id == Some(node_id)
+                    && is_input),
+            hovered: context.hovered_ids.contains(&node_id),
+            active: context.active_id == Some(node_id),
+            window: context.window,
+            ..authored_state
+        };
+        // Runtime widget state is authoritative over the authored fallback.
+        mesh_core_elements::PseudoState::Checked.set_value(&mut node.state, checked);
+        if node.state.hovered {
+            tracing::trace!(
+                "[hover] annotate: key={key} tag={} set hovered=true",
+                trace_tag.as_deref().unwrap_or_default()
+            );
+        }
+
+        // `node.attributes` is inside the shared authored payload, so every write
+        // here — including a remove of a key that was never present — forces a
+        // copy-on-write clone and breaks memo payload sharing for the whole
+        // subtree. Both branches must check before they write.
+        if node.state.focused {
+            if node.attributes.get("_mesh_focused").map(String::as_str) != Some("true") {
+                node.attributes
+                    .insert("_mesh_focused".into(), "true".into());
+            }
+        } else if node.attributes.get("_mesh_focused").is_some() {
+            node.attributes.remove("_mesh_focused");
+        }
+        // Compatibility projection for callers inspecting the live node. Semantic
+        // snapshots derive focus from `node.state`, so this is not authoritative.
+        node.accessibility.focused = node.state.focused;
+
+        if is_input {
+            let value = context
+                .input_values
+                .get(&node_id)
+                .cloned()
+                .or(authored_value.clone())
+                .unwrap_or_default();
+            let preedit = (context.focused_id == Some(node_id))
+                .then(|| context.input_preedits.get(&node_id))
+                .flatten();
+            let (value, preedit_projection) = compose_input_value(&value, preedit);
+            node.attributes.insert("value".into(), value);
+            for attribute in [
+                "_mesh_preedit_start",
+                "_mesh_preedit_end",
+                "_mesh_preedit_cursor_begin",
+                "_mesh_preedit_cursor_end",
+            ] {
+                node.attributes.remove(attribute);
+            }
+            if let Some(projection) = preedit_projection {
+                node.attributes
+                    .insert("_mesh_preedit_start".into(), projection.start.to_string());
+                node.attributes
+                    .insert("_mesh_preedit_end".into(), projection.end.to_string());
+                node.attributes.insert(
+                    "_mesh_preedit_cursor_begin".into(),
+                    projection.cursor_begin.to_string(),
+                );
+                node.attributes.insert(
+                    "_mesh_preedit_cursor_end".into(),
+                    projection.cursor_end.to_string(),
+                );
+            }
+        } else if is_slider {
+            annotate_slider_node(node, node_id, context);
+        } else if is_switch_or_checkbox {
             node.attributes.insert(
-                "selected".into(),
+                "checked".into(),
                 if checked { "true" } else { "false" }.into(),
             );
         }
-        mesh_core_elements::PseudoState::Checked.set_value(&mut node.state, checked);
-        mesh_core_elements::PseudoState::Selected.set_value(&mut node.state, checked);
-        node.accessibility.state.checked = Some(checked);
-        node.accessibility.state.selected = checked;
-    }
 
-    if selectable_group
-        && let Some(value) = context
-            .input_values
-            .get(&node_id)
-            .cloned()
-            .or(authored_value)
-    {
-        node.attributes.insert("value".into(), value.clone());
-        mesh_core_elements::PseudoState::Value.set_value(&mut node.state, true);
-        node.accessibility.state.value = Some(value);
+        if checkable_choice {
+            node.attributes.insert(
+                "checked".into(),
+                if checked { "true" } else { "false" }.into(),
+            );
+            if selects_choice {
+                node.attributes.insert(
+                    "selected".into(),
+                    if checked { "true" } else { "false" }.into(),
+                );
+            }
+            mesh_core_elements::PseudoState::Checked.set_value(&mut node.state, checked);
+            mesh_core_elements::PseudoState::Selected.set_value(&mut node.state, checked);
+            node.accessibility.state.checked = Some(checked);
+            node.accessibility.state.selected = checked;
+        }
+
+        if selectable_group
+            && let Some(value) = context
+                .input_values
+                .get(&node_id)
+                .cloned()
+                .or(authored_value)
+        {
+            node.attributes.insert("value".into(), value.clone());
+            mesh_core_elements::PseudoState::Value.set_value(&mut node.state, true);
+            node.accessibility.state.value = Some(value);
+        }
     }
 
     let offset = context

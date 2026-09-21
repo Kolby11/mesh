@@ -188,6 +188,10 @@ fn union_layout_rect(left: LayoutRect, right: LayoutRect) -> LayoutRect {
 
 pub(super) fn primitive_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
     let paint = PaintInput::for_node(node, None);
+    primitive_signature_for_paint(&paint, slot)
+}
+
+pub(super) fn primitive_signature_for_paint(paint: &PaintInput, slot: DisplayPrimitiveSlot) -> u64 {
     let slot = match slot {
         DisplayPrimitiveSlot::Background => PaintPrimitiveSlot::Background,
         DisplayPrimitiveSlot::Border => PaintPrimitiveSlot::Border,

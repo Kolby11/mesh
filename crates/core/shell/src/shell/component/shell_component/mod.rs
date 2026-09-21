@@ -975,6 +975,31 @@ impl ShellComponent for FrontendSurfaceComponent {
             animation_dirty_roots.iter().copied(),
             mesh_core_interaction::InteractionDirtyFlags::ANIMATION,
         );
+        if !animation_dirty_roots.is_empty() {
+            // The previous frame's cached child text is valid only outside all
+            // changes made this frame, including any preceding script/restyle.
+            self.retained_update_dirty_nodes
+                .extend(animation_dirty_roots.iter().copied());
+            if let (Some(previous), Some(roots)) =
+                (&self.last_frame_snapshot, &self.retained_update_dirty_roots)
+            {
+                if let Some(normalized) = previous.normalize_accessibility_dirty(
+                    &mut tree,
+                    &self.retained_update_dirty_nodes,
+                    roots,
+                ) {
+                    self.retained_update_dirty_nodes.extend(normalized);
+                } else {
+                    self.retained_update_dirty_roots = None;
+                }
+            } else {
+                mesh_core_elements::normalize_accessibility(&mut tree);
+            }
+        }
+        if !animation_dirty_roots.is_empty() {
+            let selection_dirty = self.annotate_selection_tree(&mut tree, theme, false);
+            self.retained_update_dirty_nodes.extend(selection_dirty);
+        }
         let mut retained_update_dirty_roots = self.retained_update_dirty_roots.take();
         #[cfg(test)]
         if self.force_full_retained_update {
@@ -992,7 +1017,12 @@ impl ShellComponent for FrontendSurfaceComponent {
         let render_object_started = std::time::Instant::now();
         let retained_dirty = if let Some(dirty_roots) = retained_update_dirty_roots.as_ref() {
             self.retained_tree
-                .update_for_dirty_roots(&tree, dirty_roots)
+                .update_for_dirty_roots_and_nodes_collect(
+                    &tree,
+                    dirty_roots,
+                    &self.retained_update_dirty_nodes,
+                )
+                .0
         } else {
             self.retained_tree.update(&tree)
         };
@@ -1003,6 +1033,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             render_object_started.elapsed(),
             Some("rebuild"),
         );
+        self.capture_finalized_frame(&tree);
         if tree_was_rebuilt {
             self.record_runtime_style_diagnostics_after_retained_update(
                 &mut tree,
@@ -1038,11 +1069,12 @@ impl ShellComponent for FrontendSurfaceComponent {
         let display_list_span = tracing::debug_span!("display_list_update").entered();
         self.retained_display_list
             .set_backdrop_blur_policy(mesh_core_render::backdrop_blur_policy());
-        let display_list_metrics = self.retained_display_list.update_for_retained_generation(
+        let display_list_metrics = self.retained_display_list.update_for_retained_fingerprints(
             &tree,
             retained_tree_generation,
             render_object_dirty,
             self.retained_tree.render_dirty_node_ids(),
+            &|id| self.retained_tree.render_fingerprint(id),
             content_width,
             content_height,
             self.surface_pixels_invalid,

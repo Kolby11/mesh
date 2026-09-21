@@ -183,22 +183,6 @@ been measured and reverted.
 Every optimization lands with a representative benchmark, and a checked relative
 gate where the win is structural.
 
-### Render pipeline
-
-- [ ] Wire `FrameSnapshot::capture_dirty` into `finalize_tree`. The incremental
-      semantic capture is implemented and proven against full capture, but it
-      needs an authoritative changed-node set and the retained tree diff that
-      produces one runs *after* the frame is captured. Requires reordering the
-      frame so the retained diff precedes semantic capture; folds into the
-      fingerprint unification below.
-- [ ] Continue widening generation shortcuts to per-node dirty scoping and
-      unify changed-node fingerprints across the retained, render, and display
-      layers; geometry-only retained snapshots are split out now.
-- [ ] Dirty-scope the `finalize_tree` passes that remain broad after the
-      annotation/promotion/error walks were fused into one: accessibility
-      normalization, selection annotation, and the string-attribute walks still
-      run over the whole tree on a targeted restyle.
-
 ### Style
 
 - [ ] Typed style declarations end-to-end: resolve theme tokens to typed values

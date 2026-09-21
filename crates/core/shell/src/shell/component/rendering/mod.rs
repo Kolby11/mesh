@@ -524,6 +524,7 @@ impl FrontendSurfaceComponent {
         let _span =
             tracing::debug_span!("finalize_tree", surface = %self.id(), trigger_kind).entered();
         self.retained_update_dirty_roots = None;
+        self.retained_update_dirty_nodes.clear();
         // Advance smooth-scroll animations before annotation reads scroll_offsets,
         // so the eased offset lands in this frame's `_mesh_scroll_*` attributes.
         let now = std::time::Instant::now();
@@ -533,6 +534,18 @@ impl FrontendSurfaceComponent {
         if self.has_surface_shortcut_declarations() {
             self.resolved_surface_shortcuts(&self.current_keyboard_settings());
         }
+        let mut scoped_finalize = trigger_kind == "restyle"
+            && (dirty_types.contains(ComponentDirtyFlags::STATE)
+                || animation_only_frame
+                || dirty_types
+                    .difference(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS)
+                    .is_empty())
+            && !dirty_types.intersects(ComponentDirtyFlags::SCRIPT | ComponentDirtyFlags::TEXT)
+            && self.interaction_snapshot_valid
+            && !self.surface_exiting
+            && !self.surface_entering
+            && self.closing_child_keys.is_empty()
+            && self.entering_child_keys.is_empty();
         let shortcut_cache = self.resolved_surface_shortcuts_cache.borrow();
         let mut annotation_context = RuntimeAnnotationContext::new(
             self.focused_id
@@ -552,6 +565,7 @@ impl FrontendSurfaceComponent {
             &self.checked_values,
             &mut self.scroll_offsets,
         )
+        .with_retained_tree(scoped_finalize)
         .with_window_state(self.window_states)
         .with_promoted_windows(&self.promoted_window_keys)
         .with_shortcuts(
@@ -560,6 +574,7 @@ impl FrontendSurfaceComponent {
                 .map(|cache| &cache.shortcuts_by_keybind),
         );
         annotate_runtime_and_overflow_tree(tree, "root".to_string(), &mut annotation_context);
+        let mut annotation_dirty = std::mem::take(&mut annotation_context.changed);
         drop(annotation_context);
         drop(shortcut_cache);
         if self.surface_exiting {
@@ -848,30 +863,27 @@ impl FrontendSurfaceComponent {
                 Some(trigger_kind),
             );
         }
-        // Runtime state and computed visibility are now final. Rebuild the
-        // semantic projection after children, styles, and layout so published
-        // snapshots cannot retain stale focus, names, or hidden descendants.
-        mesh_core_elements::normalize_accessibility(tree);
-        self.annotate_selection_tree(tree, theme);
-        self.frame_revision = self.frame_revision.saturating_add(1);
-        match FrameSnapshot::capture(
-            tree,
-            self.frame_revision,
-            FramePhaseStamps::complete(self.frame_revision),
-            self.last_frame_snapshot.as_ref(),
-        ) {
-            Ok(frame) => {
-                self.publish_interaction_tree_snapshot(frame.clone());
-                self.last_frame_snapshot = Some(frame);
+        // Normalize the live projection after style/layout. Paint refreshes
+        // any subsequently animated nodes before the retained diff and final
+        // immutable capture, so all consumers see the sampled frame.
+        if scoped_finalize {
+            if let Some(previous) = &self.last_frame_snapshot {
+                match previous.normalize_accessibility_dirty(
+                    tree,
+                    &annotation_dirty,
+                    &affected_keys.affected,
+                ) {
+                    Some(normalized) => annotation_dirty.extend(normalized),
+                    None => scoped_finalize = false,
+                }
+            } else {
+                mesh_core_elements::normalize_accessibility(tree);
+                scoped_finalize = false;
             }
-            Err(error) => {
-                self.last_frame_snapshot = None;
-                tracing::error!(
-                    component = %self.id(),
-                    "frame snapshot construction failed: {error}"
-                );
-            }
+        } else {
+            mesh_core_elements::normalize_accessibility(tree);
         }
+        annotation_dirty.extend(self.annotate_selection_tree(tree, theme, !scoped_finalize));
 
         // Store current interaction state for next frame's targeted restyle diff.
         // Preserve the prior frame's allocation while replacing its contents.
@@ -900,9 +912,11 @@ impl FrontendSurfaceComponent {
         // selects on it.
         self.previous_slider_values.clone_from(&self.slider_values);
         self.interaction_snapshot_valid = true;
-        if ((targeted_interaction_restyle && interaction_snapshot_valid)
-            || animation_only_frame
-            || paint_only_restyle)
+        self.retained_update_dirty_nodes = annotation_dirty;
+        if scoped_finalize
+            && ((targeted_interaction_restyle && interaction_snapshot_valid)
+                || animation_only_frame
+                || paint_only_restyle)
             && !self.surface_exiting
             && !self.surface_entering
             && self.closing_child_keys.is_empty()
@@ -913,6 +927,38 @@ impl FrontendSurfaceComponent {
             } else {
                 HashSet::new()
             });
+        }
+    }
+
+    /// Publish only after animation and the authoritative retained diff finish.
+    pub(super) fn capture_finalized_frame(&mut self, tree: &WidgetNode) {
+        self.frame_revision = self.frame_revision.saturating_add(1);
+        let dirty = self.retained_tree.last_dirty();
+        let phases = FramePhaseStamps::complete(self.frame_revision);
+        let frame = match self.last_frame_snapshot.as_ref() {
+            Some(previous) if dirty.inserted == 0 && dirty.removed == 0 && dirty.children == 0 => {
+                FrameSnapshot::capture_dirty(
+                    tree,
+                    self.frame_revision,
+                    phases,
+                    previous,
+                    self.retained_tree.dirty_node_ids(),
+                )
+            }
+            previous => FrameSnapshot::capture(tree, self.frame_revision, phases, previous),
+        };
+        match frame {
+            Ok(frame) => {
+                self.publish_interaction_tree_snapshot(frame.clone());
+                self.last_frame_snapshot = Some(frame);
+            }
+            Err(error) => {
+                self.last_frame_snapshot = None;
+                tracing::error!(
+                    component = %self.id(),
+                    "frame snapshot construction failed: {error}"
+                );
+            }
         }
     }
 
@@ -1066,9 +1112,29 @@ impl FrontendSurfaceComponent {
         true
     }
 
-    fn annotate_selection_tree(&self, tree: &mut WidgetNode, theme: &Theme) {
+    pub(super) fn annotate_selection_tree(
+        &mut self,
+        tree: &mut WidgetNode,
+        theme: &Theme,
+        force: bool,
+    ) -> HashSet<NodeId> {
+        let mut dirty = HashSet::new();
+        if let Some((previous, _, _, _)) = &self.selection_annotation {
+            if self
+                .selection
+                .as_ref()
+                .is_none_or(|selection| selection.anchor.node_key != previous.anchor.node_key)
+            {
+                if let Some(node) = find_node_by_key_mut(tree, &previous.anchor.node_key) {
+                    node.attributes
+                        .retain(|key, _| !key.starts_with("_mesh_selection_"));
+                    dirty.insert(node.id);
+                }
+            }
+        }
         let Some(selection) = &self.selection else {
-            return;
+            self.selection_annotation = None;
+            return dirty;
         };
         let selection_background = theme
             .token("color.selection-background")
@@ -1081,6 +1147,22 @@ impl FrontendSurfaceComponent {
             .map(ToString::to_string)
             .unwrap_or_else(|| "#FFFFFF".to_string());
         if let Some(node) = find_node_by_key_mut(tree, &selection.anchor.node_key) {
+            let projection = (
+                selection.clone(),
+                [
+                    node.layout.x.to_bits(),
+                    node.layout.y.to_bits(),
+                    node.computed_style.padding.left.to_bits(),
+                    node.computed_style.padding.top.to_bits(),
+                ],
+                selection_background.clone(),
+                selection_foreground.clone(),
+            );
+            if !force && self.selection_annotation.as_ref() == Some(&projection) {
+                return dirty;
+            }
+            self.selection_annotation = Some(projection);
+            dirty.insert(node.id);
             annotate_selected_text_node(
                 node,
                 selection,
@@ -1088,6 +1170,7 @@ impl FrontendSurfaceComponent {
                 &selection_foreground,
             );
         }
+        dirty
     }
 
     fn record_runtime_style_diagnostics(

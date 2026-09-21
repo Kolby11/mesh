@@ -785,6 +785,93 @@ impl FrameSnapshot {
         })))
     }
 
+    /// Normalize changed retained nodes and their name-bearing ancestors.
+    /// Cached child text avoids revisiting unrelated branches. Callers must use
+    /// full normalization after structural changes. `dirty_subtrees` includes
+    /// descendants restyled through inheritance; `dirty_nodes` contains local
+    /// runtime changes. Returns the normalized IDs, or `None` after a full
+    /// fallback when the retained topology cannot be reused.
+    pub fn normalize_accessibility_dirty(
+        &self,
+        root: &mut WidgetNode,
+        dirty_nodes: &HashSet<NodeId>,
+        dirty_subtrees: &HashSet<NodeId>,
+    ) -> Option<HashSet<NodeId>> {
+        let mut affected = BTreeSet::new();
+        for id in dirty_nodes.iter().chain(dirty_subtrees) {
+            let Some(&index) = self.0.id_index.get(id) else {
+                crate::normalize_accessibility(root);
+                return None;
+            };
+            affected.insert(index);
+            let Some((_, policy)) = self.live_node(root, index) else {
+                crate::normalize_accessibility(root);
+                return None;
+            };
+            let old = self.0.nodes.get(index).policy;
+            if dirty_subtrees.contains(id)
+                || policy.is_disabled() != old.is_disabled()
+                || policy.is_semantically_visible() != old.is_semantically_visible()
+            {
+                self.collect_descendants(index, &mut affected);
+            }
+        }
+        for index in affected.clone() {
+            let mut parent = self.0.nodes.get(index).parent();
+            while let Some(identity) = parent {
+                let index = self.0.index[identity];
+                affected.insert(index);
+                parent = self.0.nodes.get(index).parent();
+            }
+        }
+        // Check every path before writing: a stale structural index must never
+        // leave the live tree partially normalized.
+        if affected.iter().any(|&index| {
+            self.live_node(root, index).is_none_or(|(node, _)| {
+                !same_structure_and_references(node, self.0.nodes.get(index))
+            })
+        }) {
+            crate::normalize_accessibility(root);
+            return None;
+        }
+        let mut text = HashMap::<usize, String>::new();
+        for &index in affected.iter().rev() {
+            let (node, policy) = self.live_node(root, index).expect("validated path");
+            let child_text = self
+                .0
+                .nodes
+                .get(index)
+                .children
+                .iter()
+                .map(|identity| {
+                    let child = self.0.index[identity];
+                    text.get(&child)
+                        .map(String::as_str)
+                        .unwrap_or(self.0.nodes.get(child).semantic_text.as_ref())
+                })
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ");
+            let (info, visible_text) =
+                crate::accessibility::frame_local_info(node, &child_text, policy);
+            text.insert(index, visible_text);
+            let mut node = &mut *root;
+            for &child in self.0.paths[index].iter() {
+                node = &mut node.children[child];
+            }
+            if node.accessibility_baseline().is_none() {
+                node.set_accessibility_baseline(node.accessibility.clone());
+            }
+            node.accessibility = info;
+        }
+        Some(
+            affected
+                .into_iter()
+                .map(|index| self.0.nodes.get(index).id)
+                .collect(),
+        )
+    }
+
     fn live_node<'a>(
         &self,
         root: &'a WidgetNode,
@@ -1434,6 +1521,133 @@ mod tests {
                 assert_equivalent(&dirty, &full, &format!("seed {seed}, {case}"));
             }
         }
+    }
+
+    #[test]
+    fn dirty_normalization_matches_full_including_inherited_policy_and_names() {
+        fn compare(left: &WidgetNode, right: &WidgetNode) {
+            assert_eq!(
+                format!("{:?}", left.accessibility),
+                format!("{:?}", right.accessibility),
+                "node {}",
+                left.id
+            );
+            for (left, right) in left.children.iter().zip(&right.children) {
+                compare(left, right);
+            }
+        }
+        for seed in 1..12 {
+            let mut original = generated_tree(seed);
+            original.children[0].attributes.remove("aria-label");
+            original.children[0].attributes.remove("aria-hidden");
+            let mut label = WidgetNode::new("text");
+            label.id = 500;
+            label.set_mesh_key("root/item-0/label");
+            label
+                .attributes
+                .insert("content".into(), "descendant name".into());
+            original.children[0].children.push(label);
+            crate::normalize_accessibility(&mut original);
+            let previous = FrameSnapshot::complete(&original, 1, None).unwrap();
+            for case in [
+                "text",
+                "hidden",
+                "disabled",
+                "focus",
+                "restyle",
+                "structural",
+            ] {
+                let mut root = original.clone();
+                let target = &mut root.children[0];
+                let id = if case == "text" {
+                    target.children[0].id
+                } else {
+                    target.id
+                };
+                match case {
+                    "text" => {
+                        target.children[0]
+                            .attributes
+                            .insert("content".into(), "replacement".into());
+                    }
+                    "hidden" => {
+                        target
+                            .attributes
+                            .insert("aria-hidden".into(), "true".into());
+                    }
+                    "disabled" => {
+                        target.attributes.insert("disabled".into(), "true".into());
+                    }
+                    "focus" => {
+                        target.state.focused = true;
+                    }
+                    "restyle" => {
+                        target.children[0].computed_style.display = crate::style::Display::None;
+                    }
+                    _ => {
+                        target.children.push(WidgetNode::new("text"));
+                    }
+                }
+                let mut full = root.clone();
+                crate::normalize_accessibility(&mut full);
+                previous.normalize_accessibility_dirty(
+                    &mut root,
+                    &HashSet::from([id]),
+                    &if case == "restyle" {
+                        HashSet::from([id])
+                    } else {
+                        HashSet::new()
+                    },
+                );
+                compare(&root, &full);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "release-only semantic finalization benchmark"]
+    fn dirty_semantic_finalization_benchmark() {
+        let mut tree = WidgetNode::new("column");
+        for index in 0..1024 {
+            let mut label = WidgetNode::new("text");
+            label
+                .attributes
+                .insert("content".into(), format!("label {index}"));
+            tree.children.push(label);
+        }
+        crate::normalize_accessibility(&mut tree);
+        let base = FrameSnapshot::complete(&tree, 1, None).unwrap();
+        let id = tree.children[512].id;
+        let dirty = HashSet::from([id]);
+        let mut full_tree = tree.clone();
+        let start = std::time::Instant::now();
+        for revision in 2..102 {
+            full_tree.children[512].state.focused = revision % 2 == 0;
+            crate::normalize_accessibility(&mut full_tree);
+            std::hint::black_box(
+                FrameSnapshot::complete(&full_tree, revision, Some(&base)).unwrap(),
+            );
+        }
+        let full = start.elapsed();
+        let start = std::time::Instant::now();
+        for revision in 2..102 {
+            tree.children[512].state.focused = revision % 2 == 0;
+            base.normalize_accessibility_dirty(&mut tree, &dirty, &HashSet::new());
+            std::hint::black_box(
+                FrameSnapshot::capture_dirty(
+                    &tree,
+                    revision,
+                    FramePhaseStamps::complete(revision),
+                    &base,
+                    &dirty,
+                )
+                .unwrap(),
+            );
+        }
+        let scoped = start.elapsed();
+        eprintln!(
+            "semantic finalization: 1025 nodes, 100 leaf-focus frames: full {full:?}, scoped {scoped:?}"
+        );
     }
 
     /// Structural edits are outside the dirty contract and must take the full

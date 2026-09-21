@@ -292,3 +292,29 @@ fn direct_retained_update_panics_on_duplicate_node_ids() {
 
     RetainedWidgetTree::default().update(&root);
 }
+
+#[test]
+fn exact_root_state_does_not_promote_unrelated_descendants_to_full_fingerprinting() {
+    let mut tree = WidgetNode::new("column");
+    for _ in 0..128 {
+        tree.children.push(WidgetNode::new("text"));
+    }
+    annotate_with_empty_context(&mut tree);
+    let mut scoped = RetainedWidgetTree::default();
+    let mut full = RetainedWidgetTree::default();
+    scoped.update(&tree);
+    full.update(&tree);
+    tree.state.hovered = true;
+    tree.children[60].layout.x = 42.0;
+    let expected = full.update(&tree);
+    let (actual, changed) = scoped.update_for_dirty_roots_and_nodes_collect(
+        &tree,
+        &HashSet::new(),
+        &HashSet::from([tree.id]),
+    );
+    assert_eq!(actual, expected);
+    assert!(scoped.last_update_was_scoped());
+    assert_eq!(changed.unwrap().len(), 2);
+    assert_eq!(scoped.dirty_node_ids(), full.dirty_node_ids());
+    assert_eq!(scoped.render_dirty_node_ids(), full.render_dirty_node_ids());
+}
