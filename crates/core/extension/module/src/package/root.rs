@@ -111,6 +111,19 @@ impl RootModuleGraphManifest {
         }
     }
 
+    /// Forget an uninstalled module's inventory entry and the decisions bound
+    /// to its source: capability approvals and the disabled flag. A module
+    /// installed later under the same id starts from a fresh review. Returns
+    /// whether the root changed.
+    pub fn forget_uninstalled_module(&mut self, module_id: &str) -> bool {
+        let before = self.disabled.len();
+        self.disabled.retain(|disabled| disabled != module_id);
+        let disabled_changed = self.disabled.len() != before;
+        let approvals_changed = self.capability_approvals.remove(module_id).is_some();
+        let inventory_changed = self.modules.remove(module_id).is_some();
+        disabled_changed || approvals_changed || inventory_changed
+    }
+
     /// Remove every root-graph reference owned by a forcibly uninstalled
     /// module. This is shared by the CLI and shell package authorities.
     pub fn remove_module_references(&mut self, module_id: &str) {
@@ -121,8 +134,6 @@ impl RootModuleGraphManifest {
         {
             self.layout = None;
         }
-        self.disabled.retain(|disabled| disabled != module_id);
-        self.capability_approvals.remove(module_id);
         self.providers.retain(|_, provider| provider != module_id);
         if self
             .theme
@@ -131,7 +142,7 @@ impl RootModuleGraphManifest {
         {
             self.theme = None;
         }
-        self.modules.remove(module_id);
+        self.forget_uninstalled_module(module_id);
     }
 
     /// Persist the inventory portion of the root graph while preserving the

@@ -1532,12 +1532,13 @@ fn cmd_uninstall(args: &[String]) {
             .unwrap_or_else(|error| exit_error(error)),
     };
 
-    if force {
+    let root_changed = if force {
         root.remove_module_references(module_id);
+        true
     } else {
-        root.modules.remove(module_id);
-    }
-    if explicit_inventory {
+        root.forget_uninstalled_module(module_id)
+    };
+    if explicit_inventory || root_changed {
         if let Err(error) = transaction.save_root(&root_path, &root) {
             let _ = transaction.abort();
             exit_error(error);

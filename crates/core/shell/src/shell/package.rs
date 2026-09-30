@@ -302,14 +302,13 @@ impl Shell {
         }
 
         let explicit_inventory = !root.modules.is_empty();
-        if force {
+        let root_changed = if force {
             root.remove_module_references(module_id);
-        }
-
-        if !force {
-            root.modules.remove(module_id);
-        }
-        if explicit_inventory {
+            true
+        } else {
+            root.forget_uninstalled_module(module_id)
+        };
+        if explicit_inventory || root_changed {
             transaction
                 .save_root(&graph_path, &root)
                 .map_err(|error| package_error(error.to_string()))?;

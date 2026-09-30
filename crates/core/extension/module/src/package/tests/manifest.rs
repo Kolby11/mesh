@@ -1035,3 +1035,24 @@ fn module_manifest_loader_preserves_navigation_bar_entrypoint() {
     );
     assert_eq!(loaded.manifest.mesh.contributes.layout[0].id, "main");
 }
+
+#[test]
+fn uninstall_forgets_approvals_and_disabled_state_bound_to_the_source() {
+    let mut root = RootModuleGraphManifest::from_json_str(
+        r#"{
+          "mesh": {
+            "modulesDir": "../modules",
+            "disabled": ["@me/tool"],
+            "capabilityApprovals": { "@me/tool": ["exec.command"], "@me/other": ["theme.read"] }
+          }
+        }"#,
+    )
+    .unwrap();
+
+    assert!(root.forget_uninstalled_module("@me/tool"));
+
+    assert!(root.disabled.is_empty());
+    assert!(!root.capability_approvals.contains_key("@me/tool"));
+    assert!(root.capability_approvals.contains_key("@me/other"));
+    assert!(!root.forget_uninstalled_module("@me/tool"));
+}
