@@ -598,6 +598,19 @@ fn display_list_can_force_full_surface_damage() {
 }
 
 #[test]
+#[cfg(debug_assertions)]
+fn resource_reload_preserves_widget_caller_lineage() {
+    let root = node(1, "box", 0.0, 0.0, 100.0, 40.0);
+    let mut list = RetainedDisplayList::default();
+    list.update_at_for_retained_generation(&root, 95, 0.0, 0.0, 100, 40, false, true);
+    mesh_core_resources::advance_resource_revision();
+    assert!(list.caller_lineage_is_valid(&root, 95));
+    let metrics = list.update_at_for_retained_generation(&root, 95, 0.0, 0.0, 100, 40, false, true);
+    assert!(metrics.full_surface_damage);
+    assert!(metrics.entries_rebuilt > 0);
+}
+
+#[test]
 fn display_list_validates_caller_lineage_for_retained_generation() {
     let mut root = node(1, "box", 0.0, 0.0, 100.0, 40.0);
     root.computed_style.overflow_y = Overflow::Scroll;

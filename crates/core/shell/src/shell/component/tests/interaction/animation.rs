@@ -58,6 +58,45 @@ end
 }
 
 #[test]
+fn completed_transition_keeps_final_sample_in_retained_dirty_roots() {
+    use mesh_core_animation::transition::AnimatableStyle;
+    let mut component = test_frontend_component("<template><box /></template>");
+    let mut tree = transition_test_tree(mesh_core_elements::TransitionProperties {
+        opacity: true,
+        ..mesh_core_elements::TransitionProperties::none()
+    });
+    let child = &mut tree.children[0];
+    child.computed_style.opacity = 0.1;
+    let previous = AnimatableStyle::from_node(child);
+    child.computed_style.opacity = 0.9;
+    let id = child.id;
+    assert!(component.transitions.step_node(
+        id,
+        child,
+        previous,
+        std::time::Instant::now() - std::time::Duration::from_secs(1)
+    ));
+    component.retained_tree.update(&tree);
+    let before = component.retained_tree.generation();
+    let dirty = component.apply_style_animations_with_previous(
+        &mut tree,
+        &HashMap::new(),
+        &component.surface_css_props(),
+    );
+    assert!(!component.transitions.has_active(std::time::Instant::now()));
+    assert_eq!(tree.children[0].computed_style.opacity, 0.9);
+    assert!(
+        dirty.contains(&id),
+        "the completed animation still changed its last sample"
+    );
+    component
+        .retained_tree
+        .update_for_dirty_roots(&tree, &dirty);
+    assert!(component.retained_tree.generation() > before);
+    assert_eq!(component.retained_tree.render_dirty().opacity, 1);
+}
+
+#[test]
 fn animation_transition_dirty_uses_visual_repaint_for_paint_only_changes() {
     let mut component = test_frontend_component("<template><box /></template>");
     let mut previous = transition_test_tree(mesh_core_elements::TransitionProperties {

@@ -1895,10 +1895,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         let scale_policy = mesh_core_render::FractionalScale::new(scale);
         let logical_width = scale_policy.logical_extent(buffer.width());
         let logical_height = scale_policy.logical_extent(buffer.height());
-        let retained_generation = self
-            .retained_display_list
-            .subtree_generation(node.id)
-            .unwrap_or_default();
+        // Promoted roots are hidden in the parent display list, so its
+        // subtree stamps may be absent or stop advancing. The retained widget
+        // tree still tracks their animation, style and content changes.
+        let retained_generation = self.retained_tree.generation();
         let mut child_display_lists = self.child_display_lists.borrow_mut();
         let display_list = child_display_lists.get_or_insert(node.id);
         display_list.set_backdrop_blur_policy(mesh_core_render::backdrop_blur_policy());
@@ -2280,8 +2280,8 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn child_surface_paint_generation(&self, node_key: &str) -> Option<u64> {
-        let node_id = find_node_by_key(self.last_tree.as_ref()?, node_key)?.id;
-        self.retained_display_list.subtree_generation(node_id)
+        find_node_by_key(self.last_tree.as_ref()?, node_key)?;
+        Some(self.retained_tree.generation())
     }
 
     fn debug_keybinds(&self) -> Vec<mesh_core_debug::DebugKeybindEntry> {

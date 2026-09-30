@@ -233,6 +233,7 @@ impl FrontendSurfaceComponent {
                 .is_some_and(|value| value == "true");
         if node.mesh_key().is_some() {
             let node_id = node.id;
+            let before_sampling = AnimatableStyle::from_node(node);
             live_keys.insert(node_id);
             let previous_style = if entering {
                 // A promoted child is mapped from this exact paint. Snap its
@@ -269,17 +270,19 @@ impl FrontendSurfaceComponent {
                 has_active_keyframe_animation,
                 active_keyframe_bucket,
             );
-            // `previous_styles` is this pass's own baseline, so it only reports
-            // a change when the pass that captured it also advanced the
-            // animation. A surface painted twice in one frame samples the same
-            // live transition again on the second pass, sees an unchanged
-            // baseline, and would leave the node out of the retained dirty
-            // roots while its resolved colors keep moving — handing the display
-            // list one retained generation for two different trees. A node
-            // whose animation is still running is dirty by definition.
+            // Live animations stay dirty even when a delay or a repeated pass
+            // holds their sample constant. Completion can write an endpoint
+            // after `unfinished` becomes false, so also compare with the input
+            // sample and the last painted style. A value sampled at this same
+            // `now` alone cannot detect that final change.
+            let sampled = AnimatableStyle::from_node(node);
             if animation_is_live
-                || previous_style
-                    .is_some_and(|previous| previous != AnimatableStyle::from_node(node))
+                || before_sampling != sampled
+                || previous_styles
+                    .get(&node_id)
+                    .copied()
+                    .or(previous_style)
+                    .is_some_and(|previous| previous != sampled)
             {
                 dirty_node_ids.insert(node.id);
             }

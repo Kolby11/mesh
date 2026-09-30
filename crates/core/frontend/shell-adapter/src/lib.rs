@@ -722,6 +722,25 @@ impl FrontendFrameEffects {
         self.typed_effects.extend(effects);
     }
 
+    /// Drop effects whose producing revision has been superseded. Keep each
+    /// surviving stamp intact: obsolete requests must never be retagged, and
+    /// one obsolete request must not discard the rest of a current batch.
+    pub fn discard_stale(&mut self, revision: FrontendEffectRevision) -> usize {
+        let before = self.host_requests.len() + self.typed_effects.len();
+        let mut revisions = std::mem::take(&mut self.host_request_revisions).into_iter();
+        self.host_requests.retain(|_| {
+            let actual = revisions.next().expect("one revision per host request");
+            let keep = actual.is_none_or(|actual| actual == revision);
+            if keep {
+                self.host_request_revisions.push(actual);
+            }
+            keep
+        });
+        self.typed_effects
+            .retain(|effect| effect.revision().is_none_or(|actual| actual == revision));
+        before - self.host_requests.len() - self.typed_effects.len()
+    }
+
     /// Stamp typed effects with the catalog/runtime revision that produced the
     /// frame. An already stamped effect must agree; silently retagging it would
     /// turn an obsolete capability-bearing request into a current one.
@@ -1358,6 +1377,53 @@ mod frontend_frame_tests {
             ),
             Ok(requests) if matches!(requests.as_slice(), [CoreRequest::ShowSurface { .. }])
         ));
+    }
+
+    #[test]
+    fn stale_effect_filter_preserves_current_and_unbound_requests() {
+        let current = FrontendEffectRevision::new(5, 9);
+        let mut effects = FrontendFrameEffects::from_host_requests_at(
+            vec![CoreRequest::Shutdown],
+            FrontendEffectRevision::new(4, 9),
+        );
+        effects.extend_host_requests_at(
+            vec![CoreRequest::ShowSurface {
+                surface_id: "old-runtime".into(),
+            }],
+            FrontendEffectRevision::new(5, 8),
+        );
+        effects.extend_host_requests_at(
+            vec![CoreRequest::ShowSurface {
+                surface_id: "current".into(),
+            }],
+            current,
+        );
+        effects.extend_host_requests(vec![CoreRequest::Shutdown]);
+        effects.extend_typed_effects([
+            ScopedFrontendEffect::new(
+                effect_scope("shell.surface"),
+                FrontendEffect::Surface(SurfaceEffect::Show {
+                    surface_id: "old".into(),
+                }),
+            )
+            .with_revision(FrontendEffectRevision::new(5, 8)),
+            ScopedFrontendEffect::new(
+                effect_scope("shell.surface"),
+                FrontendEffect::Surface(SurfaceEffect::Show {
+                    surface_id: "current".into(),
+                }),
+            )
+            .with_revision(current),
+        ]);
+        assert_eq!(effects.discard_stale(current), 3);
+        assert!(
+            matches!(effects.host_requests(), [CoreRequest::ShowSurface { surface_id }, CoreRequest::Shutdown] if surface_id == "current")
+        );
+        assert_eq!(effects.host_request_revisions(), &[Some(current), None]);
+        assert_eq!(effects.typed_effects().len(), 1);
+        assert_eq!(effects.typed_effects()[0].revision(), Some(current));
+        effects.bind_revision(current).unwrap();
+        assert_eq!(effects.discard_stale(current), 0);
     }
 
     #[test]

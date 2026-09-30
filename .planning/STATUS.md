@@ -4,6 +4,15 @@
 
 ## Now
 
+Navigation/settings warning fixes are implemented: promoted child paint uses
+the retained widget-tree revision, and frame effect snapshots discard only
+superseded requests. Resource reloads no longer alter widget caller lineage;
+bubble-options declares its icon-pack fallbacks. Validation and limits are in
+[September's log](log/2026-09.md).
+The follow-up closes terminal-animation dirty tracking and adds transform origin,
+visibility and white-space to retained style fingerprints. Lineage diagnostics
+now identify the root module/key; the runtime checks remain enabled.
+
 A 2026-09-30 profiling pass on the navigation bar landed three fixes, committed
 alongside the hover/focus work: failed runtime creation for a
 missing interface is remembered instead of rebuilt every frame, runtime style

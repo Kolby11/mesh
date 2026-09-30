@@ -850,6 +850,59 @@ mod tests {
     }
 
     #[test]
+    fn bubble_options_resolves_night_icon_when_system_theme_lacks_it() {
+        let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read(workspace.join("modules/frontend/shared/module.json")).unwrap(),
+        )
+        .unwrap();
+        let pack_dir = workspace.join("modules/icon-packs/material-symbols");
+        let pack_manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(pack_dir.join("module.json")).unwrap()).unwrap();
+        let mut reg = registry();
+        reg.set_icon_pack(IconPackBindings {
+            pack_id: "material-rounded".into(),
+            module_id: "@mesh/icons-material-symbols".into(),
+            mappings: serde_json::from_value::<HashMap<String, String>>(
+                pack_manifest["mesh"]["contributes"]["icons"][0]["mappings"].clone(),
+            )
+            .unwrap()
+            .into_iter()
+            .map(|(name, target)| (name, target.into()))
+            .collect(),
+            vocabularies: HashMap::new(),
+            axes: SupportedAxes::default(),
+            font_aliases: HashMap::from([(
+                "ms".into(),
+                FontAsset {
+                    family: "Material Symbols Rounded".into(),
+                    glyph_map_path: Some(pack_dir.join("codepoints.json")),
+                    resolved_font_path: Some(pack_dir.join("assets/MaterialSymbolsRounded.ttf")),
+                    prepared_font: None,
+                    font_fingerprint: None,
+                    prepared_glyphs: None,
+                },
+            )]),
+        });
+        reg.set_shell_default_pack(Some("Bibata-Original-Amber".into()));
+        reg.set_frontend_bindings(
+            "@mesh/bubble-options",
+            FrontendIconBindings {
+                declared_pack_chain: serde_json::from_value(
+                    manifest["mesh"]["uses"]["resources"]["icons"].clone(),
+                )
+                .unwrap(),
+                ..Default::default()
+            },
+        );
+        assert!(matches!(
+            reg.resolve_for_module("@mesh/bubble-options", "weather-clear-night", 24),
+            IconResolution::Found { target: ResolvedTarget::Glyph { .. }, provenance, .. }
+                if provenance.pack_id.as_deref() == Some("material-rounded")
+        ));
+    }
+
+    #[test]
     fn bundled_material_symbols_resolves_to_a_variable_font_glyph() {
         let pack_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../../modules/icon-packs/material-symbols");

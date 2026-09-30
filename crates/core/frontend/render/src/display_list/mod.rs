@@ -924,6 +924,9 @@ impl RetainedDisplayList {
             if self.retained_caller_lineage != Some(caller_lineage) {
                 tracing::warn!(
                     retained_tree_generation,
+                    root_id = root.id,
+                    root_module = ?root.module_id(),
+                    root_key = ?root.mesh_key(),
                     expected_lineage = ?self.retained_caller_lineage,
                     actual_lineage = caller_lineage,
                     "retained display-list generation changed caller lineage; rebuilding"

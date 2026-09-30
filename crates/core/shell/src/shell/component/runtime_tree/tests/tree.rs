@@ -1,6 +1,35 @@
 use super::*;
 
 #[test]
+fn retained_generation_tracks_paint_style_fields_without_layout_changes() {
+    use mesh_core_elements::style::{TransformOriginValue, Visibility, WhiteSpace};
+    let mutations: [fn(&mut ComputedStyle); 3] = [
+        |style| style.transform_origin.x = TransformOriginValue::Px(12.0),
+        |style| style.visibility = Visibility::Hidden,
+        |style| style.white_space = WhiteSpace::Nowrap,
+    ];
+    for mutate in mutations {
+        let mut node = WidgetNode::new("text");
+        let mut retained = RetainedWidgetTree::default();
+        retained.update(&node);
+        let before = retained.generation();
+        let old_render = RenderObjectFingerprint::for_node(&node, None);
+        mutate(&mut node.computed_style);
+        assert_ne!(RenderObjectFingerprint::for_node(&node, None), old_render);
+        retained.update(&node);
+        assert!(
+            retained.generation() > before,
+            "paint changes must advance the retained generation"
+        );
+        assert!(retained.render_dirty().any());
+        assert_eq!(
+            retained.render_fingerprint(node.id),
+            Some(&RenderObjectFingerprint::for_node(&node, None))
+        );
+    }
+}
+
+#[test]
 fn retained_widget_tree_reports_dirty_categories_by_stable_id() {
     let mut tree = WidgetNode::new("row");
     tree.children.push(WidgetNode::new("button"));

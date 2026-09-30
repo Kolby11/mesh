@@ -171,6 +171,18 @@ pub(super) fn hash_style_fields(style: &ComputedStyle, hasher: &mut impl Hasher)
     hash_corners(style.border_radius, hasher);
     style.opacity.to_bits().hash(hasher);
     hash_transform(style.transform, hasher);
+    for origin in [style.transform_origin.x, style.transform_origin.y] {
+        match origin {
+            mesh_core_elements::style::TransformOriginValue::Percent(value) => {
+                0_u8.hash(hasher);
+                value.to_bits().hash(hasher);
+            }
+            mesh_core_elements::style::TransformOriginValue::Px(value) => {
+                1_u8.hash(hasher);
+                value.to_bits().hash(hasher);
+            }
+        }
+    }
     style.transitions.hash(hasher);
     style.animations.hash(hasher);
     style.overflow_x.hash(hasher);
@@ -184,8 +196,10 @@ pub(super) fn hash_style_fields(style: &ComputedStyle, hasher: &mut impl Hasher)
     style.font_style.hash(hasher);
     style.letter_spacing.to_bits().hash(hasher);
     style.text_overflow.hash(hasher);
+    style.white_space.hash(hasher);
     style.text_direction.hash(hasher);
     style.display.hash(hasher);
+    std::mem::discriminant(&style.visibility).hash(hasher);
     style.direction.hash(hasher);
     style.justify_content.hash(hasher);
     style.align_items.hash(hasher);

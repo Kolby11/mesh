@@ -370,13 +370,17 @@ enum AccessibilityRoleSlot {
 /// produced from. The generation remains the production fast-path authority;
 /// this catches callers that reuse a plain generation number for a different
 /// tree while making the violation observable before stale paint data escapes.
+/// Global resource revisions are validated separately by the display list;
+/// loading an icon or font does not change the caller's widget-tree lineage.
 #[cfg(debug_assertions)]
 pub(crate) fn caller_lineage_fingerprint(root: &WidgetNode) -> u64 {
     fn visit(node: &WidgetNode, hasher: &mut DefaultHasher) {
         node.id.hash(hasher);
         node.tag.hash(hasher);
         node.children.len().hash(hasher);
-        RenderObjectFingerprint::for_node(node, None).hash(hasher);
+        let mut fingerprint = RenderObjectFingerprint::for_node(node, None);
+        fingerprint.paint.resource_revision = 0;
+        fingerprint.hash(hasher);
         for child in &node.children {
             visit(child, hasher);
         }

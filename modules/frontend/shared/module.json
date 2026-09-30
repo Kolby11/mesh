@@ -5,6 +5,14 @@
   "mesh": {
     "apiVersion": "0.1",
     "kind": "component",
+    "uses": {
+      "resources": {
+        "icons": [
+          "@mesh/icons-material-symbols",
+          "@mesh/icons-default"
+        ]
+      }
+    },
     "entry": "components/bubble-options.mesh"
   }
 }

@@ -1551,6 +1551,18 @@ impl FrontendSurfaceComponent {
             self.service_revision.get(),
         );
         let mut effects = std::mem::take(&mut self.pending_frontend_effects);
+        // Host requests were already returned to the shell queue when emitted.
+        // Runtime state can advance before the next paint (including while
+        // creating nested runtimes). Keep only current requests in this frame's
+        // snapshot instead of rejecting an entire mixed-revision batch.
+        let discarded = effects.discard_stale(revisions.effect_revision());
+        if discarded > 0 {
+            tracing::debug!(
+                component_id = %self.compiled.manifest.package.id,
+                discarded,
+                "omitting superseded frontend effects from frame snapshot"
+            );
+        }
         if let Err(error) = effects.bind_revision(revisions.effect_revision()) {
             tracing::warn!(
                 component_id = %self.compiled.manifest.package.id,

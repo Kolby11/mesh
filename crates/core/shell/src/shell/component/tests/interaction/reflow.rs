@@ -1,6 +1,113 @@
 use super::*;
 
 #[test]
+fn hidden_child_surface_tracks_retained_tree_changes() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    let mut child = event_node("box", "root/popup", 0.0, 0.0, 40.0, 30.0, &[]);
+    child.mark_promoted_popover();
+    child.attributes.insert("hidden".into(), "true".into());
+    child.computed_style.background_color = mesh_core_elements::style::Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    let child_id = child.id;
+    let mut tree = root_with(vec![child]);
+    component.retained_tree.update(&tree);
+    component
+        .retained_display_list
+        .update(&tree, 120, 80, false, true);
+    component.last_tree = Some(tree.clone());
+    let first = component
+        .child_surface_paint_generation("root/popup")
+        .unwrap();
+    let mut buffer = PixelBuffer::new(40, 30);
+    component
+        .paint_child_surface("root/popup", &mut buffer, 1.0, (0, 0), false)
+        .unwrap();
+    assert_eq!(buffer.get_pixel(10, 10).g, 0);
+    assert_eq!(buffer.get_pixel(10, 10).r, 255);
+    let first_list = component
+        .child_display_lists
+        .borrow()
+        .get(child_id)
+        .unwrap()
+        .generation();
+
+    tree.children[0].computed_style.background_color.g = 255;
+    component.retained_tree.update(&tree);
+    component
+        .retained_display_list
+        .update(&tree, 120, 80, false, true);
+    component.last_tree = Some(tree);
+    assert!(
+        component
+            .child_surface_paint_generation("root/popup")
+            .unwrap()
+            > first
+    );
+    component
+        .paint_child_surface("root/popup", &mut buffer, 1.0, (0, 0), false)
+        .unwrap();
+    assert_eq!(buffer.get_pixel(10, 10).g, 255);
+    assert!(
+        component
+            .child_display_lists
+            .borrow()
+            .get(child_id)
+            .unwrap()
+            .generation()
+            > first_list
+    );
+    // Repeating the same child frame must retain its commands.
+    let generation = component
+        .child_display_lists
+        .borrow()
+        .get(child_id)
+        .unwrap()
+        .generation();
+    component
+        .paint_child_surface("root/popup", &mut buffer, 1.0, (0, 0), false)
+        .unwrap();
+    assert_eq!(
+        component
+            .child_display_lists
+            .borrow()
+            .get(child_id)
+            .unwrap()
+            .generation(),
+        generation
+    );
+}
+
+#[test]
+fn frontend_publication_preserves_current_requests_after_runtime_advances() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 80);
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 80), &mut buffer, 1.0)
+        .unwrap();
+    component.record_frontend_host_effects(vec![CoreRequest::ShowSurface {
+        surface_id: "old".into(),
+    }]);
+    component.runtime_generations.borrow_mut().sync("root", 100);
+    component.record_frontend_host_effects(vec![CoreRequest::ShowSurface {
+        surface_id: "current".into(),
+    }]);
+    component.publish_frontend_frame();
+    let frame = component.frontend_frame().unwrap();
+    assert!(
+        matches!(frame.effects().host_requests(), [CoreRequest::ShowSurface { surface_id }] if surface_id == "current")
+    );
+    assert_eq!(
+        frame.effects().host_request_revisions(),
+        &[Some(frame.revisions().effect_revision())]
+    );
+}
+
+#[test]
 fn paint_publishes_one_interaction_frame_across_all_phases() {
     let mut component = test_frontend_component("<template><box /></template>");
     let theme = default_theme();
