@@ -110,6 +110,29 @@ UIs are ordinary `.mesh` components using capability-gated core services.
   Implement the detailed element and service contracts instead of duplicating
   those standards in each desktop feature.
 
+## Comments
+
+Write a comment only when it tells the reader something the code cannot:
+why a non-obvious choice was made, an invariant or ordering requirement, a
+protocol or platform quirk, a measured performance reason, or a link to the
+spec section being implemented. Good names and small functions come first; a
+comment is not a substitute for either.
+
+Do not write comments that:
+
+- restate what the next line does (`// increment counter`, `// return result`);
+- narrate the change or its history (`// added for X`, `// now uses Y`,
+  `// previously…`, `// fixed bug`) — that belongs in the commit message
+  or the log;
+- address a reviewer or the current task (`// as requested`, `// per review`);
+- label obvious sections (`// imports`, `// helpers`, `// constructor`);
+- leave commented-out code, or `TODO`s — open work goes in `docs/BACKLOG.md`.
+
+Doc comments on public items state the contract (inputs, guarantees, errors,
+panics), not the implementation. When code changes, update or delete comments
+it made wrong; a stale comment is worse than none. Match the surrounding
+file's comment density rather than adding a comment to every item.
+
 ## Review and audit guidance
 
 Use [prompts.md](prompts.md) for the whole-codebase audit procedure and the
