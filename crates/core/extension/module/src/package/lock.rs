@@ -152,12 +152,14 @@ impl MeshLock {
         installed_manifests: &[ModuleManifest],
         activate_composition: bool,
     ) -> Result<(), ModuleManifestError> {
+        super::check_installable_module_id(&manifest.name)
+            .map_err(ModuleManifestError::Validation)?;
         let digest = module_tree_digest(installed_at)?;
         let signature = super::load_module_signature(installed_at)?;
         let trust = if signature.is_some() {
             TrustTier::Verified
         } else {
-            TrustTier::for_source(&manifest.name, matches!(source, ModuleSource::Git { .. }))
+            TrustTier::for_source(matches!(source, ModuleSource::Git { .. }))
         };
         self.modules.insert(
             manifest.name.clone(),

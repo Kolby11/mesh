@@ -7,7 +7,8 @@
 //! decision.
 
 use super::{
-    ModuleManifest, ModuleManifestError, TrustPolicy, TrustTier, load_module_signature,
+    ModuleManifest, ModuleManifestError, TrustPolicy, TrustTier, check_installable_module_id,
+    load_module_signature,
     module_tree_digest,
 };
 use mesh_core_capability::{
@@ -79,12 +80,18 @@ pub fn review_install(
     installed: &CapabilityCatalog,
     approval: InstallApproval,
 ) -> Result<InstallReview, InstallReviewError> {
+    check_installable_module_id(&manifest.name).map_err(|reason| {
+        InstallReviewError::Provenance {
+            module_id: manifest.name.clone(),
+            reason,
+        }
+    })?;
     let signature = load_module_signature(staged)?;
     let digest = module_tree_digest(staged)?;
     let trust = if signature.is_some() {
         TrustTier::Verified
     } else {
-        TrustTier::for_source(&manifest.name, from_git)
+        TrustTier::for_source(from_git)
     };
     trust_policy
         .validate_candidate(

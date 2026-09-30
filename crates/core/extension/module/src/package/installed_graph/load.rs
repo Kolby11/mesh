@@ -280,7 +280,7 @@ fn load_installed_module_graph_with(
                 let trust = if signature.is_some() {
                     TrustTier::Verified
                 } else {
-                    TrustTier::default_for_module(&module_id)
+                    TrustTier::for_unlocked_module(&module_id)
                 };
                 (trust, digest, signature)
             };

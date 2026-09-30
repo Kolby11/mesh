@@ -28,19 +28,38 @@ impl Default for TrustTier {
     }
 }
 
+/// Module-id scope reserved for modules shipped with MESH. Package installs
+/// cannot claim it, so an unlocked module in this scope came with the
+/// distribution rather than from a git or path source.
+pub const CORE_SCOPE: &str = "@mesh/";
+
+/// Reject an installed source that claims the reserved core scope.
+pub fn check_installable_module_id(module_id: &str) -> Result<(), String> {
+    if module_id.starts_with(CORE_SCOPE) {
+        Err(format!(
+            "module id {module_id} uses the reserved {CORE_SCOPE} scope, which only modules \
+             shipped with MESH may use; rename the module to install it from this source"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 impl TrustTier {
-    pub fn default_for_module(module_id: &str) -> Self {
-        if module_id.starts_with("@mesh/") {
+    /// Tier for a module in the module tree with no lock record. Only
+    /// distribution-shipped modules are Core; see [`CORE_SCOPE`].
+    pub fn for_unlocked_module(module_id: &str) -> Self {
+        if module_id.starts_with(CORE_SCOPE) {
             Self::Core
         } else {
             Self::Local
         }
     }
 
-    pub fn for_source(module_id: &str, is_git: bool) -> Self {
-        if module_id.starts_with("@mesh/") {
-            Self::Core
-        } else if is_git {
+    /// Tier for an unsigned installed source. Installed sources are never
+    /// Core, whatever their module id.
+    pub fn for_source(is_git: bool) -> Self {
+        if is_git {
             Self::Community
         } else {
             Self::Local
@@ -405,6 +424,14 @@ mod tests {
         assert!(policy.allows(TrustTier::Verified));
         assert!(!policy.allows(TrustTier::Community));
         assert!(!policy.allows(TrustTier::Local));
+    }
+
+    #[test]
+    fn installed_sources_never_receive_the_core_tier() {
+        assert_eq!(TrustTier::for_source(true), TrustTier::Community);
+        assert_eq!(TrustTier::for_source(false), TrustTier::Local);
+        assert!(check_installable_module_id("@mesh/navigation-bar").is_err());
+        assert!(check_installable_module_id("@me/navigation-bar").is_ok());
     }
 
     #[test]

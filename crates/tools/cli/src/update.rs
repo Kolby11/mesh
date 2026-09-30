@@ -848,10 +848,7 @@ pub fn commit_update(
             entry.trust = if signature.is_some() {
                 TrustTier::Verified
             } else {
-                TrustTier::for_source(
-                    &candidate.module_id,
-                    matches!(&entry.source, ModuleSource::Git { .. }),
-                )
+                TrustTier::for_source(matches!(&entry.source, ModuleSource::Git { .. }))
             };
             entry.signature = signature;
             entry.dependencies = candidate

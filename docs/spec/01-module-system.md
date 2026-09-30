@@ -983,7 +983,11 @@ Privilege levels (fixed set, part of install UX):
 
 Trust tiers: `core` (shipped, reviewed), `verified` (reviewed + signed),
 `community` (unreviewed, user accepts risk), `local` (developer path, no
-signature). A detached `module.sig` contains the key id, algorithm, and
+signature). The tier comes from provenance: an unsigned git source is
+`community` and an unsigned path source is `local`, whatever its id. The
+`@mesh/` scope is reserved for modules shipped with MESH; installing a git or
+path source under it is rejected, so only the unlocked shipped tree is `core`.
+A detached `module.sig` contains the key id, algorithm, and
 base64 signature over the canonical module id/version/digest payload. Keys are
 configured under the root graph's `trustPolicy.keys`; an unknown key, changed
 payload, unsupported algorithm, or malformed signature blocks the module before

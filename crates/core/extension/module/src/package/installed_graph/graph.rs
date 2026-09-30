@@ -492,7 +492,7 @@ impl InstalledModuleGraph {
                 .get(module_id)
                 .cloned()
                 .unwrap_or_else(|| {
-                    TrustAssessment::accepted(TrustTier::default_for_module(module_id))
+                    TrustAssessment::accepted(TrustTier::for_unlocked_module(module_id))
                 });
             let trust_allowed = assessment.signature_valid && trust_policy.allows(assessment.tier);
             if entry.enabled && !assessment.signature_valid {
