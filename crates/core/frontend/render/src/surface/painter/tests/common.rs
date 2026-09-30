@@ -201,6 +201,30 @@ impl PaintBackend for TestPaintBackend {
         SkiaPaintBackend.execute_commands(buffer, commands, diagnostics);
     }
 
+    fn execute_commands_in_session(
+        &self,
+        session: &mut PixelCanvasSession<'_>,
+        commands: &[PainterCommand],
+        diagnostics: &mut Vec<PainterDiagnostic>,
+    ) {
+        SkiaPaintBackend.execute_commands_in_session(session, commands, diagnostics);
+    }
+
+    fn begin_affine_node(
+        &self,
+        session: &mut PixelCanvasSession<'_>,
+        transform: mesh_core_elements::AffineTransform,
+        ancestor_clips: &[mesh_core_elements::AffineClip],
+        scale: f32,
+        device_clip: ClipRect,
+    ) -> Option<usize> {
+        SkiaPaintBackend.begin_affine_node(session, transform, ancestor_clips, scale, device_clip)
+    }
+
+    fn end_affine_node(&self, session: &mut PixelCanvasSession<'_>, save_count: Option<usize>) {
+        SkiaPaintBackend.end_affine_node(session, save_count);
+    }
+
     fn fill_rect(&self, buffer: &mut PixelBuffer, rect: ClipRect, color: Color, clip: ClipRect) {
         SkiaPaintBackend.fill_rect(buffer, rect, color, clip);
     }

@@ -53,6 +53,7 @@ pub(super) fn build_paint_node_with_previous_transform_and_clips(
     let opacity = node.computed_style.opacity;
     DisplayPaintNode {
         id: node.id,
+        in_scroll_content: false,
         module_id: node.shared_module_id().cloned(),
         transform: world_transform,
         local_layout: LayoutRect {

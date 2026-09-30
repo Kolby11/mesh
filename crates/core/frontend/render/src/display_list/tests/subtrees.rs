@@ -5,6 +5,74 @@ use mesh_core_elements::style::{Color, Overflow};
 use mesh_core_elements::{NodeId, WidgetNode};
 
 #[test]
+fn scroll_scope_reuses_offscreen_content_commands_and_entries() {
+    let mut root = node(1, "scroll-area", 4.0, 6.0, 120.0, 80.0);
+    root.computed_style.overflow_y = Overflow::Hidden;
+    root.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
+        max_y: 720.0,
+        content_width: 120.0,
+        content_height: 800.0,
+        ..Default::default()
+    });
+    for index in 0..40 {
+        root.children.push(node(
+            2 + index,
+            "text",
+            8.0,
+            8.0 + index as f32 * 20.0,
+            80.0,
+            18.0,
+        ));
+    }
+    let mut objects = crate::RenderObjectTree::default();
+    objects.update(&root);
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 160, 100, true, true);
+    let retained = Arc::clone(&list.subtrees[&30].commands);
+    let entries = list.entries.clone();
+    let original_plan = list.frame_paint_plan().clone();
+    let generation = list.generation();
+    assert!(list.paint_commands().iter().any(|cmd| cmd.node.id == 30));
+    for offset in [20.0, 300.5, 12.25, 0.0] {
+        root.scroll_metrics.as_mut().unwrap().y = offset;
+        let dirty = objects.update(&root);
+        assert_eq!(dirty.scroll, 1);
+        assert_eq!(dirty.geometry, 0);
+        let metrics = list.update_with_dirty_nodes(
+            &root,
+            dirty,
+            objects.dirty_node_ids(),
+            160,
+            100,
+            false,
+            true,
+        );
+        assert!(Arc::ptr_eq(&retained, &list.subtrees[&30].commands));
+        assert_eq!(list.entries, entries);
+        assert_eq!(metrics.entries_rebuilt, 0);
+        assert_eq!(metrics.subtree_commands_rebuilt, 3); // owner + push/pop
+        assert!(metrics.damage_area > 0);
+        assert_eq!(metrics.full_fallback_count, 0);
+        assert_eq!(
+            list.frame_paint_plan().scroll_scopes[0].translation,
+            mesh_core_elements::AffineTransform::translation(0.0, -offset)
+        );
+        assert!(
+            list.frame_paint_plan()
+                .transforms
+                .iter()
+                .filter(|transform| transform.node_id != root.id)
+                .all(|transform| transform.scroll_scope == Some(root.id))
+        );
+    }
+    assert!(list.generation() > generation);
+    assert_eq!(
+        original_plan.scroll_scopes[0].translation,
+        mesh_core_elements::AffineTransform::translation(0.0, 0.0)
+    );
+}
+
+#[test]
 fn sparse_entry_patch_matches_full_collection_for_material_updates() {
     let mut root = node(1, "row", 0.0, 0.0, 120.0, 40.0);
     let unchanged = node(2, "box", 0.0, 0.0, 50.0, 20.0);
@@ -696,6 +764,7 @@ fn paint_only_dirty_parent_reuses_clean_descendants() {
             &mut next_subtrees,
             &mut metrics,
             BackdropBlurPolicy::CompositorRegion,
+            false,
         );
         old_rebuilt_commands =
             old_rebuilt_commands.saturating_add(std::hint::black_box(metrics.rebuilt_commands));
@@ -721,6 +790,7 @@ fn paint_only_dirty_parent_reuses_clean_descendants() {
             &mut next_subtrees,
             &mut metrics,
             BackdropBlurPolicy::CompositorRegion,
+            false,
         );
         new_rebuilt_commands =
             new_rebuilt_commands.saturating_add(std::hint::black_box(metrics.rebuilt_commands));

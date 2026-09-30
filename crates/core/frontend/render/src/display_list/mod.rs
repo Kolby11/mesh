@@ -12,6 +12,7 @@ mod batch_index;
 mod blur;
 mod build;
 mod paint_node;
+mod scroll;
 mod sequence;
 mod signature;
 pub use sequence::PaintSequence;
@@ -299,6 +300,24 @@ impl RetainedDisplayList {
         let dirty_summary = dirty_summary.unwrap_or_default();
         let empty_dirty_nodes = HashSet::new();
         let dirty_node_ids = dirty_node_ids.unwrap_or(&empty_dirty_nodes);
+        let scroll_only = dirty_summary.scroll > 0
+            && !resource_revision_changed
+            && !caller_lineage_changed
+            && !policy_changed
+            && self.root_id == Some(root.id)
+            && self.surface_size == Some((surface.width, surface.height))
+            && self.paint_origin == paint_origin
+            && dirty_summary
+                == RenderObjectDirtySummary {
+                    scroll: dirty_summary.scroll,
+                    ..Default::default()
+                }
+            && !dirty_node_ids.is_empty()
+            && dirty_node_ids.iter().all(|id| {
+                self.subtrees
+                    .get(id)
+                    .is_some_and(|subtree| subtree.scroll_viewport.is_some())
+            });
         let blur_metadata_reuse_candidate = has_authoritative_dirty_summary
             && self.root_id == Some(root.id)
             && self.surface_size == Some((surface.width, surface.height))
@@ -324,6 +343,10 @@ impl RetainedDisplayList {
         // index cannot answer falls back to the tree walk below, which reseeds
         // it from the reconciled map.
         let patch_batch_index = patch_sparse_entries
+            && !self
+                .subtrees
+                .values()
+                .any(|subtree| subtree.scroll_viewport.is_some())
             && self.batch_index.matches_root(root)
             && self.batch_index.collect_dirty_entries_with_fingerprints(
                 root,
@@ -331,7 +354,7 @@ impl RetainedDisplayList {
                 &mut next,
                 fingerprints,
             );
-        if !patch_batch_index {
+        if !patch_batch_index && !scroll_only {
             next.clear();
             collect_display_entries_with_fingerprints(
                 root,
@@ -402,7 +425,8 @@ impl RetainedDisplayList {
                 // own layout/material slots are clean. Reusing those child
                 // subtrees would retain stale world transforms and clip
                 // stacks.
-                let allow_clean_descendant_reuse = changed_layout_count(dirty_summary) == 0
+                let allow_clean_descendant_reuse = (changed_layout_count(dirty_summary) == 0
+                    || scroll_only)
                     && dirty_summary.transform == 0
                     && dirty_summary.clip == 0;
                 let subtree = build_paint_subtree(
@@ -419,6 +443,7 @@ impl RetainedDisplayList {
                     &mut next_subtrees,
                     &mut local_metrics,
                     self.backdrop_blur_policy,
+                    scroll_only,
                 );
                 self.dirty_ancestors_scratch = rebuild_ancestors;
                 self.ancestor_path_scratch = ancestor_path;
@@ -452,6 +477,7 @@ impl RetainedDisplayList {
                     &mut next_subtrees,
                     &mut local_metrics,
                     self.backdrop_blur_policy,
+                    false,
                 );
                 let command_spans = build_command_spans(root, &next_subtrees);
                 (
@@ -469,8 +495,22 @@ impl RetainedDisplayList {
         let topology_changed =
             paint_topology_changed(self.paint_commands.as_ref(), paint_commands.as_ref());
 
-        let (damage, mut damage_rects, reused, rebuilt, removed) =
-            self.reconcile_entries(&mut next, patch_sparse_entries, dirty_node_ids, surface);
+        let (mut damage, mut damage_rects, reused, rebuilt, removed) = if scroll_only {
+            (None, Vec::new(), self.entries.len() as u64, 0, 0)
+        } else {
+            self.reconcile_entries(&mut next, patch_sparse_entries, dirty_node_ids, surface)
+        };
+        // Offsets are absent from immutable content signatures. Damage the
+        // anchored viewport explicitly when its scope transform changes.
+        let scoped_geometry_change = changed_layout_count(dirty_summary) > 0;
+        if scoped_geometry_change {
+            for subtree in self.subtrees.values().chain(subtrees.values()) {
+                if let Some(viewport) = subtree.scroll_viewport {
+                    damage = union_damage(damage, viewport);
+                    push_sparse_damage_rect(&mut damage_rects, viewport, surface);
+                }
+            }
+        }
 
         // A text change can share a frame with a visibility annotation the
         // summary does not classify as primitive; the command count catches
@@ -517,7 +557,9 @@ impl RetainedDisplayList {
         // patches the dirty nodes' leaves; anything else reseeds the index from
         // the complete map it just built.
         let mut batch_index = std::mem::take(&mut self.batch_index);
-        if patch_sparse_entries {
+        if scroll_only {
+            // Offsets cannot change the ordered material stream.
+        } else if patch_sparse_entries {
             if !(patch_batch_index && batch_index.patch(dirty_node_ids, &self.entries)) {
                 batch_index.rebuild(root, offset_x, offset_y, &self.entries);
             }
@@ -533,6 +575,8 @@ impl RetainedDisplayList {
             || force_full_damage
             || topology_changed
             || policy_changed
+            || scroll_only
+            || (scoped_geometry_change && damage.is_some())
         {
             self.generation = self.generation.saturating_add(1);
         }
@@ -784,7 +828,22 @@ impl RetainedDisplayList {
         let mut nodes = Vec::new();
         let mut transforms = Vec::new();
         let mut seen_nodes = HashSet::new();
+        let mut scroll_scope = None;
+        let mut scroll_scopes = Vec::new();
         for command in self.paint_commands.iter() {
+            if command.kind == DisplayPaintCommandKind::PushScrollContent {
+                scroll_scope = Some(command.node.id);
+                scroll_scopes.push(FrameScrollScope {
+                    owner: command.node.id,
+                    viewport: command.clip,
+                    translation: mesh_core_elements::AffineTransform::translation(
+                        -command.node.scrollbars.scroll_x,
+                        -command.node.scrollbars.scroll_y,
+                    ),
+                });
+            } else if command.kind == DisplayPaintCommandKind::PopScrollContent {
+                scroll_scope = None;
+            }
             if !seen_nodes.insert(command.node.id) {
                 continue;
             }
@@ -795,6 +854,11 @@ impl RetainedDisplayList {
                 local_layout: command.node.local_layout,
                 visual_bounds: command.node.layout,
                 ancestor_clips: Arc::clone(&command.node.ancestor_clips),
+                scroll_scope: command
+                    .node
+                    .in_scroll_content
+                    .then_some(scroll_scope)
+                    .flatten(),
             });
         }
         let spans = self
@@ -836,6 +900,7 @@ impl RetainedDisplayList {
                 kinds: Arc::clone(&self.command_kinds),
             },
             transforms.into(),
+            scroll_scopes.into(),
             FramePaintEffects {
                 backdrop_regions: self.backdrop_regions.clone().into(),
                 blur_regions: self.blur_regions.clone().into(),
@@ -1280,6 +1345,12 @@ impl RetainedDisplayList {
             && dirty_summary.clip == 0
             && dirty_summary.opacity == 0
             && dirty_summary.geometry == 0
+            && (dirty_summary.scroll == 0
+                || dirty_node_ids.iter().all(|id| {
+                    self.subtrees
+                        .get(id)
+                        .is_some_and(|s| s.scroll_viewport.is_some())
+                }))
     }
 }
 

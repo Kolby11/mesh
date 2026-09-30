@@ -165,14 +165,9 @@ From the 2026-09-30 Settings scroll session profile; evidence and A/B numbers
 in the [performance log](../.planning/log/performance-log.md). Roughly in order
 of payoff.
 
-- [ ] A scroll rebuilds the whole scrolled display subtree: the offset is baked
-      into every descendant's world transform/clip, disabling
-      `allow_clean_descendant_reuse` (`display_list/mod.rs:405`). Paint scroll
-      content in content space under one translation, sharing Section 12's model.
-      [Design](../.planning/todos/pending/2026-09-30-scroll-content-coordinates.md).
 - [ ] Scrolling repaints all visible content (one Skia draw per glyph) every
-      frame. Retain the scrolled content's raster and shift it, painting only
-      the exposed strip; needs the content-space item above first.
+      frame. Retain a bounded content raster and shift integral device pixels,
+      repainting exposed strips; [design](../.planning/todos/pending/2026-09-30-scroll-raster-cache.md).
 - [ ] Unscoped restyle frames still fingerprint the whole tree
       (`retained_tree.update`). Scroll momentum no longer takes this path; what
       remains (resize, theme, window state) also relayouts, so diffing only

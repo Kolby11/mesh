@@ -11,6 +11,7 @@ use mesh_core_elements::{
 };
 
 use super::paint_node::*;
+use super::scroll::{CONTENT_CLIP, can_retain_scroll_content};
 use super::signature::*;
 use super::subtree::*;
 use super::types::*;
@@ -185,6 +186,7 @@ pub(super) fn collect_display_entries_with_fingerprints(
         selected_node_ids,
         next,
         fingerprints,
+        None,
     );
 }
 
@@ -252,6 +254,7 @@ fn collect_display_entries_with_transform(
     selected_node_ids: Option<&HashSet<NodeId>>,
     next: &mut HashMap<DisplayListKey, DisplayListEntry>,
     fingerprints: Option<&super::RetainedFingerprintLookup<'_>>,
+    scroll_viewport: Option<DamageRect>,
 ) {
     if node_is_explicitly_hidden(node) {
         return;
@@ -268,9 +271,35 @@ fn collect_display_entries_with_transform(
         next,
         fingerprints,
     );
+    if let Some(viewport) = scroll_viewport {
+        for slot in DISPLAY_PRIMITIVE_SLOTS {
+            if let Some(entry) = next.get_mut(&DisplayListKey {
+                node_id: node.id,
+                slot,
+            }) {
+                entry.bounds = viewport;
+            }
+        }
+    }
 
     let scroll = node.resolved_scroll_metrics();
-    let child_transform = child_transform(world_transform, node, scroll.x, scroll.y);
+    let retain_content =
+        scroll_viewport.is_none() && can_retain_scroll_content(node, world_transform);
+    let child_transform = child_transform(
+        world_transform,
+        node,
+        if retain_content { 0.0 } else { scroll.x },
+        if retain_content { 0.0 } else { scroll.y },
+    );
+    let viewport = scroll_viewport.or_else(|| {
+        retain_content.then(|| {
+            let rect = mesh_core_elements::node_layout_bounds(node, world_transform);
+            FractionalScale::identity()
+                .device_layout_rect(rect)
+                .to_nonnegative_damage_rect()
+                .unwrap_or_default()
+        })
+    });
 
     for child in &node.children {
         collect_display_entries_with_transform(
@@ -280,6 +309,7 @@ fn collect_display_entries_with_transform(
             selected_node_ids,
             next,
             fingerprints,
+            viewport,
         );
     }
 }
@@ -360,6 +390,7 @@ pub(super) fn build_paint_subtree(
     next_subtrees: &mut HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     metrics: &mut LocalReuseMetrics,
     backdrop_blur_policy: BackdropBlurPolicy,
+    scroll_only: bool,
 ) -> Arc<RetainedPaintSubtree> {
     build_paint_subtree_with_transform(
         node,
@@ -375,6 +406,8 @@ pub(super) fn build_paint_subtree(
         next_subtrees,
         metrics,
         backdrop_blur_policy,
+        false,
+        scroll_only,
     )
 }
 
@@ -393,6 +426,8 @@ fn build_paint_subtree_with_transform(
     next_subtrees: &mut HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     metrics: &mut LocalReuseMetrics,
     backdrop_blur_policy: BackdropBlurPolicy,
+    in_scroll_content: bool,
+    scroll_only: bool,
 ) -> Arc<RetainedPaintSubtree> {
     let node_is_dirty = dirty_node_ids.contains(&node.id);
     let node_is_ancestor = dirty_ancestors.contains(&node.id);
@@ -430,12 +465,14 @@ fn build_paint_subtree_with_transform(
         .and_then(|subtree| subtree.commands.first())
         .filter(|command| command.node.id == node.id)
         .map(|command| command.node.as_ref());
-    let paint_node = Arc::new(build_paint_node_with_previous_transform_and_clips(
+    let mut paint_node = build_paint_node_with_previous_transform_and_clips(
         node,
         world_transform,
         previous_paint_node,
         ancestor_clips,
-    ));
+    );
+    paint_node.in_scroll_content = in_scroll_content;
+    let paint_node = Arc::new(paint_node);
     let bounds = node_clip_for(&paint_node);
     let visual_bounds = visual_clip_for(&paint_node);
     let node_clip = intersect_display_clip(clip, visual_bounds);
@@ -502,15 +539,32 @@ fn build_paint_subtree_with_transform(
     let scroll = node.resolved_scroll_metrics();
     let scroll_x = scroll.x;
     let scroll_y = scroll.y;
-    let child_transform = child_transform(world_transform, node, scroll_x, scroll_y);
-    let child_clip = if node.computed_style.overflow_x.clips_contents()
+    let retain_content = !in_scroll_content
+        && if scroll_only {
+            previous_subtrees
+                .get(&node.id)
+                .is_some_and(|subtree| subtree.scroll_viewport.is_some())
+        } else {
+            can_retain_scroll_content(node, world_transform)
+        };
+    let child_transform = child_transform(
+        world_transform,
+        node,
+        if retain_content { 0.0 } else { scroll_x },
+        if retain_content { 0.0 } else { scroll_y },
+    );
+    let child_clip = if retain_content {
+        CONTENT_CLIP
+    } else if node.computed_style.overflow_x.clips_contents()
         || node.computed_style.overflow_y.clips_contents()
     {
         intersect_display_clip(clip, bounds)
     } else {
         clip
     };
-    let child_ancestor_clips = if node.computed_style.overflow_x.clips_contents()
+    let child_ancestor_clips = if retain_content {
+        AffineClipStack::default()
+    } else if node.computed_style.overflow_x.clips_contents()
         || node.computed_style.overflow_y.clips_contents()
     {
         ancestor_clips.push(mesh_core_elements::node_clip(node, world_transform))
@@ -518,6 +572,23 @@ fn build_paint_subtree_with_transform(
         ancestor_clips.clone()
     };
     let child_order = compute_child_order(node);
+    let scroll_viewport_clip = intersect_display_clip(clip, bounds);
+    let scope_node = retain_content.then(|| {
+        let mut scope_node = (*paint_node).clone();
+        scope_node.ancestor_clips = ancestor_clips
+            .push(mesh_core_elements::node_clip(node, world_transform))
+            .as_slice()
+            .into();
+        Arc::new(scope_node)
+    });
+    if retain_content {
+        subtree.push_command(DisplayPaintCommand {
+            node: Arc::clone(scope_node.as_ref().unwrap()),
+            clip: scroll_viewport_clip,
+            kind: DisplayPaintCommandKind::PushScrollContent,
+        });
+        metrics.rebuilt_commands += 1;
+    }
     for_children_in_order(node, child_order.as_deref(), |child| {
         let (child_parent_transform, cc) = if child.computed_style.position == Position::Fixed {
             (root_transform(0.0, 0.0), viewport_clip)
@@ -536,7 +607,11 @@ fn build_paint_subtree_with_transform(
             &child_clips,
             cc,
             viewport_clip,
-            force_rebuild || (node_is_dirty && !allow_clean_descendant_reuse),
+            force_rebuild
+                || previous_subtrees
+                    .get(&node.id)
+                    .is_some_and(|previous| previous.scroll_viewport.is_some() != retain_content)
+                || (node_is_dirty && !allow_clean_descendant_reuse),
             allow_clean_descendant_reuse,
             dirty_node_ids,
             dirty_ancestors,
@@ -544,8 +619,34 @@ fn build_paint_subtree_with_transform(
             next_subtrees,
             metrics,
             backdrop_blur_policy,
+            in_scroll_content || retain_content,
+            scroll_only,
         );
     });
+
+    if retain_content {
+        subtree.push_command(DisplayPaintCommand {
+            node: Arc::clone(scope_node.as_ref().unwrap()),
+            clip: scroll_viewport_clip,
+            kind: DisplayPaintCommandKind::PopScrollContent,
+        });
+        metrics.rebuilt_commands += 1;
+        // Content bounds are in a different coordinate space; replay selection
+        // uses the anchored viewport, never the unsigned descendant AABBs.
+        let viewport = DamageRect {
+            x: scroll_viewport_clip.x.max(0) as u32,
+            y: scroll_viewport_clip.y.max(0) as u32,
+            width: scroll_viewport_clip.width.max(0) as u32,
+            height: scroll_viewport_clip.height.max(0) as u32,
+        };
+        subtree.bounds = command_bounds(&DisplayPaintCommand {
+            node: Arc::clone(&paint_node),
+            clip: node_clip,
+            kind: DisplayPaintCommandKind::Node,
+        })
+        .union(viewport);
+        subtree.child_bounds = viewport;
+    }
 
     if display_node_may_show_scrollbars(&paint_node) {
         subtree.push_command(DisplayPaintCommand {
@@ -574,8 +675,20 @@ fn build_paint_subtree_with_transform(
         });
         metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
     }
-    let subtree =
-        Arc::new(subtree.into_retained(generation, compositing_layer || filter_layer, node.id));
+    let mut retained = subtree.into_retained(
+        generation,
+        compositing_layer || filter_layer || retain_content,
+        node.id,
+    );
+    if retain_content {
+        retained.scroll_viewport = Some(DamageRect {
+            x: scroll_viewport_clip.x.max(0) as u32,
+            y: scroll_viewport_clip.y.max(0) as u32,
+            width: scroll_viewport_clip.width.max(0) as u32,
+            height: scroll_viewport_clip.height.max(0) as u32,
+        });
+    }
+    let subtree = Arc::new(retained);
     next_subtrees.insert(node.id, Arc::clone(&subtree));
     subtree
 }
@@ -659,6 +772,8 @@ pub(super) fn append_child_paint_subtree(
     next_subtrees: &mut HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     metrics: &mut LocalReuseMetrics,
     backdrop_blur_policy: BackdropBlurPolicy,
+    in_scroll_content: bool,
+    scroll_only: bool,
 ) {
     if should_preclip_child_subtree_with_transform(child, child_parent_transform, child_clip) {
         subtree.pruning.record_omitted_subtree(
@@ -681,6 +796,8 @@ pub(super) fn append_child_paint_subtree(
         next_subtrees,
         metrics,
         backdrop_blur_policy,
+        in_scroll_content,
+        scroll_only,
     );
     subtree.append_child(&child_subtree);
     subtree.append_pruning(&child_subtree);

@@ -825,6 +825,10 @@ fn blur_metadata_reuse_rejects_every_sensitive_dirty_category() {
             ..Default::default()
         },
         RenderObjectDirtySummary {
+            scroll: 1,
+            ..Default::default()
+        },
+        RenderObjectDirtySummary {
             geometry: 1,
             ..Default::default()
         },

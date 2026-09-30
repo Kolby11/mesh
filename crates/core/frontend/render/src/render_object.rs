@@ -19,6 +19,8 @@ pub struct RenderObjectDirtySummary {
     pub clip: usize,
     pub opacity: usize,
     pub geometry: usize,
+    /// Offset-only changes; layout and scroll extents remain geometry dirt.
+    pub scroll: usize,
     pub material: usize,
     pub primitive: usize,
     pub text: usize,
@@ -34,6 +36,7 @@ impl RenderObjectDirtySummary {
             || self.clip > 0
             || self.opacity > 0
             || self.geometry > 0
+            || self.scroll > 0
             || self.material > 0
             || self.primitive > 0
             || self.text > 0
@@ -300,6 +303,10 @@ impl RenderObjectDirtySummary {
             self.geometry += 1;
             changed = true;
         }
+        if previous.scroll != next.scroll {
+            self.scroll += 1;
+            changed = true;
+        }
         if previous.paint.material != next.paint.material
             || previous.paint.variables != next.paint.variables
         {
@@ -329,6 +336,7 @@ pub struct RenderObjectFingerprint {
     transform: TransformSlot,
     clip: ClipSlot,
     geometry: GeometrySlot,
+    scroll: (u32, u32),
     pub(crate) paint: PaintInput,
     accessibility: AccessibilitySlot,
 }
@@ -348,7 +356,7 @@ struct RenderObjectPaintData {
 }
 
 type TransformSlot = (u32, u32, u32, u32, u32, u32, u32, u32, u32);
-type GeometrySlot = (u32, u32, u32, u32, u32, u32, u32, u32, u32, u32);
+type GeometrySlot = (u32, u32, u32, u32, u32, u32, u32, u32);
 type ClipSlot = (bool, u32, u32, u32, u32);
 type AccessibilitySlot = (AccessibilityRoleSlot, Option<Arc<str>>, bool, bool);
 
@@ -514,6 +522,10 @@ fn render_object_fingerprint(
         ),
         clip: clip_slot(node, geometry),
         geometry,
+        scroll: {
+            let scroll = node.resolved_scroll_metrics();
+            (scroll.x.to_bits(), scroll.y.to_bits())
+        },
         paint: PaintInput::for_node(node, previous.map(|fingerprint| &fingerprint.paint)),
         accessibility: accessibility_slot(node, previous.map(|data| &data.accessibility)),
     }
@@ -580,8 +592,6 @@ fn geometry_slot(node: &WidgetNode) -> GeometrySlot {
         layout.y.to_bits(),
         layout.width.to_bits(),
         layout.height.to_bits(),
-        scroll.x.to_bits(),
-        scroll.y.to_bits(),
         scroll.max_x.to_bits(),
         scroll.max_y.to_bits(),
         scroll.content_width.to_bits(),
@@ -1475,7 +1485,7 @@ mod tests {
     }
 
     #[test]
-    fn render_object_tree_marks_scroll_updates_as_geometry_dirty() {
+    fn render_object_tree_distinguishes_scroll_offsets_from_geometry() {
         let mut root = WidgetNode::new("scroll");
         root.id = 1;
         root.attributes.insert("_mesh_scroll_x".into(), "0".into());
@@ -1489,7 +1499,8 @@ mod tests {
         root.attributes.insert("_mesh_scroll_x".into(), "24".into());
         let dirty = tree.update(&root);
 
-        assert_eq!(dirty.geometry, 1);
+        assert_eq!(dirty.geometry, 0);
+        assert_eq!(dirty.scroll, 1);
         assert_eq!(
             tree.dirty_node_ids(),
             &HashSet::from([1]),

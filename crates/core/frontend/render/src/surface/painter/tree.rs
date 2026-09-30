@@ -652,6 +652,12 @@ impl FrontendRenderEngine {
         if command.node.requires_affine_paint() {
             return false;
         }
+        if command.node.in_scroll_content {
+            // The active canvas owns the content translation and viewport.
+            // Flush batches at the coordinate boundary rather than moving a
+            // batch's surface-space clips into a different canvas space.
+            return false;
+        }
         if !matches!(command.node.content, DisplayPaintContent::None) {
             return false;
         }
@@ -690,6 +696,36 @@ impl FrontendRenderEngine {
         // restoring a layer that was never opened or paint the subtree
         // unblurred.
         match kind {
+            DisplayPaintCommandKind::PushScrollContent => {
+                debug_assert!(session.scroll_replay.is_none());
+                let dx = -command.node.scrollbars.scroll_x * scale;
+                let dy = -command.node.scrollbars.scroll_y * scale;
+                let viewport = intersect_clip(paint_clip, scaled_display_clip(command.clip, scale));
+                let clips: Vec<_> = command
+                    .node
+                    .ancestor_clips
+                    .iter()
+                    .map(|clip| mesh_core_elements::AffineClip {
+                        transform: AffineTransform::scale(scale, scale).then(clip.transform),
+                        ..*clip
+                    })
+                    .collect();
+                let save = self.paint_backend.begin_affine_node(
+                    session,
+                    AffineTransform::translation(dx, dy),
+                    &clips,
+                    1.0,
+                    viewport,
+                );
+                session.scroll_replay = Some((save, dx, dy));
+                return;
+            }
+            DisplayPaintCommandKind::PopScrollContent => {
+                if let Some((save, _, _)) = session.scroll_replay.take() {
+                    self.paint_backend.end_affine_node(session, save);
+                }
+                return;
+            }
             DisplayPaintCommandKind::ApplyBackdropFilterCompositor => {
                 // The presentation backend owns the compositor region. No
                 // client-side command is emitted, so the SHM pixels remain
@@ -785,6 +821,12 @@ impl FrontendRenderEngine {
         if paint_nodes.is_some_and(|nodes| !nodes.contains(&command.node.id)) {
             return;
         }
+        let paint_clip = if command.node.in_scroll_content {
+            let (_, dx, dy) = session.scroll_replay.expect("balanced scroll replay scope");
+            local_clip_for(AffineTransform::translation(dx, dy), 1.0, paint_clip)
+        } else {
+            paint_clip
+        };
         let command_clip = scaled_display_clip(command.clip, scale);
         let clip = intersect_clip(paint_clip, command_clip);
         if clip.width <= 0 || clip.height <= 0 {
@@ -824,6 +866,8 @@ impl FrontendRenderEngine {
                         local_clip,
                     );
                     self.paint_backend.end_affine_node(session, save_count);
+                } else if node.in_scroll_content {
+                    self.render_display_scrollbars_in_session(node, session, scale, bounds, clip);
                 } else {
                     session.with_buffer(|buffer| {
                         self.render_display_scrollbars(node, buffer, scale, bounds, clip);
@@ -836,6 +880,8 @@ impl FrontendRenderEngine {
             | DisplayPaintCommandKind::ApplyBackdropFilterCompositor
             | DisplayPaintCommandKind::ApplyBackdropFilterInSurface
             | DisplayPaintCommandKind::ApplyBackdropFilterRejected => {}
+            DisplayPaintCommandKind::PushScrollContent
+            | DisplayPaintCommandKind::PopScrollContent => {}
         }
     }
 

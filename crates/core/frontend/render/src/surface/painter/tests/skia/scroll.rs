@@ -5,6 +5,191 @@ use crate::{FractionalScale, RenderObjectTree};
 use mesh_core_elements::LayoutRect;
 use mesh_core_elements::style::{Overflow, Position};
 
+#[test]
+fn retained_content_scope_scroll_matches_full_paint_with_text_and_damage() {
+    for scale in [1.0, 1.25, 2.0] {
+        let scaling = FractionalScale::new(scale);
+        let mut root = node(
+            "scroll-area",
+            LayoutRect {
+                x: 4.0,
+                y: 6.0,
+                width: 112.0,
+                height: 68.0,
+            },
+            Color::from_hex("#203040").unwrap(),
+        );
+        root.id = 1;
+        root.computed_style.overflow_y = Overflow::Hidden;
+        root.computed_style.border_radius = mesh_core_elements::style::Corners::all(12.0);
+        root.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
+            max_y: 332.0,
+            content_width: 112.0,
+            content_height: 400.0,
+            ..Default::default()
+        });
+        for index in 0..20 {
+            let mut text = text_node(
+                &format!("row {index}"),
+                8.0,
+                8.0 + index as f32 * 20.0,
+                100.0,
+                18.0,
+                Color::from_hex("#d0e0f0").unwrap(),
+            );
+            text.id = 2 + index;
+            root.children.push(text);
+        }
+        let width = scaling.physical_extent(120);
+        let height = scaling.physical_extent(80);
+        let engine = FrontendRenderEngine::new();
+        let mut objects = RenderObjectTree::default();
+        objects.update(&root);
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 120, 80, true, true);
+        let mut buffer = PixelBuffer::new(width, height);
+        engine.render_tree(&root, &mut buffer, scale);
+        for (step, offset) in [24.0, 200.5, 12.25, 0.0, 40.0, 60.0, 64.0, 10.0]
+            .into_iter()
+            .enumerate()
+        {
+            root.scroll_metrics.as_mut().unwrap().y = offset;
+            if step == 2 {
+                root.children[1]
+                    .attributes
+                    .insert("content".into(), "changed row".into());
+            }
+            if step == 4 {
+                root.children[1].computed_style.opacity = 0.5;
+            }
+            if step == 5 {
+                root.children[1].computed_style.opacity = 1.0;
+            }
+            if step == 6 {
+                root.layout.width = 104.0;
+                root.scroll_metrics.as_mut().unwrap().content_height = 420.0;
+                root.scroll_metrics.as_mut().unwrap().max_y = 352.0;
+            }
+            let dirty = objects.update(&root);
+            let metrics = list.update_with_dirty_nodes(
+                &root,
+                dirty,
+                objects.dirty_node_ids(),
+                120,
+                80,
+                false,
+                true,
+            );
+            if step < 4 && step != 2 {
+                assert_eq!(metrics.entries_rebuilt, 0);
+                assert_eq!(metrics.subtree_commands_rebuilt, 3);
+            }
+            let damage = list.damage_rects().to_vec();
+            let selected = list
+                .select_paint_commands_for_rects(&damage, DisplayListRepaintPolicy::MinimalDamage);
+            for rect in damage {
+                let rect = scaling.clip_damage_rect(rect, width, height).unwrap();
+                buffer.clear_rect(rect.x, rect.y, rect.width, rect.height, Color::TRANSPARENT);
+                engine.render_selected_display_list_for_module(
+                    &selected,
+                    &mut buffer,
+                    scale,
+                    Some((rect.x, rect.y, rect.width, rect.height)),
+                    None,
+                    None,
+                );
+            }
+            let mut fresh = PixelBuffer::new(width, height);
+            engine.render_tree(&root, &mut fresh, scale);
+            assert!(buffer.data() == fresh.data(), "scale={scale}, step={step}");
+        }
+    }
+}
+
+#[test]
+fn nested_scroll_inside_retained_content_matches_fresh_paint() {
+    let mut root = node(
+        "scroll-area",
+        LayoutRect {
+            x: 4.0,
+            y: 4.0,
+            width: 80.0,
+            height: 64.0,
+        },
+        Color::from_hex("#203040").unwrap(),
+    );
+    root.id = 1;
+    root.computed_style.overflow_y = Overflow::Hidden;
+    root.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
+        max_y: 100.0,
+        content_height: 164.0,
+        ..Default::default()
+    });
+    let mut inner = node(
+        "scroll-area",
+        LayoutRect {
+            x: 12.0,
+            y: 40.0,
+            width: 50.0,
+            height: 32.0,
+        },
+        Color::from_hex("#507090").unwrap(),
+    );
+    inner.id = 2;
+    inner.computed_style.overflow_y = Overflow::Scroll;
+    inner.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
+        max_y: 100.0,
+        content_height: 132.0,
+        ..Default::default()
+    });
+    let mut text = text_node(
+        "nested text",
+        16.0,
+        88.0,
+        40.0,
+        18.0,
+        Color::from_hex("#e0f040").unwrap(),
+    );
+    text.id = 3;
+    inner.children.push(text);
+    root.children.push(inner);
+    let engine = FrontendRenderEngine::new();
+    let mut buffer = PixelBuffer::new(100, 80);
+    engine.render_tree(&root, &mut buffer, 1.0);
+    let mut objects = RenderObjectTree::default();
+    objects.update(&root);
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 100, 80, true, true);
+    assert_eq!(list.frame_paint_plan().scroll_scopes.len(), 1);
+    for (outer, inner) in [(20.0, 0.0), (20.0, 44.0), (12.25, 55.5), (0.0, 0.0)] {
+        root.scroll_metrics.as_mut().unwrap().y = outer;
+        root.children[0].scroll_metrics.as_mut().unwrap().y = inner;
+        let dirty = objects.update(&root);
+        list.update_with_dirty_nodes(&root, dirty, objects.dirty_node_ids(), 100, 80, false, true);
+        let damage = list.damage_rects().to_vec();
+        assert!(!damage.is_empty());
+        let selected =
+            list.select_paint_commands_for_rects(&damage, DisplayListRepaintPolicy::MinimalDamage);
+        for rect in damage {
+            buffer.clear_rect(rect.x, rect.y, rect.width, rect.height, Color::TRANSPARENT);
+            engine.render_selected_display_list_for_module(
+                &selected,
+                &mut buffer,
+                1.0,
+                Some((rect.x, rect.y, rect.width, rect.height)),
+                None,
+                None,
+            );
+        }
+        let mut fresh = PixelBuffer::new(100, 80);
+        engine.render_tree(&root, &mut fresh, 1.0);
+        assert!(
+            buffer.data() == fresh.data(),
+            "outer={outer}, inner={inner}"
+        );
+    }
+}
+
 /// Locks the pixel contract before scroll commands move to content space:
 /// newly exposed children, nested clips, fixed content, reverse scrolling,
 /// and a simultaneous material update must survive partial retained replay.

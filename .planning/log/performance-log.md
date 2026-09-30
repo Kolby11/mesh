@@ -4662,3 +4662,66 @@ fixtures; no production code was changed in this follow-up. Existing earlier
 records document shell baseline failures; no fresh baseline comparison was
 performed here. New test rustfmt and `git diff --check` pass. Workspace-wide
 rustfmt check reports pre-existing formatting differences outside this work.
+
+## 2026-09-30 — wave 4 item 14: retained scroll content coordinates
+
+Offset dirt is distinct from layout/extents. Eligible translation-only scroll
+content retains immutable descendant commands and content-space entry inputs;
+one balanced canvas translation sits under the anchored affine/rounded viewport
+clip. Owner background, border and scrollbars remain outside the scope. All
+visible content is retained, including offscreen rows, and culled during replay.
+Frame plans expose scope geometry; moving it advances generation and damages
+the old/new anchored viewports. Material, layout, clip, resource and admission
+changes keep conservative invalidation. Entry damage inside scopes is deliberately
+viewport-wide, not a guessed unsigned content-space rectangle.
+
+Admission rejects scale/rotation, fixed descendants, opacity/blend/filter and
+backdrop dependencies. Nested scrollers retain existing baked inner geometry
+inside the outer scope; changing an inner offset rebuilds its content. The
+general Section 12 transform/clip item remains open. The single-command
+AnyRender proof explicitly defers content without its enclosing scope instead
+of claiming incorrect surface-space encoding. Scope admission transitions and
+rounded viewport clips were corrected before final validation.
+
+**Measured:** `cargo test -p mesh-core-shell --release settings_scroll_frame_gate
+-- --ignored --nocapture`, desktop in use, stage profiling disabled. Baseline
+detached worktree `69705c95` (production code identical to checkpoint `1253ce1d`),
+with only the same diagnostic counter printing added. Three alternating runs
+per side, no concurrent builds. Workload: 920×900 shipped Settings Appearance,
+240 entries in each resource catalog (bounded rendered lists), 60 two-finger
+4px frames plus 30 momentum frames at 16ms intervals. Both sides: 90 paints for
+90 frames, no restyle after the first.
+
+| Metric | Checkpoint | Content coordinates |
+| --- | --- | --- |
+| Frame p50 | 4.714–5.070 ms | 4.154–4.519 ms |
+| Frame p90 | 6.918–7.113 ms | 6.423–6.502 ms |
+| Entry rebuilds / 90 frames | 24,714–25,019 | 0 |
+| Command rebuilds / 90 frames | 4,526 | 704 |
+| Final retained commands / nodes | 112 / 97 | 182 / 165 |
+| Peak process RSS (`RUSAGE_CHILDREN`) | 65,288–66,232 KiB | 65,204–66,116 KiB |
+
+These are complete-frame timings, not isolated paint/update attribution. The
+memory ranges overlap; retaining more offscreen commands is observable but
+these process measurements do not isolate their byte cost. Earlier exploratory
+runs while builds were active ranged from 3.1 to 4.2ms and are excluded. The
+historical 8.2–8.4ms wave-2 measurement is not a matched baseline for this run.
+Raster work still paints visible glyphs; no raster-cache speedup is claimed.
+
+**Checked structural gate:** `scroll_scope_reuses_offscreen_content_commands_and_entries`
+retains 40 rows and proves unchanged descendant command `Arc`s and entry maps
+across forward, reverse and fractional offsets, zero entry reconstruction,
+three rebuilt wrapper/owner commands, and immutable old frame-plan geometry.
+Pixel regressions compare partial retained replay with freshly built full paint
+at scales 1, 1.25 and 2, newly exposed text, rounded clipping, nested scrolling
+and scrollbar painting, material edits, admission removal/restoration and
+viewport/extent changes. Complex fixed/nested fallback regression also passes.
+
+**Validation:** renderer serial suite 264 passed, 0 failed, 36 ignored. A prior
+parallel attempt hit the existing icon-worker assertion and poisoned locks;
+serial reruns pass. Focused shell scroll suite: 23 passed, 5 failed, 3 ignored;
+same five fixture failures recorded in the checkpoint follow-up (scope
+fingerprinting, scroll-into-view, native fallback, volume command expectations).
+Rustfmt on touched Rust files and `git diff --check` pass. Item 14 leaves the
+backlog; its completed design is replaced by the pending item-15 raster contract.
+The pre-existing settings revision-only change (137 → 146) is preserved separately.

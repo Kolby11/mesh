@@ -17,6 +17,7 @@ pub(super) struct RetainedPaintSubtree {
     pub(super) pruning: PruningMetrics,
     pub(super) command_span: Option<RetainedSubtreeSpan>,
     pub(super) spans: Arc<[RetainedCommandSpan]>,
+    pub(super) scroll_viewport: Option<DamageRect>,
 }
 
 impl Default for RetainedPaintSubtree {
@@ -29,6 +30,7 @@ impl Default for RetainedPaintSubtree {
             pruning: PruningMetrics::default(),
             command_span: None,
             spans: Vec::new().into(),
+            scroll_viewport: None,
         }
     }
 }
@@ -287,6 +289,7 @@ impl PaintSubtreeBuilder {
             pruning: self.pruning,
             command_span,
             spans: spans.into(),
+            scroll_viewport: None,
         }
     }
 }

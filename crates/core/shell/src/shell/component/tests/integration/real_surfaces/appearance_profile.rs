@@ -374,6 +374,8 @@ fn settings_scroll_frame_gate() {
     let mut passes = 0u32;
     let mut frames = 0u32;
     let mut style_frames = 0u32;
+    let mut rebuilt_entries = 0u64;
+    let mut rebuilt_commands = 0u64;
     let mut run_frame = |settings: &mut FrontendSurfaceComponent,
                          frame_times: &mut Vec<Duration>| {
         let started = Instant::now();
@@ -382,6 +384,9 @@ fn settings_scroll_frame_gate() {
             frame_times.push(started.elapsed());
             frames += 1;
             passes += frame_passes;
+            let metrics = settings.retained_display_list.last_metrics();
+            rebuilt_entries += metrics.entries_rebuilt;
+            rebuilt_commands += metrics.subtree_commands_rebuilt;
             // The gesture's first frame claims scroll ownership, a one-time
             // interaction restyle. Every later frame must stay paint-only.
             if frames > 1
@@ -434,6 +439,21 @@ fn settings_scroll_frame_gate() {
         "MESH_PERF metric=settings_scroll_frame_ms value={:.4} p90={:.4} frames={frames} passes={passes} style_frames={style_frames}",
         p50.as_secs_f64() * 1000.0,
         p90.as_secs_f64() * 1000.0,
+    );
+    eprintln!(
+        "scroll retention: {rebuilt_entries} entries rebuilt, {rebuilt_commands} commands rebuilt; {} retained commands, {} retained nodes",
+        settings
+            .retained_display_list
+            .frame_paint_plan()
+            .topology
+            .commands
+            .len(),
+        settings
+            .retained_display_list
+            .frame_paint_plan()
+            .inputs
+            .nodes
+            .len()
     );
 
     assert!(after_fingers > 0.0, "finger input must scroll the page");

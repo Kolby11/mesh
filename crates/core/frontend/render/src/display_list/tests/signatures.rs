@@ -287,6 +287,7 @@ fn display_primitive_hashing_beats_byte_fallback() {
 #[ignore = "release-only retained paint-subtree clone microbenchmark"]
 fn retained_subtree_handle_beats_fieldwise_clone() {
     let subtree = RetainedPaintSubtree {
+        scroll_viewport: None,
         generation: 1,
         commands: Arc::new(PaintSequence::from(vec![DisplayPaintCommand {
             node: Arc::new(build_paint_node(

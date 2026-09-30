@@ -135,6 +135,15 @@ pub fn encode_command_to_scene(
     command: &DisplayPaintCommand,
     diagnostics: &mut Vec<FocusedProofDiagnostic>,
 ) -> usize {
+    // This single-command proof has no enclosing scroll transform. Do not
+    // claim surface-space encoding for retained content-space commands.
+    if command.node.in_scroll_content {
+        diagnostics.push(FocusedProofDiagnostic {
+            node_id: Some(command.node.id),
+            message: "anyrender: enclosing scroll coordinate scope is deferred".into(),
+        });
+        return 0;
+    }
     // DEFERRED per Phase 49 D-10: scrollbar painting is outside the lossless
     // subset this adapter proves.
     if matches!(command.kind, DisplayPaintCommandKind::Scrollbars) {
@@ -232,6 +241,7 @@ mod tests {
     fn cmd(content: DisplayPaintContent, kind: DisplayPaintCommandKind) -> DisplayPaintCommand {
         DisplayPaintCommand {
             node: Arc::new(DisplayPaintNode {
+                in_scroll_content: false,
                 id: 1,
                 module_id: None,
                 transform: mesh_core_elements::AffineTransform::IDENTITY,

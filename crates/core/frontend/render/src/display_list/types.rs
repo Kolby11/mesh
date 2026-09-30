@@ -170,6 +170,8 @@ pub struct FramePaintPlan {
     pub inputs: FramePaintInputs,
     pub topology: FramePaintTopology,
     pub transforms: Arc<[FramePaintTransform]>,
+    /// Anchored viewport and content translation shared by descendant inputs.
+    pub scroll_scopes: Arc<[FrameScrollScope]>,
     pub effects: FramePaintEffects,
     pub replay: FramePaintReplay,
     pub damage: FramePaintDamage,
@@ -180,6 +182,7 @@ impl FramePaintPlan {
         inputs: FramePaintInputs,
         topology: FramePaintTopology,
         transforms: Arc<[FramePaintTransform]>,
+        scroll_scopes: Arc<[FrameScrollScope]>,
         effects: FramePaintEffects,
         replay: FramePaintReplay,
         damage: FramePaintDamage,
@@ -188,6 +191,7 @@ impl FramePaintPlan {
             inputs,
             topology,
             transforms,
+            scroll_scopes,
             effects,
             replay,
             damage,
@@ -210,6 +214,7 @@ impl FramePaintPlan {
                 commands: Arc::new(PaintSequence::default()),
                 kinds: Arc::new(PaintSequence::default()),
             },
+            Vec::new().into(),
             Vec::new().into(),
             FramePaintEffects {
                 backdrop_regions: Vec::new().into(),
@@ -257,6 +262,15 @@ pub struct FramePaintTransform {
     pub local_layout: LayoutRect,
     pub visual_bounds: LayoutRect,
     pub ancestor_clips: Arc<[AffineClip]>,
+    /// When present, `transform`/bounds are in this owner's unscrolled space.
+    pub scroll_scope: Option<NodeId>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct FrameScrollScope {
+    pub owner: NodeId,
+    pub viewport: DisplayListClip,
+    pub translation: AffineTransform,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -476,6 +490,8 @@ pub struct DisplayPaintNode {
     pub style: DisplayPaintStyle,
     pub content: DisplayPaintContent,
     pub scrollbars: DisplayScrollbars,
+    /// Paint coordinates belong to an enclosing retained scroll scope.
+    pub in_scroll_content: bool,
 }
 
 impl DisplayPaintNode {
@@ -673,6 +689,9 @@ pub struct DisplayScrollbars {
 pub enum DisplayPaintCommandKind {
     Node,
     Scrollbars,
+    /// Clip to the viewport, then translate unchanged content commands.
+    PushScrollContent,
+    PopScrollContent,
     /// Opens an isolated compositing group for a node and its descendants.
     /// The node's opacity and blend mode are applied when the group is
     /// composited, rather than being threaded through individual primitives.
@@ -708,6 +727,8 @@ impl DisplayPaintCommandKind {
         matches!(
             self,
             Self::PushCompositingLayer
+                | Self::PushScrollContent
+                | Self::PopScrollContent
                 | Self::PopCompositingLayer
                 | Self::PushFilterLayer
                 | Self::PopFilterLayer

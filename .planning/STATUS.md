@@ -23,15 +23,17 @@ content-space scroll and raster shift (wave 4) and the in-surface blur engine
 (wave 5), in [the backlog](../docs/BACKLOG.md); details in
 [the performance log](log/performance-log.md).
 
-Wave 4 item 14 is starting with the
-[scroll coordinate design](todos/pending/2026-09-30-scroll-content-coordinates.md).
-It covers offset-specific dirt, retained coordinate scopes, replay/culling,
-damage/effect geometry, and the pixel/structural gates before raster shifting.
-The original working tree is checkpointed on main through `1253ce1d`.
-The first scroll pixel regression passes (newly exposed/nested/fixed content,
-fractional scale and offsets, reverse scroll, mixed material changes). Item 14
-remains open; production coordinates have not changed yet. The live hover
-capture has no sampled client blur work, but no matched 20% A/B claim is made.
+Wave 4 item 14 is implemented for translation-only content without fixed or
+compositing/readback dependencies. Offset-only frames retain descendant command
+handles and entries under one anchored, rounded viewport translation. Nested
+scrollers keep their existing geometry inside the outer content scope; inner
+scroll changes rebuild that content. Complex cases retain the established path.
+Three alternating release Appearance runs: p50 4.71–5.07 ms before versus
+4.15–4.52 ms after; entry rebuilds fall from about 25,000 to zero. Renderer:
+264 passed; focused shell scroll tests retain the prior five fixture failures.
+Wave 4 item 15 is next: [bounded raster shifting](todos/pending/2026-09-30-scroll-raster-cache.md).
+The live hover capture has no sampled client blur work, but no matched 20%
+blur-saving claim is made. Measurements are in the performance log.
 
 The render-pipeline batch is largely landed. Service polls on the shipped
 navigation bar now take the narrow path end to end — derived Luau state no

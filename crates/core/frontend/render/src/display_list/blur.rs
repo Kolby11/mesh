@@ -303,7 +303,9 @@ pub(super) fn compute_backdrop_regions(
             continue;
         };
         let has_backdrop_content = commands.iter().take(index).any(|earlier| {
-            display_command_paints_pixels(earlier) && command_bounds(earlier).intersects(region)
+            (display_command_paints_pixels(earlier)
+                || earlier.kind == DisplayPaintCommandKind::PushScrollContent)
+                && command_bounds(earlier).intersects(region)
         });
         if has_backdrop_content {
             regions.push(BackdropRegion {
@@ -337,8 +339,10 @@ pub(super) fn collect_layer_scopes(
     for (index, command) in commands.iter().enumerate() {
         match command.kind {
             DisplayPaintCommandKind::PushCompositingLayer
+            | DisplayPaintCommandKind::PushScrollContent
             | DisplayPaintCommandKind::PushFilterLayer => open.push(index),
             DisplayPaintCommandKind::PopCompositingLayer
+            | DisplayPaintCommandKind::PopScrollContent
             | DisplayPaintCommandKind::PopFilterLayer => {
                 if let Some(start) = open.pop() {
                     scopes.push((start, index.saturating_add(1)));
@@ -398,6 +402,7 @@ pub(super) fn changed_layout_count(dirty_summary: RenderObjectDirtySummary) -> u
         dirty_summary.transform,
         dirty_summary.clip,
         dirty_summary.geometry,
+        dirty_summary.scroll,
     ]
     .into_iter()
     .map(|count| count as u64)
@@ -412,6 +417,7 @@ pub(super) fn dirty_summary_preserves_blur_metadata(dirty: RenderObjectDirtySumm
         && dirty.clip == 0
         && dirty.opacity == 0
         && dirty.geometry == 0
+        && dirty.scroll == 0
         && dirty.material == 0
         && dirty.primitive == 0
 }

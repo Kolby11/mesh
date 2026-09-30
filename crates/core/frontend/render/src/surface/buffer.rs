@@ -290,6 +290,7 @@ impl PixelBuffer {
 pub struct PixelCanvasSession<'a> {
     buffer: &'a mut PixelBuffer,
     surface: Option<Surface>,
+    pub(crate) scroll_replay: Option<(Option<usize>, f32, f32)>,
 }
 
 impl<'a> PixelCanvasSession<'a> {
@@ -297,6 +298,7 @@ impl<'a> PixelCanvasSession<'a> {
         Self {
             buffer,
             surface: None,
+            scroll_replay: None,
         }
     }
 
