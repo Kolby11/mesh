@@ -451,7 +451,11 @@ impl Shell {
             );
 
             while !self.core.shutting_down {
-                self.reconcile_file_watcher();
+                let loop_started = std::time::Instant::now();
+                if loop_started >= self.next_watch_reconcile {
+                    self.next_watch_reconcile = loop_started + WATCH_RECONCILE_INTERVAL;
+                    self.reconcile_file_watcher();
+                }
                 pending.extend(self.reload_theme_if_changed()?);
                 pending.extend(self.reload_locale_if_settings_changed()?);
                 self.reload_frontend_components_if_changed()?;
@@ -1220,13 +1224,30 @@ impl Shell {
         self.schedule_reload_checks_now();
     }
 
+    /// Interval of the bounded metadata-poll fallback for hot reload. While
+    /// the managed watcher reports healthy it delivers changes directly, so
+    /// the poll only has to catch a lost event and runs far less often.
+    pub(in crate::shell) fn reload_poll_interval(&self, unwatched: Duration) -> Duration {
+        if self.file_watcher_active {
+            unwatched.max(WATCHED_RELOAD_POLL_INTERVAL)
+        } else {
+            unwatched
+        }
+    }
+
     fn schedule_reload_checks_now(&mut self) {
         let now = std::time::Instant::now();
         self.next_theme_reload_check = now;
         self.next_shell_settings_reload_check = now;
         self.next_frontend_reload_check = now;
+        self.next_watch_reconcile = now;
     }
 }
+
+/// Longest delay before the shell loop re-derives the hot-reload watch set.
+const WATCH_RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
+/// Metadata-poll fallback interval while the managed file watcher is healthy.
+const WATCHED_RELOAD_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 fn wait_for_eventfd(timeout: Duration, eventfd_fd: std::os::unix::io::BorrowedFd<'_>) {
     use rustix::event::{PollFd, PollFlags, poll};

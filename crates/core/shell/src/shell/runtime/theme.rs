@@ -385,7 +385,8 @@ impl Shell {
         // Keep polling even when inotify is active. Theme selection can move
         // the source into a directory that the startup watcher did not know;
         // the fingerprint makes this poll cheap and content-sensitive.
-        self.next_theme_reload_check = now + THEME_RELOAD_POLL_INTERVAL;
+        self.next_theme_reload_check =
+            now + self.reload_poll_interval(THEME_RELOAD_POLL_INTERVAL);
 
         let has_authorized_theme = self.installed_module_graph.as_ref().is_some_and(|graph| {
             graph
@@ -846,7 +847,8 @@ impl Shell {
         }
         // Keep the fallback bounded even while the managed watcher is healthy;
         // the watcher only reduces latency and must not become a blind spot.
-        self.next_shell_settings_reload_check = now + SHELL_SETTINGS_RELOAD_POLL_INTERVAL;
+        self.next_shell_settings_reload_check =
+            now + self.reload_poll_interval(SHELL_SETTINGS_RELOAD_POLL_INTERVAL);
 
         let Ok(metadata) = std::fs::metadata(&self.settings_watch.path) else {
             return Ok(requests);

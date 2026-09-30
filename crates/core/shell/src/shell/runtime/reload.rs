@@ -14,7 +14,8 @@ impl Shell {
         // inotify is an acceleration path, not the correctness boundary. A
         // bounded metadata poll keeps reloads live when a watch is unavailable
         // or an event is lost during an atomic replacement.
-        self.next_frontend_reload_check = now + FRONTEND_RELOAD_POLL_INTERVAL;
+        self.next_frontend_reload_check =
+            now + self.reload_poll_interval(FRONTEND_RELOAD_POLL_INTERVAL);
 
         for component_index in 0..self.components.len() {
             let Some(trigger_index) = self.components[component_index]

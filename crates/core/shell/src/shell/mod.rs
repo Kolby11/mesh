@@ -853,6 +853,10 @@ pub struct Shell {
     next_theme_reload_check: std::time::Instant,
     next_shell_settings_reload_check: std::time::Instant,
     next_frontend_reload_check: std::time::Instant,
+    /// Next time the shell loop re-derives the hot-reload watch set. Sites
+    /// that change its inputs reconcile immediately; the loop only needs a
+    /// bounded catch-all.
+    next_watch_reconcile: std::time::Instant,
     file_watcher_active: bool,
     debug: DebugOverlayState,
     /// Generation of shell-owned state represented by debug telemetry. The

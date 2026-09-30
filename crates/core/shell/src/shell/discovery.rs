@@ -2124,6 +2124,7 @@ impl Shell {
             next_theme_reload_check: now,
             next_shell_settings_reload_check: now,
             next_frontend_reload_check: now,
+            next_watch_reconcile: now,
             file_watcher_active: false,
             debug: DebugOverlayState::default(),
             debug_snapshot_generation: 0,
