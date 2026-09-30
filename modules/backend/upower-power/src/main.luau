@@ -190,13 +190,48 @@ local function refresh_state(self)
     end
 end
 
+local POLL_MS = 10000
+local monitor_program = nil
+
 function start(self)
-    -- Battery state changes slowly. Poll every 10s to keep CPU and exec
-    -- churn low; upower's time-to-full / time-remaining estimates only
-    -- update every ~30s anyway.
-    mesh.service.set_poll_interval(10000)
-    debug_info("initialized with 10s poll interval")
+    -- Battery state changes slowly and upower's time-to-full / time-remaining
+    -- estimates only update every ~30s, so a 10s poll keeps exec churn low.
+    -- UPower re-announces the battery several times a second, far more often
+    -- than that poll, so battery events are not followed. Line-power and
+    -- device add/remove events are: they carry the change a user notices
+    -- immediately (plugging in or pulling the charger).
+    mesh.service.set_poll_interval(POLL_MS)
+    if mesh.service.can_exec("upower", { "--monitor" }) then
+        local started = mesh.exec_stream("upower", { "--monitor" })
+        if started then
+            monitor_program = started.program
+            debug_info("subscribed to upower --monitor for power-source changes")
+        end
+    end
     refresh_state(self)
+end
+
+function on_stream_batch(self, program, lines)
+    if program ~= monitor_program then
+        return
+    end
+    for _, line in ipairs(lines) do
+        if line:find("line_power", 1, true)
+            or line:find("device added", 1, true)
+            or line:find("device removed", 1, true)
+        then
+            refresh_state(self)
+            return
+        end
+    end
+end
+
+function on_stream_closed(self, program, _success)
+    if program ~= monitor_program then
+        return
+    end
+    debug_warn("upower --monitor exited; power-source changes wait for the poll")
+    monitor_program = nil
 end
 
 function on_poll(self)

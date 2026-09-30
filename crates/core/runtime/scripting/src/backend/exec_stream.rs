@@ -13,8 +13,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::policy::{ResourceBudget, ResourceLimit};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
-use tokio::process::{Child, ChildStderr, ChildStdout, Command};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
+use tokio::process::{Child, ChildStderr, Command};
 use tokio::sync::{Notify, oneshot};
 use tokio::task::JoinHandle;
 
@@ -158,11 +158,11 @@ pub struct StreamLine {
 }
 
 #[derive(Debug)]
-struct StreamProcess {
-    stream: StreamHandle,
-    stop: Option<oneshot::Sender<()>>,
-    task: JoinHandle<()>,
-    child_accounted: Arc<AtomicBool>,
+pub(super) struct StreamProcess {
+    pub(super) stream: StreamHandle,
+    pub(super) stop: Option<oneshot::Sender<()>>,
+    pub(super) task: JoinHandle<()>,
+    pub(super) child_accounted: Arc<AtomicBool>,
 }
 
 /// Shared state between the backend script context and backend service loop.
@@ -172,7 +172,7 @@ pub struct StreamState {
     notify: Notify,
     processes: Mutex<HashMap<StreamId, StreamProcess>>,
     overflow_reported: Mutex<HashSet<StreamId>>,
-    resources: ResourceBudget,
+    pub(super) resources: ResourceBudget,
     generation: u64,
     shutting_down: AtomicBool,
 }
@@ -311,7 +311,11 @@ impl StreamState {
         self.generation
     }
 
-    fn register(&self, program: String, args: Vec<String>) -> std::io::Result<StreamHandle> {
+    pub(super) fn register(
+        &self,
+        program: String,
+        args: Vec<String>,
+    ) -> std::io::Result<StreamHandle> {
         if self.shutting_down.load(Ordering::Acquire) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Interrupted,
@@ -329,14 +333,14 @@ impl StreamState {
         ))
     }
 
-    fn insert_process(&self, process: StreamProcess) {
+    pub(super) fn insert_process(&self, process: StreamProcess) {
         self.processes
             .lock()
             .unwrap()
             .insert(process.stream.id(), process);
     }
 
-    fn request_stop(&self, id: StreamId) {
+    pub(super) fn request_stop(&self, id: StreamId) {
         if let Some(process) = self.processes.lock().unwrap().get_mut(&id) {
             if let Some(stop) = process.stop.take() {
                 let _ = stop.send(());
@@ -344,7 +348,7 @@ impl StreamState {
         }
     }
 
-    fn push_event(&self, event: StreamEvent) {
+    pub(super) fn push_event(&self, event: StreamEvent) {
         let id = event.stream.id();
         let output_bytes = event.queued_output_bytes();
         event.stream.set_status(match &event.kind {
@@ -438,15 +442,15 @@ impl Default for StreamState {
     }
 }
 
-fn release_child_once(resources: &ResourceBudget, accounted: &AtomicBool) {
+pub(super) fn release_child_once(resources: &ResourceBudget, accounted: &AtomicBool) {
     if !accounted.swap(true, Ordering::AcqRel) {
         resources.release_child();
     }
 }
 
-struct ChildBudgetGuard {
-    resources: ResourceBudget,
-    accounted: Arc<AtomicBool>,
+pub(super) struct ChildBudgetGuard {
+    pub(super) resources: ResourceBudget,
+    pub(super) accounted: Arc<AtomicBool>,
 }
 
 impl Drop for ChildBudgetGuard {
@@ -538,14 +542,14 @@ async fn run_stream(
     state: Arc<StreamState>,
     stream: StreamHandle,
     mut child: Child,
-    stdout: ChildStdout,
+    stdout: tokio::process::ChildStdout,
     stderr: ChildStderr,
     mut stop_rx: oneshot::Receiver<()>,
 ) {
     let stdout_state = Arc::clone(&state);
     let stdout_stream = stream.clone();
     let stdout_task = tokio::spawn(async move {
-        read_stdout(stdout_state, stdout_stream, stdout).await;
+        read_lines(stdout_state, stdout_stream, stdout).await;
     });
 
     let stderr_state = Arc::clone(&state);
@@ -620,8 +624,15 @@ async fn run_stream(
     }
 }
 
-async fn read_stdout(state: Arc<StreamState>, stream: StreamHandle, stdout: ChildStdout) {
-    let mut reader = BufReader::new(stdout);
+/// Read newline-delimited records from any byte source into the stream queue.
+/// Emits `Eof` at end of input, and stops the source on an oversized line or
+/// read error.
+pub(super) async fn read_lines<R: AsyncRead + Unpin>(
+    state: Arc<StreamState>,
+    stream: StreamHandle,
+    source: R,
+) {
+    let mut reader = BufReader::new(source);
     loop {
         let mut bytes = Vec::new();
         let mut limited_reader = reader.take((MAX_STREAM_LINE_BYTES + 1) as u64);
@@ -660,7 +671,7 @@ async fn read_stdout(state: Arc<StreamState>, stream: StreamHandle, stdout: Chil
             Err(error) => {
                 state.push_event(StreamEvent {
                     stream: stream.clone(),
-                    kind: StreamEventKind::Failed(format!("stream stdout read failed: {error}")),
+                    kind: StreamEventKind::Failed(format!("stream read failed: {error}")),
                 });
                 state.request_stop(stream.id());
                 return;

@@ -11,6 +11,7 @@
         "exec.argv:upower:[\"-e\"]",
         "exec.argv:upower:[\"-i\",\"*\"]"
       ],
+      "optionalCapabilities": ["exec.argv:upower:[\"--monitor\"]"],
       "binaries": [
         {
           "name": "upower",

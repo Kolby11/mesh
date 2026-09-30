@@ -42,14 +42,9 @@ local function sync_state()
 end
 
 function start(self)
-    mesh.service.set_poll_interval(5000)
     playlist = build_playlist(mesh.config())
     current_index = 1
     playback_state = "paused"
-    sync_state()
-end
-
-function on_poll(self)
     sync_state()
 end
 

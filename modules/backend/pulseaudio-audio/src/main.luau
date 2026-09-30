@@ -11,7 +11,7 @@ local last_emitted_percent = nil
 local last_emitted_muted = nil
 local stream_active = false
 
-local STREAM_SAFETY_POLL_MS = 1000
+local STREAM_SAFETY_POLL_MS = 30000
 local FALLBACK_POLL_MS = 250
 
 local function debug_info(message)
@@ -34,6 +34,15 @@ function start(self)
         mesh.service.set_poll_interval(FALLBACK_POLL_MS)
         debug_warn("pactl subscribe unavailable; falling back to 250ms poll")
     end
+end
+
+function on_stream_closed(self, program, _success)
+    if program ~= "pactl" then
+        return
+    end
+    debug_warn("pactl subscribe exited; falling back to 250ms poll")
+    stream_active = false
+    mesh.service.set_poll_interval(FALLBACK_POLL_MS)
 end
 
 local function read_state()

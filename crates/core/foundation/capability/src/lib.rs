@@ -82,6 +82,7 @@ impl CapabilityCatalog {
             | "shell.clipboard.write"
             | "shell.notification"
             | "fs.write"
+            | "fs.watch"
             | "dbus.session"
             | "net.http"
             | "service.audio.control"

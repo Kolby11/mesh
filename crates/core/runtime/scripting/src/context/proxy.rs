@@ -19,6 +19,35 @@ use std::sync::{
 // without introducing a scripting/backend dependency cycle.
 static NEXT_SERVICE_CALL_ID: AtomicU64 = AtomicU64::new(1 << 63);
 
+/// Parsed argument types for one contract method.
+struct MethodSignature {
+    args: Vec<Result<TypeExpr, String>>,
+    required: usize,
+}
+
+impl MethodSignature {
+    fn new(method: &mesh_core_service::InterfaceMethod) -> Self {
+        let args = method
+            .args
+            .iter()
+            .map(|argument| TypeExpr::parse(&argument.arg_type).map_err(|error| error.to_string()))
+            .collect::<Vec<_>>();
+        let required = args
+            .iter()
+            .filter(|value_type| !value_type.as_ref().is_ok_and(|value_type| value_type.optional))
+            .count();
+        Self { args, required }
+    }
+}
+
+/// Byte length of `{"channel":<channel>,"payload":<payload>}` as
+/// `serde_json` would serialize it, counted without building the envelope.
+fn envelope_json_len(channel: &str, payload: &Value) -> serde_json::Result<usize> {
+    Ok(r#"{"channel":,"payload":}"#.len()
+        + mesh_core_runtime::json_encoded_len(&Value::from(channel))
+        + mesh_core_runtime::json_encoded_len(payload))
+}
+
 pub(super) fn create_interface_proxy(
     lua: &Lua,
     scope: &Table,
@@ -138,11 +167,18 @@ pub(super) fn create_service_proxy(
         })
         .unwrap_or_default();
 
+    // Argument types are parsed once per proxy rather than on every call;
+    // a parse failure is kept so each call reports it exactly as before.
+    let method_signatures = methods
+        .iter()
+        .map(|method| (method.name.clone(), Arc::new(MethodSignature::new(method))))
+        .collect::<HashMap<_, _>>();
+
     let contract_for_index = contract.clone();
     let index_scope = scope.clone();
     meta.set(
         "__index",
-        lua.create_function(move |lua, (_table, key): (Table, String)| {
+        lua.create_function(move |lua, (proxy_table, key): (Table, String)| {
             if key == "state" {
                 return Ok(LuaValue::Table(state_for_index.clone()));
             }
@@ -174,6 +210,11 @@ pub(super) fn create_service_proxy(
             if let Some(method) = methods.iter().find(|m| m.name == key) {
                 let method_contract = contract_for_index.clone();
                 let method = method.clone();
+                let signature = Arc::clone(
+                    method_signatures
+                        .get(&key)
+                        .expect("signature for every contract method"),
+                );
                 let iface = interface_name.clone();
                 let events = Arc::clone(&published_events);
                 let pending_side_channels = Arc::clone(&pending_side_channels);
@@ -182,19 +223,11 @@ pub(super) fn create_service_proxy(
                 let source_capabilities = source_capabilities.clone();
                 let service_call_completions = Arc::clone(&service_call_completions);
                 let method_resources = resources.clone();
-                return Ok(LuaValue::Function(lua.create_function(
+                let function = lua.create_function(
                     move |lua, args: mlua::Variadic<LuaValue>| {
                         let offset = consume_self_arg(&args)?;
                         let supplied = args.len().saturating_sub(offset);
-                        let required = method
-                            .args
-                            .iter()
-                            .filter(|argument| {
-                                !TypeExpr::parse(&argument.arg_type)
-                                    .map(|value_type| value_type.optional)
-                                    .unwrap_or(false)
-                            })
-                            .count();
+                        let required = signature.required;
                         if supplied < required || supplied > method.args.len() {
                             return Err(mlua::Error::runtime(format!(
                                 "service method '{}.{}' expects {}..{} arguments, got {}",
@@ -216,8 +249,9 @@ pub(super) fn create_service_proxy(
                                     .cloned()
                                     .expect("validated service method argument count");
                                 let value = lua.from_value::<Value>(lua_value)?;
-                                let value_type =
-                                    TypeExpr::parse(&arg.arg_type).map_err(mlua::Error::runtime)?;
+                                let value_type = signature.args[index]
+                                    .as_ref()
+                                    .map_err(|error| mlua::Error::runtime(error.clone()))?;
                                 if let Some(contract) = method_contract.as_ref()
                                     && !value_type.matches_with_types(&value, &contract.types)
                                 {
@@ -260,12 +294,8 @@ pub(super) fn create_service_proxy(
                             }
                             return Err(mlua::Error::runtime(rejection.to_string()));
                         }
-                        let output_bytes = serde_json::to_vec(&serde_json::json!({
-                            "channel": &channel,
-                            "payload": &payload,
-                        }))
-                        .map_err(mlua::Error::external)?
-                        .len();
+                        let output_bytes = envelope_json_len(&channel, &payload)
+                            .map_err(mlua::Error::external)?;
                         reserve_side_effect(&method_resources, output_bytes)
                             .map_err(mlua::Error::external)?;
                         pending_side_channels.store(true, Ordering::Release);
@@ -291,7 +321,11 @@ pub(super) fn create_service_proxy(
                         )
                         .map(LuaValue::Table)
                     },
-                )?));
+                )?;
+                // The contract is fixed for this proxy's lifetime, so later
+                // lookups of the same method bypass `__index` entirely.
+                proxy_table.raw_set(key.as_str(), function.clone())?;
+                return Ok(LuaValue::Function(function));
             }
 
             // Case B: state field read from the live service payload table.
@@ -587,14 +621,13 @@ fn service_payload_field(
     service_name: &str,
     key: &str,
 ) -> mlua::Result<LuaValue> {
-    let value = service_context_state
-        .lock()
-        .unwrap()
-        .field(service_name, key);
-    value
-        .map(|value| lua.to_value(&value))
-        .transpose()
-        .map(|value| value.unwrap_or(LuaValue::Nil))
+    // Hold the lock only long enough to share the payload; the conversion
+    // reads the field in place instead of deep-cloning it first.
+    let payload = service_context_state.lock().unwrap().payload(service_name);
+    match payload.as_deref().and_then(|payload| payload.get(key)) {
+        Some(value) => lua.to_value(value),
+        None => Ok(LuaValue::Nil),
+    }
 }
 
 fn command_result_table(
@@ -810,5 +843,30 @@ mod tests {
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert!(new_time < old_time);
+    }
+}
+
+#[cfg(test)]
+mod envelope_tests {
+    use super::*;
+
+    #[test]
+    fn envelope_length_matches_serialized_envelope() {
+        for (channel, payload) in [
+            ("mesh.audio.set_volume", serde_json::json!({ "percent": 42 })),
+            ("mesh.wm.focus_workspace", serde_json::json!({})),
+            (
+                "odd\"channel\\name",
+                serde_json::json!({ "nested": { "list": [1, "two", null, 3.5] }, "u": "é\n" }),
+            ),
+        ] {
+            let expected = serde_json::to_vec(&serde_json::json!({
+                "channel": channel,
+                "payload": &payload,
+            }))
+            .unwrap()
+            .len();
+            assert_eq!(envelope_json_len(channel, &payload).unwrap(), expected);
+        }
     }
 }

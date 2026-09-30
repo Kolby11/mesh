@@ -20,7 +20,8 @@
       "@mesh/audio-popover": ["service.audio.control", "service.audio.read"],
       "@mesh/backlight-brightness": [
         "exec.argv:brightnessctl:[\"-m\"]",
-        "exec.argv:brightnessctl:[\"set\",\"*\"]"
+        "exec.argv:brightnessctl:[\"set\",\"*\"]",
+        "fs.watch"
       ],
       "@mesh/blur-test": ["shell.surface", "theme.read"],
       "@mesh/composition-editor": [
@@ -55,7 +56,8 @@
         "exec.argv:sh:[\"-c\",\"printf '%s' \\\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\\\"\"]",
         "exec.argv:sh:[\"-c\",\"test -S * && echo ok\"]",
         "exec.argv:nc:[\"-U\",\"*\"]",
-        "exec.argv:socat:[\"-\",\"UNIX-CONNECT:*\"]"
+        "exec.argv:socat:[\"-\",\"UNIX-CONNECT:*\"]",
+        "net.socket"
       ],
       "@mesh/language-popover": ["locale.read", "locale.write"],
       "@mesh/navigation-bar": [
@@ -78,7 +80,8 @@
         "exec.argv:wpctl:[\"get-volume\",\"*\"]",
         "exec.argv:wpctl:[\"set-mute\",\"*\",\"*\"]",
         "exec.argv:wpctl:[\"set-volume\",\"*\",\"*\"]",
-        "exec.argv:wpctl:[\"status\"]"
+        "exec.argv:wpctl:[\"status\"]",
+        "exec.argv:pw-mon:[\"--hide-props\",\"--hide-params\",\"--print-separator\"]"
       ],
       "@mesh/pulseaudio-audio": [
         "exec.argv:pactl:[\"get-sink-mute\",\"@DEFAULT_SINK@\"]",
@@ -123,7 +126,8 @@
       "@mesh/touch-gesture-proof": ["shell.surface", "theme.read"],
       "@mesh/upower-power": [
         "exec.argv:upower:[\"-e\"]",
-        "exec.argv:upower:[\"-i\",\"*\"]"
+        "exec.argv:upower:[\"-i\",\"*\"]",
+        "exec.argv:upower:[\"--monitor\"]"
       ]
     },
     "schemaVersion": 1

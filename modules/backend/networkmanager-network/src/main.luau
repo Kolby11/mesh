@@ -6,13 +6,9 @@ state = {
     networks = {},
 }
 
-function start(self)
-    mesh.service.set_poll_interval(1000)
-end
+-- Command-driven: without `on_poll` the provider takes no periodic wakeups.
+function start(self) end
 
-function on_poll(self)
-    state = state
-end
 
 function on_command_set_wifi_enabled(self)
     local payload = mesh.service.payload()

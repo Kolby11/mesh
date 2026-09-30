@@ -1,4 +1,9 @@
 -- brightnessctl-backed display brightness provider.
+--
+-- The kernel notifies watchers of the backlight's `actual_brightness`
+-- attribute on every change, so with `fs.watch` the provider reads the level
+-- only when it moves and keeps a slow safety poll. Without the capability it
+-- polls brightnessctl.
 
 state = {
     available = false,
@@ -7,6 +12,10 @@ state = {
 
 local last_level = nil
 local last_available = nil
+local watch_program = nil
+
+local FALLBACK_POLL_MS = 2000
+local SAFETY_POLL_MS = 60000
 
 local function log_info(message)
     mesh.log.info("[backlight-brightness] " .. message)
@@ -24,15 +33,18 @@ local function clamp_percent(value, fallback)
     return math.max(0, math.min(100, number))
 end
 
+-- Returns the level percent and, for a backlight-class device, its name.
 local function read_level()
     local result = mesh.exec("brightnessctl", { "-m" })
     if not result.success then
-        return nil
+        return nil, nil
     end
 
     -- brightnessctl -m: device,class,current,percent%,maximum
-    local percent = (result.stdout or ""):match(",([%d%.]+)%%,")
-    return clamp_percent(percent, nil)
+    local stdout = result.stdout or ""
+    local device, class = stdout:match("^([^,\n]+),([^,\n]+),")
+    local percent = stdout:match(",([%d%.]+)%%,")
+    return clamp_percent(percent, nil), class == "backlight" and device or nil
 end
 
 local function publish_level(self, level)
@@ -60,7 +72,9 @@ local function publish_level(self, level)
 end
 
 local function refresh_state(self)
-    publish_level(self, read_level())
+    local level, device = read_level()
+    publish_level(self, level)
+    return device
 end
 
 local function command_amount(default_amount)
@@ -71,8 +85,8 @@ end
 local function apply(self, argument, next_level)
     local result = mesh.exec("brightnessctl", { "set", argument })
     if result.success then
-        -- brightnessctl has no event stream. Publish the requested value
-        -- optimistically and let the safety poll correct rounding or clamping.
+        -- Publish the requested value optimistically; the attribute watch (or
+        -- the poll without one) corrects rounding or clamping.
         publish_level(self, next_level)
     else
         refresh_state(self)
@@ -82,12 +96,34 @@ local function apply(self, argument, next_level)
 end
 
 function start(self)
-    mesh.service.set_poll_interval(2000)
-    refresh_state(self)
+    mesh.service.set_poll_interval(FALLBACK_POLL_MS)
+    local device = refresh_state(self)
+    if device and mesh.service.has_capability("fs.watch") then
+        local started = mesh.watch_path("/sys/class/backlight/" .. device .. "/actual_brightness")
+        if started then
+            watch_program = started.program
+            mesh.service.set_poll_interval(SAFETY_POLL_MS)
+            log_info("watching backlight " .. device)
+        end
+    end
 end
 
 function on_poll(self)
     refresh_state(self)
+end
+
+function on_stream_batch(self, program, _lines)
+    if program == watch_program then
+        refresh_state(self)
+    end
+end
+
+function on_stream_closed(self, program, _success)
+    if program == watch_program then
+        log_warn("backlight watch ended; falling back to polling")
+        watch_program = nil
+        mesh.service.set_poll_interval(FALLBACK_POLL_MS)
+    end
 end
 
 function on_command_set(self)

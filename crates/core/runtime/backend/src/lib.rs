@@ -689,6 +689,7 @@ async fn run_backend_service(
     let mut consecutive_poll_failures = 0;
     let stream_state = ctx.stream_state();
     let mut coalesced_command_index = HashMap::new();
+    let poll_enabled = ctx.has_poll_handler();
 
     if let Some(payload) = init_payload {
         // The shell validates and stages this snapshot before treating the
@@ -744,7 +745,9 @@ async fn run_backend_service(
                     break;
                 }
             }
-            _ = tick.tick() => {
+            // A provider without `on_poll` is purely event- and command-driven:
+            // it never needs a periodic wakeup.
+            _ = tick.tick(), if poll_enabled => {
                 let payload = match ctx.run_poll() {
                     Ok(payload) => {
                         consecutive_poll_failures = 0;
@@ -1105,11 +1108,11 @@ fn dispatch_stream_events(
                     current = Some((event.stream, vec![line]));
                 }
             }
-            StreamEventKind::Started
+            kind @ (StreamEventKind::Started
             | StreamEventKind::Eof
             | StreamEventKind::Failed(_)
             | StreamEventKind::Exited(_)
-            | StreamEventKind::Overflow { .. } => {
+            | StreamEventKind::Overflow { .. }) => {
                 if let Some((stream, lines)) = current.take() {
                     if !publish_stream_callback_result(
                         ctx.run_stream_batch_for_stream(&stream, &lines),
@@ -1124,6 +1127,21 @@ fn dispatch_stream_events(
                     ) {
                         return false;
                     }
+                }
+                if let StreamEventKind::Exited(status) = kind
+                    && !publish_stream_callback_result(
+                        ctx.run_stream_closed(&event.stream, status.success),
+                        tx,
+                        service_name,
+                        module_id,
+                        last_payload,
+                        ctx,
+                        active_interval_ms,
+                        tick,
+                        &identity_handle,
+                    )
+                {
+                    return false;
                 }
             }
         }
@@ -1954,6 +1972,53 @@ mod tests {
             Some("poll")
         );
         assert_eq!(second.payload.get("tick").and_then(|v| v.as_u64()), Some(2));
+
+        drop(cmd_tx);
+        drop(update_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
+            .expect("backend task should not panic");
+    }
+
+    #[tokio::test]
+    async fn legacy_stream_hooks_observe_stream_close() {
+        let (update_tx, mut update_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/stream-close".to_string(),
+            "closing".to_string(),
+            CapabilitySet::from_ids(["exec.argv:sh:*"]),
+            serde_json::json!({}),
+            "function start()\n\
+               mesh.exec_stream(\"sh\", { \"-c\", \"printf 'line\\\\n'; exit 3\" })\n\
+             end\n\
+             function on_stream_batch(self, _program, _lines) end\n\
+             function on_stream_closed(self, program, success)\n\
+               mesh.service.emit({ closed = program, success = success })\n\
+             end"
+            .to_string(),
+            update_tx,
+            cmd_rx,
+        ));
+
+        let closed = loop {
+            let event = tokio::time::timeout(Duration::from_secs(2), update_rx.recv())
+                .await
+                .expect("stream close should reach on_stream_closed")
+                .expect("update channel should stay open");
+            if let BackendServiceEvent::Update(update) = event
+                && update.payload.get("closed").is_some()
+            {
+                break update;
+            }
+        };
+        assert_eq!(closed.payload.get("closed").and_then(|v| v.as_str()), Some("sh"));
+        assert_eq!(
+            closed.payload.get("success").and_then(|v| v.as_bool()),
+            Some(false)
+        );
 
         drop(cmd_tx);
         drop(update_rx);

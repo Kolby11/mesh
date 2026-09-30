@@ -1,7 +1,7 @@
 {
   "name": "@mesh/hyprland-wm",
   "version": "0.1.0",
-  "description": "Hyprland compositor backend — workspace and window state via hyprctl.",
+  "description": "Hyprland compositor backend — workspace and window state over Hyprland's IPC sockets.",
   "private": true,
   "mesh": {
     "apiVersion": "0.1",
@@ -19,13 +19,14 @@
         "exec.argv:sh:[\"-c\",\"test -S * && echo ok\"]"
       ],
       "optionalCapabilities": [
+        "net.socket",
         "exec.argv:nc:[\"-U\",\"*\"]",
         "exec.argv:socat:[\"-\",\"UNIX-CONNECT:*\"]"
       ],
       "binaries": [
         {
           "name": "hyprctl",
-          "reason": "Query active workspace, active window, and dispatch workspace switches.",
+          "reason": "Dispatch workspace switches, and query state when native socket access is not granted.",
           "packages": {
             "arch": "hyprland",
             "nixos": "hyprland"
@@ -33,7 +34,7 @@
         },
         {
           "name": "socat",
-          "reason": "Stream Hyprland IPC events for instant workspace/window change updates (preferred over nc).",
+          "reason": "Stream Hyprland IPC events when native socket access is not granted (preferred over nc).",
           "optional": true,
           "packages": {
             "debian": "socat",

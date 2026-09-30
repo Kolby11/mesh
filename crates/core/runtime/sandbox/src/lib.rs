@@ -35,12 +35,6 @@ pub fn validate_json(
     max_depth: usize,
     label: &str,
 ) -> Result<usize, String> {
-    let bytes =
-        serde_json::to_vec(value).map_err(|error| format!("failed to encode {label}: {error}"))?;
-    if bytes.len() > max_bytes {
-        return Err(format!("{label} exceeds {max_bytes} bytes"));
-    }
-
     fn within_depth(value: &serde_json::Value, current: usize, max_depth: usize) -> bool {
         if current > max_depth {
             return false;
@@ -56,10 +50,75 @@ pub fn validate_json(
         }
     }
 
+    // Depth first: it is a cheap walk and bounds the serializer's recursion.
     if !within_depth(value, 0, max_depth) {
         return Err(format!("{label} exceeds JSON depth {max_depth}"));
     }
-    Ok(bytes.len())
+    // Count the encoding without materializing it, stopping as soon as it
+    // passes the byte ceiling.
+    let mut counter = ByteCounter {
+        count: 0,
+        limit: max_bytes,
+    };
+    match serde_json::to_writer(&mut counter, value) {
+        Ok(()) => Ok(counter.count),
+        Err(_) if counter.count > max_bytes => Err(format!("{label} exceeds {max_bytes} bytes")),
+        Err(error) => Err(format!("failed to encode {label}: {error}")),
+    }
+}
+
+/// Serialized size of a JSON value, counted without allocating its encoding.
+pub fn json_encoded_len(value: &serde_json::Value) -> usize {
+    let mut counter = ByteCounter {
+        count: 0,
+        limit: usize::MAX,
+    };
+    // Encoding a `Value` into a counting writer cannot fail.
+    let _ = serde_json::to_writer(&mut counter, value);
+    counter.count
+}
+
+struct ByteCounter {
+    count: usize,
+    limit: usize,
+}
+
+impl std::io::Write for ByteCounter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.count = self.count.saturating_add(bytes.len());
+        if self.count > self.limit {
+            return Err(std::io::Error::other("byte limit exceeded"));
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod validate_json_tests {
+    use super::*;
+
+    #[test]
+    fn counted_size_matches_the_encoding_and_limits_hold() {
+        let value = serde_json::json!({ "a": [1, 2.5, "three", null], "b": { "c": "é\n\"" } });
+        let encoded = serde_json::to_vec(&value).unwrap().len();
+        assert_eq!(validate_json(&value, 1024, 8, "payload"), Ok(encoded));
+        assert_eq!(json_encoded_len(&value), encoded);
+        assert_eq!(validate_json(&value, encoded, 8, "payload"), Ok(encoded));
+        assert!(
+            validate_json(&value, encoded - 1, 8, "payload")
+                .unwrap_err()
+                .contains("exceeds")
+        );
+        assert!(
+            validate_json(&value, 1024, 1, "payload")
+                .unwrap_err()
+                .contains("depth")
+        );
+    }
 }
 
 /// Configuration for the module sandbox.

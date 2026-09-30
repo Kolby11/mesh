@@ -511,12 +511,10 @@ impl ScriptContext {
             .map_err(|rejection| {
                 LuaError::external(ScriptError::OperationRejected(rejection.to_string()))
             })?;
-        let output_bytes = serde_json::to_vec(&serde_json::json!({
-            "channel": &channel,
-            "payload": &payload,
-        }))
-        .map_err(LuaError::external)?
-        .len();
+        // Size of `{"channel":<channel>,"payload":<payload>}` without building it.
+        let output_bytes = r#"{"channel":,"payload":}"#.len()
+            + mesh_core_runtime::json_encoded_len(&serde_json::Value::from(channel.as_str()))
+            + mesh_core_runtime::json_encoded_len(&payload);
         crate::operation::reserve_side_effect(resources, output_bytes)
             .map_err(LuaError::external)?;
         pending_side_channels.store(true, Ordering::Release);

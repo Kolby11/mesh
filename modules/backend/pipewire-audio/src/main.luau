@@ -1,8 +1,9 @@
 -- PipeWire audio backend.
 --
--- Reads volume via wpctl. Reacts to external volume changes (hardware keys,
--- other clients) through `pw-mon`, streamed via mesh.exec_stream. A slow
--- safety-net poll covers changes that produce no monitor output.
+-- Reads volume via wpctl. Reacts to volume changes from any client through
+-- `pw-mon`, streamed via mesh.exec_stream: a volume or mute change is a
+-- `changed:` record on the sink's Node. A slow safety-net poll covers a
+-- missed record; without pw-mon the provider polls quickly.
 
 local SOUNDS_ROOT = "/usr/share/mesh/sounds/"
 
@@ -36,27 +37,35 @@ local function wpctl(args)
     return mesh.exec("wpctl", args)
 end
 
+local FALLBACK_POLL_MS = 250
+local SAFETY_POLL_MS = 30000
+
 function start(self)
-    -- Slow safety-net poll. With pw-mon active, external volume changes are
-    -- detected through client/object events (e.g. the compositor's wpctl run
-    -- for a hardware volume key registers a client), so the poll only covers
-    -- changes that produce no monitor output at all.
-    mesh.service.set_poll_interval(1000)
+    mesh.service.set_poll_interval(FALLBACK_POLL_MS)
 
     local stream_args = { "--hide-props", "--hide-params", "--print-separator" }
     if mesh.service.can_exec("pw-mon", stream_args) then
         local started = mesh.exec_stream("pw-mon", stream_args)
         if started then
             stream_active = true
+            mesh.service.set_poll_interval(SAFETY_POLL_MS)
             debug_info("subscribed to pw-mon for live volume events")
         else
-            mesh.service.set_poll_interval(250)
             debug_warn("pw-mon stream unavailable; falling back to 250ms poll")
         end
     else
-        mesh.service.set_poll_interval(250)
         mesh.log.debug("[pipewire-audio] pw-mon capability unavailable; using 250ms poll")
     end
+end
+
+function on_stream_closed(self, program, _success)
+    if program ~= "pw-mon" then
+        return
+    end
+    debug_warn("pw-mon exited; falling back to 250ms poll")
+    stream_active = false
+    pending_self_noise = 0
+    mesh.service.set_poll_interval(FALLBACK_POLL_MS)
 end
 
 local function resolve_sink_id()

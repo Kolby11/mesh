@@ -99,10 +99,12 @@ impl ServiceContextState {
             .map(|payload| payload.fingerprint)
     }
 
-    pub fn field(&self, service: &str, field: &str) -> Option<Value> {
+    /// Shared handle to a service's current payload. Readers convert fields
+    /// from it after releasing the state lock, without cloning JSON.
+    pub fn payload(&self, service: &str) -> Option<Arc<Value>> {
         self.payloads
             .get(service)
-            .and_then(|payload| payload.value.get(field).cloned())
+            .map(|payload| Arc::clone(&payload.value))
     }
 }
 

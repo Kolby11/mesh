@@ -11,6 +11,7 @@
         "exec.argv:brightnessctl:[\"-m\"]",
         "exec.argv:brightnessctl:[\"set\",\"*\"]"
       ],
+      "optionalCapabilities": ["fs.watch"],
       "binaries": [
         {
           "name": "brightnessctl",

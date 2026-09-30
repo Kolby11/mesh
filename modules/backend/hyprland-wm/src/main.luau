@@ -1,9 +1,10 @@
 -- Hyprland compositor backend.
 --
--- Reads workspace and window state via hyprctl. Subscribes to Hyprland's
--- IPC event socket (.socket2.sock) for instant updates. socat is tried
--- first; nc is tried as a fallback. A safety-net poll covers any events
--- the stream misses or events that arrive before the stream connects.
+-- Reads workspace and window state from Hyprland's request socket
+-- (.socket.sock) and subscribes to its event socket (.socket2.sock) through
+-- the host's native socket primitives, so the idle path spawns no processes.
+-- Without the `net.socket` capability it falls back to hyprctl queries and a
+-- socat/nc event stream. A safety-net poll covers events the stream misses.
 
 state = {
     available = false,
@@ -13,8 +14,15 @@ state = {
 }
 
 local stream_active = false
--- Program name actually used for the stream (socat or nc).
+-- Program label of the active event stream (native socket, socat, or nc).
 local stream_program = nil
+-- Directory holding Hyprland's sockets once located.
+local socket_dir = nil
+
+-- Poll intervals: a fast fallback when no event stream is attached, and a
+-- slow safety net once events arrive on their own.
+local FALLBACK_POLL_MS = 500
+local SAFETY_POLL_MS = 30000
 
 local function log_info(msg)
     mesh.log.info("[hyprland-wm] " .. msg)
@@ -62,14 +70,26 @@ local function parse_workspaces(stdout)
     return list
 end
 
+-- Run one hyprctl-style JSON query. The request socket answers without a
+-- process spawn; hyprctl remains the fallback for hosts without `net.socket`.
+local function query(name)
+    if socket_dir then
+        local reply = mesh.socket_request(socket_dir .. "/.socket.sock", "j/" .. name)
+        if reply.success then
+            return { success = true, stdout = reply.response }
+        end
+    end
+    return mesh.exec("hyprctl", { name, "-j" })
+end
+
 local function read_state()
-    local ws_result = mesh.exec("hyprctl", { "activeworkspace", "-j" })
+    local ws_result = query("activeworkspace")
     if not ws_result.success then
         return nil
     end
 
-    local win_result = mesh.exec("hyprctl", { "activewindow", "-j" })
-    local wss_result = mesh.exec("hyprctl", { "workspaces", "-j" })
+    local win_result = query("activewindow")
+    local wss_result = query("workspaces")
 
     local active_workspace = parse_active_workspace(ws_result.stdout or "")
     if not active_workspace then
@@ -167,70 +187,77 @@ local function refresh_state(self)
     })
 end
 
--- Discover the Hyprland IPC event socket path.
--- Tries $HYPRLAND_INSTANCE_SIGNATURE via sh first (zero extra hyprctl calls
--- when the env var is set), then falls back to `hyprctl instances -j`.
-local function find_event_socket()
-    -- Preferred: read the env var that Hyprland sets for the running session.
-    local env_result = mesh.exec("sh", { "-c", "printf '%s' \"$HYPRLAND_INSTANCE_SIGNATURE\"" })
-    if env_result.success then
-        local sig = trim(env_result.stdout or "")
-        if sig ~= "" then
-            -- Hyprland ≥0.40 uses $XDG_RUNTIME_DIR/hypr/<sig>/.socket2.sock;
-            -- older versions use /tmp/hypr/<sig>/.socket2.sock. Try both.
-            local xdg_result = mesh.exec("sh", { "-c", "printf '%s' \"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\"" })
-            if xdg_result.success then
-                local xdg = trim(xdg_result.stdout or "")
-                if xdg ~= "" then
-                    local candidate = xdg .. "/hypr/" .. sig .. "/.socket2.sock"
-                    local test = mesh.exec("sh", { "-c", "test -S " .. candidate .. " && echo ok" })
-                    if test.success and trim(test.stdout or "") == "ok" then
-                        return candidate
-                    end
-                end
-            end
-            local candidate = "/tmp/hypr/" .. sig .. "/.socket2.sock"
-            local test = mesh.exec("sh", { "-c", "test -S " .. candidate .. " && echo ok" })
-            if test.success and trim(test.stdout or "") == "ok" then
-                return candidate
-            end
+local function shell_value(script)
+    local result = mesh.exec("sh", { "-c", script })
+    if result.success then
+        local value = trim(result.stdout or "")
+        if value ~= "" then
+            return value
         end
     end
-
-    -- Fallback: parse `hyprctl instances -j`.
-    local result = mesh.exec("hyprctl", { "instances", "-j" })
-    if not result.success then
-        return nil
-    end
-    local instance = (result.stdout or ""):match('"instance"%s*:%s*"([^"]+)"')
-    if not instance or instance == "" then
-        return nil
-    end
-    return "/tmp/hypr/" .. instance .. "/.socket2.sock"
+    return nil
 end
 
--- Try to attach a stream subprocess that reads events from the socket.
--- socat is tried first because it handles bidirectional UNIX sockets cleanly.
--- nc -U is tried as a fallback (available on most distros as part of nmap
--- or netcat-openbsd, and does not need a bidirectional link for read-only use).
--- Returns the program name if a stream handle was started, or nil.
-local function try_start_stream(socket)
+-- Candidate socket directories for the running instance. Hyprland >=0.40
+-- uses $XDG_RUNTIME_DIR/hypr/<sig>; older versions use /tmp/hypr/<sig>.
+local function socket_dir_candidates()
+    local candidates = {}
+    local sig = shell_value("printf '%s' \"$HYPRLAND_INSTANCE_SIGNATURE\"")
+    if not sig then
+        local result = mesh.exec("hyprctl", { "instances", "-j" })
+        if result.success then
+            sig = (result.stdout or ""):match('"instance"%s*:%s*"([^"]+)"')
+        end
+    end
+    if not sig or sig == "" then
+        return candidates
+    end
+    local xdg = shell_value("printf '%s' \"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\"")
+    if xdg then
+        candidates[#candidates + 1] = xdg .. "/hypr/" .. sig
+    end
+    candidates[#candidates + 1] = "/tmp/hypr/" .. sig
+    return candidates
+end
+
+local function socket_exists(path)
+    local test = mesh.exec("sh", { "-c", "test -S " .. path .. " && echo ok" })
+    return test.success and trim(test.stdout or "") == "ok"
+end
+
+local function stream_label(started, fallback)
+    return type(started) == "table" and started.program or fallback
+end
+
+-- Attach the event stream: the native socket first, then socat, then nc.
+-- Returns the stream's program label, or nil.
+local function try_start_stream(dir)
+    local socket = dir .. "/.socket2.sock"
+    local started = mesh.socket_stream(socket)
+    if started then
+        socket_dir = dir
+        log_info("subscribed natively: " .. socket)
+        return stream_label(started, "socket:" .. socket)
+    end
+
+    if not socket_exists(socket) then
+        return nil
+    end
+
     if mesh.service.can_exec("socat", { "-", "UNIX-CONNECT:" .. socket }) then
-        local started = mesh.exec_stream("socat", { "-", "UNIX-CONNECT:" .. socket })
+        started = mesh.exec_stream("socat", { "-", "UNIX-CONNECT:" .. socket })
         if started then
             log_info("subscribed via socat: " .. socket)
-            return type(started) == "table" and started.program or "socat"
+            return stream_label(started, "socat")
         end
         log_warn("socat spawn failed for: " .. socket)
     end
 
     if mesh.service.can_exec("nc", { "-U", socket }) then
-        -- -q 1 tells nc to quit 1 second after EOF, which keeps the process
-        -- alive while the socket streams. Ignored harmlessly by ncat/openbsd-nc.
-        local started = mesh.exec_stream("nc", { "-U", socket })
+        started = mesh.exec_stream("nc", { "-U", socket })
         if started then
             log_info("subscribed via nc: " .. socket)
-            return type(started) == "table" and started.program or "nc"
+            return stream_label(started, "nc")
         end
         log_warn("nc spawn failed for: " .. socket)
     end
@@ -239,23 +266,37 @@ local function try_start_stream(socket)
 end
 
 function start(self)
-    -- Start with a fast safety-net poll; relax to 2 s when the stream is up.
-    mesh.service.set_poll_interval(500)
+    mesh.service.set_poll_interval(FALLBACK_POLL_MS)
 
-    local socket = find_event_socket()
-    if socket then
-        stream_program = try_start_stream(socket)
+    for _, dir in ipairs(socket_dir_candidates()) do
+        stream_program = try_start_stream(dir)
         if stream_program then
-            stream_active = true
-            mesh.service.set_poll_interval(2000)
-        else
-            log_debug("no stream tool available (socat/nc); using 500 ms poll")
+            break
         end
+    end
+
+    if stream_program then
+        stream_active = true
+        mesh.service.set_poll_interval(SAFETY_POLL_MS)
     else
-        log_debug("could not locate Hyprland event socket; using 500 ms poll")
+        log_debug("no Hyprland event stream available; using 500 ms poll")
     end
 
     refresh_state(self)
+end
+
+-- The event stream ended (compositor restart or socket error). Return to the
+-- fast poll so state keeps flowing; the supervisor restarts the provider when
+-- it fails outright.
+function on_stream_closed(self, program, _success)
+    if program ~= stream_program then
+        return
+    end
+    log_warn("event stream closed; falling back to 500 ms poll")
+    stream_active = false
+    stream_program = nil
+    socket_dir = nil
+    mesh.service.set_poll_interval(FALLBACK_POLL_MS)
 end
 
 function on_poll(self)
@@ -355,7 +396,7 @@ function on_stream_line(self, program, line)
         next_state.active_window = active_window
         next_state.available = true
     elseif needs_active_window_query then
-        local result = mesh.exec("hyprctl", { "activewindow", "-j" })
+        local result = query("activewindow")
         if result.success then
             next_state.active_window = parse_active_window(result.stdout or "")
             next_state.available = true
@@ -366,7 +407,7 @@ function on_stream_line(self, program, line)
         next_state.active_workspace = active_workspace
         next_state.available = true
     elseif needs_active_workspace_query then
-        local result = mesh.exec("hyprctl", { "activeworkspace", "-j" })
+        local result = query("activeworkspace")
         if result.success then
             local parsed = parse_active_workspace(result.stdout or "")
             if parsed then
@@ -377,7 +418,7 @@ function on_stream_line(self, program, line)
     end
 
     if needs_workspace_list_query then
-        local result = mesh.exec("hyprctl", { "workspaces", "-j" })
+        local result = query("workspaces")
         if result.success then
             next_state.workspaces = parse_workspaces(result.stdout or "")
             next_state.available = true

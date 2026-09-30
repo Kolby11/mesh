@@ -10,6 +10,7 @@ use super::exec_stream::{
     StreamEvent, StreamEventKind, StreamHandle, StreamState, StreamStatus,
     spawn_stream_with_launch_program,
 };
+use super::host_sources;
 use super::logging::log_message;
 use super::{BackendScriptError, MIN_POLL_INTERVAL_MS};
 use crate::operation::{release_side_effect, reserve_side_effect};
@@ -24,7 +25,7 @@ use mesh_core_capability::CapabilitySet;
 use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value as JsonValue;
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{
     Arc, Mutex, RwLock,
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -590,6 +591,45 @@ impl BackendScriptContext {
         self.take_service_state_snapshot()
     }
 
+    /// Notify a legacy-hook script that one stream ended, through
+    /// `on_stream_closed(self, program, success)`. Scripts using
+    /// `on_stream_event` observe the `exited` record instead.
+    pub fn run_stream_closed(
+        &mut self,
+        stream: &StreamHandle,
+        success: bool,
+    ) -> Result<Option<JsonValue>, BackendScriptError> {
+        let globals = self.script_environment()?;
+        let handler = match globals.get::<Function>("on_stream_closed") {
+            Ok(handler) => handler,
+            Err(_) => return Ok(None),
+        };
+        let _budget = self.policy.begin_callback();
+        self.host_side_effects_enabled
+            .store(true, Ordering::Release);
+        self.reset_for_call(JsonValue::Null);
+        let current_self =
+            self.current_self_table()
+                .map_err(|err| BackendScriptError::Runtime {
+                    module_id: self.module_id.clone(),
+                    message: err.to_string(),
+                })?;
+        handler
+            .call::<()>((current_self, stream.program().to_string(), success))
+            .map_err(|err| BackendScriptError::Runtime {
+                module_id: self.module_id.clone(),
+                message: err.to_string(),
+            })?;
+        self.take_service_state_snapshot()
+    }
+
+    /// Whether this script defines `on_poll`. Providers without one are
+    /// driven only by streams and commands and need no periodic wakeup.
+    pub fn has_poll_handler(&mut self) -> bool {
+        self.script_environment()
+            .is_ok_and(|globals| globals.get::<Function>("on_poll").is_ok())
+    }
+
     /// Whether this script opted into typed stream lifecycle records.
     pub fn has_stream_event_handler(&mut self) -> bool {
         self.script_environment()
@@ -774,28 +814,21 @@ impl BackendScriptContext {
                 return Err(error);
             }
         };
-        let result_bytes = match serde_json::to_vec(&result) {
+        let result_bytes = match self
+            .policy
+            .budget()
+            .validate_json(&result, "command result")
+        {
             Ok(bytes) => bytes,
             Err(error) => {
                 self.rollback_command_state(previous_state);
                 return Err(BackendScriptError::CommandResultConversionFailed {
                     module_id: self.module_id.clone(),
-                    message: format!("failed to size command result: {error}"),
+                    message: error.to_string(),
                 });
             }
         };
-        if let Err(error) = self
-            .policy
-            .budget()
-            .validate_json(&result, "command result")
-        {
-            self.rollback_command_state(previous_state);
-            return Err(BackendScriptError::CommandResultConversionFailed {
-                module_id: self.module_id.clone(),
-                message: error.to_string(),
-            });
-        }
-        if let Err(error) = self.policy.budget().reserve_output(result_bytes.len()) {
+        if let Err(error) = self.policy.budget().reserve_output(result_bytes) {
             self.rollback_command_state(previous_state);
             return Err(BackendScriptError::CommandResultConversionFailed {
                 module_id: self.module_id.clone(),
@@ -850,12 +883,8 @@ impl BackendScriptContext {
                 module_id: self.module_id.clone(),
                 message: format!("failed to convert state to JSON: {err}"),
             })?;
-        let output_bytes =
-            serde_json::to_vec(&payload).map_err(|error| BackendScriptError::SnapshotFailed {
-                module_id: self.module_id.clone(),
-                message: format!("failed to size state snapshot: {error}"),
-            })?;
-        self.policy
+        let output_bytes = self
+            .policy
             .budget()
             .validate_json(&payload, "service state snapshot")
             .map_err(|error| BackendScriptError::SnapshotFailed {
@@ -864,7 +893,7 @@ impl BackendScriptContext {
             })?;
         self.policy
             .budget()
-            .reserve_output(output_bytes.len())
+            .reserve_output(output_bytes)
             .map_err(|error| BackendScriptError::SnapshotFailed {
                 module_id: self.module_id.clone(),
                 message: error.to_string(),
@@ -989,12 +1018,9 @@ impl BackendScriptContext {
                 .create_function(move |lua, value: LuaValue| {
                     require_started(&host_side_effects_enabled)?;
                     let payload = lua.from_value::<JsonValue>(value)?;
-                    resources_for_emit
+                    let output_bytes = resources_for_emit
                         .validate_json(&payload, "service payload")
                         .map_err(|error| mlua::Error::external(error.to_string()))?;
-                    let output_bytes = serde_json::to_vec(&payload)
-                        .map_err(mlua::Error::external)?
-                        .len();
                     resources_for_emit
                         .reserve_output(output_bytes)
                         .map_err(|error| mlua::Error::external(error.to_string()))?;
@@ -1021,10 +1047,7 @@ impl BackendScriptContext {
                         }
                         Some(other) => lua.from_value::<JsonValue>(other)?,
                     };
-                    let output_bytes = serde_json::to_vec(&payload)
-                        .map_err(mlua::Error::external)?
-                        .len();
-                    resources_for_json
+                    let output_bytes = resources_for_json
                         .validate_json(&payload, "service payload")
                         .map_err(|error| mlua::Error::external(error.to_string()))?;
                     resources_for_json
@@ -1165,6 +1188,111 @@ impl BackendScriptContext {
             )?,
         )?;
 
+        self.install_native_source_api(mesh)?;
+        Ok(())
+    }
+
+    /// Fork-free event sources and socket exchanges. See `host_sources`.
+    fn install_native_source_api(&mut self, mesh: &Table) -> mlua::Result<()> {
+        type SpawnSource = fn(&Arc<StreamState>, &str) -> std::io::Result<StreamHandle>;
+        let sources: [(&str, &str, SpawnSource); 2] = [
+            (
+                "socket_stream",
+                host_sources::SOCKET_CAPABILITY,
+                host_sources::spawn_socket_stream,
+            ),
+            (
+                "watch_path",
+                host_sources::WATCH_CAPABILITY,
+                host_sources::spawn_path_watch,
+            ),
+        ];
+        for (name, capability, spawn) in sources {
+            let granted = self.capabilities.contains(capability);
+            let module_id = self.module_id.clone();
+            let streams = Arc::clone(&self.streams);
+            let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
+            mesh.set(
+                name,
+                self.lua_ref()?.create_function(move |lua, path: String| {
+                    require_started(&host_side_effects_enabled)?;
+                    if !granted {
+                        tracing::warn!(
+                            module_id = %module_id,
+                            path = %path,
+                            required_capability = capability,
+                            "denied backend {name}"
+                        );
+                        return Ok(LuaValue::Boolean(false));
+                    }
+                    if !Path::new(&path).is_absolute() {
+                        return Err(mlua::Error::external(format!(
+                            "mesh.{name} requires an absolute path"
+                        )));
+                    }
+                    match spawn(&streams, &path) {
+                        Ok(handle) => Ok(LuaValue::Table(stream_handle_table(lua, &handle)?)),
+                        Err(error) => {
+                            tracing::debug!(
+                                module_id = %module_id,
+                                path = %path,
+                                "mesh.{name} failed: {error}"
+                            );
+                            Ok(LuaValue::Boolean(false))
+                        }
+                    }
+                })?,
+            )?;
+        }
+
+        let granted = self.capabilities.contains(host_sources::SOCKET_CAPABILITY);
+        let module_id = self.module_id.clone();
+        let resources = self.policy.budget();
+        let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
+        mesh.set(
+            "socket_request",
+            self.lua_ref()?.create_function(
+                move |lua, (path, request): (String, mlua::String)| {
+                    require_started(&host_side_effects_enabled)?;
+                    let reply = if !granted {
+                        tracing::warn!(
+                            module_id = %module_id,
+                            path = %path,
+                            required_capability = host_sources::SOCKET_CAPABILITY,
+                            "denied backend socket_request"
+                        );
+                        host_sources::SocketReply {
+                            success: false,
+                            response: String::new(),
+                            error: format!(
+                                "missing capability {}",
+                                host_sources::SOCKET_CAPABILITY
+                            ),
+                        }
+                    } else if !Path::new(&path).is_absolute() {
+                        return Err(mlua::Error::external(
+                            "mesh.socket_request requires an absolute path",
+                        ));
+                    } else {
+                        let _frame_pause = resources.pause_frame_clock();
+                        host_sources::socket_request(
+                            &path,
+                            &request.as_bytes(),
+                            resources.child_process_timeout(),
+                            resources.output_limit() as usize,
+                        )
+                    };
+                    resources
+                        .reserve_output(reply.response.len() + reply.error.len())
+                        .map_err(|error| mlua::Error::external(error.to_string()))?;
+                    let table = lua.create_table()?;
+                    table.set("success", reply.success)?;
+                    table.set("response", reply.response)?;
+                    table.set("error", reply.error)?;
+                    Ok(table)
+                },
+            )?,
+        )?;
         Ok(())
     }
 
@@ -1175,9 +1303,7 @@ impl BackendScriptContext {
             "config",
             self.lua_ref()?.create_function(move |lua, ()| {
                 let settings = runtime.lock().unwrap().settings.clone();
-                let output_bytes = serde_json::to_vec(&settings)
-                    .map_err(mlua::Error::external)?
-                    .len();
+                let output_bytes = mesh_core_runtime::json_encoded_len(&settings);
                 resources
                     .reserve_output(output_bytes)
                     .map_err(|error| mlua::Error::external(error.to_string()))?;
@@ -1484,12 +1610,10 @@ fn create_backend_event_channel(
             resources
                 .reserve_event()
                 .map_err(|error| mlua::Error::external(error.to_string()))?;
-            let output_bytes = serde_json::to_vec(&serde_json::json!({
-                "name": &fire_event_name,
-                "payload": &payload,
-            }))
-            .map_err(mlua::Error::external)?
-            .len();
+            // Size of `{"name":<name>,"payload":<payload>}` without building it.
+            let output_bytes = r#"{"name":,"payload":}"#.len()
+                + mesh_core_runtime::json_encoded_len(&JsonValue::from(fire_event_name.as_str()))
+                + mesh_core_runtime::json_encoded_len(&payload);
             if let Err(error) = reserve_side_effect(&resources, output_bytes) {
                 resources.release_event(1);
                 return Err(mlua::Error::external(error));
