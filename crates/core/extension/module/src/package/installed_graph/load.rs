@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 pub fn load_installed_module_graph(
     root_module_graph_path: &Path,
 ) -> Result<InstalledModuleGraph, ModuleManifestError> {
-    load_installed_module_graph_with(root_module_graph_path, None, load_each_module_manifest)
+    load_installed_module_graph_with(root_module_graph_path, None, None, load_each_module_manifest)
 }
 
 /// Resolve the installed graph against an explicit candidate profile without
@@ -26,13 +26,50 @@ pub fn load_installed_module_graph_for_profile(
     load_installed_module_graph_with(
         root_module_graph_path,
         Some(profile),
+        None,
         load_each_module_manifest,
     )
+}
+
+/// Reload the installed graph while a module is being edited. A module whose
+/// `module.json` no longer loads keeps the manifest it had in `previous`, so
+/// a half-typed edit does not deactivate it; a `module_manifest_retained`
+/// diagnostic carries the load error until the file is fixed. A module with
+/// no previous manifest is isolated as usual.
+pub fn load_installed_module_graph_retaining(
+    root_module_graph_path: &Path,
+    candidate_profile: Option<&ShellProfile>,
+    previous: &InstalledModuleGraph,
+) -> Result<InstalledModuleGraph, ModuleManifestError> {
+    load_installed_module_graph_with(
+        root_module_graph_path,
+        candidate_profile,
+        Some(previous),
+        load_each_module_manifest,
+    )
+}
+
+/// The manifest `previous` loaded from `module_dir`, when it had one there.
+fn retained_manifest(
+    previous: Option<&InstalledModuleGraph>,
+    module_dir: &Path,
+) -> Option<LoadedModuleManifest> {
+    let node = previous?
+        .modules()
+        .into_iter()
+        .find(|node| node.manifest_path.parent() == Some(module_dir))?;
+    Some(LoadedModuleManifest {
+        manifest: node.manifest.clone(),
+        path: node.manifest_path.clone(),
+        source: node.manifest_source,
+        diagnostics: Vec::new(),
+    })
 }
 
 fn load_installed_module_graph_with(
     root_module_graph_path: &Path,
     candidate_profile: Option<&ShellProfile>,
+    previous: Option<&InstalledModuleGraph>,
     load_manifests: impl Fn(&[PathBuf]) -> Vec<Result<LoadedModuleManifest, ModuleManifestError>>,
 ) -> Result<InstalledModuleGraph, ModuleManifestError> {
     let mut root = RootModuleGraphManifest::from_path(root_module_graph_path)?;
@@ -72,14 +109,27 @@ fn load_installed_module_graph_with(
         for (module_dir, loaded) in module_dirs.iter().cloned().zip(loaded_manifests) {
             let loaded = match loaded {
                 Ok(loaded) => loaded,
-                Err(error) => {
-                    isolated.push(isolated_module_diagnostic(
-                        display_relative(&module_dir, &modules_dir),
-                        "module_manifest_invalid",
-                        format!("module at {} was not loaded: {error}", module_dir.display()),
-                    ));
-                    continue;
-                }
+                Err(error) => match retained_manifest(previous, &module_dir) {
+                    Some(retained) => {
+                        isolated.push(isolated_module_diagnostic(
+                            retained.manifest.name.clone(),
+                            "module_manifest_retained",
+                            format!(
+                                "module at {} keeps its last valid manifest: {error}",
+                                module_dir.display()
+                            ),
+                        ));
+                        retained
+                    }
+                    None => {
+                        isolated.push(isolated_module_diagnostic(
+                            display_relative(&module_dir, &modules_dir),
+                            "module_manifest_invalid",
+                            format!("module at {} was not loaded: {error}", module_dir.display()),
+                        ));
+                        continue;
+                    }
+                },
             };
             let name = loaded.manifest.name.clone();
             let kind = loaded.manifest.mesh.kind;
@@ -130,10 +180,28 @@ fn load_installed_module_graph_with(
                 .collect::<Result<Vec<_>, _>>()?
         };
         let module_ids = root.modules.keys().cloned().collect::<Vec<_>>();
-        for (module_id, loaded) in module_ids.into_iter().zip(load_manifests(&module_dirs)) {
+        let loaded_manifests = load_manifests(&module_dirs);
+        for ((module_id, module_dir), loaded) in module_ids
+            .into_iter()
+            .zip(&module_dirs)
+            .zip(loaded_manifests)
+        {
+            let loaded = loaded.map_err(|error| {
+                let retained = retained_manifest(previous, module_dir)
+                    .filter(|retained| retained.manifest.name == module_id);
+                (error, retained)
+            });
             match loaded {
                 Ok(loaded) => modules.push(loaded),
-                Err(error) => {
+                Err((error, Some(retained))) => {
+                    isolated.push(isolated_module_diagnostic(
+                        module_id.clone(),
+                        "module_manifest_retained",
+                        format!("installed module {module_id} keeps its last valid manifest: {error}"),
+                    ));
+                    modules.push(retained);
+                }
+                Err((error, None)) => {
                     // Drop the entry and every root decision naming it, so the
                     // graph treats it as absent rather than failing to build.
                     root.modules.remove(&module_id);
@@ -301,7 +369,7 @@ fn snapshot_module_dirs(
 pub(in crate::package) fn load_installed_module_graph_serial(
     root_module_graph_path: &Path,
 ) -> Result<InstalledModuleGraph, ModuleManifestError> {
-    load_installed_module_graph_with(root_module_graph_path, None, |module_dirs| {
+    load_installed_module_graph_with(root_module_graph_path, None, None, |module_dirs| {
         module_dirs
             .iter()
             .map(|module_dir| load_module_manifest(module_dir))

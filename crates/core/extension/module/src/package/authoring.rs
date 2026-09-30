@@ -36,6 +36,26 @@ pub fn load_authoring_snapshot_for_profile(
     ))
 }
 
+/// Reload the authoring snapshot during live editing, retaining the manifest
+/// each module had in `previous` while its `module.json` does not load. See
+/// [`super::load_installed_module_graph_retaining`].
+pub fn load_authoring_snapshot_retaining(
+    root_module_graph_path: &Path,
+    candidate_profile: Option<&super::ShellProfile>,
+    previous: &AuthoringSnapshot,
+) -> Result<AuthoringSnapshot, ModuleManifestError> {
+    let graph = super::load_installed_module_graph_retaining(
+        root_module_graph_path,
+        candidate_profile,
+        previous,
+    )?;
+    Ok(with_content_revision(
+        root_module_graph_path,
+        graph,
+        candidate_profile,
+    ))
+}
+
 fn with_content_revision(
     root_module_graph_path: &Path,
     graph: InstalledModuleGraph,

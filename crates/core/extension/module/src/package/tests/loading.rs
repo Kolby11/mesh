@@ -432,6 +432,83 @@ fn an_invalid_or_unreadable_module_is_isolated_not_fatal() {
 }
 
 #[test]
+fn a_module_mid_edit_keeps_its_last_valid_manifest() {
+    let root = temp_dir("retained-manifest");
+    let modules_dir = root.join("modules");
+    write_frontend(&modules_dir, "alpha", "@me/alpha");
+    write_frontend(&modules_dir, "beta", "@me/beta");
+    fs::write(
+        root.join("module.json"),
+        r#"{"name":"@me/config","version":"0.1.0",
+            "mesh":{"schemaVersion":1,"modulesDir":"modules","modules":{}}}"#,
+    )
+    .unwrap();
+    let graph_path = root.join("module.json");
+    let previous = load_installed_module_graph(&graph_path).unwrap();
+
+    // A half-typed edit: the file no longer parses.
+    fs::write(modules_dir.join("beta/module.json"), "{ \"name\": \"@me/be").unwrap();
+    let retained = load_installed_module_graph_retaining(&graph_path, None, &previous)
+        .expect("an invalid manifest must not abort the reload");
+    assert_eq!(
+        retained
+            .module("@me/beta")
+            .map(|module| (module.manifest.name.clone(), module.manifest_path.clone())),
+        previous
+            .module("@me/beta")
+            .map(|module| (module.manifest.name.clone(), module.manifest_path.clone())),
+        "the module keeps the manifest it had before the edit"
+    );
+    assert!(retained.module("@me/beta").is_some_and(|module| module.enabled));
+    assert!(retained.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@me/beta" && diagnostic.status == "module_manifest_retained"
+    }));
+
+    // Without a previous graph (a cold start) the module is isolated.
+    let cold = load_installed_module_graph(&graph_path).unwrap();
+    assert!(cold.module("@me/beta").is_none());
+
+    // Fixing the file picks up the new manifest and clears the diagnostic.
+    write_frontend(&modules_dir, "beta", "@me/beta");
+    let fixed = load_installed_module_graph_retaining(&graph_path, None, &retained).unwrap();
+    assert!(fixed.module("@me/beta").is_some());
+    assert!(
+        !fixed
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.status == "module_manifest_retained")
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn an_explicit_module_mid_edit_keeps_its_last_valid_manifest_and_decisions() {
+    let root = temp_dir("retained-explicit");
+    let modules_dir = root.join("modules");
+    write_frontend(&modules_dir, "alpha", "@me/alpha");
+    fs::write(
+        root.join("module.json"),
+        r#"{"name":"@me/config","version":"0.1.0","mesh":{"schemaVersion":1,
+            "modulesDir":"modules",
+            "modules":{"@me/alpha":{"kind":"frontend","path":"alpha","enabled":true}}}}"#,
+    )
+    .unwrap();
+    let graph_path = root.join("module.json");
+    let previous = load_installed_module_graph(&graph_path).unwrap();
+
+    fs::write(modules_dir.join("alpha/module.json"), "not json").unwrap();
+    let retained = load_installed_module_graph_retaining(&graph_path, None, &previous)
+        .expect("an invalid explicit module keeps its last manifest");
+    assert!(retained.module("@me/alpha").is_some_and(|module| module.enabled));
+    assert!(retained.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@me/alpha" && diagnostic.status == "module_manifest_retained"
+    }));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn an_invalid_explicit_module_drops_only_itself_and_decisions_naming_it() {
     let root = temp_dir("isolated-explicit");
     let modules_dir = root.join("modules");

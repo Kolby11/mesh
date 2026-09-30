@@ -718,3 +718,39 @@ fn one_module_with_unresolvable_capabilities_does_not_withhold_grants_from_the_r
     assert_eq!(failures[0].0, "@test/bad");
     assert!(failures[0].1.to_string().contains("service.nonexistent.read"));
 }
+
+#[test]
+fn live_reload_keeps_a_module_whose_manifest_is_mid_edit() {
+    let root = tempfile::tempdir().unwrap();
+    let module_dir = root.path().join("modules/widget");
+    fs::create_dir_all(module_dir.join("src")).unwrap();
+    fs::write(module_dir.join("src/main.mesh"), "<template><box /></template>").unwrap();
+    let manifest = module_dir.join("module.json");
+    fs::write(
+        &manifest,
+        r#"{"name":"@test/widget","version":"0.1.0",
+            "mesh":{"apiVersion":"0.1","kind":"frontend","entry":"src/main.mesh"}}"#,
+    )
+    .unwrap();
+    let graph_path = root.path().join("module.json");
+    fs::write(
+        &graph_path,
+        r#"{"name":"@test/config","version":"0.1.0",
+            "mesh":{"schemaVersion":1,"modulesDir":"modules","modules":{}}}"#,
+    )
+    .unwrap();
+
+    let mut shell = Shell::new();
+    shell.discover_modules_at(&graph_path);
+    assert!(shell.modules.contains_key("@test/widget"));
+
+    // Saving a half-typed manifest must not deactivate the module.
+    fs::write(&manifest, r#"{"name":"@test/widget","version":"#).unwrap();
+    let reloaded = shell
+        .reload_installed_module_graph_at(&graph_path)
+        .expect("a module mid-edit must not reject the whole graph");
+    assert!(reloaded.module("@test/widget").is_some());
+    assert!(reloaded.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@test/widget" && diagnostic.status == "module_manifest_retained"
+    }));
+}

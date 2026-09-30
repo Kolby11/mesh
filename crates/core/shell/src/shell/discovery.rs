@@ -19,10 +19,21 @@ pub(in crate::shell) fn installed_module_graph_path() -> PathBuf {
         .join("config/module.json")
 }
 
+/// Load a candidate graph. Once a graph is committed, a module whose
+/// `module.json` stops loading keeps its committed manifest, so saving a
+/// half-finished edit does not deactivate it.
 fn load_installed_module_graph_candidate(
     root_module_graph_path: &Path,
+    committed: Option<&InstalledModuleGraph>,
 ) -> Result<InstalledModuleGraph, mesh_core_module::package::ModuleManifestError> {
-    mesh_core_module::package::load_authoring_snapshot(root_module_graph_path)
+    match committed {
+        Some(committed) => mesh_core_module::package::load_authoring_snapshot_retaining(
+            root_module_graph_path,
+            None,
+            committed,
+        ),
+        None => mesh_core_module::package::load_authoring_snapshot(root_module_graph_path),
+    }
 }
 
 pub(in crate::shell) fn graph_i18n_catalog_sources(
@@ -2243,7 +2254,10 @@ impl Shell {
             );
             return;
         }
-        let graph = match load_installed_module_graph_candidate(graph_path) {
+        let graph = match load_installed_module_graph_candidate(
+            graph_path,
+            self.installed_module_graph.as_ref(),
+        ) {
             Ok(graph) => graph,
             Err(error) => {
                 let message = format!(
@@ -2306,7 +2320,7 @@ impl Shell {
     ) -> Result<&InstalledModuleGraph, mesh_core_module::package::ModuleManifestError> {
         if self.installed_module_graph.is_none() {
             let graph_path = self.installed_module_graph_path();
-            let candidate = load_installed_module_graph_candidate(&graph_path)?;
+            let candidate = load_installed_module_graph_candidate(&graph_path, None)?;
             self.commit_installed_module_graph(candidate)
                 .map_err(|error| {
                     mesh_core_module::package::ModuleManifestError::Validation(error.to_string())
@@ -2324,7 +2338,10 @@ impl Shell {
     pub(in crate::shell) fn load_installed_module_graph_candidate(
         &self,
     ) -> Result<InstalledModuleGraph, mesh_core_module::package::ModuleManifestError> {
-        load_installed_module_graph_candidate(&self.installed_module_graph_path())
+        load_installed_module_graph_candidate(
+            &self.installed_module_graph_path(),
+            self.installed_module_graph.as_ref(),
+        )
     }
 
     #[cfg(test)]
@@ -2332,7 +2349,10 @@ impl Shell {
         &mut self,
         root_module_graph_path: &Path,
     ) -> Result<InstalledModuleGraph, mesh_core_module::package::ModuleManifestError> {
-        let candidate = load_installed_module_graph_candidate(root_module_graph_path)?;
+        let candidate = load_installed_module_graph_candidate(
+            root_module_graph_path,
+            self.installed_module_graph.as_ref(),
+        )?;
         self.commit_installed_module_graph(candidate.clone())
             .map_err(|error| {
                 mesh_core_module::package::ModuleManifestError::Validation(error.to_string())
