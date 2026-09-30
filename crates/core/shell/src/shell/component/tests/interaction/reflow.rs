@@ -1164,3 +1164,137 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
         "theme button should resolve against the dark palette, not stale light colors"
     );
 }
+
+/// A parent surface whose trigger cell embeds `@mesh/test-popover` (rendered from
+/// `popover_src`) near the surface's right edge.
+fn component_with_edge_popover(popover_src: &str) -> FrontendSurfaceComponent {
+    use crate::shell::ComponentContext;
+    use crate::shell::component::catalog::{FrontendCatalog, FrontendCatalogEntry};
+    use mesh_core_component::parse_component;
+    use mesh_core_frontend::CompiledFrontendModule;
+
+    const PARENT: &str = "@test/popover-host";
+    let mut parent_manifest = minimal_test_manifest(PARENT);
+    parent_manifest.dependencies.modules.insert(
+        "@mesh/test-popover".into(),
+        mesh_core_module::manifest::DependencySpec::Simple(">=0.1.0".into()),
+    );
+    let mut popover_manifest = minimal_test_manifest("@mesh/test-popover");
+    popover_manifest.package.module_type = mesh_core_module::ModuleType::Component;
+    let parent = CompiledFrontendModule {
+        manifest: parent_manifest,
+        source_path: PathBuf::from("src/main.mesh"),
+        component: parse_component(
+            r#"
+<template>
+    <row class="bar">
+        <box class="spacer" />
+        <box class="cell" ref="cell"><EdgePopover /></box>
+    </row>
+</template>
+<script lang="luau">
+import EdgePopover from "@mesh/test-popover"
+</script>
+<style>
+.bar { width: 200px; height: 30px; }
+.spacer { flex-grow: 1; }
+.cell { width: 24px; height: 24px; flex-shrink: 0; align-items: center; justify-content: center; }
+</style>
+"#,
+        )
+        .unwrap(),
+        public_props: Default::default(),
+        local_components: HashMap::new(),
+        module_component_imports: HashMap::from([("EdgePopover".into(), "@mesh/test-popover".into())]),
+        watched_paths: Vec::new(),
+    };
+    let popover = CompiledFrontendModule {
+        manifest: popover_manifest,
+        source_path: PathBuf::from("src/main.mesh"),
+        component: parse_component(popover_src).unwrap(),
+        public_props: Default::default(),
+        local_components: HashMap::new(),
+        module_component_imports: HashMap::new(),
+        watched_paths: Vec::new(),
+    };
+    let catalog = FrontendCatalog {
+        modules: HashMap::from([
+            (
+                PARENT.into(),
+                FrontendCatalogEntry {
+                    module_dir: PathBuf::from("."),
+                    compiled: parent.clone().into(),
+                },
+            ),
+            (
+                "@mesh/test-popover".into(),
+                FrontendCatalogEntry {
+                    module_dir: PathBuf::from("."),
+                    compiled: popover.into(),
+                },
+            ),
+        ]),
+        diagnostics: Default::default(),
+        extension_point_contributions: HashMap::new(),
+        extension_point_entries: HashMap::new(),
+        node_slot_placements: Default::default(),
+    };
+    let mut component = FrontendSurfaceComponent::new_for_test(
+        parent,
+        PathBuf::from("."),
+        catalog,
+        InterfaceCatalog::default(),
+        test_settings_store(),
+    );
+    component
+        .mount(ComponentContext {
+            component_id: PARENT.into(),
+            surface_id: PARENT.into(),
+            diagnostics: mesh_core_diagnostics::Diagnostics::new(PARENT),
+        })
+        .unwrap();
+    component.visible = true;
+    let theme = mesh_core_theme::default_theme();
+    let mut buffer = PixelBuffer::new(200, 30);
+    component
+        .paint(&theme, SurfaceExtent::unpadded(200, 30), &mut buffer, 1.0)
+        .unwrap();
+    component
+}
+
+#[test]
+fn promoted_popover_keeps_its_intrinsic_size_beyond_the_parent_edge() {
+    // The popover wrapper collapses to 0x0 in its trigger cell. Its promoted
+    // root must still size to its own content: a fixed-width panel must not
+    // shrink, and text must not wrap to the 0px the wrapper offers.
+    let component = component_with_edge_popover(
+        r#"
+<template>
+    <popover open="true" class="shell" anchor-ref="cell" anchor="bottom" gravity="bottom">
+        <column class="panel"><text content="A fairly long popover title" /></column>
+        <text class="note" content="Wide unwrapped explanatory text line" />
+    </popover>
+</template>
+<style>
+.shell { width: fit; height: fit; }
+.panel { width: 300px; }
+.note { text-wrap: wrap; }
+</style>
+"#,
+    );
+    let requests = component.child_surface_requests();
+    let [request] = requests.as_slice() else {
+        panic!("the open popover should author one child surface: {requests:?}");
+    };
+    let tree = component.last_tree.as_ref().expect("tree");
+    let panel = first_node_by_class(tree, "panel").expect("panel");
+    assert_eq!(panel.layout.width, 300.0, "a fixed-width panel must not shrink");
+    let note = first_node_by_class(tree, "note").expect("note");
+    assert!(
+        note.layout.height < 2.0 * 22.0,
+        "wrappable text must lay out on one line, got {}x{}",
+        note.layout.width,
+        note.layout.height
+    );
+    assert!(request.content_size.0 >= 300, "{:?}", request.content_size);
+}

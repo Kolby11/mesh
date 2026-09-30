@@ -114,11 +114,9 @@ pub(super) fn apply_runtime_attribute_state_for_ids(
 /// Collapses promoted `<popover>` wrappers to a zero-size, overflow-visible box so
 /// their (still full-size) popover subtree does not push trigger-row siblings around.
 /// A zero flex-basis contributes nothing to the parent's layout, while the overflowing
-/// popover content keeps its real size and stays anchored at the wrapper's in-flow
-/// position — which child-surface paint and input translation rely on to locate the
-/// promoted subtree. (Out-of-flow `position: absolute` would instead relocate the
-/// subtree's layout coordinates, breaking that translation.) See
-/// the node's typed composition metadata.
+/// popover content keeps its intrinsic size at the wrapper's in-flow position.
+/// Child-surface paint and input translate the subtree by its own layout origin.
+/// See the node's typed composition metadata.
 pub(super) fn collapse_promoted_popover_wrappers(node: &mut WidgetNode) {
     collapse_promoted_popover_node(node);
     for child in &mut node.children {
@@ -134,6 +132,16 @@ fn collapse_promoted_popover_node(node: &mut WidgetNode) {
         node.computed_style.min_height = mesh_core_elements::Dimension::Px(0.0);
         node.computed_style.overflow_x = mesh_core_elements::style::Overflow::Visible;
         node.computed_style.overflow_y = mesh_core_elements::style::Overflow::Visible;
+        // The zero-size wrapper is not the popup's containing block: the
+        // promoted root owns a surface of its own. Lay the root out along a
+        // row it cannot shrink in, so its width is its max-content width
+        // rather than the min-content fallback a 0px available width forces
+        // (Quick Settings' 300px panel collapsed to its widest row).
+        node.computed_style.direction = mesh_core_elements::style::FlexDirection::Row;
+        for child in &mut node.children {
+            child.computed_style.flex_shrink = 0.0;
+            child.computed_style.align_self = mesh_core_elements::style::AlignSelf::Start;
+        }
     }
 }
 

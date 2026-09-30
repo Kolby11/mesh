@@ -360,8 +360,12 @@ pub(super) fn measure_taffy_node(
             measured
         };
 
+    // Layout rounds boxes to whole pixels, and the painter wraps at the
+    // rounded width. A fractional measurement rounded down (94.3 -> 94) makes
+    // the painter break the last word onto a line the box has no room for, so
+    // the intrinsic width always rounds up to contain the shaped line.
     TaffySize {
-        width: known_dimensions.width.unwrap_or(measured_width),
+        width: known_dimensions.width.unwrap_or(measured_width.ceil()),
         height: known_dimensions.height.unwrap_or(measured_height),
     }
 }

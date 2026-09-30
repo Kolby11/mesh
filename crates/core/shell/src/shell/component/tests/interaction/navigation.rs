@@ -1776,11 +1776,11 @@ fn phase44_navigation_behavior_survives_focused_proof_path() {
 }
 
 #[test]
-fn navigation_quick_settings_popup_paints_content_laid_out_above_the_bar() {
-    // The popover lays out in-flow around its trigger, so most of the panel
-    // sits above the 36px bar. The child buffer must be translated by the
-    // unclipped layout origin; clipped bounds clamp it to y=0 and push the
-    // header and sliders out of the popup.
+fn navigation_quick_settings_popup_paints_content_laid_out_beyond_the_bar() {
+    // The popover lays out in-flow at its trigger, so the panel extends far
+    // past the 36px bar. The child buffer must be translated by the unclipped
+    // layout origin; bounds clipped to the bar misplace the content (a panel
+    // that once centred on the trigger lost its header and sliders).
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
     let theme = default_theme();
@@ -1816,8 +1816,9 @@ fn navigation_quick_settings_popup_paints_content_laid_out_above_the_bar() {
     let tree = component.last_tree.as_ref().expect("navigation tree");
     let popover = find_node_by_key(tree, &request.node_key).expect("quick settings popover");
     assert!(
-        popover.layout.y < 0.0,
-        "fixture must exercise a popover extending above the parent surface"
+        popover.layout.y + popover.layout.height > height as f32
+            && popover.layout.x + popover.layout.width > width as f32,
+        "fixture must exercise a popover extending beyond the parent surface"
     );
 
     let child_tree = component

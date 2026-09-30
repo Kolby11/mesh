@@ -171,6 +171,34 @@ fn text_measure_key_includes_all_shaping_inputs_and_revisions() {
     assert_ne!(base, TextMeasureKey::new(&context));
 }
 
+struct FractionalMeasurer;
+
+impl TextMeasurer for FractionalMeasurer {
+    fn measure_text(&self, _context: &TextMeasureContext<'_>) -> (f32, f32) {
+        (94.3, 16.0)
+    }
+}
+
+#[test]
+fn intrinsic_text_width_rounds_up_so_the_painter_does_not_wrap() {
+    // Layout rounds to whole pixels and the painter wraps at the rounded
+    // width. Rounding 94.3 down to 94 pushed the last word of "Quick
+    // Settings" onto a clipped second line.
+    let mut root = make_node("row", Dimension::Px(200.0), Dimension::Px(32.0));
+    let mut text = make_node("text", Dimension::Auto, Dimension::Auto);
+    text.attributes.insert("content".into(), "Quick Settings".into());
+    root.children.push(text);
+
+    LayoutEngine::compute_with_intrinsic_cache_and_measurer(
+        &mut root,
+        200.0,
+        32.0,
+        &mut IntrinsicLayoutCache::default(),
+        Some(&FractionalMeasurer),
+    );
+    assert_eq!(root.children[0].layout.width, 95.0);
+}
+
 #[test]
 fn retained_layout_remeasures_when_measurer_revision_changes() {
     let mut root = make_node("row", Dimension::Content, Dimension::Auto);
