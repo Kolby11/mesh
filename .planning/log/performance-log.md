@@ -1,5 +1,371 @@
 # MESH Performance Log
 
+## 2026-09-30 — scroll and animation frames: wave 2 timed, wave 3 compositor blur via `ext-background-effect-v1`
+
+`working tree` · area: paint-only frames, presentation blur protocols, backdrop policy, styling spec
+
+Follows the "waves 1 and 2" entry below, which left wave 2 untimed.
+
+**Wave 2 timing.** Release, desktop in use. Baseline is a worktree of `HEAD`
+plus the wave-1 working tree as snapshotted before wave 2 began (its diff
+against the current tree touches only wave-2 files and hunks), with today's
+gate harness copied in. Four alternating runs per side, same machine:
+
+| | scroll p50 | scroll p90 |
+| --- | --- | --- |
+| wave 1 | 11.57–13.59 ms | 12.81–15.11 ms |
+| waves 1+2 | 8.18–8.42 ms | 9.31–9.56 ms |
+
+`settings_scroll_frame_gate` still reports 90 frames, 90 passes, and no restyle
+after the first frame on both sides.
+
+`navigation_frame_cost_profile` with `MESH_BENCH_BACKDROP=in-surface`, default
+60 events with the stage profiler on (not comparable to the 300-event
+uninstrumented rows of the previous entry). Both sides painted 60 audio and
+35 pointer frames; per-event cost:
+
+| | paint only | pointer move | audio poll | render hooks alone |
+| --- | --- | --- | --- | --- |
+| wave 1 | 1.32–1.44 ms | 2.05–2.13 ms | 9.12–9.31 ms | 0.99–1.05 ms |
+| waves 1+2 | 0.80–0.81 ms | 1.76–1.85 ms | 8.71–9.26 ms | 1.05–1.11 ms |
+
+The audio poll is a restyle/relayout frame and is unchanged within noise, as
+expected: wave 2 targets paint-only frames.
+
+**Wave 3: `ext-background-effect-v1`.** The presentation backend binds
+`ext_background_effect_manager_v1` next to the KDE manager
+(`wayland_surface/backend/blur.rs`). The ext protocol is preferred while its
+`capabilities` event carries `blur`, else KDE blur, else none; the choice is
+re-read on every staging, so a capability that arrives late or is withdrawn
+moves each surface's region onto the other protocol (or clears it).
+`supports_compositor_backdrop_blur` now reports that live choice instead of the
+KDE global's version, and the shell requests a paint on every component when
+the backdrop policy flips, since an idle surface would otherwise keep display
+lists built for the old policy. The per-surface object is still created lazily
+and a region is only resent when it changes.
+
+On Hyprland this selects `CompositorRegion`: the in-surface blur path is no
+longer taken at all for the navigation bar, and the compositor blurs the
+desktop behind the `.nav-shell-blur` region on its GPU. Live check, release
+`mesh-shell start` for 8 s with `WAYLAND_DEBUG=1` (Hyprland, same session as
+the entry below): `capabilities(1)` arrives, the bar gets one
+`get_background_effect` and one `set_blur_region` with 19 rounded-corner band
+rectangles (2880 px wide), and no protocol error. The visible result on screen
+was not inspected, and the bar-hover session profile the plan called for was
+not repeated.
+
+Namespace decision (item 13): the `:blur` suffix stays when a protocol is
+bound. Changing it would recreate the surface on a capability change, and it is
+a name that user rules match; 04 §10 now tells users to leave the Hyprland
+`layerrule` out on compositors with a protocol. 04 §10 was rewritten for the
+protocol order, the runtime capability, and the no-protocol in-surface
+fallback (outline only; the full contract remains in the in-surface blur
+backlog item). The plan `2026-09-30-compositor-backdrop-blur.md` is removed.
+
+**Verified.** New `blur_prefers_background_effect_only_while_it_can_blur`;
+`mesh-core-presentation` passes (113). Debug `cargo test -p mesh-core-shell
+-p mesh-core-render -p mesh-core-elements -p mesh-core-presentation
+--no-fail-fast`: 42 failures. Against the wave-2 set, `phase98_*` passed and
+`phase26_real_surface_baseline_emits_canonical_proof_measurements` plus three
+`scheduler_*` tests failed; the scheduler tests pass alone (3/3) and `phase26_*`
+fails alone but is in the pre-change baseline failure set. Clippy reports
+nothing on the new code; rustfmt is clean on it.
+
+## 2026-09-30 — scroll and animation frames, waves 1 and 2: one paint per frame, paint-only scroll ticks, cheaper paint-only frames
+
+`working tree` · area: frame scheduling, scroll invalidation, backdrop blur, profiling harness, style animation, display-list pre-clip, layout, eligibility, runtime annotation
+
+Implements the "Scroll and animation frames" backlog items filed by the
+entry below. Wave 1 is measured; wave 2 is verified for correctness only.
+
+**Wave 1.**
+
+1. **Gate `settings_scroll_frame_gate`** (`appearance_profile.rs`, ignored,
+   release). Real `@mesh/settings` Appearance page at 920x900 with a 240-entry
+   resource catalog. The pointer hovers the page and transitions settle; then
+   60 `TwoFingerScroll { dy: -4 }` frames and 30 momentum frames, 16 ms apart.
+   Each frame runs the way `render_components_inner` does: paint only when
+   `wants_render()`, plus one corrective pass when `wants_immediate_rerender()`.
+   It fails when any frame paints twice, or any frame after the gesture's first
+   restyles (the first frame claims scroll ownership, a one-time interaction
+   restyle).
+2. **No second pass for animation re-arm.** `next_frame_only_dirty` marks dirt
+   that a live transition, keyframe, smooth scroll, or momentum tick schedules
+   for the next frame. `wants_immediate_rerender` ignores it, and requires
+   pending dirt, so an animating surface no longer re-runs a full pass before
+   every present. Measurement and configure dirt still take the corrective pass.
+3. **Paint-only scroll ticks.** Momentum and smooth-scroll ticks invalidate
+   `PAINT | METRICS` when an offset moved, and `PAINT` alone while momentum
+   waits out its 34 ms start delay (previously `VISUAL_REPAINT`).
+4. **Empty in-surface backdrops are not blurred.** The painter skips
+   `ApplyBackdropFilterInSurface` for a node that `compute_backdrop_regions`
+   gave no read region, i.e. nothing is painted beneath it in the surface. The
+   shipped navigation bar has exactly one such node (the `.nav-shell` root) and
+   was blurring transparent pixels every frame. Pixels are unchanged.
+5. **Profiling overhead.** The `#[cfg(test)]` focused proof snapshot is built
+   only in debug test builds by default (`focused_proof_enabled`), so release
+   benchmarks stop paying for it; tests that assert on it enable it. Per-rule
+   restyle attribution now needs `MESH_PROFILE_STYLE_RULES=1`.
+
+Scroll gate, release, desktop in use, alternating runs of the pre-change tree
+(same harness) and the change:
+
+| | frames | passes | restyled after first | frame p50 | frame p90 |
+| --- | ---: | ---: | ---: | --- | --- |
+| before (4 runs) | 71–89 | 142–177 | 70–88 | 13.24–30.12 ms | 17.65–34.58 ms |
+| after (4 runs) | 90 | 90 | 0 | 8.10–11.60 ms | 12.36–14.40 ms |
+
+"Before" frames often exceeded the 16 ms interval, so fewer fit in the run. The
+machine drifted (one "before" run measured 13.24 ms, three measured
+29.6–30.1 ms); the pass and restyle counts are not timing-dependent.
+
+Navigation bar, `navigation_frame_cost_profile` with the new
+`MESH_BENCH_BACKDROP=in-surface` switch (Hyprland's policy; the harness default
+is the compositor policy, which paints no blur), 300 events × 3 runs,
+alternating. Very noisy — the audio poll ranged 4.6–9.5 ms on each side, so no
+audio claim is made. Pointer loop:
+
+| | frames painted | per event | per painted frame |
+| --- | ---: | --- | --- |
+| before | 99–135 | 1.18–1.96 ms | 2.9–4.4 ms |
+| after | 160 | 0.52–0.98 ms | 0.98–1.63 ms |
+
+The "before" side painted fewer pointer frames; not investigated.
+
+**Wave 2** (not timed yet — the release gates were not re-run).
+
+6. **Style-animation pass skipped on paint-only frames with nothing live**
+   (`should_run_style_animation_pass(styles_unchanged)`). Styles are not
+   re-resolved on a paint-only retained frame, so no transition can start.
+7. **Linear display-list pre-clip.** `should_preclip_child_subtree_with_transform`
+   stops as soon as the growing union of visual bounds reaches the clip (the
+   union only grows, so the answer is unchanged), and visual bounds come
+   straight from the widget node instead of a full `DisplayPaintNode` per
+   descendant. `early_exit_preclip_matches_the_full_subtree_union` compares it
+   with the old union walk.
+8. **`validate_widget_tree` skipped on no-op layout frames.** The incremental
+   layout's existing "nothing affects geometry" return now happens before the
+   validation walk; every frame that lays out still validates first.
+9. **Local eligibility reads its attributes in one pass.** `NodeEligibility::local`
+   did seven string-keyed binary searches (`hidden` and `inert` twice); one scan
+   of the sorted list with a length-first string `match`, stopping after
+   `"inert"`, reads all five.
+10. **Scroll-only runtime annotation.** A paint-only retained frame whose
+    annotation inputs (focus, hover path, pressed node, slider/input/checked
+    values, window state, promoted windows, shortcut cache generation) equal
+    the previous paint-only frame's writes only clamped scroll offsets into the
+    retained metrics. A frame that ran layout never stores inputs, because
+    annotation measures overflow before layout. A paint-only frame *can* change
+    interaction state (a text selection clears the pressed node), which is why
+    this compares inputs rather than trusting the dirty flags.
+    `consecutive_scroll_frames_annotate_only_scroll_offsets` checks pixel
+    equality against a twin forced through the full walk.
+
+Item 11 (fingerprint only restyled nodes) was not done: its main trigger was
+the momentum restyle removed in wave 1, and the remaining full-restyle frames
+relayout, so a style-only dirty set would be incomplete. Backlog item reworded.
+
+**Verified.** Debug `cargo test -p mesh-core-shell -p mesh-core-render
+-p mesh-core-elements --no-fail-fast`, wave 1 against the pre-change tree in a
+separate worktree and target dir: identical failure sets apart from the new
+wave-1 tests (which fail on the old tree, as intended) and 14 render icon tests
+that fail only in the worktree checkout. With wave 2, the same suites against
+the wave-1 failure set: no new failures except
+`phase98_pixel_equivalence_backend_update`, which passes 3/3 alone (a known
+order-dependent test); `phase26_*` and three `scheduler_*` tests passed this
+run. Clippy adds no warnings on the new code; rustfmt is clean on it.
+
+## 2026-09-30 — settings scroll: every frame paints twice, and momentum ticks restore the full restyle
+
+`working tree` · area: frame scheduling, scroll invalidation, display-list build, paint · investigation only, nothing landed
+
+A live session capture with the new `./tools/profile-shell session` (CPU stacks
+joined to the shell's input log and built-in stage timings; report by
+`./tools/profile-report`). The operator idled, clicked through the navigation
+bar, then scrolled the Settings Appearance page with a touchpad. Fixes are
+filed in the backlog under "Scroll and animation frames"; the A/B numbers below
+come from temporary patches that were reverted, not from rejected designs.
+
+**Live session.** `profiling` build (release + line debuginfo), Hyprland,
+`perf record -e cpu-clock -F 499 --call-graph dwarf,16384`, with the stage
+profiler on (its per-rule style attribution adds ~5% `clock_gettime`, so
+restyle shares are slightly inflated). Capture `profiles/session/20260930-142634`.
+
+| activity | time | shell CPU (of one core) | renders/s | mean / max settings render |
+| --- | ---: | ---: | ---: | --- |
+| settings scroll (818 two-finger events) | 18.6 s | 58% (per-second peaks 72%) | 32.3 | 24.8 ms / 77.1 ms |
+| navigation-bar clicks and hover | 11.2 s | 39% | 69.4 | — |
+| idle | 4.7 s | 5% | 1.3 | — |
+
+Scroll stage shares of wall time: full restyle 28.9%, paint 13.5%, paint
+traversal 11.7% (text blits 1.29 s of 2.16 s), layout 8.1%, display-list update
+7.6%, render-object sync 4.5%. Top self time: `retained_snapshot_with_render`
+9.6%, `memcmp` 8.9% (mostly `interaction_contract::boolean_attribute` via
+`NodeEligibility::local`), `memmove` 5.7%, `clock_gettime` 5.2% (profiler).
+
+**Finding 1 — two full passes per presented frame.** Settings logged 1,294
+paints for 652 presents; the navigation bar 976 paints for 520 presents. In
+`render_components_inner` a surface is painted again before present whenever
+`wants_immediate_rerender()` is true, and that is true whenever `wants_render()`
+is and the pending work is not surface-configuration only. A live transition,
+keyframe animation, smooth scroll, or momentum entry keeps `wants_render()`
+true, so every animated frame is restyled, laid out, and painted twice before
+the compositor sees either. The per-frame stage order in the activity
+log shows the pair directly: restyle → layout → display list → paint, twice,
+then one `present_commit`.
+
+**Finding 2 — momentum and smooth-scroll ticks invalidate `STYLE`.** Direct
+two-finger input invalidates `PAINT | METRICS`, which takes the paint-only path
+from the 2026-08-08 entry "skip full style restyle on paint-only scroll frames".
+`advance_scroll_inertia` and `advance_scroll_animations` invalidate
+`VISUAL_REPAINT` (`STYLE | PAINT | ACCESSIBILITY | METRICS`). A momentum entry
+is created on every finger event and ticks during its 34 ms start delay, so
+every scroll frame — fingers down or not — carries `STYLE` and takes the
+full-restyle branch, plus layout, full retained fingerprinting, and full
+`normalize_accessibility`. That silently undid the 2026-08-08 fix; its gate
+(`paint_only_frame_speedup`) invalidates `PAINT` directly and never sees
+momentum.
+
+**Headless reproduction.** Temporary ignored test on the real `@mesh/settings`
+Appearance page, 920x900, large resource catalog: 60 frames of
+`TwoFingerScroll { dy: -8 }` then 30 momentum frames, 16 ms apart, mirroring the
+render loop's one extra pass. `cargo test --profile profiling`, three runs each:
+
+| variant | passes / 90 frames | frame p50 | frame p90 |
+| --- | ---: | --- | --- |
+| current | 160–164 | 15.96–20.36 ms | 22.27–27.40 ms |
+| no second pass | 90 | 15.32–15.40 ms | 24.22–24.45 ms |
+| momentum ticks → `PAINT \| METRICS`, both passes | 162–167 | 12.30–16.64 ms | 16.60–25.79 ms |
+| both | 90 | 11.63–11.86 ms | 22.67–24.35 ms |
+
+The desktop was in use, so ranges are wide; the dirty flags are not noisy: with
+the tick change every scroll frame reports `PAINT | METRICS` instead of
+`STYLE | PAINT | ACCESSIBILITY | METRICS`, and the full restyle disappears.
+
+**What a paint-only scroll frame still costs** (perf on the "both" variant,
+samples inside `paint`, excluding the test's own idle-frame rebuilds):
+display-list update 23.9% (`build_paint_subtree_with_transform` 14.3%, of which
+the pre-clip bounds walk `subtree_bounds_at_with_transform` is most), painting
+21.7% (text blits 14.4%), style-animation pass 11.6%
+(`apply_style_animations_to_node` 8.6% + `collect_visual_styles_into` 3.0%),
+`#[cfg(test)]` focused proof snapshot 10.6% (build + drop; test builds only),
+`validate_widget_tree` inside layout 5.4%, runtime annotation 4.2%,
+`normalize_accessibility_dirty` 2.3%. No glyph-atlas misses (fractional scroll
+offsets do not defeat the cache).
+
+**Finding 3 — navigation-bar interaction is dominated by in-surface blur.**
+During bar clicks and hover, `ThreeBoxApproxPass::blurSegment` is 18.7% self
+time and blur 21.9% inclusive, all from `.nav-shell-blur`'s
+`backdrop-filter`. On Hyprland (no `org_kde_kwin_blur`) the policy is
+`InSurfaceFilter`, so every damaged animation frame re-blurs the clipped
+backdrop.
+
+**Harness observations.** Direct `paint()` calls in the in-crate benchmarks
+bypass `render_components_inner`, so none of them can see Finding 1, and the
+`#[cfg(test)]` focused proof snapshot adds ~10% to every in-crate paint-only
+frame measurement.
+
+## 2026-09-30 — navigation bar: stop re-creating failed runtimes, scope style diagnostics, one-pass accessibility attributes
+
+`working tree` · area: frontend runtime lifecycle, runtime style diagnostics, accessibility normalization, harness
+
+Found by sampling `navigation_frame_cost_profile` under `perf` (release,
+`nix develop`) rather than from the backlog. Three changes land; one experiment
+was reverted; the harness had two defects of its own.
+
+**1. A runtime that cannot be created is no longer re-created every frame.**
+The bar's start-slot components (workspace list, window title) require
+`mesh.wm`. With no provider, `create_runtime_for_component` built a whole Luau
+context — host API install, storage open, i18n translator — then failed with
+`InterfaceUnavailable`, dropped it, and rendered a placeholder. Nothing was
+cached, so the next frame did it again: 411 creations over ~400 frames for two
+instances, plus a `tracing::warn!` per frame. A surface's interface catalog and
+capability grants are fixed for its lifetime, so `InterfaceUnavailable` and
+`CapabilityDenied` creation failures are now remembered per instance key
+(`failed_runtime_creations`) and cleared wherever the runtime map is rebuilt
+(reload, frontend catalog change). The diagnostic issue stays open. This
+affects any real session without a provider for a required interface, e.g. a
+compositor with no `mesh.wm` backend.
+
+**2. Runtime style diagnostics re-resolve only nodes the retained diff marked.**
+`record_runtime_style_diagnostics` re-resolved every node's full style with
+diagnostics after each rebuild, only to keep animation diagnostics — which all
+land in the single `runtime` issue row. Its gate included
+`retained_tree_generation`, which advances on every changed rebuild, so it ran
+on every audio poll. When the only input that moved is the retained generation,
+by exactly one step, and that update was non-structural, it now resolves only
+nodes flagged `STYLE | ATTRIBUTES | STATE`. Each node is resolved in isolation
+in both walks, so the per-node result is unchanged. Anything else takes the
+full pass as before.
+
+**3. Accessibility normalization reads a node's attributes in one pass.**
+`normalized_info` did about 40 binary-search lookups per node (`aria-*` and
+alias names, each a string compare chain). It now fills named slots in one scan
+of the sorted attribute list and applies the same precedence chains.
+`normalization_keeps_alias_precedence_and_empty_values` pins alias order, the
+any-true `disabled` rule, and "empty `aria-role` does not fall back to `role`".
+
+**Harness correction.** `navigation_frame_cost_profile` painted after every
+event, whether or not the component wanted a frame, and its pointer loop ran
+along `y = 40` — the bottom edge of the settled 40 px bar — so it never hovered
+anything. A forced paint of an unchanged surface takes the conservative
+full-rebuild path, which a session never does (`Shell::render_components`
+checks `wants_render()`). The harness now paints only when asked, moves the
+pointer through the bar's middle, leaves and settles hover transitions by wall
+clock before the following loops, and reports how many events painted.
+`MESH_BENCH_ONLY=<loop>` restricts a run to one loop for `perf`. Consequences
+for earlier entries: the "media poll (unread)" costs (2.3–2.6 ms on 2026-09-21)
+and every "pointer move" figure measured that forced-repaint path. In a session
+an unread poll paints **0** frames. The harness catalog still has no `mesh.wm`
+provider, so the start slot is two error placeholders here (see backlog).
+
+**Measured.** Release under `nix develop`, interleaved runs of isolated builds.
+
+Per change, as measured at the time (the first two on the old harness):
+
+| change | workload (events × runs) | before | after |
+| --- | --- | --- | --- |
+| 1 | unread poll, old harness (200 × 3) | 2.05–2.17 ms | 1.53–1.55 ms |
+| 1 | pointer, old harness (200 × 3) | 2.12–2.21 ms | 1.54–1.60 ms |
+| 1 | audio poll, old harness (200 × 3) | 4.74–4.88 ms | 4.17 ms |
+| 2 | audio poll, old harness (200 × 3) | 4.00 ms | 3.07–3.10 ms |
+| 3 | audio poll, corrected harness (300 × 3) | 3.22–3.25 ms | 2.92–2.94 ms |
+
+End to end, corrected harness on both sides, 300 events × 3 runs:
+
+| workload | before | after |
+| --- | --- | --- |
+| audio poll (read; 300/300 paint) | 4.74–4.90 ms | **3.06–3.17 ms (1.53x)** |
+| pointer across the bar (160/300 paint) | 0.49–0.52 ms | 0.46–0.48 ms |
+| paint only | 0.49–0.50 ms | 0.47–0.49 ms (overlapping) |
+| unread poll | 0 paints | 0 paints |
+
+This machine drifted about 3% between batches (the same change-3 binary
+measured 2.92–2.94 ms, then 3.03–3.10 ms), so compare only within a batch.
+
+**Rejected — cheaper hashing in `validate_widget_tree`.** It runs a full-tree
+walk on every build (~4% of an audio frame) with SipHash sets and a `String`
+allocation per keyed node. Borrowed keys plus a multiply-rotate hasher:
+3.03–3.07 ms vs 3.03–3.10 ms audio poll, fully overlapping. Reverted.
+
+**Remaining profile (audio poll, after).** Template re-evaluation on the narrow
+path is ~40% — mostly the three instances that read `mesh.audio`. Full-tree
+`normalize_accessibility` is ~20%: narrow script frames cannot use
+`normalize_accessibility_dirty`, because memo-reused subtrees are stored before
+finalization and carry no normalized data. Tracked in the backlog.
+
+**Verified.** New tests:
+`unavailable_interface_runtime_failure_is_not_retried_every_frame` (a
+remembered message is rendered verbatim on the next frame, so no retry occurred),
+`animation_token_diagnostic_follows_a_non_structural_class_change` (fails with
+the scoped branch disabled), and the precedence test above. Debug `cargo test
+-p mesh-core-shell -p mesh-core-elements --no-fail-fast`: 10 and 31 failures,
+the same counts as the same tree with these changes removed. The three names
+that differed each way (`scheduler_*`, `phase26_*`, `phase98_*`,
+`debug_snapshot_exposes_installed_module_graph_contracts`) behave identically
+on both sides when run alone; `phase26_*` fails on both. rustfmt is clean on
+the new code, and clippy adds no warnings.
+
 ## 2026-09-30 — a full-restyle style-share cache hits 99% and saves nothing
 
 `archive/style-share-cache` (local branch, not landed) · area: style resolution
@@ -1112,6 +1478,7 @@ section noted.
 | 2026-07-15 | Luau `table.clone` plus recursive array replacement for nested storage reads | I | Regressed 1.237s current to 1.611s cached over 100k reads (0.77x); exact detached-value semantics still require too much table reconstruction |
 | 2026-07-28 | `SmallVec<[&WidgetNode; 8]>` for scoped retained-update candidates | N | Removed one allocation per sparse update, but the complete 40-node path improved only 1.005x (63.918ms → 63.631ms/50k); prototype reverted |
 | 2026-07-30 | Downsample → blur → upsample image-filter chain for `filter: blur()` layers | P | Slower at every radius (512x512 layer, 200 frames: r8 254ms full-res vs 562ms quarter-res; r32 287ms vs 479ms; r64 310ms vs 488ms). Skia's raster blur already resamples internally for wide kernels, so an explicit chain only adds two transforms and an intermediate. The `downscale` setting was removed rather than shipped as a slower default |
+| 2026-09-30 | Borrowed keys + multiply-rotate hasher in `validate_widget_tree` | — | Audio poll 3.03–3.07ms vs 3.03–3.10ms (300 events × 3); the per-build validation walk is not hash-bound enough to show. Reverted |
 | 2026-09-30 | Full-restyle `StyleShareCache` reusing cloned `ComputedStyle`s by node inputs | E | 99.3% hit rate but no frame win: 15.51–15.91ms before vs 15.13–16.07ms after on `appearance_frame_cost_profile`; key hash/compare plus a full style clone costs as much as resolution. Archived on local branch `archive/style-share-cache` |
 
 ## 2026-07-30 — element `filter: blur()` subtree layers

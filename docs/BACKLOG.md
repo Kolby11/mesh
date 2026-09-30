@@ -159,6 +159,28 @@ been measured and reverted.
 Every optimization lands with a representative benchmark, and a checked relative
 gate where the win is structural.
 
+### Scroll and animation frames
+
+From the 2026-09-30 Settings scroll session profile; evidence and A/B numbers
+in the [performance log](../.planning/log/performance-log.md). Roughly in order
+of payoff.
+
+- [ ] A scroll rebuilds the whole scrolled display subtree: the offset is baked
+      into every descendant's world transform/clip, disabling
+      `allow_clean_descendant_reuse` (`display_list/mod.rs:405`). Paint scroll
+      content in content space under one translation. Folds into the Section 12
+      transform/clip model item below.
+- [ ] Scrolling repaints all visible content (one Skia draw per glyph) every
+      frame. Retain the scrolled content's raster and shift it, painting only
+      the exposed strip; needs the content-space item above first.
+- [ ] Unscoped restyle frames still fingerprint the whole tree
+      (`retained_tree.update`). Scroll momentum no longer takes this path; what
+      remains (resize, theme, window state) also relayouts, so diffing only
+      restyled nodes needs layout-changed nodes reported too.
+- [ ] In-component blur costs a full re-blur on every nearby repaint, and
+      in-surface `backdrop-filter` has only an outline contract (04 §10: the
+      no-protocol fallback). Plan: [in-surface blur engine](../.planning/todos/pending/2026-09-30-in-surface-blur-engine.md).
+
 ### Style
 
 - [ ] Typed style declarations end-to-end: resolve theme tokens to typed values
@@ -210,6 +232,12 @@ gate where the win is structural.
 
 ### Rendering and paint
 
+- [ ] Narrow script frames run full-tree `normalize_accessibility` (~20% of a
+      navigation audio poll): memo-reused subtrees are stored pre-finalization,
+      so `normalize_accessibility_dirty` has no normalized data to keep for them.
+- [ ] `navigation_bar_catalog` has no `mesh.wm` provider, so every navigation
+      test and `navigation_frame_cost_profile` render the start slot as error
+      placeholders. Add one so the bench measures the real workspace list.
 - [ ] Establish one canonical render-frame snapshot and transform/clip model;
       unify invalidation, display-list reuse, damage, blur regions, and hit
       testing around cumulative affine transforms. [Section 12 audit](../.planning/log/sections/12-rendering-and-paint/improvements.md).
