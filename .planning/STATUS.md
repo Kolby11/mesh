@@ -4,8 +4,8 @@
 
 ## Now
 
-A 2026-09-30 profiling pass on the navigation bar landed three fixes, uncommitted
-alongside the hover/focus work in the tree: failed runtime creation for a
+A 2026-09-30 profiling pass on the navigation bar landed three fixes, committed
+alongside the hover/focus work: failed runtime creation for a
 missing interface is remembered instead of rebuilt every frame, runtime style
 diagnostics re-resolve only retained-dirty nodes, and accessibility
 normalization reads attributes in one pass. A volume poll went from 4.74–4.90 ms
@@ -14,7 +14,7 @@ paints a session never makes and never hovered the bar. Details and the
 reverted experiment are in [the performance log](log/performance-log.md).
 
 The "Scroll and animation frames" waves 1–3 are implemented and measured,
-uncommitted: one paint per animated frame, paint-only scroll ticks, no blur of
+committed: one paint per animated frame, paint-only scroll ticks, no blur of
 empty in-surface backdrops, opt-in profiling overhead, cheaper paint-only
 frames, and compositor blur through `ext-background-effect-v1` (Hyprland now
 blurs the bar on its GPU; MESH does no pixel work for it). The settings scroll
@@ -22,6 +22,16 @@ gate went from 13–30 ms to 8.2–8.4 ms p50 over waves 1–2. Remaining: the
 content-space scroll and raster shift (wave 4) and the in-surface blur engine
 (wave 5), in [the backlog](../docs/BACKLOG.md); details in
 [the performance log](log/performance-log.md).
+
+Wave 4 item 14 is starting with the
+[scroll coordinate design](todos/pending/2026-09-30-scroll-content-coordinates.md).
+It covers offset-specific dirt, retained coordinate scopes, replay/culling,
+damage/effect geometry, and the pixel/structural gates before raster shifting.
+The original working tree is checkpointed on main through `1253ce1d`.
+The first scroll pixel regression passes (newly exposed/nested/fixed content,
+fractional scale and offsets, reverse scroll, mixed material changes). Item 14
+remains open; production coordinates have not changed yet. The live hover
+capture has no sampled client blur work, but no matched 20% A/B claim is made.
 
 The render-pipeline batch is largely landed. Service polls on the shipped
 navigation bar now take the narrow path end to end — derived Luau state no

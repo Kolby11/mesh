@@ -168,8 +168,8 @@ of payoff.
 - [ ] A scroll rebuilds the whole scrolled display subtree: the offset is baked
       into every descendant's world transform/clip, disabling
       `allow_clean_descendant_reuse` (`display_list/mod.rs:405`). Paint scroll
-      content in content space under one translation. Folds into the Section 12
-      transform/clip model item below.
+      content in content space under one translation, sharing Section 12's model.
+      [Design](../.planning/todos/pending/2026-09-30-scroll-content-coordinates.md).
 - [ ] Scrolling repaints all visible content (one Skia draw per glyph) every
       frame. Retain the scrolled content's raster and shift it, painting only
       the exposed strip; needs the content-space item above first.

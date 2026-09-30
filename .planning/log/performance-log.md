@@ -4607,3 +4607,58 @@ annotation candidates as exact dirty nodes regressed two narrow-service scope
 checks; restricting that tracking to retained annotation restored the baseline.
 The temporary baseline checkout was removed and test-written font settings
 were restored to their initial contents.
+
+## 2026-09-30 — checkpoint waves 1–3; live hover follow-up and wave 4 design
+
+`1b7c3158` `e930668f` `9087b71b` `84128e0c` `1253ce1d` · area: profiling,
+scroll/animation, compositor blur, retained scroll coordinates
+
+Committed the original mixed tree on main: session profiling tools;
+hover/focus fixes, navigation profiling fixes, and waves 1–2; compositor blur;
+planning/measurement records; local settings and tool permissions. The shell
+changes share files and retained-state dependencies, so the hover/focus and
+scroll fixes remain together. No push was performed.
+
+**Live follow-up.** Hyprland, the existing 2880×1800 output at scale 1, current
+`profiling` build (release optimization plus symbols), stage profiler enabled,
+`perf record -e cpu-clock -F 499 --call-graph dwarf,16384`. Capture
+`profiles/session/20260930-181254`, report alongside it. An automated sweep
+moved the pointer across the bar twice at y=78 for approximately 20 seconds
+(120 positions, 166 ms between moves), restoring its prior position afterward.
+The full capture includes startup/idle and concurrent desktop use; its activity
+classifier assigns 233 bar input events to six hover windows totaling 4.66 s,
+with 110 renders. Single diagnostic capture, not a repeated A/B benchmark:
+hover CPU 14% of one core (shell thread 13.1%), mean render 5.190 ms, mean paint
+0.565 ms. Across all 3,208 CPU samples, symbolized stacks contain no `blur`,
+`SkImageFilter`, or `apply_backdrop` symbol. This supports disappearance of the
+client blur hotspot; it does not establish a matched 20% before/after saving.
+The earlier `20260930-180735` attempt captured mostly idle because the old
+Hyprland pointer dispatcher syntax failed; excluded from the hover assessment.
+Perf's final symbol collection took minutes; reports were regenerated after
+it completed, avoiding a misleading intermediate zero-sample report.
+
+Screenshots of the running bar were inspected: rounded corners have no obvious
+rectangular halo. The dark wallpaper makes blur strength inconclusive by eye;
+the live backend reports `ext_background_effect_manager_v1` blur capability.
+The ordinary release shell was restored after capture. Stale, unlistened IPC
+sockets left by termination were removed before each restart.
+
+**Wave 4 started.** The pending scroll-coordinate design links from the existing
+backlog item and covers offset-specific dirt, retained coordinate scopes,
+signed content bounds, replay-time viewport culling, scope-balanced selection,
+and shared damage/blur geometry. Raster shifting remains dependent work; item
+14 is still open. Added
+`retained_scroll_reveals_content_and_matches_fresh_full_paint`: newly exposed
+children, nested overflow, fixed descendants, fractional offsets at scales
+1 and 1.25, reverse scrolling, and a simultaneous material update compare
+partial retained replay against freshly built full paint.
+
+**Verified.** Renderer 261 passed / 0 failed / 36 ignored; presentation suite
+passes; animation crate 40 passed. Focused shell scroll suite: 23 passed /
+5 failed / 3 ignored. Shell animation group: 26 passed / 4 failed / 1 ignored;
+the new scheduling, annotation, and diagnostic tests pass. Failures concern
+older retained-scope, scroll-into-view, native fallback, and volume-command
+fixtures; no production code was changed in this follow-up. Existing earlier
+records document shell baseline failures; no fresh baseline comparison was
+performed here. New test rustfmt and `git diff --check` pass. Workspace-wide
+rustfmt check reports pre-existing formatting differences outside this work.
