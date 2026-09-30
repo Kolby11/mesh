@@ -4,6 +4,13 @@
 
 ## Now
 
+Quick Settings and popover fixes landed 2026-09-30 (`eb9215f2`, `ada52286`).
+Promoted popovers paint from their unclipped origin, size to their content,
+and Quick Settings animates open and closed. Measured text widths now round up,
+so short multi-word labels no longer wrap. S11-DEAD-001 (`62b0cfbb`) and
+last-valid-manifest retention during live edits (`98efc62e`) are closed. Details
+are in [September's log](log/2026-09.md).
+
 Navigation/settings warning fixes are implemented: promoted child paint uses
 the retained widget-tree revision, and frame effect snapshots discard only
 superseded requests. Resource reloads no longer alter widget caller lineage;
