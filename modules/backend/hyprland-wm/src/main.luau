@@ -221,7 +221,7 @@ local function socket_dir_candidates()
 end
 
 local function socket_exists(path)
-    local test = mesh.exec("sh", { "-c", "test -S " .. path .. " && echo ok" })
+    local test = mesh.exec("sh", { "-c", 'test -S "$1" && echo ok', "sh", path })
     return test.success and trim(test.stdout or "") == "ok"
 end
 

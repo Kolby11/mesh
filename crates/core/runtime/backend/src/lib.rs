@@ -1989,7 +1989,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/stream-close".to_string(),
             "closing".to_string(),
-            CapabilitySet::from_ids(["exec.argv:sh:*"]),
+            CapabilitySet::from_ids(["exec.argv:sh:[\"-c\",\"printf 'line\\\\n'; exit 3\"]"]),
             serde_json::json!({}),
             "function start()\n\
                mesh.exec_stream(\"sh\", { \"-c\", \"printf 'line\\\\n'; exit 3\" })\n\
@@ -2036,7 +2036,7 @@ mod tests {
         let task = tokio::spawn(spawn_backend_service(
             "@test/stream-polling".to_string(),
             "polling".to_string(),
-            CapabilitySet::from_ids(["exec.argv:sh:*"]),
+            CapabilitySet::from_ids(["exec.argv:sh:[\"-c\",\"printf 'changed\\\\n'\"]"]),
             serde_json::json!({}),
             "function start()\n\
                mesh.service.set_poll_interval(1000)\n\

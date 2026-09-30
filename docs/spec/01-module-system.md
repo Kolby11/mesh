@@ -941,7 +941,12 @@ without the grant.
   The host resolves `<program>` through `PATH` or an explicit path, stores its
   canonical target, and matches the complete argument vector. A `*` argument
   is an explicit single-argument glob; a JSON `*` permits any argument vector.
-  Basename grants such as `exec.wpctl` are not executable policy. The explicit
+  A `*` inside an argument matches only ASCII letters, digits and `._/@:+=-`,
+  so it cannot end the string, word or address it sits in. Grants for
+  interpreters and program launchers (`sh`, `python*`, `env`, `awk`, …) are
+  rejected when a wildcard reaches code: the only accepted form is a shell
+  running an exact `-c` script with whole-argument `*` positional values after
+  it (`["-c","test -S \"$1\"","sh","*"]`). Basename grants such as `exec.wpctl` are not executable policy. The explicit
   high-risk `exec.command` capability remains the unrestricted override.
 - **Shipped:** the core catalog explicitly enumerates host powers and the
   built-in service permissions; unknown names are rejected.

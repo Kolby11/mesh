@@ -2366,7 +2366,7 @@ fn run_stream_batch_without_any_hook_is_a_noop() {
 async fn typed_stream_events_expose_handle_identity_and_exit_status() {
     let mut ctx = BackendScriptContext::new_with_capabilities(
         "@test/typed-stream",
-        ["exec.argv:sh:*".to_string()],
+        ["exec.argv:sh:[\"-c\",\"printf 'hello\\\\n'\"]".to_string()],
     );
     ctx.load_script(
         "state = {}\n\

@@ -222,7 +222,7 @@ impl CapabilityCatalog {
             "exec.command" | "shell.screenshot" | "dbus.system" | "net.socket" | "locale.write" => {
                 PrivilegeLevel::High
             }
-            value if value.starts_with("exec.argv:") && valid_exec_argv_capability(value) => {
+            value if value.starts_with("exec.argv:") && parse_exec_argv_capability(value).is_some() => {
                 PrivilegeLevel::High
             }
             _ => return None,
@@ -230,6 +230,15 @@ impl CapabilityCatalog {
     }
 
     pub fn validate(&self, id: &str) -> Result<PrivilegeLevel, CapabilityPolicyError> {
+        if let Some((program, arguments)) = parse_exec_argv_capability(id)
+            && let Some(reason) = exec_argv_grant_error(&program, arguments.as_deref())
+        {
+            return Err(CapabilityPolicyError::UnsafeExecGrant {
+                module_id: String::new(),
+                capability: id.to_string(),
+                reason,
+            });
+        }
         self.privilege_level(id)
             .ok_or_else(|| CapabilityPolicyError::UnknownCapability {
                 module_id: String::new(),
@@ -272,17 +281,89 @@ fn valid_permission_operation(operation: &str) -> bool {
             })
 }
 
-fn valid_exec_argv_capability(value: &str) -> bool {
-    let Some(specification) = value.strip_prefix("exec.argv:") else {
-        return false;
-    };
-    let Some((program, arguments)) = specification.split_once(':') else {
-        return false;
-    };
+/// Split an `exec.argv:<program>:<json-args>` grant. `None` arguments means
+/// the grant allows any argument list (`*` in place of the array).
+pub fn parse_exec_argv_capability(value: &str) -> Option<(String, Option<Vec<String>>)> {
+    let specification = value.strip_prefix("exec.argv:")?;
+    let (program, arguments) = specification.split_once(':')?;
     if program.is_empty() || program.contains('\0') || arguments.is_empty() {
-        return false;
+        return None;
     }
-    arguments == "*" || serde_json::from_str::<Vec<String>>(arguments).is_ok()
+    let arguments = if arguments == "*" {
+        None
+    } else {
+        Some(serde_json::from_str::<Vec<String>>(arguments).ok()?)
+    };
+    Some((program.to_string(), arguments))
+}
+
+/// Whether an in-argument `*` of an `exec.argv` grant may match `c`. The set
+/// excludes whitespace, quotes, brackets and separators, so a wildcard cannot
+/// end the literal it sits in: a Lua string, a shell word, or a socat address.
+pub fn exec_argv_glob_char_allowed(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '@' | ':' | '+' | '=' | '-')
+}
+
+/// Shells whose `-c` script is fixed text; positional arguments after it are
+/// data, so a whole-argument `*` there cannot change the program.
+const EXEC_SHELLS: &[&str] = &["sh", "bash", "dash", "zsh", "ksh", "mksh", "ash", "fish"];
+
+/// Programs that interpret an argument as code or run another program named by
+/// one. A wildcard anywhere in their arguments grants arbitrary execution.
+const EXEC_INTERPRETERS: &[&str] = &[
+    "env", "xargs", "sudo", "doas", "pkexec", "nice", "nohup", "timeout", "setsid", "stdbuf",
+    "busybox", "awk", "gawk", "mawk", "nawk", "sed", "find", "perl", "ruby", "node", "deno",
+    "bun", "php", "lua", "luajit", "tclsh", "osascript",
+];
+const EXEC_INTERPRETER_PREFIXES: &[&str] = &["python", "perl", "ruby", "lua", "node", "php"];
+
+/// Why an `exec.argv` grant is too broad to accept, or `None` when it is
+/// acceptable. A grant is rejected when a wildcard reaches code: any wildcard
+/// for an interpreter, or for a shell anything but whole-argument `*`
+/// positional values after an exact `-c` script.
+pub fn exec_argv_grant_error(program: &str, arguments: Option<&[String]>) -> Option<String> {
+    let name = std::path::Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(program);
+    let shell = EXEC_SHELLS.contains(&name);
+    let interpreter = shell
+        || EXEC_INTERPRETERS.contains(&name)
+        || EXEC_INTERPRETER_PREFIXES
+            .iter()
+            .any(|prefix| name.starts_with(prefix));
+    if !interpreter {
+        return None;
+    }
+    let Some(arguments) = arguments else {
+        return Some(format!("{name} interprets code; it cannot allow any argument list"));
+    };
+    let first_data_argument = if shell {
+        arguments
+            .iter()
+            .position(|argument| argument == "-c")
+            .map(|index| index + 2)
+            .unwrap_or(arguments.len())
+    } else {
+        arguments.len()
+    };
+    for (index, argument) in arguments.iter().enumerate() {
+        if !argument.contains('*') {
+            continue;
+        }
+        if index >= first_data_argument && argument == "*" {
+            continue;
+        }
+        return Some(if shell {
+            format!(
+                "{name} interprets code; a wildcard may only be a whole positional argument \
+                 after an exact -c script"
+            )
+        } else {
+            format!("{name} interprets code; its arguments cannot contain wildcards")
+        });
+    }
+    None
 }
 
 /// The immutable result of resolving a module's declarations against user
@@ -406,6 +487,12 @@ pub enum CapabilityPolicyError {
         module_id: String,
         capability: String,
     },
+    #[error("module '{module_id}' declares unsafe executable grant '{capability}': {reason}")]
+    UnsafeExecGrant {
+        module_id: String,
+        capability: String,
+        reason: String,
+    },
     #[error("module '{module_id}' is missing approval for required capabilities: {capabilities:?}")]
     MissingRequiredApproval {
         module_id: String,
@@ -419,6 +506,13 @@ impl CapabilityPolicyError {
             Self::UnknownCapability { capability, .. } => Self::UnknownCapability {
                 module_id: module_id.to_string(),
                 capability,
+            },
+            Self::UnsafeExecGrant {
+                capability, reason, ..
+            } => Self::UnsafeExecGrant {
+                module_id: module_id.to_string(),
+                capability,
+                reason,
             },
             other => other,
         }
@@ -577,6 +671,27 @@ mod tests {
 
     #[global_allocator]
     static TEST_ALLOCATOR: test_alloc::CountingAllocator = test_alloc::CountingAllocator;
+
+    #[test]
+    fn interpreter_exec_grants_with_code_wildcards_are_unsafe() {
+        let catalog = CapabilityCatalog::builtin();
+        assert!(matches!(
+            catalog.validate("exec.argv:sh:[\"-c\",\"test -S * && echo ok\"]"),
+            Err(CapabilityPolicyError::UnsafeExecGrant { .. })
+        ));
+        assert!(matches!(
+            catalog.validate("exec.argv:/usr/bin/python3.12:*"),
+            Err(CapabilityPolicyError::UnsafeExecGrant { .. })
+        ));
+        assert_eq!(
+            catalog.validate("exec.argv:sh:[\"-c\",\"test -S \\\"$1\\\"\",\"sh\",\"*\"]"),
+            Ok(PrivilegeLevel::High)
+        );
+        assert_eq!(
+            catalog.validate("exec.argv:hyprctl:[\"dispatch\",\"workspace\",\"*\"]"),
+            Ok(PrivilegeLevel::High)
+        );
+    }
 
     #[test]
     fn unknown_capabilities_fail_closed() {

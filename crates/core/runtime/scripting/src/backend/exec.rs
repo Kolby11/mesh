@@ -34,7 +34,9 @@ struct ExecutableRule {
 /// Executable grants are deliberately not inferred from a file name. A grant
 /// has the form `exec.argv:<program>:<json-array>` where `<program>` is
 /// resolved once to its canonical path and each argument is matched exactly or
-/// by an explicit `*` glob. A bare `*` argument matches one value, while a JSON
+/// by an explicit `*` glob. An in-argument `*` matches only a restricted
+/// character set, and interpreter grants whose wildcards reach code are
+/// refused. A bare `*` argument matches one value, while a JSON
 /// `*` in place of the array opts into any argument list. `exec.command` remains
 /// the explicit, high-risk unrestricted override.
 #[derive(Debug, Clone, Default)]
@@ -87,32 +89,26 @@ impl ExecutableCapabilityPolicy {
 }
 
 fn parse_executable_rule(capability: &str) -> Option<ExecutableRule> {
-    let specification = capability.strip_prefix(EXEC_ARGV_PREFIX)?;
-    let (program, argument_specification) = specification.split_once(':')?;
-    if program.is_empty() || argument_specification.is_empty() {
+    let (program, arguments) = mesh_core_capability::parse_exec_argv_capability(capability)?;
+    if mesh_core_capability::exec_argv_grant_error(&program, arguments.as_deref()).is_some() {
         return None;
     }
-    let arguments = if argument_specification == "*" {
-        None
-    } else {
-        let arguments = serde_json::from_str::<Vec<String>>(argument_specification).ok()?;
-        Some(
-            arguments
-                .into_iter()
-                .map(|argument| {
-                    if argument == "*" {
-                        ArgumentPattern::Any
-                    } else if argument.contains('*') {
-                        ArgumentPattern::Glob(argument)
-                    } else {
-                        ArgumentPattern::Exact(argument)
-                    }
-                })
-                .collect(),
-        )
-    };
+    let arguments = arguments.map(|arguments| {
+        arguments
+            .into_iter()
+            .map(|argument| {
+                if argument == "*" {
+                    ArgumentPattern::Any
+                } else if argument.contains('*') {
+                    ArgumentPattern::Glob(argument)
+                } else {
+                    ArgumentPattern::Exact(argument)
+                }
+            })
+            .collect()
+    });
     Some(ExecutableRule {
-        canonical_path: canonical_program_path(program)?,
+        canonical_path: canonical_program_path(&program)?,
         arguments,
     })
 }
@@ -129,30 +125,28 @@ fn arguments_match(patterns: &[ArgumentPattern], args: &[String]) -> bool {
             })
 }
 
+/// Match an in-argument glob. Each `*` matches only characters that cannot
+/// end the literal around it; see `exec_argv_glob_char_allowed`.
 fn glob_match(pattern: &str, value: &str) -> bool {
-    let parts = pattern.split('*').collect::<Vec<_>>();
-    let mut cursor = 0;
-    if let Some(first) = parts.first().filter(|part| !part.is_empty()) {
-        if !value.starts_with(first) {
-            return false;
+    let Some((prefix, rest)) = pattern.split_once('*') else {
+        return pattern == value;
+    };
+    let Some(value) = value.strip_prefix(prefix) else {
+        return false;
+    };
+    let mut end = 0;
+    loop {
+        if glob_match(rest, &value[end..]) {
+            return true;
         }
-        cursor = first.len();
-    }
-    for (index, part) in parts.iter().enumerate().skip(1) {
-        if part.is_empty() {
-            continue;
-        }
-        let is_last_literal = index == parts.len() - 1 && !pattern.ends_with('*');
-        let remainder = &value[cursor..];
-        if is_last_literal {
-            return remainder.ends_with(part);
-        }
-        let Some(found) = remainder.find(part) else {
+        let Some(next) = value[end..].chars().next() else {
             return false;
         };
-        cursor += found + part.len();
+        if !mesh_core_capability::exec_argv_glob_char_allowed(next) {
+            return false;
+        }
+        end += next.len_utf8();
     }
-    true
 }
 
 fn canonical_program_path(program: &str) -> Option<PathBuf> {
@@ -688,6 +682,29 @@ mod tests {
 
     fn service(config: SandboxConfig) -> ExecService {
         ExecService::new(ResourceBudget::new(config))
+    }
+
+    #[test]
+    fn in_argument_globs_cannot_escape_their_literal() {
+        let dispatch = "hl.dsp.focus({ workspace = \"*\" })";
+        assert!(glob_match(dispatch, "hl.dsp.focus({ workspace = \"3\" })"));
+        assert!(!glob_match(
+            dispatch,
+            "hl.dsp.focus({ workspace = \"\" }) os.execute(\"x\") --\" })"
+        ));
+        assert!(glob_match("UNIX-CONNECT:*", "UNIX-CONNECT:/run/user/1000/hypr/s.sock"));
+        assert!(!glob_match("UNIX-CONNECT:*", "UNIX-CONNECT:/tmp/s,fork"));
+    }
+
+    #[test]
+    fn interpreter_rules_whose_wildcards_reach_code_are_refused() {
+        assert!(parse_executable_rule("exec.argv:sh:[\"-c\",\"test -S * && echo ok\"]").is_none());
+        assert!(parse_executable_rule("exec.argv:sh:*").is_none());
+        assert!(parse_executable_rule("exec.argv:python3:[\"-c\",\"*\"]").is_none());
+        assert!(
+            parse_executable_rule("exec.argv:sh:[\"-c\",\"test -S \\\"$1\\\"\",\"sh\",\"*\"]")
+                .is_some()
+        );
     }
 
     #[test]
