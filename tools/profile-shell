@@ -9,8 +9,10 @@ readonly STAMP="$(date +%Y%m%d-%H%M%S)"
 
 usage() {
   cat <<'EOF'
-Usage: ./tools/profile-shell <live|alloc|cpu|memory|build> [shell arguments...]
+Usage: ./tools/profile-shell <session|live|alloc|cpu|memory|build> [shell arguments...]
 
+  session  Record CPU stacks plus an input/stage activity log to
+           profiles/session/<timestamp>/; report with tools/profile-report
   live     Stream CPU spans and allocations to the Tracy profiler UI
   alloc    Count allocation operations and bytes per surface render pass
   cpu      Record CPU stacks and write profiles/cpu/<timestamp>.svg
@@ -100,6 +102,33 @@ main() {
         return 1
       fi
       "$BINARY" "${shell_args[@]}"
+      ;;
+    session)
+      require_command perf
+      ensure_shell_is_not_running
+      build_shell
+      local dir="profiles/session/$STAMP"
+      mkdir -p "$dir"
+      echo "Session capture: $dir"
+      echo "Use the shell normally, then press Ctrl-C. Report: ./tools/profile-report $dir"
+      # Enable the built-in stage profiler once the shell's IPC socket is up.
+      (
+        for _ in $(seq 1 100); do
+          sleep 0.2
+          if "$BINARY" debug profiling >/dev/null 2>&1; then
+            exit 0
+          fi
+        done
+        echo "could not enable built-in stage profiling" >&2
+      ) &
+      # Realtime sample clock so samples line up with the log's wall-clock
+      # timestamps; cpu-clock works under perf_event_paranoid=2.
+      perf record -e cpu-clock -k CLOCK_REALTIME -F 499 \
+        --call-graph dwarf,16384 -o "$dir/perf.data" -- \
+        env NO_COLOR=1 \
+        RUST_LOG="${RUST_LOG:-info,mesh_core_presentation::wayland_surface::handlers=trace,mesh_profiling=debug}" \
+        sh -c 'exec "$0" "$@" >"'"$dir"'/activity.log" 2>&1' "$BINARY" "${shell_args[@]}" || true
+      echo "Wrote $dir; run ./tools/profile-report $dir"
       ;;
     alloc)
       ensure_shell_is_not_running

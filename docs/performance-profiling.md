@@ -31,6 +31,27 @@ run a manual `perf record` capture and open its `perf.data` in Hotspot.
 Linux may deny sampling when `kernel.perf_event_paranoid` is restrictive. The
 script reports that error rather than changing system security settings.
 
+## Session capture with an activity log
+
+```bash
+./tools/profile-shell session
+./tools/profile-report profiles/session/<timestamp>
+```
+
+Records CPU stacks for the whole session while the shell logs its input
+(scroll, click, key, hover) and, with the built-in stage profiler switched on
+automatically, every render-stage timing. Use the shell normally, then press
+Ctrl-C. The report splits the session into activity segments, and for each
+activity it gives CPU use per thread, MESH stage timings and renders per second,
+and the hottest functions by self and inclusive time. It is also written to
+`report.md` in the session directory. Key presses that produce text are logged
+without the key.
+
+Stage timings do not break restyle down per style rule by default: timing every
+rule match adds a `clock_gettime` pair per rule and inflates the restyle being
+measured. Set `MESH_PROFILE_STYLE_RULES=1` for a capture that needs the
+per-rule breakdown, and do not compare its restyle times with other captures.
+
 ## Live CPU and memory
 
 ```bash

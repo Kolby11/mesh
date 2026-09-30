@@ -1,0 +1,318 @@
+#!/usr/bin/env python3
+"""Join a `profile-shell session` capture into per-activity performance metrics.
+
+Splits the session into activity segments (scroll, click, key, hover, idle)
+from the shell's input log, then reports for each segment: CPU use per
+thread, MESH render-stage timings from the built-in profiler, and the hottest
+native functions from perf's call stacks.
+
+Usage: ./tools/profile-report profiles/session/<timestamp> [--top N] [--inline]
+"""
+
+import argparse
+import collections
+import datetime
+import os
+import re
+import subprocess
+import sys
+
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
+LOG_LINE = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+Z)\s+(\w+)\s+(?:\S*\{[^}]*\}:\s*)*([\w:]+): (.*)$")
+FIELD = re.compile(r'(\w+)=("(?:[^"\\]|\\.)*"|\S+)')
+# Consecutive input of one kind closer than this belongs to one activity.
+MERGE_GAP = 0.6
+# Work triggered by input (kinetic scroll, transitions) settles after it.
+SETTLE_TAIL = 0.3
+
+
+def parse_ts(text):
+    return datetime.datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+
+
+def fields(text):
+    return {k: v.strip('"') for k, v in FIELD.findall(text)}
+
+
+def classify(message, data):
+    if "pointer axis input" in message:
+        return "scroll"
+    if "pointer press" in message or "pointer release" in message:
+        return "click"
+    if "Wayland key press" in message:
+        return "key"
+    if "pointer motion" in message or "pointer enter" in message:
+        return "hover"
+    return None
+
+
+def surface_of(message, data):
+    if "surface_id" in data:
+        return data["surface_id"]
+    match = re.search(r"surface_id=(\S+)", message)
+    return match.group(1) if match else "?"
+
+
+def read_log(path):
+    inputs, stages, other = [], [], []
+    with open(path, errors="replace") as handle:
+        for raw in handle:
+            match = LOG_LINE.match(ANSI.sub("", raw.rstrip("\n")))
+            if not match:
+                continue
+            ts, level, target, rest = match.groups()
+            t = parse_ts(ts)
+            data = fields(rest)
+            if target == "mesh_profiling":
+                stages.append((t, data))
+                continue
+            kind = classify(rest, data)
+            if kind:
+                inputs.append((t, kind, surface_of(rest, data)))
+            elif level in ("WARN", "ERROR"):
+                other.append((t, level, rest[:160]))
+    return inputs, stages, other
+
+
+def segment(inputs, start, end):
+    """Merge input into activity segments and fill the gaps with idle."""
+    active = []
+    for t, kind, surface in inputs:
+        # Hover inside a scroll/click burst is part of that gesture.
+        if active and t - active[-1]["last"] < MERGE_GAP and (
+            active[-1]["kind"] == kind or kind == "hover"
+        ):
+            active[-1]["last"] = t
+            active[-1]["events"] += 1
+            active[-1]["surfaces"][surface] += 1
+            continue
+        if active and kind != "hover" and active[-1]["kind"] == "hover" and t - active[-1]["last"] < MERGE_GAP:
+            # Promote a hover segment that turned into a real gesture.
+            active[-1]["kind"] = kind
+            active[-1]["last"] = t
+            active[-1]["events"] += 1
+            active[-1]["surfaces"][surface] += 1
+            continue
+        active.append({"kind": kind, "first": t, "last": t, "events": 1,
+                       "surfaces": collections.Counter({surface: 1})})
+    segments, cursor = [], start
+    for seg in active:
+        seg_start = max(seg["first"], cursor)
+        seg_end = min(seg["last"] + SETTLE_TAIL, end)
+        if seg_start - cursor > 0.05:
+            segments.append({"kind": "idle", "start": cursor, "end": seg_start,
+                             "events": 0, "surfaces": collections.Counter()})
+        segments.append({"kind": seg["kind"], "start": seg_start, "end": max(seg_end, seg_start + 0.01),
+                         "events": seg["events"], "surfaces": seg["surfaces"]})
+        cursor = segments[-1]["end"]
+    if end - cursor > 0.05:
+        segments.append({"kind": "idle", "start": cursor, "end": end,
+                         "events": 0, "surfaces": collections.Counter()})
+    return segments
+
+
+def clean_symbol(sym):
+    sym = re.sub(r"::h[0-9a-f]{16}$", "", sym)
+    sym = re.sub(r"\+0x[0-9a-f]+$", "", sym)
+    sym = sym.replace("_<", "<")
+    return sym if len(sym) <= 150 else sym[:147] + "..."
+
+
+def read_perf(path, use_inline):
+    cmd = ["perf", "script", "-i", path, "-F", "comm,tid,time,ip,sym,dso", "--ns"]
+    if not use_inline:
+        cmd.append("--no-inline")
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                            text=True, errors="replace")
+    samples, current = [], None
+    header = re.compile(r"^\s*(\S.*?)\s+(\d+)\s+(\d+\.\d+):\s*$")
+    for line in proc.stdout:
+        if not line.strip():
+            if current:
+                samples.append(current)
+                current = None
+            continue
+        match = header.match(line)
+        if match and not line.startswith("\t") and current is None:
+            current = {"comm": match.group(1), "tid": match.group(2),
+                       "t": float(match.group(3)), "stack": []}
+            continue
+        if current is not None:
+            parts = line.strip().split(None, 1)
+            if len(parts) == 2:
+                sym = parts[1]
+                sym = re.sub(r"\s+\([^()]*\)$", "", sym)
+                current["stack"].append(clean_symbol(sym))
+    if current:
+        samples.append(current)
+    proc.wait()
+    return samples
+
+
+def perf_frequency(path):
+    out = subprocess.run(["perf", "evlist", "-v", "-i", path], capture_output=True, text=True).stdout
+    match = re.search(r"sample_freq:\s*(\d+)", out)
+    return int(match.group(1)) if match else 499
+
+
+def is_mesh(sym):
+    return "mesh_" in sym
+
+
+def report_segment(segs, samples, stages, freq, top, out, title):
+    """Report one activity over one or more time windows."""
+    dur = sum(seg["end"] - seg["start"] for seg in segs)
+    inside = lambda t: any(seg["start"] <= t < seg["end"] for seg in segs)
+    in_seg = [s for s in samples if inside(s["t"])]
+    stage_rows = [d for t, d in stages if inside(t)]
+    surf = collections.Counter()
+    for seg in segs:
+        surf.update(seg["surfaces"])
+    surfaces = ", ".join(f"{s}×{n}" for s, n in surf.most_common(3)) or "-"
+    events = sum(seg["events"] for seg in segs)
+    cpu = 100.0 * len(in_seg) / (freq * dur) if dur > 0 else 0.0
+    out.append(f"### {title} — {dur:.2f}s, {events} input events, "
+               f"CPU {cpu:.0f}% of one core")
+    if len(segs) == 1:
+        out.append(f"Window {fmt_time(segs[0]['start'])} → {fmt_time(segs[0]['end'])}; surfaces: {surfaces}\n")
+    else:
+        out.append(f"{len(segs)} windows; surfaces: {surfaces}\n")
+    if not in_seg and not stage_rows:
+        out.append("_No CPU samples or stage timings in this window._\n")
+        return
+    threads = collections.Counter(s["comm"] for s in in_seg)
+    if threads:
+        out.append("| Thread | CPU % of one core |\n| --- | ---: |")
+        for comm, n in threads.most_common(6):
+            out.append(f"| {comm} | {100.0 * n / (freq * dur):.1f} |")
+        out.append("")
+    # Attribution samples re-report time already inside their stage sample.
+    attributed = [d for d in stage_rows if d.get("trigger", "").startswith("attribution:")]
+    stage_rows = [d for d in stage_rows if not d.get("trigger", "").startswith("attribution:")]
+    if stage_rows:
+        agg = collections.defaultdict(lambda: [0, 0, 0])
+        for d in stage_rows:
+            key = d.get("stage", "?") + (" (backend)" if d.get("backend") == "true" else "")
+            key += f" [{d['trigger']}]" if d.get("trigger") and d.get("stage") != "scheduler_idle" else ""
+            us = int(d.get("duration_us", "0") or 0)
+            a = agg[key]
+            a[0] += 1
+            a[1] += us
+            a[2] = max(a[2], us)
+        frames = sum(v[0] for k, v in agg.items() if k.startswith("total_surface_render"))
+        out.append(f"MESH stage timings ({frames} surface renders, {frames / dur:.1f}/s):\n")
+        out.append("| Stage | Count | Total ms | Mean µs | Max µs | % of window |\n| --- | ---: | ---: | ---: | ---: | ---: |")
+        for key, (n, total, peak) in sorted(agg.items(), key=lambda kv: -kv[1][1]):
+            out.append(f"| {key} | {n} | {total / 1000:.1f} | {total // max(n, 1)} | {peak} | "
+                       f"{100.0 * total / 1e6 / dur:.1f} |")
+        out.append("")
+    if attributed:
+        agg = collections.defaultdict(lambda: [0, 0])
+        for d in attributed:
+            key = (d.get("surface", ""), d.get("stage", "?"), d["trigger"][len("attribution:"):])
+            agg[key][0] += 1
+            agg[key][1] += int(d.get("duration_us", "0") or 0)
+        out.append("Attribution — where stage time went (already included above):\n")
+        out.append("| Surface | Stage | Rule / command | Count | Total ms |\n| --- | --- | --- | ---: | ---: |")
+        for (surface, stage, what), (n, total) in sorted(agg.items(), key=lambda kv: -kv[1][1])[:top]:
+            out.append(f"| {surface} | {stage} | `{what}` | {n} | {total / 1000:.1f} |")
+        out.append("")
+    if in_seg:
+        self_counts = collections.Counter(s["stack"][0] if s["stack"] else "?" for s in in_seg)
+        incl = collections.Counter()
+        for s in in_seg:
+            for sym in set(sym for sym in s["stack"] if is_mesh(sym)):
+                incl[sym] += 1
+        n = len(in_seg)
+        out.append(f"Hottest functions — self time ({n} samples):\n")
+        out.append("| % | Function |\n| ---: | --- |")
+        for sym, c in self_counts.most_common(top):
+            out.append(f"| {100.0 * c / n:.1f} | `{sym}` |")
+        out.append(f"\nHottest MESH functions — inclusive (self + callees):\n")
+        out.append("| % | Function |\n| ---: | --- |")
+        for sym, c in incl.most_common(top):
+            out.append(f"| {100.0 * c / n:.1f} | `{sym}` |")
+        out.append("")
+
+
+def fmt_time(t):
+    return datetime.datetime.fromtimestamp(t).strftime("%H:%M:%S.%f")[:-3]
+
+
+def timeline(samples, segments, freq, out):
+    if not samples:
+        return
+    out.append("## Timeline (CPU % of one core per second)\n")
+    out.append("```")
+    buckets = collections.Counter(int(s["t"]) for s in samples)
+    first, last = int(segments[0]["start"]), int(segments[-1]["end"])
+    for sec in range(first, last + 1):
+        kinds = sorted({seg["kind"] for seg in segments if seg["start"] < sec + 1 and seg["end"] > sec})
+        pct = 100.0 * buckets.get(sec, 0) / freq
+        bar = "#" * int(min(pct, 200) / 5)
+        out.append(f"{fmt_time(sec)[:8]} {pct:5.0f}% {bar:<40} {'+'.join(kinds)}")
+    out.append("```\n")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("session")
+    parser.add_argument("--top", type=int, default=15)
+    parser.add_argument("--inline", action="store_true", help="resolve inlined frames (slow)")
+    parser.add_argument("--min-duration", type=float, default=0.3,
+                        help="skip detailed sections for shorter segments")
+    args = parser.parse_args()
+
+    log_path = os.path.join(args.session, "activity.log")
+    perf_path = os.path.join(args.session, "perf.data")
+    inputs, stages, warnings = read_log(log_path)
+    print(f"parsed {len(inputs)} input events, {len(stages)} stage samples", file=sys.stderr)
+    samples = read_perf(perf_path, args.inline) if os.path.exists(perf_path) else []
+    print(f"parsed {len(samples)} CPU samples", file=sys.stderr)
+    freq = perf_frequency(perf_path) if samples else 499
+
+    times = [t for t, *_ in inputs] + [s["t"] for s in samples] + [t for t, _ in stages]
+    if not times:
+        sys.exit("no data in session")
+    segments = segment(sorted(inputs), min(times), max(times))
+
+    out = [f"# MESH session report — {os.path.basename(args.session.rstrip('/'))}\n"]
+    out.append(f"perf sampling {freq} Hz; CPU % is relative to one core (200% = two busy cores).\n")
+    out.append("## Summary by activity\n")
+    out.append("| Activity | Segments | Total s | CPU % of one core | Renders/s |\n| --- | ---: | ---: | ---: | ---: |")
+    by_kind = collections.defaultdict(lambda: [0, 0.0, 0, 0])
+    for seg in segments:
+        k = by_kind[seg["kind"]]
+        k[0] += 1
+        k[1] += seg["end"] - seg["start"]
+        k[2] += sum(1 for s in samples if seg["start"] <= s["t"] < seg["end"])
+        k[3] += sum(1 for t, d in stages if seg["start"] <= t < seg["end"]
+                    and d.get("stage") == "total_surface_render"
+                    and not d.get("trigger", "").startswith("attribution:"))
+    for kind, (n, dur, cnt, renders) in sorted(by_kind.items(), key=lambda kv: -kv[1][2]):
+        out.append(f"| {kind} | {n} | {dur:.1f} | {100.0 * cnt / (freq * dur) if dur else 0:.0f} | "
+                   f"{renders / dur if dur else 0:.1f} |")
+    out.append("")
+    timeline(samples, segments, freq, out)
+
+    out.append("## By activity (all windows combined)\n")
+    for kind in sorted(by_kind, key=lambda k: -by_kind[k][2]):
+        report_segment([seg for seg in segments if seg["kind"] == kind],
+                       samples, stages, freq, args.top, out, kind)
+    out.append("## Individual segments\n")
+    for seg in segments:
+        if seg["end"] - seg["start"] < args.min_duration:
+            continue
+        report_segment([seg], samples, stages, freq, args.top, out, seg["kind"])
+    if warnings:
+        out.append("## Warnings and errors during the session\n")
+        for t, level, text in warnings[:40]:
+            out.append(f"- {fmt_time(t)} {level}: {text}")
+    report = "\n".join(out) + "\n"
+    with open(os.path.join(args.session, "report.md"), "w") as handle:
+        handle.write(report)
+    print(report)
+
+
+if __name__ == "__main__":
+    main()

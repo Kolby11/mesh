@@ -542,6 +542,16 @@ impl ProfilingRuntimeState {
             redraw_count,
             trigger_kind: trigger_kind.map(str::to_string),
         };
+        // Lets offline tooling line stage timings up with input and CPU
+        // samples; enable with RUST_LOG=mesh_profiling=debug.
+        tracing::debug!(
+            target: "mesh_profiling",
+            stage = stage.label(),
+            duration_us = sample.duration_micros,
+            surface = surface_id.unwrap_or(""),
+            trigger = trigger_kind.unwrap_or(""),
+            "profiling sample"
+        );
         self.next_sample_order = self.next_sample_order.saturating_add(1);
         sample
     }
@@ -563,6 +573,14 @@ impl ProfilingRuntimeState {
             duration_micros: duration.as_micros().min(u128::from(u64::MAX)) as u64,
             trigger_kind: trigger_kind.map(str::to_string),
         };
+        tracing::debug!(
+            target: "mesh_profiling",
+            stage = stage.label(),
+            duration_us = sample.duration_micros,
+            backend = true,
+            trigger = trigger_kind.unwrap_or(""),
+            "profiling sample"
+        );
         self.next_sample_order = self.next_sample_order.saturating_add(1);
         sample
     }
