@@ -363,6 +363,11 @@ impl ActiveSnapshot {
         &self.settings
     }
 
+    /// Capability grants resolved for this activation, keyed by module id.
+    pub fn effective_capabilities(&self) -> &HashMap<String, EffectiveCapabilities> {
+        &self.plan.effective_capabilities
+    }
+
     pub fn providers(&self) -> &HashMap<String, mesh_core_backend::BackendIdentity> {
         &self.providers
     }
@@ -659,6 +664,19 @@ pub(super) fn candidate_capabilities(
     }
     failures.sort_by(|left, right| left.0.cmp(&right.0));
     (Arc::new(effective), failures)
+}
+
+/// Whether any module granted in both activations received a different grant.
+/// Modules present in only one side cannot back a retained runtime.
+fn grants_changed(
+    current: &HashMap<String, EffectiveCapabilities>,
+    candidate: &HashMap<String, EffectiveCapabilities>,
+) -> bool {
+    current.iter().any(|(module_id, granted)| {
+        candidate
+            .get(module_id)
+            .is_some_and(|next| next != granted)
+    })
 }
 
 impl Shell {
@@ -1583,11 +1601,16 @@ impl Shell {
                 )
             })
             .collect::<HashMap<_, _>>();
+        // A retained surface's script runtimes hold the grants they were
+        // created with, so any change to a grant they may use re-mounts them.
+        let retained_grants_changed =
+            grants_changed(&self.effective_capabilities, &effective_capabilities);
         let mut prepared_frontends = Vec::new();
         for (instance_id, root) in profile.roots.iter().filter(|(_, root)| root.is_active()) {
-            if existing_surface_modules
-                .get(instance_id)
-                .is_some_and(|module_id| module_id == &root.module)
+            if !retained_grants_changed
+                && existing_surface_modules
+                    .get(instance_id)
+                    .is_some_and(|module_id| module_id == &root.module)
             {
                 continue;
             }
@@ -1747,7 +1770,9 @@ impl Shell {
                         provider_id == &candidate.module_id && settings == &candidate.settings
                     },
                 );
-                !(running_matches && config_matches)
+                let grant_matches = self.effective_capabilities.get(&candidate.module_id)
+                    == plan.effective_capabilities.get(&candidate.module_id);
+                !(running_matches && config_matches && grant_matches)
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -2080,6 +2105,7 @@ impl Shell {
         // swaps, before any newly committed state can emit follow-up work.
         self.interfaces
             .publish_snapshot(Arc::clone(&plan.interface_catalog));
+        self.effective_capabilities = plan.effective_capabilities.clone();
         self.clear_candidate_preview(plan.generation);
         let prepared_surfaces = pending
             .prepared_frontends

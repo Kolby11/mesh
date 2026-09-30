@@ -1212,6 +1212,49 @@ fn legacy_graph_delta_uses_the_activation_coordinator_commit_boundary() {
 }
 
 #[test]
+fn committed_activation_replaces_the_previous_capability_grants() {
+    let mut shell = Shell::new();
+    shell.active_profile_id = None;
+    let stale = mesh_core_capability::CapabilityPolicy::default()
+        .resolve_in(
+            &mesh_core_capability::CapabilityCatalog::builtin(),
+            "@test/stale",
+            &[],
+            &[],
+        )
+        .unwrap();
+    shell.effective_capabilities = Arc::new(HashMap::from([("@test/stale".to_string(), stale)]));
+    let graph = graph_from_json(
+        r#"{
+              "schemaVersion": 1,
+              "modulesDir": "modules",
+              "modules": {},
+              "providers": {}
+            }"#,
+        Vec::new(),
+    );
+
+    shell.activate_graph_candidate(graph);
+    for _ in 0..500 {
+        if shell.pending_resource_preparation.is_none() && shell.pending_profile_switch.is_none() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        shell.poll_pending_resource_preparation();
+    }
+
+    assert!(shell.pending_profile_switch.is_none());
+    assert!(shell.effective_capabilities.is_empty());
+    assert!(
+        shell
+            .active_snapshot()
+            .unwrap()
+            .effective_capabilities()
+            .is_empty()
+    );
+}
+
+#[test]
 fn newly_active_backend_interfaces_spawns_only_the_active_unrunning_provider() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();
