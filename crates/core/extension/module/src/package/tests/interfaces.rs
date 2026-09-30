@@ -178,6 +178,98 @@ fn duplicate_interface_declaration_prefers_interface_module() {
     );
 }
 
+fn inline_example_backend(module_id: &str, priority: u32, method: &str) -> LoadedModuleManifest {
+    let mut backend = loaded_module(
+        module_id,
+        ModuleKind::Backend,
+        MeshDependencies::default(),
+        vec![MeshProvidesDeclaration {
+            interface: "mesh.example".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider: Some(module_id.into()),
+            label: None,
+            priority,
+        }],
+        MeshContributes::default(),
+    );
+    backend.manifest.mesh.interfaces =
+        vec![crate::package::module_manifest::MeshInterfaceDeclaration {
+            name: "mesh.example".into(),
+            version: Some("1.0".into()),
+            contract: Some(serde_json::json!({ "methods": [{ "name": method }] })),
+            domain: Some("example".into()),
+            extends: None,
+            relationship: Some(crate::package::module_manifest::InterfaceRelationship::Base),
+            reason: None,
+        }];
+    backend
+}
+
+#[test]
+fn provider_priority_cannot_replace_an_inline_interface_contract() {
+    let root = root_with_modules(
+        &[
+            ("@mesh/example-backend", ModuleKind::Backend),
+            ("@other/example-backend", ModuleKind::Backend),
+        ],
+        &[("mesh.example", "@mesh/example-backend")],
+        None,
+    );
+    let graph = InstalledModuleGraph::from_parts(
+        root,
+        vec![
+            inline_example_backend("@mesh/example-backend", 100, "focus"),
+            inline_example_backend("@other/example-backend", 101, "rewritten"),
+        ],
+    )
+    .unwrap();
+
+    assert!(graph.declared_interface("mesh.example").is_none());
+    for module_id in ["@mesh/example-backend", "@other/example-backend"] {
+        assert!(
+            graph.diagnostics().iter().any(|d| d.status
+                == "conflicting_interface_declaration"
+                && d.module_id == module_id),
+            "every declarer should get a conflict diagnostic; got: {:?}",
+            graph.diagnostics()
+        );
+    }
+}
+
+#[test]
+fn identical_inline_interface_copies_share_one_declaration() {
+    let root = root_with_modules(
+        &[
+            ("@mesh/example-backend", ModuleKind::Backend),
+            ("@other/example-backend", ModuleKind::Backend),
+        ],
+        &[("mesh.example", "@mesh/example-backend")],
+        None,
+    );
+    let graph = InstalledModuleGraph::from_parts(
+        root,
+        vec![
+            inline_example_backend("@mesh/example-backend", 100, "focus"),
+            inline_example_backend("@other/example-backend", 101, "focus"),
+        ],
+    )
+    .unwrap();
+
+    assert_eq!(
+        graph.interface_contract("mesh.example").unwrap().methods[0].name,
+        "focus"
+    );
+    assert!(
+        !graph
+            .diagnostics()
+            .iter()
+            .any(|d| d.status.contains("interface_declaration")),
+        "identical copies are not a conflict; got: {:?}",
+        graph.diagnostics()
+    );
+}
+
 #[test]
 fn duplicate_standalone_interface_declarations_are_rejected_deterministically() {
     let first = interface_module(

@@ -683,27 +683,18 @@ impl InstalledModuleGraph {
         }
 
         // Collect inline interface declarations from backend modules
-        // (`mesh.interfaces`). A standalone interface module always wins for
-        // the same interface name; among duplicate inline declarations the
-        // highest-priority provider's copy wins. Losers become diagnostics,
-        // not errors — the graph stays loadable.
+        // (`mesh.interfaces`). A standalone interface module owns its name and
+        // wins over inline copies. Inline copies must agree: provider priority
+        // chooses a provider, never a contract, so differing inline
+        // declarations make the interface unavailable instead of letting one
+        // provider rewrite its methods and permission levels.
         let mut backend_ids: Vec<String> = graph_modules
             .values()
             .filter(|node| node.enabled && node.kind == ModuleKind::Backend)
             .map(|node| node.id.clone())
             .collect();
         backend_ids.sort();
-        let provider_priority = |interface: &str, module_id: &str| -> u32 {
-            backend_providers
-                .get(interface)
-                .and_then(|providers| {
-                    providers
-                        .iter()
-                        .find(|provider| provider.module_id == module_id)
-                })
-                .map(|provider| provider.priority)
-                .unwrap_or(0)
-        };
+        let mut conflicting_interfaces: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         for module_id in backend_ids {
             let Some(node) = graph_modules.get(&module_id) else {
                 continue;
@@ -724,39 +715,46 @@ impl InstalledModuleGraph {
                     relationship: interface.effective_relationship(),
                     reason: interface.reason.clone(),
                 };
-                match interface_declarations.get(&name) {
-                    None => {
-                        interface_declarations.insert(name.clone(), candidate);
-                    }
-                    Some(existing) => {
-                        let existing_is_interface_module = graph_modules
-                            .get(&existing.module_id)
-                            .is_some_and(|node| node.kind == ModuleKind::Interface);
-                        let replace = !existing_is_interface_module
-                            && provider_priority(&candidate.name, &candidate.module_id)
-                                > provider_priority(&existing.name, &existing.module_id);
-                        let (winner_id, loser_id) = if replace {
-                            (candidate.module_id.clone(), existing.module_id.clone())
-                        } else {
-                            (existing.module_id.clone(), candidate.module_id.clone())
-                        };
-                        manual_diagnostics.push(ModuleGraphDiagnostic {
-                            module_id: loser_id.clone(),
-                            contribution_id: Some(format!(
-                                "{loser_id}:interface:{}",
-                                candidate.name
-                            )),
-                            status: "duplicate_interface_declaration".into(),
-                            message: format!(
-                                "interface {} is declared by both {winner_id} and {loser_id}; the declaration from {winner_id} wins",
-                                candidate.name
-                            ),
-                        });
-                        if replace {
-                            interface_declarations.insert(candidate.name.clone(), candidate);
-                        }
-                    }
+                if let Some(declarers) = conflicting_interfaces.get_mut(&name) {
+                    declarers.insert(module_id.clone());
+                    continue;
                 }
+                let Some(existing) = interface_declarations.get(&name) else {
+                    interface_declarations.insert(name.clone(), candidate);
+                    continue;
+                };
+                let existing_is_interface_module = graph_modules
+                    .get(&existing.module_id)
+                    .is_some_and(|node| node.kind == ModuleKind::Interface);
+                if existing_is_interface_module {
+                    manual_diagnostics.push(ModuleGraphDiagnostic {
+                        module_id: module_id.clone(),
+                        contribution_id: Some(format!("{module_id}:interface:{name}")),
+                        status: "duplicate_interface_declaration".into(),
+                        message: format!(
+                            "interface {name} is owned by interface module {}; the inline declaration in {module_id} is ignored",
+                            existing.module_id
+                        ),
+                    });
+                } else if !existing.declares_same_contract(&candidate) {
+                    let existing_id = existing.module_id.clone();
+                    interface_declarations.remove(&name);
+                    conflicting_interfaces
+                        .insert(name.clone(), BTreeSet::from([existing_id, module_id.clone()]));
+                }
+            }
+        }
+        for (name, declarers) in &conflicting_interfaces {
+            let listed = declarers.iter().cloned().collect::<Vec<_>>().join(", ");
+            for module_id in declarers {
+                manual_diagnostics.push(ModuleGraphDiagnostic {
+                    module_id: module_id.clone(),
+                    contribution_id: Some(format!("{module_id}:interface:{name}")),
+                    status: "conflicting_interface_declaration".into(),
+                    message: format!(
+                        "interface {name} is declared differently by {listed}; no declaration is used until one owner remains or an interface module declares it"
+                    ),
+                });
             }
         }
 
@@ -1913,6 +1911,19 @@ pub struct InterfaceDeclarationNode {
     pub extends: Option<String>,
     pub relationship: InterfaceRelationship,
     pub reason: Option<String>,
+}
+
+impl InterfaceDeclarationNode {
+    /// Whether two declarations describe the same contract, ignoring who
+    /// declared it and the free-form reason.
+    pub fn declares_same_contract(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.version == other.version
+            && self.contract == other.contract
+            && self.domain == other.domain
+            && self.extends == other.extends
+            && self.relationship == other.relationship
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

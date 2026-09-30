@@ -436,10 +436,12 @@ contract-less binding.
 - **Inline declaration for single-provider domains.** A backend module may
   declare its interface contract itself under `mesh.interfaces[]` (same
   shape as `mesh.interface`) — no separate interface module needed. A
-  standalone interface module always wins over inline duplicates of the same
-  name; duplicate inline declarations resolve to the highest-priority
-  provider's copy, and every conflict emits
-  `duplicate_interface_declaration`. Promote an inline contract to a
+  standalone interface module owns its name and wins over inline copies, each
+  of which emits `duplicate_interface_declaration`. Identical inline copies
+  share one declaration. Differing inline copies are a conflict: provider
+  priority selects a provider, never a contract, so the interface has no
+  declaration and every declarer gets `conflicting_interface_declaration`.
+  Promote an inline contract to a
   standalone interface module once a second provider exists.
 - **No untyped fallback.** A backend that implements an interface nothing
   declares, or whose declaration has no contract, is not a provider. Interface
