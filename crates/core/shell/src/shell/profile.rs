@@ -1151,7 +1151,7 @@ impl Shell {
                 "module": root.module,
                 "active": root.active,
             }));
-            if !root.active {
+            if !root.is_active() {
                 continue;
             }
             let Some(host) = catalog.modules.get(&root.module) else {
@@ -1549,7 +1549,7 @@ impl Shell {
                     ProfileRootInstance {
                         module: module_id,
                         entrypoint: "main".into(),
-                        active: true,
+                        active: Some(true),
                         surface: None,
                     },
                 );
@@ -1558,13 +1558,13 @@ impl Shell {
         let desired_surfaces = profile
             .roots
             .iter()
-            .filter(|(_, root)| root.active)
+            .filter(|(_, root)| root.is_active())
             .map(|(instance_id, _)| instance_id.clone())
             .collect::<HashSet<_>>();
         let root_modules = profile
             .roots
             .iter()
-            .filter(|(_, root)| root.active)
+            .filter(|(_, root)| root.is_active())
             .map(|(instance_id, root)| (instance_id.clone(), root.module.clone()))
             .collect::<HashMap<_, _>>();
         let existing_surface_modules = self
@@ -1578,7 +1578,7 @@ impl Shell {
             })
             .collect::<HashMap<_, _>>();
         let mut prepared_frontends = Vec::new();
-        for (instance_id, root) in profile.roots.iter().filter(|(_, root)| root.active) {
+        for (instance_id, root) in profile.roots.iter().filter(|(_, root)| root.is_active()) {
             if existing_surface_modules
                 .get(instance_id)
                 .is_some_and(|module_id| module_id == &root.module)

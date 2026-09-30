@@ -59,8 +59,11 @@ pub struct ProfileRootInstance {
     pub module: String,
     #[serde(default = "default_entrypoint")]
     pub entrypoint: String,
-    #[serde(default = "default_true")]
-    pub active: bool,
+    /// `None` in a sparse overlay means "inherit"; an effective root with no
+    /// decision anywhere is active. Read the effective value with
+    /// [`ProfileRootInstance::is_active`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active: Option<bool>,
     /// Sparse per-instance placement override. Omission inherits `mesh.surface`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface: Option<SurfaceLayoutSection>,
@@ -71,12 +74,40 @@ pub struct ProfileRootInstance {
 pub struct ProfileResources {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
-    #[serde(default)]
-    pub icons: Vec<String>,
-    #[serde(default)]
-    pub fonts: Vec<String>,
-    #[serde(default)]
-    pub languages: Vec<String>,
+    /// Ordered pack chains. `None` inherits the base composition's chain;
+    /// `Some(empty)` explicitly selects no packs. Read the effective chain
+    /// with the accessor of the same name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icons: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fonts: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub languages: Option<Vec<String>>,
+}
+
+impl ProfileRootInstance {
+    /// Effective activation: a root no layer decided about is active.
+    pub fn is_active(&self) -> bool {
+        self.active.unwrap_or(true)
+    }
+}
+
+impl ProfileResources {
+    pub fn icons(&self) -> &[String] {
+        self.icons.as_deref().unwrap_or_default()
+    }
+
+    pub fn fonts(&self) -> &[String] {
+        self.fonts.as_deref().unwrap_or_default()
+    }
+
+    pub fn languages(&self) -> &[String] {
+        self.languages.as_deref().unwrap_or_default()
+    }
+
+    fn chains_mut(&mut self) -> [&mut Option<Vec<String>>; 3] {
+        [&mut self.icons, &mut self.fonts, &mut self.languages]
+    }
 }
 
 fn default_profile_schema_version() -> u32 {
@@ -89,10 +120,6 @@ fn is_zero_revision(revision: &u64) -> bool {
 
 fn default_entrypoint() -> String {
     "main".into()
-}
-
-fn default_true() -> bool {
-    true
 }
 
 fn validate_unique_ordered_ids(field: &str, values: &[String]) -> Result<(), ModuleManifestError> {
@@ -143,7 +170,7 @@ impl Default for ProfileRootInstance {
         Self {
             module: String::new(),
             entrypoint: default_entrypoint(),
-            active: true,
+            active: Some(true),
             surface: None,
         }
     }
@@ -250,12 +277,12 @@ impl ShellProfile {
             self.resources
                 .theme
                 .iter()
-                .chain(self.resources.icons.iter())
-                .chain(self.resources.fonts.iter())
-                .chain(self.resources.languages.iter()),
+                .chain(self.resources.icons())
+                .chain(self.resources.fonts())
+                .chain(self.resources.languages()),
             "resources",
         )?;
-        validate_unique_ordered_ids("resources.languages", &self.resources.languages)?;
+        validate_unique_ordered_ids("resources.languages", self.resources.languages())?;
         for (instance_id, slots) in &self.node_slots {
             if instance_id.trim().is_empty() {
                 return Err(ModuleManifestError::Validation(
@@ -321,11 +348,11 @@ impl ShellProfile {
         let instance_id = format!("{}#default", manifest.name);
         self.roots
             .entry(instance_id.clone())
-            .and_modify(|instance| instance.active = true)
+            .and_modify(|instance| instance.active = Some(true))
             .or_insert_with(|| ProfileRootInstance {
                 module: manifest.name.clone(),
                 entrypoint: "main".into(),
-                active: true,
+                active: Some(true),
                 surface: None,
             });
         Ok(instance_id)
@@ -339,7 +366,7 @@ impl ShellProfile {
         let instance = self.roots.get_mut(instance_id).ok_or_else(|| {
             ModuleManifestError::Validation(format!("profile has no root instance {instance_id}"))
         })?;
-        instance.active = active;
+        instance.active = Some(active);
         Ok(())
     }
 
@@ -360,9 +387,9 @@ impl ShellProfile {
                 .values()
                 .any(|provider| provider == module_id)
             || self.resources.theme.as_deref() == Some(module_id)
-            || self.resources.icons.iter().any(|id| id == module_id)
-            || self.resources.fonts.iter().any(|id| id == module_id)
-            || self.resources.languages.iter().any(|id| id == module_id)
+            || self.resources.icons().iter().any(|id| id == module_id)
+            || self.resources.fonts().iter().any(|id| id == module_id)
+            || self.resources.languages().iter().any(|id| id == module_id)
     }
 
     /// Remove all profile-owned references to a forcibly uninstalled module.
@@ -380,9 +407,9 @@ impl ShellProfile {
         if self.resources.theme.as_deref() == Some(module_id) {
             self.resources.theme = None;
         }
-        self.resources.icons.retain(|id| id != module_id);
-        self.resources.fonts.retain(|id| id != module_id);
-        self.resources.languages.retain(|id| id != module_id);
+        for chain in self.resources.chains_mut().into_iter().flatten() {
+            chain.retain(|id| id != module_id);
+        }
     }
 
     /// Resolve the modules needed by this profile. Roots are explicit; declared
@@ -451,7 +478,7 @@ impl ShellProfile {
                 )));
             }
         }
-        for language_pack in &activation_spec.resources.languages {
+        for language_pack in activation_spec.resources.languages() {
             let manifest = manifests.get(language_pack.as_str()).ok_or_else(|| {
                 ModuleManifestError::Validation(format!(
                     "profile references language pack {language_pack}, but it is not installed"
@@ -472,14 +499,14 @@ impl ShellProfile {
             activation_spec
                 .roots
                 .get(instance_id)
-                .is_some_and(|instance| instance.active)
+                .is_some_and(ProfileRootInstance::is_active)
                 && !orphaned.iter().any(|orphan| {
                     orphan == instance_id || orphan == &format!("nodeSlots.{instance_id}")
                 })
         };
 
         for (instance_id, instance) in &activation_spec.roots {
-            if !instance.active || !is_active_host(instance_id) {
+            if !instance.is_active() || !is_active_host(instance_id) {
                 continue;
             }
             queue.push_back(instance.module.clone());
@@ -489,9 +516,9 @@ impl ShellProfile {
         if let Some(theme) = &activation_spec.resources.theme {
             queue.push_back(theme.clone());
         }
-        queue.extend(activation_spec.resources.icons.iter().cloned());
-        queue.extend(activation_spec.resources.fonts.iter().cloned());
-        queue.extend(activation_spec.resources.languages.iter().cloned());
+        queue.extend(activation_spec.resources.icons().iter().cloned());
+        queue.extend(activation_spec.resources.fonts().iter().cloned());
+        queue.extend(activation_spec.resources.languages().iter().cloned());
         for (instance_id, slots) in &activation_spec.node_slots {
             if !is_active_host(instance_id) {
                 continue;
@@ -691,7 +718,7 @@ impl ShellProfile {
         root.layout = self
             .roots
             .values()
-            .find(|instance| instance.active)
+            .find(|instance| instance.is_active())
             .map(|instance| RootLayoutSelection {
                 entrypoint: format!("{}:{}", instance.module, instance.entrypoint),
             });
@@ -1116,7 +1143,7 @@ mod tests {
         let mut profile = ShellProfile::new();
         let instance_id = profile.add_frontend(&module).unwrap();
         let instance = &profile.roots[&instance_id];
-        assert!(instance.active);
+        assert!(instance.is_active());
         assert!(instance.surface.is_none());
     }
 
@@ -1287,7 +1314,7 @@ mod tests {
         .unwrap();
         let root = &profile.roots["@me/panel#top"];
         assert_eq!(root.module, "@me/panel");
-        assert!(!root.active);
+        assert!(!root.is_active());
     }
 
     #[test]
@@ -1647,7 +1674,11 @@ mod tests {
             .providers
             .insert("mesh.audio".into(), "@mesh/audio".into());
         profile.resources.theme = Some("@mesh/theme".into());
-        profile.resources.icons.push("@mesh/icons".into());
+        profile
+            .resources
+            .icons
+            .get_or_insert_default()
+            .push("@mesh/icons".into());
 
         assert!(profile.references_module("@mesh/audio"));
         profile.remove_module_references("@mesh/audio");

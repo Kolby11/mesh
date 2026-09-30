@@ -131,9 +131,9 @@ fn load_installed_module_graph_with(
         let resolved = resolve_composition(profile, manifests.iter())?;
         let effective_profile = resolved.to_profile();
         composition.slots = resolved.spec.slots.clone();
-        composition.icon_pack_chain = Some(resolved.spec.resources.icons.clone());
-        composition.font_pack_chain = Some(resolved.spec.resources.fonts.clone());
-        composition.language_pack_chain = Some(resolved.spec.resources.languages.clone());
+        composition.icon_pack_chain = Some(resolved.spec.resources.icons().to_vec());
+        composition.font_pack_chain = Some(resolved.spec.resources.fonts().to_vec());
+        composition.language_pack_chain = Some(resolved.spec.resources.languages().to_vec());
         // A node-slot placement is meaningful only while its host root is
         // active. Orphaned overrides remain in the profile for diagnostics,
         // but must not pull their contributed modules into the activation

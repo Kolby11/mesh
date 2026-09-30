@@ -144,7 +144,7 @@ impl EffectiveComposition {
                         .spec
                         .roots
                         .get(*instance_id)
-                        .is_some_and(|root| root.active)
+                        .is_some_and(ProfileRootInstance::is_active)
             })
             .map(|(instance_id, slots)| (instance_id.clone(), slots.clone()))
             .collect();
@@ -292,14 +292,15 @@ fn merge_spec(base: &mut CompositionSpec, overlay: &CompositionSpec) {
     }
     // Ordered chains replace rather than merge: an icon or font chain is an
     // ordered fallback list, and interleaving two orderings has no meaning.
-    if !overlay.resources.icons.is_empty() {
-        base.resources.icons = overlay.resources.icons.clone();
-    }
-    if !overlay.resources.fonts.is_empty() {
-        base.resources.fonts = overlay.resources.fonts.clone();
-    }
-    if !overlay.resources.languages.is_empty() {
-        base.resources.languages = overlay.resources.languages.clone();
+    // A present chain replaces even when empty, which selects no packs.
+    for (target, chain) in [
+        (&mut base.resources.icons, &overlay.resources.icons),
+        (&mut base.resources.fonts, &overlay.resources.fonts),
+        (&mut base.resources.languages, &overlay.resources.languages),
+    ] {
+        if chain.is_some() {
+            target.clone_from(chain);
+        }
     }
 
     for (point, over) in &overlay.slots {
@@ -334,7 +335,9 @@ fn merge_root(base: &mut ProfileRootInstance, overlay: &ProfileRootInstance) {
     if overlay.entrypoint != "main" {
         base.entrypoint = overlay.entrypoint.clone();
     }
-    base.active = overlay.active;
+    if overlay.active.is_some() {
+        base.active = overlay.active;
+    }
     if let Some(surface) = &overlay.surface {
         base.surface = Some(match base.surface.take() {
             Some(existing) => merge_surface(existing, surface),
@@ -475,7 +478,65 @@ mod tests {
         assert_eq!(resolved.spec.providers["mesh.audio"], "@mesh/pulseaudio");
         // Scalar selections inherit; ordered chains replace wholesale.
         assert_eq!(resolved.spec.resources.theme.as_deref(), Some("@mesh/dark"));
-        assert_eq!(resolved.spec.resources.icons, vec!["@alice/icons"]);
+        assert_eq!(resolved.spec.resources.icons(), ["@alice/icons"]);
+    }
+
+    #[test]
+    fn a_surface_only_overlay_keeps_an_inactive_root_inactive() {
+        let desk = composition(
+            "@alice/desk",
+            None,
+            r#"{"roots":{"@mesh/panel#top":{"module":"@mesh/panel","active":false}}}"#,
+        );
+        let surface_only = resolve_composition(
+            &profile(
+                r#"{"schemaVersion":3,"from":{"module":"@alice/desk"},
+                    "roots":{"@mesh/panel#top":{"surface":{"anchor":"bottom"}}}}"#,
+            ),
+            [&desk],
+        )
+        .unwrap();
+        assert!(!surface_only.spec.roots["@mesh/panel#top"].is_active());
+
+        let reenabled = resolve_composition(
+            &profile(
+                r#"{"schemaVersion":3,"from":{"module":"@alice/desk"},
+                    "roots":{"@mesh/panel#top":{"active":true}}}"#,
+            ),
+            [&desk],
+        )
+        .unwrap();
+        assert!(reenabled.spec.roots["@mesh/panel#top"].is_active());
+    }
+
+    #[test]
+    fn an_explicit_empty_chain_clears_an_inherited_one() {
+        let desk = composition(
+            "@alice/desk",
+            None,
+            r#"{"resources":{"icons":["@mesh/icons"],"fonts":["@mesh/fonts"],
+                "languages":["@mesh/sk"]}}"#,
+        );
+        let cleared = resolve_composition(
+            &profile(
+                r#"{"schemaVersion":3,"from":{"module":"@alice/desk"},
+                    "resources":{"icons":[],"fonts":[],"languages":[]}}"#,
+            ),
+            [&desk],
+        )
+        .unwrap();
+        assert!(cleared.spec.resources.icons().is_empty());
+        assert!(cleared.spec.resources.fonts().is_empty());
+        assert!(cleared.spec.resources.languages().is_empty());
+
+        let inherited = resolve_composition(
+            &profile(r#"{"schemaVersion":3,"from":{"module":"@alice/desk"}}"#),
+            [&desk],
+        )
+        .unwrap();
+        assert_eq!(inherited.spec.resources.icons(), ["@mesh/icons"]);
+        assert_eq!(inherited.spec.resources.fonts(), ["@mesh/fonts"]);
+        assert_eq!(inherited.spec.resources.languages(), ["@mesh/sk"]);
     }
 
     #[test]
@@ -523,7 +584,7 @@ mod tests {
         .unwrap();
 
         let root = &resolved.spec.roots["@mesh/panel#top"];
-        assert!(!root.active);
+        assert!(!root.is_active());
         let surface = root.surface.as_ref().unwrap();
         assert_eq!(surface.anchor.as_deref(), Some("bottom"));
         // A per-field surface merge keeps the composition's other placement.

@@ -240,7 +240,7 @@ pub(super) fn write_composed_module_enabled(
                 .values_mut()
                 .filter(|instance| instance.module == module_id)
             {
-                instance.active = enabled;
+                instance.active = Some(enabled);
                 found = true;
             }
             if enabled && !found {
@@ -249,7 +249,7 @@ pub(super) fn write_composed_module_enabled(
                     ProfileRootInstance {
                         module: module_id.to_string(),
                         entrypoint: "main".into(),
-                        active: true,
+                        active: Some(true),
                         surface: None,
                     },
                 );
@@ -463,7 +463,7 @@ mod tests {
             ProfileRootInstance {
                 module: "@mesh/panel".into(),
                 entrypoint: "main".into(),
-                active: true,
+                active: Some(true),
                 surface: None,
             },
         );
@@ -473,11 +473,11 @@ mod tests {
         let rollback =
             write_composed_module_enabled(&root_path, "@mesh/panel", ModuleKind::Frontend, false)
                 .unwrap();
-        assert!(!paths.load("desktop").unwrap().roots["@mesh/panel#default"].active);
+        assert!(!paths.load("desktop").unwrap().roots["@mesh/panel#default"].is_active());
         assert_eq!(fs::read_to_string(&root_path).unwrap(), root);
 
         rollback.restore().unwrap();
-        assert!(paths.load("desktop").unwrap().roots["@mesh/panel#default"].active);
+        assert!(paths.load("desktop").unwrap().roots["@mesh/panel#default"].is_active());
     }
 
     #[test]

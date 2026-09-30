@@ -1335,7 +1335,7 @@ pub(in crate::shell) fn effective_profile_settings(
             .or_insert_with(|| serde_json::json!({}));
         mesh_core_config::merge_json(target, overrides);
     }
-    for (instance_id, instance) in profile.roots.iter().filter(|(_, root)| root.active) {
+    for (instance_id, instance) in profile.roots.iter().filter(|(_, root)| root.is_active()) {
         let Some(surface) = &instance.surface else {
             continue;
         };
@@ -2631,7 +2631,7 @@ impl Shell {
                 .into_iter()
                 .map(|entry| (entry.compiled.manifest.package.id.clone(), entry))
                 .collect::<HashMap<_, _>>();
-            for (instance_id, root) in profile.roots.iter().filter(|(_, root)| root.active) {
+            for (instance_id, root) in profile.roots.iter().filter(|(_, root)| root.is_active()) {
                 let entry = entries.get(&root.module).ok_or_else(|| {
                     ShellRunError::FrontendComposition {
                         message: format!(
@@ -2714,7 +2714,7 @@ impl Shell {
                 .load(profile_id)?
                 .roots
                 .into_iter()
-                .filter(|(_, root)| root.active && root.module == module_id)
+                .filter(|(_, root)| root.is_active() && root.module == module_id)
                 .map(|(instance_id, _)| instance_id)
                 .collect::<Vec<_>>()
         } else {

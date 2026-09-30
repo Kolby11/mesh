@@ -753,7 +753,9 @@ field is the whole decision rather than a delta. Layering runs base composition
 deliberate exceptions:
 
 - **Ordered resource chains replace rather than merge.** An icon or font chain
-  is an ordered fallback list; interleaving two orderings has no meaning.
+  is an ordered fallback list; interleaving two orderings has no meaning. An
+  omitted chain inherits; an explicit empty chain (`"icons": []`) selects no
+  packs.
 - **A user may deactivate an inherited root but not delete it.** Deletion is not
   expressible in a delta layer, and an update would resurrect it anyway.
 
@@ -790,7 +792,10 @@ catalog.
 ```
 
 Presence composes an instance; `active: false` temporarily removes it while
-preserving identity and overrides. `surface` on an instance is sparse: omitted
+preserving identity and overrides. Every root field is sparse in an overlay: an
+overlay that omits `active` (for example, one that only moves the surface)
+inherits the less-specific decision, and a root no layer decides about is
+active. `surface` on an instance is sparse: omitted
 fields inherit `mesh.surface`, and only user changes are written. Installing a
 frontend directly creates or re-enables its `#default` instance. Component,
 interface, and library modules are availability/dependency nodes rather than
