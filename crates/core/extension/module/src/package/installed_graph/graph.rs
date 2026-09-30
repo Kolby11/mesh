@@ -108,6 +108,7 @@ fn resolve_active_providers(
     let mut active = HashMap::new();
     let mut diagnostics = Vec::new();
     let mut blocked_frontends = BTreeSet::new();
+    let no_providers = Vec::new();
 
     for interface in interfaces {
         // Core-provided interfaces are registered by the shell after graph
@@ -126,20 +127,34 @@ fn resolve_active_providers(
             .values()
             .filter(|requirements| requirements.optional_backend.contains_key(&interface))
             .collect::<Vec<_>>();
-        let provider_candidates = providers
-            .get(&interface)
-            .map(|providers| {
-                providers
+        // Every runnable service has an explicit typed contract. A provider
+        // of an interface with no valid contract is never a candidate.
+        let contract = contracts.get(&interface);
+        let interface_providers = providers.get(&interface).unwrap_or(&no_providers);
+        if contract.is_none() {
+            for provider in interface_providers {
+                diagnostics.push(ModuleGraphDiagnostic {
+                    module_id: provider.module_id.clone(),
+                    contribution_id: Some(format!(
+                        "{}:provider:{interface}",
+                        provider.module_id
+                    )),
+                    status: "missing_interface_contract".into(),
+                    message: format!(
+                        "provider {} implements {interface}, which has no valid typed contract; declare one in mesh.interfaces or an interface module",
+                        provider.module_id
+                    ),
+                });
+            }
+        }
+        let provider_candidates = contract
+            .map(|contract| {
+                interface_providers
                     .iter()
                     .filter(|provider| {
                         required_consumers.iter().all(|consumer| {
                             consumer.backend.get(&interface).is_some_and(|requirement| {
-                                provider_satisfies_requirement(
-                                    provider,
-                                    requirement,
-                                    declarations.get(&interface),
-                                    contracts.get(&interface),
-                                )
+                                provider_satisfies_requirement(provider, requirement, contract)
                             })
                         })
                     })
@@ -170,16 +185,13 @@ fn resolve_active_providers(
             let Some(requirement) = consumer.backend.get(&interface) else {
                 continue;
             };
-            match selected {
-                Some(provider)
-                    if provider_satisfies_requirement(
-                        provider,
-                        requirement,
-                        declarations.get(&interface),
-                        contracts.get(&interface),
-                    ) => {}
+            match (selected, contract) {
+                (Some(provider), Some(contract))
+                    if provider_satisfies_requirement(provider, requirement, contract) => {}
                 _ => {
-                    let status = if provider_candidates.is_empty() {
+                    let status = if contract.is_none() {
+                        "missing_interface_contract"
+                    } else if provider_candidates.is_empty() {
                         "required_interface_version_mismatch"
                     } else {
                         "required_interface_unavailable"
@@ -207,7 +219,7 @@ fn resolve_active_providers(
             let Some(requirement) = consumer.optional_backend.get(&interface) else {
                 continue;
             };
-            let (status, message) = match selected {
+            let (status, message) = match selected.zip(contract) {
                 None => (
                     "optional_interface_unavailable",
                     format!(
@@ -215,17 +227,12 @@ fn resolve_active_providers(
                         consumer.module_id
                     ),
                 ),
-                Some(provider)
-                    if provider_satisfies_requirement(
-                        provider,
-                        requirement,
-                        declarations.get(&interface),
-                        contracts.get(&interface),
-                    ) =>
+                Some((provider, contract))
+                    if provider_satisfies_requirement(provider, requirement, contract) =>
                 {
                     continue;
                 }
-                Some(provider) => (
+                Some((provider, _)) => (
                     "optional_interface_version_mismatch",
                     format!(
                         "module {} optionally uses {interface} {requirement}, but provider {} is incompatible",
@@ -251,47 +258,21 @@ fn resolve_active_providers(
 fn provider_satisfies_requirement(
     provider: &BackendProviderNode,
     requirement: &str,
-    declaration: Option<&InterfaceDeclarationNode>,
-    contract: Option<&InterfaceContract>,
+    contract: &InterfaceContract,
 ) -> bool {
     let Some(request) = parse_version_req(requirement) else {
         return false;
     };
-    if let Some(contract) = contract {
-        if !request.matches(&contract.version) {
-            return false;
-        }
-    } else if let Some(version) = declaration
-        .and_then(|declaration| declaration.version.as_deref())
-        .and_then(parse_contract_version)
-        && !request.matches(&version)
-    {
+    if !request.matches(&contract.version) {
         return false;
     }
-
-    let Some(provider_version) = provider.version.as_deref() else {
-        // Older providers without a version inherit the declared contract
-        // version, which was checked above when one exists.
-        // Providers without any declaration are also valid for the legacy
-        // untyped interface path; there is no graph-owned version to compare.
-        return true;
-    };
-    let Some(provider_version) = parse_contract_version(provider_version) else {
-        return false;
-    };
-    if let Some(contract) = contract
-        && provider_version != contract.version
-    {
-        return false;
+    // A provider that names no version implements the declared contract
+    // version; one that names a version must implement exactly that version.
+    match provider.version.as_deref() {
+        None => true,
+        Some(version) => parse_contract_version(version)
+            .is_some_and(|version| version == contract.version && request.matches(&version)),
     }
-    if let Some(declaration_version) = declaration
-        .and_then(|declaration| declaration.version.as_deref())
-        .and_then(parse_contract_version)
-        && provider_version != declaration_version
-    {
-        return false;
-    }
-    request.matches(&provider_version)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

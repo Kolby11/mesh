@@ -503,7 +503,7 @@ fn graph_health_marks_active_provider_unavailable_when_required_binary_is_missin
     );
     backend.manifest.mesh.capabilities.required = vec!["exec.argv:test:*".into()];
 
-    let graph = InstalledModuleGraph::from_parts(root, vec![backend]).unwrap();
+    let graph = InstalledModuleGraph::from_parts(root, typed(vec![backend])).unwrap();
 
     assert!(graph.health().iter().any(|record| {
         record.module_id == "@mesh/backend"
@@ -564,7 +564,7 @@ fn graph_health_marks_frontend_required_interface_unavailable_when_active_provid
         MeshContributes::default(),
     );
 
-    let graph = InstalledModuleGraph::from_parts(root, vec![frontend, backend]).unwrap();
+    let graph = InstalledModuleGraph::from_parts(root, typed(vec![frontend, backend])).unwrap();
 
     assert!(graph.health().iter().any(|record| {
         record.module_id == "@mesh/frontend"

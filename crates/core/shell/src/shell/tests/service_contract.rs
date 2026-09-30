@@ -22,6 +22,7 @@ fn service_contract_provider_declaration_requires_provider_pair() {
                     "apiVersion": "0.1",
                     "kind": "backend",
                     "entrypoints": { "main": "src/main.luau" },
+                    "interfaces": [{ "name": "mesh.audio", "version": "1.0", "contract": {} }],
                     "implements": [{ "interface": "mesh.audio", "provider": "test" }]
                   }
                 }"#,
@@ -73,6 +74,7 @@ fn backend_lifecycle_accepts_provider_without_consumer_capabilities() {
                     "apiVersion": "0.1",
                     "kind": "backend",
                     "entrypoints": { "main": "src/main.luau" },
+                    "interfaces": [{ "name": "mesh.example", "version": "1.0", "contract": {} }],
                     "implements": [{ "interface": "mesh.example", "provider": "test" }]
                   }
                 }"#,
@@ -118,6 +120,7 @@ fn backend_lifecycle_accepts_valid_provider_with_contract() {
                     "kind": "backend",
                     "capabilities": { "required": ["exec.argv:example:*"] },
                     "entrypoints": { "main": "src/main.luau" },
+                    "interfaces": [{ "name": "mesh.example", "version": "1.0", "contract": {} }],
                     "implements": [{ "interface": "mesh.example", "provider": "test" }]
                   }
                 }"#,
@@ -174,6 +177,7 @@ fn backend_lifecycle_rejects_provider_without_activation_resolved_capabilities()
                       "optional": ["service.example.read"]
                     },
                     "entrypoints": { "main": "src/main.luau" },
+                    "interfaces": [{ "name": "mesh.example", "version": "1.0", "contract": {} }],
                     "implements": [{ "interface": "mesh.example", "provider": "test" }]
                   }
                 }"#,

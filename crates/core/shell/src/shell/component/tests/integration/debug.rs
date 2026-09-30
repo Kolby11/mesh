@@ -445,12 +445,12 @@ pub(in crate::shell) fn settings_catalog() -> InterfaceCatalog {
                     },
                     ContractStateField {
                         name: "themes".into(),
-                        field_type: "array".into(),
+                        field_type: "any[]".into(),
                         description: None,
                     },
                     ContractStateField {
                         name: "available".into(),
-                        field_type: "array".into(),
+                        field_type: "any[]".into(),
                         description: None,
                     },
                 ]

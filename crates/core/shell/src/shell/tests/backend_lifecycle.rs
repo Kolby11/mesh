@@ -513,6 +513,7 @@ fn backend_lifecycle_never_falls_back_to_an_unselected_discovered_provider() {
                     "apiVersion": "0.1",
                     "kind": "backend",
                     "entrypoints": { "main": "src/main.luau" },
+                    "interfaces": [{ "name": "mesh.example", "version": "1.0", "contract": {} }],
                     "implements": [{ "interface": "mesh.example", "provider": "selected" }]
                   }
                 }"#,
@@ -523,6 +524,7 @@ fn backend_lifecycle_never_falls_back_to_an_unselected_discovered_provider() {
                     "apiVersion": "0.1",
                     "kind": "backend",
                     "entrypoints": { "main": "src/main.luau" },
+                    "interfaces": [{ "name": "mesh.example", "version": "1.0", "contract": {} }],
                     "implements": [{ "interface": "mesh.example", "provider": "fallback" }]
                   }
                 }"#,
@@ -572,6 +574,7 @@ fn backend_lifecycle_rejects_missing_backend_entrypoint_before_launch() {
                   "mesh": {
                     "apiVersion": "0.1",
                     "kind": "backend",
+                    "interfaces": [{ "name": "mesh.audio", "version": "1.0", "contract": {} }],
                     "implements": [{ "interface": "mesh.audio", "provider": "test" }]
                   }
                 }"#,
@@ -612,6 +615,7 @@ fn backend_lifecycle_rejects_escaping_backend_entrypoint_before_read() {
                   "mesh": {
                     "apiVersion": "0.1",
                     "kind": "backend",
+                    "interfaces": [{ "name": "mesh.audio", "version": "1.0", "contract": {} }],
                     "implements": [{ "interface": "mesh.audio", "provider": "test" }]
                   }
                 }"#,
@@ -655,6 +659,7 @@ fn backend_lifecycle_rejects_symlinked_backend_entrypoint_before_read() {
                   "mesh": {
                     "apiVersion": "0.1",
                     "kind": "backend",
+                    "interfaces": [{ "name": "mesh.audio", "version": "1.0", "contract": {} }],
                     "implements": [{ "interface": "mesh.audio", "provider": "test" }]
                   }
                 }"#,
@@ -715,6 +720,7 @@ fn backend_lifecycle_excludes_disabled_backend_modules() {
                     "apiVersion": "0.1",
                     "kind": "backend",
                     "entrypoints": { "main": "src/main.luau" },
+                    "interfaces": [{ "name": "mesh.audio", "version": "1.0", "contract": {} }],
                     "implements": [{ "interface": "mesh.audio", "provider": "test" }]
                   }
                 }"#,
@@ -765,6 +771,7 @@ fn backend_lifecycle_reports_frontend_requirement_without_active_provider() {
                     "apiVersion": "0.1",
                     "kind": "backend",
                     "entrypoints": { "main": "src/main.luau" },
+                    "interfaces": [{ "name": "mesh.audio", "version": "1.0", "contract": {} }],
                     "implements": [{ "interface": "mesh.audio", "provider": "test" }]
                   }
                 }"#,
@@ -1230,6 +1237,7 @@ fn newly_active_backend_interfaces_spawns_only_the_active_unrunning_provider() {
                     "apiVersion": "0.1",
                     "kind": "backend",
                     "entrypoints": { "main": "src/main.luau" },
+                    "interfaces": [{ "name": "mesh.example", "version": "1.0", "contract": {} }],
                     "implements": [{ "interface": "mesh.example", "provider": "selected" }]
                   }
                 }"#,
@@ -1240,6 +1248,7 @@ fn newly_active_backend_interfaces_spawns_only_the_active_unrunning_provider() {
                     "apiVersion": "0.1",
                     "kind": "backend",
                     "entrypoints": { "main": "src/main.luau" },
+                    "interfaces": [{ "name": "mesh.example", "version": "1.0", "contract": {} }],
                     "implements": [{ "interface": "mesh.example", "provider": "fallback" }]
                   }
                 }"#,
@@ -1250,6 +1259,7 @@ fn newly_active_backend_interfaces_spawns_only_the_active_unrunning_provider() {
                     "apiVersion": "0.1",
                     "kind": "backend",
                     "entrypoints": { "main": "src/main.luau" },
+                    "interfaces": [{ "name": "mesh.other", "version": "1.0", "contract": {} }],
                     "implements": [{ "interface": "mesh.other", "provider": "other" }]
                   }
                 }"#,

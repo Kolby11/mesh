@@ -471,11 +471,9 @@ impl MeshModuleSection {
                     "interface modules must declare mesh.interface.version".into(),
                 ));
             }
-            // `mesh.interface.contract` is optional: a module may ship only
-            // name/version/domain and let the contract be inferred from the
-            // provider's emitted state. The graph then reports
-            // `missing_interface_contract` and contract-based validation
-            // (capabilities, events) does not apply.
+            // `mesh.interface.contract` may be omitted at parse time so the
+            // graph can isolate the module with a `missing_interface_contract`
+            // diagnostic; no provider of a contractless interface activates.
         }
         if !self.interfaces.is_empty() {
             if self.kind != ModuleKind::Backend {

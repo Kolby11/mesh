@@ -553,3 +553,28 @@ fn shipped_themes_are_discoverable_modules_that_contribute_theme_packs() {
         "the shell ships a choice of themes, found only {ids:?}"
     );
 }
+
+#[test]
+fn every_shipped_provider_implements_a_typed_contract() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let graph = crate::package::load_authoring_snapshot(&root.join("config/module.json"))
+        .expect("shipped graph loads");
+    let untyped = graph
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.status == "missing_interface_contract")
+        .map(|diagnostic| diagnostic.message.clone())
+        .collect::<Vec<_>>();
+    assert!(untyped.is_empty(), "{untyped:#?}");
+    for backend in graph.backend_modules() {
+        for implemented in backend.manifest.mesh.implementations() {
+            let interface = mesh_core_service::canonical_interface_name(&implemented.interface);
+            assert!(
+                graph.active_provider(&interface).is_some()
+                    || graph.backend_providers_for_interface(&interface).len() > 1,
+                "{interface} from {} has no active provider",
+                backend.id
+            );
+        }
+    }
+}

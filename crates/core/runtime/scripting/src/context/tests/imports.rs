@@ -660,33 +660,25 @@ end
 }
 
 #[test]
-fn provider_only_require_creates_read_only_proxy() {
+fn provider_only_require_is_unavailable_without_a_contract() {
     let caps = CapabilitySet::from_ids(["theme.read"]);
     let mut ctx = ScriptContext::new("@test/theme-widget", caps).unwrap();
     ctx.set_interface_catalog(theme_provider_only_catalog());
     ctx.load_script(
         r#"
-theme_icon = "weather-clear-night"
-
 function sync_theme_state()
-    local theme = require("mesh.theme")
-    if theme.is_dark then
-        theme_icon = "weather-clear-night"
-    else
-        theme_icon = "weather-clear"
-    end
+    ok = pcall(require, "mesh.theme")
 end
 "#,
     )
     .unwrap();
 
-    ctx.apply_service_payload("theme", &serde_json::json!({ "is_dark": false }));
     ctx.call_handler("sync_theme_state", &[]).unwrap();
     assert_eq!(
-        ctx.state.get("theme_icon"),
-        Some(Value::String("weather-clear".into()))
+        ctx.state.get("ok"),
+        Some(Value::Bool(false)),
+        "every runnable service is typed: a provider with no contract is never bound"
     );
-    assert!(ctx.drain_diagnostics().is_empty());
 }
 
 #[test]

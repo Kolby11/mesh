@@ -789,7 +789,7 @@ fn diagnose_missing_interface_contracts(
                 contribution_id: None,
                 status: "missing_interface_contract".into(),
                 message: format!(
-                    "interface module {} declares {} without a contract; contract-based validation does not apply",
+                    "interface module {} declares {} without a contract; none of its providers can be activated",
                     module.id, interface.name
                 ),
             });

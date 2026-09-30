@@ -420,19 +420,19 @@ completion use its strict Luau field, argument, return, and event-payload types.
 Provider stubs, mocks, standalone documentation, and compatibility reports
 remain target tooling.
 
-**Target contract requirement.** Every runnable service has an explicit typed
-contract, inline or external. The permissive v0 behavior below documents
-migration gaps, not a second supported design direction. Missing or invalid
-contracts must eventually reject the affected activation instead of silently
-falling back to untyped execution.
+**Shipped contract requirement.** Every runnable service has an explicit typed
+contract, inline or external. A provider whose interface has no valid contract
+is never selected or bound: the graph reports `missing_interface_contract` for
+it, required consumers are blocked, and the service catalog creates no
+contract-less binding.
 
 - **Type grammar.** Every `type`/`returns` expression is validated at graph
   build: primitives (`string`, `int`, `float`, `boolean`, `object`, `any`),
   PascalCase named types declared under `contract.types` (plus the builtin
   `Result`), with `[]` (array) and `?` (optional) suffixes. Invalid
   expressions or references to undeclared types produce
-  `invalid_interface_contract` diagnostics and the interface loads without a
-  typed contract.
+  `invalid_interface_contract` diagnostics, and the interface's providers
+  cannot be activated.
 - **Inline declaration for single-provider domains.** A backend module may
   declare its interface contract itself under `mesh.interfaces[]` (same
   shape as `mesh.interface`) — no separate interface module needed. A
@@ -441,12 +441,10 @@ falling back to untyped execution.
   provider's copy, and every conflict emits
   `duplicate_interface_declaration`. Promote an inline contract to a
   standalone interface module once a second provider exists.
-- **Current v0 fallback; removal is target work.** `mesh.interface.contract`
-  can be omitted: the contract can be inferred from the provider's emitted
-  state, and a backend may implement an
-  interface with **no declaration at all** (name in `mesh.implements` with no
-  `baseModule`). Interface modules without a contract report
-  `missing_interface_contract`.
+- **No untyped fallback.** A backend that implements an interface nothing
+  declares, or whose declaration has no contract, is not a provider. Interface
+  modules without a contract report `missing_interface_contract`, as does each
+  provider of such an interface.
 - **Reactive command state.** A method may declare
   `"stateBinding": { "field", "fromArg" }` or
   `"stateBinding": { "field", "toggle": true }`: on successful dispatch the

@@ -202,9 +202,33 @@ pub(super) fn root_with_modules(
     }
 }
 
+/// Give a backend fixture an inline typed declaration for each interface it
+/// implements: every runnable service needs an explicit contract.
+pub(super) fn with_inline_contracts(mut module: LoadedModuleManifest) -> LoadedModuleManifest {
+    let declarations = module
+        .manifest
+        .mesh
+        .implements
+        .iter()
+        .map(|provided| MeshInterfaceDeclaration {
+            name: provided.interface.clone(),
+            version: Some(provided.version.clone().unwrap_or_else(|| "1.0".into())),
+            contract: Some(serde_json::json!({})),
+            ..Default::default()
+        })
+        .collect::<Vec<_>>();
+    module.manifest.mesh.interfaces.extend(declarations);
+    module
+}
+
+/// [`with_inline_contracts`] over a whole fixture module list.
+pub(super) fn typed(modules: Vec<LoadedModuleManifest>) -> Vec<LoadedModuleManifest> {
+    modules.into_iter().map(with_inline_contracts).collect()
+}
+
 pub(super) fn audio_modules() -> Vec<LoadedModuleManifest> {
     vec![
-        loaded_module(
+        with_inline_contracts(loaded_module(
             "@mesh/pipewire-audio",
             ModuleKind::Backend,
             MeshDependencies::default(),
@@ -219,7 +243,7 @@ pub(super) fn audio_modules() -> Vec<LoadedModuleManifest> {
                 priority: 100,
             }],
             MeshContributes::default(),
-        ),
+        )),
         loaded_module(
             "@mesh/pulseaudio-audio",
             ModuleKind::Backend,

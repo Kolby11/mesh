@@ -61,7 +61,7 @@ fn graph_diff_reports_inventory_activation_and_provider_changes() {
             MeshContributes::default(),
         ),
     ];
-    let before = InstalledModuleGraph::from_parts(before_root, before_modules).unwrap();
+    let before = InstalledModuleGraph::from_parts(before_root, typed(before_modules)).unwrap();
 
     let mut after_root = root_with_modules(
         &[
@@ -110,7 +110,7 @@ fn graph_diff_reports_inventory_activation_and_provider_changes() {
             MeshContributes::default(),
         ),
     ];
-    let after = InstalledModuleGraph::from_parts(after_root, after_modules).unwrap();
+    let after = InstalledModuleGraph::from_parts(after_root, typed(after_modules)).unwrap();
 
     let diff = before.diff(&after);
     assert_eq!(diff.added_modules, vec!["@mesh/extra"]);
@@ -535,7 +535,7 @@ fn provider_capability_metadata_comes_only_from_backend_manifest() {
         None,
     );
 
-    let graph = InstalledModuleGraph::from_parts(root, vec![frontend, backend]).unwrap();
+    let graph = InstalledModuleGraph::from_parts(root, typed(vec![frontend, backend])).unwrap();
     let provider = graph.active_provider("mesh.example").unwrap();
     assert_eq!(provider.version.as_deref(), Some("1.2.0"));
     assert_eq!(
@@ -577,7 +577,7 @@ fn installed_module_graph_routes_generic_interface_provider_without_service_bran
         None,
     );
 
-    let graph = InstalledModuleGraph::from_parts(root, vec![backend]).unwrap();
+    let graph = InstalledModuleGraph::from_parts(root, typed(vec![backend])).unwrap();
     let provider = graph.active_provider("mesh.example.alt").unwrap();
     assert_eq!(provider.module_id, "@mesh/example-backend");
     assert_eq!(provider.provider.as_deref(), Some("example-alt"));
@@ -736,31 +736,42 @@ fn installed_module_graph_does_not_auto_select_among_multiple_providers() {
 }
 
 #[test]
-fn installed_module_graph_supports_backend_without_interface_module() {
-    // A standalone backend implements an interface with no separate interface
-    // module and no contract file. The graph builds clean, auto-selects the
-    // sole provider, and emits no contract/interface-module diagnostics.
-    let root = root_with_modules(&[("@me/cputemp-backend", ModuleKind::Backend)], &[], None);
-    let backend = loaded_module(
-        "@me/cputemp-backend",
-        ModuleKind::Backend,
-        MeshDependencies::default(),
-        vec![MeshProvidesDeclaration {
-            interface: "me.cputemp".into(),
-            version: Some("1.0".into()),
-            base_module: None,
-            provider: Some("lmsensors".into()),
-            label: None,
-            priority: 100,
-        }],
-        MeshContributes::default(),
-    );
-    let graph = InstalledModuleGraph::from_parts(root, vec![backend]).unwrap();
+fn installed_module_graph_requires_a_typed_contract_for_every_provider() {
+    // A standalone backend implementing an interface nothing declares is
+    // never activated: every runnable service has an explicit typed contract.
+    let cputemp = || {
+        loaded_module(
+            "@me/cputemp-backend",
+            ModuleKind::Backend,
+            MeshDependencies::default(),
+            vec![MeshProvidesDeclaration {
+                interface: "me.cputemp".into(),
+                version: Some("1.0".into()),
+                base_module: None,
+                provider: Some("lmsensors".into()),
+                label: None,
+                priority: 100,
+            }],
+            MeshContributes::default(),
+        )
+    };
+    let root = || root_with_modules(&[("@me/cputemp-backend", ModuleKind::Backend)], &[], None);
+
+    let untyped = InstalledModuleGraph::from_parts(root(), vec![cputemp()]).unwrap();
+    assert!(untyped.active_provider("me.cputemp").is_none());
+    assert!(untyped.diagnostics().iter().any(|diagnostic| {
+        diagnostic.status == "missing_interface_contract"
+            && diagnostic.module_id == "@me/cputemp-backend"
+    }));
+
+    // The same backend with an inline declaration needs no interface module.
+    let typed = InstalledModuleGraph::from_parts(root(), vec![with_inline_contracts(cputemp())])
+        .unwrap();
     assert_eq!(
-        graph.active_provider("me.cputemp").unwrap().module_id,
+        typed.active_provider("me.cputemp").unwrap().module_id,
         "@me/cputemp-backend"
     );
-    assert!(graph.diagnostics().iter().all(|diagnostic| {
+    assert!(typed.diagnostics().iter().all(|diagnostic| {
         diagnostic.status != "missing_interface_contract"
             && diagnostic.status != "missing_provider_interface_module_dependency"
     }));

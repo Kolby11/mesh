@@ -185,7 +185,7 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
                 name: "set_wifi_enabled".into(),
                 args: vec![InterfaceArgument {
                     name: "enabled".into(),
-                    arg_type: "bool".into(),
+                    arg_type: "boolean".into(),
                 }],
                 returns: None,
                 coalesce: false,
@@ -464,7 +464,7 @@ pub(super) fn debug_catalog() -> InterfaceCatalog {
             },
             ContractStateField {
                 name: "profiling_session_id".into(),
-                field_type: "integer".into(),
+                field_type: "int".into(),
                 description: None,
             },
             ContractStateField {
@@ -474,27 +474,27 @@ pub(super) fn debug_catalog() -> InterfaceCatalog {
             },
             ContractStateField {
                 name: "modules".into(),
-                field_type: "array".into(),
+                field_type: "any[]".into(),
                 description: None,
             },
             ContractStateField {
                 name: "module_graph".into(),
-                field_type: "array".into(),
+                field_type: "any[]".into(),
                 description: None,
             },
             ContractStateField {
                 name: "interfaces".into(),
-                field_type: "array".into(),
+                field_type: "any[]".into(),
                 description: None,
             },
             ContractStateField {
                 name: "backend_runtimes".into(),
-                field_type: "array".into(),
+                field_type: "any[]".into(),
                 description: None,
             },
             ContractStateField {
                 name: "active_surfaces".into(),
-                field_type: "array".into(),
+                field_type: "any[]".into(),
                 description: None,
             },
             ContractStateField {

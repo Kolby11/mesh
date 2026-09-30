@@ -199,8 +199,16 @@ pub fn service_name_from_interface_cow(interface: &str) -> Cow<'_, str> {
 }
 
 impl InterfaceCatalog {
+    /// Register a contract that is known to be valid, e.g. a fixture or a
+    /// core-owned declaration. Panics on an invalid contract: dropping it
+    /// silently would leave its providers untyped, which no service may be.
+    /// Use [`Self::try_register_contract`] for untrusted declarations.
+    #[track_caller]
     pub fn register_contract(&mut self, contract: InterfaceContract) {
-        let _ = self.try_register_contract(contract);
+        let interface = contract.interface.clone();
+        if let Err(error) = self.try_register_contract(contract) {
+            panic!("invalid contract for {interface}: {error}");
+        }
     }
 
     pub fn try_register_contract(
@@ -365,19 +373,8 @@ impl ResolvedServiceCatalog {
                     feature_negotiation,
                 });
             }
-            if contracts.is_empty()
-                && let Some(provider) = eligible_providers
-                    .clone()
-                    .find(|provider| provider_matches_request(provider, None))
-                    .cloned()
-            {
-                interface_bindings.push(ResolvedServiceBinding {
-                    interface: interface.clone(),
-                    contract: None,
-                    provider: Some(provider),
-                    feature_negotiation: FeatureNegotiation::default(),
-                });
-            }
+            // A provider registered for an interface with no contract gets no
+            // binding: every runnable service is typed.
             bindings.insert(interface, interface_bindings);
         }
 
@@ -886,6 +883,7 @@ mod tests {
     #[test]
     fn catalog_can_be_prepared_and_committed_without_mutating_the_source_view() {
         let mut live = InterfaceCatalog::default();
+        live.register_contract(test_contract("mesh.audio", 1));
         live.register_provider(InterfaceProvider {
             interface: "mesh.audio".into(),
             version: Some("1.0".into()),
@@ -1058,6 +1056,7 @@ mod tests {
     #[test]
     fn preserves_provider_base_interface_metadata_in_catalog() {
         let mut catalog = InterfaceCatalog::default();
+        catalog.register_contract(test_contract("mesh.network", 1));
         catalog.register_provider(InterfaceProvider {
             interface: "mesh.network".into(),
             version: Some("1.0".into()),
@@ -1072,6 +1071,35 @@ mod tests {
             resolved.provider.unwrap().base_module.as_deref(),
             Some("@mesh/network-interface")
         );
+    }
+
+    #[test]
+    fn a_provider_without_a_contract_is_never_bound() {
+        let mut catalog = InterfaceCatalog::default();
+        catalog.register_provider(InterfaceProvider {
+            interface: "mesh.untyped".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider_module: "@me/untyped".into(),
+            backend_name: "untyped".into(),
+            priority: 100,
+        });
+
+        let resolved = catalog.resolve("mesh.untyped", None);
+        assert!(resolved.contract.is_none());
+        assert!(resolved.provider.is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid contract for mesh.bad")]
+    fn registering_an_invalid_known_contract_fails_loudly() {
+        let mut contract = test_contract("mesh.bad", 0);
+        contract.state_fields.push(crate::contract::ContractStateField {
+            name: "flag".into(),
+            field_type: "bool".into(),
+            description: None,
+        });
+        InterfaceCatalog::default().register_contract(contract);
     }
 
     #[test]
