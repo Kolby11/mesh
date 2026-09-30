@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
+use std::sync::Arc;
 
 /// A dotted capability id: `shell.widget`, `service.battery.read`, …
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
@@ -35,6 +36,18 @@ pub enum PrivilegeLevel {
     High,
 }
 
+impl PrivilegeLevel {
+    /// Parse the lowercase name used in manifests and contracts.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "standard" => Some(Self::Standard),
+            "elevated" => Some(Self::Elevated),
+            "high" => Some(Self::High),
+            _ => None,
+        }
+    }
+}
+
 impl fmt::Display for PrivilegeLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -45,22 +58,130 @@ impl fmt::Display for PrivilegeLevel {
     }
 }
 
-/// The host capabilities understood by this MESH build.
+/// The capabilities understood by this MESH build, plus the service-operation
+/// permissions that installed interface contracts declare.
 ///
-/// Service read/control capabilities are listed explicitly because interface
+/// Host powers are closed: only this build can add one. Built-in service
+/// read/control capabilities are listed explicitly because interface
 /// contracts are data and their consumer capabilities must be reviewed before
-/// they become runnable. Provider host powers are also explicit; executable
-/// access uses the structured `exec.argv:<program>:<json-args>` form rather
-/// than basename-derived grants.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct CapabilityCatalog;
+/// they become runnable. Executable access uses the structured
+/// `exec.argv:<program>:<json-args>` form rather than basename-derived grants.
+///
+/// An interface contract may additionally declare its own namespaced service
+/// permissions ([`Self::with_service_permissions`]). Each must live under the
+/// declaring interface's `service.<name>.` namespace, may not collide with a
+/// built-in or another interface's permission, and carries an explicit
+/// privilege level. They authorize consumer access to that service's
+/// operations only; they never grant a host power.
+#[derive(Debug, Clone, Default)]
+pub struct CapabilityCatalog {
+    service_permissions: Arc<BTreeMap<String, ServicePermission>>,
+}
+
+/// A consumer permission declared by an interface contract.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServicePermission {
+    /// Canonical interface name that owns the permission.
+    pub owner: String,
+    pub level: PrivilegeLevel,
+}
+
+/// One declared permission as read from a contract, before validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServicePermissionDeclaration {
+    pub interface: String,
+    pub permission: String,
+    pub level: String,
+}
+
+/// A declared permission the catalog refused, with the reason.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("interface {interface} declares service permission '{permission}': {reason}")]
+pub struct ServicePermissionError {
+    pub interface: String,
+    pub permission: String,
+    pub reason: String,
+}
+
+/// The service name that scopes an interface's permissions: `mesh.audio` →
+/// `audio`, `acme.weather` → `acme.weather`.
+pub fn service_permission_namespace(interface: &str) -> String {
+    let name = interface.strip_prefix("mesh.").unwrap_or(interface);
+    format!("service.{name}.")
+}
 
 impl CapabilityCatalog {
-    pub const fn builtin() -> Self {
-        Self
+    /// The closed build catalog, with no interface-declared permissions.
+    pub fn builtin() -> Self {
+        Self::default()
+    }
+
+    /// Extend the catalog with interface-declared service permissions.
+    ///
+    /// Invalid declarations are skipped and returned: a bad declaration in
+    /// one interface must not deny unrelated modules their grants.
+    pub fn with_service_permissions<I>(mut self, declarations: I) -> (Self, Vec<ServicePermissionError>)
+    where
+        I: IntoIterator<Item = ServicePermissionDeclaration>,
+    {
+        let mut permissions = (*self.service_permissions).clone();
+        let mut errors = Vec::new();
+        for declaration in declarations {
+            let refuse = |reason: String| ServicePermissionError {
+                interface: declaration.interface.clone(),
+                permission: declaration.permission.clone(),
+                reason,
+            };
+            let namespace = service_permission_namespace(&declaration.interface);
+            let operation = declaration.permission.strip_prefix(namespace.as_str());
+            let error = if !operation.is_some_and(valid_permission_operation) {
+                Some(refuse(format!(
+                    "it must be `{namespace}<operation>` with a lowercase operation name"
+                )))
+            } else if Self::builtin_level(&declaration.permission).is_some() {
+                Some(refuse("it collides with a built-in capability".into()))
+            } else if let Some(existing) = permissions.get(&declaration.permission)
+                && existing.owner != declaration.interface
+            {
+                Some(refuse(format!("it is already owned by {}", existing.owner)))
+            } else {
+                match PrivilegeLevel::parse(&declaration.level) {
+                    Some(level) => {
+                        permissions.insert(
+                            declaration.permission.clone(),
+                            ServicePermission {
+                                owner: declaration.interface.clone(),
+                                level,
+                            },
+                        );
+                        None
+                    }
+                    None => Some(refuse(format!(
+                        "privilege level '{}' is not standard, elevated, or high",
+                        declaration.level
+                    ))),
+                }
+            };
+            errors.extend(error);
+        }
+        self.service_permissions = Arc::new(permissions);
+        (self, errors)
+    }
+
+    /// Interface-declared permissions in this catalog, by name.
+    pub fn service_permissions(&self) -> &BTreeMap<String, ServicePermission> {
+        &self.service_permissions
     }
 
     fn privilege_level(&self, id: &str) -> Option<PrivilegeLevel> {
+        Self::builtin_level(id).or_else(|| {
+            self.service_permissions
+                .get(id)
+                .map(|permission| permission.level)
+        })
+    }
+
+    fn builtin_level(id: &str) -> Option<PrivilegeLevel> {
         Some(match id {
             "shell.surface"
             | "shell.widget"
@@ -139,6 +260,18 @@ impl CapabilityCatalog {
     }
 }
 
+fn valid_permission_operation(operation: &str) -> bool {
+    !operation.is_empty()
+        && operation
+            .split('.')
+            .all(|segment| {
+                !segment.is_empty()
+                    && segment
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+            })
+}
+
 fn valid_exec_argv_capability(value: &str) -> bool {
     let Some(specification) = value.strip_prefix("exec.argv:") else {
         return false;
@@ -201,8 +334,20 @@ impl CapabilityPolicy {
         required: &[String],
         optional: &[String],
     ) -> Result<EffectiveCapabilities, CapabilityPolicyError> {
-        let required = normalize_declarations(&self.catalog, module_id, required)?;
-        let optional = normalize_declarations(&self.catalog, module_id, optional)?;
+        self.resolve_in(&self.catalog, module_id, required, optional)
+    }
+
+    /// Resolve against a catalog that includes the active graph's
+    /// interface-declared service permissions.
+    pub fn resolve_in(
+        &self,
+        catalog: &CapabilityCatalog,
+        module_id: &str,
+        required: &[String],
+        optional: &[String],
+    ) -> Result<EffectiveCapabilities, CapabilityPolicyError> {
+        let required = normalize_declarations(catalog, module_id, required)?;
+        let optional = normalize_declarations(catalog, module_id, optional)?;
         let approved = self.approvals.get(module_id);
 
         let missing_required = required
@@ -488,6 +633,90 @@ mod tests {
             .unwrap();
         assert!(effective.granted_ids().any(|id| id == "locale.read"));
         assert_eq!(effective.into_capability_set().granted().len(), 2);
+    }
+
+    fn declaration(interface: &str, permission: &str, level: &str) -> ServicePermissionDeclaration {
+        ServicePermissionDeclaration {
+            interface: interface.into(),
+            permission: permission.into(),
+            level: level.into(),
+        }
+    }
+
+    #[test]
+    fn interface_declared_permissions_are_owned_classified_and_grantable() {
+        let (catalog, errors) = CapabilityCatalog::builtin().with_service_permissions([
+            declaration("mesh.weather", "service.weather.read", "standard"),
+            declaration("mesh.weather", "service.weather.refresh", "elevated"),
+            declaration("acme.sensors", "service.acme.sensors.calibrate", "high"),
+        ]);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(catalog.validate("service.weather.read"), Ok(PrivilegeLevel::Standard));
+        assert_eq!(catalog.validate("service.weather.refresh"), Ok(PrivilegeLevel::Elevated));
+        assert_eq!(
+            catalog.validate("service.acme.sensors.calibrate"),
+            Ok(PrivilegeLevel::High)
+        );
+        assert!(CapabilityCatalog::builtin().validate("service.weather.read").is_err());
+
+        let policy = CapabilityPolicy::from_approvals([(
+            "@me/forecast".to_string(),
+            vec!["service.weather.read".to_string()],
+        )]);
+        let granted = policy
+            .resolve_in(&catalog, "@me/forecast", &["service.weather.read".into()], &[])
+            .expect("a declared permission resolves");
+        assert!(granted.granted_ids().any(|id| id == "service.weather.read"));
+        assert!(
+            policy
+                .resolve("@me/forecast", &["service.weather.read".into()], &[])
+                .is_err(),
+            "the closed builtin catalog still rejects it"
+        );
+    }
+
+    #[test]
+    fn interface_permissions_cannot_escape_their_namespace_or_shadow_others() {
+        let (catalog, errors) = CapabilityCatalog::builtin().with_service_permissions([
+            declaration("mesh.weather", "service.audio.read", "standard"),
+            declaration("mesh.weather", "net.http", "standard"),
+            declaration("mesh.weather", "service.weather.", "standard"),
+            declaration("mesh.weather", "service.weather.Read", "standard"),
+            declaration("mesh.weather", "service.weather.read", "root"),
+            declaration("mesh.audio", "service.audio.control", "standard"),
+            declaration("mesh.weather", "service.weather.read", "standard"),
+            declaration("mesh.weather", "service.weather.read", "standard"),
+        ]);
+        let reasons = errors
+            .iter()
+            .map(|error| (error.permission.as_str(), error.reason.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(reasons.len(), 6, "{reasons:#?}");
+        assert!(reasons[0].1.contains("service.weather.<operation>"));
+        assert!(reasons[1].1.contains("service.weather.<operation>"));
+        assert!(reasons[4].1.contains("privilege level 'root'"));
+        assert!(reasons[5].1.contains("built-in"));
+        // Redeclaring one's own permission is idempotent.
+        assert_eq!(catalog.validate("service.weather.read"), Ok(PrivilegeLevel::Standard));
+        assert!(catalog.validate("net.http").is_ok(), "host powers are untouched");
+        assert_eq!(
+            catalog.service_permissions()["service.weather.read"].owner,
+            "mesh.weather"
+        );
+    }
+
+    #[test]
+    fn a_second_interface_cannot_claim_an_owned_permission() {
+        let (catalog, errors) = CapabilityCatalog::builtin().with_service_permissions([
+            declaration("acme.sensors", "service.acme.sensors.read", "standard"),
+            declaration("acme", "service.acme.sensors.read", "high"),
+        ]);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].reason.contains("already owned by acme.sensors"));
+        assert_eq!(
+            catalog.validate("service.acme.sensors.read"),
+            Ok(PrivilegeLevel::Standard)
+        );
     }
 
     #[test]

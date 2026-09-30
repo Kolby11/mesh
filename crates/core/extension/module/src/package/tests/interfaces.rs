@@ -791,3 +791,60 @@ fn graph_diagnostics_accept_backend_provider_declared_base_module_dependency() {
             && diagnostic.status == "missing_provider_interface_module_dependency"
     }));
 }
+
+#[test]
+fn interface_contracts_declare_owned_service_permissions() {
+    let root = root_with_modules(
+        &[("@acme/weather", ModuleKind::Backend)],
+        &[("mesh.weather", "@acme/weather")],
+        None,
+    );
+    let mut backend = with_inline_contracts(loaded_module(
+        "@acme/weather",
+        ModuleKind::Backend,
+        MeshDependencies::default(),
+        vec![MeshProvidesDeclaration {
+            interface: "mesh.weather".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider: Some("openmeteo".into()),
+            label: None,
+            priority: 100,
+        }],
+        MeshContributes::default(),
+    ));
+    backend.manifest.mesh.interfaces[0].contract = Some(serde_json::json!({
+        "state": [{ "name": "temperature", "type": "float" }],
+        "capabilities": {
+            "read": ["service.weather.read"],
+            "permissions": {
+                "service.weather.read": "standard",
+                "service.weather.refresh": "elevated",
+                "service.audio.control": "standard",
+                "service.weather.everything": "root"
+            }
+        }
+    }));
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![backend]).unwrap();
+    let catalog = graph.capability_catalog();
+    assert_eq!(
+        catalog.validate("service.weather.read"),
+        Ok(mesh_core_capability::PrivilegeLevel::Standard)
+    );
+    assert_eq!(
+        catalog.validate("service.weather.refresh"),
+        Ok(mesh_core_capability::PrivilegeLevel::Elevated)
+    );
+    assert!(catalog.validate("service.weather.everything").is_err());
+    let refused = graph
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.status == "invalid_service_permission")
+        .map(|diagnostic| (diagnostic.module_id.as_str(), diagnostic.message.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(refused.len(), 2, "{refused:#?}");
+    assert!(refused.iter().all(|(module_id, _)| *module_id == "@acme/weather"));
+    assert!(refused.iter().any(|(_, message)| message.contains("service.audio.control")));
+    assert!(refused.iter().any(|(_, message)| message.contains("'root'")));
+}

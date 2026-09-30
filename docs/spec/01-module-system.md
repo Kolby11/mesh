@@ -933,14 +933,35 @@ without the grant.
   is an explicit single-argument glob; a JSON `*` permits any argument vector.
   Basename grants such as `exec.wpctl` are not executable policy. The explicit
   high-risk `exec.command` capability remains the unrestricted override.
-- **Shipped:** the core catalog explicitly enumerates both host powers and
-  service permissions; unknown names are rejected.
-- **Target:** host powers remain closed, while interface packages may declare
-  namespaced service-operation permissions with validated ownership and a
-  privilege classification. Consumers must request and receive those grants.
-  A custom service permission cannot introduce OS powers, collide with a
-  built-in permission, or enlarge its provider's host access. New service
-  contracts should not require Rust changes just to authorize their operations.
+- **Shipped:** the core catalog explicitly enumerates host powers and the
+  built-in service permissions; unknown names are rejected.
+- **Shipped — interface-declared service permissions.** Host powers remain
+  closed, while an interface contract may declare its own consumer permissions
+  under `capabilities.permissions`, each with a privilege level:
+
+  ```json
+  "capabilities": {
+    "read": ["service.weather.read"],
+    "methods": { "refresh": ["service.weather.refresh"] },
+    "permissions": {
+      "service.weather.read": "standard",
+      "service.weather.refresh": "elevated"
+    }
+  }
+  ```
+
+  A permission must live under the declaring interface's namespace
+  (`service.<name>.` with `mesh.` stripped, so `mesh.weather` owns
+  `service.weather.*` and `acme.sensors` owns `service.acme.sensors.*`), may
+  not collide with a built-in or another interface's permission, and must be
+  `standard`, `elevated`, or `high`. A refused declaration is an
+  `invalid_service_permission` diagnostic and is left out. Valid ones join the
+  graph's capability catalog: consumers request and are granted them like any
+  other capability, install review classifies them at their declared level,
+  and the runtime enforces them through the contract's read, event, and method
+  policies. They authorize access to that service only and never grant a host
+  power, so new service contracts need no Rust changes to authorize their
+  operations.
 
 Privilege levels (fixed set, part of install UX):
 

@@ -996,62 +996,39 @@ fn cmd_install(args: &[String]) {
     let manifest = mesh_core_module::package::ModuleManifest::from_path(&manifest_path)
         .unwrap_or_else(|error| exit_error(error));
 
-    let signature = mesh_core_module::package::load_module_signature(source_path)
-        .unwrap_or_else(|error| exit_error(error.to_string()));
-    let digest = mesh_core_module::package::module_tree_digest(source_path)
-        .unwrap_or_else(|error| exit_error(error.to_string()));
-    let trust = if signature.is_some() {
-        mesh_core_module::package::TrustTier::Verified
-    } else {
-        mesh_core_module::package::TrustTier::for_source(
-            &manifest.name,
-            matches!(
-                source.source(),
-                mesh_core_module::package::ModuleSource::Git { .. }
-            ),
-        )
-    };
-    if let Err(error) = root.trust_policy.validate_candidate(
-        &manifest.name,
-        &manifest.version,
-        &digest,
-        trust,
-        signature.as_ref(),
-    ) {
-        exit_error(format!(
-            "module {} provenance rejected: {error}",
-            manifest.name
-        ));
-    }
-
     let allow_elevated = args.iter().any(|arg| arg == "--allow-elevated");
     let allow_high = args.iter().any(|arg| arg == "--allow-high");
-    let catalog = mesh_core_capability::CapabilityCatalog::builtin();
-    let requested = manifest
-        .mesh
-        .capabilities
-        .required
-        .iter()
-        .chain(manifest.mesh.capabilities.optional.iter())
-        .map(|id| mesh_core_capability::Capability::new(id.clone()))
-        .collect::<Vec<_>>();
-    for capability in &requested {
-        let level = catalog
-            .validate(capability.id())
-            .unwrap_or_else(|error| exit_error(error.to_string()));
-        use mesh_core_capability::PrivilegeLevel;
-        match level {
-            PrivilegeLevel::High if !allow_high => exit_error(format!(
-                "{} requests high capability {}; review it and repeat with --allow-high",
-                manifest.name, capability
-            )),
-            PrivilegeLevel::Elevated if !allow_elevated && !allow_high => exit_error(format!(
-                "{} requests elevated capability {}; review it and repeat with --allow-elevated",
-                manifest.name, capability
-            )),
-            _ => {}
+    // An unloadable installed graph reviews against the closed host catalog.
+    let installed_catalog = load_authoring_snapshot_at(&root_path)
+        .map(|graph| graph.capability_catalog().clone())
+        .unwrap_or_default();
+    mesh_core_module::package::review_install(
+        &root.trust_policy,
+        source_path,
+        &manifest,
+        matches!(
+            source.source(),
+            mesh_core_module::package::ModuleSource::Git { .. }
+        ),
+        &installed_catalog,
+        mesh_core_module::package::InstallApproval {
+            allow_elevated,
+            allow_high,
+        },
+    )
+    .unwrap_or_else(|error| match error {
+        mesh_core_module::package::InstallReviewError::NeedsApproval { level, .. } => {
+            exit_error(format!(
+                "{error}; review it and repeat with {}",
+                if level == mesh_core_capability::PrivilegeLevel::High {
+                    "--allow-high"
+                } else {
+                    "--allow-elevated"
+                }
+            ))
         }
-    }
+        other => exit_error(other.to_string()),
+    });
     let destination = mesh_core_module::package::module_install_path(&modules_dir, &manifest.name)
         .unwrap_or_else(|error| exit_error(error));
     if destination.exists() {

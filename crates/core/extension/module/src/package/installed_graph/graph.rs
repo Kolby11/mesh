@@ -318,6 +318,9 @@ pub struct InstalledModuleGraph {
     icon_pack_chain: Vec<String>,
     font_pack_chain: Vec<String>,
     language_pack_chain: Vec<String>,
+    /// The closed host catalog plus the service permissions valid interface
+    /// contracts declare. Activation resolves grants against this.
+    capability_catalog: mesh_core_capability::CapabilityCatalog,
 }
 
 /// The normalized, user-facing change set between two resolved graphs.
@@ -821,6 +824,42 @@ impl InstalledModuleGraph {
             }
         }
 
+        // Interface-declared service permissions. Interfaces are visited in
+        // name order so ownership conflicts resolve the same way every build.
+        let mut permission_declarations = interface_contracts
+            .values()
+            .flat_map(|contract| {
+                contract.capabilities.permissions.iter().map(|(permission, level)| {
+                    mesh_core_capability::ServicePermissionDeclaration {
+                        interface: contract.interface.clone(),
+                        permission: permission.clone(),
+                        level: level.clone(),
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        permission_declarations.sort_by(|left, right| {
+            (&left.interface, &left.permission).cmp(&(&right.interface, &right.permission))
+        });
+        let (capability_catalog, permission_errors) =
+            mesh_core_capability::CapabilityCatalog::builtin()
+                .with_service_permissions(permission_declarations);
+        for error in permission_errors {
+            let module_id = interface_declarations
+                .get(&error.interface)
+                .map(|declaration| declaration.module_id.clone())
+                .unwrap_or_default();
+            manual_diagnostics.push(ModuleGraphDiagnostic {
+                contribution_id: Some(format!(
+                    "{module_id}:permission:{}",
+                    error.permission
+                )),
+                module_id,
+                status: "invalid_service_permission".into(),
+                message: error.to_string(),
+            });
+        }
+
         let disabled_provider_interfaces = graph_modules
             .values()
             .filter(|node| !node.enabled && node.kind == ModuleKind::Backend)
@@ -1080,6 +1119,7 @@ impl InstalledModuleGraph {
             icon_pack_chain,
             font_pack_chain,
             language_pack_chain,
+            capability_catalog,
         })
     }
 
@@ -1668,6 +1708,12 @@ impl InstalledModuleGraph {
     /// interface name.
     pub fn interface_contracts(&self) -> &HashMap<String, InterfaceContract> {
         &self.interface_contracts
+    }
+
+    /// Capability catalog for this graph: the closed host catalog plus every
+    /// valid interface-declared service permission.
+    pub fn capability_catalog(&self) -> &mesh_core_capability::CapabilityCatalog {
+        &self.capability_catalog
     }
 
     pub fn interface_contract(&self, interface: &str) -> Option<&InterfaceContract> {

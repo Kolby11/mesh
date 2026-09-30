@@ -637,7 +637,8 @@ fn candidate_capabilities(
         }
         effective.insert(
             module_id.clone(),
-            policy.resolve(
+            policy.resolve_in(
+                graph.capability_catalog(),
                 module_id,
                 &module.manifest.capabilities.required,
                 &module.manifest.capabilities.optional,

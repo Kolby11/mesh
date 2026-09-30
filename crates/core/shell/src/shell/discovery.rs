@@ -2577,7 +2577,8 @@ impl Shell {
             {
                 continue;
             }
-            let effective = self.capability_policy.resolve(
+            let effective = self.capability_policy.resolve_in(
+                active_graph.capability_catalog(),
                 module_id,
                 &module.manifest.capabilities.required,
                 &module.manifest.capabilities.optional,

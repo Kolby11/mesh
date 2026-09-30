@@ -309,6 +309,11 @@ pub struct ContractCapabilities {
     pub methods: HashMap<String, Vec<String>>,
     /// Provider feature groups. Groups are optional unless `required` is true.
     pub feature_groups: BTreeMap<String, ContractFeatureGroup>,
+    /// Service-operation permissions this interface declares for its
+    /// consumers, by name → privilege level (`standard` | `elevated` |
+    /// `high`). The graph validates ownership and level before any module
+    /// may request them; see `mesh_core_capability::CapabilityCatalog`.
+    pub permissions: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -1102,6 +1107,7 @@ pub fn parse_interface_contract(
                     )
                 })
                 .collect(),
+            permissions: parsed.capabilities.permissions,
         },
     };
 
@@ -1480,6 +1486,8 @@ struct ContractCapabilitiesJson {
     methods: HashMap<String, Vec<String>>,
     #[serde(default, rename = "featureGroups")]
     feature_groups: BTreeMap<String, ContractFeatureGroupJson>,
+    #[serde(default)]
+    permissions: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

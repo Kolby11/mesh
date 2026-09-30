@@ -1,12 +1,12 @@
 use super::component::FrontendCatalog;
 use super::profile::PackageRuntimeRollback;
 use super::*;
-use mesh_core_capability::{CapabilityCatalog, PrivilegeLevel};
+use mesh_core_capability::PrivilegeLevel;
 use mesh_core_module::package::{
-    InstalledModuleEntry, MeshLock, ModuleId, ModuleKind, ModuleManifest, ModuleSource,
-    PackageOperation, PackageOwner, PackageTransaction, ProfilePaths, RootModuleGraphManifest,
-    TrustTier, contained_path, load_authoring_snapshot, load_module_signature, module_install_path,
-    module_tree_digest,
+    InstallApproval, InstallReviewError, InstalledModuleEntry, MeshLock, ModuleId, ModuleKind,
+    ModuleManifest, ModuleSource, PackageOperation, PackageOwner, PackageTransaction,
+    ProfilePaths, RootModuleGraphManifest, contained_path, load_authoring_snapshot,
+    module_install_path, review_install,
 };
 use std::collections::VecDeque;
 use std::fs;
@@ -48,31 +48,33 @@ impl Shell {
             .map_err(|error| package_error(error.to_string()))?;
         let manifest = ModuleManifest::from_path(&staged.path().join("module.json"))
             .map_err(|error| package_error(error.to_string()))?;
-        check_install_capabilities(&manifest, allow_elevated, allow_high)?;
-        let signature = load_module_signature(staged.path())
-            .map_err(|error| package_error(error.to_string()))?;
-        let digest =
-            module_tree_digest(staged.path()).map_err(|error| package_error(error.to_string()))?;
-        let trust = if signature.is_some() {
-            TrustTier::Verified
-        } else {
-            TrustTier::for_source(
-                &manifest.name,
-                matches!(staged.source(), ModuleSource::Git { .. }),
-            )
-        };
-        if let Err(error) = root.trust_policy.validate_candidate(
-            &manifest.name,
-            &manifest.version,
-            &digest,
-            trust,
-            signature.as_ref(),
-        ) {
-            return Err(package_error(format!(
-                "module {} provenance rejected: {error}",
-                manifest.name
-            )));
-        }
+        let installed_catalog = self
+            .installed_module_graph
+            .as_ref()
+            .map(|graph| graph.capability_catalog().clone())
+            .unwrap_or_default();
+        review_install(
+            &root.trust_policy,
+            staged.path(),
+            &manifest,
+            matches!(staged.source(), ModuleSource::Git { .. }),
+            &installed_catalog,
+            InstallApproval {
+                allow_elevated,
+                allow_high,
+            },
+        )
+        .map_err(|error| match error {
+            InstallReviewError::NeedsApproval { level, .. } => package_error(format!(
+                "{error}; repeat with {}",
+                if level == PrivilegeLevel::High {
+                    "allow_high"
+                } else {
+                    "allow_elevated"
+                }
+            )),
+            other => package_error(other.to_string()),
+        })?;
 
         fs::create_dir_all(&modules_dir).map_err(|error| {
             package_error(format!(
@@ -681,42 +683,6 @@ impl Shell {
 
 fn package_error(message: impl Into<String>) -> ShellRunError {
     ShellRunError::Package(message.into())
-}
-
-fn check_install_capabilities(
-    manifest: &ModuleManifest,
-    allow_elevated: bool,
-    allow_high: bool,
-) -> Result<(), ShellRunError> {
-    let catalog = CapabilityCatalog::builtin();
-    let requested = manifest
-        .mesh
-        .capabilities
-        .required
-        .iter()
-        .chain(manifest.mesh.capabilities.optional.iter())
-        .map(|id| mesh_core_capability::Capability::new(id.clone()));
-    for capability in requested {
-        let level = catalog
-            .validate(capability.id())
-            .map_err(|error| package_error(error.to_string()))?;
-        match level {
-            PrivilegeLevel::High if !allow_high => {
-                return Err(package_error(format!(
-                    "{} requests high capability {}; repeat with allow_high",
-                    manifest.name, capability
-                )));
-            }
-            PrivilegeLevel::Elevated if !allow_elevated && !allow_high => {
-                return Err(package_error(format!(
-                    "{} requests elevated capability {}; repeat with allow_elevated",
-                    manifest.name, capability
-                )));
-            }
-            _ => {}
-        }
-    }
-    Ok(())
 }
 
 fn approve_required_capabilities(root: &mut RootModuleGraphManifest, manifest: &ModuleManifest) {

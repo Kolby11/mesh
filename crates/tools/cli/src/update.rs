@@ -423,7 +423,7 @@ pub fn plan_update(
     }
 
     classify_contract_changes(&mut plan, installed);
-    classify_capability_changes(&mut plan, approvals)?;
+    classify_capability_changes(&mut plan, approvals, &CapabilityCatalog::builtin())?;
     Ok(plan)
 }
 
@@ -462,7 +462,7 @@ pub fn plan_update_from_staged_graph(
     }
 
     classify_contract_changes(&mut plan, installed);
-    classify_capability_changes(&mut plan, approvals)?;
+    classify_capability_changes(&mut plan, approvals, candidate_graph.capability_catalog())?;
     resolve_candidate_capabilities(&mut plan, &candidate_graph, approvals)?;
     // Trust-policy and other graph diagnostics can change even when every
     // locked revision is unchanged, so candidate graph review is never gated
@@ -629,7 +629,8 @@ fn resolve_candidate_capabilities(
             .map(|(module_id, capabilities)| (module_id.clone(), capabilities.clone())),
     );
     for module in graph.enabled_modules() {
-        match policy.resolve(
+        match policy.resolve_in(
+            graph.capability_catalog(),
             &module.id,
             &module.manifest.mesh.capabilities.required,
             &module.manifest.mesh.capabilities.optional,
@@ -764,9 +765,14 @@ fn declared_contracts(
 fn classify_capability_changes(
     plan: &mut UpdatePlan,
     approvals: &BTreeMap<String, Vec<String>>,
+    base_catalog: &CapabilityCatalog,
 ) -> Result<(), String> {
-    let catalog = CapabilityCatalog::builtin();
     for candidate in plan.candidates.iter().filter(|c| !c.is_unchanged()) {
+        // A candidate may ship the interface whose permissions it requests.
+        let catalog = mesh_core_module::package::candidate_catalog(
+            base_catalog,
+            &candidate.candidate_manifest,
+        );
         let approved = approvals
             .get(&candidate.module_id)
             .map(|ids| ids.iter().collect::<std::collections::BTreeSet<_>>())
@@ -1239,7 +1245,7 @@ mod tests {
             "@me/audio".to_string(),
             vec!["service.audio.read".to_string()],
         )]);
-        classify_capability_changes(&mut plan, &approvals).unwrap();
+        classify_capability_changes(&mut plan, &approvals, &CapabilityCatalog::builtin()).unwrap();
         assert!(plan.breaking.is_empty(), "{:?}", plan.breaking);
         assert!(plan.is_refused());
         assert!(
@@ -1297,7 +1303,7 @@ mod tests {
             "@me/audio".to_string(),
             vec!["exec.argv:wpctl:[\"get-volume\"]".to_string()],
         )]);
-        classify_capability_changes(&mut plan, &approvals).unwrap();
+        classify_capability_changes(&mut plan, &approvals, &CapabilityCatalog::builtin()).unwrap();
         assert!(plan.is_refused());
         assert_eq!(plan.capability_additions.len(), 1);
         assert_eq!(
