@@ -772,10 +772,10 @@ impl LocaleSnapshot {
         Arc::clone(&self.catalogs)
     }
 
-    pub fn module_translator(&self, module_id: &str) -> ModuleTranslator<'_> {
+    pub fn module_translator<'a>(&'a self, module_id: &'a str) -> ModuleTranslator<'a> {
         ModuleTranslator {
             snapshot: self,
-            module_id: module_id.to_string(),
+            module_id,
         }
     }
 
@@ -794,44 +794,62 @@ impl LocaleSnapshot {
         None
     }
 
-    fn translate_in_module(&self, key: &str, module_id: &str) -> Option<&CatalogEntry> {
-        for locale in self.selection.chain() {
-            if let Some(value) = self.module_entry(module_id, locale, key, true) {
-                return Some(value);
-            }
-        }
-        if let Some(default_locale) = self.catalogs.module_defaults.get(module_id)
-            && !self
-                .selection
-                .chain()
-                .iter()
-                .any(|locale| locale == default_locale)
-            && let Some(value) = self.module_entry(module_id, default_locale, key, false)
-        {
-            return Some(value);
-        }
-        None
+    /// The one precedence order for a module's catalogs, highest first: each
+    /// locale of the fallback chain (all layers, language packs included),
+    /// then the module's own default locale when the chain omits it (module
+    /// layers only). Point lookups take the first match along this order and
+    /// bulk projections apply it in reverse, so both agree by construction.
+    fn module_lookup_order<'a>(
+        &'a self,
+        module_id: &str,
+    ) -> impl DoubleEndedIterator<Item = (&'a str, bool)> + 'a {
+        let default_locale = self
+            .catalogs
+            .module_defaults
+            .get(module_id)
+            .map(String::as_str)
+            .filter(|default_locale| {
+                !self
+                    .selection
+                    .chain()
+                    .iter()
+                    .any(|locale| locale == default_locale)
+            });
+        self.selection
+            .chain()
+            .iter()
+            .map(|locale| (locale.as_str(), true))
+            .chain(default_locale.map(|locale| (locale, false)))
     }
 
-    fn module_entry_locale(&self, module_id: &str, key: &str) -> Option<&str> {
-        for locale in self.selection.chain() {
-            if self.module_entry(module_id, locale, key, true).is_some() {
-                return Some(locale);
+    fn translate_in_module(&self, key: &str, module_id: &str) -> Option<&CatalogEntry> {
+        self.module_lookup_order(module_id)
+            .find_map(|(locale, packs)| self.module_entry(module_id, locale, key, packs))
+    }
+
+    /// Visit every effective `(key, entry)` of a module once, lowest
+    /// precedence first, so later visits for a key override earlier ones.
+    fn for_each_module_entry_by_precedence<'a>(
+        &'a self,
+        module_id: &str,
+        mut visit: impl FnMut(&'a str, &'a CatalogEntry, &'a str, &'a CatalogProvenance),
+    ) {
+        let Some(module_locales) = self.catalogs.modules.get(module_id) else {
+            return;
+        };
+        for (locale, include_language_packs) in self.module_lookup_order(module_id).rev() {
+            let Some(layers) = module_locales.get(locale) else {
+                continue;
+            };
+            for layer in layers.iter().rev() {
+                if !include_language_packs && layer.source.kind == CatalogSourceKind::LanguagePack {
+                    continue;
+                }
+                for (key, entry) in &layer.messages {
+                    visit(key.as_str(), entry, locale, &layer.source);
+                }
             }
         }
-        if let Some(default_locale) = self.catalogs.module_defaults.get(module_id)
-            && !self
-                .selection
-                .chain()
-                .iter()
-                .any(|locale| locale == default_locale)
-            && self
-                .module_entry(module_id, default_locale, key, false)
-                .is_some()
-        {
-            return Some(default_locale);
-        }
-        None
     }
 
     fn resolve_in_core<'a>(&'a self, key: &str, args: &HashMap<String, String>) -> Option<&'a str> {
@@ -891,21 +909,8 @@ impl LocaleSnapshot {
     }
 
     fn source_for_module(&self, key: &str, module_id: &str) -> Option<&CatalogProvenance> {
-        for locale in self.selection.chain() {
-            if let Some(source) = self.module_source(module_id, locale, key, true) {
-                return Some(source);
-            }
-        }
-        if let Some(default_locale) = self.catalogs.module_defaults.get(module_id)
-            && !self
-                .selection
-                .chain()
-                .iter()
-                .any(|locale| locale == default_locale)
-        {
-            return self.module_source(module_id, default_locale, key, false);
-        }
-        None
+        self.module_lookup_order(module_id)
+            .find_map(|(locale, packs)| self.module_source(module_id, locale, key, packs))
     }
 
     fn module_source(
@@ -946,35 +951,28 @@ impl LocaleSnapshot {
     }
 
     fn effective_module_translations(&self, module_id: &str) -> HashMap<String, String> {
-        let mut messages = HashMap::new();
-        for key in self.module_keys(module_id) {
-            if let Some(entry) = self.translate_in_module(&key, module_id)
-                && let Some(value) = entry.default_text()
-            {
-                messages.insert(key, value.to_string());
-            }
-        }
-        messages
+        let mut effective = HashMap::<&str, &CatalogEntry>::new();
+        self.for_each_module_entry_by_precedence(module_id, |key, entry, _, _| {
+            effective.insert(key, entry);
+        });
+        effective
+            .into_iter()
+            .filter_map(|(key, entry)| {
+                entry
+                    .default_text()
+                    .map(|value| (key.to_string(), value.to_string()))
+            })
+            .collect()
     }
 
     fn effective_module_entries(&self, module_id: &str) -> HashMap<String, CatalogEntry> {
-        let mut messages = HashMap::new();
-        for key in self.module_keys(module_id) {
-            if let Some(entry) = self.translate_in_module(&key, module_id) {
-                messages.insert(key, entry.clone());
-            }
-        }
-        messages
-    }
-
-    fn module_keys(&self, module_id: &str) -> BTreeSet<String> {
-        self.catalogs
-            .modules
-            .get(module_id)
+        let mut effective = HashMap::<&str, &CatalogEntry>::new();
+        self.for_each_module_entry_by_precedence(module_id, |key, entry, _, _| {
+            effective.insert(key, entry);
+        });
+        effective
             .into_iter()
-            .flat_map(|locales| locales.values())
-            .flat_map(|layers| layers.iter())
-            .flat_map(|layer| layer.messages.keys().cloned())
+            .map(|(key, entry)| (key.to_string(), entry.clone()))
             .collect()
     }
 
@@ -1434,7 +1432,7 @@ fn civil_date_from_days(days: i64) -> (i64, u32, u32) {
 #[derive(Debug, Clone)]
 pub struct ModuleTranslator<'a> {
     snapshot: &'a LocaleSnapshot,
-    module_id: String,
+    module_id: &'a str,
 }
 
 impl ModuleTranslator<'_> {
@@ -1477,7 +1475,7 @@ impl ModuleTranslator<'_> {
             .or_else(|| fallback.map(str::to_owned))
             .unwrap_or_else(|| LocalizedTextResolution::missing_marker(key));
         LocalizedTextResolution {
-            owner_module_id: self.module_id.clone(),
+            owner_module_id: self.module_id.to_string(),
             key: Some(key.to_owned()),
             text,
             fallback: fallback.map(str::to_owned),
@@ -1504,7 +1502,7 @@ impl ModuleTranslator<'_> {
             .or_else(|| fallback.map(str::to_owned));
         let text = translated.unwrap_or_else(|| LocalizedTextResolution::missing_marker(key));
         LocalizedTextResolution {
-            owner_module_id: self.module_id.clone(),
+            owner_module_id: self.module_id.to_string(),
             key: Some(key.to_owned()),
             text,
             fallback: fallback.map(str::to_owned),
@@ -1533,22 +1531,21 @@ impl ModuleTranslator<'_> {
     /// Copy this module-scoped resolver across an execution boundary while
     /// retaining effective catalog provenance for diagnostics.
     pub fn owned(&self) -> OwnedModuleTranslator {
-        let mut entries = HashMap::new();
-        let mut entry_locales = HashMap::new();
-        let mut sources = HashMap::new();
-        for key in self.snapshot.module_keys(&self.module_id) {
-            if let Some(entry) = self.snapshot.translate_in_module(&key, &self.module_id) {
-                entries.insert(key.clone(), entry.clone());
-                if let Some(locale) = self.snapshot.module_entry_locale(&self.module_id, &key) {
-                    entry_locales.insert(key.clone(), locale.to_string());
-                }
-                if let Some(source) = self.source(&key) {
-                    sources.insert(key, source.clone());
-                }
-            }
+        let mut effective = HashMap::<&str, (&CatalogEntry, &str, &CatalogProvenance)>::new();
+        self.snapshot
+            .for_each_module_entry_by_precedence(self.module_id, |key, entry, locale, source| {
+                effective.insert(key, (entry, locale, source));
+            });
+        let mut entries = HashMap::with_capacity(effective.len());
+        let mut entry_locales = HashMap::with_capacity(effective.len());
+        let mut sources = HashMap::with_capacity(effective.len());
+        for (key, (entry, locale, source)) in effective {
+            entries.insert(key.to_string(), entry.clone());
+            entry_locales.insert(key.to_string(), locale.to_string());
+            sources.insert(key.to_string(), source.clone());
         }
         OwnedModuleTranslator {
-            owner_module_id: self.module_id.clone(),
+            owner_module_id: self.module_id.to_string(),
             locale: self.locale().to_string(),
             entries,
             entry_locales,
@@ -2031,7 +2028,7 @@ impl LocaleEngine {
         catalogs.revision = catalogs.revision.saturating_add(1);
     }
 
-    pub fn module_translator(&self, module_id: &str) -> ModuleTranslator<'_> {
+    pub fn module_translator<'a>(&'a self, module_id: &'a str) -> ModuleTranslator<'a> {
         self.snapshot.module_translator(module_id)
     }
 

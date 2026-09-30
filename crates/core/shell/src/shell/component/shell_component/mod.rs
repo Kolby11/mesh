@@ -1405,7 +1405,8 @@ impl ShellComponent for FrontendSurfaceComponent {
         let payload = crate::shell::locale_service_payload(&locale.snapshot(), None, None);
         let mut generations = Vec::new();
         for (instance_key, runtime) in self.runtimes.lock().unwrap().iter_mut() {
-            let translator = self.locale.module_translator(&runtime.script_ctx.module_id);
+            let module_id = runtime.script_ctx.module_id.clone();
+            let translator = self.locale.module_translator(&module_id);
             runtime.script_ctx.set_i18n_translator(&translator);
             runtime.script_ctx.apply_service_payload("locale", &payload);
             if script_has_service_read(&runtime.script_ctx, "mesh.locale", "locale") {
