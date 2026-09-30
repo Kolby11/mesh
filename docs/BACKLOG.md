@@ -20,9 +20,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ## Platform philosophy
 
-- [ ] Support owned, classified service-operation permissions from interface
-      declarations without extending host powers; the catalog currently rejects new names.
-      [Contract](spec/01-module-system.md#7-capabilities--security)
 
 ## 2026-08-31 read-only audit findings — Section 1
 
@@ -49,8 +46,6 @@ evidence and test workloads are in the linked reports.
 - [ ] **S02-LOGIC-013:** Add generation-aware package garbage collection that
       retains active, rollback, and in-flight journal objects while reclaiming
       only unreferenced immutable content. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
-- [ ] **S02-DEAD-002:** Centralize install capability/trust review in the module
-      core and make shell and CLI consume the same typed result. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
 - [ ] **S02-PERF-001 / S02-PERF-002 / S02-PERF-004:** Move blocking
       package/Git preparation off the shell request path, avoid broad no-op
       backups, and share parsed manifests/passes. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
