@@ -1016,12 +1016,28 @@ pub fn rollback(
             .filter(|module_id| profile.references_module(module_id))
             .cloned()
             .collect::<Vec<_>>();
-        if removed.is_empty() {
+        // The target generation was resolved for a specific composition
+        // version; a profile instantiating that composition returns to it
+        // rather than keeping the newer generation's pin.
+        let composition_pin = target.composition.as_ref().and_then(|composition| {
+            let from = profile.from.as_ref()?;
+            (from.module == composition.module
+                && from.version.as_deref() != Some(composition.version.as_str()))
+            .then(|| composition.version.clone())
+        });
+        if removed.is_empty() && composition_pin.is_none() {
             continue;
         }
         let expected_revision = profile.revision;
         for module_id in removed {
             profile.remove_module_references(&module_id);
+        }
+        if let (Some(version), Some(from)) = (composition_pin, profile.from.as_mut()) {
+            restored.push(format!(
+                "profile {profile_id} composition {} → {version}",
+                from.module
+            ));
+            from.version = Some(version);
         }
         transaction
             .save_profile_if_revision(&paths, &profile_id, &profile, expected_revision)
@@ -1481,6 +1497,89 @@ mod tests {
             .map(|module| (module.id.clone(), module.manifest.clone()))
             .collect();
         (workspace, root_path, installed, lock, installed_manifests)
+    }
+
+    fn rev_parse(repository: &Path, reference: &str) -> String {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repository)
+            .args(["rev-parse", reference])
+            .output()
+            .expect("git runs");
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
+    }
+
+    #[test]
+    fn rollback_staging_reproduces_the_locked_tree_or_fails_closed() {
+        let upstream = fixture_repository("rollback-source");
+        let v1 = rev_parse(&upstream, "HEAD~1");
+        let config = upstream.with_file_name(format!(
+            "{}-config",
+            upstream.file_name().unwrap().to_string_lossy()
+        ));
+        std::fs::create_dir_all(&config).unwrap();
+
+        // The digest of v1 as it would have been installed.
+        let reference = config.join("reference");
+        git(&config, &["clone", "--quiet", upstream.to_str().unwrap(), "reference"]);
+        git(&reference, &["checkout", "--quiet", &v1]);
+        let v1_digest = module_tree_digest(&reference).unwrap();
+
+        // The installed checkout was rewritten locally and no longer
+        // contains the locked revision.
+        let installed = config.join("installed");
+        std::fs::create_dir_all(&installed).unwrap();
+        git(&installed, &["init", "--quiet", "--initial-branch=main"]);
+        git(&installed, &["config", "user.email", "test@example.invalid"]);
+        git(&installed, &["config", "user.name", "Test"]);
+        std::fs::write(installed.join("module.json"), "{}").unwrap();
+        git(&installed, &["add", "."]);
+        git(&installed, &["commit", "--quiet", "-m", "local rewrite"]);
+
+        let entry = |digest: &str| LockedModule {
+            version: "1.0.0".into(),
+            source: ModuleSource::Git {
+                url: upstream.display().to_string(),
+                reference: None,
+            },
+            revision: Some(v1.clone()),
+            digest: digest.into(),
+            trust: TrustTier::Local,
+            signature: None,
+            dependencies: Default::default(),
+            requested_by: BTreeSet::new(),
+        };
+        let transaction =
+            PackageTransaction::begin(&config, PackageOwner::Cli, PackageOperation::Rollback)
+                .unwrap();
+
+        let staged = transaction
+            .stage_locked_module(
+                &entry(&v1_digest),
+                &installed,
+                &transaction.staging_dir().join("restored"),
+            )
+            .expect("the locked URL reproduces the revision");
+        assert_eq!(module_tree_digest(&staged).unwrap(), v1_digest);
+        assert!(
+            std::fs::read_to_string(staged.join("module.json"))
+                .unwrap()
+                .contains(r#""version":"1.0.0""#)
+        );
+
+        let error = transaction
+            .stage_locked_module(
+                &entry("sha256:0000"),
+                &installed,
+                &transaction.staging_dir().join("mismatch"),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("no source reproduces locked revision"), "{error}");
+
+        transaction.abort().unwrap();
+        let _ = std::fs::remove_dir_all(&config);
+        let _ = std::fs::remove_dir_all(&upstream);
     }
 
     #[test]

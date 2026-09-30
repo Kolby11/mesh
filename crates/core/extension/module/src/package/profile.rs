@@ -122,6 +122,12 @@ fn default_entrypoint() -> String {
     "main".into()
 }
 
+/// The source module of a `module-id:contribution-id` placement reference,
+/// parsed the same way activation queues it.
+fn placement_module(contribution: &str) -> Option<&str> {
+    contribution.rsplit_once(':').map(|(module_id, _)| module_id)
+}
+
 fn validate_unique_ordered_ids(field: &str, values: &[String]) -> Result<(), ModuleManifestError> {
     let mut seen = HashSet::new();
     for value in values {
@@ -375,8 +381,8 @@ impl ShellProfile {
         self.roots.remove(instance_id).is_some()
     }
 
-    /// Whether any profile-owned root, provider, service, resource, or
-    /// composition reference points at a module.
+    /// Whether any profile-owned root, provider, service, resource, node-slot
+    /// placement, or composition reference points at a module.
     pub fn references_module(&self, module_id: &str) -> bool {
         self.from
             .as_ref()
@@ -391,6 +397,12 @@ impl ShellProfile {
             || self.resources.icons().iter().any(|id| id == module_id)
             || self.resources.fonts().iter().any(|id| id == module_id)
             || self.resources.languages().iter().any(|id| id == module_id)
+            || self
+                .node_slots
+                .values()
+                .flat_map(|slots| slots.values())
+                .flat_map(|slot| slot.nodes.iter())
+                .any(|node| placement_module(&node.contribution) == Some(module_id))
     }
 
     /// Remove all profile-owned references to a forcibly uninstalled module.
@@ -410,6 +422,12 @@ impl ShellProfile {
         }
         for chain in self.resources.chains_mut().into_iter().flatten() {
             chain.retain(|id| id != module_id);
+        }
+        for slots in self.node_slots.values_mut() {
+            for slot in slots.values_mut() {
+                slot.nodes
+                    .retain(|node| placement_module(&node.contribution) != Some(module_id));
+            }
         }
     }
 
@@ -776,8 +794,12 @@ impl ProfilePaths {
 
     pub fn active_profile_id(&self) -> Result<Option<String>, ModuleManifestError> {
         let path = self.active_profile_path();
-        if !path.exists() {
-            return Ok(None);
+        // Inspect the link itself: `exists()` follows it, so a dangling or
+        // redirected pointer would silently read as "no profile".
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(source) => return Err(ModuleManifestError::Io { path, source }),
+            Ok(_) => {}
         }
         super::validate_regular_file(&path, "active profile pointer")?;
         let profile_id =
@@ -1146,6 +1168,62 @@ mod tests {
         let instance = &profile.roots[&instance_id];
         assert!(instance.is_active());
         assert!(instance.surface.is_none());
+    }
+
+    #[test]
+    fn a_symlinked_active_profile_pointer_fails_closed() {
+        let root = std::env::temp_dir().join(format!(
+            "mesh-active-profile-pointer-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let paths = ProfilePaths::from_root_graph(&root.join("module.json")).unwrap();
+        assert_eq!(paths.active_profile_id().unwrap(), None, "a missing pointer is no profile");
+
+        let outside = root.join("outside-pointer");
+        std::os::unix::fs::symlink(&outside, paths.active_profile_path()).unwrap();
+        assert!(
+            paths.active_profile_id().is_err(),
+            "a dangling pointer must not read as no profile"
+        );
+        fs::write(&outside, "desktop\n").unwrap();
+        assert!(
+            paths.active_profile_id().is_err(),
+            "a pointer redirected through a symlink must not be followed"
+        );
+
+        fs::remove_file(paths.active_profile_path()).unwrap();
+        fs::write(paths.active_profile_path(), "desktop\n").unwrap();
+        assert_eq!(paths.active_profile_id().unwrap().as_deref(), Some("desktop"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn node_slot_placements_are_module_references() {
+        let mut profile = ShellProfile::from_json_str(
+            r#"{"schemaVersion":3,
+                "roots":{"@me/panel#top":{"module":"@me/panel","active":false}},
+                "nodeSlots":{"@me/panel#top":{"start":{"nodes":[
+                  {"id":"clock","use":"@me/items:clock"},
+                  {"id":"tray","use":"@me/tray:tray"}]}}}}"#,
+        )
+        .unwrap();
+        // Referenced even though the host root is inactive: removal would
+        // leave a dangling placement that fails when it is re-enabled.
+        assert!(profile.references_module("@me/items"));
+
+        profile.remove_module_references("@me/items");
+        assert!(!profile.references_module("@me/items"));
+        let nodes = &profile.node_slots["@me/panel#top"]["start"].nodes;
+        assert_eq!(
+            nodes.iter().map(|node| node.id.as_str()).collect::<Vec<_>>(),
+            ["tray"]
+        );
+        assert!(profile.references_module("@me/tray"));
     }
 
     #[test]

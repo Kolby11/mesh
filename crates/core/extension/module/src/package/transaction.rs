@@ -179,20 +179,7 @@ impl PackageTransaction {
             source,
         })?;
 
-        let lock_path = config_dir.join(LOCK_FILE);
-        let lock_file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .open(&lock_path)
-            .map_err(|source| ModuleManifestError::Io {
-                path: lock_path.clone(),
-                source,
-            })?;
-        lock_exclusive(&lock_file).map_err(|source| ModuleManifestError::Io {
-            path: lock_path,
-            source,
-        })?;
+        let lock_file = open_package_lock(&config_dir)?;
 
         let journal_path = config_dir.join(JOURNAL_FILE);
         recover_journal(&config_dir, &journal_path)?;
@@ -261,20 +248,8 @@ impl PackageTransaction {
             }
         }
 
-        let lock_path = config_dir.join(LOCK_FILE);
-        let lock_file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .open(&lock_path)
-            .map_err(|source| ModuleManifestError::Io {
-                path: lock_path.clone(),
-                source,
-            })?;
-        lock_exclusive(&lock_file).map_err(|source| ModuleManifestError::Io {
-            path: lock_path,
-            source,
-        })?;
+        // Held until recovery returns; dropping it releases the lock.
+        let _lock_file = open_package_lock(&config_dir)?;
         recover_journal(&config_dir, &journal_path)
     }
 
@@ -328,6 +303,12 @@ impl PackageTransaction {
     }
 
     /// Stage a locked module at an exact revision or path for rollback.
+    ///
+    /// The staged tree must reproduce the lock's recorded digest. A Git
+    /// entry is staged from the installed checkout when it still holds the
+    /// locked revision (fast and offline), and from the locked URL otherwise;
+    /// if neither reproduces the digest, rollback fails closed rather than
+    /// restoring different content under the old lock entry.
     pub fn stage_locked_module(
         &self,
         entry: &LockedModule,
@@ -335,19 +316,39 @@ impl PackageTransaction {
         destination: &Path,
     ) -> Result<PathBuf, ModuleManifestError> {
         if let Some(revision) = &entry.revision {
-            let source = match &entry.source {
-                ModuleSource::Git { url, .. } if !installed_at.exists() => url.clone(),
-                _ if installed_at.exists() => installed_at.display().to_string(),
-                ModuleSource::Git { url, .. } => url.clone(),
-                ModuleSource::Path { .. } => {
-                    return Err(ModuleManifestError::Validation(format!(
-                        "cannot materialize rollback entry without a Git source: {}",
-                        installed_at.display()
-                    )));
-                }
+            let url = match &entry.source {
+                ModuleSource::Git { url, .. } => Some(url.clone()),
+                ModuleSource::Path { .. } => None,
             };
-            self.stage_git_revision(&source, Some(revision), destination)?;
-            return Ok(destination.to_path_buf());
+            let mut sources = Vec::new();
+            if installed_at.exists() {
+                sources.push(installed_at.display().to_string());
+            }
+            sources.extend(url);
+            if sources.is_empty() {
+                return Err(ModuleManifestError::Validation(format!(
+                    "cannot materialize rollback entry without a Git source: {}",
+                    installed_at.display()
+                )));
+            }
+            let mut failures = Vec::new();
+            for source in sources {
+                let attempt = self
+                    .stage_git_revision(&source, Some(revision), destination)
+                    .and_then(|_| verify_locked_digest(entry, destination));
+                match attempt {
+                    Ok(()) => return Ok(destination.to_path_buf()),
+                    Err(error) => {
+                        failures.push(format!("{source}: {error}"));
+                        remove_staged_tree(destination)?;
+                    }
+                }
+            }
+            return Err(ModuleManifestError::Validation(format!(
+                "no source reproduces locked revision {revision} ({}): {}",
+                entry.digest,
+                failures.join("; ")
+            )));
         }
 
         let ModuleSource::Path { path } = &entry.source else {
@@ -369,6 +370,7 @@ impl PackageTransaction {
             })?;
         copy_path(&source, destination, &metadata)?;
         validate_module_tree(destination)?;
+        verify_locked_digest(entry, destination)?;
         Ok(destination.to_path_buf())
     }
 
@@ -789,6 +791,69 @@ impl Drop for PackageTransaction {
         // the restore indivisible from the next package operation.
         let _ = self.lock_file.sync_all();
     }
+}
+
+/// Fail unless a staged tree matches the digest its lock entry recorded.
+fn verify_locked_digest(entry: &LockedModule, staged: &Path) -> Result<(), ModuleManifestError> {
+    let digest = super::module_tree_digest(staged)?;
+    if digest != entry.digest {
+        return Err(ModuleManifestError::Validation(format!(
+            "staged tree digest {digest} does not match the locked {}",
+            entry.digest
+        )));
+    }
+    Ok(())
+}
+
+/// Clear a failed staging attempt so the next source starts clean.
+fn remove_staged_tree(path: &Path) -> Result<(), ModuleManifestError> {
+    match fs::remove_dir_all(path) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            Err(ModuleManifestError::Io {
+                path: path.to_path_buf(),
+                source: error,
+            })
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Open and exclusively lock the package lock file without following a
+/// symlink: `O_NOFOLLOW` refuses a link atomically at open, so a link planted
+/// at the lock path can never redirect lock creation or locking outside the
+/// configuration directory. The opened file must also be a regular file.
+fn open_package_lock(config_dir: &Path) -> Result<File, ModuleManifestError> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let lock_path = config_dir.join(LOCK_FILE);
+    let io_error = |source| ModuleManifestError::Io {
+        path: lock_path.clone(),
+        source,
+    };
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&lock_path)
+        .map_err(|source| {
+            if source.raw_os_error() == Some(libc::ELOOP) {
+                ModuleManifestError::Validation(format!(
+                    "package lock {} is a symlink; refusing to follow it",
+                    lock_path.display()
+                ))
+            } else {
+                io_error(source)
+            }
+        })?;
+    if !lock_file.metadata().map_err(io_error)?.is_file() {
+        return Err(ModuleManifestError::Validation(format!(
+            "package lock {} must be a regular file",
+            lock_path.display()
+        )));
+    }
+    lock_exclusive(&lock_file).map_err(io_error)?;
+    Ok(lock_file)
 }
 
 fn canonical_config_dir(path: &Path) -> Result<PathBuf, ModuleManifestError> {
@@ -1297,6 +1362,32 @@ mod tests {
         let mut permissions = metadata.permissions();
         permissions.set_readonly(false);
         fs::set_permissions(path, permissions).unwrap();
+    }
+
+    #[test]
+    fn a_symlinked_package_lock_fails_closed_without_touching_its_target() {
+        let root = temp_dir("lock-symlink");
+        let outside = temp_dir("lock-symlink-outside");
+        let target = outside.join("planted.lock");
+        std::os::unix::fs::symlink(&target, root.join(LOCK_FILE)).unwrap();
+
+        let begin = PackageTransaction::begin(&root, PackageOwner::Cli, PackageOperation::Install)
+            .err()
+            .expect("begin must refuse a symlinked lock");
+        assert!(begin.to_string().contains("is a symlink"), "{begin}");
+        // With no journal, recovery is a documented no-op that never opens
+        // the lock; with one present it must refuse the link too.
+        PackageTransaction::recover(&root).unwrap();
+        fs::write(root.join(JOURNAL_FILE), "{}").unwrap();
+        let recover = PackageTransaction::recover(&root).unwrap_err();
+        assert!(recover.to_string().contains("is a symlink"), "{recover}");
+        assert!(
+            fs::symlink_metadata(&target).is_err(),
+            "the link target outside the configuration directory must not be created"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(outside).unwrap();
     }
 
     #[test]
