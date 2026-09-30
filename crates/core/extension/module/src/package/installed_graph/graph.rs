@@ -5,7 +5,7 @@ use super::super::{
     SlotOverride, TrustPolicy, TrustTier, apply_slot_override, parse_module_entrypoint,
     resolve_closure,
 };
-use super::scan::{scan_mesh_files_recursive, scan_mesh_source};
+use super::scan::{scan_mesh_files_recursive, scan_mesh_source, scan_mesh_sources};
 use super::*;
 use crate::manifest;
 use mesh_core_service::{
@@ -1573,13 +1573,16 @@ impl InstalledModuleGraph {
         } else {
             module_dir
         };
-        scan_mesh_files_recursive(scan_root)
+        let scanned = scan_mesh_sources(scan_root);
+        scanned
+            .files
             .into_iter()
             .filter_map(|(path, content)| {
                 mesh_core_component::parse_component(&content)
                     .err()
                     .map(|error| (path, error.to_string()))
             })
+            .chain(scanned.rejected)
             .collect()
     }
 

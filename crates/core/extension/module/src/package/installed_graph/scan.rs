@@ -314,15 +314,47 @@ pub(super) fn is_declared_shell_event_channel(channel: &str) -> bool {
     )
 }
 
+/// Largest single source file read during a module scan. The largest
+/// shipped `.mesh` file is ~44 KiB; the budget leaves authoring headroom
+/// while bounding what a malformed or hostile module can force into memory.
+pub(super) const MAX_SOURCE_FILE_BYTES: u64 = 1024 * 1024;
+/// Aggregate source bytes read from one module's scan root (shipped maximum
+/// ~106 KiB across 7 files).
+pub(super) const MAX_MODULE_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
+/// Matching source files read from one module's scan root.
+pub(super) const MAX_MODULE_SOURCE_FILES: usize = 2048;
+
+/// Sources read from one scan root, plus the paths refused by the budgets
+/// above with a one-line reason each.
+#[derive(Debug, Default)]
+pub(super) struct ScannedSources {
+    pub(super) files: Vec<(std::path::PathBuf, String)>,
+    pub(super) rejected: Vec<(std::path::PathBuf, String)>,
+}
+
+#[derive(Default)]
+struct ScanBudget {
+    bytes: u64,
+    files: usize,
+}
+
 pub(super) fn scan_mesh_files_recursive(dir: &Path) -> Vec<(std::path::PathBuf, String)> {
     scan_files_recursive(dir, "mesh")
+}
+
+pub(super) fn scan_mesh_sources(dir: &Path) -> ScannedSources {
+    scan_sources(dir, "mesh")
 }
 
 pub(super) fn scan_files_recursive(
     dir: &Path,
     extension: &str,
 ) -> Vec<(std::path::PathBuf, String)> {
-    let mut results = Vec::new();
+    scan_sources(dir, extension).files
+}
+
+pub(super) fn scan_sources(dir: &Path, extension: &str) -> ScannedSources {
+    let mut results = ScannedSources::default();
     let Ok(root_metadata) = std::fs::symlink_metadata(dir) else {
         return results;
     };
@@ -333,7 +365,15 @@ pub(super) fn scan_files_recursive(
         return results;
     };
     let mut visited = std::collections::HashSet::new();
-    scan_files_recursive_into(dir, &root, extension, &mut visited, &mut results);
+    let mut budget = ScanBudget::default();
+    scan_files_recursive_into(
+        dir,
+        &root,
+        extension,
+        &mut visited,
+        &mut budget,
+        &mut results,
+    );
     results
 }
 
@@ -342,7 +382,8 @@ fn scan_files_recursive_into(
     root: &Path,
     extension: &str,
     visited: &mut std::collections::HashSet<std::path::PathBuf>,
-    results: &mut Vec<(std::path::PathBuf, String)>,
+    budget: &mut ScanBudget,
+    results: &mut ScannedSources,
 ) {
     let Ok(canonical) = std::fs::canonicalize(dir) else {
         return;
@@ -362,12 +403,90 @@ fn scan_files_recursive_into(
             continue;
         }
         if metadata.is_dir() {
-            scan_files_recursive_into(&path, root, extension, visited, results);
-        } else if metadata.is_file()
-            && path.extension().and_then(|e| e.to_str()) == Some(extension)
-            && let Ok(content) = std::fs::read_to_string(&path)
+            scan_files_recursive_into(&path, root, extension, visited, budget, results);
+        } else if metadata.is_file() && path.extension().and_then(|e| e.to_str()) == Some(extension)
         {
-            results.push((path, content));
+            if budget.files >= MAX_MODULE_SOURCE_FILES {
+                results.rejected.push((
+                    path,
+                    format!("module exceeds the {MAX_MODULE_SOURCE_FILES}-file source budget"),
+                ));
+                continue;
+            }
+            if metadata.len() > MAX_SOURCE_FILE_BYTES {
+                results.rejected.push((
+                    path,
+                    format!(
+                        "source file is {} bytes, over the {MAX_SOURCE_FILE_BYTES}-byte budget",
+                        metadata.len()
+                    ),
+                ));
+                continue;
+            }
+            let remaining = MAX_MODULE_SOURCE_BYTES.saturating_sub(budget.bytes);
+            if metadata.len() > remaining {
+                results.rejected.push((
+                    path,
+                    format!("module exceeds the {MAX_MODULE_SOURCE_BYTES}-byte source budget"),
+                ));
+                continue;
+            }
+            // Bound the read itself: the file may grow between stat and read.
+            match read_bounded(&path, MAX_SOURCE_FILE_BYTES.min(remaining)) {
+                Some(Ok(content)) => {
+                    budget.files += 1;
+                    budget.bytes += content.len() as u64;
+                    results.files.push((path, content));
+                }
+                Some(Err(reason)) => results.rejected.push((path, reason)),
+                None => {}
+            }
         }
+    }
+}
+
+/// Read a UTF-8 file of at most `limit` bytes. `None` for an unreadable file
+/// (skipped silently, as before); `Some(Err)` when it outgrew the budget.
+fn read_bounded(path: &Path, limit: u64) -> Option<Result<String, String>> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).ok()?;
+    let mut content = String::new();
+    file.take(limit + 1).read_to_string(&mut content).ok()?;
+    if content.len() as u64 > limit {
+        return Some(Err(format!("source file grew past the {limit}-byte budget")));
+    }
+    Some(Ok(content))
+}
+
+#[cfg(test)]
+mod source_budget_tests {
+    use super::*;
+
+    #[test]
+    fn oversized_sources_are_rejected_with_reasons() {
+        let dir = std::env::temp_dir().join(format!(
+            "mesh-scan-budget-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("nested")).unwrap();
+        std::fs::write(dir.join("small.mesh"), "<box/>").unwrap();
+        std::fs::write(
+            dir.join("nested/huge.mesh"),
+            vec![b'x'; MAX_SOURCE_FILE_BYTES as usize + 1],
+        )
+        .unwrap();
+        std::fs::write(dir.join("ignored.txt"), "not a source").unwrap();
+
+        let scanned = scan_mesh_sources(&dir);
+        assert_eq!(scanned.files.len(), 1);
+        assert!(scanned.files[0].0.ends_with("small.mesh"));
+        assert_eq!(scanned.rejected.len(), 1);
+        assert!(scanned.rejected[0].0.ends_with("huge.mesh"));
+        assert!(scanned.rejected[0].1.contains("budget"));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
