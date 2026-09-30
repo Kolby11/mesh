@@ -20,9 +20,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ## Platform philosophy
 
-- [ ] Allow explicit profile roots for `component` modules using the shared UI
-      model and profile placement; activation currently requires `frontend`.
-      [Contract](spec/01-module-system.md#32-module-kinds)
 - [ ] Require explicit typed contracts for runnable services; permissive v0
       inference and missing/invalid-contract fallbacks still need reconciliation.
       [Contract](spec/01-module-system.md#4-interfaces)
