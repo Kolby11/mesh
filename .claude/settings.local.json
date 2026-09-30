@@ -194,7 +194,8 @@
       "Read(//home/kolby/.claude/plugins/**)",
       "Bash(echo \"fmt rc=$?\")",
       "Bash(echo \"diffcheck rc=$?\")",
-      "Bash(xargs cat)"
+      "Bash(xargs cat)",
+      "Bash(mkdir -p /tmp/claude-1000/-home-kolby-projects-mesh/6479e5cb-3667-4d2b-a0d6-dccebfb57386/scratchpad)"
     ]
   }
 }

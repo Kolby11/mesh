@@ -1,9 +1,9 @@
 {
-  "revision": 108,
+  "revision": 137,
   "schemaVersion": 1,
   "shell": {
     "fonts": {
-      "ui_family": "CaskaydiaCove NFM"
+      "ui_family": "CaskaydiaCove NF"
     },
     "i18n": {
       "fallback_locale": "en",
@@ -11,7 +11,7 @@
       "policy": "manual"
     },
     "icons": {
-      "default_pack": "Bibata-Original-Classic-Right"
+      "default_pack": "Bibata-Original-Amber"
     },
     "render": {
       "blur": {
