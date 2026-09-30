@@ -372,14 +372,94 @@ fn parse_component_file(path: &Path) -> Result<ComponentFile, CompileFrontendErr
             path: path.to_path_buf(),
             source,
         })?;
-    let component =
-        parse_component(&source).map_err(|source| CompileFrontendError::ParseSource {
-            path: path.to_path_buf(),
-            span: source.span(),
-            source,
-        })?;
+    let component = match parsed_component_cache::get(&source) {
+        Some(component) => component,
+        None => {
+            let component =
+                parse_component(&source).map_err(|source| CompileFrontendError::ParseSource {
+                    path: path.to_path_buf(),
+                    span: source.span(),
+                    source,
+                })?;
+            parsed_component_cache::insert(source, &component);
+            component
+        }
+    };
     validate_component_pseudo_states(path, &component)?;
     Ok(component)
+}
+
+/// Successfully parsed components keyed by their exact source text.
+///
+/// Parsing is a pure function of the source, so a rebuild, hot reload, or
+/// sibling entrypoint that reaches an unchanged component reuses its AST
+/// instead of reparsing it. Entries compare the full source, never only a
+/// digest, and failures are not cached so their diagnostics stay fresh.
+mod parsed_component_cache {
+    use mesh_core_component::ComponentFile;
+    use std::collections::HashMap;
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    use std::sync::{Mutex, OnceLock};
+
+    /// Retained source bytes before the cache is cleared outright. Shipped
+    /// modules total ~300 KiB of `.mesh` source.
+    const MAX_CACHED_SOURCE_BYTES: usize = 8 * 1024 * 1024;
+
+    #[derive(Default)]
+    struct Cache {
+        entries: HashMap<u64, Vec<(String, ComponentFile)>>,
+        bytes: usize,
+    }
+
+    fn cache() -> &'static Mutex<Cache> {
+        static CACHE: OnceLock<Mutex<Cache>> = OnceLock::new();
+        CACHE.get_or_init(Default::default)
+    }
+
+    fn digest(source: &str) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        source.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    pub(super) fn get(source: &str) -> Option<ComponentFile> {
+        let cache = cache().lock().ok()?;
+        cache
+            .entries
+            .get(&digest(source))?
+            .iter()
+            .find(|(cached, _)| cached == source)
+            .map(|(_, component)| component.clone())
+    }
+
+    #[cfg(test)]
+    pub(super) fn clear() {
+        if let Ok(mut cache) = cache().lock() {
+            cache.entries.clear();
+            cache.bytes = 0;
+        }
+    }
+
+    pub(super) fn insert(source: String, component: &ComponentFile) {
+        let Ok(mut cache) = cache().lock() else {
+            return;
+        };
+        if source.len() > MAX_CACHED_SOURCE_BYTES {
+            return;
+        }
+        if cache.bytes + source.len() > MAX_CACHED_SOURCE_BYTES {
+            cache.entries.clear();
+            cache.bytes = 0;
+        }
+        cache.bytes += source.len();
+        let key = digest(&source);
+        cache
+            .entries
+            .entry(key)
+            .or_default()
+            .push((source, component.clone()));
+    }
 }
 
 fn validate_component_pseudo_states(
@@ -1813,5 +1893,58 @@ import BranchB from "./branch-b.mesh"
         ));
         assert!(error.to_string().contains("owner.mesh"));
         assert!(error.to_string().contains("@mesh/item"));
+    }
+}
+
+#[cfg(test)]
+mod parse_cache_tests {
+    use super::*;
+
+    fn settings_module() -> (Manifest, PathBuf) {
+        let module_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../modules/frontend/settings");
+        let loaded = mesh_core_module::manifest::load_canonical_manifest(&module_dir)
+            .expect("settings manifest should load");
+        (loaded.manifest, module_dir)
+    }
+
+    #[test]
+    fn cached_parse_compiles_identically() {
+        let (manifest, module_dir) = settings_module();
+        parsed_component_cache::clear();
+        let cold = compile_frontend_module(&manifest, &module_dir).expect("cold compile");
+        let warm = compile_frontend_module(&manifest, &module_dir).expect("warm compile");
+        assert_eq!(format!("{:?}", cold.component), format!("{:?}", warm.component));
+        assert_eq!(
+            format!("{:?}", cold.local_components.keys().collect::<std::collections::BTreeSet<_>>()),
+            format!("{:?}", warm.local_components.keys().collect::<std::collections::BTreeSet<_>>())
+        );
+        assert_eq!(cold.watched_paths.len(), warm.watched_paths.len());
+    }
+
+    // cargo test -p mesh-core-frontend --release -- parse_cache_recompile_cost --ignored --nocapture
+    #[test]
+    #[ignore = "release-only recompile benchmark"]
+    fn parse_cache_recompile_cost() {
+        let (manifest, module_dir) = settings_module();
+        const ITERATIONS: u32 = 200;
+        let started = std::time::Instant::now();
+        for _ in 0..ITERATIONS {
+            parsed_component_cache::clear();
+            compile_frontend_module(&manifest, &module_dir).expect("cold compile");
+        }
+        let cold = started.elapsed();
+        compile_frontend_module(&manifest, &module_dir).expect("seed");
+        let started = std::time::Instant::now();
+        for _ in 0..ITERATIONS {
+            compile_frontend_module(&manifest, &module_dir).expect("warm compile");
+        }
+        let warm = started.elapsed();
+        eprintln!(
+            "settings module (7 components) x{ITERATIONS}: reparse {:.3}ms/compile, cached {:.3}ms/compile, {:.2}x",
+            cold.as_secs_f64() * 1000.0 / ITERATIONS as f64,
+            warm.as_secs_f64() * 1000.0 / ITERATIONS as f64,
+            cold.as_secs_f64() / warm.as_secs_f64()
+        );
     }
 }
