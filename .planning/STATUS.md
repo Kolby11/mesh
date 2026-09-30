@@ -31,7 +31,10 @@ scroll changes rebuild that content. Complex cases retain the established path.
 Three alternating release Appearance runs: p50 4.71–5.07 ms before versus
 4.15–4.52 ms after; entry rebuilds fall from about 25,000 to zero. Renderer:
 264 passed; focused shell scroll tests retain the prior five fixture failures.
-Wave 4 item 15 is next: [bounded raster shifting](todos/pending/2026-09-30-scroll-raster-cache.md).
+Wave 4 item 15 is in flight: [bounded raster shifting](todos/pending/2026-09-30-scroll-raster-cache.md).
+Overlap-safe byte shifting and exposed-strip text repair pass independent pixel
+tests. Cache allocation, invalidation, composition and profiling are not wired
+into production; item 15 remains open. Item 14 is committed as `9558a889`.
 The live hover capture has no sampled client blur work, but no matched 20%
 blur-saving claim is made. Measurements are in the performance log.
 

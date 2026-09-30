@@ -6,6 +6,83 @@ use mesh_core_elements::LayoutRect;
 use mesh_core_elements::style::{Overflow, Position};
 
 #[test]
+fn shifted_content_raster_with_exposed_strip_repair_matches_full_text_paint() {
+    for scale in [1.0, 1.25, 2.0] {
+        let scaling = FractionalScale::new(scale);
+        let mut root = node(
+            "scroll-area",
+            LayoutRect {
+                x: 0.0,
+                y: 0.0,
+                width: 112.0,
+                height: 64.0,
+            },
+            Color::TRANSPARENT,
+        );
+        root.id = 1;
+        root.computed_style.overflow_y = Overflow::Hidden;
+        root.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
+            max_y: 336.0,
+            content_width: 112.0,
+            content_height: 400.0,
+            ..Default::default()
+        });
+        for index in 0..20 {
+            let mut text = text_node(
+                &format!("row {index}"),
+                4.0,
+                index as f32 * 20.0,
+                100.0,
+                18.0,
+                Color::from_hex("#b0e040").unwrap(),
+            );
+            text.id = 2 + index;
+            root.children.push(text);
+        }
+        let width = scaling.physical_extent(112);
+        let height = scaling.physical_extent(64);
+        let engine = FrontendRenderEngine::new();
+        let mut raster = PixelBuffer::new(width, height);
+        engine.render_tree(&root, &mut raster, scale);
+        let mut previous = 0.0;
+        for offset in [4.0, 12.0, 8.0, 52.0, 0.0, 120.0] {
+            let displacement = (previous - offset) * scale;
+            assert_eq!(displacement.fract(), 0.0);
+            let strips = raster.shift_raster_pixels(0, displacement as i32);
+            root.scroll_metrics.as_mut().unwrap().y = offset;
+            let mut list = RetainedDisplayList::default();
+            list.update(&root, 112, 64, true, true);
+            let selected = list.select_paint_commands(
+                Some(DamageRect {
+                    x: 0,
+                    y: 0,
+                    width: 112,
+                    height: 64,
+                }),
+                DisplayListRepaintPolicy::FullSurface,
+            );
+            for strip in strips {
+                engine.render_selected_display_list_for_module(
+                    &selected,
+                    &mut raster,
+                    scale,
+                    Some((strip.x, strip.y, strip.width, strip.height)),
+                    None,
+                    None,
+                );
+            }
+            let mut fresh = PixelBuffer::new(width, height);
+            engine.render_tree(&root, &mut fresh, scale);
+            assert!(
+                raster.data() == fresh.data(),
+                "scale={scale}, offset={offset}"
+            );
+            previous = offset;
+        }
+    }
+}
+
+#[test]
 fn retained_content_scope_scroll_matches_full_paint_with_text_and_damage() {
     for scale in [1.0, 1.25, 2.0] {
         let scaling = FractionalScale::new(scale);

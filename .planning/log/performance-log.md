@@ -4725,3 +4725,30 @@ fingerprinting, scroll-into-view, native fallback, volume command expectations).
 Rustfmt on touched Rust files and `git diff --check` pass. Item 14 leaves the
 backlog; its completed design is replaced by the pending item-15 raster contract.
 The pre-existing settings revision-only change (137 → 146) is preserved separately.
+
+## 2026-09-30 — wave 4 item 15 started: pixel shifting contract
+
+`9558a889` checkpoints item 14 before cache work. Added an overlap-safe integral
+device-pixel shift for standalone content rasters: rows move in the safe vertical
+order with `copy_within`, newly exposed pixels clear to transparent, and at most
+two disjoint strips need repainting. Empty/zero shifts do nothing; viewport-sized
+or extreme signed displacements clear and expose the entire raster. Backing
+storage never moves. This helper is not wired into production painting yet.
+
+Independent byte/coverage oracle exhausts 0–7px widths, 0–5px heights, signed
+horizontal shifts −9…9 and vertical shifts −7…7 plus both i32 extremes. Every
+destination pixel is checked against the original raster, with exactly one
+strip covering each newly exposed pixel and none covering retained pixels.
+Text regression shifts a 112×64 transparent viewport containing 20 rows through
+forward/reverse/large integral shifts, repairs only exposed strips, and compares
+against fresh full paint at scales 1, 1.25 and 2. Both tests pass.
+
+No cache-hit or performance saving is claimed. The bounded cache, content/resource
+identity, rounded-mask-at-composition rule, partial-damage validity, eviction,
+profiling parity and representative A/B measurement remain in the existing
+backlog item and its pending design. Wave 5 remains lower-priority dependent
+workflow, beginning with its partial-repaint blur pixel test rather than a cache.
+
+Final renderer serial suite: 266 passed, 0 failed, 36 ignored. Touched files
+pass rustfmt and `git diff --check`. The existing local settings revision-only
+change is checkpointed in a separate chore commit; no preference values change.

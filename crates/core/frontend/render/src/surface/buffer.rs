@@ -98,6 +98,71 @@ impl PixelBuffer {
         &mut self.data
     }
 
+    /// Shift a standalone content raster by integral device pixels, preserving
+    /// overlapping pixels exactly. Newly exposed pixels become transparent;
+    /// returned strips are disjoint and must be repainted before cache reuse.
+    /// This must not shift a composed surface (backgrounds/overlays stay put).
+    #[allow(dead_code)] // Verified primitive; production raster-cache integration follows.
+    pub(crate) fn shift_raster_pixels(&mut self, dx: i32, dy: i32) -> Vec<crate::DamageRect> {
+        let mut exposed = Vec::new();
+        if self.width == 0 || self.height == 0 || (dx == 0 && dy == 0) {
+            return exposed;
+        }
+        let ax = dx.unsigned_abs();
+        let ay = dy.unsigned_abs();
+        if ax >= self.width || ay >= self.height {
+            self.data.fill(0);
+            exposed.push(crate::DamageRect {
+                x: 0,
+                y: 0,
+                width: self.width,
+                height: self.height,
+            });
+            return exposed;
+        }
+
+        let source_x = if dx < 0 { ax } else { 0 };
+        let source_y = if dy < 0 { ay } else { 0 };
+        let target_x = if dx > 0 { ax } else { 0 };
+        let target_y = if dy > 0 { ay } else { 0 };
+        let rows = self.height - ay;
+        let row_bytes = (self.width - ax) as usize * 4;
+        for step in 0..rows {
+            // Moving down must copy bottom-up; copy_within handles horizontal
+            // overlap in either direction within each row.
+            let row = if dy > 0 { rows - 1 - step } else { step };
+            let source = ((source_y + row) * self.stride + source_x * 4) as usize;
+            let target = ((target_y + row) * self.stride + target_x * 4) as usize;
+            self.data.copy_within(source..source + row_bytes, target);
+        }
+        if ay > 0 {
+            exposed.push(crate::DamageRect {
+                x: 0,
+                y: if dy > 0 { 0 } else { rows },
+                width: self.width,
+                height: ay,
+            });
+        }
+        if ax > 0 {
+            exposed.push(crate::DamageRect {
+                x: if dx > 0 { 0 } else { self.width - ax },
+                y: target_y,
+                width: ax,
+                height: rows,
+            });
+        }
+        for strip in &exposed {
+            self.clear_rect(
+                strip.x,
+                strip.y,
+                strip.width,
+                strip.height,
+                Color::TRANSPARENT,
+            );
+        }
+        exposed
+    }
+
     pub fn width(&self) -> u32 {
         self.width
     }
@@ -419,6 +484,61 @@ fn src_over_paint(color: Color) -> Paint {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn raster_shift_matches_independent_byte_oracle_and_disjoint_coverage() {
+        for width in 0..=7 {
+            for height in 0..=5 {
+                for dx in (-9..=9).chain([i32::MIN, i32::MAX]) {
+                    for dy in (-7..=7).chain([i32::MIN, i32::MAX]) {
+                        let mut buffer = super::PixelBuffer::new(width, height);
+                        for (index, pixel) in buffer.data_mut().chunks_exact_mut(4).enumerate() {
+                            if index % 3 != 0 {
+                                pixel.copy_from_slice(&[index as u8, (index * 3) as u8, 17, 200]);
+                            }
+                        }
+                        let original = buffer.data().to_vec();
+                        let allocation = buffer.data().as_ptr();
+                        let strips = buffer.shift_raster_pixels(dx, dy);
+                        assert!(strips.len() <= 2);
+                        assert_eq!(buffer.data().as_ptr(), allocation);
+                        for y in 0..height {
+                            for x in 0..width {
+                                let sx = i64::from(x) - i64::from(dx);
+                                let sy = i64::from(y) - i64::from(dy);
+                                let retained = sx >= 0
+                                    && sx < i64::from(width)
+                                    && sy >= 0
+                                    && sy < i64::from(height);
+                                let target = ((y * width + x) * 4) as usize;
+                                let expected = if retained {
+                                    let source = ((sy as u32 * width + sx as u32) * 4) as usize;
+                                    &original[source..source + 4]
+                                } else {
+                                    &[0; 4]
+                                };
+                                assert_eq!(
+                                    &buffer.data()[target..target + 4],
+                                    expected,
+                                    "{width}x{height}, shift ({dx},{dy}), pixel ({x},{y})"
+                                );
+                                let coverage = strips
+                                    .iter()
+                                    .filter(|strip| {
+                                        x >= strip.x
+                                            && x < strip.x + strip.width
+                                            && y >= strip.y
+                                            && y < strip.y + strip.height
+                                    })
+                                    .count();
+                                assert_eq!(coverage, usize::from(!retained));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     use super::*;
 
     #[test]
