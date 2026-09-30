@@ -18,6 +18,10 @@ use crate::{
 
 use super::ParseError;
 
+/// Names the runtime `props` table answers as helpers (`props.source(name)`,
+/// `props.at(name, scope)`); a declared prop would shadow them.
+pub const RESERVED_PROP_NAMES: [&str; 2] = ["source", "at"];
+
 /// A raw, untyped value scanned from the block, before mapping onto typed fields.
 #[derive(Debug, Clone)]
 enum RawValue {
@@ -256,6 +260,11 @@ pub(super) fn parse_props_at(source: &str, source_base: usize) -> Result<PropsBl
         let prop_end = scanner.offset;
         if props.iter().any(|p| p.name == name) {
             return Err(scanner.invalid(format!("duplicate prop `{name}`")));
+        }
+        if RESERVED_PROP_NAMES.contains(&name.as_str()) {
+            return Err(scanner.invalid(format!(
+                "prop name `{name}` is reserved for `props.{name}(...)` layer introspection"
+            )));
         }
         let prop_span = SourceSpan::new(source_base + prop_start, source_base + prop_end);
         props.push(
@@ -604,6 +613,16 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("requires a non-empty `options`"), "{err}");
+    }
+
+    #[test]
+    fn rejects_reserved_introspection_names() {
+        for name in RESERVED_PROP_NAMES {
+            let err = parse_props(&format!(r#"{name}: {{ type: "bool" }}"#))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("is reserved"), "{err}");
+        }
     }
 
     #[test]

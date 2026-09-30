@@ -96,10 +96,10 @@ UIs are ordinary `.mesh` components using capability-gated core services.
   ordinary host APIs and language constructs cannot cleanly meet.
 - Backend `main.luau` exposes `start(self)`; setup and poll registration belong
   inside it instead of top-level side effects.
-- Component `<props>` and their style/script/settings projections are shipped.
-  Backend/interface props and script-side layer introspection remain targets;
-  use [03](docs/spec/03-components.md) and [08](docs/spec/08-settings.md) for
-  precise status. Scripts control effective props while persisted user
+- Component `<props>`, their style/script/settings projections, and
+  script-side layer introspection are shipped. Backend/interface props remain
+  targets; use [03](docs/spec/03-components.md) and
+  [08](docs/spec/08-settings.md) for precise status. Scripts control effective props while persisted user
   preferences remain distinct and inspectable by contract.
 - Module execution stays within the shell process. Private environments,
   explicit public communication, capability checks, execution budgets, and

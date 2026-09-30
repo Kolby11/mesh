@@ -33,9 +33,9 @@ in the generated settings UI (§5), the current shell CLI (§7), and the
 writes are the capability-gated `set_prop`/`unset_prop` methods
 ([01 §5.4](01-module-system.md)); **target** for retiring the injected
 `settings` prop (components still receive their namespace as a prop rather than
-reading the service they declare), script-side layer introspection
-([03 §4](03-components.md#4-precedence--one-specificity-ladder)), and the
-remaining service-backed CLI surface. This replaced the previous multi-file
+reading the service they declare) and the remaining service-backed CLI
+surface. Script-side layer introspection is shipped
+([03 §4](03-components.md#4-precedence--one-specificity-ladder)). This replaced the previous multi-file
 model (`settings-default.json`,
 `shell-settings.json`, per-module `config/settings.json`, six-layer stack) —
 those files and their readers are deleted. Schemas no longer come from
@@ -186,8 +186,8 @@ gets a user-facing dial:
 The full ladder is defined once, in [03 §4](03-components.md): author default
 → user global → author instance → user per-instance → script → imperative.
 The store contributes the two user layers; scripts can inspect them and their
-provenance separately from the effective result (introspection remains target
-API work in [03 §4](03-components.md#4-precedence--one-specificity-ladder)).
+provenance separately from the effective result through `props.source` and
+`props.at` ([03 §4](03-components.md#4-precedence--one-specificity-ladder)).
 Script/imperative overrides are runtime state and do not persist preferences
 implicitly. Per-instance keys are the
 composition instance key, prefixed by the root-graph instance id when one

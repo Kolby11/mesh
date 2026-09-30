@@ -11,7 +11,7 @@ use damage::*;
 use super::runtime_tree::RetainedTreeDirtySummary;
 use super::*;
 use crate::shell::component::runtime::{
-    merge_reloaded_props, resolved_props_json, script_has_service_read,
+    ResolvedProps, merge_reloaded_props, resolve_props, script_has_service_read,
 };
 use crate::shell::{ServiceInterfaceEventSubscription, ServiceObservationSummary};
 use mesh_core_elements::style::SurfaceExclusiveZone;
@@ -1533,7 +1533,10 @@ impl ShellComponent for FrontendSurfaceComponent {
                 .unwrap()
                 .get_mut(self.root_instance_key())
             {
-                let next_host_props = resolved_props_json(
+                let ResolvedProps {
+                    effective: next_host_props,
+                    layers,
+                } = resolve_props(
                     &self.compiled.component,
                     &HashMap::new(),
                     &next_settings_json,
@@ -1552,6 +1555,9 @@ impl ShellComponent for FrontendSurfaceComponent {
                         "failed to refresh component props after settings reload: {error}"
                     );
                 } else {
+                    if let Err(error) = runtime.script_ctx.set_prop_layers(layers) {
+                        tracing::warn!("failed to refresh prop layers after settings reload: {error}");
+                    }
                     runtime.host_props = next_host_props;
                     Self::normalize_script_props(&self.diagnostics, runtime);
                 }

@@ -615,7 +615,10 @@ impl FrontendSurfaceComponent {
         settings_json: &serde_json::Value,
         instance_key: &str,
     ) -> Result<(), ScriptError> {
-        let next_host_props = resolved_props_json(component, props, settings_json, instance_key);
+        let ResolvedProps {
+            effective: next_host_props,
+            layers,
+        } = resolve_props(component, props, settings_json, instance_key);
         let merged_props = merge_reloaded_props(
             runtime.script_ctx.state().get_ref("props"),
             &runtime.host_props,
@@ -624,6 +627,7 @@ impl FrontendSurfaceComponent {
         let mut publication = props.clone();
         publication.insert("props".to_string(), merged_props);
         runtime.script_ctx.set_member_states(&publication, true)?;
+        runtime.script_ctx.set_prop_layers(layers)?;
         runtime.host_props = next_host_props;
         Self::normalize_script_props(diagnostics, runtime);
         Ok(())
@@ -1823,9 +1827,10 @@ pub(super) fn publish_resolved_props(
     settings_json: &serde_json::Value,
     instance_key: &str,
 ) -> Result<serde_json::Value, ScriptError> {
-    let value = resolved_props_json(component, instance_props, settings_json, instance_key);
-    script_ctx.set_member_state("props", value.clone())?;
-    Ok(value)
+    let resolved = resolve_props(component, instance_props, settings_json, instance_key);
+    script_ctx.set_member_state("props", resolved.effective.clone())?;
+    script_ctx.set_prop_layers(resolved.layers)?;
+    Ok(resolved.effective)
 }
 
 pub(super) fn resolved_props_json(
@@ -1834,10 +1839,30 @@ pub(super) fn resolved_props_json(
     settings_json: &serde_json::Value,
     instance_key: &str,
 ) -> serde_json::Value {
+    resolve_props(component, instance_props, settings_json, instance_key).effective
+}
+
+/// Host-resolved props: the effective value of each declared prop, and the
+/// per-layer snapshot behind `props.source(name)` / `props.at(name, scope)`.
+pub(super) struct ResolvedProps {
+    pub(super) effective: serde_json::Value,
+    pub(super) layers: serde_json::Value,
+}
+
+pub(super) fn resolve_props(
+    component: &mesh_core_component::ComponentFile,
+    instance_props: &HashMap<String, serde_json::Value>,
+    settings_json: &serde_json::Value,
+    instance_key: &str,
+) -> ResolvedProps {
     let Some(block) = &component.props else {
-        return serde_json::json!({});
+        return ResolvedProps {
+            effective: serde_json::json!({}),
+            layers: serde_json::json!({}),
+        };
     };
     let mut props = serde_json::Map::new();
+    let mut layers = serde_json::Map::new();
     let global_settings = settings_json
         .pointer("/props/global")
         .and_then(serde_json::Value::as_object);
@@ -1861,9 +1886,13 @@ pub(super) fn resolved_props_json(
             candidates.push((PropLayer::PerInstance, value.clone()));
         }
 
+        let raw_layers = candidates
+            .iter()
+            .map(|(layer, value)| (layer.as_str().to_string(), value.clone()))
+            .collect::<serde_json::Map<_, _>>();
         let resolved = candidates.into_iter().rev().find_map(|(layer, value)| {
             match validate_json_prop(def, value) {
-                Ok(value) => Some(value),
+                Ok(value) => Some((layer, value)),
                 Err(error) => {
                     tracing::warn!(
                         prop = %def.name,
@@ -1875,11 +1904,26 @@ pub(super) fn resolved_props_json(
                 }
             }
         });
-        if let Some(value) = resolved {
-            props.insert(def.name.clone(), value);
+        let (winner, effective) = match resolved {
+            Some((layer, value)) => (serde_json::Value::from(layer.as_str()), value),
+            None => (serde_json::Value::Null, serde_json::Value::Null),
+        };
+        if !effective.is_null() {
+            props.insert(def.name.clone(), effective.clone());
         }
+        layers.insert(
+            def.name.clone(),
+            serde_json::json!({
+                "layers": raw_layers,
+                "winner": winner,
+                "effective": effective,
+            }),
+        );
     }
-    serde_json::Value::Object(props)
+    ResolvedProps {
+        effective: serde_json::Value::Object(props),
+        layers: serde_json::Value::Object(layers),
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1996,6 +2040,70 @@ mod prop_resolution_tests {
         assert_eq!(
             resolved_props_json(&component, &instance_props, &settings, "instance"),
             serde_json::json!({ "width": "28px" })
+        );
+    }
+
+    #[test]
+    fn scripts_read_the_winning_layer_and_user_intent_beneath_an_override() {
+        let component = component_with_props();
+        let settings = serde_json::json!({
+            "props": {
+                "global": { "width": "28px" },
+                "instances": { "instance": { "width": "36px" } }
+            }
+        });
+        let mut script_ctx =
+            ScriptContext::new("@test/props", mesh_core_capability::CapabilitySet::default())
+                .expect("script context");
+        script_ctx
+            .load_script(
+                r#"
+function report()
+  observed = {
+    before = props.source("width"),
+    user = props.at("width", "per_instance"),
+    unset = props.at("width", "instance"),
+    undeclared = props.source("height"),
+  }
+  props.width = "44px"
+  observed.after = props.source("width")
+  observed.script = props.at("width", "script")
+  observed.global = props.at("width", "global")
+  observed.default = props.at("width", "default")
+  observed.user_after = props.at("width", "per_instance")
+  observed.bad_scope = pcall(props.at, "width", "session")
+end
+"#,
+            )
+            .expect("load script");
+        publish_resolved_props(
+            &mut script_ctx,
+            &component,
+            &HashMap::new(),
+            &settings,
+            "instance",
+        )
+        .expect("publish props");
+        script_ctx.call_handler("report", &[]).expect("report");
+
+        let observed = script_ctx
+            .state()
+            .get_ref("observed")
+            .cloned()
+            .expect("observed state");
+        assert_eq!(
+            observed,
+            serde_json::json!({
+                "before": "per_instance",
+                "user": "36px",
+                "after": "script",
+                "script": "44px",
+                "global": "28px",
+                "default": "20px",
+                "user_after": "36px",
+                "bad_scope": false,
+            }),
+            "unset layers and undeclared props answer nil"
         );
     }
 

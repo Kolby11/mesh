@@ -195,12 +195,13 @@ inspect the underlying user value even while their assignment wins, so they
 can honor it, constrain it, or temporarily override it intentionally. Neither
 script writes nor imperative geometry bypass permission or surface constraints.
 
-**Target — layer introspection:** `props.source(name)` → winning layer;
+**Shipped — layer introspection:** `props.source(name)` → winning layer
+(`"script"` while a script assignment differs from the host-resolved value);
 `props.at(name, scope)` → raw value at
-`"default" | "global" | "instance" | "per_instance" | "script"` or `nil`.
-These named introspection helpers are not currently exposed by the Luau props
-binding. They are the contract for reading user intent separately from the
-effective value, not evidence that the API is shipped.
+`"default" | "global" | "instance" | "per_instance" | "script"` or `nil`. An
+unknown scope is a runtime error, and an undeclared prop answers `nil`. The
+helpers are served from the `props` table's metatable, so `source` and `at`
+are reserved and rejected as declared prop names.
 
 For example, a component can read a requested width from the user layer, clamp
 it to the available area, and assign the result to `props.width` while leaving

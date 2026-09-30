@@ -132,6 +132,10 @@ pub struct ScriptContext {
     /// Structured missing-key observations from Luau and template consumers.
     /// The shell drains these into stable per-key diagnostics.
     pub(super) localized_misses: Arc<Mutex<Vec<LocalizedTextResolution>>>,
+    /// Host-resolved per-layer prop values read by `props.source(name)` and
+    /// `props.at(name, scope)`. Rust-owned so a republished `props` table
+    /// keeps answering without copying the snapshot into Luau.
+    pub(super) prop_layers: Arc<Mutex<serde_json::Value>>,
 }
 
 impl Drop for ScriptContext {
@@ -353,6 +357,7 @@ impl ScriptContext {
             service_call_completions: Arc::new(Mutex::new(HashMap::new())),
             locale_cell: Arc::new(Mutex::new(LocaleCell::default())),
             localized_misses: Arc::new(Mutex::new(Vec::new())),
+            prop_layers: Arc::new(Mutex::new(serde_json::Value::Null)),
         })
     }
 

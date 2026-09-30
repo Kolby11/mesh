@@ -170,6 +170,9 @@ impl ScriptContext {
         let lua_value = self.lua().to_value(&value).map_err(lua_err)?;
         self.env().set(name, lua_value).map_err(map_lua_error)?;
         self.state.set(name.to_string(), value);
+        if name == "props" {
+            self.attach_prop_introspection()?;
+        }
         Ok(())
     }
 
@@ -246,8 +249,12 @@ impl ScriptContext {
             }
         }
 
+        let republished_props = updates.iter().any(|(name, _, _)| name == "props");
         for (name, value, _) in updates {
             self.state.set(name, value);
+        }
+        if republished_props {
+            self.attach_prop_introspection()?;
         }
         Ok(())
     }

@@ -26,9 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Support owned, classified service-operation permissions from interface
       declarations without extending host powers; the catalog currently rejects new names.
       [Contract](spec/01-module-system.md#7-capabilities--security)
-- [ ] Expose `props.source` / `props.at` so scripts can inspect user intent
-      beneath runtime overrides; the documented helpers lack runtime bindings.
-      [Contract](spec/03-components.md#4-precedence--one-specificity-ladder)
 
 ## 2026-08-31 read-only audit findings — Section 1
 
