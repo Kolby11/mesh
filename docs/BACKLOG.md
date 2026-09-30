@@ -20,9 +20,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ## Platform philosophy
 
-- [ ] Require explicit typed contracts for runnable services; permissive v0
-      inference and missing/invalid-contract fallbacks still need reconciliation.
-      [Contract](spec/01-module-system.md#4-interfaces)
 - [ ] Support owned, classified service-operation permissions from interface
       declarations without extending host powers; the catalog currently rejects new names.
       [Contract](spec/01-module-system.md#7-capabilities--security)
