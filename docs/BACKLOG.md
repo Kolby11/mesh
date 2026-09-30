@@ -105,9 +105,6 @@ evidence and test workloads are in the linked reports.
 - [ ] **S11-PERF-001 / S11-PERF-002 / S11-PERF-003:** Measure shared-realm contention, host-boundary JSON
       conversion, and stream lock/overflow behavior under bounded workloads
       before changing runtime sharing or conversion paths. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/11-luau-runtime-and-sandbox.md)
-- [ ] **S11-DEAD-001:** Review repository callers and make the authorized stream
-      launch function the only production entry point, retaining any wrapper
-      only as an explicit test adapter. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/11-luau-runtime-and-sandbox.md)
 
 ### Section 12 — Rendering and paint
 

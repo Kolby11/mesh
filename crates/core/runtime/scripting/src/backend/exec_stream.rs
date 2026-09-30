@@ -459,9 +459,11 @@ impl Drop for ChildBudgetGuard {
     }
 }
 
-/// Spawn a subprocess and return its stable stream handle.
-#[allow(dead_code)]
-pub fn spawn_stream(
+/// Test adapter: spawn `program` without executable authorization. Production
+/// launches go through [`spawn_stream_with_launch_program`] after capability
+/// resolution; compiling this only for tests keeps that the sole entry point.
+#[cfg(test)]
+fn spawn_stream(
     state: &Arc<StreamState>,
     program: String,
     args: Vec<String>,
