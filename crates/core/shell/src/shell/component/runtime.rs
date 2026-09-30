@@ -106,6 +106,7 @@ impl FrontendSurfaceComponent {
         HashMap<Arc<str>, EmbeddedFrontendRuntime>,
         Option<ComponentError>,
     ) {
+        self.failed_runtime_creations.get_mut().clear();
         let runtimes = std::mem::take(&mut *self.runtimes.lock().unwrap());
         let mut runtimes = runtimes.into_iter().collect::<Vec<_>>();
         // Embedded children are torn down before their parents, while the
@@ -983,6 +984,38 @@ impl FrontendSurfaceComponent {
         Ok(())
     }
 
+    /// A remembered deterministic creation failure for `instance_key`.
+    fn known_runtime_creation_failure(&self, instance_key: &str) -> Option<String> {
+        let failures = self.failed_runtime_creations.borrow();
+        if failures.is_empty() {
+            return None;
+        }
+        failures.get(instance_key).cloned()
+    }
+
+    /// Remember a creation failure that cannot recover while this component's
+    /// interface catalog and capability grants stay the same. The diagnostic
+    /// issue recorded for it stays open; later frames reuse its message.
+    fn remember_runtime_creation_failure(
+        &self,
+        instance_key: &str,
+        error: &ComponentError,
+        message: &str,
+    ) {
+        let deterministic = matches!(
+            error,
+            ComponentError::Script {
+                source: ScriptError::InterfaceUnavailable(_) | ScriptError::CapabilityDenied(_),
+                ..
+            }
+        );
+        if deterministic && !self.runtimes.lock().unwrap().contains_key(instance_key) {
+            self.failed_runtime_creations
+                .borrow_mut()
+                .insert(Arc::from(instance_key), message.to_owned());
+        }
+    }
+
     pub(super) fn render_local_component(
         &self,
         host: &mesh_core_module::Manifest,
@@ -995,6 +1028,9 @@ impl FrontendSurfaceComponent {
         container_height: f32,
         host_rules: &[mesh_core_component::style::StyleRule],
     ) -> WidgetNode {
+        if let Some(message) = self.known_runtime_creation_failure(instance_key) {
+            return self.build_error_widget(message);
+        }
         if let Err(err) = self.ensure_local_component_runtime(
             instance_key,
             &host.package.id,
@@ -1005,6 +1041,7 @@ impl FrontendSurfaceComponent {
             props,
         ) {
             let message = self.record_frontend_runtime_issue("render", instance_key, &err);
+            self.remember_runtime_creation_failure(instance_key, &err, &message);
             return self.build_error_widget(message);
         }
 
@@ -1094,8 +1131,12 @@ impl FrontendSurfaceComponent {
             return self.build_error_widget(format!("composition cycle blocked for '{module_id}'"));
         }
 
+        if let Some(message) = self.known_runtime_creation_failure(instance_key) {
+            return self.build_error_widget(message);
+        }
         if let Err(err) = self.ensure_runtime_for_compiled(instance_key, compiled, props) {
             let message = self.record_frontend_runtime_issue("render", instance_key, &err);
+            self.remember_runtime_creation_failure(instance_key, &err, &message);
             return self.build_error_widget(message);
         }
 

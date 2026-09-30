@@ -548,3 +548,54 @@ pub(super) fn resolved_slider_value(
 pub(super) fn float_eq(left: f32, right: f32) -> bool {
     (left - right).abs() <= f32::EPSILON
 }
+
+/// Every input of [`annotate_runtime_and_overflow_tree`] except scroll offsets,
+/// captured after a paint-only retained frame's annotation (slider values
+/// included, which annotation itself settles).
+///
+/// When the next frame is paint-only too and its inputs still equal this
+/// snapshot, the retained tree already carries this exact projection and the
+/// layout its overflow extents were measured against, so only scroll offsets
+/// can differ: see [`annotate_scroll_offsets_only`]. A frame that ran layout
+/// never stores a snapshot — annotation runs before layout, so the first
+/// paint-only frame after one must re-measure overflow in full.
+#[derive(Debug, PartialEq)]
+pub(in crate::shell::component) struct RuntimeAnnotationInputs {
+    pub(in crate::shell::component) focused_id: Option<NodeId>,
+    pub(in crate::shell::component) focus_visible_id: Option<NodeId>,
+    pub(in crate::shell::component) hovered_path: Vec<NodeId>,
+    pub(in crate::shell::component) active_id: Option<NodeId>,
+    pub(in crate::shell::component) active_slider_id: Option<NodeId>,
+    pub(in crate::shell::component) window: WindowSurfaceState,
+    pub(in crate::shell::component) promoted_windows: HashSet<String>,
+    pub(in crate::shell::component) input_values: HashMap<NodeId, String>,
+    pub(in crate::shell::component) input_preedits: HashMap<NodeId, TextPreeditState>,
+    pub(in crate::shell::component) checked_values: HashMap<NodeId, bool>,
+    pub(in crate::shell::component) slider_values: HashMap<NodeId, f32>,
+    pub(in crate::shell::component) slider_script_values: HashMap<NodeId, f32>,
+    pub(in crate::shell::component) shortcuts_generation: Option<u64>,
+}
+
+/// Scroll-only annotation for a paint-only frame whose other annotation inputs
+/// match [`RuntimeAnnotationInputs`]: write each scroll container's clamped
+/// offset into its retained metrics. The extents are unchanged because layout
+/// was reused, so this is what the full walk would produce, without building a
+/// key string and re-deriving the projection for every node.
+pub(in crate::shell::component) fn annotate_scroll_offsets_only(
+    node: &mut WidgetNode,
+    scroll_offsets: &mut HashMap<NodeId, ScrollOffsetState>,
+) {
+    if (node.computed_style.overflow_x.is_scrollable()
+        || node.computed_style.overflow_y.is_scrollable())
+        && let Some(metrics) = node.scroll_metrics.as_mut()
+    {
+        let offset = scroll_offsets.entry(node.id).or_default();
+        offset.x = offset.x.clamp(0.0, metrics.max_x);
+        offset.y = offset.y.clamp(0.0, metrics.max_y);
+        metrics.x = offset.x;
+        metrics.y = offset.y;
+    }
+    for child in &mut node.children {
+        annotate_scroll_offsets_only(child, scroll_offsets);
+    }
+}

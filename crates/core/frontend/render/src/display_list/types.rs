@@ -43,6 +43,8 @@ pub struct DisplayListKey {
 /// distance of the change, not across the whole region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BackdropRegion {
+    /// The `backdrop-filter` node whose read region this is.
+    pub node_id: NodeId,
     pub region: DamageRect,
     pub reach: u32,
 }
@@ -392,7 +394,7 @@ pub struct RetainedDisplayList {
     pub(super) command_kinds: Arc<PaintSequence<DisplayPaintCommandKind>>,
     /// In-surface read regions available to the renderer fallback.
     pub(super) backdrop_regions: Vec<BackdropRegion>,
-    /// Compositor blur regions for `org_kde_kwin_blur`, computed from the full
+    /// Compositor blur regions for the blur protocol, computed from the full
     /// widget tree (not the scoped `paint_commands` selection). Deriving them
     /// from `paint_commands` would drop the blur nodes on partial retained
     /// updates, yielding an empty region set that flips the compositor to
@@ -477,16 +479,25 @@ pub struct DisplayPaintNode {
 }
 
 impl DisplayPaintNode {
-    /// Dimensions used by content layout. Axis-aligned transforms already
-    /// have their scaled dimensions in `layout`; rotated nodes must measure
-    /// text and controls in their untransformed local box before the backend
-    /// applies the affine matrix.
+    /// Whether this node paints through the backend's affine matrix rather
+    /// than into its axis-aligned `layout` box. Any transform beyond a pure
+    /// translation qualifies: a `scale()` painted into `layout` snaps the box
+    /// to whole device pixels and draws text at its unscaled size, so a
+    /// scale transition makes text jump a pixel at a time instead of growing.
+    pub fn requires_affine_paint(&self) -> bool {
+        const EPSILON: f32 = 0.0001;
+        self.transform.m12.abs() > EPSILON
+            || self.transform.m21.abs() > EPSILON
+            || (self.transform.m11 - 1.0).abs() > EPSILON
+            || (self.transform.m22 - 1.0).abs() > EPSILON
+    }
+
+    /// Dimensions used by content layout. Translated nodes already have their
+    /// dimensions in `layout`; affine-painted nodes must measure text and
+    /// controls in their untransformed local box before the backend applies
+    /// the matrix.
     pub fn paint_width(&self) -> f32 {
-        if self.transform.m12.abs() > 0.0001
-            || self.transform.m21.abs() > 0.0001
-            || self.transform.m11 < -0.0001
-            || self.transform.m22 < -0.0001
-        {
+        if self.requires_affine_paint() {
             self.local_layout.width
         } else {
             self.layout.width
@@ -494,11 +505,7 @@ impl DisplayPaintNode {
     }
 
     pub fn paint_height(&self) -> f32 {
-        if self.transform.m12.abs() > 0.0001
-            || self.transform.m21.abs() > 0.0001
-            || self.transform.m11 < -0.0001
-            || self.transform.m22 < -0.0001
-        {
+        if self.requires_affine_paint() {
             self.local_layout.height
         } else {
             self.layout.height
@@ -755,6 +762,7 @@ pub struct SelectedDisplayListPaint<'a> {
     pub(super) kinds: &'a PaintSequence<DisplayPaintCommandKind>,
     pub(super) selection: SelectedDisplayListSelection,
     pub(super) metrics: DisplayListMetrics,
+    pub(super) backdrop_regions: &'a [BackdropRegion],
 }
 
 #[derive(Debug, Clone)]
@@ -863,6 +871,12 @@ impl<'a> Iterator for SelectedDisplayListPaintKindIter<'a> {
 }
 
 impl<'a> SelectedDisplayListPaint<'a> {
+    /// Read regions of `backdrop-filter` nodes with painted content beneath
+    /// them; see [`RetainedDisplayList::backdrop_filter_regions`].
+    pub fn backdrop_regions(&self) -> &'a [BackdropRegion] {
+        self.backdrop_regions
+    }
+
     pub fn iter(&self) -> SelectedDisplayListPaintIter<'_> {
         SelectedDisplayListPaintIter {
             commands: self.commands,

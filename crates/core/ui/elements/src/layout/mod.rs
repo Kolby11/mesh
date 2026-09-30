@@ -534,6 +534,24 @@ impl LayoutEngine {
         intrinsic_cache: &mut IntrinsicLayoutCache,
         measurer: Option<&dyn TextMeasurer>,
     ) {
+        let text_measure_revisions = measurer
+            .map(|measurer| measurer.revisions())
+            .unwrap_or_default();
+        // Paint-only frames cannot change geometry: a valid retained layout
+        // with no structural or layout dirt, the same available space, and the
+        // same text measurements leaves the Taffy tree untouched below. Return
+        // before validating: the validation walk visits every node, and the
+        // next frame that does lay out validates first.
+        if state.valid
+            && !dirty_structural
+            && !dirty_layout
+            && state.last_available == (available_width, available_height)
+            && state.text_measure_revisions == text_measure_revisions
+            && retained_taffy_id(root, state).is_some()
+        {
+            intrinsic_cache.invalidate_text_measurements_if_needed(text_measure_revisions);
+            return;
+        }
         if let Err(error) = validate_widget_tree(root) {
             tracing::error!(
                 target: "mesh::layout",
@@ -543,9 +561,6 @@ impl LayoutEngine {
             state.valid = false;
             return;
         }
-        let text_measure_revisions = measurer
-            .map(|measurer| measurer.revisions())
-            .unwrap_or_default();
         intrinsic_cache.invalidate_text_measurements_if_needed(text_measure_revisions);
         if !state.valid {
             compute_fresh_retained_layout(

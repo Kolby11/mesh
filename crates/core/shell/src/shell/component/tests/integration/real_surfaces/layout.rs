@@ -8,6 +8,7 @@ fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
     navigation.set_profiling_enabled(true);
     navigation.visible = true;
+    navigation.focused_proof_enabled = true;
     let mut navigation_buffer = PixelBuffer::new(960, 80);
     navigation
         .paint(
@@ -97,6 +98,7 @@ fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
 
     let mut audio = real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
     audio.set_profiling_enabled(true);
+    audio.focused_proof_enabled = true;
     audio
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.audio".into(),

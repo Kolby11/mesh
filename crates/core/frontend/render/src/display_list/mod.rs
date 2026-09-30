@@ -974,7 +974,7 @@ impl RetainedDisplayList {
     }
 
     /// Derived from the full widget tree at the last rebuild and handed to
-    /// `org_kde_kwin_blur`; empty means the surface has no blur.
+    /// the compositor blur protocol; empty means the surface has no blur.
     pub fn blur_regions(&self) -> &[DamageRect] {
         self.frame_plan.effects.blur_regions.as_ref()
     }
@@ -1004,6 +1004,7 @@ impl RetainedDisplayList {
                 kinds: plan.topology.kinds.as_ref(),
                 selection: SelectedDisplayListSelection::None,
                 metrics,
+                backdrop_regions: plan.effects.backdrop_regions.as_ref(),
             };
         }
 
@@ -1015,6 +1016,7 @@ impl RetainedDisplayList {
                 kinds: plan.topology.kinds.as_ref(),
                 selection: SelectedDisplayListSelection::None,
                 metrics,
+                backdrop_regions: plan.effects.backdrop_regions.as_ref(),
             };
         };
 
@@ -1027,6 +1029,7 @@ impl RetainedDisplayList {
                 kinds: plan.topology.kinds.as_ref(),
                 selection: SelectedDisplayListSelection::All,
                 metrics,
+                backdrop_regions: plan.effects.backdrop_regions.as_ref(),
             };
         }
 
@@ -1045,6 +1048,7 @@ impl RetainedDisplayList {
                 kinds: plan.topology.kinds.as_ref(),
                 selection: SelectedDisplayListSelection::All,
                 metrics,
+                backdrop_regions: plan.effects.backdrop_regions.as_ref(),
             };
         }
 
@@ -1064,6 +1068,7 @@ impl RetainedDisplayList {
                 command_count: selected_command_count,
             },
             metrics,
+            backdrop_regions: plan.effects.backdrop_regions.as_ref(),
         }
     }
 
@@ -1097,6 +1102,7 @@ impl RetainedDisplayList {
                 kinds: plan.topology.kinds.as_ref(),
                 selection: SelectedDisplayListSelection::None,
                 metrics,
+                backdrop_regions: plan.effects.backdrop_regions.as_ref(),
             };
         }
 
@@ -1108,6 +1114,7 @@ impl RetainedDisplayList {
                 kinds: plan.topology.kinds.as_ref(),
                 selection: SelectedDisplayListSelection::None,
                 metrics,
+                backdrop_regions: plan.effects.backdrop_regions.as_ref(),
             };
         };
 
@@ -1120,6 +1127,7 @@ impl RetainedDisplayList {
                 kinds: plan.topology.kinds.as_ref(),
                 selection: SelectedDisplayListSelection::All,
                 metrics,
+                backdrop_regions: plan.effects.backdrop_regions.as_ref(),
             };
         }
 
@@ -1139,6 +1147,7 @@ impl RetainedDisplayList {
                 command_count: selected_command_count,
             },
             metrics,
+            backdrop_regions: plan.effects.backdrop_regions.as_ref(),
         }
     }
 

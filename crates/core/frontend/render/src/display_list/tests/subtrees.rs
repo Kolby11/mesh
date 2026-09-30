@@ -775,3 +775,75 @@ fn display_list_reuses_unrelated_subtrees_for_local_reorder_updates() {
     assert!(metrics.subtree_segments_reused > 0);
     assert_eq!(metrics.full_fallback_count, 0);
 }
+
+/// The early-exit pre-clip must answer exactly what the full union walk did:
+/// preclip only when the union of every visible node's visual bounds exists
+/// and misses the clip.
+#[test]
+fn early_exit_preclip_matches_the_full_subtree_union() {
+    use super::super::build::{should_preclip_child_subtree, subtree_bounds_at};
+
+    let clip = DisplayListClip {
+        x: 0,
+        y: 40,
+        width: 100,
+        height: 20,
+    };
+    let reference = |child: &WidgetNode| {
+        subtree_bounds_at(child, 0.0, 0.0).is_some_and(|bounds| !bounds.intersects_clip(clip))
+    };
+
+    // Layout is in surface coordinates. Entirely below the clip, with
+    // descendants.
+    let mut below = node(10, "column", 0.0, 80.0, 100.0, 20.0);
+    below.children.push(node(11, "box", 0.0, 85.0, 50.0, 10.0));
+    // Own box inside the clip.
+    let inside = node(20, "box", 0.0, 45.0, 100.0, 10.0);
+    // An empty own box whose descendants straddle the band: neither paints in
+    // it, but their union does, so the walk must not prune it.
+    let mut straddle = node(30, "column", 0.0, 0.0, 0.0, 0.0);
+    straddle
+        .children
+        .push(node(31, "box", 0.0, 10.0, 50.0, 10.0));
+    straddle
+        .children
+        .push(node(32, "box", 0.0, 80.0, 50.0, 10.0));
+    // Own box above the clip, a deep descendant inside it.
+    let mut deep = node(40, "column", 0.0, 0.0, 100.0, 10.0);
+    let mut middle = node(41, "column", 0.0, 0.0, 100.0, 10.0);
+    middle.children.push(node(42, "box", 0.0, 45.0, 10.0, 10.0));
+    deep.children.push(middle);
+    // A shadow reaching into the clip from outside.
+    let mut shadowed = node(50, "box", 0.0, 20.0, 100.0, 10.0);
+    shadowed.computed_style.box_shadow.blur_radius = 6.0;
+    shadowed.computed_style.box_shadow.color = Color {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 128,
+    };
+    // Nothing visible at all.
+    let empty = node(60, "box", 0.0, 0.0, 0.0, 0.0);
+
+    for (child, expected) in [
+        (&below, true),
+        (&inside, false),
+        (&straddle, false),
+        (&deep, false),
+        (&shadowed, false),
+        (&empty, false),
+    ] {
+        assert_eq!(
+            reference(child),
+            expected,
+            "reference for node {}",
+            child.id
+        );
+        assert_eq!(
+            should_preclip_child_subtree(child, 0.0, 0.0, clip),
+            expected,
+            "early-exit pre-clip for node {}",
+            child.id
+        );
+    }
+}

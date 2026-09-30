@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use mesh_core_elements::style::{BlendMode, Position};
 use mesh_core_elements::{
-    AffineClipStack, AffineTransform, InteractionTarget, LayoutRect, NodeId, WidgetNode,
+    AffineClipStack, AffineTransform, BoxShadow, InteractionTarget, LayoutRect, NodeId, WidgetNode,
     child_transform, node_eligibility, node_transform, root_transform,
 };
 
@@ -743,13 +743,46 @@ pub(super) fn should_preclip_child_subtree(
     should_preclip_child_subtree_with_transform(child, root_transform(offset_x, offset_y), clip)
 }
 
+/// Whether `child`'s whole subtree paints outside `clip`: the union of its
+/// visible nodes' visual bounds exists and misses the clip.
+///
+/// Called for every child at every depth of a build, so a full subtree walk
+/// here made the build O(nodes × depth). The walk stops as soon as the growing
+/// union reaches the clip — the union only grows, so the answer is the same —
+/// and a visible child usually reaches it on its own box.
 fn should_preclip_child_subtree_with_transform(
     child: &WidgetNode,
     parent_transform: AffineTransform,
     clip: DisplayListClip,
 ) -> bool {
-    subtree_bounds_at_with_transform(child, parent_transform)
-        .is_some_and(|bounds| !bounds.intersects_clip(clip))
+    let mut bounds = None;
+    !subtree_bounds_reach_clip(child, parent_transform, clip, &mut bounds) && bounds.is_some()
+}
+
+/// Union `node`'s subtree visual bounds into `bounds`, returning `true` as soon
+/// as the union intersects `clip`.
+fn subtree_bounds_reach_clip(
+    node: &WidgetNode,
+    parent_transform: AffineTransform,
+    clip: DisplayListClip,
+    bounds: &mut Option<FloatBounds>,
+) -> bool {
+    if node_is_explicitly_hidden(node) {
+        return false;
+    }
+    let world_transform = node_transform(parent_transform, node);
+    if let Some(own) = node_visual_bounds_at_with_transform(node, world_transform) {
+        let union = bounds.map_or(own, |existing| existing.union(own));
+        *bounds = Some(union);
+        if union.intersects_clip(clip) {
+            return true;
+        }
+    }
+    let scroll = node.resolved_scroll_metrics();
+    let child_transform = child_transform(world_transform, node, scroll.x, scroll.y);
+    node.children
+        .iter()
+        .any(|child| subtree_bounds_reach_clip(child, child_transform, clip, bounds))
 }
 
 pub(super) fn subtree_bounds_at(
@@ -800,8 +833,21 @@ fn node_visual_bounds_at_with_transform(
 ) -> Option<FloatBounds> {
     (node.layout.width > 0.0 && node.layout.height > 0.0 && world_transform.inverse().is_some())
         .then(|| {
-            let paint_node = build_paint_node_with_previous_transform(node, world_transform, None);
-            let visual = visual_clip_for(&paint_node);
+            // The same box `visual_clip_for` computes for this node's paint
+            // node, without building one (it clones fonts and text content).
+            let style = &node.computed_style;
+            let visual = visual_clip_from_parts(
+                world_transform,
+                LayoutRect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: node.layout.width,
+                    height: node.layout.height,
+                },
+                style.box_shadow,
+                style.filter.blur_radius,
+                style.backdrop_filter.blur_radius,
+            );
             FloatBounds {
                 left: visual.x as f32,
                 top: visual.y as f32,
@@ -863,24 +909,34 @@ pub(super) fn node_clip_for(node: &DisplayPaintNode) -> DisplayListClip {
 }
 
 pub(super) fn visual_clip_for(node: &DisplayPaintNode) -> DisplayListClip {
-    let mut layout = node.transform.transform_rect(node.local_layout);
-    let shadow = node.style.box_shadow;
+    visual_clip_from_parts(
+        node.transform,
+        node.local_layout,
+        node.style.box_shadow,
+        node.style.filter.blur_radius,
+        node.style.backdrop_filter.blur_radius,
+    )
+}
+
+fn visual_clip_from_parts(
+    transform: AffineTransform,
+    local_layout: LayoutRect,
+    shadow: BoxShadow,
+    filter_blur_radius: f32,
+    backdrop_blur_radius: f32,
+) -> DisplayListClip {
+    let mut layout = transform.transform_rect(local_layout);
     if !shadow.is_none() && !shadow.inset {
         let pad = shadow.spread_radius + shadow.blur_radius * 3.0;
-        let shadow_layout = node.transform.transform_rect(LayoutRect {
+        let shadow_layout = transform.transform_rect(LayoutRect {
             x: shadow.offset_x - pad,
             y: shadow.offset_y - pad,
-            width: node.local_layout.width + pad * 2.0,
-            height: node.local_layout.height + pad * 2.0,
+            width: local_layout.width + pad * 2.0,
+            height: local_layout.height + pad * 2.0,
         });
         layout = union_layout_rect(layout, shadow_layout);
     }
-    let filter_pad = node
-        .style
-        .filter
-        .blur_radius
-        .max(node.style.backdrop_filter.blur_radius)
-        * 3.0;
+    let filter_pad = filter_blur_radius.max(backdrop_blur_radius) * 3.0;
     if filter_pad > 0.0 {
         layout.x -= filter_pad;
         layout.y -= filter_pad;

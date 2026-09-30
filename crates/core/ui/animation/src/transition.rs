@@ -455,6 +455,11 @@ fn claimed_after(entries: &[TransitionStyle], index: usize) -> TransitionPropert
 #[derive(Debug, Default)]
 pub struct TransitionAnimator {
     active: HashMap<NodeId, Vec<ActiveTransition>>,
+    /// The authored style each in-flight node is heading to. A node keeps
+    /// this frame's sample in its computed style until something restyles
+    /// it, so a frame that reuses the retained style reads the target from
+    /// here instead of mistaking the sample for a new one.
+    authored: HashMap<NodeId, AnimatableStyle>,
 }
 
 impl TransitionAnimator {
@@ -472,10 +477,12 @@ impl TransitionAnimator {
 
     pub fn clear(&mut self) {
         self.active.clear();
+        self.authored.clear();
     }
 
     pub fn remove(&mut self, key: NodeId) {
         self.active.remove(&key);
+        self.authored.remove(&key);
     }
 
     /// Style currently displayed for `key`: every in-flight entry's own
@@ -514,6 +521,8 @@ impl TransitionAnimator {
             instances.retain(|instance| !instance.finished(now));
             !instances.is_empty()
         });
+        let active = &self.active;
+        self.authored.retain(|key, _| active.contains_key(key));
     }
 
     pub fn has_active(&self, now: Instant) -> bool {
@@ -577,7 +586,27 @@ impl TransitionAnimator {
         now: Instant,
         policy: MotionPolicy,
     ) -> AnimationStep {
-        let desired = AnimatableStyle::from_node(node);
+        // A node nothing restyled since the last step still holds that step's
+        // sample in the properties it animates. Reading it as the target would
+        // retarget the transition at its own output — every such frame
+        // restarts the ease from a lower value, so the motion jitters and
+        // crawls toward its end. Only the animated properties are restored;
+        // the rest keep any in-place update (a surface root's size) made since.
+        let resolved = AnimatableStyle::from_node(node);
+        let desired = match (self.authored.get(&key), self.active.get(&key)) {
+            (Some(authored), Some(running)) if node.computed_style.animated_sample => {
+                let animated = running
+                    .iter()
+                    .fold(TransitionProperties::none(), |props, instance| {
+                        props.union(instance.source.properties)
+                    });
+                let desired = AnimatableStyle::selective_from(*authored, resolved, animated);
+                desired.apply_to_node(node);
+                desired
+            }
+            _ => resolved,
+        };
+        node.computed_style.animated_sample = false;
         let entry_count = node.computed_style.transitions.len();
 
         // The clamped visual radius is authoritative whether or not the radius
@@ -666,6 +695,7 @@ impl TransitionAnimator {
         });
 
         if running.is_empty() {
+            self.authored.remove(&key);
             return AnimationStep {
                 lifecycle,
                 active: false,
@@ -677,6 +707,10 @@ impl TransitionAnimator {
         let before = running.len();
         running.retain(|instance| !instance.finished(now));
         if running.is_empty() {
+            // Land exactly on the authored values, not the last interpolated
+            // sample, so the resting style matches a fresh restyle bit for bit.
+            desired.apply_to_node(node);
+            self.authored.remove(&key);
             return AnimationStep {
                 lifecycle: AnimationLifecycle::Completed,
                 active: false,
@@ -686,6 +720,8 @@ impl TransitionAnimator {
             lifecycle = merge_lifecycle(lifecycle, AnimationLifecycle::Completed);
         }
 
+        node.computed_style.animated_sample = true;
+        self.authored.insert(key, desired);
         self.active.insert(key, running);
         AnimationStep {
             lifecycle,
@@ -813,6 +849,17 @@ mod tests {
         node
     }
 
+    /// Model a restyle: resolution replaces the style wholesale, which clears
+    /// the animator's sample marker along with every authored value.
+    fn restyle(node: &mut WidgetNode, change: impl FnOnce(&mut ComputedStyle)) {
+        let mut style = ComputedStyle {
+            animated_sample: false,
+            ..node.computed_style.clone()
+        };
+        change(&mut style);
+        node.computed_style = style;
+    }
+
     #[test]
     fn from_node_clamps_border_radius_to_visible_cap() {
         let mut node = WidgetNode::new("button");
@@ -866,6 +913,68 @@ mod tests {
     }
 
     #[test]
+    fn a_frame_without_restyle_does_not_retarget_at_the_last_sample() {
+        // A hover `scale(1.05)`: frames that reuse the retained style still
+        // hold the previous sample. Treating it as the target retargeted the
+        // transition every such frame, so the scale bounced back and forth.
+        let transition = TransitionStyle {
+            duration_ms: 100,
+            easing: mesh_core_elements::TransitionEasing::Linear,
+            properties: mesh_core_elements::TransitionProperties {
+                transform: true,
+                ..mesh_core_elements::TransitionProperties::none()
+            },
+            ..TransitionStyle::default()
+        };
+        let mut style = ComputedStyle {
+            transitions: vec![transition],
+            ..ComputedStyle::default()
+        };
+        style.transform.scale_x = 1.05;
+        style.transform.scale_y = 1.05;
+        let mut node = node_with_style(style.clone());
+        let key = node.id;
+        let mut animator = TransitionAnimator::new();
+
+        let start = Instant::now();
+        let rest = AnimatableStyle {
+            transform: Transform2D::default(),
+            ..AnimatableStyle::from_node(&node)
+        };
+        assert!(animator.step_node(key, &mut node, rest, start));
+
+        let mut last = node.computed_style.transform.scale_x;
+        for ms in [25, 50, 75] {
+            let now = start + Duration::from_millis(ms);
+            let displayed = animator
+                .displayed_style(key, now, AnimatableStyle::from_node(&node))
+                .expect("in flight");
+            assert!(animator.step_node(key, &mut node, displayed, now));
+            let scale = node.computed_style.transform.scale_x;
+            let expected = 1.0 + 0.05 * ms as f32 / 100.0;
+            assert!(scale > last, "scale went back from {last} to {scale}");
+            assert!((scale - expected).abs() < 1e-4, "{scale} != {expected}");
+            last = scale;
+        }
+
+        // A real restyle resolves a fresh style, so a new target still wins.
+        style.transform = Transform2D::default();
+        node.computed_style = style;
+        let now = start + Duration::from_millis(80);
+        let displayed = animator
+            .displayed_style(key, now, AnimatableStyle::from_node(&node))
+            .expect("in flight");
+        let step = animator.step_node_with_policy_state(
+            key,
+            &mut node,
+            displayed,
+            now,
+            MotionPolicy::default(),
+        );
+        assert_eq!(step.lifecycle, AnimationLifecycle::Reversed);
+    }
+
+    #[test]
     fn transition_reversal_starts_from_the_current_displayed_value() {
         let transition = TransitionStyle {
             duration_ms: 100,
@@ -903,7 +1012,7 @@ mod tests {
         let displayed = animator
             .displayed_style(key, halfway, AnimatableStyle::from_node(&node))
             .expect("active transition");
-        node.computed_style.opacity = 0.0;
+        restyle(&mut node, |style| style.opacity = 0.0);
         let step = animator.step_node_with_policy_state(
             key,
             &mut node,
@@ -954,7 +1063,7 @@ mod tests {
         let displayed = animator
             .displayed_style(key, replacement_time, AnimatableStyle::from_node(&node))
             .expect("active transition");
-        node.computed_style.opacity = 0.5;
+        restyle(&mut node, |style| style.opacity = 0.5);
         let replaced = animator.step_node_with_policy_state(
             key,
             &mut node,

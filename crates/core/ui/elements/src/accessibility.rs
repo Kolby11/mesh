@@ -1,4 +1,5 @@
 /// Accessibility tree — semantic representation for AT-SPI and screen readers.
+use crate::attributes::ResolvedAttributeValueRef;
 use crate::interaction_contract::{InteractionTarget, NodeEligibility};
 use crate::layout::LayoutRect;
 use crate::tree::{NodeId, WidgetNode, WidgetTreeValidationError, validate_widget_tree};
@@ -358,6 +359,109 @@ pub(crate) fn frame_local_info(
     (info, text)
 }
 
+/// The attributes `normalized_info` reads, gathered in one pass over the
+/// node's sorted attributes instead of one binary search per name — about
+/// forty lookups per node on every full normalization.
+#[derive(Default)]
+struct NormalizationAttributes<'a> {
+    alt: Option<&'a String>,
+    aria_description: Option<&'a String>,
+    aria_keyshortcuts: Option<&'a String>,
+    aria_label: Option<&'a String>,
+    aria_role: Option<&'a String>,
+    aria_valuemax: Option<&'a String>,
+    aria_valuemin: Option<&'a String>,
+    aria_valuenow: Option<&'a String>,
+    data_mesh_element: Option<&'a String>,
+    key: Option<&'a String>,
+    keybind: Option<&'a String>,
+    label: Option<&'a String>,
+    max: Option<&'a String>,
+    min: Option<&'a String>,
+    role: Option<&'a String>,
+    shortcut: Option<&'a String>,
+    title: Option<&'a String>,
+    tooltip: Option<&'a String>,
+    value: Option<&'a String>,
+    disabled: Option<ResolvedAttributeValueRef<'a>>,
+    aria_disabled: Option<ResolvedAttributeValueRef<'a>>,
+    checked: Option<ResolvedAttributeValueRef<'a>>,
+    aria_checked: Option<ResolvedAttributeValueRef<'a>>,
+    selected: Option<ResolvedAttributeValueRef<'a>>,
+    aria_selected: Option<ResolvedAttributeValueRef<'a>>,
+    pressed: Option<ResolvedAttributeValueRef<'a>>,
+    aria_pressed: Option<ResolvedAttributeValueRef<'a>>,
+    expanded: Option<ResolvedAttributeValueRef<'a>>,
+    open: Option<ResolvedAttributeValueRef<'a>>,
+    aria_expanded: Option<ResolvedAttributeValueRef<'a>>,
+    busy: Option<ResolvedAttributeValueRef<'a>>,
+    aria_busy: Option<ResolvedAttributeValueRef<'a>>,
+    invalid: Option<ResolvedAttributeValueRef<'a>>,
+    aria_invalid: Option<ResolvedAttributeValueRef<'a>>,
+    required: Option<ResolvedAttributeValueRef<'a>>,
+    aria_required: Option<ResolvedAttributeValueRef<'a>>,
+}
+
+impl<'a> NormalizationAttributes<'a> {
+    fn collect(attributes: &'a crate::AttributeMap) -> Self {
+        let mut slots = Self::default();
+        for ((key, text), (_, value)) in attributes.iter().zip(attributes.iter_values()) {
+            match key.as_str() {
+                "alt" => slots.alt = Some(text),
+                "aria-description" => slots.aria_description = Some(text),
+                "aria-keyshortcuts" => slots.aria_keyshortcuts = Some(text),
+                "aria-label" => slots.aria_label = Some(text),
+                "aria-role" => slots.aria_role = Some(text),
+                "aria-valuemax" => slots.aria_valuemax = Some(text),
+                "aria-valuemin" => slots.aria_valuemin = Some(text),
+                "aria-valuenow" => slots.aria_valuenow = Some(text),
+                "data-mesh-element" => slots.data_mesh_element = Some(text),
+                "key" => slots.key = Some(text),
+                "keybind" => slots.keybind = Some(text),
+                "label" => slots.label = Some(text),
+                "max" => slots.max = Some(text),
+                "min" => slots.min = Some(text),
+                "role" => slots.role = Some(text),
+                "shortcut" => slots.shortcut = Some(text),
+                "title" => slots.title = Some(text),
+                "tooltip" => slots.tooltip = Some(text),
+                "value" => slots.value = Some(text),
+                "disabled" => slots.disabled = Some(value),
+                "aria-disabled" => slots.aria_disabled = Some(value),
+                "checked" => slots.checked = Some(value),
+                "aria-checked" => slots.aria_checked = Some(value),
+                "selected" => slots.selected = Some(value),
+                "aria-selected" => slots.aria_selected = Some(value),
+                "pressed" => slots.pressed = Some(value),
+                "aria-pressed" => slots.aria_pressed = Some(value),
+                "expanded" => slots.expanded = Some(value),
+                "open" => slots.open = Some(value),
+                "aria-expanded" => slots.aria_expanded = Some(value),
+                "busy" => slots.busy = Some(value),
+                "aria-busy" => slots.aria_busy = Some(value),
+                "invalid" => slots.invalid = Some(value),
+                "aria-invalid" => slots.aria_invalid = Some(value),
+                "required" => slots.required = Some(value),
+                "aria-required" => slots.aria_required = Some(value),
+                _ => {}
+            }
+        }
+        slots
+    }
+}
+
+fn any_true(values: &[Option<ResolvedAttributeValueRef<'_>>]) -> bool {
+    values.iter().flatten().any(|value| value.legacy_bool())
+}
+
+fn first_bool(values: &[Option<ResolvedAttributeValueRef<'_>>]) -> Option<bool> {
+    values
+        .iter()
+        .flatten()
+        .next()
+        .map(|value| value.legacy_bool())
+}
+
 fn normalized_info(
     node: &WidgetNode,
     hidden: bool,
@@ -365,14 +469,14 @@ fn normalized_info(
     authored: &AccessibilityInfo,
 ) -> AccessibilityInfo {
     let mut info = authored.clone();
-    let attributes = &node.attributes;
+    let attributes = NormalizationAttributes::collect(&node.attributes);
 
-    if !attributes.contains_key("aria-role")
-        && !attributes.contains_key("role")
+    if attributes.aria_role.is_none()
+        && attributes.role.is_none()
         && info.role == AccessibilityRole::Region
         && let Some(contract) = crate::element::element_contract_for_tag(
             attributes
-                .get("data-mesh-element")
+                .data_mesh_element
                 .map(String::as_str)
                 .unwrap_or(node.tag.as_str()),
         )
@@ -382,8 +486,8 @@ fn normalized_info(
     }
 
     if let Some(role) = attributes
-        .get("aria-role")
-        .or_else(|| attributes.get("role"))
+        .aria_role
+        .or(attributes.role)
         .filter(|value| !value.trim().is_empty())
     {
         info.role = AccessibilityRole::from_name(role);
@@ -391,15 +495,15 @@ fn normalized_info(
 
     let visible_text = visible_text(node, child_text, hidden);
     let label = attributes
-        .get("label")
+        .label
         .filter(|value| !value.trim().is_empty())
         .cloned();
     let aria_label = attributes
-        .get("aria-label")
+        .aria_label
         .filter(|value| !value.trim().is_empty())
         .cloned();
     let alt = attributes
-        .get("alt")
+        .alt
         .filter(|value| !value.trim().is_empty())
         .cloned();
     let preserved_label = (!hidden && (node.tag == "surface" || node.children.is_empty()))
@@ -428,37 +532,42 @@ fn normalized_info(
         None
     } else {
         attributes
-            .get("aria-description")
-            .or_else(|| attributes.get("title"))
-            .or_else(|| attributes.get("tooltip"))
+            .aria_description
+            .or(attributes.title)
+            .or(attributes.tooltip)
             .filter(|value| !value.trim().is_empty())
             .cloned()
             .or(preserved_description)
     };
     info.keyboard_shortcut = attributes
-        .get("aria-keyshortcuts")
-        .or_else(|| attributes.get("key"))
-        .or_else(|| attributes.get("keybind"))
-        .or_else(|| attributes.get("shortcut"))
+        .aria_keyshortcuts
+        .or(attributes.key)
+        .or(attributes.keybind)
+        .or(attributes.shortcut)
         .filter(|value| !value.trim().is_empty())
         .cloned()
         .or_else(|| info.keyboard_shortcut.clone());
 
     info.state.disabled =
-        node.state.disabled || bool_alias(attributes, &["disabled", "aria-disabled"]);
+        node.state.disabled || any_true(&[attributes.disabled, attributes.aria_disabled]);
     info.state.checked =
-        alias_bool(attributes, &["checked", "aria-checked"]).or(info.state.checked);
+        first_bool(&[attributes.checked, attributes.aria_checked]).or(info.state.checked);
     info.state.selected =
-        alias_bool(attributes, &["selected", "aria-selected"]).unwrap_or(info.state.selected);
+        first_bool(&[attributes.selected, attributes.aria_selected]).unwrap_or(info.state.selected);
     info.state.pressed =
-        alias_bool(attributes, &["pressed", "aria-pressed"]).unwrap_or(info.state.pressed);
-    info.state.expanded =
-        alias_bool(attributes, &["expanded", "open", "aria-expanded"]).or(info.state.expanded);
-    info.state.busy = alias_bool(attributes, &["busy", "aria-busy"]).unwrap_or(info.state.busy);
+        first_bool(&[attributes.pressed, attributes.aria_pressed]).unwrap_or(info.state.pressed);
+    info.state.expanded = first_bool(&[
+        attributes.expanded,
+        attributes.open,
+        attributes.aria_expanded,
+    ])
+    .or(info.state.expanded);
+    info.state.busy =
+        first_bool(&[attributes.busy, attributes.aria_busy]).unwrap_or(info.state.busy);
     info.state.invalid =
-        alias_bool(attributes, &["invalid", "aria-invalid"]).unwrap_or(info.state.invalid);
+        first_bool(&[attributes.invalid, attributes.aria_invalid]).unwrap_or(info.state.invalid);
     info.state.required =
-        alias_bool(attributes, &["required", "aria-required"]).unwrap_or(info.state.required);
+        first_bool(&[attributes.required, attributes.aria_required]).unwrap_or(info.state.required);
     info.state.checked = info.state.checked.or(node.state.checked.then_some(true));
     info.state.selected |= node.state.selected;
     info.state.pressed |= node.state.pressed;
@@ -466,27 +575,19 @@ fn normalized_info(
     info.state.required |= node.state.required;
     info.state.expanded = info.state.expanded.or(node.state.expanded.then_some(true));
     info.state.value = attributes
-        .get("aria-valuenow")
-        .or_else(|| attributes.get("value"))
+        .aria_valuenow
+        .or(attributes.value)
         .cloned()
         .or(info.state.value);
     info.state.value_min = attributes
-        .get("aria-valuemin")
+        .aria_valuemin
         .and_then(|value| value.trim().parse().ok())
-        .or_else(|| {
-            attributes
-                .get("min")
-                .and_then(|value| value.trim().parse().ok())
-        })
+        .or_else(|| attributes.min.and_then(|value| value.trim().parse().ok()))
         .or(info.state.value_min);
     info.state.value_max = attributes
-        .get("aria-valuemax")
+        .aria_valuemax
         .and_then(|value| value.trim().parse().ok())
-        .or_else(|| {
-            attributes
-                .get("max")
-                .and_then(|value| value.trim().parse().ok())
-        })
+        .or_else(|| attributes.max.and_then(|value| value.trim().parse().ok()))
         .or(info.state.value_max);
 
     info.focused = live_accessibility_focus(node);
@@ -521,20 +622,6 @@ fn semantic_text(info: &AccessibilityInfo, visible_text: String, hidden: bool) -
     } else {
         info.label.clone().unwrap_or_default()
     }
-}
-
-fn bool_alias(attributes: &crate::AttributeMap, names: &[&str]) -> bool {
-    names.iter().any(|name| {
-        attributes
-            .get_value(name)
-            .is_some_and(|value| value.legacy_bool())
-    })
-}
-
-fn alias_bool(attributes: &crate::AttributeMap, names: &[&str]) -> Option<bool> {
-    names
-        .iter()
-        .find_map(|name| attributes.get_value(name).map(|value| value.legacy_bool()))
 }
 
 fn non_empty(value: String) -> Option<String> {
@@ -765,6 +852,44 @@ mod tests {
                 .iter()
                 .all(|node| node.info.label.as_deref() != Some("Do not announce"))
         );
+    }
+
+    #[test]
+    fn normalization_keeps_alias_precedence_and_empty_values() {
+        let mut root = WidgetNode::new("box");
+        let mut node = WidgetNode::new("button");
+        // The earlier alias wins even when a later one disagrees.
+        attr(&mut node, "checked", "false");
+        attr(&mut node, "aria-checked", "true");
+        attr(&mut node, "open", "true");
+        attr(&mut node, "aria-expanded", "false");
+        attr(&mut node, "aria-selected", "true");
+        // `disabled` is true when any alias is.
+        attr(&mut node, "disabled", "false");
+        attr(&mut node, "aria-disabled", "true");
+        // A present but empty `aria-role` does not fall back to `role`.
+        attr(&mut node, "aria-role", " ");
+        attr(&mut node, "role", "switch");
+        // Description: `aria-description` before `title` before `tooltip`.
+        attr(&mut node, "title", "Title text");
+        attr(&mut node, "tooltip", "Tooltip text");
+        attr(&mut node, "aria-valuemin", "not a number");
+        attr(&mut node, "min", "3");
+        attr(&mut node, "value", "7");
+        node.accessibility.role = AccessibilityRole::Button;
+        root.children.push(node);
+
+        normalize_accessibility(&mut root);
+
+        let info = &root.children[0].accessibility;
+        assert_eq!(info.state.checked, Some(false));
+        assert_eq!(info.state.expanded, Some(true));
+        assert!(info.state.selected);
+        assert!(info.state.disabled);
+        assert_eq!(info.role, AccessibilityRole::Button);
+        assert_eq!(info.description.as_deref(), Some("Title text"));
+        assert_eq!(info.state.value_min, Some(3.0));
+        assert_eq!(info.state.value.as_deref(), Some("7"));
     }
 
     #[test]

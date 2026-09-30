@@ -311,14 +311,16 @@ impl NodeEligibility {
 
     /// Resolve the local state of a node without ancestor state.
     pub fn local(node: &WidgetNode) -> Self {
+        let attributes = LocalStateAttributes::read(node);
+        let visual_visible = node.computed_style.display != Display::None
+            && matches!(node.computed_style.visibility, Visibility::Visible)
+            && !attributes.hidden;
         Self {
-            visual_visible: locally_visual_visible(node),
-            semantic_visible: locally_visual_visible(node)
-                && !locally_aria_hidden(node)
-                && !locally_inert(node),
+            visual_visible,
+            semantic_visible: visual_visible && !attributes.aria_hidden && !attributes.inert,
             has_geometry: node_has_geometry(node),
-            disabled: locally_disabled(node),
-            inert: locally_inert(node),
+            disabled: node.state.disabled || attributes.disabled || attributes.aria_disabled,
+            inert: attributes.inert,
         }
     }
 
@@ -554,24 +556,41 @@ pub fn transformed_layout_for(
     })
 }
 
-fn locally_visual_visible(node: &WidgetNode) -> bool {
-    node.computed_style.display != Display::None
-        && matches!(node.computed_style.visibility, Visibility::Visible)
-        && !boolean_attribute(node, "hidden")
+/// The boolean attributes that decide a node's local eligibility.
+///
+/// Every display-list, damage, accessibility, and hit-test walk asks for a
+/// node's eligibility, so these were seven binary searches per call, each a
+/// chain of string compares — the top `memcmp` source in a scroll profile.
+/// One pass over the sorted attribute list reads all five; a string `match`
+/// rejects most keys on length alone.
+#[derive(Default)]
+struct LocalStateAttributes {
+    aria_disabled: bool,
+    aria_hidden: bool,
+    disabled: bool,
+    hidden: bool,
+    inert: bool,
 }
 
-fn locally_aria_hidden(node: &WidgetNode) -> bool {
-    boolean_attribute(node, "aria-hidden")
-}
-
-fn locally_disabled(node: &WidgetNode) -> bool {
-    node.state.disabled
-        || boolean_attribute(node, "disabled")
-        || boolean_attribute(node, "aria-disabled")
-}
-
-fn locally_inert(node: &WidgetNode) -> bool {
-    boolean_attribute(node, "inert")
+impl LocalStateAttributes {
+    fn read(node: &WidgetNode) -> Self {
+        let mut attributes = Self::default();
+        for (key, value) in node.attributes.iter_values() {
+            let key = key.as_str();
+            let slot = match key {
+                "aria-disabled" => &mut attributes.aria_disabled,
+                "aria-hidden" => &mut attributes.aria_hidden,
+                "disabled" => &mut attributes.disabled,
+                "hidden" => &mut attributes.hidden,
+                "inert" => &mut attributes.inert,
+                // Keys are sorted; nothing after "inert" is read here.
+                _ if key > "inert" => break,
+                _ => continue,
+            };
+            *slot = value.legacy_bool();
+        }
+        attributes
+    }
 }
 
 fn node_has_geometry(node: &WidgetNode) -> bool {
@@ -581,12 +600,6 @@ fn node_has_geometry(node: &WidgetNode) -> bool {
         && node.layout.height > 0.0
 }
 
-fn boolean_attribute(node: &WidgetNode, name: &str) -> bool {
-    node.attributes
-        .get_value(name)
-        .is_some_and(|value| value.legacy_bool())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -594,6 +607,51 @@ mod tests {
 
     fn attr(node: &mut WidgetNode, name: &str, value: &str) {
         node.attributes.insert(name.into(), value.into());
+    }
+
+    #[test]
+    fn local_eligibility_reads_each_state_attribute_among_unrelated_keys() {
+        let base = || {
+            let mut node = WidgetNode::new("box");
+            node.layout.width = 10.0;
+            node.layout.height = 10.0;
+            for (name, value) in [
+                ("_mesh_key", "root/0"),
+                ("aria-label", "x"),
+                ("class", "a"),
+                ("id", "n"),
+                ("role", "button"),
+                ("tooltip", "t"),
+            ] {
+                attr(&mut node, name, value);
+            }
+            node
+        };
+        let plain = NodeEligibility::local(&base());
+        assert!(plain.is_visible() && plain.is_semantically_visible());
+        assert!(!plain.is_disabled() && !plain.is_inert());
+
+        let with = |name: &str, value: &str| {
+            let mut node = base();
+            attr(&mut node, name, value);
+            NodeEligibility::local(&node)
+        };
+        assert!(!with("hidden", "").is_visible());
+        assert!(!with("aria-hidden", "true").is_semantically_visible());
+        assert!(with("aria-hidden", "true").is_visible());
+        assert!(with("disabled", "1").is_disabled());
+        assert!(with("aria-disabled", "true").is_disabled());
+        let inert = with("inert", "true");
+        assert!(inert.is_inert() && !inert.is_semantically_visible());
+        for name in [
+            "hidden",
+            "aria-hidden",
+            "disabled",
+            "aria-disabled",
+            "inert",
+        ] {
+            assert_eq!(with(name, "false"), plain, "{name}=false changes nothing");
+        }
     }
 
     #[test]

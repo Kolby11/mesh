@@ -25,6 +25,32 @@ fn frames() -> u32 {
         .unwrap_or(60)
 }
 
+/// Frames for one named loop. `MESH_BENCH_ONLY=<name>` runs only that loop
+/// (`audio`, `unread`, `pointer`, `paint`, `hooks`), so a `perf` sample
+/// attributes to a single workload instead of the whole mix.
+fn loop_frames(name: &str) -> u32 {
+    match std::env::var("MESH_BENCH_ONLY") {
+        Ok(only) if only != name => 0,
+        _ => frames(),
+    }
+}
+
+/// Paint only when the component asks for a frame, as `Shell::render_components`
+/// does. Painting unconditionally measures a forced repaint of an unchanged
+/// surface, which takes the conservative full-rebuild path and never happens in
+/// a session. Returns whether a frame was painted.
+fn paint_if_wanted(
+    component: &mut FrontendSurfaceComponent,
+    theme: &Theme,
+    buffer: &mut PixelBuffer,
+) -> bool {
+    if !component.wants_render() {
+        return false;
+    }
+    component.paint(theme, extent(), buffer, 1.0).unwrap();
+    true
+}
+
 fn extent() -> SurfaceExtent {
     SurfaceExtent::unpadded(WIDTH, SETTLED.load(std::sync::atomic::Ordering::Relaxed))
 }
@@ -129,6 +155,15 @@ fn report(label: &str, elapsed: Duration, frames: u32) {
 #[test]
 #[ignore = "release-only navigation-bar frame-cost profile"]
 fn navigation_frame_cost_profile() {
+    // `MESH_BENCH_BACKDROP=in-surface` paints the bar's `backdrop-filter` in
+    // the surface, as on a compositor without a blur protocol (Hyprland).
+    // The default is the compositor-region policy, which paints no blur.
+    if std::env::var("MESH_BENCH_BACKDROP").is_ok_and(|value| value == "in-surface") {
+        mesh_core_render::set_backdrop_blur_policy(
+            mesh_core_render::BackdropBlurPolicy::InSurfaceFilter,
+        );
+        eprintln!("backdrop policy: in-surface");
+    }
     let frames = frames();
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(WIDTH, HEIGHT);
@@ -177,42 +212,64 @@ fn navigation_frame_cost_profile() {
     // A 1 Hz audio poll: the bar's volume button reads it, everything else
     // must not care.
     let started = Instant::now();
-    for volume in 0..frames {
+    let mut audio_painted = 0u32;
+    for volume in 0..loop_frames("audio") {
         publish(&mut component, "mesh.audio", audio_payload(volume % 100));
-        component.paint(&theme, extent(), &mut buffer, 1.0).unwrap();
+        audio_painted += u32::from(paint_if_wanted(&mut component, &theme, &mut buffer));
     }
     let audio_poll = started.elapsed();
 
     // A service nothing in the bar reads.
     let started = Instant::now();
-    for tick in 0..frames {
+    let mut unread_painted = 0u32;
+    for tick in 0..loop_frames("unread") {
         publish(
             &mut component,
             "mesh.media",
             serde_json::json!({ "playing": false, "title": format!("track {tick}") }),
         );
-        component.paint(&theme, extent(), &mut buffer, 1.0).unwrap();
+        unread_painted += u32::from(paint_if_wanted(&mut component, &theme, &mut buffer));
     }
     let unread_poll = started.elapsed();
 
-    // A pointer crossing the bar at 60 Hz: hover restyle plus repaint.
+    // A pointer crossing the bar at 60 Hz through its vertical middle: hover
+    // restyle plus repaint. (Before 2026-09-30 this used y = 40, the bottom
+    // edge of the settled 40px bar, so it never hovered anything.)
+    let settled_height = SETTLED.load(std::sync::atomic::Ordering::Relaxed);
+    let pointer_y = settled_height as f32 / 2.0;
     let started = Instant::now();
-    for tick in 0..frames {
+    let mut pointer_painted = 0u32;
+    for tick in 0..loop_frames("pointer") {
         let x = (tick as f32 / frames as f32) * WIDTH as f32;
         component
             .handle_input(
                 &theme,
                 WIDTH,
-                HEIGHT,
-                ComponentInput::PointerMove { x, y: 40.0 },
+                settled_height,
+                ComponentInput::PointerMove { x, y: pointer_y },
             )
             .unwrap();
-        component.paint(&theme, extent(), &mut buffer, 1.0).unwrap();
+        pointer_painted += u32::from(paint_if_wanted(&mut component, &theme, &mut buffer));
     }
     let hover = started.elapsed();
+    // Leave the bar and let hover transitions finish, so the loops below
+    // measure a bar at rest rather than one with the last button's tooltip up.
+    component
+        .handle_input(&theme, WIDTH, settled_height, ComponentInput::PointerLeave)
+        .unwrap();
+    // Transitions run on the wall clock, so settle at 60 Hz, not in a
+    // tight loop. A bar still animating after two seconds is reported.
+    let settle_started = Instant::now();
+    while paint_if_wanted(&mut component, &theme, &mut buffer) {
+        if settle_started.elapsed() > Duration::from_secs(2) {
+            eprintln!("warning: bar still wants frames 2s after the pointer left");
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(16));
+    }
 
     let started = Instant::now();
-    for _ in 0..frames {
+    for _ in 0..loop_frames("paint") {
         component.invalidate_paint();
         component.paint(&theme, extent(), &mut buffer, 1.0).unwrap();
     }
@@ -223,7 +280,7 @@ fn navigation_frame_cost_profile() {
     );
 
     let started = Instant::now();
-    for _ in 0..frames {
+    for _ in 0..loop_frames("hooks") {
         component.call_render_hooks();
     }
     let hooks = started.elapsed();
@@ -270,6 +327,10 @@ fn navigation_frame_cost_profile() {
         damage_rects as f64 / sample_frames as f64,
     );
 
+    eprintln!(
+        "frames painted: audio {audio_painted}, unread {unread_painted}, pointer {pointer_painted} \
+         (per-frame costs below divide by all {frames} events)"
+    );
     report("audio poll (read)", audio_poll, frames);
     report("media poll (unread)", unread_poll, frames);
     report("pointer move", hover, frames);
@@ -293,11 +354,12 @@ fn navigation_frame_cost_profile() {
         return;
     }
     component.set_profiling_enabled(true);
+    component.style_rule_attribution = true;
 
     let _ = component.take_profiling_records();
     for volume in 0..frames {
         publish(&mut component, "mesh.audio", audio_payload(volume % 100));
-        component.paint(&theme, extent(), &mut buffer, 1.0).unwrap();
+        paint_if_wanted(&mut component, &theme, &mut buffer);
     }
     dump_stages(
         "audio poll (read)",
@@ -312,11 +374,11 @@ fn navigation_frame_cost_profile() {
             .handle_input(
                 &theme,
                 WIDTH,
-                HEIGHT,
-                ComponentInput::PointerMove { x, y: 40.0 },
+                settled_height,
+                ComponentInput::PointerMove { x, y: pointer_y },
             )
             .unwrap();
-        component.paint(&theme, extent(), &mut buffer, 1.0).unwrap();
+        paint_if_wanted(&mut component, &theme, &mut buffer);
     }
     dump_stages("pointer move", component.take_profiling_records(), frames);
 

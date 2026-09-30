@@ -579,8 +579,12 @@ impl FrontendSurfaceComponent {
             }
         }
 
+        let mut moved = false;
         for (key, offset) in updates {
-            self.scroll_offsets.insert(key, offset);
+            moved |= self
+                .scroll_offsets
+                .insert(key, offset)
+                .is_none_or(|previous| previous.x != offset.x || previous.y != offset.y);
         }
         for key in finished {
             self.scroll_animations.remove(&key);
@@ -588,10 +592,9 @@ impl FrontendSurfaceComponent {
 
         // Keep frames coming until every animation settles. This runs inside
         // `finalize_tree` (after the per-paint dirty flags were taken), so the
-        // flag schedules the next frame via the cheap restyle path — mirroring
-        // how keyframe animations re-arm themselves.
+        // flag schedules the next frame.
         if !self.scroll_animations.is_empty() {
-            self.invalidate_style_path(ComponentDirtyFlags::VISUAL_REPAINT);
+            self.invalidate_scroll_tick(scroll_tick_flags(moved));
         }
     }
 
@@ -676,6 +679,7 @@ impl FrontendSurfaceComponent {
             }
         }
 
+        let moved = !updates.is_empty();
         for (node_id, offset) in updates {
             self.scroll_offsets.insert(node_id, offset);
         }
@@ -683,7 +687,7 @@ impl FrontendSurfaceComponent {
             self.scroll_inertia.remove(&node_id);
         }
         if !self.scroll_inertia.is_empty() {
-            self.invalidate_style_path(ComponentDirtyFlags::VISUAL_REPAINT);
+            self.invalidate_scroll_tick(scroll_tick_flags(moved));
         }
     }
 
@@ -786,6 +790,18 @@ impl FrontendSurfaceComponent {
         if should_clear_selection {
             self.selection = None;
         }
+    }
+}
+
+/// A scroll tick changes only the scroll offset, never styles. A tick that
+/// moved it needs a paint plus fresh scroll metrics; one that is still waiting
+/// (momentum's start delay) only keeps frames coming, and an unchanged paint
+/// presents no damage.
+fn scroll_tick_flags(moved: bool) -> ComponentDirtyFlags {
+    if moved {
+        ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS
+    } else {
+        ComponentDirtyFlags::PAINT
     }
 }
 

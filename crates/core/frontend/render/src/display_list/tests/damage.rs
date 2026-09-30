@@ -844,6 +844,7 @@ fn backdrop_regions_require_painted_content_beneath() {
     assert_eq!(
         list.backdrop_filter_regions(),
         &[BackdropRegion {
+            node_id: 3,
             region: DamageRect {
                 x: 8,
                 y: 8,
@@ -914,6 +915,7 @@ fn transformed_backdrop_regions_follow_cumulative_geometry() {
     assert_eq!(
         list.backdrop_filter_regions(),
         &[BackdropRegion {
+            node_id: 3,
             region: DamageRect {
                 x: 17,
                 y: 0,

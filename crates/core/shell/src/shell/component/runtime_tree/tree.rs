@@ -418,8 +418,10 @@ impl RetainedWidgetTree {
         Some(dirty_nodes)
     }
 
-    #[cfg(test)]
-    pub(super) fn dirty_flags_for(&self, node_id: NodeId) -> RetainedNodeDirtyFlags {
+    pub(in crate::shell::component) fn dirty_flags_for(
+        &self,
+        node_id: NodeId,
+    ) -> RetainedNodeDirtyFlags {
         self.node_keys
             .get(&node_id)
             .and_then(|key| self.dirty.get(*key))

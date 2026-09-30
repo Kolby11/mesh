@@ -4,6 +4,7 @@ use super::*;
 fn audio_popover_theme_repaint_keeps_audio_state_without_available_flag() {
     let theme = default_theme();
     let mut audio = real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
+    audio.focused_proof_enabled = true;
     audio
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.audio".into(),
@@ -110,6 +111,7 @@ fn phase44_navigation_audio_surface_emits_focused_proof_snapshot() {
     let mut navigation =
         real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
     navigation.visible = true;
+    navigation.focused_proof_enabled = true;
     let mut navigation_buffer = PixelBuffer::new(960, 80);
     navigation
         .paint(

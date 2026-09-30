@@ -394,6 +394,84 @@ fn keyboard_navigation_pointer_focus_visible_tracks_input_modality() {
 }
 
 #[test]
+fn keyboard_focus_visible_ignores_shortcut_modifiers_and_key_releases() {
+    // Click a button, then run a compositor shortcut (Super+Shift+S): neither
+    // the lone modifier presses nor any release may paint the button's ring.
+    let mut component = test_frontend_component("<template><box /></template>");
+    component.last_tree = Some(root_with(vec![event_node(
+        "button",
+        "root/0",
+        0.0,
+        0.0,
+        80.0,
+        24.0,
+        &[],
+    )]));
+
+    let theme = default_theme();
+    let send = |component: &mut FrontendSurfaceComponent, input| {
+        component.handle_input(&theme, 240, 160, input).unwrap();
+    };
+    send(
+        &mut component,
+        ComponentInput::PointerButton {
+            button: 0x110,
+            x: 8.0,
+            y: 8.0,
+            pressed: true,
+        },
+    );
+    for key in ["Super_L", "Shift_L"] {
+        send(
+            &mut component,
+            ComponentInput::KeyPressed {
+                key: key.into(),
+                modifiers: KeyModifiers::default(),
+            },
+        );
+    }
+    for key in ["s", "Shift_L", "Super_L"] {
+        send(
+            &mut component,
+            ComponentInput::KeyReleased {
+                key: key.into(),
+                modifiers: KeyModifiers::default(),
+            },
+        );
+    }
+    assert_eq!(component.focused_key.as_deref(), Some("root/0"));
+    assert!(component.focus_visible_key.is_none());
+
+    send(
+        &mut component,
+        ComponentInput::KeyPressed {
+            key: "Down".into(),
+            modifiers: KeyModifiers::default(),
+        },
+    );
+    assert_eq!(component.focus_visible_key.as_deref(), Some("root/0"));
+}
+
+#[test]
+fn surface_auto_focus_does_not_paint_a_focus_ring() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    let tree = root_with(vec![event_node(
+        "button",
+        "root/0",
+        0.0,
+        0.0,
+        80.0,
+        24.0,
+        &[],
+    )]);
+    component.pending_auto_focus = true;
+    component.apply_pending_auto_focus(&tree);
+
+    assert_eq!(component.focused_key.as_deref(), Some("root/0"));
+    assert!(component.focus_visible_key.is_none());
+}
+
+#[test]
 fn keyboard_navigation_tab_orders_by_visual_position_and_wraps() {
     let mut component = test_frontend_component("<template><box /></template>");
     component.last_tree = Some(root_with(vec![

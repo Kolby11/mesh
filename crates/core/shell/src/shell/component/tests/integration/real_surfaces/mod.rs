@@ -10,6 +10,7 @@ mod navigation_profile;
 mod raster;
 mod settings;
 mod transitions;
+mod unavailable_interface;
 
 use super::*;
 use mesh_core_interaction::find_tooltip_text_by_key;

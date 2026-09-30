@@ -91,11 +91,16 @@ impl FrontendSurfaceComponent {
                 return Ok(requests);
             }
         }
-        let mut transaction = self.interaction_state.begin();
-        transaction.focus(self.focused_id, true);
-        self.commit_interaction_delta(transaction);
-        self.focus_visible_key = self.focused_key.clone();
-        self.focus_visible_id = self.focused_id;
+        // A key aimed at the focused element makes its focus visible. A lone
+        // modifier is not: it is usually half of a compositor shortcut, and
+        // lighting the ring on a button the pointer just clicked is noise.
+        if !is_modifier_key(&key) {
+            let mut transaction = self.interaction_state.begin();
+            transaction.focus(self.focused_id, true);
+            self.commit_interaction_delta(transaction);
+            self.focus_visible_key = self.focused_key.clone();
+            self.focus_visible_id = self.focused_id;
+        }
         if let Some(focused_key) = focused_key {
             let mut requests = self.dispatch_focused_keyboard_handler(
                 tree,
@@ -211,12 +216,10 @@ impl FrontendSurfaceComponent {
         key: String,
         modifiers: KeyModifiers,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
+        // Release never changes focus visibility: the press already decided
+        // it, and releasing the keys of a compositor shortcut after clicking
+        // a button must not paint that button's focus ring.
         let keyboard_settings = self.current_keyboard_settings();
-        let mut transaction = self.interaction_state.begin();
-        transaction.focus(self.focused_id, true);
-        self.commit_interaction_delta(transaction);
-        self.focus_visible_key = self.focused_key.clone();
-        self.focus_visible_id = self.focused_id;
         let normalized_focused_key = self.normalized_focused_key(tree);
         if let Some(focused_key) = normalized_focused_key {
             let mut requests = self.dispatch_focused_keyboard_handler(
@@ -523,7 +526,9 @@ impl FrontendSurfaceComponent {
                 .or_insert_with(Vec::new)
                 .push(format_shortcut_for_accessibility(shortcut));
         }
+        static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         *self.resolved_surface_shortcuts_cache.borrow_mut() = Some(ResolvedSurfaceShortcutsCache {
+            generation: GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             keyboard_settings: keyboard_settings.clone(),
             locale: active_locale,
             shortcuts: resolved.clone(),
@@ -1259,4 +1264,20 @@ mod shortcut_annotation_tests {
         );
         assert!(new_time < old_time);
     }
+}
+
+/// XKB keysym names of keys that only modify other keys.
+fn is_modifier_key(key: &str) -> bool {
+    const PREFIXES: [&str; 8] = [
+        "Shift",
+        "Control",
+        "Alt",
+        "Super",
+        "Meta",
+        "Hyper",
+        "ISO_Level",
+        "Mode_switch",
+    ];
+    PREFIXES.iter().any(|prefix| key.starts_with(prefix))
+        || matches!(key, "Caps_Lock" | "Num_Lock" | "Scroll_Lock")
 }

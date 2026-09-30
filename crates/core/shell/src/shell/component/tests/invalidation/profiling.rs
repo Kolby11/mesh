@@ -86,6 +86,7 @@ fn phase44_focused_proof_preserves_invalidation_and_damage_payloads() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
     component.set_profiling_enabled(true);
+    component.focused_proof_enabled = true;
     let mut buffer = PixelBuffer::new(960, 80);
 
     component

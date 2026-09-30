@@ -1734,6 +1734,7 @@ fn phase44_navigation_behavior_survives_focused_proof_path() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
     component.visible = true;
+    component.focused_proof_enabled = true;
 
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(960, 80);

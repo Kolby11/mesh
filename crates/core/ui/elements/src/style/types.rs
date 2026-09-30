@@ -810,6 +810,12 @@ pub struct ComputedStyle {
     /// Per-element tooltip offset override in CSS pixels (horizontal, vertical).
     /// Set via the `tooltip-offset` CSS property. `None` uses the shell default.
     pub tooltip_offset: Option<(f32, f32)>,
+    /// Set when a transition wrote an interpolated sample over this style's
+    /// animatable values. Resolution builds a fresh style with it cleared, so
+    /// while it is set nothing has restyled the node since that sample and its
+    /// animatable values are not the authored ones — a frame that reuses the
+    /// retained style must not read them as a new transition target.
+    pub animated_sample: bool,
 }
 
 impl Default for ComputedStyle {
@@ -880,6 +886,7 @@ impl Default for ComputedStyle {
             icon_optical_size: None,
             tooltip_anchor: TooltipAnchor::Auto,
             tooltip_offset: None,
+            animated_sample: false,
         }
     }
 }

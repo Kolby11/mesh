@@ -914,7 +914,14 @@ impl ShellComponent for FrontendSurfaceComponent {
             && self.last_tree.is_some()
             && !self.render_hooks_pending
             && !combined_script_and_interaction_update;
-        let run_style_animation_pass = self.should_run_style_animation_pass();
+        // Mirrors `finalize_tree`'s paint-only restyle: the retained styles are
+        // reused as they are, so no transition can start this frame.
+        let styles_unchanged = use_retained_style_path
+            && !dirty_types.is_empty()
+            && dirty_types
+                .difference(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS)
+                .is_empty();
+        let run_style_animation_pass = self.should_run_style_animation_pass(styles_unchanged);
         let previous_visual_styles = if run_style_animation_pass && self.last_tree.is_some() {
             self.take_previous_visual_styles()
         } else {
@@ -959,6 +966,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.prune_stale_interaction_targets(&tree);
         self.apply_pending_auto_focus(&tree);
         self.apply_pending_embedded_popover_focus(&tree);
+        #[cfg(test)]
+        {
+            self.style_animation_passes += u64::from(run_style_animation_pass);
+        }
         let mut animation_dirty_roots = if run_style_animation_pass {
             self.apply_style_animations_with_previous(
                 &mut tree,
@@ -1209,7 +1220,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 .select_paint_commands_for_rects(&effective_damage.rects, effective_damage.policy)
         };
         #[cfg(test)]
-        {
+        if self.focused_proof_enabled {
             let focused_proof_snapshot = mesh_core_render::build_focused_proof_snapshot(
                 &tree,
                 render_object_dirty,
@@ -1679,6 +1690,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             return false;
         }
         self.last_frontend_frame = None;
+        self.failed_runtime_creations.get_mut().clear();
 
         let runtimes = std::mem::take(&mut *self.runtimes.lock().unwrap());
         let mut retained = HashMap::with_capacity(runtimes.len());
@@ -2162,11 +2174,14 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn wants_immediate_rerender(&self) -> bool {
-        if !self.wants_render() {
+        // Only dirt the pass just raised and left unresolved asks for a second
+        // pass before present. A live transition, keyframe, smooth scroll, or
+        // momentum keeps `wants_render` true and re-arms the next frame; taking
+        // that as a corrective pass paints every animated frame twice.
+        if !(self.dirty || self.style_only_dirty) || self.next_frame_only_dirty {
             return false;
         }
         let configure_only = !self.dirty
-            && self.style_only_dirty
             && !self.dirty_types.is_empty()
             && self
                 .dirty_types

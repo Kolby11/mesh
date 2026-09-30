@@ -1149,3 +1149,343 @@ fn animation_token_runtime_diagnostic_reaches_component() {
             if message.contains("animation.duration.fastest")
     ));
 }
+
+#[test]
+fn animation_token_diagnostic_follows_a_non_structural_class_change() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <box class="panel">
+    <box class="{itemClass}" />
+    <text content="{label}" />
+  </box>
+</template>
+
+<script lang="luau">
+itemClass = "item"
+label = "one"
+
+function relabel()
+    label = "two"
+end
+
+function breakItem()
+    itemClass = "item broken"
+end
+</script>
+
+<style>
+.panel { width: 40px; height: 20px; }
+.item { width: 10px; height: 10px; }
+.broken { animation-duration: var(--animation-duration-fastest); }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 40);
+    let extent = SurfaceExtent::unpadded(120, 40);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    let diagnostics = component.diagnostics.clone().expect("diagnostics handle");
+    assert_eq!(diagnostics.error_count(), 0);
+
+    // An unrelated change diagnoses only its own node.
+    component.call_namespaced_handler("relabel", &[]).unwrap();
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    assert_eq!(diagnostics.error_count(), 0);
+
+    // The class change keeps the structure and dirties one node; that node
+    // must still be diagnosed.
+    component.call_namespaced_handler("breakItem", &[]).unwrap();
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    assert!(matches!(
+        diagnostics.health(),
+        mesh_core_diagnostics::HealthStatus::Error(message)
+            if message.contains("animation.duration.fastest")
+    ));
+}
+
+/// The render loop paints a surface again before presenting whenever
+/// `wants_immediate_rerender` is true. A running animation re-arms the next
+/// frame; it must not also ask for that corrective pass, or every animated
+/// frame is restyled, laid out, and painted twice.
+#[test]
+fn a_running_animation_rearms_the_next_frame_without_a_second_pass() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box class="panel" /></template>
+<style>
+.panel { animation: pulse 1000ms linear infinite; }
+@keyframes pulse { 0% { opacity: 0; } 100% { opacity: 1; } }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 40);
+    // The first paint measures the surface and legitimately owes a configure.
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
+    for _ in 0..2 {
+        component
+            .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+            .unwrap();
+        assert!(
+            component.wants_render(),
+            "the animation keeps frames coming"
+        );
+        assert!(!component.wants_immediate_rerender());
+    }
+
+    // Unrelated dirt on top of the re-arm is resolved in the same frame.
+    component.invalidate_paint();
+    assert!(component.wants_immediate_rerender());
+}
+
+const MOMENTUM_SCROLL_SOURCE: &str = r#"
+<style>
+scroll { width: 100px; height: 100px; overflow-y: auto; }
+.content { width: 100px; height: 400px; flex-shrink: 0; }
+</style>
+<template><scroll><box class="content" /></scroll></template>
+"#;
+
+/// Momentum only moves a scroll offset. Its ticks must take the paint-only
+/// path direct finger input takes, not a full restyle.
+#[test]
+fn momentum_ticks_are_paint_only_and_do_not_request_a_second_pass() {
+    let mut component = test_frontend_component(MOMENTUM_SCROLL_SOURCE);
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(160, 120);
+    let mut buffer = PixelBuffer::new(160, 120);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+
+    for _ in 0..3 {
+        component
+            .handle_input(
+                &theme,
+                160,
+                120,
+                ComponentInput::TwoFingerScroll {
+                    x: 20.0,
+                    y: 20.0,
+                    dx: 0.0,
+                    dy: -12.0,
+                },
+            )
+            .unwrap();
+        component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    }
+    let node_id = *component
+        .scroll_inertia
+        .keys()
+        .next()
+        .expect("finger input arms momentum");
+
+    // Inside momentum's start delay the tick moves nothing: it only keeps
+    // frames coming.
+    assert_eq!(component.dirty_types, ComponentDirtyFlags::PAINT);
+    assert!(!component.wants_immediate_rerender());
+
+    // After the delay the tick moves the offset.
+    let before = component.scroll_offsets[&node_id].y;
+    let inertia = component.scroll_inertia.get_mut(&node_id).unwrap();
+    inertia.last_input -= Duration::from_millis(100);
+    inertia.last_tick -= Duration::from_millis(16);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    assert_eq!(component.last_dirty_types, ComponentDirtyFlags::PAINT);
+    assert!(component.scroll_offsets[&node_id].y > before);
+    assert!(component.wants_render());
+    assert_eq!(
+        component.dirty_types,
+        ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS,
+        "a tick that moved the offset re-arms a paint plus scroll metrics, never STYLE"
+    );
+    assert!(!component.wants_immediate_rerender());
+
+    // The next frame paints the moved offset without restyling.
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    assert!(
+        !component
+            .last_dirty_types
+            .contains(ComponentDirtyFlags::STYLE)
+    );
+}
+
+#[test]
+fn smooth_scroll_ticks_are_paint_only_and_do_not_request_a_second_pass() {
+    let mut component = test_frontend_component(MOMENTUM_SCROLL_SOURCE);
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(160, 120);
+    let mut buffer = PixelBuffer::new(160, 120);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+
+    component.scroll_animations.insert(
+        runtime_node_id_for_key("root/0"),
+        ScrollAnimation {
+            start: ScrollOffsetState::default(),
+            target: ScrollOffsetState { x: 0.0, y: 80.0 },
+            start_time: Instant::now()
+                .checked_sub(Duration::from_millis(50))
+                .unwrap(),
+            duration: Duration::from_secs(60),
+        },
+    );
+    component.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+
+    assert_eq!(
+        component.dirty_types,
+        ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS
+    );
+    assert!(component.wants_render());
+    assert!(!component.wants_immediate_rerender());
+}
+
+/// A declared transition makes every frame eligible for the style-animation
+/// pass, but a paint-only frame reuses the retained styles and cannot start
+/// one. With nothing live it skips the pass; a restyle still runs it.
+#[test]
+fn paint_only_frames_skip_the_style_animation_pass_when_nothing_is_live() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box class="panel" /></template>
+<style>
+.panel { width: 40px; height: 20px; opacity: 1; transition: opacity 200ms linear; }
+.panel:hover { opacity: 0.5; }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(120, 40);
+    let mut buffer = PixelBuffer::new(120, 40);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    assert!(component.transitions.is_empty());
+
+    let before = component.style_animation_passes;
+    component.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    assert_eq!(component.style_animation_passes, before);
+
+    // Hover restyles, so the pass runs and starts the transition.
+    component
+        .handle_input(
+            &theme,
+            120,
+            40,
+            ComponentInput::PointerMove { x: 10.0, y: 10.0 },
+        )
+        .unwrap();
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    assert_eq!(component.style_animation_passes, before + 1);
+    assert!(
+        !component.transitions.is_empty(),
+        "the hover transition starts"
+    );
+
+    // While it runs, even a paint-only frame samples it.
+    component.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    assert_eq!(component.style_animation_passes, before + 2);
+}
+
+const SCROLL_LIST_SOURCE: &str = r#"
+<style>
+scroll { width: 100px; height: 100px; overflow-y: auto; }
+.row { width: 100px; height: 20px; flex-shrink: 0; background-color: #336699; }
+.row.alt { background-color: #994433; }
+</style>
+<template>
+  <scroll>
+    <box class="row" /><box class="row alt" /><box class="row" /><box class="row alt" />
+    <box class="row" /><box class="row alt" /><box class="row" /><box class="row alt" />
+    <box class="row" /><box class="row alt" /><box class="row" /><box class="row alt" />
+  </scroll>
+</template>
+"#;
+
+fn scroll_by(component: &mut FrontendSurfaceComponent, theme: &Theme, dy: f32) {
+    component
+        .handle_input(
+            theme,
+            120,
+            120,
+            ComponentInput::TwoFingerScroll {
+                x: 20.0,
+                y: 20.0,
+                dx: 0.0,
+                dy,
+            },
+        )
+        .unwrap();
+}
+
+/// Consecutive scroll frames change nothing but a scroll offset, so after the
+/// first paint-only frame they skip the full annotation walk — and must paint
+/// exactly what the full walk paints.
+#[test]
+fn consecutive_scroll_frames_annotate_only_scroll_offsets() {
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(120, 120);
+    let mut fast = test_frontend_component(SCROLL_LIST_SOURCE);
+    let mut full = test_frontend_component(SCROLL_LIST_SOURCE);
+    let mut fast_buffer = PixelBuffer::new(120, 120);
+    let mut full_buffer = PixelBuffer::new(120, 120);
+    for component in [&mut fast, &mut full] {
+        component.motion_policy.reduced_motion = true;
+    }
+    for _ in 0..2 {
+        fast.paint(&theme, extent, &mut fast_buffer, 1.0).unwrap();
+        full.paint(&theme, extent, &mut full_buffer, 1.0).unwrap();
+    }
+
+    for _ in 0..6 {
+        scroll_by(&mut fast, &theme, -9.0);
+        scroll_by(&mut full, &theme, -9.0);
+        // No stored inputs forces the full walk.
+        full.paint_only_annotation_inputs = None;
+        fast.paint(&theme, extent, &mut fast_buffer, 1.0).unwrap();
+        full.paint(&theme, extent, &mut full_buffer, 1.0).unwrap();
+        assert_eq!(fast_buffer.data(), full_buffer.data());
+    }
+    assert!(fast.scroll_only_annotation_frames >= 4);
+    assert_eq!(full.scroll_only_annotation_frames, 0);
+    let viewport = runtime_node_id_for_key("root/0");
+    let offset = fast.scroll_offsets[&viewport];
+    assert!(offset.y > 40.0);
+    let metrics = first_node_by_tag(fast.last_tree.as_ref().unwrap(), "scroll")
+        .unwrap()
+        .resolved_scroll_metrics();
+    assert_eq!(metrics.y, offset.y);
+}
+
+/// A paint-only frame can still change interaction state (e.g. a text
+/// selection clears the pressed node). Changed inputs take the full walk.
+#[test]
+fn paint_only_frame_with_changed_interaction_state_takes_the_full_annotation() {
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(120, 120);
+    let mut component = test_frontend_component(SCROLL_LIST_SOURCE);
+    let mut buffer = PixelBuffer::new(120, 120);
+    // The first paint owes a configure pass; settle before the paint-only frame.
+    for _ in 0..2 {
+        component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    }
+    component.invalidate_paint();
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    assert!(component.paint_only_annotation_inputs.is_some());
+
+    let row = first_node_with_class_token(component.last_tree.as_ref().unwrap(), "row")
+        .unwrap()
+        .id;
+    component.pointer_down_id = Some(row);
+    component.invalidate_paint();
+    let before = component.scroll_only_annotation_frames;
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    assert_eq!(component.scroll_only_annotation_frames, before);
+    let active = first_node_with_class_token(component.last_tree.as_ref().unwrap(), "row").unwrap();
+    assert!(
+        active.state.active,
+        "the pressed node is projected as :active"
+    );
+}

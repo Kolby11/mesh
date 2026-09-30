@@ -82,11 +82,17 @@ pub(super) fn keyframe_rule_animation_bucket(rule: &RenderKeyframeRule) -> Anima
 }
 
 impl FrontendSurfaceComponent {
-    pub(super) fn should_run_style_animation_pass(&self) -> bool {
-        self.has_animatable_style_rules
-            || !self.transitions.is_empty()
+    /// Whether this frame must sample style animations. A live transition or
+    /// keyframe animation always needs sampling. Otherwise the pass exists to
+    /// start transitions from restyled values, so a frame whose styles were
+    /// not re-resolved (`styles_unchanged`, a paint-only retained frame)
+    /// cannot start one and skips it — though any rule declaring a transition,
+    /// as the default theme's `node {}` does, sets `has_animatable_style_rules`.
+    pub(super) fn should_run_style_animation_pass(&self, styles_unchanged: bool) -> bool {
+        !self.transitions.is_empty()
             || !self.keyframe_animations.is_empty()
             || self.has_active_keyframe_animation
+            || (self.has_animatable_style_rules && !styles_unchanged)
     }
 
     #[cfg(test)]

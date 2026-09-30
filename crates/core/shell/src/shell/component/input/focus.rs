@@ -266,16 +266,19 @@ impl FrontendSurfaceComponent {
         if self.focused_key.is_some() {
             return;
         }
+        // Focus without a ring: a surface shown by a pointer click or at
+        // startup must not paint one. The first key press makes it visible,
+        // and keyboard-driven entry (Tab transfer) sets visibility itself.
         if let Some(first) = next_focus_target(tree, None, false) {
             self.input_preedits.clear();
             let node_id = find_node_by_key(tree, &first).map(|node| node.id);
             let mut transaction = self.interaction_state.begin();
-            transaction.focus(node_id, true);
+            transaction.focus(node_id, false);
             self.commit_interaction_delta(transaction);
-            self.focused_key = Some(first.clone());
-            self.focus_visible_key = Some(first);
+            self.focused_key = Some(first);
+            self.focus_visible_key = None;
             self.focused_id = self.focused_key.as_deref().map(runtime_node_id_for_key);
-            self.focus_visible_id = self.focused_id;
+            self.focus_visible_id = None;
         }
     }
 

@@ -307,6 +307,7 @@ pub(super) fn compute_backdrop_regions(
         });
         if has_backdrop_content {
             regions.push(BackdropRegion {
+                node_id: command.node.id,
                 region,
                 reach: backdrop_kernel_reach(&command.node),
             });

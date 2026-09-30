@@ -127,6 +127,39 @@ fn display_list_retains_cumulative_transform_and_ancestor_clip() {
 }
 
 #[test]
+fn display_list_paints_scaled_descendants_through_the_affine_matrix() {
+    // A hover `scale(1.05)` on a button must scale its text with the canvas
+    // matrix. Painting into the scaled axis-aligned box snapped the text to
+    // whole pixels at its unscaled size, so it jumped up and down mid-animation.
+    let mut root = node(1, "box", 0.0, 0.0, 100.0, 40.0);
+    root.computed_style.transform.scale_x = 1.05;
+    root.computed_style.transform.scale_y = 1.05;
+    root.children.push(node(2, "text", 10.0, 5.0, 40.0, 13.0));
+    let mut translated = node(3, "box", 0.0, 50.0, 100.0, 40.0);
+    translated.computed_style.transform.translate_y = 2.5;
+    let mut container = node(0, "box", 0.0, 0.0, 200.0, 100.0);
+    container.children.push(root);
+    container.children.push(translated);
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&container, 200, 100, false, true);
+    let paint_node = |id| {
+        &list
+            .paint_commands()
+            .iter()
+            .find(|command| command.node.id == id && command.kind == DisplayPaintCommandKind::Node)
+            .expect("retained paint command")
+            .node
+    };
+
+    let text = paint_node(2);
+    assert!(text.requires_affine_paint());
+    assert_eq!(text.paint_width(), 40.0);
+    assert_eq!(text.paint_height(), 13.0);
+    assert!(!paint_node(3).requires_affine_paint());
+}
+
+#[test]
 fn display_list_rebuilds_descendant_geometry_after_ancestor_transform_changes() {
     let mut root = node(1, "box", 0.0, 0.0, 100.0, 80.0);
     root.computed_style.transform.rotation = std::f32::consts::FRAC_PI_4;

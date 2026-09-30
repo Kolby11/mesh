@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::display_list::{
-    CheckmarkKind, DisplayCheckmarkPaint, DisplayListClip, DisplayPaintCommand,
+    BackdropRegion, CheckmarkKind, DisplayCheckmarkPaint, DisplayListClip, DisplayPaintCommand,
     DisplayPaintCommandKind, DisplayPaintContent, DisplayPaintNode, RetainedDisplayList,
     SelectedDisplayListPaint,
 };
@@ -192,6 +192,7 @@ impl FrontendRenderEngine {
                 paint_nodes,
                 module_id,
                 &mut scratch.node_commands,
+                None,
             );
         }
         if !scratch.batched_commands.is_empty() {
@@ -256,6 +257,7 @@ impl FrontendRenderEngine {
                 paint_nodes,
                 module_id,
                 &mut scratch.node_commands,
+                Some(commands.backdrop_regions()),
             );
         }
         if !scratch.batched_commands.is_empty() {
@@ -325,6 +327,7 @@ impl FrontendRenderEngine {
                         paint_nodes,
                         module_id,
                         &mut scratch.node_commands,
+                        Some(commands.backdrop_regions()),
                     );
                 }
                 if !scratch.batched_commands.is_empty() {
@@ -374,6 +377,7 @@ impl FrontendRenderEngine {
                     paint_nodes,
                     module_id,
                     &mut scratch.node_commands,
+                    Some(commands.backdrop_regions()),
                 );
             }
         }
@@ -454,6 +458,7 @@ impl FrontendRenderEngine {
                 paint_nodes,
                 module_id,
                 &mut scratch.node_commands,
+                Some(commands.backdrop_regions()),
             );
             attribution.record(class, 1, started.elapsed());
         }
@@ -543,6 +548,7 @@ impl FrontendRenderEngine {
                         paint_nodes,
                         module_id,
                         &mut scratch.node_commands,
+                        Some(commands.backdrop_regions()),
                     );
                     attribution.record(class, 1, started.elapsed());
                 }
@@ -610,6 +616,7 @@ impl FrontendRenderEngine {
                     paint_nodes,
                     module_id,
                     &mut scratch.node_commands,
+                    Some(commands.backdrop_regions()),
                 );
                 attribution.record(class, 1, started.elapsed());
             }
@@ -642,7 +649,7 @@ impl FrontendRenderEngine {
         if paint_nodes.is_some_and(|nodes| !nodes.contains(&command.node.id)) {
             return false;
         }
-        if requires_affine_paint(&command.node) {
+        if command.node.requires_affine_paint() {
             return false;
         }
         if !matches!(command.node.content, DisplayPaintContent::None) {
@@ -663,6 +670,8 @@ impl FrontendRenderEngine {
         )
     }
 
+    /// `backdrop_regions` are the display list's in-surface backdrop read
+    /// regions when known; `None` blurs every in-surface backdrop.
     fn render_display_command(
         &self,
         command: &DisplayPaintCommand,
@@ -673,6 +682,7 @@ impl FrontendRenderEngine {
         paint_nodes: Option<&HashSet<mesh_core_elements::NodeId>>,
         module_id: Option<&str>,
         node_commands: &mut Vec<PainterCommand>,
+        backdrop_regions: Option<&[BackdropRegion]>,
     ) {
         // Layer scope commands are bookkeeping, not drawing: a push runs even
         // when its region is outside the damage clip or its node is filtered
@@ -699,6 +709,14 @@ impl FrontendRenderEngine {
                             property: Some("backdrop-filter".to_string()),
                         }),
                     });
+                    return;
+                }
+                // The display list only records a read region for a backdrop
+                // with painted content beneath it. Blurring an empty
+                // (transparent) backdrop changes no pixel, so skip the pass.
+                if backdrop_regions
+                    .is_some_and(|regions| !regions.iter().any(|r| r.node_id == command.node.id))
+                {
                     return;
                 }
                 let bounds = scaled_display_node_bounds(&command.node, scale);
@@ -788,7 +806,7 @@ impl FrontendRenderEngine {
             DisplayPaintCommandKind::Scrollbars => {
                 let bounds = scaled_display_node_bounds(&command.node, scale);
                 let node = &command.node;
-                if requires_affine_paint(node) {
+                if node.requires_affine_paint() {
                     let local_bounds = scaled_display_local_bounds(node, scale);
                     let local_clip = local_clip_for(node.transform, scale, clip);
                     let save_count = self.paint_backend.begin_affine_node(
@@ -831,7 +849,7 @@ impl FrontendRenderEngine {
         node_commands: &mut Vec<PainterCommand>,
         module_id: Option<&str>,
     ) {
-        if requires_affine_paint(node) {
+        if node.requires_affine_paint() {
             let local_bounds = scaled_display_local_bounds(node, scale);
             let local_clip = local_clip_for(node.transform, scale, clip);
             let save_count = self.paint_backend.begin_affine_node(
@@ -1254,13 +1272,6 @@ fn scaled_visual_filter(filter: VisualFilter, scale: f32) -> VisualFilter {
     VisualFilter {
         blur_radius: filter.blur_radius * scale,
     }
-}
-
-fn requires_affine_paint(node: &DisplayPaintNode) -> bool {
-    node.transform.m12.abs() > 0.0001
-        || node.transform.m21.abs() > 0.0001
-        || node.transform.m11 < -0.0001
-        || node.transform.m22 < -0.0001
 }
 
 fn scaled_display_local_bounds(node: &DisplayPaintNode, scale: f32) -> ClipRect {

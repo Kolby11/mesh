@@ -114,9 +114,18 @@ impl FrontendSurfaceComponent {
                         .cloned(),
                 );
             }
+            // Imported component modules render inside this surface too, and so
+            // do the modules *they* import (e.g. navigation-bar → theme-selector
+            // → bubble-options). Follow imports transitively; stopping at the
+            // first level restyles nested module nodes from theme defaults.
             imported_module_ids.sort();
             imported_module_ids.dedup();
-            for module_id in imported_module_ids {
+            imported_module_ids.reverse();
+            let mut visited = std::collections::HashSet::new();
+            while let Some(module_id) = imported_module_ids.pop() {
+                if module_id == self.id() || !visited.insert(module_id.clone()) {
+                    continue;
+                }
                 let Some(entry) = self.frontend_catalog.modules.get(&module_id) else {
                     continue;
                 };
@@ -128,6 +137,14 @@ impl FrontendSurfaceComponent {
                         rules.extend(style.rules.iter().cloned());
                     }
                 }
+                imported_module_ids.extend(
+                    entry
+                        .compiled
+                        .module_component_imports
+                        .values()
+                        .filter(|nested| !visited.contains(*nested))
+                        .cloned(),
+                );
             }
             let mut state_dependencies = StyleStateDependencies::default();
             for rule in &rules {
@@ -546,37 +563,68 @@ impl FrontendSurfaceComponent {
             && !self.surface_entering
             && self.closing_child_keys.is_empty()
             && self.entering_child_keys.is_empty();
-        let shortcut_cache = self.resolved_surface_shortcuts_cache.borrow();
-        let mut annotation_context = RuntimeAnnotationContext::new(
-            self.focused_id
-                .or_else(|| self.focused_key.as_deref().map(runtime_node_id_for_key)),
-            self.focus_visible_id.or_else(|| {
-                self.focus_visible_key
-                    .as_deref()
-                    .map(runtime_node_id_for_key)
-            }),
-            &self.hovered_path,
-            self.pointer_down_id,
-            self.active_slider_id,
-            &self.input_values,
-            &self.input_preedits,
-            &mut self.slider_values,
-            &mut self.slider_script_values,
-            &self.checked_values,
-            &mut self.scroll_offsets,
-        )
-        .with_retained_tree(scoped_finalize)
-        .with_window_state(self.window_states)
-        .with_promoted_windows(&self.promoted_window_keys)
-        .with_shortcuts(
-            shortcut_cache
+        // A paint-only frame on the retained tree whose annotation inputs are
+        // unchanged since the previous paint-only frame can only have moved a
+        // scroll offset; see `RuntimeAnnotationInputs`.
+        let paint_only_annotation = trigger_kind == "restyle"
+            && scoped_finalize
+            && !dirty_types.is_empty()
+            && dirty_types
+                .difference(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS)
+                .is_empty();
+        let scroll_only_annotation = paint_only_annotation
+            && self
+                .paint_only_annotation_inputs
                 .as_ref()
-                .map(|cache| &cache.shortcuts_by_keybind),
-        );
-        annotate_runtime_and_overflow_tree(tree, "root".to_string(), &mut annotation_context);
-        let mut annotation_dirty = std::mem::take(&mut annotation_context.changed);
-        drop(annotation_context);
-        drop(shortcut_cache);
+                .is_some_and(|inputs| self.annotation_inputs_match(inputs));
+        let mut annotation_dirty = if scroll_only_annotation {
+            #[cfg(test)]
+            {
+                self.scroll_only_annotation_frames += 1;
+            }
+            annotate_scroll_offsets_only(tree, &mut self.scroll_offsets);
+            HashSet::new()
+        } else {
+            let shortcut_cache = self.resolved_surface_shortcuts_cache.borrow();
+            let mut annotation_context = RuntimeAnnotationContext::new(
+                self.focused_id
+                    .or_else(|| self.focused_key.as_deref().map(runtime_node_id_for_key)),
+                self.focus_visible_id.or_else(|| {
+                    self.focus_visible_key
+                        .as_deref()
+                        .map(runtime_node_id_for_key)
+                }),
+                &self.hovered_path,
+                self.pointer_down_id,
+                self.active_slider_id,
+                &self.input_values,
+                &self.input_preedits,
+                &mut self.slider_values,
+                &mut self.slider_script_values,
+                &self.checked_values,
+                &mut self.scroll_offsets,
+            )
+            .with_retained_tree(scoped_finalize)
+            .with_window_state(self.window_states)
+            .with_promoted_windows(&self.promoted_window_keys)
+            .with_shortcuts(
+                shortcut_cache
+                    .as_ref()
+                    .map(|cache| &cache.shortcuts_by_keybind),
+            );
+            annotate_runtime_and_overflow_tree(tree, "root".to_string(), &mut annotation_context);
+            let changed = std::mem::take(&mut annotation_context.changed);
+            drop(annotation_context);
+            drop(shortcut_cache);
+            changed
+        };
+        self.paint_only_annotation_inputs = if !paint_only_annotation {
+            None
+        } else if scroll_only_annotation {
+            self.paint_only_annotation_inputs.take()
+        } else {
+            Some(self.capture_annotation_inputs())
+        };
         if self.surface_exiting {
             append_class_recursive(tree, "mesh-surface-exiting");
             tree.attributes
@@ -618,7 +666,7 @@ impl FrontendSurfaceComponent {
             container_height: height as f32,
         };
         let restyle_started = std::time::Instant::now();
-        let collect_style_attribution = self.profiling_enabled;
+        let collect_style_attribution = self.profiling_enabled && self.style_rule_attribution;
         let restyle_rules = self
             .cached_restyle_rules
             .as_deref()
@@ -967,6 +1015,62 @@ impl FrontendSurfaceComponent {
     /// Compares every interaction-driven pseudo-state against the previous
     /// frame and returns only nodes whose changed state is referenced by this
     /// surface's selectors.
+    fn resolved_annotation_focus(&self) -> (Option<NodeId>, Option<NodeId>) {
+        (
+            self.focused_id
+                .or_else(|| self.focused_key.as_deref().map(runtime_node_id_for_key)),
+            self.focus_visible_id.or_else(|| {
+                self.focus_visible_key
+                    .as_deref()
+                    .map(runtime_node_id_for_key)
+            }),
+        )
+    }
+
+    fn shortcuts_generation(&self) -> Option<u64> {
+        self.resolved_surface_shortcuts_cache
+            .borrow()
+            .as_ref()
+            .map(|cache| cache.generation)
+    }
+
+    fn capture_annotation_inputs(&self) -> RuntimeAnnotationInputs {
+        let (focused_id, focus_visible_id) = self.resolved_annotation_focus();
+        RuntimeAnnotationInputs {
+            focused_id,
+            focus_visible_id,
+            hovered_path: self.hovered_path.clone(),
+            active_id: self.pointer_down_id,
+            active_slider_id: self.active_slider_id,
+            window: self.window_states,
+            promoted_windows: self.promoted_window_keys.clone(),
+            input_values: self.input_values.clone(),
+            input_preedits: self.input_preedits.clone(),
+            checked_values: self.checked_values.clone(),
+            slider_values: self.slider_values.clone(),
+            slider_script_values: self.slider_script_values.clone(),
+            shortcuts_generation: self.shortcuts_generation(),
+        }
+    }
+
+    /// `capture_annotation_inputs() == *inputs`, without cloning.
+    fn annotation_inputs_match(&self, inputs: &RuntimeAnnotationInputs) -> bool {
+        let (focused_id, focus_visible_id) = self.resolved_annotation_focus();
+        inputs.focused_id == focused_id
+            && inputs.focus_visible_id == focus_visible_id
+            && inputs.hovered_path == self.hovered_path
+            && inputs.active_id == self.pointer_down_id
+            && inputs.active_slider_id == self.active_slider_id
+            && inputs.window == self.window_states
+            && inputs.promoted_windows == self.promoted_window_keys
+            && inputs.input_values == self.input_values
+            && inputs.input_preedits == self.input_preedits
+            && inputs.checked_values == self.checked_values
+            && inputs.slider_values == self.slider_values
+            && inputs.slider_script_values == self.slider_script_values
+            && inputs.shortcuts_generation == self.shortcuts_generation()
+    }
+
     pub(super) fn collect_interaction_changed_node_ids(&self) -> InteractionChangedNodeIds {
         let dependencies = self.cached_restyle_state_dependencies;
         let mut changed_ids =
@@ -1215,10 +1319,30 @@ impl FrontendSurfaceComponent {
             container_width: context.container_width.to_bits(),
             container_height: context.container_height.to_bits(),
         };
+        let previous = self.runtime_style_diagnostic_fingerprint;
         if !runtime_style_diagnostic_inputs_changed(
             &mut self.runtime_style_diagnostic_fingerprint,
             fingerprint,
         ) {
+            return;
+        }
+        // Diagnostics are a per-node function of the node's own style inputs
+        // under fixed rules, props, and container size. When this retained
+        // update is the only one since the last diagnosed tree and it kept
+        // the structure, only the nodes it marked style/attribute/state dirty
+        // can report anything new.
+        let dirty = self.retained_tree.last_dirty();
+        let scoped = previous.is_some_and(|previous| {
+            RuntimeStyleDiagnosticFingerprint {
+                retained_tree_generation: fingerprint.retained_tree_generation,
+                ..previous
+            } == fingerprint
+                && previous.retained_tree_generation.checked_add(1)
+                    == Some(fingerprint.retained_tree_generation)
+        }) && dirty.inserted == 0
+            && dirty.removed == 0
+            && dirty.children == 0;
+        if scoped && dirty.style == 0 && dirty.attributes == 0 && dirty.state == 0 {
             return;
         }
 
@@ -1231,10 +1355,58 @@ impl FrontendSurfaceComponent {
             .cached_style_rule_index
             .as_ref()
             .expect("style index cache populated during tree finalization");
+        if scoped {
+            self.record_runtime_style_diagnostics_for_dirty_nodes(
+                tree,
+                restyle_rules,
+                style_index,
+                &resolver,
+                context,
+            );
+            return;
+        }
         self.record_runtime_style_diagnostics(tree, restyle_rules, style_index, &resolver, context);
     }
 
+    fn record_runtime_style_diagnostics_for_dirty_nodes(
+        &self,
+        node: &mut WidgetNode,
+        rules: &[mesh_core_component::style::StyleRule],
+        index: &mesh_core_elements::StyleRuleIndex,
+        resolver: &StyleResolver,
+        context: StyleContext,
+    ) {
+        if self.retained_tree.dirty_flags_for(node.id).intersects(
+            super::runtime_tree::RetainedNodeDirtyFlags::STYLE
+                | super::runtime_tree::RetainedNodeDirtyFlags::ATTRIBUTES
+                | super::runtime_tree::RetainedNodeDirtyFlags::STATE,
+        ) {
+            self.record_runtime_style_diagnostics_for_single_node(
+                node, rules, index, resolver, context,
+            );
+        }
+        for child in &mut node.children {
+            self.record_runtime_style_diagnostics_for_dirty_nodes(
+                child, rules, index, resolver, context,
+            );
+        }
+    }
+
     fn record_runtime_style_diagnostics_for_node(
+        &self,
+        node: &mut WidgetNode,
+        rules: &[mesh_core_component::style::StyleRule],
+        index: &mesh_core_elements::StyleRuleIndex,
+        resolver: &StyleResolver,
+        context: StyleContext,
+    ) {
+        self.record_runtime_style_diagnostics_for_single_node(node, rules, index, resolver, context);
+        for child in &mut node.children {
+            self.record_runtime_style_diagnostics_for_node(child, rules, index, resolver, context);
+        }
+    }
+
+    fn record_runtime_style_diagnostics_for_single_node(
         &self,
         node: &mut WidgetNode,
         rules: &[mesh_core_component::style::StyleRule],
@@ -1251,10 +1423,6 @@ impl FrontendSurfaceComponent {
             {
                 self.record_runtime_animation_diagnostic(diagnostic.message);
             }
-        }
-
-        for child in &mut node.children {
-            self.record_runtime_style_diagnostics_for_node(child, rules, index, resolver, context);
         }
     }
 }

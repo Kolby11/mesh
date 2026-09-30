@@ -255,9 +255,19 @@ impl PaintBackend for TestPaintBackend {
 pub(super) struct RecordingPaintBackend {
     commands: Arc<Mutex<Vec<PainterCommand>>>,
     execute_call_sizes: Arc<Mutex<Vec<usize>>>,
+    backdrop_blur: bool,
 }
 
 impl RecordingPaintBackend {
+    /// A recorder that reports in-surface backdrop blur support, so the
+    /// painter emits its backdrop `ApplyFilter` commands.
+    pub(super) fn with_backdrop_blur() -> Self {
+        Self {
+            backdrop_blur: true,
+            ..Self::default()
+        }
+    }
+
     pub(super) fn recorded_commands(&self) -> Vec<PainterCommand> {
         self.commands
             .lock()
@@ -290,7 +300,7 @@ impl PaintBackend for RecordingPaintBackend {
             images: false,
             shadows: true,
             filters: true,
-            backdrop_blur: false,
+            backdrop_blur: self.backdrop_blur,
             blend_modes: true,
         }
     }

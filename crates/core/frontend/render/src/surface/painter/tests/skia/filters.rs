@@ -85,6 +85,57 @@ fn in_surface_backdrop_filter_uses_the_validated_renderer_fallback() {
     assert!(engine.painter_diagnostics().is_empty());
 }
 
+fn recorded_backdrop_filters(root: &WidgetNode) -> usize {
+    let mut list = RetainedDisplayList::default();
+    list.set_backdrop_blur_policy(BackdropBlurPolicy::InSurfaceFilter);
+    list.update(root, 32, 32, true, true);
+    let selected = list.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 32,
+            height: 32,
+        }),
+        DisplayListRepaintPolicy::FullSurface,
+    );
+    let backend = RecordingPaintBackend::with_backdrop_blur();
+    let engine = FrontendRenderEngine::with_paint_backend(Box::new(backend.clone()));
+    let mut buffer = PixelBuffer::new(32, 32);
+    engine.render_selected_display_list_for_module(&selected, &mut buffer, 1.0, None, None, None);
+    backend
+        .recorded_commands()
+        .iter()
+        .filter(|command| {
+            matches!(
+                command,
+                PainterCommand::ApplyFilter {
+                    filter: PainterFilter::Backdrop(_),
+                    ..
+                }
+            )
+        })
+        .count()
+}
+
+/// A backdrop with nothing painted beneath it in the surface is transparent,
+/// and blurring transparent pixels changes nothing — e.g. a bar whose root
+/// carries the `backdrop-filter`. The painter skips that pass.
+#[test]
+fn in_surface_backdrop_filter_skips_an_empty_backdrop() {
+    let mut root = backdrop_blur_scene(Color::TRANSPARENT);
+    // Drop the painted left/right boxes: only the frosted node remains.
+    root.children.drain(..2);
+    assert_eq!(recorded_backdrop_filters(&root), 0);
+
+    let with_content = backdrop_blur_scene(Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    });
+    assert_eq!(recorded_backdrop_filters(&with_content), 1);
+}
+
 #[test]
 fn unsupported_in_surface_backdrop_filter_is_rejected_with_diagnostic() {
     let root = backdrop_blur_scene(Color {

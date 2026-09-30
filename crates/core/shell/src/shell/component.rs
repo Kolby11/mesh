@@ -47,8 +47,8 @@ pub(in crate::shell) use mesh_core_interaction::ScrollOffsetState;
 use runtime_tree::stable_runtime_node_id;
 use runtime_tree::{
     NodeServiceFieldDependencies, RetainedWidgetTree, RuntimeAnnotationContext,
-    annotate_runtime_and_overflow_tree, collect_element_metrics, input_accepts_char,
-    runtime_node_id_for_key,
+    RuntimeAnnotationInputs, annotate_runtime_and_overflow_tree, annotate_scroll_offsets_only,
+    collect_element_metrics, input_accepts_char, runtime_node_id_for_key,
 };
 
 use mesh_core_capability::EffectiveCapabilities;
@@ -977,9 +977,15 @@ pub(super) struct FrontendSurfaceComponent {
     selection_annotation: Option<(TextSelectionState, [u32; 4], String, String)>,
     #[cfg(test)]
     force_full_retained_update: bool,
+    #[cfg(test)]
+    style_animation_passes: u64,
     /// True only when the pending style frame was requested exclusively by
     /// the animation pass. Any unrelated invalidation clears this marker.
     animation_only_dirty: bool,
+    /// True while every pending invalidation is a next-frame re-arm from a
+    /// live style animation or scroll tick. Such dirt is resolved by the next
+    /// presented frame, never by an immediate corrective pass.
+    next_frame_only_dirty: bool,
     node_service_field_deps: NodeServiceFieldDependencies,
     /// Template nodes whose tracked service fields changed since the last
     /// paint. `None` means a narrow invalidation without an authoritative
@@ -1053,6 +1059,12 @@ pub(super) struct FrontendSurfaceComponent {
     has_active_keyframe_animation: bool,
     has_promoted_popover_wrappers: Cell<bool>,
     has_error_placeholders: Cell<bool>,
+    /// Instances whose runtime creation failed in a way no later frame can
+    /// change: an interface with no provider, or a capability not granted.
+    /// Both are fixed for this component's catalog, so retrying rebuilt a
+    /// whole Luau context per instance on every frame. Holds the placeholder
+    /// message; cleared wherever the runtime map is rebuilt.
+    pub(super) failed_runtime_creations: RefCell<HashMap<Arc<str>, String>>,
     /// Memoized built subtrees for embedded/local component instances, keyed
     /// by instance key. An entry is reused wholesale on rebuild when the
     /// instance's props, script-state generations (own + descendants), theme,
@@ -1081,10 +1093,21 @@ pub(super) struct FrontendSurfaceComponent {
     narrow_path_active: bool,
     affected_node_count: u64,
     profiling_enabled: bool,
+    /// Break restyle time down per style rule while profiling. Timing every
+    /// rule costs a `clock_gettime` pair per match and inflates the restyle it
+    /// measures, so it is opt-in: `MESH_PROFILE_STYLE_RULES=1`.
+    pub(super) style_rule_attribution: bool,
     profiling_records: RefCell<Vec<ComponentProfilingRecord>>,
     invalidation_snapshot: Option<mesh_core_debug::ProfilingInvalidationSnapshot>,
     #[cfg(test)]
     focused_proof_snapshot: Option<mesh_core_render::FocusedProofSnapshot>,
+    /// Build the focused renderer proof on every paint. On in debug test
+    /// builds, where it checks renderer invariants across the suite; off in
+    /// release test builds, the profile every frame benchmark runs in, where
+    /// it would add ~10% to each measured frame. Tests that assert on the
+    /// proof turn it on explicitly.
+    #[cfg(test)]
+    pub(super) focused_proof_enabled: bool,
     last_present_damage_rects: Vec<DamageRect>,
     last_visual_damage: HashMap<NodeId, DamageRect>,
     tooltip_damage_scratch: Vec<DamageRect>,
@@ -1134,10 +1157,17 @@ pub(super) struct FrontendSurfaceComponent {
     /// declarations, checks overrides, and localizes triggers, so avoid doing
     /// that again for every key event when neither input changed.
     resolved_surface_shortcuts_cache: RefCell<Option<ResolvedSurfaceShortcutsCache>>,
+    /// Annotation inputs of the last paint-only retained frame; see
+    /// [`RuntimeAnnotationInputs`].
+    paint_only_annotation_inputs: Option<RuntimeAnnotationInputs>,
+    #[cfg(test)]
+    scroll_only_annotation_frames: u64,
 }
 
 #[derive(Debug, Clone)]
 struct ResolvedSurfaceShortcutsCache {
+    /// Distinct per resolution, so annotation can tell a replaced cache apart.
+    generation: u64,
     keyboard_settings: mesh_core_config::KeyboardSettings,
     locale: String,
     shortcuts: Vec<ResolvedSurfaceShortcut>,
@@ -1341,7 +1371,10 @@ impl FrontendSurfaceComponent {
             selection_annotation: None,
             #[cfg(test)]
             force_full_retained_update: false,
+            #[cfg(test)]
+            style_animation_passes: 0,
             animation_only_dirty: false,
+            next_frame_only_dirty: false,
             node_service_field_deps: NodeServiceFieldDependencies::default(),
             pending_service_template_nodes: None,
             selective_service_build_supported,
@@ -1372,6 +1405,7 @@ impl FrontendSurfaceComponent {
             has_active_keyframe_animation: false,
             has_promoted_popover_wrappers: Cell::new(false),
             has_error_placeholders: Cell::new(false),
+            failed_runtime_creations: RefCell::new(HashMap::new()),
             component_memo: RefCell::new(HashMap::new()),
             runtime_generations: RefCell::new(memo::RuntimeGenerationIndex::default()),
             prepared_component_styles: RefCell::new(HashMap::new()),
@@ -1382,10 +1416,13 @@ impl FrontendSurfaceComponent {
             narrow_path_active: false,
             affected_node_count: 0,
             profiling_enabled: false,
+            style_rule_attribution: style_rule_attribution_requested(),
             profiling_records: RefCell::new(Vec::new()),
             invalidation_snapshot: None,
             #[cfg(test)]
             focused_proof_snapshot: None,
+            #[cfg(test)]
+            focused_proof_enabled: cfg!(debug_assertions),
             last_present_damage_rects: Vec::new(),
             last_visual_damage: HashMap::new(),
             tooltip_damage_scratch: Vec::new(),
@@ -1403,6 +1440,9 @@ impl FrontendSurfaceComponent {
             runtime_style_diagnostic_fingerprint: None,
             element_metric_usage,
             resolved_surface_shortcuts_cache: RefCell::new(None),
+            paint_only_annotation_inputs: None,
+            #[cfg(test)]
+            scroll_only_annotation_frames: 0,
         }
     }
 
@@ -1563,6 +1603,7 @@ impl FrontendSurfaceComponent {
 
     pub(super) fn invalidate(&mut self, flags: ComponentDirtyFlags) {
         self.animation_only_dirty = false;
+        self.next_frame_only_dirty = false;
         self.dirty_types |= flags;
         self.dirty = true;
         if invalidation_requires_pixel_repaint(flags) {
@@ -1572,6 +1613,7 @@ impl FrontendSurfaceComponent {
 
     pub(super) fn invalidate_style_path(&mut self, flags: ComponentDirtyFlags) {
         self.animation_only_dirty = false;
+        self.next_frame_only_dirty = false;
         self.dirty_types |= flags;
         self.style_only_dirty = true;
         if invalidation_requires_pixel_repaint(flags) {
@@ -1581,12 +1623,27 @@ impl FrontendSurfaceComponent {
 
     pub(super) fn invalidate_animation_style_path(&mut self, flags: ComponentDirtyFlags) {
         let exclusively_animation = self.dirty_types.is_empty() || self.animation_only_dirty;
+        self.next_frame_only_dirty = self.pending_dirt_is_next_frame_only();
         self.dirty_types |= flags;
         self.style_only_dirty = true;
         self.animation_only_dirty = exclusively_animation;
         if invalidation_requires_pixel_repaint(flags) {
             self.surface_pixels_invalid = true;
         }
+    }
+
+    /// Schedule the next frame for a live smooth scroll or momentum tick. Like
+    /// `invalidate_style_path`, but the dirt it adds does not ask the render
+    /// loop for an immediate corrective pass.
+    pub(super) fn invalidate_scroll_tick(&mut self, flags: ComponentDirtyFlags) {
+        let next_frame_only = self.pending_dirt_is_next_frame_only();
+        self.invalidate_style_path(flags);
+        self.next_frame_only_dirty = next_frame_only;
+    }
+
+    fn pending_dirt_is_next_frame_only(&self) -> bool {
+        self.next_frame_only_dirty
+            || (!self.dirty && !self.style_only_dirty && self.dirty_types.is_empty())
     }
 
     pub(super) fn invalidate_script_state(&mut self) {
@@ -1659,6 +1716,7 @@ impl FrontendSurfaceComponent {
         self.dirty_types = ComponentDirtyFlags::empty();
         self.dirty = false;
         self.style_only_dirty = false;
+        self.next_frame_only_dirty = false;
 
         (
             requires_tree_rebuild,
@@ -1667,6 +1725,13 @@ impl FrontendSurfaceComponent {
             self.last_dirty_types,
         )
     }
+}
+
+fn style_rule_attribution_requested() -> bool {
+    static REQUESTED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *REQUESTED.get_or_init(|| {
+        std::env::var_os("MESH_PROFILE_STYLE_RULES").is_some_and(|value| value == "1")
+    })
 }
 
 fn compiled_module_has_animatable_style_rules(compiled: &CompiledFrontendModule) -> bool {
