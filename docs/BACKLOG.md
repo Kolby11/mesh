@@ -37,9 +37,6 @@ evidence and test workloads are in the linked reports.
 - [ ] **S02-LOGIC-003 / S02-LOGIC-008 / S02-LOGIC-011:** Bind graph diffs and
       activation candidates to the same store, manifest/content revision, and
       lock identity so same-version edits or mismatched objects cannot publish. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
-- [ ] **S02-LOGIC-004 / S02-LOGIC-005 / S02-LOGIC-006 / S02-LOGIC-007:** Make
-      forced slot removal, Git/profile rollback, lock paths, and active-profile
-      pointers fail closed and recover against the intended generation. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
 - [ ] **S02-LOGIC-009 / S02-LOGIC-010 / S02-LOGIC-012:** Resolve the required-
       provider rule conflict and isolate invalid or unreadable modules with
       durable diagnostics instead of aborting or silently shrinking discovery. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
