@@ -36,7 +36,13 @@ impl WaylandSurfaceBackend {
         let viewporter: Option<WpViewporter> = globals.bind(&qh, 1..=1, GlobalData).ok();
         let fractional_scale_manager: Option<WpFractionalScaleManagerV1> =
             globals.bind(&qh, 1..=1, GlobalData).ok();
-        let blur_manager: Option<OrgKdeKwinBlurManager> = globals.bind(&qh, 1..=1, GlobalData).ok();
+        // The ext manager's `blur` capability arrives as an event; until it
+        // does, `blur_protocols` prefers KDE's blur (or none).
+        let blur_protocols = BlurProtocols {
+            background_effect: globals.bind(&qh, 1..=1, GlobalData).ok(),
+            background_effect_blur: false,
+            kde: globals.bind(&qh, 1..=1, GlobalData).ok(),
+        };
         // Trackpad gesture support (two-finger scroll is plain wl_pointer axis
         // events, already handled elsewhere; this covers swipe/pinch/hold).
         // Optional: compositors without it just never emit gesture events.
@@ -59,7 +65,7 @@ impl WaylandSurfaceBackend {
             focus_grab_manager,
             viewporter,
             fractional_scale_manager,
-            blur_manager,
+            blur_protocols,
             pointer_gestures,
             text_input_manager,
             text_input_seats: HashMap::new(),
@@ -258,11 +264,10 @@ impl WaylandSurfaceBackend {
                 entry.viewport = Some(viewporter.get_viewport(&wl_surface, &qh, ()));
             }
         }
-        // The kde_blur object is created lazily when the first non-empty blur
-        // region is committed in `present_with_damage`. Creating it eagerly
-        // would enable the compositor's default whole-surface blur on every
-        // surface — including ones with no `backdrop-filter` at all — because
-        // an org_kde_kwin_blur object with no region set blurs the entire
+        // The blur object is created lazily when the first non-empty blur
+        // region is staged (`stage_blur_region`). Creating a KDE one eagerly
+        // would blur every surface, including ones with no `backdrop-filter`,
+        // because an org_kde_kwin_blur object with no region blurs the entire
         // surface.
     }
 
@@ -767,6 +772,7 @@ fn negotiated_capabilities(
         version("wp_viewporter"),
         version("wp_fractional_scale_manager_v1"),
         version("org_kde_kwin_blur_manager"),
+        version("ext_background_effect_manager_v1"),
         version("xdg_activation_v1"),
         version("hyprland_focus_grab_manager_v1"),
         version("zwp_pointer_gestures_v1"),

@@ -298,27 +298,31 @@ the same tree unblurred. Prefer it for transient states (a dismissing card, a
 modal backdrop) over permanently blurred chrome, and see
 `shell.render.blur` in [08](08-settings.md) for the quality dial.
 
-In-surface `backdrop-filter` remains compositor-owned — see below.
+`backdrop-filter` is covered in §10.
 
 ## 10. Compositor background blur
 
-**Status: shipped (namespace opt-in) + target (`org_kde_kwin_blur`).**
+**Status: shipped (`ext-background-effect-v1`, `org_kde_kwin_blur`, namespace
+opt-in); in-surface fallback shipped, its contract is a target.**
 
 Background ("frosted glass") blur behind a shell surface is a **compositor**
-effect: the app cannot rasterize it itself without capturing the screen. MESH
-supports it two ways, and neither invents a rendering path:
+effect: a Wayland client never sees the pixels behind its own surface. MESH
+computes blur regions from each element's `backdrop-filter` — rectangles, with
+rounded corners approximated as bands — and hands them to the compositor:
 
-1. **`org_kde_kwin_blur`** — where the compositor advertises it (KWin, some
-   wlroots setups), MESH computes per-node blur regions from the surface's
-   `backdrop-filter` and hands them to the protocol. This is what Qt/KDE's
-   `enableBlurBehind()` uses. It is a **no-op on compositors that don't
-   advertise the global** (e.g. Hyprland).
+1. **`ext-background-effect-v1`** — preferred while the compositor advertises
+   the protocol's `blur` capability (Hyprland, KWin, niri). The capability can
+   arrive late or be withdrawn; MESH follows it at runtime and switches
+   protocol or falls back without restarting.
+2. **`org_kde_kwin_blur`** — used where only the KDE global exists (older KWin,
+   some wlroots setups). This is what Qt/KDE's `enableBlurBehind()` uses.
 
-2. **Namespace opt-in** — because Hyprland (and others) blur by their own
-   config keyed on the layer-shell **namespace**, a surface sets
-   `mesh.surface.blur: true`. MESH then appends `:blur` to that surface's
-   compositor namespace, so a single compositor rule targets every opted-in
-   MESH surface. On Hyprland:
+The compositor blurs on its own renderer, so these cost MESH no pixel work.
+
+3. **Namespace opt-in** — for compositors that blur layer surfaces by their own
+   rules rather than a protocol, a surface sets `mesh.surface.blur: true`.
+   MESH then appends `:blur` to that surface's layer-shell namespace, so a
+   single compositor rule targets every opted-in MESH surface. On Hyprland:
 
    ```
    # ~/.config/hypr/hyprland.conf
@@ -327,11 +331,25 @@ supports it two ways, and neither invents a rendering path:
    layerrule = ignorealpha 0.2, :blur$
    ```
 
-The two are complementary — a surface can declare both; each compositor honours
-whichever it supports. For the blur to be *visible*, the surface must be
-translucent where you want it (a frosted `background-color` with alpha < 1) and
-must not mark that area opaque; a solid fill or an opaque `box-shadow` painted
-behind a translucent fill will hide it.
+   The rule blurs the whole surface wherever its alpha passes the threshold,
+   independent of `backdrop-filter`. The suffix is kept when a protocol is
+   available, because the namespace is a stable name compositor rules match;
+   on a compositor that supports either protocol, leave the rule out, or the
+   rule's blur applies in addition to the regions.
+
+For the blur to be *visible*, the surface must be translucent where you want it
+(a frosted `background-color` with alpha < 1) and must not mark that area
+opaque; a solid fill or an opaque `box-shadow` painted behind a translucent
+fill will hide it.
+
+**No protocol.** When the compositor supports neither protocol, MESH blurs
+in-surface: the element's backdrop is whatever MESH itself painted beneath it
+in the same surface. An element with nothing painted beneath it — typically a
+surface's root — is skipped rather than blurred, since blurring the cleared
+buffer changes no pixel. The desktop behind the surface is then only blurred by
+a namespace rule. The per-element choice between compositor and in-surface
+blur, and the in-surface engine's caching, are open work in the
+[backlog](../BACKLOG.md) and not yet part of this contract.
 
 Popovers promoted to `xdg_popup` inherit their parent layer surface's blur on
 compositors that blur layer popups.

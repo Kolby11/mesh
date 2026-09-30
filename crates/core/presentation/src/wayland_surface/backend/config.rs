@@ -409,8 +409,9 @@ impl SurfaceConfig {
 
     /// The namespace handed to the compositor when creating the layer surface.
     /// Blur-opted surfaces get a `:blur` suffix so one compositor rule targets
-    /// them all — MESH cannot request blur through a protocol on every
-    /// compositor, so it encodes the intent in the namespace instead.
+    /// them all, on compositors that blur by rule rather than by protocol. It
+    /// stays when a protocol is bound: the namespace is a stable name for
+    /// compositor rules, and changing it would recreate the surface.
     pub(in crate::wayland_surface) fn wayland_namespace(&self) -> String {
         if self.blur {
             format!("{}:blur", self.namespace)

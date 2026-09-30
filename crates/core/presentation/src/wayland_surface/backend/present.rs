@@ -60,15 +60,10 @@ impl WaylandSurfaceBackend {
             if let Some(entry) = self.state.surfaces.get_mut(surface_id)
                 && entry.configured
             {
-                // Clear compositor blur before hiding. A null
-                // region blurs the whole surface, so destroy the blur object to
-                // actually remove it rather than calling set_region(None).
-                if let Some(kde_blur) = entry.kde_blur.take() {
-                    if let Some(ref manager) = self.state.blur_manager {
-                        let wl_surface = entry.wl_surface().clone();
-                        manager.unset(&wl_surface);
-                    }
-                    kde_blur.release();
+                // Clear compositor blur before hiding.
+                if let Some(object) = entry.blur_object.take() {
+                    let wl_surface = entry.wl_surface().clone();
+                    object.release(&self.state.blur_protocols, &wl_surface);
                 }
                 entry.blur_committed = false;
                 entry.blur_region_dirty = false;
@@ -240,7 +235,7 @@ impl WaylandSurfaceBackend {
             && entry.stage_input_region(input_region, &state.compositor_state);
         let opaque_region_staged = entry.stage_opaque_region(&state.compositor_state);
         let blur_staged =
-            stage_blur_region(&state.blur_manager, &state.compositor_state, entry, &qh);
+            stage_blur_region(&state.blur_protocols, &state.compositor_state, entry, &qh);
         let window_geometry = entry.stage_window_geometry(input_region.unwrap_or(DamageRect {
             x: 0,
             y: 0,
@@ -295,10 +290,9 @@ impl WaylandSurfaceBackend {
         entry.content_input_region_for_extent(entry.resolved_extent(output_size))
     }
 
-    /// Set the logical-coordinate blur regions for a surface.
-    /// The regions are sent as kde_blur protocol calls before the next
-    /// wl_surface.commit(). If `blur_regions` is empty, no kde_blur
-    /// calls are emitted — the compositor gets no blur hint.
+    /// Set the logical-coordinate blur regions for a surface. They are staged
+    /// on the preferred blur protocol before the next wl_surface.commit(); an
+    /// empty list removes any committed blur and otherwise sends nothing.
     pub(crate) fn update_blur_regions(&mut self, surface_id: &str, blur_regions: Vec<DamageRect>) {
         let Some(entry) = self.state.surfaces.get_mut(surface_id) else {
             return;
@@ -357,6 +351,10 @@ impl WaylandSurfaceBackend {
         self.state.negotiated_capabilities
     }
 
+    pub fn supports_compositor_backdrop_blur(&self) -> bool {
+        self.state.blur_protocols.preferred().is_some()
+    }
+
     pub fn surface_scale(&self, surface_id: &str) -> f32 {
         self.state
             .surfaces
@@ -378,64 +376,4 @@ impl WaylandSurfaceBackend {
             entry.needs_full_redraw = false;
         }
     }
-}
-
-fn stage_blur_region(
-    blur_manager: &Option<OrgKdeKwinBlurManager>,
-    compositor_state: &CompositorState,
-    entry: &mut SurfaceEntry,
-    qh: &QueueHandle<State>,
-) -> bool {
-    if !entry.blur_region_dirty {
-        return false;
-    }
-    if !entry.blur_regions.is_empty() {
-        // Lazily create the blur object the first time this surface actually
-        // needs blur, so surfaces without a backdrop filter never acquire the
-        // compositor's default whole-surface blur.
-        if entry.kde_blur.is_none()
-            && let Some(manager) = blur_manager.as_ref()
-        {
-            let wl_surface = entry.wl_surface().clone();
-            entry.kde_blur = Some(manager.create(&wl_surface, qh, ()));
-        }
-        if let Some(kde_blur) = entry.kde_blur.as_ref()
-            && let Ok(region) = Region::new(compositor_state)
-        {
-            for rect in &entry.blur_regions {
-                region.add(
-                    rect.x as i32,
-                    rect.y as i32,
-                    rect.width as i32,
-                    rect.height as i32,
-                );
-            }
-            kde_blur.set_region(Some(region.wl_region()));
-            kde_blur.commit();
-            entry.blur_committed = true;
-            return true;
-        }
-        // A compositor without the optional blur manager cannot apply this
-        // hint. Treat it as an intentional no-op rather than retrying forever;
-        // a later backend recreation will receive the desired regions again.
-        if blur_manager.is_none() {
-            entry.blur_region_dirty = false;
-        }
-        return false;
-    }
-
-    // A null KDE blur region means whole-surface blur, so clear blur by
-    // unsetting and releasing the auxiliary object instead.
-    if let Some(kde_blur) = entry.kde_blur.take() {
-        if let Some(manager) = blur_manager.as_ref() {
-            let wl_surface = entry.wl_surface().clone();
-            manager.unset(&wl_surface);
-        }
-        kde_blur.release();
-        entry.blur_committed = false;
-        return true;
-    }
-    entry.blur_committed = false;
-    entry.blur_region_dirty = false;
-    false
 }

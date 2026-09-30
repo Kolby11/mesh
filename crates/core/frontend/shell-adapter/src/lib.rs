@@ -1733,7 +1733,7 @@ pub trait ShellComponent: Send {
     /// Regions of the child subtree's nodes with an active
     /// `backdrop-filter`, in child-local logical coordinates (including the
     /// content padding offset passed to `paint_child_surface`). Drives the
-    /// compositor blur region (org_kde_kwin_blur) for promoted popups, the
+    /// compositor blur region (blur protocol) for promoted popups, the
     /// same way the parent surface's display list drives its blur region.
     fn child_surface_blur_regions(&self, _node_key: &str) -> Vec<DamageRect> {
         Vec::new()

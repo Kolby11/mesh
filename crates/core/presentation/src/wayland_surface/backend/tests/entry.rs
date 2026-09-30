@@ -124,16 +124,17 @@ fn output_membership_keeps_surviving_outputs_after_an_unordered_leave() {
 
 #[test]
 fn negotiated_capabilities_clamp_versions_and_gate_popup_reposition() {
-    let capabilities = NegotiatedCapabilities::from_versions(1, 9, 2, 4, 3, 2, 2, 2, 8, 9);
+    let capabilities = NegotiatedCapabilities::from_versions(1, 9, 2, 4, 3, 2, 3, 2, 2, 8, 9);
 
     assert_eq!(capabilities.generation, 1);
     assert_eq!(capabilities.layer_shell_version, 4);
     assert_eq!(capabilities.xdg_shell_version, 2);
     assert_eq!(capabilities.viewporter_version, 1);
+    assert_eq!(capabilities.background_effect_version, 1);
     assert!(!capabilities.supports_xdg_popup_reposition());
     assert!(!capabilities.supports_xdg_popup_reactive_positioner());
 
-    let capabilities = NegotiatedCapabilities::from_versions(2, 4, 3, 1, 1, 1, 1, 1, 3, 1);
+    let capabilities = NegotiatedCapabilities::from_versions(2, 4, 3, 1, 1, 1, 1, 1, 1, 3, 1);
     assert_eq!(capabilities.generation, 2);
     assert!(capabilities.supports_xdg_popup_reposition());
     assert!(capabilities.supports_xdg_popup_reactive_positioner());
@@ -144,4 +145,22 @@ fn popup_reposition_tokens_are_nonzero_and_never_wrap() {
     assert_eq!(next_popup_reposition_token(0), Some(1));
     assert_eq!(next_popup_reposition_token(41), Some(42));
     assert_eq!(next_popup_reposition_token(u32::MAX), None);
+}
+
+#[test]
+fn blur_prefers_background_effect_only_while_it_can_blur() {
+    use BlurProtocol::{BackgroundEffect, Kde};
+    assert_eq!(
+        preferred_blur_protocol(true, true, true),
+        Some(BackgroundEffect)
+    );
+    assert_eq!(
+        preferred_blur_protocol(true, true, false),
+        Some(BackgroundEffect)
+    );
+    // Bound, but no `blur` capability yet (or withdrawn).
+    assert_eq!(preferred_blur_protocol(true, false, true), Some(Kde));
+    assert_eq!(preferred_blur_protocol(true, false, false), None);
+    assert_eq!(preferred_blur_protocol(false, false, true), Some(Kde));
+    assert_eq!(preferred_blur_protocol(false, false, false), None);
 }

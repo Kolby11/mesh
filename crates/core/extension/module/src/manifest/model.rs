@@ -792,10 +792,11 @@ pub struct SurfaceLayoutSection {
     /// "none" | "on_demand" | "exclusive" (durable default; runtime may override)
     #[serde(default)]
     pub keyboard_mode: Option<String>,
-    /// Request compositor background blur. No Wayland protocol forces it
-    /// everywhere (Hyprland does not expose `org_kde_kwin_blur`), so this
-    /// instead gives the surface a `:blur`-suffixed layer-shell namespace that
-    /// one compositor rule can target (Hyprland: `layerrule = blur, :blur$`).
+    /// Request whole-surface compositor blur by rule: gives the surface a
+    /// `:blur`-suffixed layer-shell namespace that one compositor rule can
+    /// target (Hyprland: `layerrule = blur, :blur$`). Element-precise blur of
+    /// `backdrop-filter` regions goes through a blur protocol instead
+    /// (styling spec §10) and needs no flag.
     #[serde(default)]
     pub blur: Option<bool>,
     /// Window title (`role: "window"` only). Localizable.

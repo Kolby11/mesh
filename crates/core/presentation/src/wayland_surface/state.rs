@@ -1,4 +1,4 @@
-use super::backend::{SurfaceEntry, WaylandRole, apply_config};
+use super::backend::{BlurProtocols, SurfaceEntry, WaylandRole, apply_config};
 use super::*;
 use crate::NegotiatedCapabilities;
 use crate::TextInputState;
@@ -203,7 +203,7 @@ pub(super) struct State {
     pub(super) focus_grab_manager: Option<HyprlandFocusGrabManagerV1>,
     pub(super) viewporter: Option<WpViewporter>,
     pub(super) fractional_scale_manager: Option<WpFractionalScaleManagerV1>,
-    pub(super) blur_manager: Option<OrgKdeKwinBlurManager>,
+    pub(super) blur_protocols: BlurProtocols,
     pub(super) seat_state: SeatState,
     /// Most recently announced seat, used for legacy activation requests and
     /// retained only as a selection hint. Ownership itself lives in
@@ -221,7 +221,7 @@ pub(super) struct State {
     /// `zwp_pointer_gestures_v1` global, bound when the compositor advertises
     /// it. `None` on compositors without the protocol — gesture events simply
     /// never fire, matching the graceful-degradation pattern used for the
-    /// other optional globals (`blur_manager`, `focus_grab_manager`, etc).
+    /// other optional globals (`blur_protocols`, `focus_grab_manager`, etc).
     pub(super) pointer_gestures: Option<ZwpPointerGesturesV1>,
     /// Optional text-input-v3 manager. One text-input object is created for
     /// every seat so compositor focus and IME transactions remain seat-local.

@@ -55,7 +55,15 @@ impl Shell {
         } else {
             BackdropBlurPolicy::Rejected
         };
+        // The compositor can grant or withdraw blur mid-session. Display lists
+        // rebuild for a new policy, but an idle surface has no frame to do it.
+        let backdrop_policy_changed = mesh_core_render::backdrop_blur_policy() != backdrop_policy;
         mesh_core_render::set_backdrop_blur_policy(backdrop_policy);
+        if backdrop_policy_changed {
+            for runtime in &mut self.components {
+                runtime.component.request_paint();
+            }
+        }
         let icon_resolutions_ready = mesh_core_render::poll_icon_resolution_jobs();
         let icon_rasters_ready = mesh_core_render::poll_icon_raster_jobs();
         let glyph_rasters_ready = mesh_core_render::poll_glyph_raster_jobs();

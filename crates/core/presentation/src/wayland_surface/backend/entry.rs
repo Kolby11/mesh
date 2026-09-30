@@ -249,7 +249,7 @@ pub(in crate::wayland_surface) struct SurfaceEntry {
     pub(in crate::wayland_surface) needs_full_redraw: bool,
     pub(in crate::wayland_surface) fractional_scale: Option<WpFractionalScaleV1>,
     pub(in crate::wayland_surface) viewport: Option<WpViewport>,
-    pub(in crate::wayland_surface) kde_blur: Option<OrgKdeKwinBlur>,
+    pub(in crate::wayland_surface) blur_object: Option<SurfaceBlurObject>,
     pub(in crate::wayland_surface) blur_regions: Vec<DamageRect>,
     pub(in crate::wayland_surface) blur_committed: bool,
     pub(in crate::wayland_surface) blur_region_dirty: bool,
@@ -300,7 +300,7 @@ impl SurfaceEntry {
             needs_full_redraw: false,
             fractional_scale: None,
             viewport: None,
-            kde_blur: None,
+            blur_object: None,
             blur_regions: Vec::new(),
             blur_committed: false,
             blur_region_dirty: false,
@@ -398,8 +398,8 @@ impl SurfaceEntry {
         if let Some(fractional_scale) = self.fractional_scale.as_ref() {
             fractional_scale.destroy();
         }
-        if let Some(blur) = self.kde_blur.as_ref() {
-            blur.release();
+        if let Some(blur) = self.blur_object.as_ref() {
+            blur.destroy();
         }
     }
 

@@ -6,6 +6,7 @@
 //! buffer pool and damage arithmetic, and [`surfaces`], [`present`], [`events`]
 //! carry the three halves of [`WaylandSurfaceBackend`]'s inherent impl.
 
+mod blur;
 mod config;
 mod damage;
 mod entry;
@@ -18,6 +19,7 @@ mod surfaces;
 #[cfg(test)]
 mod tests;
 
+pub(in crate::wayland_surface) use blur::*;
 pub use config::*;
 use damage::*;
 pub(in crate::wayland_surface) use entry::*;

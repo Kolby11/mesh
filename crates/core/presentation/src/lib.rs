@@ -232,7 +232,12 @@ pub struct NegotiatedCapabilities {
     pub xdg_shell_version: u32,
     pub viewporter_version: u32,
     pub fractional_scale_version: u32,
+    /// `org_kde_kwin_blur_manager`.
     pub blur_version: u32,
+    /// `ext_background_effect_manager_v1`. Whether it can blur right now is
+    /// a separate, changing capability; see
+    /// [`PresentationEngine::supports_compositor_backdrop_blur`].
+    pub background_effect_version: u32,
     pub activation_version: u32,
     pub focus_grab_version: u32,
     pub pointer_gestures_version: u32,
@@ -250,6 +255,7 @@ impl NegotiatedCapabilities {
         viewporter_version: u32,
         fractional_scale_version: u32,
         blur_version: u32,
+        background_effect_version: u32,
         activation_version: u32,
         focus_grab_version: u32,
         pointer_gestures_version: u32,
@@ -262,6 +268,7 @@ impl NegotiatedCapabilities {
             viewporter_version: viewporter_version.min(1),
             fractional_scale_version: fractional_scale_version.min(1),
             blur_version: blur_version.min(1),
+            background_effect_version: background_effect_version.min(1),
             activation_version: activation_version.min(1),
             focus_grab_version: focus_grab_version.min(1),
             pointer_gestures_version: pointer_gestures_version.min(3),
@@ -1434,7 +1441,8 @@ impl PresentationEngine {
     }
 
     /// Set the logical-coordinate blur regions for a surface.
-    /// Only meaningful on Wayland backends with `org_kde_kwin_blur` support.
+    /// Only meaningful on Wayland backends with a compositor blur protocol
+    /// (`ext-background-effect-v1` or `org_kde_kwin_blur`).
     /// Pass an empty vector to clear any previously committed blur region from the
     /// compositor. No protocol calls are emitted if no blur region has ever
     /// been set for this surface.
@@ -1515,8 +1523,14 @@ impl PresentationEngine {
     /// Whether this presentation backend can realize a compositor-owned
     /// backdrop region. Non-Wayland backends deliberately report false so
     /// the shell selects the renderer's validated in-surface fallback.
+    ///
+    /// Can change during a session: `ext-background-effect-v1` announces its
+    /// `blur` capability in an event and may withdraw it later.
     pub fn supports_compositor_backdrop_blur(&self) -> bool {
-        self.negotiated_capabilities().blur_version > 0
+        match &self.backend {
+            Backend::WaylandSurface(bridge) => bridge.supports_compositor_backdrop_blur(),
+            Backend::DevWindow(_) | Backend::Testing(_) => false,
+        }
     }
 
     pub fn surface_scale(&self, surface_id: &str) -> f32 {

@@ -916,6 +916,17 @@ impl KeyboardHandler for State {
                 alt: input.keyboard_mods.alt,
             });
         let text = committed_text(event.utf8.as_deref());
+        // Text-producing keys are logged without their name so the log never
+        // records what was typed.
+        tracing::debug!(
+            surface_id = surface_id.as_ref(),
+            key = if text.is_some() {
+                "<text>"
+            } else {
+                name.as_ref()
+            },
+            "Wayland key press"
+        );
         let repeat = self.keyboard_repeat_state(
             &seat_id,
             &surface_id,
@@ -1263,6 +1274,56 @@ impl Dispatch<WpViewport, ()> for State {
         _qh: &QueueHandle<Self>,
     ) {
         // wp_viewport has no events in protocol version 1.
+    }
+}
+
+// `capabilities` is sent on bind and whenever the compositor's effects
+// change. A withdrawn `blur` bit stops the effect even for regions already
+// set, so the shell reads the capability again every frame
+// (`supports_compositor_backdrop_blur`) and every surface with blur restages
+// on whichever protocol is now preferred.
+impl Dispatch<ExtBackgroundEffectManagerV1, GlobalData> for State {
+    fn event(
+        state: &mut State,
+        _: &ExtBackgroundEffectManagerV1,
+        event: ext_background_effect_manager_v1::Event,
+        _: &GlobalData,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        let ext_background_effect_manager_v1::Event::Capabilities { flags } = event else {
+            return;
+        };
+        let blur = flags
+            .into_result()
+            .is_ok_and(|flags| flags.contains(ext_background_effect_manager_v1::Capability::Blur));
+        if state.blur_protocols.background_effect_blur == blur {
+            return;
+        }
+        tracing::info!(
+            blur,
+            "ext_background_effect_manager_v1: blur capability changed"
+        );
+        state.blur_protocols.background_effect_blur = blur;
+        for entry in state.surfaces.values_mut() {
+            if !entry.blur_regions.is_empty() || entry.blur_object.is_some() {
+                entry.blur_region_dirty = true;
+            }
+        }
+    }
+}
+
+// ext_background_effect_surface_v1 has no events.
+impl Dispatch<ExtBackgroundEffectSurfaceV1, ()> for State {
+    fn event(
+        _: &mut State,
+        _: &ExtBackgroundEffectSurfaceV1,
+        _: ext_background_effect_surface_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        unreachable!("ext_background_effect_surface_v1 has no events");
     }
 }
 
