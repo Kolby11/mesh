@@ -332,3 +332,13 @@ pub(super) fn offset_widget_tree_layout(node: &mut WidgetNode, offset_x: f32, of
         offset_widget_tree_layout(child, offset_x, offset_y);
     }
 }
+
+/// Parent-surface origin of a promoted subtree, used to translate it into its
+/// own buffer. It must be the node's unclipped layout origin: the subtree is
+/// painted without its ancestors, and a popover commonly lays out beyond the
+/// parent surface (a bar's quick-settings panel extends above the 36px bar).
+/// Clipped hit-test bounds would clamp that origin to the parent's edge and
+/// shift the content out of the child buffer.
+pub(super) fn promoted_child_origin(node: &WidgetNode) -> (f32, f32) {
+    (node.layout.x, node.layout.y)
+}

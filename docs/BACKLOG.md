@@ -148,6 +148,9 @@ evidence and test workloads are in the linked reports.
       coordinator: immutable candidate graph/interfaces/resources, full root and
       provider identities, ready hidden replacements, atomic commit, and
       post-commit retirement. [Audit](../.planning/log/sections/15-shell-core-and-orchestration/improvements.md).
+- [ ] Lay promoted popovers out against their child surface, not in-flow in the
+      trigger's cell: Quick Settings' 300px panel shrinks to ~225px near the
+      bar's right edge and clips its "Quick Settings" title.
 
 ## Performance
 

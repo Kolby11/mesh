@@ -1774,3 +1774,148 @@ fn phase44_navigation_behavior_survives_focused_proof_path() {
         "keyboard focus should remain visibly tracked after focused proof paint"
     );
 }
+
+#[test]
+fn navigation_quick_settings_popup_paints_content_laid_out_above_the_bar() {
+    // The popover lays out in-flow around its trigger, so most of the panel
+    // sits above the 36px bar. The child buffer must be translated by the
+    // unclipped layout origin; clipped bounds clamp it to y=0 and push the
+    // header and sliders out of the popup.
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    let theme = default_theme();
+    let (width, height) = (960, 36);
+    let mut buffer = PixelBuffer::new(width, height);
+    component
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    component
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onSettingsEnter",
+            &[serde_json::json!({ "trigger": { "type": "pointer" } })],
+        )
+        .unwrap();
+    component
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+
+    let requests = component.child_surface_requests();
+    let [request] = requests.as_slice() else {
+        panic!("hovering settings should author one Quick Settings child: {requests:?}");
+    };
+    let tree = component.last_tree.as_ref().expect("navigation tree");
+    let popover = find_node_by_key(tree, &request.node_key).expect("quick settings popover");
+    assert!(
+        popover.layout.y < 0.0,
+        "fixture must exercise a popover extending above the parent surface"
+    );
+
+    let child_tree = component
+        .child_surface_debug_tree(&request.node_key, (0.0, 0.0))
+        .expect("child tree");
+    assert_eq!((child_tree.layout.x, child_tree.layout.y), (0.0, 0.0));
+    let header = first_node_by_class(&child_tree, "qs-header").expect("header");
+    assert!(
+        header.layout.y >= 0.0 && header.layout.y < 64.0,
+        "header must be near the top of the popup, got y={}",
+        header.layout.y
+    );
+
+    let mut child_buffer = PixelBuffer::new(request.content_size.0, request.content_size.1);
+    assert!(
+        component
+            .paint_child_surface(&request.node_key, &mut child_buffer, 1.0, (0, 0), false)
+            .unwrap()
+    );
+    let panel_top = buffer_pixel(
+        &child_buffer,
+        request.content_size.0 / 2,
+        (header.layout.y as u32).max(8),
+    );
+    assert_ne!(
+        panel_top[3], 0,
+        "the panel's top must be painted into the popup"
+    );
+}
+
+#[test]
+fn navigation_quick_settings_popup_animates_open_and_close() {
+    fn popover_style(component: &FrontendSurfaceComponent, key: &str) -> (f32, bool) {
+        let tree = component.last_tree.as_ref().expect("navigation tree");
+        let node = find_node_by_key(tree, key).expect("quick settings popover");
+        (
+            node.computed_style.opacity,
+            !node.computed_style.transform.is_identity(),
+        )
+    }
+
+    let mut component =
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    let theme = default_theme();
+    let (width, height) = (960, 36);
+    let extent = SurfaceExtent::unpadded(width, height);
+    let mut buffer = PixelBuffer::new(width, height);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onSettingsEnter",
+            &[serde_json::json!({ "trigger": { "type": "pointer" } })],
+        )
+        .unwrap();
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    let key = component.child_surface_requests()[0].node_key.clone();
+
+    // The runtime maps the popup only after one frame with the entering
+    // state, then drops it so the resting style transitions in.
+    component.set_entering_child_keys_from_slice(&[key.as_str()]);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    let (entering_opacity, entering_transformed) = popover_style(&component, &key);
+    assert_eq!(entering_opacity, 0.0, "the popup should start transparent");
+    assert!(entering_transformed, "the popup should start offset and scaled");
+    component.set_entering_child_keys_from_slice(&[]);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    std::thread::sleep(Duration::from_millis(40));
+    component.tick().unwrap();
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    let (opening_opacity, _) = popover_style(&component, &key);
+    assert!(
+        opening_opacity > 0.0 && opening_opacity < 1.0,
+        "opening should fade in over several frames, got {opening_opacity}"
+    );
+
+    std::thread::sleep(Duration::from_millis(250));
+    component.tick().unwrap();
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    assert_eq!(popover_style(&component, &key).0, 1.0);
+
+    component
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::closeSettingsBridge",
+            &[],
+        )
+        .unwrap();
+    assert!(component.child_hide_transition_ms(&key) >= 150);
+    component.set_closing_child_keys_from_slice(&[key.as_str()]);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    std::thread::sleep(Duration::from_millis(40));
+    component.tick().unwrap();
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    let (closing_opacity, closing_transformed) = popover_style(&component, &key);
+    // The exit accelerates: a front-loaded curve had already dropped below
+    // 20% here, which read as the popup vanishing without animation.
+    assert!(
+        closing_opacity > 0.5 && closing_opacity < 1.0,
+        "closing should still be visibly fading, got {closing_opacity}"
+    );
+    assert!(closing_transformed, "closing should lift the popup out");
+}

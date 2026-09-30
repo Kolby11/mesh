@@ -1567,7 +1567,9 @@ impl ShellComponent for FrontendSurfaceComponent {
                     );
                 } else {
                     if let Err(error) = runtime.script_ctx.set_prop_layers(layers) {
-                        tracing::warn!("failed to refresh prop layers after settings reload: {error}");
+                        tracing::warn!(
+                            "failed to refresh prop layers after settings reload: {error}"
+                        );
                     }
                     runtime.host_props = next_host_props;
                     Self::normalize_script_props(&self.diagnostics, runtime);
@@ -1763,11 +1765,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         let Some(node) = find_node_by_key(tree, node_key) else {
             return Ok(Vec::new());
         };
-        let Some(bounds) = find_node_bounds_by_key(tree, node_key, 0.0, 0.0).or_else(|| {
-            find_focus_node_with_bounds_by_key(tree, node_key).map(|(_, bounds)| bounds)
-        }) else {
-            return Ok(Vec::new());
-        };
+        let bounds = promoted_child_origin(node);
         // The promoted popover is laid out in-flow under its trigger (often extending
         // off the parent surface), but presented as a separate popup. Hit-testing the
         // parent tree would clip the off-surface content and is blocked by the popover's
@@ -1825,9 +1823,7 @@ impl ShellComponent for FrontendSurfaceComponent {
     ) -> Option<WidgetNode> {
         let tree = self.last_tree.as_ref()?;
         let node = find_node_by_key(tree, node_key)?;
-        let bounds = find_node_bounds_by_key(tree, node_key, 0.0, 0.0).or_else(|| {
-            find_focus_node_with_bounds_by_key(tree, node_key).map(|(_, bounds)| bounds)
-        })?;
+        let bounds = promoted_child_origin(node);
         let mut child_tree = node.clone();
         child_tree.attributes.remove("hidden");
         // Must match `paint_child_surface`'s offset exactly: that call bakes
@@ -1876,11 +1872,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         let Some(node) = find_node_by_key(tree, node_key) else {
             return Ok(false);
         };
-        let Some(bounds) = find_node_bounds_by_key(tree, node_key, 0.0, 0.0).or_else(|| {
-            find_focus_node_with_bounds_by_key(tree, node_key).map(|(_, bounds)| bounds)
-        }) else {
-            return Ok(false);
-        };
+        let bounds = promoted_child_origin(node);
 
         // The exiting class (when applicable) is baked into `node`'s
         // `computed_style` already: `finalize_tree` scopes it to this node's

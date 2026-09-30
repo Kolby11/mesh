@@ -205,11 +205,23 @@ end
     padding: var(--spacing-xs);
     background: transparent;
     opacity: 1;
-    transition: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    transform: translateY(0px) scale(1);
+    transition: transform 220ms var(--animation-curves-bezier-emphasized-decelerate),
+    opacity 180ms var(--animation-curves-bezier-standard);
+}
+
+/* Drop in from the bar while scaling up; lift back out while fading. The
+exit accelerates so it stays visible instead of vanishing in its first frame. */
+.qs-shell.mesh-surface-entering {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.96);
 }
 
 .qs-shell.mesh-surface-exiting {
     opacity: 0;
+    transform: translateY(-6px) scale(0.96);
+    transition: transform 160ms var(--animation-curves-bezier-standard-accelerate),
+    opacity 160ms var(--animation-curves-bezier-standard-accelerate);
 }
 
 .qs-panel {
