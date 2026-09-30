@@ -220,7 +220,8 @@ start ([01 §9](01-module-system.md)). Severity policy:
 | Finding | Effect |
 | ------- | ------ |
 | Invalid/legacy manifest, ambiguous manifest files | Module fails to load; replacement diagnostic |
-| Missing required interface provider | Frontend loads; consuming UI sees interface health `unavailable` |
+| Missing required interface provider (none installed) | Consumer loads; its UI sees interface health `unavailable` |
+| Required interface with installed providers that cannot serve it (version, ambiguity, no typed contract) | Consumer blocked (`interface_dependency_blocked`); unrelated modules unaffected |
 | Missing required binary | Module loads; health `unavailable` until present |
 | Missing optional binary / optional icon / pack coverage gap | Health `degraded` or informational diagnostic |
 | Capability misdeclaration, undeclared events, unknown shell channels | Non-fatal typed diagnostics with author actions |

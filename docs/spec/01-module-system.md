@@ -823,7 +823,17 @@ ordering language.
 Required services are inferred from component interface dependencies. A sole
 compatible provider may be selected automatically; ambiguity requires an
 explicit profile binding. Components with missing optional services degrade
-locally; missing required contracts reject the candidate before activation.
+locally. A required service never rejects the whole candidate; it affects only
+its consumers:
+
+- **No provider installed:** the consumer activates and sees the interface's
+  health as `unavailable` until a provider is installed or enabled.
+- **Providers installed but none can serve it** (incompatible version,
+  ambiguous without a binding, or no valid typed contract): the consumer is
+  blocked with `interface_dependency_blocked`.
+
+Unrelated modules activate either way. [02 §3](02-installation.md) applies the
+same rule at install time.
 
 Live profile switching is transactional: validate the candidate, diff it
 against the active graph, retain identical service instances, initialize new

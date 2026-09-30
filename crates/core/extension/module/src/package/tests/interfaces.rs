@@ -848,3 +848,88 @@ fn interface_contracts_declare_owned_service_permissions() {
     assert!(refused.iter().any(|(_, message)| message.contains("service.audio.control")));
     assert!(refused.iter().any(|(_, message)| message.contains("'root'")));
 }
+
+/// The one required-provider rule (spec 01 §5, spec 02 §3): a consumer whose
+/// required interface has no installed provider still loads and sees the
+/// interface `unavailable`; a consumer whose required interface has providers
+/// that cannot serve it is blocked; unrelated modules are never affected.
+#[test]
+fn a_missing_required_provider_degrades_while_an_unusable_one_blocks() {
+    let root = root_with_modules(
+        &[
+            ("@me/waits", ModuleKind::Frontend),
+            ("@me/blocked", ModuleKind::Frontend),
+            ("@me/unrelated", ModuleKind::Frontend),
+            ("@me/old-provider", ModuleKind::Backend),
+            ("@me/missing-interface", ModuleKind::Interface),
+        ],
+        &[],
+        None,
+    );
+    let requiring = |id: &str, interface: &str, range: &str| {
+        loaded_module(
+            id,
+            ModuleKind::Frontend,
+            MeshDependencies {
+                backend: HashMap::from([(interface.into(), range.into())]),
+                ..MeshDependencies::default()
+            },
+            vec![],
+            MeshContributes::default(),
+        )
+    };
+    let unrelated = loaded_module(
+        "@me/unrelated",
+        ModuleKind::Frontend,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    // Declared (and typed) but nothing implements it.
+    let mut declared_only = interface_module(
+        "@me/missing-interface",
+        "mesh.missing",
+        "missing",
+        InterfaceRelationship::Base,
+        None,
+    );
+    declared_only.manifest.mesh.interface.as_mut().unwrap().version = Some("1.0".into());
+    // Implemented, but only at a version the consumer rejects.
+    let old_provider = with_inline_contracts(loaded_module(
+        "@me/old-provider",
+        ModuleKind::Backend,
+        MeshDependencies::default(),
+        vec![MeshProvidesDeclaration {
+            interface: "mesh.versioned".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider: Some("old".into()),
+            label: None,
+            priority: 100,
+        }],
+        MeshContributes::default(),
+    ));
+
+    let graph = InstalledModuleGraph::from_parts(
+        root,
+        vec![
+            requiring("@me/waits", "mesh.missing", ">=1.0"),
+            requiring("@me/blocked", "mesh.versioned", ">=2.0"),
+            unrelated,
+            old_provider,
+            declared_only,
+        ],
+    )
+    .unwrap();
+
+    assert!(graph.module("@me/waits").unwrap().enabled);
+    assert!(graph.health().iter().any(|record| {
+        record.interface.as_deref() == Some("mesh.missing") && record.status.contains("unavailable")
+    }));
+    assert!(!graph.module("@me/blocked").unwrap().enabled);
+    assert!(graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@me/blocked" && diagnostic.status == "interface_dependency_blocked"
+    }));
+    assert!(graph.module("@me/unrelated").unwrap().enabled);
+    assert!(graph.module("@me/old-provider").unwrap().enabled);
+}
