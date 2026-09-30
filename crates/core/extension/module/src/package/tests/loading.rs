@@ -375,3 +375,88 @@ fn canonical_module_manifest_loading_beats_serial_benchmark() {
         "parallel manifest loading should improve the complete canonical graph startup"
     );
 }
+
+fn write_frontend(modules_dir: &std::path::Path, dir: &str, id: &str) {
+    let module_dir = modules_dir.join(dir);
+    fs::create_dir_all(&module_dir).unwrap();
+    fs::write(
+        module_dir.join("module.json"),
+        format!(
+            r#"{{"name":"{id}","version":"0.1.0",
+                "mesh":{{"apiVersion":"0.1","kind":"frontend","entry":"src/main.mesh"}}}}"#
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn an_invalid_or_unreadable_module_is_isolated_not_fatal() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = temp_dir("isolated-modules");
+    let modules_dir = root.join("modules");
+    write_frontend(&modules_dir, "alpha", "@me/alpha");
+    write_frontend(&modules_dir, "beta", "@me/beta");
+    let broken = modules_dir.join("broken");
+    fs::create_dir_all(&broken).unwrap();
+    fs::write(broken.join("module.json"), "{ \"name\": ").unwrap();
+    let locked = modules_dir.join("locked");
+    write_frontend(&modules_dir, "locked/gamma", "@me/gamma");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    fs::write(
+        root.join("module.json"),
+        r#"{"name":"@me/config","version":"0.1.0",
+            "mesh":{"schemaVersion":1,"modulesDir":"modules","modules":{}}}"#,
+    )
+    .unwrap();
+
+    let graph = load_installed_module_graph(&root.join("module.json"));
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    let graph = graph.expect("one bad module must not abort the graph");
+
+    assert!(graph.module("@me/alpha").is_some_and(|module| module.enabled));
+    assert!(graph.module("@me/beta").is_some_and(|module| module.enabled));
+    let isolated = graph
+        .diagnostics()
+        .iter()
+        .map(|diagnostic| (diagnostic.module_id.as_str(), diagnostic.status.as_str()))
+        .filter(|(_, status)| status.starts_with("module_"))
+        .collect::<Vec<_>>();
+    assert!(isolated.contains(&("broken", "module_manifest_invalid")), "{isolated:?}");
+    // Running as root can read a 0o000 directory; only assert when it can't.
+    if fs::read_dir(&locked).is_err() {
+        assert!(isolated.contains(&("locked", "module_discovery_failed")), "{isolated:?}");
+    }
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn an_invalid_explicit_module_drops_only_itself_and_decisions_naming_it() {
+    let root = temp_dir("isolated-explicit");
+    let modules_dir = root.join("modules");
+    write_frontend(&modules_dir, "alpha", "@me/alpha");
+    let broken = modules_dir.join("broken");
+    fs::create_dir_all(&broken).unwrap();
+    fs::write(broken.join("module.json"), "not json").unwrap();
+    fs::write(
+        root.join("module.json"),
+        r#"{"name":"@me/config","version":"0.1.0","mesh":{"schemaVersion":1,
+            "modulesDir":"modules",
+            "modules":{
+              "@me/alpha":{"kind":"frontend","path":"alpha","enabled":true},
+              "@me/broken":{"kind":"backend","path":"broken","enabled":true}},
+            "providers":{"mesh.audio":"@me/broken"}}}"#,
+    )
+    .unwrap();
+
+    let graph = load_installed_module_graph(&root.join("module.json"))
+        .expect("an invalid explicit module is isolated");
+    assert!(graph.module("@me/alpha").is_some());
+    assert!(graph.module("@me/broken").is_none());
+    assert!(graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@me/broken" && diagnostic.status == "module_manifest_invalid"
+    }));
+
+    fs::remove_dir_all(root).unwrap();
+}

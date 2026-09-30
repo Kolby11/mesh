@@ -2564,28 +2564,42 @@ impl Shell {
         );
     }
 
+    /// Isolate modules whose capability declarations could not be resolved:
+    /// each gets a lifecycle diagnostic and the `Errored` state, and nothing
+    /// else is affected.
+    pub(in crate::shell) fn record_capability_failures(
+        &mut self,
+        failures: &[(String, mesh_core_capability::CapabilityPolicyError)],
+    ) {
+        for (module_id, error) in failures {
+            tracing::error!(module_id = %module_id, "module capabilities unresolved: {error}");
+            self.diagnostics.record_lifecycle_error(
+                module_id,
+                "capability_resolution_failed",
+                error.to_string(),
+            );
+            if let Some(module) = self.modules.get_mut(module_id)
+                && module.state != ModuleState::Errored
+                && let Err(transition) = module.transition(ModuleState::Errored)
+            {
+                tracing::warn!(module_id = %module_id, "failed to mark module errored: {transition}");
+            }
+        }
+    }
+
     pub fn resolve_modules(&mut self) -> Result<(), ShellRunError> {
         let active_graph = self.load_installed_module_graph_cached()?.clone();
         let resources = self.prepare_resource_snapshot(&active_graph, &self.settings_store)?;
         self.commit_resource_snapshot(&resources)?;
         self.sync_module_graph_health(&active_graph);
-        let mut effective_capabilities = HashMap::with_capacity(self.modules.len());
-        for (module_id, module) in &self.modules {
-            if !active_graph
-                .module(module_id)
-                .is_some_and(|node| node.enabled)
-            {
-                continue;
-            }
-            let effective = self.capability_policy.resolve_in(
-                active_graph.capability_catalog(),
-                module_id,
-                &module.manifest.capabilities.required,
-                &module.manifest.capabilities.optional,
-            )?;
-            effective_capabilities.insert(module_id.clone(), effective);
-        }
-        self.effective_capabilities = Arc::new(effective_capabilities);
+        let (effective_capabilities, capability_failures) =
+            super::profile::candidate_capabilities(
+                &self.capability_policy,
+                &active_graph,
+                &self.modules,
+            );
+        self.effective_capabilities = effective_capabilities;
+        self.record_capability_failures(&capability_failures);
         let ids: Vec<String> = self.modules.keys().cloned().collect();
         for id in ids {
             if let Some(module) = self.modules.get_mut(&id) {

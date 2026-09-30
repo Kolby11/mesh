@@ -625,27 +625,40 @@ pub(super) fn interface_catalog_for_graph(
     Ok(catalog.build())
 }
 
-fn candidate_capabilities(
+/// Resolve every enabled module's grants against the graph's catalog.
+///
+/// A module whose declarations cannot be resolved (unknown capability,
+/// missing required approval) is returned as a failure and gets no grant;
+/// every consumer of the grant map already fails that module closed. One
+/// bad module never withholds grants from the rest.
+pub(super) fn candidate_capabilities(
     policy: &CapabilityPolicy,
     graph: &InstalledModuleGraph,
     modules: &HashMap<String, ModuleInstance>,
-) -> Result<Arc<HashMap<String, EffectiveCapabilities>>, ShellRunError> {
+) -> (
+    Arc<HashMap<String, EffectiveCapabilities>>,
+    Vec<(String, mesh_core_capability::CapabilityPolicyError)>,
+) {
     let mut effective = HashMap::with_capacity(modules.len());
+    let mut failures = Vec::new();
     for (module_id, module) in modules {
         if !graph.module(module_id).is_some_and(|node| node.enabled) {
             continue;
         }
-        effective.insert(
-            module_id.clone(),
-            policy.resolve_in(
-                graph.capability_catalog(),
-                module_id,
-                &module.manifest.capabilities.required,
-                &module.manifest.capabilities.optional,
-            )?,
-        );
+        match policy.resolve_in(
+            graph.capability_catalog(),
+            module_id,
+            &module.manifest.capabilities.required,
+            &module.manifest.capabilities.optional,
+        ) {
+            Ok(granted) => {
+                effective.insert(module_id.clone(), granted);
+            }
+            Err(error) => failures.push((module_id.clone(), error)),
+        }
     }
-    Ok(Arc::new(effective))
+    failures.sort_by(|left, right| left.0.cmp(&right.0));
+    (Arc::new(effective), failures)
 }
 
 impl Shell {
@@ -1515,13 +1528,9 @@ impl Shell {
                 }
             };
         let candidate_interfaces = interface_catalog.as_ref();
-        let effective_capabilities =
-            match candidate_capabilities(&self.capability_policy, &graph, &self.modules) {
-                Ok(capabilities) => capabilities,
-                Err(error) => {
-                    reject_candidate!(error.to_string());
-                }
-            };
+        let (effective_capabilities, capability_failures) =
+            candidate_capabilities(&self.capability_policy, &graph, &self.modules);
+        self.record_capability_failures(&capability_failures);
         let resolved_shell_settings =
             mesh_core_config::resolve_shell_locale_settings(settings.shell());
         let previous_catalog = self.frontend_catalog.snapshot().catalog;

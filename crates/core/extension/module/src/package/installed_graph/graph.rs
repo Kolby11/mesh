@@ -1132,6 +1132,19 @@ impl InstalledModuleGraph {
         self.revision
     }
 
+    /// Record modules that discovery or manifest loading had to leave out.
+    /// They are part of the graph's identity, so a module that disappears
+    /// because it became unreadable changes the revision visibly instead of
+    /// looking like a deliberate removal.
+    pub(crate) fn with_isolated_modules(mut self, isolated: Vec<ModuleGraphDiagnostic>) -> Self {
+        if isolated.is_empty() {
+            return self;
+        }
+        self.diagnostics.extend(isolated);
+        self.revision = graph_revision(&self.modules, &self.diagnostics);
+        self
+    }
+
     pub(crate) fn with_revision(mut self, revision: u64) -> Self {
         self.revision = revision.max(1);
         self

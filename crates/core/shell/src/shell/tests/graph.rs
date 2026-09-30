@@ -679,3 +679,42 @@ fn core_crate_boundaries_do_not_regress() {
     assert!(!surface_config.contains("mesh-core-shell"));
     assert!(!surface_config.contains("mesh-core-render"));
 }
+
+#[test]
+fn one_module_with_unresolvable_capabilities_does_not_withhold_grants_from_the_rest() {
+    let graph = graph_from_json(
+        r#"{
+            "modulesDir": "modules",
+            "modules": {
+                "@test/good": { "kind": "backend", "path": "@test/good", "enabled": true },
+                "@test/bad": { "kind": "backend", "path": "@test/bad", "enabled": true }
+            }
+        }"#,
+        vec![
+            r#"{ "name": "@test/good", "version": "0.1.0",
+                 "mesh": { "apiVersion": "0.1", "kind": "backend", "entry": "main.luau" } }"#,
+            r#"{ "name": "@test/bad", "version": "0.1.0",
+                 "mesh": { "apiVersion": "0.1", "kind": "backend", "entry": "main.luau" } }"#,
+        ],
+    );
+    let (_good_dir, mut good) = module_instance("@test/good", None);
+    good.manifest.capabilities.optional = vec!["net.http".into()];
+    let (_bad_dir, mut bad) = module_instance("@test/bad", None);
+    bad.manifest.capabilities.required = vec!["service.nonexistent.read".into()];
+    let modules = HashMap::from([
+        ("@test/good".to_string(), good),
+        ("@test/bad".to_string(), bad),
+    ]);
+
+    let (granted, failures) = super::super::profile::candidate_capabilities(
+        &mesh_core_capability::CapabilityPolicy::default(),
+        &graph,
+        &modules,
+    );
+
+    assert!(granted.contains_key("@test/good"));
+    assert!(!granted.contains_key("@test/bad"));
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].0, "@test/bad");
+    assert!(failures[0].1.to_string().contains("service.nonexistent.read"));
+}

@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 pub fn load_installed_module_graph(
     root_module_graph_path: &Path,
 ) -> Result<InstalledModuleGraph, ModuleManifestError> {
-    load_installed_module_graph_with(root_module_graph_path, None, load_module_manifests)
+    load_installed_module_graph_with(root_module_graph_path, None, load_each_module_manifest)
 }
 
 /// Resolve the installed graph against an explicit candidate profile without
@@ -23,13 +23,17 @@ pub fn load_installed_module_graph_for_profile(
     root_module_graph_path: &Path,
     profile: &ShellProfile,
 ) -> Result<InstalledModuleGraph, ModuleManifestError> {
-    load_installed_module_graph_with(root_module_graph_path, Some(profile), load_module_manifests)
+    load_installed_module_graph_with(
+        root_module_graph_path,
+        Some(profile),
+        load_each_module_manifest,
+    )
 }
 
 fn load_installed_module_graph_with(
     root_module_graph_path: &Path,
     candidate_profile: Option<&ShellProfile>,
-    load_manifests: impl Fn(&[PathBuf]) -> Result<Vec<LoadedModuleManifest>, ModuleManifestError>,
+    load_manifests: impl Fn(&[PathBuf]) -> Vec<Result<LoadedModuleManifest, ModuleManifestError>>,
 ) -> Result<InstalledModuleGraph, ModuleManifestError> {
     let mut root = RootModuleGraphManifest::from_path(root_module_graph_path)?;
     let root_dir = root_module_graph_path.parent().ok_or_else(|| {
@@ -42,6 +46,9 @@ fn load_installed_module_graph_with(
     let modules_dir = root_dir.join(&root.modules_dir);
     let active_store = load_active_store(root_dir)?;
     let mut modules = Vec::new();
+    // Modules left out because their directory or manifest could not be
+    // read. One bad module never aborts the graph; it becomes a diagnostic.
+    let mut isolated = Vec::new();
 
     if root.modules.is_empty() {
         // The root graph lists no modules: scan `modulesDir` for `module.json`
@@ -51,10 +58,29 @@ fn load_installed_module_graph_with(
         let module_dirs = if let Some((store, snapshot)) = &active_store {
             snapshot_module_dirs(store, snapshot)?
         } else {
-            discover_module_dirs(&modules_dir)
+            let discovered = discover_module_dirs_reporting(&modules_dir);
+            isolated.extend(discovered.skipped.into_iter().map(|(path, reason)| {
+                isolated_module_diagnostic(
+                    display_relative(&path, &modules_dir),
+                    "module_discovery_failed",
+                    format!("module directory {} was skipped: {reason}", path.display()),
+                )
+            }));
+            discovered.dirs
         };
-        let loaded_manifests = load_manifests(&module_dirs)?;
+        let loaded_manifests = load_manifests(&module_dirs);
         for (module_dir, loaded) in module_dirs.iter().cloned().zip(loaded_manifests) {
+            let loaded = match loaded {
+                Ok(loaded) => loaded,
+                Err(error) => {
+                    isolated.push(isolated_module_diagnostic(
+                        display_relative(&module_dir, &modules_dir),
+                        "module_manifest_invalid",
+                        format!("module at {} was not loaded: {error}", module_dir.display()),
+                    ));
+                    continue;
+                }
+            };
             let name = loaded.manifest.name.clone();
             let kind = loaded.manifest.mesh.kind;
             let relative = if active_store.is_some() {
@@ -103,7 +129,28 @@ fn load_installed_module_graph_with(
                 .map(|entry| contained_path(&modules_dir, &entry.path, "installed module path"))
                 .collect::<Result<Vec<_>, _>>()?
         };
-        modules = load_manifests(&module_dirs)?;
+        let module_ids = root.modules.keys().cloned().collect::<Vec<_>>();
+        for (module_id, loaded) in module_ids.into_iter().zip(load_manifests(&module_dirs)) {
+            match loaded {
+                Ok(loaded) => modules.push(loaded),
+                Err(error) => {
+                    // Drop the entry and every root decision naming it, so the
+                    // graph treats it as absent rather than failing to build.
+                    root.modules.remove(&module_id);
+                    root.providers.retain(|_, provider| provider != &module_id);
+                    if root.layout.as_ref().is_some_and(|layout| {
+                        layout.entrypoint.split(':').next() == Some(module_id.as_str())
+                    }) {
+                        root.layout = None;
+                    }
+                    isolated.push(isolated_module_diagnostic(
+                        module_id.clone(),
+                        "module_manifest_invalid",
+                        format!("installed module {module_id} was not loaded: {error}"),
+                    ));
+                }
+            }
+        }
     }
 
     // Profiles are opt-in: without an `active-profile` file the root graph's
@@ -179,12 +226,34 @@ fn load_installed_module_graph_with(
             Ok::<_, ModuleManifestError>((module_id, assessment))
         })
         .collect::<Result<std::collections::BTreeMap<String, TrustAssessment>, _>>()?;
-    InstalledModuleGraph::from_parts_with_provenance(
+    Ok(InstalledModuleGraph::from_parts_with_provenance(
         root,
         modules,
         composition,
         provenance_by_module,
-    )
+    )?
+    .with_isolated_modules(isolated))
+}
+
+fn isolated_module_diagnostic(
+    module_id: String,
+    status: &str,
+    message: String,
+) -> ModuleGraphDiagnostic {
+    ModuleGraphDiagnostic {
+        contribution_id: None,
+        module_id,
+        status: status.into(),
+        message,
+    }
+}
+
+/// A module directory named relative to `modulesDir` for diagnostics.
+fn display_relative(path: &Path, modules_dir: &Path) -> String {
+    path.strip_prefix(modules_dir)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 fn load_active_store(
@@ -232,7 +301,12 @@ fn snapshot_module_dirs(
 pub(in crate::package) fn load_installed_module_graph_serial(
     root_module_graph_path: &Path,
 ) -> Result<InstalledModuleGraph, ModuleManifestError> {
-    load_installed_module_graph_with(root_module_graph_path, None, load_module_manifests_serial)
+    load_installed_module_graph_with(root_module_graph_path, None, |module_dirs| {
+        module_dirs
+            .iter()
+            .map(|module_dir| load_module_manifest(module_dir))
+            .collect()
+    })
 }
 
 #[cfg(test)]
@@ -245,6 +319,7 @@ pub(in crate::package) fn load_discovered_module_manifests(
 
 /// Load ordered module directories without serializing file IO and JSON parsing
 /// on the caller. Indexed parallel iteration preserves the input order.
+#[cfg(test)]
 pub(in crate::package) fn load_module_manifests(
     module_dirs: &[PathBuf],
 ) -> Result<Vec<LoadedModuleManifest>, ModuleManifestError> {
@@ -277,62 +352,118 @@ pub(in crate::package) fn load_module_manifests_serial(
 /// `module.json`. Descent stops once a `module.json` is found, so nested
 /// resources inside a module are never treated as separate modules. Results are
 /// sorted for deterministic ordering.
+#[cfg(test)]
 pub(in crate::package) fn discover_module_dirs(modules_dir: &Path) -> Vec<PathBuf> {
-    let mut found = Vec::new();
-    let Ok(metadata) = std::fs::symlink_metadata(modules_dir) else {
-        return found;
+    discover_module_dirs_reporting(modules_dir).dirs
+}
+
+/// Module directories found under `modulesDir`, plus every path that could
+/// not be examined, with the reason. A skipped path is reported rather than
+/// silently omitted so an unreadable module never looks like an uninstall.
+#[derive(Debug, Default)]
+pub(in crate::package) struct DiscoveredModuleDirs {
+    pub(in crate::package) dirs: Vec<PathBuf>,
+    pub(in crate::package) skipped: Vec<(PathBuf, String)>,
+}
+
+pub(in crate::package) fn discover_module_dirs_reporting(modules_dir: &Path) -> DiscoveredModuleDirs {
+    let mut discovered = DiscoveredModuleDirs::default();
+    let metadata = match std::fs::symlink_metadata(modules_dir) {
+        Ok(metadata) => metadata,
+        // No modules directory yet is an empty installation, not a failure.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return discovered,
+        Err(error) => {
+            discovered.skipped.push((modules_dir.to_path_buf(), error.to_string()));
+            return discovered;
+        }
     };
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return found;
+        discovered.skipped.push((
+            modules_dir.to_path_buf(),
+            "modules directory must be a real directory".into(),
+        ));
+        return discovered;
     }
-    let Ok(root) = std::fs::canonicalize(modules_dir) else {
-        return found;
+    let root = match std::fs::canonicalize(modules_dir) {
+        Ok(root) => root,
+        Err(error) => {
+            discovered.skipped.push((modules_dir.to_path_buf(), error.to_string()));
+            return discovered;
+        }
     };
     let mut visited = std::collections::HashSet::new();
-    discover_module_dirs_into(modules_dir, &root, &mut visited, &mut found);
-    found.sort();
-    found
+    discover_module_dirs_into(modules_dir, &root, &mut visited, &mut discovered);
+    discovered.dirs.sort();
+    discovered.skipped.sort();
+    discovered
 }
 
 fn discover_module_dirs_into(
     dir: &Path,
     root: &Path,
     visited: &mut std::collections::HashSet<PathBuf>,
-    found: &mut Vec<PathBuf>,
+    discovered: &mut DiscoveredModuleDirs,
 ) {
-    let Ok(metadata) = std::fs::symlink_metadata(dir) else {
-        return;
+    let mut skip = |reason: String| discovered.skipped.push((dir.to_path_buf(), reason));
+    let metadata = match std::fs::symlink_metadata(dir) {
+        Ok(metadata) => metadata,
+        Err(error) => return skip(error.to_string()),
     };
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+    if metadata.file_type().is_symlink() {
+        return skip("symlinks under modulesDir are not followed".into());
+    }
+    if !metadata.is_dir() {
         return;
     }
-    let Ok(canonical) = std::fs::canonicalize(dir) else {
-        return;
+    let canonical = match std::fs::canonicalize(dir) {
+        Ok(canonical) => canonical,
+        Err(error) => return skip(error.to_string()),
     };
     if !canonical.starts_with(root) || !visited.insert(canonical) {
         return;
     }
     let module_json = dir.join("module.json");
-    if std::fs::symlink_metadata(&module_json)
-        .map(|metadata| metadata.is_file())
-        .unwrap_or(false)
-    {
-        found.push(dir.to_path_buf());
-        return;
+    match std::fs::symlink_metadata(&module_json) {
+        Ok(metadata) if metadata.is_file() => {
+            discovered.dirs.push(dir.to_path_buf());
+            return;
+        }
+        Ok(_) => return skip("module.json is not a regular file".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return skip(format!("module.json could not be read: {error}")),
     }
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) => return skip(error.to_string()),
     };
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                discovered.skipped.push((dir.to_path_buf(), error.to_string()));
+                continue;
+            }
+        };
         let path = entry.path();
-        if entry
-            .file_type()
-            .map(|file_type| file_type.is_dir())
-            .unwrap_or(false)
-        {
-            discover_module_dirs_into(&path, root, visited, found);
+        match entry.file_type() {
+            Ok(file_type) if file_type.is_dir() || file_type.is_symlink() => {
+                discover_module_dirs_into(&path, root, visited, discovered);
+            }
+            Ok(_) => {}
+            Err(error) => discovered.skipped.push((path, error.to_string())),
         }
     }
+}
+
+/// Load each directory's manifest independently, in parallel, keeping one
+/// result per directory so a single failure isolates only that module.
+fn load_each_module_manifest(
+    module_dirs: &[PathBuf],
+) -> Vec<Result<LoadedModuleManifest, ModuleManifestError>> {
+    module_dirs
+        .par_iter()
+        .map(|module_dir| load_module_manifest(module_dir))
+        .collect()
 }
 
 pub fn load_module_manifest(
