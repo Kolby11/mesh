@@ -606,7 +606,7 @@ impl Shell {
                 let expected_revision = profile.revision;
                 package_try!(
                     profile
-                        .add_frontend(manifest)
+                        .add_root(manifest)
                         .map_err(|error| package_error(error.to_string()))
                 );
                 let manifests = package_try!(

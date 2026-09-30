@@ -14,7 +14,7 @@ use mesh_core_frontend::{
 use mesh_core_module::Manifest;
 use mesh_core_module::ModuleType;
 use mesh_core_module::lifecycle::ModuleInstance;
-use mesh_core_module::package::{InstalledModuleGraph, ModuleKind, NodeSlotOverride};
+use mesh_core_module::package::{InstalledModuleGraph, NodeSlotOverride};
 use rayon::prelude::*;
 
 use super::{ComponentError, memo};
@@ -880,7 +880,7 @@ impl FrontendCatalog {
                     && *module_id != "@mesh/debug-inspector"
                     && !graph
                         .module(module_id)
-                        .is_some_and(|entry| entry.enabled && entry.kind == ModuleKind::Frontend)
+                        .is_some_and(|entry| entry.enabled && entry.kind.is_mountable_root())
                 {
                     return None;
                 }
@@ -1433,6 +1433,21 @@ impl FrontendCatalog {
         entries
     }
 
+    /// Entries a profile may mount as a root instance: surface frontends and
+    /// component modules, which share one UI component model.
+    pub(in crate::shell) fn mountable_roots(&self) -> HashMap<String, FrontendCatalogEntry> {
+        self.modules
+            .values()
+            .filter(|entry| {
+                matches!(
+                    entry.compiled.manifest.package.module_type,
+                    ModuleType::Surface | ModuleType::Component
+                )
+            })
+            .map(|entry| (entry.compiled.manifest.package.id.clone(), entry.clone()))
+            .collect()
+    }
+
     pub(in crate::shell) fn top_level_surfaces_filtered(
         &self,
         enabled_frontends: Option<&std::collections::HashSet<String>>,
@@ -1778,6 +1793,37 @@ mod performance_tests {
                 .join("modules/frontend/navigation-bar/src/settings.mesh")
                 .canonicalize()
                 .expect("shipped contribution source path canonicalizes")
+        );
+    }
+
+    /// Profiles may mount component modules as roots, so a graph-backed
+    /// catalog must compile enabled components alongside surface frontends
+    /// while the legacy top-level surface set stays frontend-only.
+    #[test]
+    fn graph_backed_catalog_offers_component_modules_as_mountable_roots() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let graph = mesh_core_module::package::load_authoring_snapshot(
+            &workspace_root.join("config/module.json"),
+        )
+        .expect("shipped graph loads");
+        let modules = shipped_frontend_modules();
+        let catalog = FrontendCatalog::from_modules(&modules, Some(&graph)).unwrap();
+
+        let roots = catalog.mountable_roots();
+        assert!(roots.contains_key("@mesh/navigation-bar"));
+        let quick_settings = roots
+            .get("@mesh/quick-settings")
+            .expect("an enabled component module is a mountable root");
+        assert_eq!(
+            quick_settings.compiled.manifest.package.module_type,
+            ModuleType::Component
+        );
+        assert!(
+            !catalog
+                .top_level_surfaces()
+                .iter()
+                .any(|entry| entry.compiled.manifest.package.id == "@mesh/quick-settings"),
+            "components are not legacy auto-mounted surfaces"
         );
     }
 

@@ -637,7 +637,7 @@ impl InstalledModuleGraph {
             if !node.enabled {
                 continue;
             }
-            if node.kind == ModuleKind::Frontend {
+            if node.kind.is_mountable_root() {
                 frontend_requirements.insert(
                     node.id.clone(),
                     FrontendRequirementSet::from_manifest(&node.id, &node.manifest),

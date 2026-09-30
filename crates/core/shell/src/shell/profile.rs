@@ -1535,11 +1535,7 @@ impl Shell {
             }
         };
         let temporary_catalog = FrontendCatalogHandle::from(catalog.clone());
-        let entries = catalog
-            .top_level_surfaces()
-            .into_iter()
-            .map(|entry| (entry.compiled.manifest.package.id.clone(), entry))
-            .collect::<HashMap<_, _>>();
+        let entries = catalog.mountable_roots();
         let mut profile = profile;
         if !persist_active_profile {
             for entry in catalog.top_level_surfaces() {
@@ -1587,7 +1583,7 @@ impl Shell {
             }
             let Some(entry) = entries.get(&root.module) else {
                 reject_candidate!(format!(
-                    "profile root {instance_id} has no mountable frontend entrypoint"
+                    "profile root {instance_id} has no mountable frontend or component entrypoint"
                 ));
             };
             let mut component = FrontendSurfaceComponent::new(

@@ -2626,16 +2626,12 @@ impl Shell {
                 &self.installed_module_graph_path(),
             )?;
             let profile = paths.load(&profile_id)?;
-            let entries = frontend_catalog
-                .top_level_surfaces()
-                .into_iter()
-                .map(|entry| (entry.compiled.manifest.package.id.clone(), entry))
-                .collect::<HashMap<_, _>>();
+            let entries = frontend_catalog.mountable_roots();
             for (instance_id, root) in profile.roots.iter().filter(|(_, root)| root.is_active()) {
                 let entry = entries.get(&root.module).ok_or_else(|| {
                     ShellRunError::FrontendComposition {
                         message: format!(
-                            "profile root {instance_id} has no mountable frontend entrypoint"
+                            "profile root {instance_id} has no mountable frontend or component entrypoint"
                         ),
                     }
                 })?;

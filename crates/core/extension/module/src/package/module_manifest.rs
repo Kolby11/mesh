@@ -931,6 +931,14 @@ pub enum ModuleKind {
     Component,
 }
 
+impl ModuleKind {
+    /// Kinds a profile may mount as a root instance. A frontend supplies its
+    /// default placement; a component root takes placement from the profile.
+    pub fn is_mountable_root(self) -> bool {
+        matches!(self, Self::Frontend | Self::Component)
+    }
+}
+
 impl From<ModuleType> for ModuleKind {
     fn from(module_type: ModuleType) -> Self {
         match module_type {

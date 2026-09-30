@@ -147,9 +147,11 @@ Frontend and component modules share one UI component model and one primary
 public component; extra public entries are explicit contributions (§4.3).
 `frontend` supplies default surface placement and direct-install activation;
 `component` has no default surface declaration and is made available on install.
-**Target:** profiles may explicitly mount either kind with suitable placement
-and existing capability grants. Current profile root activation still requires
-`frontend`; shared component semantics do not claim that target is shipped.
+**Shipped:** profiles may explicitly mount either kind as a root instance
+(`mesh-shell profile add <profile> <module>`). A component root takes its
+placement from core defaults plus the instance's sparse `surface` override and
+runs with its existing capability grants; its required interfaces gate
+activation exactly as a frontend's do.
 
 ### 3.3 Surface placement (`mesh.surface`)
 

@@ -819,12 +819,12 @@ fn cmd_profile(args: &[String]) {
             let profile_id = required_arg(
                 args,
                 1,
-                "mesh-shell profile add <profile> <frontend-module>",
+                "mesh-shell profile add <profile> <frontend-or-component-module>",
             );
             let module_id = required_arg(
                 args,
                 2,
-                "mesh-shell profile add <profile> <frontend-module>",
+                "mesh-shell profile add <profile> <frontend-or-component-module>",
             );
             let mut profile = paths
                 .load_or_default(profile_id)
@@ -834,7 +834,7 @@ fn cmd_profile(args: &[String]) {
                 .module(module_id)
                 .unwrap_or_else(|| exit_error(format!("module {module_id} is not installed")));
             let instance_id = profile
-                .add_frontend(&module.manifest)
+                .add_root(&module.manifest)
                 .unwrap_or_else(|error| exit_error(error));
             save_profile_revision(&paths, profile_id, &profile)
                 .unwrap_or_else(|error| exit_error(error));
@@ -1210,7 +1210,7 @@ fn cmd_install(args: &[String]) {
             .load_or_default(&profile_id)
             .map_err(|error| error.to_string())?;
         let instance_id = profile
-            .add_frontend(&manifest)
+            .add_root(&manifest)
             .map_err(|error| error.to_string())?;
         let manifests = graph
             .modules()

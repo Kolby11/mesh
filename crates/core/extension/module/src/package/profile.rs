@@ -335,13 +335,14 @@ impl ShellProfile {
         Ok(())
     }
 
-    pub fn add_frontend(
-        &mut self,
-        manifest: &ModuleManifest,
-    ) -> Result<String, ModuleManifestError> {
-        if manifest.mesh.kind != ModuleKind::Frontend {
+    /// Mount a module's primary component as the `#default` root instance.
+    /// Frontend and component modules share one UI model; a component root
+    /// has no declared `mesh.surface`, so its placement comes from core
+    /// defaults plus the instance's sparse `surface` override.
+    pub fn add_root(&mut self, manifest: &ModuleManifest) -> Result<String, ModuleManifestError> {
+        if !manifest.mesh.kind.is_mountable_root() {
             return Err(ModuleManifestError::Validation(format!(
-                "{} is {:?}; only frontend modules create profile root instances",
+                "{} is {:?}; only frontend and component modules create profile root instances",
                 manifest.name, manifest.mesh.kind
             )));
         }
@@ -1141,10 +1142,32 @@ mod tests {
             r#"{"name":"@me/weather","version":"1","mesh":{"apiVersion":"0.1","kind":"frontend","entry":"src/main.mesh","surface":{"anchor":"top"}}}"#,
         );
         let mut profile = ShellProfile::new();
-        let instance_id = profile.add_frontend(&module).unwrap();
+        let instance_id = profile.add_root(&module).unwrap();
         let instance = &profile.roots[&instance_id];
         assert!(instance.is_active());
         assert!(instance.surface.is_none());
+    }
+
+    #[test]
+    fn component_modules_mount_as_roots_and_other_kinds_do_not() {
+        let component = manifest(
+            r#"{"name":"@me/clock","version":"1","mesh":{"apiVersion":"0.1","kind":"component","entry":"main.mesh"}}"#,
+        );
+        let backend = manifest(
+            r#"{"name":"@me/audio","version":"1","mesh":{"apiVersion":"0.1","kind":"backend","entry":"main.luau"}}"#,
+        );
+        let mut profile = ShellProfile::new();
+        let instance_id = profile.add_root(&component).unwrap();
+        assert_eq!(instance_id, "@me/clock#default");
+        assert!(profile.roots[&instance_id].is_active());
+
+        let active = profile
+            .active_module_ids([&component, &backend])
+            .expect("a component root activates");
+        assert_eq!(active, HashSet::from(["@me/clock".to_string()]));
+
+        let error = profile.add_root(&backend).unwrap_err().to_string();
+        assert!(error.contains("only frontend and component modules"), "{error}");
     }
 
     #[test]
@@ -1159,7 +1182,7 @@ mod tests {
             r#"{"name":"@me/audio","version":"1","mesh":{"apiVersion":"0.1","kind":"backend","entry":"main.luau","implements":[{"interface":"mesh.audio","version":"1"}]}}"#,
         );
         let mut profile = ShellProfile::new();
-        profile.add_frontend(&frontend).unwrap();
+        profile.add_root(&frontend).unwrap();
         let active = profile
             .active_module_ids([&frontend, &component, &backend])
             .unwrap();
@@ -1225,7 +1248,7 @@ mod tests {
             r#"{"name":"@me/helpers","version":"1.5.0","mesh":{"apiVersion":"0.1","kind":"library"}}"#,
         );
         let mut profile = ShellProfile::new();
-        profile.add_frontend(&frontend).unwrap();
+        profile.add_root(&frontend).unwrap();
 
         let error = profile
             .active_module_ids([&frontend, &helpers])
@@ -1244,7 +1267,7 @@ mod tests {
             r#"{"name":"@me/helpers","version":"1.5.0","mesh":{"apiVersion":"0.1","kind":"library"}}"#,
         );
         let mut profile = ShellProfile::new();
-        profile.add_frontend(&frontend).unwrap();
+        profile.add_root(&frontend).unwrap();
 
         let active = profile.active_module_ids([&frontend, &helpers]).unwrap();
         assert_eq!(active, HashSet::from(["@me/panel".to_string()]));
@@ -1262,7 +1285,7 @@ mod tests {
             r#"{"name":"@me/audio","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"backend","implements":[{"interface":"mesh.audio","version":"1.0.0"}]}}"#,
         );
         let mut profile = ShellProfile::new();
-        profile.add_frontend(&frontend).unwrap();
+        profile.add_root(&frontend).unwrap();
 
         let error = profile
             .active_module_ids([&frontend, &interface, &backend])
