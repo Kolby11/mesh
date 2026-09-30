@@ -1,5 +1,34 @@
 # MESH Performance Log
 
+## 2026-09-30 — a full-restyle style-share cache hits 99% and saves nothing
+
+`archive/style-share-cache` (local branch, not landed) · area: style resolution
+
+This targeted the backlog item "a tree-rebuild frame restyles memo-reused
+subtrees". A `StyleShareCache` on each surface reused a prior `ComputedStyle`
+whenever a node's resolution inputs were identical: tag, module, classes, id,
+inline style, state, the parent's inherited style, and container size. Theme,
+props, and rule identity formed the cache epoch. It was correct, and a
+node-for-node equality test against the unshared restyle passed.
+
+**Measured.** Release under `nix develop`, `appearance_frame_cost_profile` (real
+`@mesh/settings` Appearance surface, 920x900, 60 unrelated `mesh.audio` frames),
+three interleaved runs each against an isolated build of `0aff0b08`:
+**15.51–15.91ms before, 15.13–16.07ms after** per service frame, fully
+overlapping. The cache answered 39,428 of 39,720 lookups (99.3%), so the misses
+were not the problem. Hashing and comparing the key, then cloning a whole
+`ComputedStyle` into the node, costs about as much as resolving the style.
+
+**What this rules out.** Value-level memoization of computed styles cannot beat
+resolution while a hit still clones the full style. A win here needs the
+restyle walk to *skip* nodes (a "styles still valid" mark on memo-reused
+subtrees), or a cheaply shareable `ComputedStyle` (`Arc`/copy-on-write). The
+backlog item stays open with that note.
+
+Note: this harness's attributed second pass takes the `*_cached_profiled`
+restyle path, which bypasses any unattributed restyle variant. Read only the
+`MESH_PERF` wall-clock line when evaluating restyle changes.
+
 ## 2026-09-21 — the narrow service path engages, and sparse frames stop paying whole-stream costs
 
 `working tree` · area: service invalidation, damage selection, display-list batch metrics
@@ -1083,6 +1112,7 @@ section noted.
 | 2026-07-15 | Luau `table.clone` plus recursive array replacement for nested storage reads | I | Regressed 1.237s current to 1.611s cached over 100k reads (0.77x); exact detached-value semantics still require too much table reconstruction |
 | 2026-07-28 | `SmallVec<[&WidgetNode; 8]>` for scoped retained-update candidates | N | Removed one allocation per sparse update, but the complete 40-node path improved only 1.005x (63.918ms → 63.631ms/50k); prototype reverted |
 | 2026-07-30 | Downsample → blur → upsample image-filter chain for `filter: blur()` layers | P | Slower at every radius (512x512 layer, 200 frames: r8 254ms full-res vs 562ms quarter-res; r32 287ms vs 479ms; r64 310ms vs 488ms). Skia's raster blur already resamples internally for wide kernels, so an explicit chain only adds two transforms and an intermediate. The `downscale` setting was removed rather than shipped as a slower default |
+| 2026-09-30 | Full-restyle `StyleShareCache` reusing cloned `ComputedStyle`s by node inputs | E | 99.3% hit rate but no frame win: 15.51–15.91ms before vs 15.13–16.07ms after on `appearance_frame_cost_profile`; key hash/compare plus a full style clone costs as much as resolution. Archived on local branch `archive/style-share-cache` |
 
 ## 2026-07-30 — element `filter: blur()` subtree layers
 

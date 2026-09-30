@@ -46,9 +46,6 @@ evidence and test workloads are in the linked reports.
 
 ### Section 02 — Module system and installation
 
-- [ ] **S02-LOGIC-001 / S02-LOGIC-002:** Preserve omitted versus explicit
-      profile overlays so inactive roots stay inactive and explicit empty
-      icon/font/language chains clear inherited values. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
 - [ ] **S02-LOGIC-003 / S02-LOGIC-008 / S02-LOGIC-011:** Bind graph diffs and
       activation candidates to the same store, manifest/content revision, and
       lock identity so same-version edits or mismatched objects cannot publish. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
@@ -63,10 +60,9 @@ evidence and test workloads are in the linked reports.
       only unreferenced immutable content. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
 - [ ] **S02-DEAD-002:** Centralize install capability/trust review in the module
       core and make shell and CLI consume the same typed result. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
-- [ ] **S02-PERF-001 / S02-PERF-002 / S02-PERF-004 / S02-PERF-005:** Move
-      blocking package/Git preparation off the shell request path, avoid broad
-      no-op backups, share parsed manifests/passes, and enforce measured source
-      size budgets. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
+- [ ] **S02-PERF-001 / S02-PERF-002 / S02-PERF-004:** Move blocking
+      package/Git preparation off the shell request path, avoid broad no-op
+      backups, and share parsed manifests/passes. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
 - [ ] **S02-PERF-003:** Replace whole-catalog authoring refresh hashing with
       watcher/content-index revisions and retain full hashing as a recovery
       fallback. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
@@ -89,10 +85,8 @@ evidence and test workloads are in the linked reports.
 
 ### Section 05 — Localization and i18n
 
-- [ ] **S05-PERF-001 / S05-PERF-002 / S05-PERF-003 / S05-DEAD-002:** Make bulk and point translation
-      lookup share one effective-catalog precedence traversal, and measure
-      catalog parsing, projection, and translator identifier allocation at
-      realistic sizes. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/05-localization-i18n.md)
+- [ ] **S05-PERF-001 / S05-PERF-002 / S05-PERF-003:** Measure catalog
+      parsing and bulk projection at realistic catalog sizes. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/05-localization-i18n.md)
 
 ### Section 06 — Host resources and icon packs
 
@@ -197,7 +191,8 @@ gate where the win is structural.
       entries are stored pre-restyle (position-independent by design), so a
       reused page pays a full style walk and copy-on-write anyway — 2.8ms of an
       8.6ms Appearance service frame. Needs styled memo entries, or a
-      "styles still valid" mark the restyle walk can skip.
+      "styles still valid" mark the restyle walk can skip — a value-level
+      share cache was measured and rejected (see log).
 
 ### Typing and interning
 
@@ -220,13 +215,9 @@ gate where the win is structural.
 
 ### Runtime boundary
 
-- [ ] Push-based backend host API primitives (D-Bus signal subscribe, fd/socket
-      watch, stream adoption) so providers are event-driven and polling is the
-      fallback (C). **Measured 2026-08-08:** the shipped polls fork ~3 processes
-      per second (`hyprctl` 500ms, `wpctl` 1000ms, `brightnessctl` 2000ms) and
-      cost 6.4% of a core continuously — 32x the whole shell render loop at rest
-      (0.2%) — mostly in dynamic-linker startup, for no state change. Includes evaluating `pw-dump --monitor` as a real volume
-      event source; `pw-mon` emits no `changed:` block for volume.
+- [ ] D-Bus signal subscription as a backend host primitive, so UPower and
+      NetworkManager providers stop adopting monitor subprocesses (C); then
+      re-measure the at-rest fork rate on a live session.
 - [ ] Handler sync still reads compound table globals, because nested in-place
       mutations never assign through `_ENV`. Eliminating those reads needs
       recursively tracked tables or Rust-owned reactive values (R).
