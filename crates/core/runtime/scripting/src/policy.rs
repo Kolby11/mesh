@@ -416,6 +416,13 @@ impl RuntimePolicy {
         // module is alive (for example, when a capability is revoked). Keep
         // Luau's import optimization from caching a stale `mesh` member.
         lua.set_compiler(Compiler::new().add_mutable_global("mesh"));
+        // Contexts share one realm and are isolated only by their environment
+        // tables. `getfenv` on any function another context handed over (a
+        // bind:this call, a callback) would return that context's environment
+        // with its `mesh` API and storage, so neither function is reachable.
+        let globals = lua.globals();
+        globals.raw_remove("getfenv")?;
+        globals.raw_remove("setfenv")?;
         lua.sandbox(true)?;
         lua.set_memory_limit(self.budget.config().memory_limit as usize)?;
         let budget = self.budget.clone();
@@ -445,6 +452,17 @@ impl RuntimePolicy {
 mod tests {
     use super::*;
     use mlua::Lua;
+
+    #[test]
+    fn policy_removes_environment_access_from_the_realm() {
+        let lua = Lua::new();
+        RuntimePolicy::default().install(&lua).unwrap();
+        let exposed: (bool, bool) = lua
+            .load("return getfenv ~= nil, setfenv ~= nil")
+            .eval()
+            .unwrap();
+        assert_eq!(exposed, (false, false));
+    }
 
     #[test]
     fn policy_installs_sandbox_memory_and_instruction_limits() {

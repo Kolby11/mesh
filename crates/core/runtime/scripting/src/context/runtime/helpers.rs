@@ -48,6 +48,64 @@ pub(super) fn is_denied_binding_key(key: &str, denylist: &HashSet<String>) -> bo
     key.starts_with("__") || is_reserved_runtime_hook(key) || denylist.contains(key)
 }
 
+/// Wraps a value read through a live `bind:this` proxy. Functions become
+/// forwarding closures and tables become read-through proxies, recursively,
+/// so the parent never holds the child's own function or table values. Every
+/// call or write through a wrapper runs `mark`, which flags the child for a
+/// state resync. Runs in an empty environment; its globals arrive as arguments.
+const LIVE_BINDING_WRAPPER: &str = r#"
+local setmetatable, next, type, mark = ...
+local wrap
+wrap = function(value)
+  local kind = type(value)
+  if kind == "function" then
+    return function(...)
+      mark()
+      return value(...)
+    end
+  elseif kind ~= "table" then
+    return value
+  end
+  return setmetatable({}, {
+    __index = function(_, key) return wrap(value[key]) end,
+    __newindex = function(_, key, next_value)
+      mark()
+      value[key] = next_value
+    end,
+    __len = function() return #value end,
+    __iter = function()
+      local key
+      return function()
+        local item
+        key, item = next(value, key)
+        if key == nil then return nil end
+        return key, wrap(item)
+      end
+    end,
+    __metatable = false,
+  })
+end
+return wrap
+"#;
+
+/// Build the deep wrapper for one live binding; see [`LIVE_BINDING_WRAPPER`].
+pub(super) fn live_binding_wrapper(lua: &Lua, accessed: Arc<AtomicBool>) -> mlua::Result<Function> {
+    let globals = lua.globals();
+    let mark = lua.create_function(move |_, ()| {
+        accessed.store(true, Ordering::Release);
+        Ok(())
+    })?;
+    lua.load(LIVE_BINDING_WRAPPER)
+        .set_name("=mesh:live-binding")
+        .set_environment(lua.create_table()?)
+        .call((
+            globals.get::<Function>("setmetatable")?,
+            globals.get::<Function>("next")?,
+            globals.get::<Function>("type")?,
+            mark,
+        ))
+}
+
 /// Resolve (or lazily create) a `self.<Event>` channel.
 ///
 /// The registry lives on the per-instance `_ENV` table (`scope`) so two

@@ -1578,12 +1578,12 @@ fn create_backend_event_channel(
     let subscribers = lua.create_table()?;
     let next_subscription_id = Arc::new(AtomicU64::new(1));
     let subscribe_host_side_effects_enabled = Arc::clone(&host_side_effects_enabled);
-    channel.set("__subscribers", subscribers.clone())?;
+    let subscribe_subscribers = subscribers.clone();
     channel.set(
         "subscribe",
-        lua.create_function(move |lua, (table, callback): (Table, Function)| {
+        lua.create_function(move |lua, (_table, callback): (Table, Function)| {
             require_started(&subscribe_host_side_effects_enabled)?;
-            let subscribers: Table = table.get("__subscribers")?;
+            let subscribers = subscribe_subscribers.clone();
             let id = next_subscription_id.fetch_add(1, Ordering::Relaxed);
             subscribers.raw_set(id, callback)?;
             Ok(lua.create_function(move |_lua, ()| subscribers.raw_set(id, LuaValue::Nil))?)
@@ -1596,7 +1596,7 @@ fn create_backend_event_channel(
     let host_side_effects_enabled = Arc::clone(&host_side_effects_enabled);
     channel.set(
         "fire",
-        lua.create_function(move |lua, (table, payload): (Table, Option<LuaValue>)| {
+        lua.create_function(move |lua, (_table, payload): (Table, Option<LuaValue>)| {
             require_started(&host_side_effects_enabled)?;
             let payload = match payload {
                 Some(value) => lua.from_value::<JsonValue>(value)?,
@@ -1618,7 +1618,6 @@ fn create_backend_event_channel(
                 resources.release_event(1);
                 return Err(mlua::Error::external(error));
             }
-            let subscribers: Table = table.get("__subscribers")?;
             dispatch_backend_event_subscribers(
                 &subscribers,
                 lua.to_value(&payload)?,

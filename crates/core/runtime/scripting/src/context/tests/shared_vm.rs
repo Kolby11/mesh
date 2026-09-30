@@ -304,6 +304,74 @@ function init() end
 }
 
 #[test]
+fn live_binding_values_cannot_reach_the_child_environment() {
+    // A parent holding a child's functions or tables must not reach the
+    // child's environment: getfenv is gone from the realm, nested values are
+    // wrapped rather than handed over, and channel subscriber lists are not
+    // table fields.
+    let vm = SurfaceVm::new();
+
+    let mut child = ScriptContext::new("@mesh/child", CapabilitySet::default()).unwrap();
+    child.attach_shared_vm(&vm);
+    child
+        .load_script(
+            r#"
+local secret = "child-secret"
+api = { value = 7, items = { "a", "b" } }
+function api.read() return secret end
+function init() end
+"#,
+        )
+        .unwrap();
+    child.call_init().unwrap();
+
+    let mut parent = ScriptContext::new("@mesh/parent", CapabilitySet::default()).unwrap();
+    parent.attach_shared_vm(&vm);
+    parent
+        .load_script(
+            r#"
+has_getfenv = true
+nested_value = 0
+iterated = 0
+read_value = ""
+written_value = 0
+subscribers_hidden = false
+function probe()
+    has_getfenv = getfenv ~= nil or setfenv ~= nil
+    nested_value = child.api.value
+    for _, _ in child.api.items do
+        iterated = iterated + 1
+    end
+    read_value = child.api.read()
+    child.api.value = 9
+    written_value = child.api.value
+    subscribers_hidden = child.Changed.__subscribers == nil
+end
+function init() end
+"#,
+        )
+        .unwrap();
+    parent.call_init().unwrap();
+
+    parent.install_live_binding("child", &child).unwrap();
+    parent.call_handler("probe", &[]).unwrap();
+
+    assert_eq!(parent.state.get("has_getfenv"), Some(serde_json::json!(false)));
+    assert_eq!(parent.state.get("nested_value"), Some(serde_json::json!(7)));
+    assert_eq!(parent.state.get("iterated"), Some(serde_json::json!(2)));
+    assert_eq!(
+        parent.state.get("read_value"),
+        Some(serde_json::json!("child-secret"))
+    );
+    assert_eq!(parent.state.get("written_value"), Some(serde_json::json!(9)));
+    assert_eq!(
+        parent.state.get("subscribers_hidden"),
+        Some(serde_json::json!(true))
+    );
+    assert!(child.take_live_binding_external_accessed());
+}
+
+#[test]
 fn live_binding_routes_child_self_event_to_parent_in_same_tick() {
     // Child→parent events: the live proxy exposes the child's `self.<Event>`
     // channel, so a parent subscribes with `child.Event:on(fn)` and the child's

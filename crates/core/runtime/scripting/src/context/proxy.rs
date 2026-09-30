@@ -430,6 +430,16 @@ pub(super) fn interface_event_channel(
     }
 }
 
+const CHANNEL_SUBSCRIBERS_KEY: &str = "mesh.subscribers";
+
+/// The subscriber set of a channel made by [`create_event_channel`].
+pub(super) fn channel_subscribers(channel: &Table) -> mlua::Result<Table> {
+    channel
+        .metatable()
+        .ok_or_else(|| mlua::Error::runtime("event channel has no subscriber set"))?
+        .raw_get(CHANNEL_SUBSCRIBERS_KEY)
+}
+
 pub(super) fn create_event_channel(
     lua: &Lua,
     subscribed_interface_events: Option<Arc<Mutex<HashMap<String, HashMap<String, usize>>>>>,
@@ -460,10 +470,14 @@ fn create_event_channel_with_policy(
         .as_ref()
         .map(|(service, event)| format!("{service}.{event}"))
         .unwrap_or_else(|| "unnamed".to_string());
-    // Rust host delivery uses this private-by-convention slot to reach the
-    // subscriber set without exposing a provider publication method. The
-    // interface channel deliberately has no `emit` or `fire` member.
-    channel.set("__subscribers", subscribers.clone())?;
+    // Rust host delivery reaches the subscriber set through a locked
+    // metatable, never a table field: a component holding another's channel
+    // through bind:this must not reach callbacks other components registered.
+    // The interface channel deliberately has no `emit` or `fire` member.
+    let meta = lua.create_table()?;
+    meta.raw_set(CHANNEL_SUBSCRIBERS_KEY, subscribers.clone())?;
+    meta.raw_set("__metatable", false)?;
+    channel.set_metatable(Some(meta))?;
     let subscribers_for_subscription = subscribers.clone();
     channel.set(
         "subscribe",

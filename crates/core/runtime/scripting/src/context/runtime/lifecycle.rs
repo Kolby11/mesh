@@ -6,7 +6,7 @@ use super::super::{
 use super::*;
 use crate::storage::create_lua_storage_table;
 use crate::util::is_named_event_channel;
-use mlua::{Function, LuaSerdeExt, MultiValue, Table, Value as LuaValue, Variadic};
+use mlua::{Function, LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value;
 use std::sync::{Arc, atomic::Ordering};
 
@@ -20,6 +20,8 @@ impl ScriptContext {
     ///
     /// A denylist from the child's `builtin_globals` plus the lifecycle hooks
     /// hides host internals, so only public values and functions pass through.
+    /// Function and table members are deep-wrapped, so the parent never holds
+    /// the child's own values.
     /// Takes `&self`/`&child` so the caller can borrow both runtimes out of one
     /// map guard; both must already be initialized.
     pub fn install_live_binding(
@@ -50,7 +52,8 @@ impl ScriptContext {
         let index_env = child_env.clone();
         let index_scalars = child_scalars;
         let index_deny = denylist.clone();
-        let index_external_accessed = Arc::clone(&child_external_accessed);
+        let index_wrap =
+            live_binding_wrapper(lua, Arc::clone(&child_external_accessed)).map_err(lua_err)?;
         let index_parent_accessed = Arc::clone(&parent_external_accessed);
         let index_channel_wrappers = event_channel_wrappers;
         meta.set(
@@ -65,16 +68,10 @@ impl ScriptContext {
                 if matches!(raw, LuaValue::Nil) {
                     raw = index_scalars.raw_get::<LuaValue>(key.as_str())?;
                 }
+                if matches!(raw, LuaValue::Function(_) | LuaValue::Table(_)) {
+                    return index_wrap.call::<LuaValue>(raw);
+                }
                 if !matches!(raw, LuaValue::Nil) {
-                    if let LuaValue::Function(function) = raw {
-                        let accessed = Arc::clone(&index_external_accessed);
-                        return lua
-                            .create_function(move |_lua, args: Variadic<LuaValue>| {
-                                accessed.store(true, Ordering::Release);
-                                function.call::<MultiValue>(args)
-                            })
-                            .map(LuaValue::Function);
-                    }
                     return Ok(raw);
                 }
                 // Child→parent events: a named-channel key with no public member

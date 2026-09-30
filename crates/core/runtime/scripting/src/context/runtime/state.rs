@@ -1,7 +1,7 @@
 use super::super::ScriptError;
 use super::super::element_ref::install_bound_element_proxies;
 use super::super::lookup::{lua_err, map_lua_error};
-use super::super::proxy::{dispatch_event_subscribers, interface_event_channel};
+use super::super::proxy::{channel_subscribers, dispatch_event_subscribers, interface_event_channel};
 use super::*;
 use mesh_core_elements::VariableStore;
 use mlua::Table;
@@ -128,7 +128,7 @@ impl ScriptContext {
         let scope = self.env().clone();
         let channel = interface_event_channel(self.lua(), &scope, service, event_name, None, true)
             .map_err(lua_err)?;
-        let subscribers = channel.get::<Table>("__subscribers").map_err(lua_err)?;
+        let subscribers = channel_subscribers(&channel).map_err(lua_err)?;
         let lua_payload = self.lua().to_value(payload).map_err(lua_err)?;
         dispatch_event_subscribers(
             &subscribers,
