@@ -442,6 +442,33 @@ impl EffectScheduler {
         self.queues.values().map(VecDeque::len).sum::<usize>() + self.deferred.len()
     }
 
+    /// Drop the queued effects of one runtime, returning the service calls
+    /// they would have answered.
+    fn discard_runtime(&mut self, runtime_id: &str) -> Vec<u64> {
+        let mut dropped = Vec::new();
+        for queue in self.queues.values_mut() {
+            queue.retain(|effect| {
+                let keep = effect.context.source.runtime_id != runtime_id;
+                if !keep {
+                    dropped.extend(effect.call_id);
+                }
+                keep
+            });
+        }
+        self.queues.retain(|_, queue| !queue.is_empty());
+        let queues = &self.queues;
+        self.ready_sources
+            .retain(|source| queues.contains_key(source));
+        self.deferred.retain(|effect| {
+            let keep = effect.context.source.runtime_id != runtime_id;
+            if !keep {
+                dropped.extend(effect.call_id);
+            }
+            keep
+        });
+        dropped
+    }
+
     /// Drop every queued effect, returning how many were dropped and the
     /// service calls they would have answered.
     fn discard_pending(&mut self) -> (usize, Vec<u64>) {
@@ -770,6 +797,13 @@ impl Shell {
                     .component
                     .isolate_runtime_failure("effect_scheduler", &message);
             }
+        }
+    }
+
+    /// Drop queued effects issued by one runtime, answering their calls.
+    pub(in crate::shell) fn discard_runtime_effects(&mut self, runtime_id: &str) {
+        for call_id in self.effect_scheduler.discard_runtime(runtime_id) {
+            self.settle_core_service_call(call_id, Err("the calling component was removed".into()));
         }
     }
 

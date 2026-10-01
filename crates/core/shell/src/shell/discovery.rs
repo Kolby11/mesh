@@ -2895,17 +2895,11 @@ impl Shell {
             return Ok(VecDeque::new());
         }
         let mut removed_surfaces = Vec::new();
+        let mut requests = VecDeque::new();
         for index in indices.into_iter().rev() {
             let surface_id = self.components[index].surface_id.clone();
             let module_id = self.components[index].component.id().to_string();
-            if let Err(error) = self.components[index].unmount() {
-                tracing::warn!(
-                    module_id,
-                    error = %error,
-                    "frontend deactivation unmount failed"
-                );
-                self.contain_component_failure(index, "unmount", &error);
-            }
+            requests.extend(self.retire_component(index, "frontend deactivation"));
             if let Some(module) = self.modules.get_mut(&module_id)
                 && let Err(error) = module.mark_unloaded()
             {
@@ -2914,24 +2908,10 @@ impl Shell {
                     "frontend unload lifecycle transition failed: {error}"
                 );
             }
-            self.destroy_all_child_surfaces(index);
-            self.presentation_engine.destroy_surface(&surface_id);
-            self.components.remove(index);
-            self.diagnostics.unregister(&module_id, &surface_id);
-            self.core.surfaces.remove(&surface_id);
-            self.surfaces.remove(&surface_id);
-            self.pending_popover_hides.remove(&surface_id);
-            self.transfer_owned_keyboard_modes.remove(&surface_id);
-            if self.keyboard_focus_surface.as_deref() == Some(surface_id.as_str()) {
-                self.keyboard_focus_surface = None;
-            }
             removed_surfaces.push(surface_id);
         }
-        self.rebuild_component_surface_index();
-        self.service_delivery_index.mark_dirty();
         self.locale = locale;
         tracing::info!(module_id, "deactivated frontend module live");
-        let mut requests = VecDeque::new();
         for surface_id in removed_surfaces {
             match self.broadcast_core_event(CoreEvent::SurfaceVisibilityChanged {
                 surface_id,
@@ -2945,6 +2925,46 @@ impl Shell {
             }
         }
         Ok(requests)
+    }
+
+    /// Remove a mounted component and every piece of shell state keyed by its
+    /// surface: child and parent surfaces, queued effects, pending service
+    /// call routes, popover and focus bookkeeping. Returns the effects its
+    /// unmount emitted, for the caller to dispatch.
+    pub(in crate::shell) fn retire_component(
+        &mut self,
+        index: usize,
+        reason: &str,
+    ) -> VecDeque<CoreRequest> {
+        self.invalidate_debug_snapshot_cache();
+        let surface_id = self.components[index].surface_id.clone();
+        let module_id = self.components[index].component.id().to_string();
+        let effects = match self.components[index].unmount() {
+            Ok(effects) => VecDeque::from(effects),
+            Err(error) => {
+                tracing::warn!(module_id, error = %error, "{reason} unmount failed");
+                self.contain_component_failure(index, "unmount", &error);
+                VecDeque::new()
+            }
+        };
+        self.destroy_all_child_surfaces(index);
+        self.presentation_engine.destroy_surface(&surface_id);
+        self.components.remove(index);
+        self.diagnostics.unregister(&module_id, &surface_id);
+        self.core.surfaces.remove(&surface_id);
+        self.surfaces.remove(&surface_id);
+        self.pending_popover_hides.remove(&surface_id);
+        self.pending_popup_grabs.remove(&surface_id);
+        self.transfer_owned_keyboard_modes.remove(&surface_id);
+        if self.keyboard_focus_surface.as_deref() == Some(surface_id.as_str()) {
+            self.keyboard_focus_surface = None;
+        }
+        self.discard_runtime_effects(&surface_id);
+        self.pending_service_call_routes
+            .retain(|_, route| route.instance_id != surface_id);
+        self.rebuild_component_surface_index();
+        self.service_delivery_index.mark_dirty();
+        effects
     }
 
     pub(super) fn unmount_components(&mut self) -> VecDeque<CoreRequest> {

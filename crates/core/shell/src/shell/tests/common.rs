@@ -478,6 +478,7 @@ pub(super) fn recorded_updates_for(
 pub(super) struct RecordingComponent {
     pub(super) events: Arc<Mutex<Vec<ServiceEvent>>>,
     pub(super) keybinds: Vec<mesh_core_debug::DebugKeybindEntry>,
+    pub(super) unmount_effects: Vec<CoreRequest>,
 }
 
 impl RecordingComponent {
@@ -485,6 +486,7 @@ impl RecordingComponent {
         Self {
             events,
             keybinds: Vec::new(),
+            unmount_effects: Vec::new(),
         }
     }
 
@@ -492,7 +494,11 @@ impl RecordingComponent {
         events: Arc<Mutex<Vec<ServiceEvent>>>,
         keybinds: Vec<mesh_core_debug::DebugKeybindEntry>,
     ) -> Self {
-        Self { events, keybinds }
+        Self {
+            events,
+            keybinds,
+            unmount_effects: Vec::new(),
+        }
     }
 }
 
@@ -510,6 +516,10 @@ impl super::types::ShellComponent for RecordingComponent {
         _ctx: super::types::ComponentContext,
     ) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
         Ok(Vec::new())
+    }
+
+    fn unmount(&mut self) -> Result<Vec<super::types::CoreRequest>, super::types::ComponentError> {
+        Ok(std::mem::take(&mut self.unmount_effects))
     }
 
     fn handle_core_event(

@@ -1174,6 +1174,32 @@ fn frontend_module_deactivation_removes_runtime_and_destroys_surface() {
 }
 
 #[test]
+fn retiring_a_component_returns_its_unmount_effects_and_purges_its_queued_effects() {
+    let mut shell = Shell::new();
+    let mut component = RecordingComponent::new(Arc::new(Mutex::new(Vec::new())));
+    component.unmount_effects = vec![CoreRequest::PublishDiagnostics {
+        message: "unmounted".into(),
+    }];
+    shell.register_component(Box::new(component));
+    shell.components[0].mounted = true;
+    shell.enqueue_effects([CoreRequest::PositionSurface {
+        surface_id: "@test/recording".into(),
+        margin_top: 0,
+        margin_left: 0,
+    }]);
+
+    let requests = shell
+        .deactivate_frontend_module("@test/recording", None)
+        .unwrap();
+
+    assert!(requests.iter().any(|request| matches!(
+        request,
+        CoreRequest::PublishDiagnostics { message } if message == "unmounted"
+    )));
+    assert_eq!(shell.discard_scheduled_effects(), 0);
+}
+
+#[test]
 fn legacy_graph_delta_uses_the_activation_coordinator_commit_boundary() {
     let mut shell = Shell::new();
     shell.active_profile_id = None;

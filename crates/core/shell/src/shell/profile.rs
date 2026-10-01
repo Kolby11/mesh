@@ -2112,16 +2112,17 @@ impl Shell {
             .iter()
             .map(|prepared| prepared.component.surface_id().to_string())
             .collect::<HashSet<_>>();
+        let mut retired_effects = VecDeque::new();
         for index in (0..self.components.len()).rev() {
             if !plan
                 .desired_surfaces
                 .contains(&self.components[index].surface_id)
                 || prepared_surfaces.contains(&self.components[index].surface_id)
             {
-                self.remove_profile_component(index);
+                retired_effects.extend(self.retire_component(index, "profile replacement"));
             }
         }
-        let mut requests = VecDeque::new();
+        let mut requests = retired_effects;
         for prepared in pending.prepared_frontends {
             requests.extend(prepared.requests);
             self.register_component(Box::new(prepared.component));
@@ -2300,32 +2301,6 @@ impl Shell {
         self.components_want_render = true;
         tracing::info!(profile_id = plan.profile_id, "switched shell profile live");
         requests
-    }
-
-    fn remove_profile_component(&mut self, index: usize) {
-        self.invalidate_debug_snapshot_cache();
-        let surface_id = self.components[index].surface_id.clone();
-        let module_id = self.components[index].component.id().to_string();
-        if let Err(error) = self.components[index].unmount() {
-            tracing::warn!(
-                module_id,
-                error = %error,
-                "profile replacement unmount failed"
-            );
-        }
-        self.destroy_all_child_surfaces(index);
-        self.presentation_engine.destroy_surface(&surface_id);
-        self.components.remove(index);
-        self.diagnostics.unregister(&module_id, &surface_id);
-        self.core.surfaces.remove(&surface_id);
-        self.surfaces.remove(&surface_id);
-        self.pending_popover_hides.remove(&surface_id);
-        self.transfer_owned_keyboard_modes.remove(&surface_id);
-        if self.keyboard_focus_surface.as_deref() == Some(surface_id.as_str()) {
-            self.keyboard_focus_surface = None;
-        }
-        self.rebuild_component_surface_index();
-        self.service_delivery_index.mark_dirty();
     }
 
     fn abort_pending_profile_switch(&mut self, message: String) {
