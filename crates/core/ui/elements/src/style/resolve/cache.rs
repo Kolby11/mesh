@@ -22,6 +22,7 @@ thread_local! {
     pub(super) static VARIABLE_SCRATCH: RefCell<HashMap<String, StyleValue>> =
         RefCell::new(HashMap::new());
     pub(super) static CANDIDATE_RULE_SCRATCH: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+    pub(super) static MATCHED_RULE_SCRATCH: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
     pub(super) static INLINE_STYLE_CACHE: RefCell<LruCache<Arc<str>, CachedInlineStyle>> =
         RefCell::new(LruCache::new(MAX_INLINE_STYLE_CACHE_ENTRIES));
     pub(super) static SHARED_THEME_DEFAULT_CACHE: RefCell<LruCache<u64, SharedThemeDefaultCache>> =

@@ -1,3 +1,4 @@
+use super::declaration::DeclarationPass;
 use super::StyleResolver;
 use super::attrs::*;
 use super::cache::*;
@@ -381,22 +382,49 @@ impl<'a> StyleResolver<'a> {
                 _ => {}
             }
 
-            self.apply_theme_style_rules(
-                &mut style,
-                attrs,
-                &mut diagnostics,
-                &mut scratch_variables,
-            );
-
-            if let Some(attribution) = attribution.as_deref_mut() {
+            MATCHED_RULE_SCRATCH.with(|matched| {
+                let mut matched = matched.borrow_mut();
+                matched.clear();
                 index.for_each_candidate_rule_index(attrs, |rule_idx| {
                     let Some(rule) = rules.get(rule_idx) else {
                         return;
                     };
-                    let started = std::time::Instant::now();
+                    let started = attribution.is_some().then(std::time::Instant::now);
                     if rule_matches_attrs(rule, attrs, context) {
+                        matched.push(rule_idx);
+                        if let (Some(attribution), Some(started)) =
+                            (attribution.as_deref_mut(), started)
+                        {
+                            attribution.record(rule_idx, started.elapsed());
+                        }
+                    }
+                });
+                let inline_declarations = attrs.inline_style.map(cached_inline_style);
+                if let Some(CachedInlineStyle::Error(error)) = &inline_declarations
+                    && let Some(diagnostics) = diagnostics.as_mut()
+                {
+                    diagnostics.push(StyleDiagnostic {
+                        property: "style".into(),
+                        selector: Some("@inline".into()),
+                        message: error.to_string(),
+                    });
+                }
+
+                for pass in [DeclarationPass::CustomProperties, DeclarationPass::Properties] {
+                    self.apply_theme_style_rules(
+                        &mut style,
+                        attrs,
+                        &mut diagnostics,
+                        &mut scratch_variables,
+                        pass,
+                    );
+                    for &rule_idx in matched.iter() {
                         let selector = index.selector_diagnostic(rule_idx);
-                        for decl in index.no_diagnostics_declarations(rule_idx) {
+                        for decl in index
+                            .no_diagnostics_declarations(rule_idx)
+                            .iter()
+                            .filter(|decl| pass.includes(decl))
+                        {
                             let diagnostic_sink = diagnostics
                                 .as_mut()
                                 .map(|diagnostics| (selector, &mut **diagnostics));
@@ -408,38 +436,11 @@ impl<'a> StyleResolver<'a> {
                                 Some(&mut explicit_properties),
                             );
                         }
-                        attribution.record(rule_idx, started.elapsed());
                     }
-                });
-            } else {
-                // Keep the production path clock-free and free of per-rule
-                // profiling branches. The single option branch is per node.
-                index.for_each_candidate_rule_index(attrs, |rule_idx| {
-                    let Some(rule) = rules.get(rule_idx) else {
-                        return;
-                    };
-                    if rule_matches_attrs(rule, attrs, context) {
-                        let selector = index.selector_diagnostic(rule_idx);
-                        for decl in index.no_diagnostics_declarations(rule_idx) {
-                            let diagnostic_sink = diagnostics
-                                .as_mut()
-                                .map(|diagnostics| (selector, &mut **diagnostics));
-                            self.apply_indexed_declaration_with_mask(
-                                &mut style,
-                                decl,
-                                diagnostic_sink,
-                                &mut scratch_variables,
-                                Some(&mut explicit_properties),
-                            );
-                        }
-                    }
-                });
-            }
-
-            if let Some(inline_style) = attrs.inline_style {
-                match cached_inline_style(inline_style) {
-                    CachedInlineStyle::Declarations(declarations) => {
-                        for declaration in declarations.iter() {
+                    if let Some(CachedInlineStyle::Declarations(declarations)) =
+                        &inline_declarations
+                    {
+                        for declaration in declarations.iter().filter(|decl| pass.includes(decl)) {
                             let diagnostic_sink = diagnostics
                                 .as_mut()
                                 .map(|diagnostics| ("@inline", &mut **diagnostics));
@@ -452,17 +453,8 @@ impl<'a> StyleResolver<'a> {
                             );
                         }
                     }
-                    CachedInlineStyle::Error(error) => {
-                        if let Some(diagnostics) = diagnostics.as_mut() {
-                            diagnostics.push(StyleDiagnostic {
-                                property: "style".into(),
-                                selector: Some("@inline".into()),
-                                message: error.to_string(),
-                            });
-                        }
-                    }
                 }
-            }
+            });
         });
 
         VARIABLE_SCRATCH.with(|scratch| {

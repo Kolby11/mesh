@@ -282,6 +282,7 @@ impl<'a> StyleResolver<'a> {
         attrs: &StyleNodeAttrs,
         diagnostics: &mut Option<&mut Vec<StyleDiagnostic>>,
         variables: &mut HashMap<String, StyleValue>,
+        pass: DeclarationPass,
     ) {
         let mut apply = |rules: &[mesh_core_theme::ThemeStyleRule], scope: &str| {
             for (index, rule) in rules.iter().enumerate() {
@@ -291,7 +292,7 @@ impl<'a> StyleResolver<'a> {
                 let declarations =
                     indexed_theme_defaults(self.theme.revision(), &rule.declarations);
                 let selector = format!("@theme:{scope}:rule:{index}");
-                for declaration in declarations.iter() {
+                for declaration in declarations.iter().filter(|declaration| pass.includes(declaration)) {
                     let diagnostic_sink = diagnostics
                         .as_mut()
                         .map(|diagnostics| (selector.as_str(), &mut **diagnostics));
@@ -1287,4 +1288,20 @@ pub(super) fn canonicalize_suffixed(value: &str, suffixes: &[&str]) -> String {
         }
     }
     value.to_string()
+}
+
+/// One pass of a node's cascade. Custom properties are applied for every
+/// matching rule before any other declaration, so `var(--x)` sees the `--x`
+/// a later rule declares on the same node, as CSS's computed-value order does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DeclarationPass {
+    CustomProperties,
+    Properties,
+}
+
+impl DeclarationPass {
+    pub(super) fn includes(self, declaration: &IndexedDeclaration) -> bool {
+        matches!(declaration.property, IndexedProperty::Custom(_))
+            == (self == Self::CustomProperties)
+    }
 }

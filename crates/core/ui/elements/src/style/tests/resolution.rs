@@ -1090,3 +1090,51 @@ fn input_state_sets_hover_flags_on_nodes() {
             .any(|e| matches!(e, UiEvent::PointerLeave { node_id } if *node_id == btn_id))
     );
 }
+
+#[test]
+fn a_later_rules_custom_property_applies_to_the_same_nodes_var() {
+    let theme = mesh_core_theme::default_theme();
+    let resolver = StyleResolver::new(&theme);
+    let rules = vec![
+        StyleRule {
+            selector: Selector::Tag("button".to_string()),
+            declarations: vec![
+                Declaration {
+                    property: "--bg".to_string(),
+                    value: StyleValue::Literal("#0000ff".to_string()),
+                },
+                Declaration {
+                    property: "background-color".to_string(),
+                    value: StyleValue::Var("--bg".to_string()),
+                },
+            ],
+            container_query: None,
+        },
+        StyleRule {
+            selector: Selector::State("button".to_string(), "hover".to_string()),
+            declarations: vec![Declaration {
+                property: "--bg".to_string(),
+                value: StyleValue::Literal("#ff0000".to_string()),
+            }],
+            container_query: None,
+        },
+    ];
+    let resolve = |hovered| {
+        resolver
+            .resolve_node_style(
+                &rules,
+                "button",
+                &[],
+                None,
+                StyleContext::default(),
+                ElementState {
+                    hovered,
+                    ..ElementState::default()
+                },
+            )
+            .background_color
+    };
+
+    assert_eq!(resolve(false), Color::from_hex("#0000ff").unwrap());
+    assert_eq!(resolve(true), Color::from_hex("#ff0000").unwrap());
+}
