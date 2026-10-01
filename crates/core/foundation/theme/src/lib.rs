@@ -977,6 +977,10 @@ pub struct Theme {
     /// not portable theme-file content.
     #[serde(skip, default)]
     provenance: BTreeMap<String, ThemeProvenance>,
+    /// User token overrides that could not be applied. A bad override is
+    /// skipped and reported here; it never fails composition.
+    #[serde(skip, default)]
+    user_override_diagnostics: Vec<String>,
     /// Monotonic identity for the style-bearing data, retained across clones
     /// so consumers can share derived style caches. Every mutable accessor
     /// advances it, so an in-place edit cannot reuse stale lowered values.
@@ -996,6 +1000,7 @@ impl Theme {
             modules: HashMap::new(),
             rules: Vec::new(),
             provenance: BTreeMap::new(),
+            user_override_diagnostics: Vec::new(),
             revision: next_theme_revision(),
         }
     }
@@ -1137,6 +1142,7 @@ impl Theme {
         composed.metadata = pack.metadata.clone();
         composed.metadata.mode = mode.clone();
         composed.provenance.clear();
+        composed.user_override_diagnostics.clear();
 
         for token in composed.tokens.keys() {
             composed
@@ -1195,11 +1201,25 @@ impl Theme {
         }
 
         flatten_module_tokens_into(&mut composed.tokens, &composed.modules);
-        for (token, value) in user_overrides {
-            apply_user_token_override(&mut composed, token, value.clone())?;
+        let mut overrides = user_overrides.iter().collect::<Vec<_>>();
+        overrides.sort_by(|left, right| left.0.cmp(right.0));
+        for (token, value) in overrides {
+            if let Err(error) = apply_user_token_override(&mut composed, token, value.clone()) {
+                composed.user_override_diagnostics.push(error.to_string());
+            }
         }
         composed.revision = next_theme_revision();
         Ok(composed)
+    }
+
+    /// User token overrides skipped during composition, one message each.
+    pub fn user_override_diagnostics(&self) -> &[String] {
+        &self.user_override_diagnostics
+    }
+
+    /// Report a user override the caller could not convert to a token value.
+    pub fn push_user_override_diagnostic(&mut self, message: String) {
+        self.user_override_diagnostics.push(message);
     }
 
     /// Look up a token by dotted name, e.g. `color.primary`.
@@ -1337,7 +1357,8 @@ impl Theme {
             match self.resolve_reference_value(reference, stack) {
                 Ok(value) => output.push_str(&value.to_string()),
                 Err(ThemeTokenError::Missing(_)) if fallback.is_some() => {
-                    output.push_str(fallback.unwrap_or_default())
+                    let fallback = fallback.unwrap_or_default();
+                    output.push_str(&self.resolve_string_references(fallback, stack)?)
                 }
                 Err(error) => return Err(error),
             }
@@ -1365,9 +1386,11 @@ fn canonical_token_name(name: &str) -> String {
         .unwrap_or_else(|| name.to_string())
 }
 
+/// The token name when `value` is exactly one fallback-free `var(--x)`.
+/// `var(--a) var(--b)` and `var(--a, …)` are not aliases.
 fn exact_var_reference(value: &str) -> Option<&str> {
     let end = value.strip_prefix("var(")?.strip_suffix(')')?;
-    if end.contains(',') {
+    if end.contains([',', '(', ')']) {
         return None;
     }
     let reference = end.trim();
@@ -1423,6 +1446,7 @@ impl From<RawTheme> for Theme {
             modules: raw.modules,
             rules: raw.rules,
             provenance: BTreeMap::new(),
+            user_override_diagnostics: Vec::new(),
             revision: next_theme_revision(),
         };
         normalize_legacy_default_shell_animations(
@@ -1567,7 +1591,8 @@ fn apply_user_token_override(
     token: &str,
     value: TokenValue,
 ) -> Result<(), ThemeError> {
-    let token = token.trim();
+    let token = user_override_token_name(token);
+    let token = token.as_str();
     if token.is_empty() || token.split('.').any(|part| part.trim().is_empty()) {
         return Err(ThemeError::Composition(format!(
             "user theme token '{token}' must use a dotted name"
@@ -1594,6 +1619,20 @@ fn apply_user_token_override(
         .provenance
         .insert(token.to_string(), ThemeProvenance::UserOverride);
     Ok(())
+}
+
+/// Canonical dotted name for a user override key. Overrides may use the
+/// dotted name (`color.primary`), the CSS name (`--color-primary`) or the
+/// dash name the settings schema shows (`color-primary`).
+fn user_override_token_name(token: &str) -> String {
+    let token = token.trim();
+    if let Some(css_name) = token.strip_prefix("--") {
+        css_custom_property_to_token_name(css_name)
+    } else if !token.contains('.') && token.contains('-') {
+        css_custom_property_to_token_name(token)
+    } else {
+        token.to_string()
+    }
 }
 
 fn flatten_module_tokens_into(
@@ -1762,6 +1801,7 @@ fn parse_theme_css(id: &str, name: &str, content: &str) -> Result<Theme, String>
         modules: HashMap::new(),
         rules: Vec::new(),
         provenance: BTreeMap::new(),
+        user_override_diagnostics: Vec::new(),
         revision: next_theme_revision(),
     };
 
@@ -2059,6 +2099,65 @@ fn split_explicit_module_token(name: &str) -> Option<(&str, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn theme_with_tokens(tokens: &[(&str, &str)]) -> Theme {
+        let mut theme = Theme::new("tokens", "Tokens");
+        for (name, value) in tokens {
+            theme
+                .tokens
+                .insert((*name).to_string(), TokenValue::String((*value).to_string()));
+        }
+        theme
+    }
+
+    #[test]
+    fn two_var_references_are_not_one_alias() {
+        let theme = theme_with_tokens(&[
+            ("spacing.a", "1px"),
+            ("spacing.b", "2px"),
+            ("spacing.pair", "var(--spacing-a) var(--spacing-b)"),
+        ]);
+        assert_eq!(
+            theme.resolve_token_value("spacing.pair").unwrap(),
+            Some(TokenValue::String("1px 2px".into()))
+        );
+    }
+
+    #[test]
+    fn nested_var_fallbacks_are_resolved() {
+        let theme = theme_with_tokens(&[("color.primary", "#123456")]);
+        assert_eq!(
+            theme
+                .resolve_token_references("var(--color-missing, var(--color-primary))")
+                .unwrap(),
+            "#123456"
+        );
+    }
+
+    #[test]
+    fn bad_user_overrides_are_skipped_with_diagnostics() {
+        let base = theme_with_tokens(&[("color.primary", "#000000")]);
+        let overrides = HashMap::from([
+            (
+                "color-primary".to_string(),
+                TokenValue::String("#ff6b00".into()),
+            ),
+            (
+                "@not/installed.accent".to_string(),
+                TokenValue::String("#ffffff".into()),
+            ),
+        ]);
+
+        let composed =
+            Theme::compose_layers(&base, &base, "pack", "dark", Vec::new(), &overrides).unwrap();
+
+        assert_eq!(
+            composed.token("color.primary"),
+            Some(&TokenValue::String("#ff6b00".into()))
+        );
+        assert_eq!(composed.user_override_diagnostics().len(), 1);
+        assert!(composed.user_override_diagnostics()[0].contains("@not/installed.accent"));
+    }
 
     #[test]
     fn theme_css_keyframes_parse_into_sorted_stops() {

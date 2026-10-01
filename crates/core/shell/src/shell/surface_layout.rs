@@ -89,32 +89,32 @@ pub(super) fn prepare_theme_for_graph(
                 },
             })
         });
-    let user_overrides = settings
-        .theme
-        .tokens
-        .iter()
-        .map(|(name, value)| {
-            let token = match value {
-                serde_json::Value::String(value) => TokenValue::String(value.clone()),
-                serde_json::Value::Bool(value) => TokenValue::Bool(*value),
-                serde_json::Value::Number(value) => value
-                    .as_f64()
-                    .filter(|value| value.is_finite())
-                    .map(TokenValue::Number)
-                    .ok_or_else(|| {
-                        ThemeError::Composition(format!(
+    let mut skipped_overrides = Vec::new();
+    let mut user_overrides = HashMap::new();
+    for (name, value) in &settings.theme.tokens {
+        let token = match value {
+            serde_json::Value::String(value) => TokenValue::String(value.clone()),
+            serde_json::Value::Bool(value) => TokenValue::Bool(*value),
+            serde_json::Value::Number(value) => {
+                match value.as_f64().filter(|value| value.is_finite()) {
+                    Some(value) => TokenValue::Number(value),
+                    None => {
+                        skipped_overrides.push(format!(
                             "user theme token '{name}' must contain a finite number"
-                        ))
-                    })?,
-                _ => {
-                    return Err(ThemeError::Composition(format!(
-                        "user theme token '{name}' must be a string, number, or boolean"
-                    )));
+                        ));
+                        continue;
+                    }
                 }
-            };
-            Ok((name.clone(), token))
-        })
-        .collect::<Result<HashMap<_, _>, _>>()?;
+            }
+            _ => {
+                skipped_overrides.push(format!(
+                    "user theme token '{name}' must be a string, number, or boolean"
+                ));
+                continue;
+            }
+        };
+        user_overrides.insert(name.clone(), token);
+    }
     let mut theme = Theme::compose_layers(
         &base,
         &pack,
@@ -123,6 +123,12 @@ pub(super) fn prepare_theme_for_graph(
         module_layers,
         &user_overrides,
     )?;
+    for message in skipped_overrides {
+        theme.push_user_override_diagnostic(message);
+    }
+    for message in theme.user_override_diagnostics() {
+        tracing::warn!("skipped user theme override: {message}");
+    }
     theme.set_render_metadata(
         mode.clone(),
         mode_descriptor.metadata.color_scheme.clone(),
