@@ -235,7 +235,7 @@ impl Shell {
                 | BackendRuntimeStatus::MissingEntrypoint
                 | BackendRuntimeStatus::MissingBinary
                 | BackendRuntimeStatus::InitFailed
-                | BackendRuntimeStatus::PollFailed
+                | BackendRuntimeStatus::CallbackFailed
                 | BackendRuntimeStatus::Failed
                 | BackendRuntimeStatus::Quarantined
         );
@@ -305,7 +305,7 @@ impl Shell {
         }
         let result = match status {
             BackendRuntimeStatus::Running => module.mark_running(),
-            BackendRuntimeStatus::PollFailed => {
+            BackendRuntimeStatus::CallbackFailed => {
                 module.mark_degraded(message.to_string());
                 Ok(())
             }
@@ -528,7 +528,7 @@ impl Shell {
         }
         let (health_state, recoverable, available) = match status {
             BackendRuntimeStatus::Running => ("healthy", true, Some(true)),
-            BackendRuntimeStatus::PollFailed => ("degraded", true, None),
+            BackendRuntimeStatus::CallbackFailed => ("degraded", true, None),
             BackendRuntimeStatus::Quarantined => ("unavailable", false, Some(false)),
             BackendRuntimeStatus::NoActiveProvider
             | BackendRuntimeStatus::UnmetBackendRequirement

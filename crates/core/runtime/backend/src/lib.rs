@@ -10,7 +10,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-const MAX_CONSECUTIVE_POLL_FAILURES: u32 = 3;
+/// Consecutive failures of one callback kind (poll or stream) after which the
+/// provider stops. A single failure is reported but never terminal.
+const MAX_CONSECUTIVE_CALLBACK_FAILURES: u32 = 3;
 const MIN_POLL_INTERVAL_MS: u64 = 50;
 const MAX_COMMAND_BATCH: usize = 64;
 pub const BACKEND_COMMAND_QUEUE_CAPACITY: usize = 128;
@@ -301,9 +303,12 @@ pub enum BackendServiceEvent {
         message: String,
         identity: mesh_core_runtime::BackendIdentity,
     },
-    PollFailed {
+    /// A poll or stream callback failed; the provider keeps running until
+    /// `MAX_CONSECUTIVE_CALLBACK_FAILURES` failures in a row.
+    CallbackFailed {
         service: Arc<str>,
         source_module: Arc<str>,
+        stage: String,
         count: u32,
         message: String,
         identity: mesh_core_runtime::BackendIdentity,
@@ -331,10 +336,33 @@ enum BackendEventSender {
 }
 
 impl BackendEventSender {
-    fn send(&self, event: BackendServiceEvent) -> Result<(), ()> {
+    /// Send one event, waiting for queue space on a bounded channel. Fails
+    /// only when the shell has dropped the receiver: a full queue applies
+    /// backpressure to the provider instead of looking like a dead shell.
+    async fn send(&self, event: BackendServiceEvent) -> Result<(), ()> {
         match self {
             Self::Unbounded(sender) => sender.send(event).map_err(|_| ()),
-            Self::Bounded(sender) => sender.try_send(event).map_err(|_| ()),
+            Self::Bounded(sender) => sender.send(event).await.map_err(|_| ()),
+        }
+    }
+
+    /// Send from a synchronous path. A full bounded queue hands the event
+    /// to a task that waits for space, so it is still delivered.
+    fn send_detached(&self, event: BackendServiceEvent) {
+        match self {
+            Self::Unbounded(sender) => {
+                let _ = sender.send(event);
+            }
+            Self::Bounded(sender) => {
+                if let Err(mpsc::error::TrySendError::Full(event)) = sender.try_send(event)
+                    && let Ok(runtime) = tokio::runtime::Handle::try_current()
+                {
+                    let sender = sender.clone();
+                    runtime.spawn(async move {
+                        let _ = sender.send(event).await;
+                    });
+                }
+            }
         }
     }
 }
@@ -609,30 +637,33 @@ impl BackendLifecycleGuard {
                 source_module: Arc::clone(&self.source_module),
                 stage: "stop".to_string(),
                 message: err.to_string(),
-                identity: *self
-                    .identity_handle
-                    .read()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner()),
-            });
+                identity: backend_identity(&self.identity_handle),
+            }).await;
         }
         ctx.shutdown_exec();
         ctx.shutdown_streams().await;
-        self.send_terminal();
+        if !self.terminal_sent {
+            self.terminal_sent = true;
+            let _ = self.tx.send(self.terminal_event()).await;
+        }
     }
 
+    fn terminal_event(&self) -> BackendServiceEvent {
+        BackendServiceEvent::Stopped {
+            service: Arc::clone(&self.service),
+            source_module: Arc::clone(&self.source_module),
+            identity: backend_identity(&self.identity_handle),
+        }
+    }
+
+    /// The terminal record for paths that cannot await, such as `Drop` on
+    /// panic or cancellation.
     fn send_terminal(&mut self) {
         if self.terminal_sent {
             return;
         }
         self.terminal_sent = true;
-        let _ = self.tx.send(BackendServiceEvent::Stopped {
-            service: Arc::clone(&self.service),
-            source_module: Arc::clone(&self.source_module),
-            identity: *self
-                .identity_handle
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()),
-        });
+        self.tx.send_detached(self.terminal_event());
     }
 }
 
@@ -663,7 +694,7 @@ async fn run_backend_service(
             stage: "load".to_string(),
             message: e.to_string(),
             identity: backend_identity(&identity_handle),
-        });
+        }).await;
         return;
     }
     let init_payload = match ctx.call_init() {
@@ -678,7 +709,7 @@ async fn run_backend_service(
                 source_module: module_id,
                 message: e.to_string(),
                 identity: backend_identity(&identity_handle),
-            });
+            }).await;
             return;
         }
     };
@@ -687,6 +718,7 @@ async fn run_backend_service(
     let mut tick = make_interval(interval_ms, true);
     let mut last_payload: Option<serde_json::Value> = None;
     let mut consecutive_poll_failures = 0;
+    let mut consecutive_stream_failures = 0;
     let stream_state = ctx.stream_state();
     let mut coalesced_command_index = HashMap::new();
     let poll_enabled = ctx.has_poll_handler();
@@ -703,7 +735,7 @@ async fn run_backend_service(
             &mut last_payload,
             payload,
             &identity_handle,
-        ) {
+        ).await {
             return;
         }
     }
@@ -712,7 +744,7 @@ async fn run_backend_service(
             service: service_name.clone(),
             source_module: module_id.clone(),
             identity: backend_identity(&identity_handle),
-        })
+        }).await
         .is_err()
     {
         return;
@@ -723,7 +755,7 @@ async fn run_backend_service(
         &module_id,
         ctx.drain_events(),
         &identity_handle,
-    ) {
+    ).await {
         return;
     }
 
@@ -741,7 +773,8 @@ async fn run_backend_service(
                     &mut last_payload,
                     &mut interval_ms,
                     &mut tick,
-                ) {
+                    &mut consecutive_stream_failures,
+                ).await {
                     break;
                 }
             }
@@ -756,21 +789,22 @@ async fn run_backend_service(
                     Err(err) => {
                         consecutive_poll_failures += 1;
                         let message = err.to_string();
-                        let _ = tx.send(BackendServiceEvent::PollFailed {
+                        let _ = tx.send(BackendServiceEvent::CallbackFailed {
                             service: service_name.clone(),
                             source_module: module_id.clone(),
+                            stage: "poll".to_string(),
                             count: consecutive_poll_failures,
                             message: message.clone(),
                             identity: backend_identity(&identity_handle),
-                        });
-                        if consecutive_poll_failures >= MAX_CONSECUTIVE_POLL_FAILURES {
+                        }).await;
+                        if consecutive_poll_failures >= MAX_CONSECUTIVE_CALLBACK_FAILURES {
                             let _ = tx.send(BackendServiceEvent::Failed {
                                 service: service_name.clone(),
                                 source_module: module_id.clone(),
                                 stage: "poll".to_string(),
                                 message,
                                 identity: backend_identity(&identity_handle),
-                            });
+                            }).await;
                             break;
                         }
                         refresh_interval(&ctx, &mut interval_ms, &mut tick);
@@ -785,7 +819,7 @@ async fn run_backend_service(
                         &module_id,
                         ctx.drain_events(),
                         &identity_handle,
-                    ) {
+                    ).await {
                         break;
                     }
                     continue;
@@ -797,7 +831,7 @@ async fn run_backend_service(
                     &mut last_payload,
                     payload,
                     &identity_handle,
-                ) {
+                ).await {
                     break;
                 }
                 if !publish_script_events(
@@ -806,7 +840,7 @@ async fn run_backend_service(
                     &module_id,
                     ctx.drain_events(),
                     &identity_handle,
-                ) {
+                ).await {
                     break;
                 }
             }
@@ -850,7 +884,7 @@ async fn run_backend_service(
                         outcome: BackendCommandOutcome::Superseded,
                         generation,
                         identity,
-                    })).is_err() {
+                    })).await.is_err() {
                         return;
                     }
                 }
@@ -892,7 +926,7 @@ async fn run_backend_service(
                                 outcome: stale_outcome,
                                 generation: command_generation,
                                 identity: command_identity,
-                            }))
+                            })).await
                             .is_err()
                         {
                             stop = true;
@@ -916,7 +950,7 @@ async fn run_backend_service(
                                 outcome: BackendCommandOutcome::Failed,
                                 generation,
                                 identity: command_identity,
-                            }))
+                            })).await
                             .is_err()
                         {
                             stop = true;
@@ -940,7 +974,7 @@ async fn run_backend_service(
                                 outcome,
                                 generation,
                                 identity: command_identity,
-                            }))
+                            })).await
                             .is_err()
                         {
                             stop = true;
@@ -972,7 +1006,7 @@ async fn run_backend_service(
                                 outcome: terminal_outcome,
                                 generation,
                                 identity: command_identity,
-                            })).is_err() {
+                            })).await.is_err() {
                                 stop = true;
                                 break;
                             }
@@ -984,7 +1018,7 @@ async fn run_backend_service(
                                     &mut last_payload,
                                     payload,
                                     &identity_handle,
-                                ) {
+                                ).await {
                                     stop = true;
                                     break;
                                 }
@@ -995,7 +1029,7 @@ async fn run_backend_service(
                                 &module_id,
                                 ctx.drain_events(),
                                 &identity_handle,
-                            ) {
+                            ).await {
                                 stop = true;
                             }
                         }
@@ -1014,7 +1048,7 @@ async fn run_backend_service(
                                 outcome: BackendCommandOutcome::Failed,
                                 generation,
                                 identity: command_identity,
-                            }));
+                            })).await;
                             refresh_interval(&ctx, &mut interval_ms, &mut tick);
                         }
                     }
@@ -1040,11 +1074,11 @@ async fn run_backend_service(
             outcome: BackendCommandOutcome::StaleGeneration,
             generation: pending_generation,
             identity: pending_identity,
-        }));
+        })).await;
     }
 }
 
-fn dispatch_stream_events(
+async fn dispatch_stream_events(
     ctx: &mut BackendScriptContext,
     events: Vec<StreamEvent>,
     tx: &BackendEventSender,
@@ -1054,6 +1088,7 @@ fn dispatch_stream_events(
     last_payload: &mut Option<serde_json::Value>,
     active_interval_ms: &mut u64,
     tick: &mut tokio::time::Interval,
+    stream_failures: &mut u32,
 ) -> bool {
     if events.is_empty() {
         return true;
@@ -1071,7 +1106,8 @@ fn dispatch_stream_events(
                 active_interval_ms,
                 tick,
                 &identity_handle,
-            ) {
+                stream_failures,
+            ).await {
                 return false;
             }
         }
@@ -1101,7 +1137,8 @@ fn dispatch_stream_events(
                             active_interval_ms,
                             tick,
                             &identity_handle,
-                        ) {
+                            stream_failures,
+                        ).await {
                             return false;
                         }
                     }
@@ -1124,7 +1161,8 @@ fn dispatch_stream_events(
                         active_interval_ms,
                         tick,
                         &identity_handle,
-                    ) {
+                        stream_failures,
+                    ).await {
                         return false;
                     }
                 }
@@ -1139,7 +1177,8 @@ fn dispatch_stream_events(
                         active_interval_ms,
                         tick,
                         &identity_handle,
-                    )
+                        stream_failures,
+                    ).await
                 {
                     return false;
                 }
@@ -1157,14 +1196,15 @@ fn dispatch_stream_events(
             active_interval_ms,
             tick,
             &identity_handle,
-        ) {
+            stream_failures,
+        ).await {
             return false;
         }
     }
     true
 }
 
-fn publish_stream_callback_result(
+async fn publish_stream_callback_result(
     result: Result<Option<serde_json::Value>, BackendScriptError>,
     tx: &BackendEventSender,
     service_name: &Arc<str>,
@@ -1174,7 +1214,11 @@ fn publish_stream_callback_result(
     active_interval_ms: &mut u64,
     tick: &mut tokio::time::Interval,
     identity_handle: &std::sync::Arc<std::sync::RwLock<mesh_core_runtime::BackendIdentity>>,
+    stream_failures: &mut u32,
 ) -> bool {
+    if result.is_ok() {
+        *stream_failures = 0;
+    }
     let keep_running = match result {
         Ok(Some(payload)) => {
             publish_changed_update(
@@ -1184,13 +1228,13 @@ fn publish_stream_callback_result(
                 last_payload,
                 payload,
                 identity_handle,
-            ) && publish_script_events(
+            ).await && publish_script_events(
                 tx,
                 service_name,
                 module_id,
                 ctx.drain_events(),
                 identity_handle,
-            )
+            ).await
         }
         Ok(None) => publish_script_events(
             tx,
@@ -1198,16 +1242,30 @@ fn publish_stream_callback_result(
             module_id,
             ctx.drain_events(),
             identity_handle,
-        ),
+        ).await,
         Err(err) => {
-            let _ = tx.send(BackendServiceEvent::Failed {
+            *stream_failures += 1;
+            let message = err.to_string();
+            let _ = tx.send(BackendServiceEvent::CallbackFailed {
                 service: service_name.clone(),
                 source_module: module_id.clone(),
                 stage: "stream".to_string(),
-                message: err.to_string(),
+                count: *stream_failures,
+                message: message.clone(),
                 identity: backend_identity(identity_handle),
-            });
-            true
+            }).await;
+            if *stream_failures >= MAX_CONSECUTIVE_CALLBACK_FAILURES {
+                let _ = tx.send(BackendServiceEvent::Failed {
+                    service: service_name.clone(),
+                    source_module: module_id.clone(),
+                    stage: "stream".to_string(),
+                    message,
+                    identity: backend_identity(identity_handle),
+                }).await;
+                false
+            } else {
+                true
+            }
         }
     };
     // Stream callbacks can change the schedule just like poll and command
@@ -1217,7 +1275,7 @@ fn publish_stream_callback_result(
     keep_running
 }
 
-fn publish_script_events(
+async fn publish_script_events(
     tx: &BackendEventSender,
     service_name: &Arc<str>,
     module_id: &Arc<str>,
@@ -1238,7 +1296,7 @@ fn publish_script_events(
                 stage: "event".to_string(),
                 message,
                 identity: event_identity,
-            });
+            }).await;
             return false;
         }
         if tx
@@ -1249,7 +1307,7 @@ fn publish_script_events(
                 payload: event.payload,
                 generation: event.generation,
                 identity: event.identity,
-            }))
+            })).await
             .is_err()
         {
             return false;
@@ -1258,7 +1316,7 @@ fn publish_script_events(
     true
 }
 
-fn publish_changed_update(
+async fn publish_changed_update(
     tx: &BackendEventSender,
     service_name: &Arc<str>,
     module_id: &Arc<str>,
@@ -1281,7 +1339,7 @@ fn publish_changed_update(
             stage: "state".to_string(),
             message,
             identity: backend_identity(identity_handle),
-        });
+        }).await;
         return false;
     }
     last_payload.replace(payload.clone());
@@ -1290,7 +1348,7 @@ fn publish_changed_update(
         source_module: Arc::clone(module_id),
         payload,
         identity: backend_identity(identity_handle),
-    }))
+    })).await
     .is_ok()
 }
 
@@ -1427,8 +1485,8 @@ mod tests {
         assert!(validate_command_payload(&nested).is_err());
     }
 
-    #[test]
-    fn bounded_event_sender_rejects_overflow_without_retaining_more_events() {
+    #[tokio::test]
+    async fn bounded_event_sender_waits_for_space_instead_of_failing() {
         let (tx, mut rx) = mpsc::channel(1);
         let sender = BackendEventSender::Bounded(tx);
         let event = BackendServiceEvent::Started {
@@ -1436,9 +1494,39 @@ mod tests {
             source_module: Arc::from("test"),
             identity: BackendIdentity::default(),
         };
-        assert!(sender.send(event.clone()).is_ok());
-        assert!(sender.send(event).is_err());
-        assert!(rx.try_recv().is_ok());
+        assert!(sender.send(event.clone()).await.is_ok());
+        let blocked = sender.send(event.clone());
+        tokio::pin!(blocked);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut blocked)
+                .await
+                .is_err(),
+            "a full queue applies backpressure"
+        );
+        assert!(rx.recv().await.is_some());
+        assert!(blocked.await.is_ok());
+        drop(rx);
+        assert!(sender.send(event).await.is_err(), "a closed queue still fails");
+    }
+
+    #[tokio::test]
+    async fn detached_send_delivers_through_a_full_bounded_queue() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let sender = BackendEventSender::Bounded(tx);
+        let event = BackendServiceEvent::Started {
+            service: Arc::from("test"),
+            source_module: Arc::from("test"),
+            identity: BackendIdentity::default(),
+        };
+        sender.send_detached(event.clone());
+        sender.send_detached(event);
+        assert!(rx.recv().await.is_some());
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), rx.recv())
+                .await
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[test]
@@ -2019,6 +2107,59 @@ mod tests {
             closed.payload.get("success").and_then(|v| v.as_bool()),
             Some(false)
         );
+
+        drop(cmd_tx);
+        drop(update_rx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("backend task should exit after command channel closes")
+            .expect("backend task should not panic");
+    }
+
+    #[tokio::test]
+    async fn one_failing_stream_callback_does_not_stop_the_provider() {
+        let (update_tx, mut update_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/stream-error".to_string(),
+            "erroring".to_string(),
+            CapabilitySet::from_ids(["exec.argv:sh:[\"-c\",\"printf 'bad\\\\n'; sleep 0.2; printf 'good\\\\n'\"]"]),
+            serde_json::json!({}),
+            "function start()\n\
+               mesh.exec_stream(\"sh\", { \"-c\", \"printf 'bad\\\\n'; sleep 0.2; printf 'good\\\\n'\" })\n\
+             end\n\
+             function on_stream_batch(self, _program, lines)\n\
+               if lines[1] == \"bad\" then error(\"malformed line\") end\n\
+               mesh.service.emit({ line = lines[1] })\n\
+             end"
+            .to_string(),
+            update_tx,
+            cmd_rx,
+        ));
+
+        let mut saw_callback_failure = false;
+        let good = loop {
+            let event = tokio::time::timeout(Duration::from_secs(2), update_rx.recv())
+                .await
+                .expect("the provider should keep handling stream lines")
+                .expect("update channel should stay open");
+            match event {
+                BackendServiceEvent::CallbackFailed { stage, count, .. } => {
+                    assert_eq!((stage.as_str(), count), ("stream", 1));
+                    saw_callback_failure = true;
+                }
+                BackendServiceEvent::Failed { stage, .. } => {
+                    panic!("one failed {stage} callback must not stop the provider")
+                }
+                BackendServiceEvent::Update(update) if update.payload.get("line").is_some() => {
+                    break update;
+                }
+                _ => {}
+            }
+        };
+        assert!(saw_callback_failure);
+        assert_eq!(good.payload.get("line").and_then(|v| v.as_str()), Some("good"));
 
         drop(cmd_tx);
         drop(update_rx);
@@ -2748,17 +2889,17 @@ mod tests {
             .expect("event channel should stay open");
         assert!(matches!(started, BackendServiceEvent::Started { .. }));
 
-        for expected_count in 1..=MAX_CONSECUTIVE_POLL_FAILURES {
+        for expected_count in 1..=MAX_CONSECUTIVE_CALLBACK_FAILURES {
             let event = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
                 .await
                 .expect("poll failure should emit lifecycle event")
                 .expect("event channel should stay open");
             match event {
-                BackendServiceEvent::PollFailed { count, message, .. } => {
+                BackendServiceEvent::CallbackFailed { count, message, .. } => {
                     assert_eq!(count, expected_count);
                     assert!(message.contains("poll boom"));
                 }
-                other => panic!("expected PollFailed event, got {other:?}"),
+                other => panic!("expected CallbackFailed event, got {other:?}"),
             }
         }
 

@@ -844,7 +844,7 @@ fn backend_lifecycle_status_names_match_phase_contract() {
         BackendRuntimeStatus::MissingBinary,
         BackendRuntimeStatus::InitFailed,
         BackendRuntimeStatus::Running,
-        BackendRuntimeStatus::PollFailed,
+        BackendRuntimeStatus::CallbackFailed,
         BackendRuntimeStatus::Failed,
         BackendRuntimeStatus::Stopped,
     ]
@@ -861,7 +861,7 @@ fn backend_lifecycle_status_names_match_phase_contract() {
             "missing_binary",
             "init_failed",
             "running",
-            "poll_failed",
+            "callback_failed",
             "failed",
             "stopped",
         ]
@@ -901,7 +901,7 @@ fn backend_lifecycle_replacement_records_stopped_after_transient_poll_failure() 
     shell.record_backend_runtime_status(
         "mesh.audio".to_string(),
         "@mesh/old-audio".to_string(),
-        BackendRuntimeStatus::PollFailed,
+        BackendRuntimeStatus::CallbackFailed,
         "temporary poll failure".to_string(),
     );
 
@@ -1728,19 +1728,19 @@ fn backend_lifecycle_debug_snapshot_includes_failure_counts() {
     shell.record_backend_runtime_status(
         "mesh.audio".to_string(),
         "@mesh/pipewire-audio".to_string(),
-        BackendRuntimeStatus::PollFailed,
+        BackendRuntimeStatus::CallbackFailed,
         "poll failure 1".to_string(),
     );
     shell.record_backend_runtime_status(
         "mesh.audio".to_string(),
         "@mesh/pipewire-audio".to_string(),
-        BackendRuntimeStatus::PollFailed,
+        BackendRuntimeStatus::CallbackFailed,
         "poll failure 2".to_string(),
     );
     shell.record_backend_runtime_status(
         "mesh.audio".to_string(),
         "@mesh/pipewire-audio".to_string(),
-        BackendRuntimeStatus::PollFailed,
+        BackendRuntimeStatus::CallbackFailed,
         "poll failure 3".to_string(),
     );
 
@@ -1755,7 +1755,7 @@ fn backend_lifecycle_debug_snapshot_includes_failure_counts() {
         entry.failure_count, 3,
         "debug snapshot must include cumulative failure count for the provider"
     );
-    assert_eq!(entry.status, "poll_failed");
+    assert_eq!(entry.status, "callback_failed");
     assert!(
         !entry.provider_id.is_empty(),
         "debug snapshot must include provider identity"

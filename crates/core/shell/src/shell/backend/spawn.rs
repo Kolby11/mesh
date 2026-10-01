@@ -302,15 +302,18 @@ impl Shell {
                             "{message}"
                         );
                     }
-                    BackendServiceEvent::PollFailed {
-                        message, identity, ..
+                    BackendServiceEvent::CallbackFailed {
+                        stage,
+                        message,
+                        identity,
+                        ..
                     } => {
                         let _ = shell_tx.send(ShellMessage::BackendLifecycle {
                             interface: bridge_interface.clone(),
                             provider_id: current_event_provider_id.clone(),
                             identity,
-                            stage: "poll".to_string(),
-                            status: "poll_failed".to_string(),
+                            stage,
+                            status: "callback_failed".to_string(),
                             message: message.clone(),
                         });
                         bridge_wake.wake();
