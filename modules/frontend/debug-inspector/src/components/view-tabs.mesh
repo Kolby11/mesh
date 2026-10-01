@@ -60,23 +60,18 @@ onBenchmark = nil
     border-bottom-width: 2px;
     border-bottom-style: solid;
     border-bottom-color: transparent;
+    font-size: var(--typography-size-md);
+    font-weight: 600;
+    color: var(--color-on-surface-variant);
   }
 
   .view-tab-active {
     border-bottom-color: var(--color-primary);
+    font-weight: 700;
+    color: var(--color-primary);
   }
 
   .view-tab-icon {
-    font-size: var(--typography-size-md);
-    font-weight: 600;
-    color: var(--color-on-surface-variant);
-    text-align: center;
-  }
-
-  .view-tab-active .view-tab-icon {
-    font-size: var(--typography-size-md);
-    font-weight: 700;
-    color: var(--color-primary);
     text-align: center;
   }
 </style>

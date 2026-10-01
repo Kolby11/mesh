@@ -37,11 +37,13 @@ pub enum Selector {
 /// Parse one selector and reject combinators, functions, attributes, and
 /// other CSS syntax for which the retained element tree has no matcher.
 pub fn parse_selector(source: &str) -> Result<Selector, String> {
-    let mut input = ParserInput::new(source);
+    let mut input = ParserInput::new(source.trim());
     let mut parser = Parser::new(&mut input);
     let mut parts = Vec::new();
 
-    while let Ok(token) = parser.next() {
+    // `next()` skips whitespace, which would read `.a .b` as the compound
+    // `.a.b`; the descendant combinator must be seen to be rejected.
+    while let Ok(token) = parser.next_including_whitespace() {
         match token {
             Token::Delim('*') => parts.push(Selector::Universal),
             Token::Delim('.') => {

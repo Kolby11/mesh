@@ -242,12 +242,19 @@ fn style_diagnostics_descendant_selector_out_of_scope_documented() {
     let docs = include_str!("../../../../../../../docs/css-coverage.md");
 
     assert!(
-        rules.iter().any(|rule| {
+        !rules.iter().any(|rule| {
             selector_has_class(&rule.selector, "nav-button")
                 && selector_has_class(&rule.selector, "nav-button-glyph")
         }),
-        "fixture should preserve current descendant-like selector lowering shape"
+        "a descendant selector must not lower to a compound of both classes"
     );
+    for selector in [".nav-button:hover .nav-button-glyph", ".a > .b", "row text"] {
+        assert!(
+            mesh_core_theme::css::parse_selector(selector).is_err(),
+            "{selector} has a combinator and must be rejected"
+        );
+    }
+    assert!(mesh_core_theme::css::parse_selector(" .a.b:hover ").is_ok());
     assert!(docs.contains("Descendant"));
     assert!(docs.contains("out-of-scope"));
 }

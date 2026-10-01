@@ -290,17 +290,20 @@ end
         justify-content: center;
         align-items: center;
         color: inherit;
-        --icon-fill: 0;
-        --icon-weight: 400;
         transition: color var(--animation-duration-medium) var(--animation-curves-bezier-standard);
     }
 
-    .nav-button:hover .nav-button-glyph {
+    .nav-button {
+        --icon-fill: 0;
+        --icon-weight: 400;
+    }
+
+    .nav-button:hover {
         --icon-fill: 1;
         --icon-weight: 500;
     }
 
-    .nav-button:active .nav-button-glyph {
+    .nav-button:active {
         --icon-fill: 1;
         --icon-weight: 600;
     }

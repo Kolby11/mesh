@@ -1105,17 +1105,17 @@ end
 
 <style>
     .inspector-root,
-    .inspector-root row,
-    .inspector-root column,
-    .inspector-root text,
-    .inspector-root button,
-    .inspector-root input,
-    .inspector-root box,
-    .inspector-root list,
-    .inspector-root list-item,
-    .inspector-root empty-state,
-    .inspector-root tabs,
-    .inspector-root tab {
+    row,
+    column,
+    text,
+    button,
+    input,
+    box,
+    list,
+    list-item,
+    empty-state,
+    tabs,
+    tab {
         transition: none;
     }
 
