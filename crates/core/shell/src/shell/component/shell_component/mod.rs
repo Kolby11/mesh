@@ -1557,6 +1557,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                     runtime.script_ctx.state().get_ref("props"),
                     &runtime.host_props,
                     &next_host_props,
+                    &mut runtime.script_owned_props,
                 );
                 if let Err(error) = runtime
                     .script_ctx

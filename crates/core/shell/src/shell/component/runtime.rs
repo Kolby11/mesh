@@ -624,6 +624,7 @@ impl FrontendSurfaceComponent {
             runtime.script_ctx.state().get_ref("props"),
             &runtime.host_props,
             &next_host_props,
+            &mut runtime.script_owned_props,
         );
         let mut publication = props.clone();
         publication.insert("props".to_string(), merged_props);
@@ -807,6 +808,7 @@ impl FrontendSurfaceComponent {
                 .map(|block| block.props.clone())
                 .unwrap_or_default(),
             host_props,
+            script_owned_props: HashSet::new(),
             cached_state_clone: None,
         };
         Self::dispatch_runtime_hook(&self.diagnostics, &mut runtime, "mount")?;
@@ -1986,13 +1988,18 @@ impl PropLayer {
     }
 }
 
-/// Apply a fresh host-owned prop snapshot without overwriting script values.
-/// A current field equal to the previous host snapshot is still host-owned and
-/// follows the new snapshot; a differing field was assigned by script and wins.
+/// Merge a host prop republication into the script's current props.
+///
+/// A prop whose current value differs from the host value last published is
+/// a script override (03 §4, layer 5). Ownership is recorded in
+/// `script_owned` and kept even if a later host value happens to coincide, so
+/// a newer host value never replaces it. A script releases a prop by
+/// assigning `nil`; the host value then applies again.
 pub(super) fn merge_reloaded_props(
     current: Option<&serde_json::Value>,
     previous_host: &serde_json::Value,
     next_host: &serde_json::Value,
+    script_owned: &mut HashSet<String>,
 ) -> serde_json::Value {
     let mut merged = current
         .and_then(serde_json::Value::as_object)
@@ -2001,21 +2008,35 @@ pub(super) fn merge_reloaded_props(
     let previous = previous_host.as_object().cloned().unwrap_or_default();
     let next = next_host.as_object().cloned().unwrap_or_default();
 
-    for (name, old_value) in &previous {
-        if merged.get(name) == Some(old_value) {
-            match next.get(name) {
-                Some(value) => {
-                    merged.insert(name.clone(), value.clone());
-                }
-                None => {
-                    merged.remove(name);
-                }
+    for name in previous.keys() {
+        match merged.get(name) {
+            None => {
+                script_owned.remove(name);
             }
+            Some(value) if Some(value) != previous.get(name) => {
+                script_owned.insert(name.clone());
+            }
+            Some(_) => {}
         }
     }
-    for (name, value) in next {
-        if !previous.contains_key(&name) && !merged.contains_key(&name) {
-            merged.insert(name, value);
+    for (name, value) in &next {
+        if !previous.contains_key(name)
+            && merged.get(name).is_some_and(|current| current != value)
+        {
+            script_owned.insert(name.clone());
+        }
+    }
+    for name in previous.keys().chain(next.keys()) {
+        if script_owned.contains(name) {
+            continue;
+        }
+        match next.get(name) {
+            Some(value) => {
+                merged.insert(name.clone(), value.clone());
+            }
+            None => {
+                merged.remove(name);
+            }
         }
     }
     serde_json::Value::Object(merged)

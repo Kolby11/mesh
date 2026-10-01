@@ -335,3 +335,25 @@ fn settings_reload_preserves_a_higher_precedence_script_prop() {
         .expect("runtime props");
     assert_eq!(props["track_width"], serde_json::json!("36px"));
 }
+
+#[test]
+fn a_script_prop_override_survives_a_host_value_that_once_matched_it() {
+    let mut owned = std::collections::HashSet::new();
+    let host = |size: i64| serde_json::json!({ "size": size, "label": "a" });
+
+    // The script overrode size=1 with 5 while the host published 1.
+    let current = serde_json::json!({ "size": 5, "label": "a" });
+    let merged = crate::shell::component::runtime::merge_reloaded_props(Some(&current), &host(1), &host(5), &mut owned);
+    assert_eq!(merged["size"], 5);
+
+    // The host now publishes 9; the earlier coincidence must not hand the
+    // prop back to the host.
+    let merged = crate::shell::component::runtime::merge_reloaded_props(Some(&merged), &host(5), &host(9), &mut owned);
+    assert_eq!(merged["size"], 5);
+    assert_eq!(merged["label"], "a");
+
+    // Assigning nil releases the prop to the host value.
+    let released = serde_json::json!({ "label": "a" });
+    let merged = crate::shell::component::runtime::merge_reloaded_props(Some(&released), &host(9), &host(11), &mut owned);
+    assert_eq!(merged["size"], 11);
+}

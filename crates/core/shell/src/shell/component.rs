@@ -1206,6 +1206,8 @@ struct EmbeddedFrontendRuntime {
     /// Used on settings reload to distinguish host-owned values from a newer
     /// script assignment, which has higher precedence and must survive.
     host_props: serde_json::Value,
+    /// Props the script has overridden; see `merge_reloaded_props`.
+    script_owned_props: HashSet<String>,
     /// Cached clone of the script state, keyed by its mutation generation.
     /// Tree builds need a state snapshot that outlives the runtimes lock;
     /// this avoids re-cloning the full variable map on every frame the
