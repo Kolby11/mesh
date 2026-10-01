@@ -781,6 +781,19 @@ pub fn is_input_key(tree: &WidgetNode, key: &str) -> bool {
     })
 }
 
+/// Whether the focused input may change its value: an input that is not
+/// `readonly`. Caret movement and selection stay available on read-only
+/// inputs; every keyboard, IME and delete-surrounding edit checks this.
+pub fn is_editable_input_key(tree: &WidgetNode, key: &str) -> bool {
+    is_input_key(tree, key)
+        && find_node_by_key(tree, key).is_some_and(|node| {
+            !node.state.read_only
+                && !mesh_core_elements::PseudoState::ReadOnly
+                    .authored_value(&node.attributes)
+                    .unwrap_or(false)
+        })
+}
+
 pub fn is_slider_key(tree: &WidgetNode, key: &str) -> bool {
     find_node_by_key(tree, key).is_some_and(|node| {
         node.tag == "slider" && node_can_receive_target(tree, node.id, InteractionTarget::Focus)

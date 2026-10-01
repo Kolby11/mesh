@@ -115,8 +115,9 @@ impl FrontendSurfaceComponent {
                 let input_id = find_node_by_key(tree, &focused_key)
                     .expect("is_input_key verified the focused input exists")
                     .id;
+                let editable = is_editable_input_key(tree, &focused_key);
                 match key.as_str() {
-                    "Backspace" => {
+                    "Backspace" if editable => {
                         let current = self.delete_input_text(
                             input_id,
                             self.input_previous_scalar_bytes(input_id),
@@ -131,7 +132,7 @@ impl FrontendSurfaceComponent {
                         )?);
                         return Ok(requests);
                     }
-                    "Delete" => {
+                    "Delete" if editable => {
                         let current = self.delete_input_text(
                             input_id,
                             0,

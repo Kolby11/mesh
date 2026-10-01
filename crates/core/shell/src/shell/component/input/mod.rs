@@ -781,7 +781,7 @@ impl FrontendSurfaceComponent {
                 if let Some(focused_key) = self.focused_key.clone() {
                     let input_node = find_node_by_key(tree, &focused_key);
                     let accepts_char = input_node.is_some_and(|node| input_accepts_char(node, ch));
-                    if is_input_key(tree, &focused_key)
+                    if is_editable_input_key(tree, &focused_key)
                         && accepts_char
                         && let Some(input_node) = input_node
                     {
@@ -813,7 +813,7 @@ impl FrontendSurfaceComponent {
                 }
                 if let Some(focused_key) = self.focused_key.clone() {
                     let input_node = find_node_by_key(tree, &focused_key);
-                    if is_input_key(tree, &focused_key)
+                    if is_editable_input_key(tree, &focused_key)
                         && let Some(input_node) = input_node
                     {
                         let accepted: String = text
@@ -856,7 +856,7 @@ impl FrontendSurfaceComponent {
             } => {
                 if let Some(focused_key) = self.focused_key.clone() {
                     let input_node = find_node_by_key(tree, &focused_key);
-                    if is_input_key(tree, &focused_key)
+                    if is_editable_input_key(tree, &focused_key)
                         && let Some(input_node) = input_node
                     {
                         let previous = self
@@ -889,7 +889,7 @@ impl FrontendSurfaceComponent {
             } => {
                 if let Some(focused_key) = self.focused_key.clone() {
                     let input_node = find_node_by_key(tree, &focused_key);
-                    if is_input_key(tree, &focused_key)
+                    if is_editable_input_key(tree, &focused_key)
                         && let Some(input_node) = input_node
                     {
                         let previous = self

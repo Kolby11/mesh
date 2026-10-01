@@ -708,6 +708,57 @@ end
 }
 
 #[test]
+fn a_readonly_input_ignores_typing_ime_commits_and_deletion() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<script lang="luau">
+change_count = 0
+function onTextChange(value)
+    change_count = change_count + 1
+end
+</script>
+"#,
+    );
+    let mut input = event_node(
+        "input",
+        "root/0",
+        0.0,
+        0.0,
+        100.0,
+        24.0,
+        &[("change", "onTextChange")],
+    );
+    input.attributes.insert("readonly".into(), "true".into());
+    component.last_tree = Some(root_with(vec![input]));
+
+    let theme = default_theme();
+    for event in [
+        ComponentInput::PointerButton {
+            button: 0x110,
+            x: 4.0,
+            y: 4.0,
+            pressed: true,
+        },
+        ComponentInput::Char { ch: 'A' },
+        ComponentInput::TextInput {
+            text: "bc".into(),
+        },
+        ComponentInput::TextDelete {
+            before_bytes: 1,
+            after_bytes: 0,
+        },
+    ] {
+        component.handle_input(&theme, 240, 160, event).unwrap();
+    }
+
+    assert_eq!(
+        runtime_value(&component, "change_count"),
+        Some(serde_json::json!(0))
+    );
+}
+
+#[test]
 fn committed_text_preserves_multiple_scalars_and_one_change_boundary() {
     let mut component = test_frontend_component(
         r#"
