@@ -20,6 +20,9 @@ pub(super) struct TemplateExpressionCache {
     pub(super) template_member_reads: HashSet<String>,
     pub(super) member_reads: HashMap<String, Vec<String>>,
     pub(super) values: HashMap<String, Value>,
+    /// Expressions that call a component function. Their reads happen inside
+    /// the function, so any public change may affect them.
+    pub(super) opaque_expressions: HashSet<String>,
     pub(super) hits: u64,
 }
 

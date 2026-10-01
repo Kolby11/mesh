@@ -94,11 +94,25 @@ impl ScriptContext {
                     names
                 });
             if let Some(member_reads) = member_reads {
+                let env = self.env();
+                let calls_component_function = member_reads.iter().any(|name| {
+                    !self.builtin_globals.contains(name)
+                        && matches!(
+                            env.raw_get::<LuaValue>(name.as_str()),
+                            Ok(LuaValue::Function(_))
+                        )
+                });
                 let cacheable = reads.is_empty()
+                    && !calls_component_function
                     && member_reads
                         .iter()
                         .all(|name| self.user_global_key_set.contains(name));
                 let mut cache = self.template_expression_cache.lock().unwrap();
+                if calls_component_function {
+                    cache
+                        .opaque_expressions
+                        .insert(expression_source.to_string());
+                }
                 cache
                     .template_member_reads
                     .extend(member_reads.iter().cloned());
@@ -131,9 +145,11 @@ impl ScriptContext {
             return true;
         }
         let cache = self.template_expression_cache.lock().unwrap();
-        self.changed_public_members
-            .iter()
-            .any(|name| cache.template_member_reads.contains(name))
+        !cache.opaque_expressions.is_empty()
+            || self
+                .changed_public_members
+                .iter()
+                .any(|name| cache.template_member_reads.contains(name))
     }
 
     /// Whether this runtime has completed a template evaluation, so its

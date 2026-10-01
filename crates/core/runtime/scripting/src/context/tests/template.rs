@@ -182,6 +182,34 @@ fn template_dependency_rust_gate_beats_lua_table_lookup() {
 }
 
 #[test]
+fn a_template_calling_a_helper_rerenders_when_the_helper_inputs_change() {
+    let mut ctx = ScriptContext::new("@test/template-helper", CapabilitySet::default()).unwrap();
+    ctx.compile_and_execute_component(
+        "count = 1\nfunction label() return 'n' .. count end\nfunction bump() count = count + 1 end",
+        &[],
+        &["label()".to_string()],
+    )
+    .unwrap();
+    let first = ctx
+        .evaluate_template_expression("label()", &serde_json::Map::new())
+        .unwrap()
+        .0;
+    assert_eq!(first, Value::String("n1".into()));
+    ctx.mark_template_dependencies_ready();
+    ctx.state_mut().clear_dirty();
+
+    ctx.call_handler("bump", &[]).unwrap();
+
+    assert!(ctx.dirty_state_affects_template());
+    assert_eq!(
+        ctx.evaluate_template_expression("label()", &serde_json::Map::new())
+            .unwrap()
+            .0,
+        Value::String("n2".into())
+    );
+}
+
+#[test]
 fn template_member_dependencies_are_conservative_until_first_evaluation_finishes() {
     let mut ctx = ScriptContext::new(
         "@test/template-dependency-readiness",
