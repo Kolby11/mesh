@@ -1,8 +1,13 @@
 # Status
 
-**Updated:** 2026-09-30
+**Updated:** 2026-10-01
 
 ## Now
+
+Block review Priority 1 (isolation and capability grants) is closed: RT-01,
+MOD-01..04 and SH-01 (`5dd71773`..`d5cb04fb`); see
+[October's log](log/2026-10.md). Next is Priority 2 (shell survival), starting
+with SH-02.
 
 Quick Settings and popover fixes landed 2026-09-30 (`eb9215f2`, `ada52286`).
 Promoted popovers paint from their unclipped origin, size to their content,

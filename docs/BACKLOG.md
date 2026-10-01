@@ -26,23 +26,6 @@ unless an item says otherwise. IDs point into the
 (evidence and tests); `A1`–`A8` point into the
 [module architecture direction](../.planning/todos/pending/2026-09-30-module-architecture-direction.md).
 
-### Priority 1 — Isolation and capability grants
-
-- [ ] **RT-01:** Remove `getfenv`/`setfenv` from the shared realm, bind template
-      expression environments from Rust, and deep-wrap live-binding values; any
-      component holding another's function can reach its `mesh` API and storage.
-- [ ] **MOD-01 / A1:** One owning module per interface name; reject conflicting
-      declarations instead of letting the higher `provider_priority` replace a
-      contract and its permission levels.
-- [ ] **MOD-02:** Derive the `Core` trust tier from provenance, not the `@mesh/`
-      name prefix; refuse `@mesh/*` from git or path sources.
-- [ ] **MOD-03:** Drop capability approvals (and stale `disabled` entries) on
-      every uninstall, or bind approvals to source identity.
-- [ ] **MOD-04:** Reject in-argument `exec.argv` globs for interpreters and code
-      arguments; rewrite the shipped `sh -c` and Hyprland dispatch grants.
-- [ ] **SH-01:** Commit `ActivationPlan.effective_capabilities` on profile switch
-      and publish grants through `ActiveSnapshot`.
-
 ### Priority 2 — Shell survival and bounded failure
 
 - [ ] **SH-02:** Make control-plane service calls non-fatal to the loop, queue
