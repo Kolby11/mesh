@@ -452,7 +452,7 @@ mod tests {
                 "__index",
                 context
                     .lua()
-                    .create_function(move |_, (_, key): (Table, String)| {
+                    .create_function(move |_, (_, key): (mlua::Table, String)| {
                         reactive_scalar_reads.raw_get::<LuaValue>(key)
                     })
                     .expect("reactive read function"),
@@ -464,7 +464,7 @@ mod tests {
             .expect("set environment metatable");
         let blocked_write = context
             .lua()
-            .create_function(|_, _: (Table, String, LuaValue)| -> mlua::Result<()> {
+            .create_function(|_, _: (mlua::Table, String, LuaValue)| -> mlua::Result<()> {
                 Err(mlua::Error::RuntimeError(
                     "blocked member write".to_string(),
                 ))

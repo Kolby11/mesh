@@ -141,6 +141,7 @@ pub struct ScriptContext {
 impl Drop for ScriptContext {
     fn drop(&mut self) {
         self.flush_storage();
+        self.release_pending_side_effects();
         self.uninit();
     }
 }
@@ -543,30 +544,10 @@ impl ScriptContext {
         })
     }
 
-    /// Load a script source after installing explicit interface imports as Lua globals.
-    pub fn load_script_with_interface_imports(
-        &mut self,
-        source: &str,
-        imports: &[ScriptInterfaceImport],
-    ) -> Result<(), ScriptError> {
-        self.ensure_initialized()?;
-        self.restore_proxied_scalars_to_env().map_err(lua_err)?;
-        self.interface_bindings.clear();
-        self.user_global_keys.clear();
-        self.user_global_key_set.clear();
-        self.user_globals_discovered = false;
-        self.assigned_global_keys.lock().unwrap().clear();
-        self.pending_assigned_global_keys
-            .store(false, Ordering::Release);
-        self.template_dependencies_ready = false;
-        *self.template_expression_cache.lock().unwrap() = TemplateExpressionCache::default();
-        {
-            let mut shared_interface_bindings = self.shared_interface_bindings.lock().unwrap();
-            shared_interface_bindings.bindings.clear();
-            shared_interface_bindings.generation =
-                shared_interface_bindings.generation.wrapping_add(1);
-            self.interface_bindings_generation = shared_interface_bindings.generation;
-        }
+    /// Drop queued events and element actions and return their reserved
+    /// side-effect budget to the realm. The realm outlives this context, so
+    /// anything still queued at reload or teardown must be released here.
+    fn release_pending_side_effects(&mut self) {
         let published_event_count = self.published_events.len();
         let published_event_bytes = self
             .published_events
@@ -606,9 +587,6 @@ impl ScriptContext {
             published_event_count,
             published_event_bytes,
         );
-        self.service_call_completions.lock().unwrap().clear();
-        self.shared_diagnostics.lock().unwrap().clear();
-        self.localized_misses.lock().unwrap().clear();
         let (element_action_count, element_action_bytes) = {
             let mut element_actions = self.shared_element_actions.lock().unwrap();
             let count = element_actions.len();
@@ -624,6 +602,36 @@ impl ScriptContext {
             element_action_count,
             element_action_bytes,
         );
+    }
+
+    /// Load a script source after installing explicit interface imports as Lua globals.
+    pub fn load_script_with_interface_imports(
+        &mut self,
+        source: &str,
+        imports: &[ScriptInterfaceImport],
+    ) -> Result<(), ScriptError> {
+        self.ensure_initialized()?;
+        self.restore_proxied_scalars_to_env().map_err(lua_err)?;
+        self.interface_bindings.clear();
+        self.user_global_keys.clear();
+        self.user_global_key_set.clear();
+        self.user_globals_discovered = false;
+        self.assigned_global_keys.lock().unwrap().clear();
+        self.pending_assigned_global_keys
+            .store(false, Ordering::Release);
+        self.template_dependencies_ready = false;
+        *self.template_expression_cache.lock().unwrap() = TemplateExpressionCache::default();
+        {
+            let mut shared_interface_bindings = self.shared_interface_bindings.lock().unwrap();
+            shared_interface_bindings.bindings.clear();
+            shared_interface_bindings.generation =
+                shared_interface_bindings.generation.wrapping_add(1);
+            self.interface_bindings_generation = shared_interface_bindings.generation;
+        }
+        self.release_pending_side_effects();
+        self.service_call_completions.lock().unwrap().clear();
+        self.shared_diagnostics.lock().unwrap().clear();
+        self.localized_misses.lock().unwrap().clear();
         self.changed_storage_keys.lock().unwrap().clear();
         self.pending_side_channels.store(false, Ordering::Release);
         self.clear_tracked_service_fields();

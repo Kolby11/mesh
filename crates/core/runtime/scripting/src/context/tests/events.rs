@@ -363,3 +363,27 @@ end
 
     assert_eq!(ctx.state.get("seen_level"), Some(serde_json::json!(42)));
 }
+
+#[test]
+fn dropping_a_context_returns_its_queued_side_effect_budget_to_the_realm() {
+    let vm = SurfaceVm::new();
+    let budget = vm.policy().budget();
+    let before = budget.aggregate_in_use();
+    {
+        let caps = CapabilitySet::from_ids(["service.audio.control"]);
+        let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+        ctx.attach_shared_vm(&vm);
+        ctx.set_interface_catalog(audio_catalog());
+        ctx.load_script(
+            r#"
+function publish()
+    mesh.events.publish("mesh.audio.set_volume", { device_id = "default", percent = 55 })
+end
+"#,
+        )
+        .unwrap();
+        ctx.call_handler("publish", &[]).unwrap();
+        assert!(budget.aggregate_in_use() > before);
+    }
+    assert_eq!(budget.aggregate_in_use(), before);
+}

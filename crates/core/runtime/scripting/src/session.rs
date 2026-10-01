@@ -482,8 +482,8 @@ impl ResourceBroker {
         self.inner.reserve_output(bytes)
     }
 
-    pub fn reserve_storage(&self, bytes: usize) -> Result<(), ResourceLimit> {
-        self.inner.reserve_storage(bytes)
+    pub fn recharge_storage(&self, previous: u64, next: u64) -> Result<(), ResourceLimit> {
+        self.inner.recharge_storage(previous, next)
     }
 
     pub fn reserve_queue(&self) -> Result<(), ResourceLimit> {

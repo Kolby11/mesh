@@ -1438,6 +1438,7 @@ impl BackendScriptContext {
         let storage_arc = Arc::clone(&self.storage);
         let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
         let storage_resources = self.policy.budget();
+        let charged_storage_bytes = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let storage = create_lua_storage_table_with_write_guard_and_charge(
             self.lua_ref()?,
             storage_arc,
@@ -1452,9 +1453,13 @@ impl BackendScriptContext {
             Arc::new(|_key| {}),
             Arc::new(move || require_started(&host_side_effects_enabled)),
             Arc::new(move |bytes| {
+                let next = bytes as u64;
+                let previous = charged_storage_bytes.load(Ordering::Acquire);
                 storage_resources
-                    .reserve_storage(bytes)
-                    .map_err(|error| mlua::Error::external(error.to_string()))
+                    .recharge_storage(previous, next)
+                    .map_err(|error| mlua::Error::external(error.to_string()))?;
+                charged_storage_bytes.store(next, Ordering::Release);
+                Ok(())
             }),
         )?;
         current_self.set("storage", storage)?;
@@ -1504,6 +1509,7 @@ impl Drop for BackendScriptContext {
         self.kill_streams();
         self.shutdown_exec();
         self.flush_storage();
+        drop(self.drain_events());
     }
 }
 

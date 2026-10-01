@@ -228,8 +228,16 @@ impl ResourceBudget {
         Ok(())
     }
 
-    pub(crate) fn reserve_storage(&self, bytes: usize) -> Result<(), ResourceLimit> {
-        self.reserve_aggregate(bytes as u64)
+    /// Move a storage document's aggregate charge from its previous size to
+    /// its next size. Storage is resident state, so a rewrite charges only
+    /// growth and shrinking releases the difference.
+    pub(crate) fn recharge_storage(&self, previous: u64, next: u64) -> Result<(), ResourceLimit> {
+        if next > previous {
+            self.reserve_aggregate(next - previous)
+        } else {
+            self.release_aggregate(previous - next);
+            Ok(())
+        }
     }
 
     fn reserve_aggregate(&self, amount: u64) -> Result<(), ResourceLimit> {
@@ -239,6 +247,11 @@ impl ResourceBudget {
             self.config.aggregate_resource_budget,
             ResourceKind::Aggregate,
         )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn aggregate_in_use(&self) -> u64 {
+        self.counters.aggregate.load(Ordering::Acquire)
     }
 
     fn release_aggregate(&self, amount: u64) {
@@ -570,6 +583,21 @@ mod tests {
         budget.release_event(1);
 
         assert!(budget.reserve_output(4).is_ok());
-        assert!(budget.reserve_storage(1).is_err());
+        assert!(budget.recharge_storage(0, 1).is_err());
+    }
+
+    #[test]
+    fn rewriting_storage_charges_only_its_growth() {
+        let mut config = SandboxConfig::default();
+        config.aggregate_resource_budget = 100;
+        let budget = ResourceBudget::new(config);
+
+        assert!(budget.recharge_storage(0, 60).is_ok());
+        for _ in 0..1_000 {
+            assert!(budget.recharge_storage(60, 60).is_ok());
+        }
+        assert!(budget.recharge_storage(60, 20).is_ok());
+        assert!(budget.recharge_storage(20, 100).is_ok());
+        assert!(budget.recharge_storage(100, 101).is_err());
     }
 }
