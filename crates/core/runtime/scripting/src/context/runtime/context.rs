@@ -673,14 +673,11 @@ impl ScriptContext {
         imports: &[ScriptInterfaceImport],
         template_expressions: &[mesh_core_expression::SharedCompiledExpression],
     ) -> Result<(), ScriptError> {
-        self.load_script_with_interface_imports(source, imports)?;
+        let source =
+            component_source_with_compiled_template_expressions(source, template_expressions);
+        self.load_script_with_interface_imports(&source, imports)?;
         let _budget = self.realm_policy.begin_callback();
-        install_template_expressions(
-            self.lua(),
-            self.env(),
-            &self.module_id,
-            template_expressions,
-        )
-        .map_err(map_lua_error)
+        install_template_expressions(self.lua(), self.env(), template_expressions)
+            .map_err(map_lua_error)
     }
 }

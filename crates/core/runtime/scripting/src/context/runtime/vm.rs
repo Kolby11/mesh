@@ -23,66 +23,83 @@ pub(super) struct TemplateExpressionCache {
     pub(super) hits: u64,
 }
 
-/// Builds one template-expression closure. It runs in an empty environment
-/// and receives the component `_ENV` as an argument, so neither it nor the
-/// expressions need `getfenv`/`setfenv`. Each expression chunk is compiled by
-/// the host against a proxy that resolves call locals first, then records the
-/// component member it read.
+/// Append each template expression to the component source as a closure, so
+/// it resolves the component's lexical locals. The host later binds each
+/// closure's environment; see [`install_template_expressions`].
+pub(super) fn component_source_with_compiled_template_expressions(
+    source: &str,
+    expressions: &[mesh_core_expression::SharedCompiledExpression],
+) -> String {
+    let mut combined = String::with_capacity(source.len() + expressions.len() * 64);
+    combined.push_str(source);
+    combined.push_str("\n__mesh_template_expressions = {}\n");
+    for expression in expressions {
+        let source = expression.source();
+        let key = serde_json::to_string(source).expect("template expression string");
+        combined.push_str("__mesh_template_expressions[");
+        combined.push_str(&key);
+        combined.push_str("] = function() return (");
+        combined.push_str(source);
+        combined.push_str(") end\n");
+    }
+    combined
+}
+
+/// Binds template-expression closures. It runs in an empty environment and
+/// receives the component `_ENV` as an argument, so neither it nor the
+/// expressions need `getfenv`/`setfenv`. Each expression's environment
+/// resolves call locals first, then records the component member it read.
 const TEMPLATE_EXPRESSION_FACTORY: &str = r#"
 local component_env, setmetatable = ...
 local no_locals = {}
-return function(member_reads, compile)
+return function(member_reads)
   local current = no_locals
-  local expression = compile(setmetatable({}, { __index = function(_, name)
+  local env = setmetatable({}, { __index = function(_, name)
     local value = current[name]
     if value ~= nil then return value end
     if member_reads[name] == nil then member_reads[name] = true end
     return component_env[name]
-  end }))
-  return function(locals)
-    local previous = current
-    current = locals or no_locals
-    local value = expression()
-    current = previous
-    return value
+  end })
+  return env, function(expression)
+    return function(locals)
+      local previous = current
+      current = locals or no_locals
+      local value = expression()
+      current = previous
+      return value
+    end
   end
 end
 "#;
 
-/// Install `__mesh_template_expressions` and their member-read tables into a
-/// component environment, keyed by expression source.
+/// Rebind the closures the component source installed in
+/// `__mesh_template_expressions` to their per-expression environments, and
+/// install `__mesh_template_expression_member_reads`, keyed by source.
 pub(super) fn install_template_expressions(
     lua: &Lua,
     env: &Table,
-    chunk_name: &str,
     expressions: &[mesh_core_expression::SharedCompiledExpression],
 ) -> mlua::Result<()> {
-    let closures = lua.create_table()?;
     let all_member_reads = lua.create_table()?;
-    if !expressions.is_empty() {
-        let factory: Function = lua
-            .load(TEMPLATE_EXPRESSION_FACTORY)
-            .set_name("=mesh:template-expression")
-            .set_environment(lua.create_table()?)
-            .call((env.clone(), lua.globals().get::<Function>("setmetatable")?))?;
-        for expression in expressions {
-            let source = expression.source();
-            let member_reads = lua.create_table()?;
-            let chunk = format!("return ({source})");
-            let name = chunk_name.to_string();
-            let compile = lua.create_function(move |lua, expression_env: Table| {
-                lua.load(chunk.as_str())
-                    .set_name(&name)
-                    .set_environment(expression_env)
-                    .into_function()
-            })?;
-            let closure: Function = factory.call((member_reads.clone(), compile))?;
-            closures.raw_set(source, closure)?;
-            all_member_reads.raw_set(source, member_reads)?;
-        }
+    env.raw_set("__mesh_template_expression_member_reads", all_member_reads.clone())?;
+    if expressions.is_empty() {
+        return Ok(());
     }
-    env.raw_set("__mesh_template_expressions", closures)?;
-    env.raw_set("__mesh_template_expression_member_reads", all_member_reads)?;
+    let closures: Table = env.raw_get("__mesh_template_expressions")?;
+    let factory: Function = lua
+        .load(TEMPLATE_EXPRESSION_FACTORY)
+        .set_name("=mesh:template-expression")
+        .set_environment(lua.create_table()?)
+        .call((env.clone(), lua.globals().get::<Function>("setmetatable")?))?;
+    for expression in expressions {
+        let source = expression.source();
+        let closure: Function = closures.raw_get(source)?;
+        let member_reads = lua.create_table()?;
+        let (expression_env, bind): (Table, Function) = factory.call(member_reads.clone())?;
+        closure.set_environment(expression_env)?;
+        closures.raw_set(source, bind.call::<Function>(closure)?)?;
+        all_member_reads.raw_set(source, member_reads)?;
+    }
     Ok(())
 }
 
