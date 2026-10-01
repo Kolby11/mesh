@@ -44,7 +44,8 @@ pub(super) fn revisioned_surface_config(
 impl Shell {
     pub(in crate::shell) fn render_components(&mut self) -> Result<(), ShellRunError> {
         self.render_components_inner()?;
-        self.process_effects().map(|_| ())
+        self.process_effects();
+        Ok(())
     }
 
     pub(in crate::shell) fn render_components_inner(&mut self) -> Result<(), ShellRunError> {

@@ -882,6 +882,9 @@ pub struct Shell {
     pending_profile_switch: Option<profile::PendingProfileSwitch>,
     pending_control_plane_commit: Option<runtime::PendingControlPlaneCommit>,
     pending_profile_write: Option<runtime::PendingProfileWrite>,
+    /// Durable writes waiting for the pending one, keyed by the setting they
+    /// write; see `process_effects`.
+    parked_durable_writes: Vec<(String, runtime::ScheduledEffect)>,
     /// Prepared activation surfaces remain isolated from the live presentation
     /// maps until their candidate becomes the active snapshot.
     candidate_preview: Option<Arc<profile::CandidatePreview>>,

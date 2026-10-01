@@ -261,6 +261,7 @@ impl Shell {
             locale,
             theme_effect,
             locale_effect,
+            call_ids: Vec::new(),
         });
         Ok(VecDeque::new())
     }

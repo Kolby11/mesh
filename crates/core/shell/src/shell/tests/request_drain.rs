@@ -63,3 +63,63 @@ fn drain_requests_processes_a_normal_batch_without_dropping_anything() {
             .any(|issue| issue.issue_code.contains("request_drain_budget_exceeded"))
     );
 }
+
+fn set_prop_call(call_id: u64, value: i64) -> CoreRequest {
+    CoreRequest::ServiceCall {
+        interface: "mesh.settings".to_string(),
+        command: "set_prop".to_string(),
+        payload: serde_json::json!({ "module_id": "@test/none", "prop": "size", "value": value }),
+        call_id,
+        source_instance_id: "@test/caller".to_string(),
+        source_module_id: "@test/caller".to_string(),
+        source_capabilities: mesh_core_capability::CapabilitySet::from_ids([
+            "service.settings.control",
+        ]),
+    }
+}
+
+/// A core service call runs as a follow-up effect. When that effect fails,
+/// the failure is answered to the call and recorded against its source; it
+/// must not leave the effect loop with an error that stops the shell.
+#[test]
+fn a_failing_core_service_effect_answers_its_call_without_stopping_the_shell() {
+    let mut shell = Shell::new();
+    let mut requests = VecDeque::from([set_prop_call(7, 1)]);
+
+    shell
+        .drain_requests(&mut requests)
+        .expect("a failed effect is contained, not returned");
+
+    assert!(!shell.pending_service_call_routes.contains_key(&7));
+    assert!(shell.diagnostics.snapshot().iter().any(|entry| {
+        entry.module_id == "@test/caller" && entry.health.to_string().contains("shell_effect_failed")
+    }));
+}
+
+/// A durable write that arrives while another is pending waits for it
+/// instead of failing, and only the latest write to one setting survives.
+#[test]
+fn durable_writes_wait_for_the_pending_write_and_the_latest_wins() {
+    let mut shell = Shell::new();
+    shell.pending_profile_write = Some(crate::shell::runtime::PendingProfileWrite {
+        worker: std::thread::spawn(|| {}),
+        call_ids: Vec::new(),
+    });
+    let mut requests = VecDeque::from([set_prop_call(1, 1), set_prop_call(2, 2)]);
+
+    shell.drain_requests(&mut requests).unwrap();
+
+    assert_eq!(shell.parked_durable_writes.len(), 1);
+    assert!(
+        !shell.pending_service_call_routes.contains_key(&1),
+        "the superseded call is answered"
+    );
+    assert!(shell.pending_service_call_routes.contains_key(&2));
+
+    shell.pending_profile_write.take().unwrap().worker.join().unwrap();
+    shell.release_parked_durable_writes();
+    shell.drain_requests(&mut VecDeque::new()).unwrap();
+
+    assert!(shell.parked_durable_writes.is_empty());
+    assert!(!shell.pending_service_call_routes.contains_key(&2));
+}

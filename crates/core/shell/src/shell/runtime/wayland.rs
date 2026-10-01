@@ -70,7 +70,8 @@ impl Shell {
 
     pub(in crate::shell) fn dispatch_wayland(&mut self) -> Result<(), ShellRunError> {
         self.dispatch_wayland_inner()?;
-        self.process_effects().map(|_| ())
+        self.process_effects();
+        Ok(())
     }
 
     pub(in crate::shell) fn dispatch_wayland_inner(&mut self) -> Result<(), ShellRunError> {

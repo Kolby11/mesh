@@ -50,10 +50,12 @@ struct EffectContext {
 }
 
 #[derive(Debug, Clone)]
-struct ScheduledEffect {
+pub(in crate::shell) struct ScheduledEffect {
     request: CoreRequest,
     context: EffectContext,
     fingerprint: u64,
+    /// The core service call answered when this effect settles.
+    call_id: Option<u64>,
 }
 
 #[derive(Debug, Default)]
@@ -72,6 +74,8 @@ pub(in crate::shell) struct EffectSchedulerReport {
     transaction_budget_exceeded: usize,
     source_budget_exceeded: usize,
     quarantined_sources: Vec<EffectSource>,
+    /// Service calls whose effect was dropped before it ran.
+    dropped_calls: Vec<u64>,
 }
 
 #[derive(Debug)]
@@ -127,6 +131,7 @@ impl EffectScheduler {
                     transaction_id,
                     depth: 0,
                 },
+                call_id: None,
             });
         }
     }
@@ -142,8 +147,35 @@ impl EffectScheduler {
                 fingerprint: effect_fingerprint(&request),
                 request,
                 context: followup_context.clone(),
+                call_id: None,
             });
         }
+    }
+
+    /// Queue a core service call's request as a follow-up of the active
+    /// effect; `call_id` is answered when that request settles.
+    fn enqueue_tracked_followup(&mut self, request: CoreRequest, call_id: u64) {
+        let Some(mut context) = self.active_context.clone() else {
+            return;
+        };
+        context.depth = context.depth.saturating_add(1);
+        self.enqueue_with_context(ScheduledEffect {
+            fingerprint: effect_fingerprint(&request),
+            request,
+            context,
+            call_id: Some(call_id),
+        });
+    }
+
+    /// Return a parked effect to the scheduler for the next frame.
+    fn requeue(&mut self, effect: ScheduledEffect) {
+        self.deferred.push_back(effect);
+    }
+
+    fn record_dropped<'a>(&mut self, effects: impl IntoIterator<Item = &'a ScheduledEffect>) {
+        self.report
+            .dropped_calls
+            .extend(effects.into_iter().filter_map(|effect| effect.call_id));
     }
 
     fn enqueue_with_context(&mut self, effect: ScheduledEffect) {
@@ -154,6 +186,7 @@ impl EffectScheduler {
                 .contains(&(effect.context.transaction_id, source.clone()))
         {
             self.report.dropped = self.report.dropped.saturating_add(1);
+            self.record_dropped([&effect]);
             return;
         }
         let queue = self.queues.entry(source.clone()).or_default();
@@ -198,6 +231,7 @@ impl EffectScheduler {
             if weight > MAX_EFFECT_BYTES_PER_FRAME {
                 self.drop_causal_chain(&effect.context);
                 self.report.dropped = self.report.dropped.saturating_add(1);
+                self.record_dropped([&effect]);
                 continue;
             }
             if frame.bytes.saturating_add(weight) > MAX_EFFECT_BYTES_PER_FRAME {
@@ -244,6 +278,7 @@ impl EffectScheduler {
                 self.report.transaction_budget_exceeded =
                     self.report.transaction_budget_exceeded.saturating_add(1);
                 self.report.dropped = self.report.dropped.saturating_add(1);
+                self.record_dropped([&effect]);
                 continue;
             }
 
@@ -261,6 +296,7 @@ impl EffectScheduler {
                         .insert((effect.context.transaction_id, effect.context.source.clone()));
                     self.report.cycle_breaks = self.report.cycle_breaks.saturating_add(1);
                     self.report.dropped = self.report.dropped.saturating_add(1);
+                    self.record_dropped([&effect]);
                     continue;
                 }
             }
@@ -319,9 +355,14 @@ impl EffectScheduler {
 
     fn drop_source(&mut self, source: &EffectSource) {
         self.ready_sources.retain(|queued| queued != source);
-        self.queues.remove(source);
-        self.deferred
-            .retain(|effect| &effect.context.source != source);
+        if let Some(queue) = self.queues.remove(source) {
+            self.record_dropped(&queue);
+        }
+        let (dropped, kept): (VecDeque<_>, VecDeque<_>) = std::mem::take(&mut self.deferred)
+            .into_iter()
+            .partition(|effect| &effect.context.source == source);
+        self.record_dropped(&dropped);
+        self.deferred = kept;
     }
 
     fn drop_causal_chain(&mut self, context: &EffectContext) {
@@ -333,6 +374,11 @@ impl EffectScheduler {
                     .iter()
                     .filter(|effect| effect.context.transaction_id == context.transaction_id)
                     .count(),
+            );
+            self.record_dropped(
+                queue
+                    .iter()
+                    .filter(|effect| effect.context.transaction_id == context.transaction_id),
             );
             self.deferred.extend(
                 queue
@@ -347,22 +393,33 @@ impl EffectScheduler {
                 self.ready_sources.push_back(context.source.clone());
             }
         }
-        self.deferred.retain(|effect| {
-            effect.context.transaction_id != context.transaction_id
-                || effect.context.source != context.source
-        });
+        let (dropped, kept): (VecDeque<_>, VecDeque<_>) = std::mem::take(&mut self.deferred)
+            .into_iter()
+            .partition(|effect| {
+                effect.context.transaction_id == context.transaction_id
+                    && effect.context.source == context.source
+            });
+        self.record_dropped(&dropped);
+        self.deferred = kept;
     }
 
     fn pending_len(&self) -> usize {
         self.queues.values().map(VecDeque::len).sum::<usize>() + self.deferred.len()
     }
 
-    fn discard_pending(&mut self) -> usize {
+    /// Drop every queued effect, returning how many were dropped and the
+    /// service calls they would have answered.
+    fn discard_pending(&mut self) -> (usize, Vec<u64>) {
         let count = self.pending_len();
-        self.queues.clear();
+        let calls = self
+            .queues
+            .drain()
+            .flat_map(|(_, queue)| queue)
+            .chain(self.deferred.drain(..))
+            .filter_map(|effect| effect.call_id)
+            .collect();
         self.ready_sources.clear();
-        self.deferred.clear();
-        count
+        (count, calls)
     }
 }
 
@@ -495,33 +552,135 @@ impl Shell {
         self.effect_scheduler.enqueue_batch(sourced);
     }
 
-    pub(in crate::shell) fn process_effects(
-        &mut self,
-    ) -> Result<EffectSchedulerReport, ShellRunError> {
+    /// Run this frame's effects. A failing effect is reported to its source
+    /// and to the service call that queued it; it never stops the shell.
+    pub(in crate::shell) fn process_effects(&mut self) -> EffectSchedulerReport {
         self.effect_scheduler.begin_frame();
         while let Some(effect) = self.effect_scheduler.next_effect() {
-            let context = effect.context.clone();
+            if self.durable_write_pending()
+                && let Some(key) = durable_write_key(&effect.request)
+            {
+                self.park_durable_write(key, effect);
+                continue;
+            }
+            let ScheduledEffect {
+                request,
+                context,
+                call_id,
+                ..
+            } = effect;
+            let source_module = context.source.module_id.clone();
+            let writes_before = self.durable_write_pending();
             self.effect_scheduler.set_active_context(context);
-            let result = self.apply_request(effect.request);
+            let result = self.apply_request(request);
+            if let Ok(followups) = &result {
+                self.effect_scheduler.enqueue_followups(followups.iter().cloned());
+            }
+            self.effect_scheduler.clear_active_context();
+            let started_write = !writes_before && self.durable_write_pending();
             match result {
-                Ok(followups) => {
-                    self.effect_scheduler.enqueue_followups(followups);
-                    self.effect_scheduler.clear_active_context();
+                Ok(_) => {
+                    if let Some(call_id) = call_id {
+                        if started_write {
+                            self.await_durable_write(call_id);
+                        } else {
+                            self.settle_core_service_call(call_id, Ok(()));
+                        }
+                    }
                 }
                 Err(error) => {
-                    self.effect_scheduler.clear_active_context();
-                    let report = self.effect_scheduler.finish_frame();
-                    self.report_effect_scheduler(&report);
-                    return Err(error);
+                    let message = error.to_string();
+                    tracing::warn!(module = %source_module, error = %message, "shell effect failed");
+                    self.diagnostics.record_lifecycle_error(
+                        source_module,
+                        "shell_effect_failed",
+                        message.clone(),
+                    );
+                    if let Some(call_id) = call_id {
+                        self.settle_core_service_call(call_id, Err(message));
+                    }
                 }
             }
         }
         let report = self.effect_scheduler.finish_frame();
         self.report_effect_scheduler(&report);
-        Ok(report)
+        report
+    }
+
+    pub(in crate::shell) fn durable_write_pending(&self) -> bool {
+        self.pending_control_plane_commit.is_some() || self.pending_profile_write.is_some()
+    }
+
+    /// Hold a durable write until the pending one finishes. A later write for
+    /// the same setting replaces an earlier parked one, whose call is
+    /// answered as superseded.
+    fn park_durable_write(&mut self, key: String, effect: ScheduledEffect) {
+        if let Some(index) = self
+            .parked_durable_writes
+            .iter()
+            .position(|(parked, _)| parked == &key)
+        {
+            let (_, superseded) = self.parked_durable_writes.remove(index);
+            if let Some(call_id) = superseded.call_id {
+                self.settle_core_service_call(
+                    call_id,
+                    Err("superseded by a later write to the same setting".into()),
+                );
+            }
+        }
+        self.parked_durable_writes.push((key, effect));
+    }
+
+    /// Return parked durable writes to the scheduler once no write is pending.
+    pub(in crate::shell) fn release_parked_durable_writes(&mut self) {
+        for (_, effect) in std::mem::take(&mut self.parked_durable_writes) {
+            self.effect_scheduler.requeue(effect);
+        }
+    }
+
+    fn await_durable_write(&mut self, call_id: u64) {
+        if let Some(pending) = self.pending_control_plane_commit.as_mut() {
+            pending.call_ids.push(call_id);
+        } else if let Some(pending) = self.pending_profile_write.as_mut() {
+            pending.call_ids.push(call_id);
+        }
+    }
+
+    /// Answer a core service call whose request has settled.
+    pub(in crate::shell) fn settle_core_service_call(
+        &mut self,
+        call_id: u64,
+        outcome: Result<(), String>,
+    ) {
+        let (status, result) = match outcome {
+            Ok(()) => (
+                "applied",
+                serde_json::json!({ "ok": true, "status": "applied", "call_id": call_id }),
+            ),
+            Err(error) => (
+                "failed",
+                serde_json::json!({
+                    "ok": false,
+                    "status": "failed",
+                    "error": error,
+                    "call_id": call_id,
+                }),
+            ),
+        };
+        self.complete_service_call_route(
+            mesh_core_backend::CallId::from_raw(call_id),
+            status,
+            &result,
+        );
     }
 
     fn report_effect_scheduler(&mut self, report: &EffectSchedulerReport) {
+        for call_id in &report.dropped_calls {
+            self.settle_core_service_call(
+                *call_id,
+                Err("the effect scheduler dropped this request".into()),
+            );
+        }
         if report.deferred > 0 {
             tracing::debug!(count = report.deferred, "deferred residual shell effects");
         }
@@ -580,7 +739,11 @@ impl Shell {
     }
 
     pub(in crate::shell) fn discard_scheduled_effects(&mut self) -> usize {
-        self.effect_scheduler.discard_pending()
+        let (count, calls) = self.effect_scheduler.discard_pending();
+        for call_id in calls {
+            self.settle_core_service_call(call_id, Err("the shell discarded this request".into()));
+        }
+        count
     }
 
     pub(in crate::shell) fn complete_profile_write(
@@ -1377,7 +1540,7 @@ impl Shell {
         requests: &mut VecDeque<CoreRequest>,
     ) -> Result<(), ShellRunError> {
         self.enqueue_effects(std::mem::take(requests));
-        let report = self.process_effects()?;
+        let report = self.process_effects();
         if report.deferred > 0
             || report.cycle_breaks > 0
             || report.transaction_budget_exceeded > 0
@@ -1402,7 +1565,8 @@ impl Shell {
         request: CoreRequest,
     ) -> Result<(), ShellRunError> {
         self.enqueue_effects(std::iter::once(request));
-        self.process_effects().map(|_| ())
+        self.process_effects();
+        Ok(())
     }
 
     pub(in crate::shell) fn apply_request(
@@ -2041,17 +2205,24 @@ impl Shell {
             .request(interface, command, payload)
             .or_else(|| core_service_request(interface, command, payload));
         let mut dispatch_result = if let Some(request) = core_request {
-            let result = if self.effect_scheduler.active_context().is_some() {
+            // Inside the scheduler the request runs as a tracked follow-up and
+            // the call is answered when it settles, not when it is queued.
+            if self.effect_scheduler.active_context().is_some() {
                 self.effect_scheduler
-                    .enqueue_followups(std::iter::once(request));
-                Ok(VecDeque::new())
+                    .enqueue_tracked_followup(request, call_id.raw());
+                serde_json::json!({ "ok": true, "queued": true, "status": "queued" })
             } else {
-                self.apply_request(request)
-            };
+            let writes_before = self.durable_write_pending();
+            let result = self.apply_request(request);
             match result {
                 Ok(follow_ups) => {
                     self.enqueue_effects(follow_ups);
-                    serde_json::json!({ "ok": true, "status": "applied" })
+                    if !writes_before && self.durable_write_pending() {
+                        self.await_durable_write(call_id.raw());
+                        serde_json::json!({ "ok": true, "queued": true, "status": "queued" })
+                    } else {
+                        serde_json::json!({ "ok": true, "status": "applied" })
+                    }
                 }
                 Err(error) => {
                     let message = error.to_string();
@@ -2067,6 +2238,7 @@ impl Shell {
                         "status": "failed",
                     })
                 }
+            }
             }
         } else if self.service_handlers.contains_key(interface) {
             let coalesce = self.service_command_is_coalescable(interface, command);
@@ -3345,6 +3517,36 @@ fn benchmark_scenario_id(scenario_id: &str) -> Option<BenchmarkScenarioId> {
     }
 }
 
+/// Settings key of a request that commits durable control-plane state, or
+/// `None` for any other request. Two requests with one key write the same
+/// setting, so only the latest needs to run.
+fn durable_write_key(request: &CoreRequest) -> Option<String> {
+    Some(match request {
+        CoreRequest::SetTheme { .. } => "theme".into(),
+        CoreRequest::SetThemeMode { .. } => "theme_mode".into(),
+        CoreRequest::SetLocale { .. } => "locale".into(),
+        CoreRequest::SetIconTheme { .. } => "icon_theme".into(),
+        CoreRequest::SetFontFamily { .. } => "font_family".into(),
+        CoreRequest::SetProvider { interface, .. } => format!("provider:{interface}"),
+        CoreRequest::SetModuleEnabled { module_id, .. } => format!("enabled:{module_id}"),
+        CoreRequest::SetModuleProp {
+            module_id,
+            instance_id,
+            prop,
+            ..
+        }
+        | CoreRequest::UnsetModuleProp {
+            module_id,
+            instance_id,
+            prop,
+        } => format!(
+            "prop:{module_id}:{}:{prop}",
+            instance_id.as_deref().unwrap_or_default()
+        ),
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3507,3 +3709,4 @@ mod tests {
         assert_eq!(scheduler.pending_len(), 0);
     }
 }
+

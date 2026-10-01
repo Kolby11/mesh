@@ -14,7 +14,7 @@ mod theme;
 mod wayland;
 
 pub(in crate::shell) use debug::DebugSnapshotCache;
-pub(in crate::shell) use request::EffectScheduler;
+pub(in crate::shell) use request::{EffectScheduler, ScheduledEffect};
 pub(in crate::shell) use theme::ControlPlaneSettingsCommit;
 
 pub(in crate::shell) struct PendingControlPlaneCommit {
@@ -23,10 +23,14 @@ pub(in crate::shell) struct PendingControlPlaneCommit {
     pub(in crate::shell) locale: Option<LocaleEngine>,
     pub(in crate::shell) theme_effect: bool,
     pub(in crate::shell) locale_effect: bool,
+    /// Core service calls answered when this commit lands.
+    pub(in crate::shell) call_ids: Vec<u64>,
 }
 
 pub(in crate::shell) struct PendingProfileWrite {
     pub(in crate::shell) worker: std::thread::JoinHandle<()>,
+    /// Core service calls answered when this write lands.
+    pub(in crate::shell) call_ids: Vec<u64>,
 }
 
 const MAX_SHELL_MESSAGE_DRAIN_PER_FRAME: usize = 256;
@@ -164,7 +168,10 @@ impl Shell {
                 wake.wake();
             }
         });
-        self.pending_profile_write = Some(PendingProfileWrite { worker });
+        self.pending_profile_write = Some(PendingProfileWrite {
+            worker,
+            call_ids: Vec::new(),
+        });
         Ok(())
     }
 
@@ -486,7 +493,7 @@ impl Shell {
                     self.presented_last_frame = true;
                 }
                 self.enqueue_effects(std::mem::take(&mut pending));
-                self.process_effects()?;
+                self.process_effects();
                 self.flush_throttled_commands();
                 self.render_components_inner()?;
                 self.presentation_engine
@@ -567,9 +574,7 @@ impl Shell {
         self.enqueue_effects(shutdown_requests);
         let unmount_requests = self.unmount_components();
         self.enqueue_effects(unmount_requests);
-        if let Err(error) = self.process_effects() {
-            first_error.get_or_insert(error);
-        }
+        self.process_effects();
         self.shutdown_effects_allowed = false;
 
         if let Some(mut pending) = self.pending_resource_preparation.take() {
@@ -995,47 +1000,68 @@ impl Shell {
                     tracing::warn!("ignored durable settings completion without a pending commit");
                     return Ok(());
                 };
-                if pending_commit.worker.join().is_err() {
+                let call_ids = pending_commit.call_ids;
+                let outcome = if pending_commit.worker.join().is_err() {
+                    let message = "durable settings worker panicked before acknowledgement";
                     self.diagnostics.record_lifecycle_error(
                         "@mesh/settings",
                         "control_plane_commit_worker_panicked",
-                        "durable settings worker panicked before acknowledgement",
+                        message,
                     );
-                    return Ok(());
-                }
-                match result {
-                    Ok(commit) => {
-                        pending.extend(self.commit_control_plane_batch(
+                    Err(message.to_string())
+                } else {
+                    match result.and_then(|commit| {
+                        self.commit_control_plane_batch(
                             commit,
                             pending_commit.theme,
                             pending_commit.locale,
                             pending_commit.theme_effect,
                             pending_commit.locale_effect,
-                        )?);
+                        )
+                        .map_err(|error| error.to_string())
+                    }) {
+                        Ok(effects) => {
+                            pending.extend(effects);
+                            Ok(())
+                        }
+                        Err(error) => {
+                            self.diagnostics.record_lifecycle_error(
+                                "@mesh/settings",
+                                "control_plane_commit_rejected",
+                                error.clone(),
+                            );
+                            Err(error)
+                        }
                     }
-                    Err(error) => {
-                        self.diagnostics.record_lifecycle_error(
-                            "@mesh/settings",
-                            "control_plane_commit_rejected",
-                            error,
-                        );
-                    }
+                };
+                for call_id in call_ids {
+                    self.settle_core_service_call(call_id, outcome.clone());
                 }
+                self.release_parked_durable_writes();
             }
             ShellMessage::ProfileWriteFinished { operation, result } => {
                 let Some(pending_write) = self.pending_profile_write.take() else {
                     tracing::warn!("ignored profile write completion without a pending write");
                     return Ok(());
                 };
-                if pending_write.worker.join().is_err() {
+                let call_ids = pending_write.call_ids;
+                let outcome = if pending_write.worker.join().is_err() {
+                    let message = "profile write worker panicked before acknowledgement";
                     self.diagnostics.record_lifecycle_error(
                         "@mesh/settings",
                         "profile_write_worker_panicked",
-                        "profile write worker panicked before acknowledgement",
+                        message,
                     );
-                    return Ok(());
+                    Err(message.to_string())
+                } else {
+                    let outcome = result.as_ref().map(|_| ()).map_err(Clone::clone);
+                    pending.extend(self.complete_profile_write(operation, result));
+                    outcome
+                };
+                for call_id in call_ids {
+                    self.settle_core_service_call(call_id, outcome.clone());
                 }
-                pending.extend(self.complete_profile_write(operation, result));
+                self.release_parked_durable_writes();
             }
         }
         if let Some(started) = message_started {
