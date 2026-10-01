@@ -88,9 +88,6 @@ impl Shell {
                 return Err(ShellRunError::Presentation(error));
             }
         };
-        if !events.is_empty() {
-            self.presented_last_frame = true;
-        }
         self.pending_wayland_events.extend(events);
 
         for _ in 0..MAX_WAYLAND_EVENTS_PER_FRAME {

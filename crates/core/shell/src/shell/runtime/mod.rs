@@ -35,6 +35,7 @@ pub(in crate::shell) struct PendingProfileWrite {
 
 const MAX_SHELL_MESSAGE_DRAIN_PER_FRAME: usize = 256;
 const DEV_WINDOW_POLL_SLEEP: Duration = Duration::from_millis(16);
+const NO_PROGRESS_RENDER_RETRY: Duration = Duration::from_millis(16);
 
 impl Shell {
     /// Contain one component's failure at the shell boundary. Component
@@ -262,9 +263,10 @@ impl Shell {
         &self,
         shell_message_backlog_likely: bool,
     ) -> Duration {
+        let render_ready = self.components_have_ready_render_work();
         if shell_message_backlog_likely
             || !self.pending_wayland_events.is_empty()
-            || self.components_have_ready_render_work()
+            || (render_ready && !self.render_stalled)
         {
             return Duration::ZERO;
         }
@@ -340,7 +342,14 @@ impl Shell {
         }
 
         let sleep_for = next_deadline.saturating_duration_since(now);
-        sleep_for
+        // A component that keeps asking to render but presented nothing in the
+        // last pass (for example a fully clipped infinite animation) waits for
+        // the next deadline or one frame interval instead of spinning.
+        if render_ready {
+            sleep_for.min(NO_PROGRESS_RENDER_RETRY)
+        } else {
+            sleep_for
+        }
     }
 
     pub(in crate::shell) fn components_have_ready_render_work(&self) -> bool {
@@ -479,9 +488,6 @@ impl Shell {
                 }
                 let shell_message_backlog_likely =
                     drained_shell_message_count == MAX_SHELL_MESSAGE_DRAIN_PER_FRAME;
-                if drained_shell_message_count > 0 {
-                    self.presented_last_frame = true;
-                }
                 for message in shell_messages.into_vec() {
                     self.handle_shell_message(&mut pending, message)?;
                 }
@@ -489,9 +495,6 @@ impl Shell {
                 pending.extend(self.tick_components()?);
                 pending.extend(self.complete_due_surface_transitions()?);
                 pending.extend(self.poll_pending_resource_preparation());
-                if !pending.is_empty() {
-                    self.presented_last_frame = true;
-                }
                 self.enqueue_effects(std::mem::take(&mut pending));
                 self.process_effects();
                 self.flush_throttled_commands();

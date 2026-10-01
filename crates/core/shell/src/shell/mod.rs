@@ -834,11 +834,10 @@ pub struct Shell {
     /// It is the baseline for deterministic revisioned token events.
     last_published_theme_snapshot: Option<mesh_core_theme::ThemeSnapshot>,
     components: Vec<ComponentRuntime>,
-    components_want_render: bool,
-    /// True after a component presented; false after a render pass with zero
-    /// presents.  When false, `components_have_ready_render_work` is suppressed
-    /// so stale `wants_render()` flags cannot spin the idle loop.
-    presented_last_frame: bool,
+    /// The last render pass rendered a ready component but presented nothing.
+    /// Ready render work then waits for the next deadline instead of keeping
+    /// the loop at a zero wait; see `next_runtime_sleep`.
+    render_stalled: bool,
     component_by_surface: HashMap<SurfaceId, usize>,
     service_delivery_index: ServiceDeliveryIndex,
     surfaces: HashMap<SurfaceId, StubSurface>,

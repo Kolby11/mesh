@@ -59,7 +59,6 @@ fn scheduler_wakes_for_visible_dirty_component_even_without_previous_present() {
         surface.width = 120;
         surface.height = 36;
     }
-    shell.presented_last_frame = false;
 
     assert_eq!(shell.next_runtime_sleep(false), Duration::ZERO);
 }
@@ -80,7 +79,6 @@ fn scheduler_ignores_hidden_component_deadlines_and_render_dirtiness() {
         .get_mut("@test/hidden")
         .expect("hidden surface state")
         .visible = false;
-    shell.presented_last_frame = true;
 
     let sleep = shell.next_runtime_sleep(false);
 

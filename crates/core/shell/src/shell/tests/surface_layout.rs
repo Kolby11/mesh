@@ -925,3 +925,44 @@ fn configured_surface(shell: &Shell, surface_id: &str) -> mesh_core_presentation
         .unwrap_or_else(|| panic!("{surface_id} was never configured"))
         .1
 }
+
+/// A component that keeps asking to render while the last loop iteration
+/// presented nothing must not keep the loop at a zero wait.
+#[test]
+fn ready_render_work_without_progress_backs_off_instead_of_spinning() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(MeasuredLayerGeometryComponent::new(
+        "@test/no-progress",
+        (80, 40),
+        (80, 40),
+    )));
+    let mut emitted = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: "@test/no-progress".into(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    shell.render_components().unwrap();
+    shell
+        .presentation_engine
+        .testing_set_surface_configured("@test/no-progress", false);
+    shell.render_components().unwrap();
+    shell
+        .presentation_engine
+        .testing_set_surface_configured("@test/no-progress", true);
+    assert!(shell.components_have_ready_render_work());
+    let later = std::time::Instant::now() + Duration::from_secs(60);
+    shell.next_frontend_reload_check = later;
+    shell.next_theme_reload_check = later;
+    shell.next_shell_settings_reload_check = later;
+
+    shell.render_stalled = false;
+    assert_eq!(shell.next_runtime_sleep(false), Duration::ZERO);
+
+    shell.render_stalled = true;
+    let wait = shell.next_runtime_sleep(false);
+    assert!(wait > Duration::ZERO, "no progress must not spin");
+    assert!(wait <= Duration::from_millis(16), "render work is retried within a frame");
+}

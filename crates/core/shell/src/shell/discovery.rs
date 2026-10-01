@@ -2117,8 +2117,7 @@ impl Shell {
             core: ShellCoreState::default(),
             last_published_theme_snapshot: None,
             components: Vec::new(),
-            components_want_render: false,
-            presented_last_frame: true,
+            render_stalled: false,
             component_by_surface: HashMap::new(),
             service_delivery_index: ServiceDeliveryIndex::default(),
             surfaces: HashMap::new(),
@@ -3020,7 +3019,6 @@ impl Shell {
         }
         if invalidated {
             self.service_delivery_index.mark_dirty();
-            self.components_want_render = true;
         }
         invalidated
     }

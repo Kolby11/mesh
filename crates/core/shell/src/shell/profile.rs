@@ -1364,7 +1364,6 @@ impl Shell {
             }
             Ok(())
         })?;
-        self.components_want_render = true;
         self.commit_control_plane_settings(candidate, None, None, false, false)
     }
 
@@ -2298,7 +2297,6 @@ impl Shell {
             requests.extend(next);
         }
         self.sync_frontend_catalog_components();
-        self.components_want_render = true;
         tracing::info!(profile_id = plan.profile_id, "switched shell profile live");
         requests
     }

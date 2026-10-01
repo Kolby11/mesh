@@ -93,8 +93,8 @@ impl Shell {
             self.enqueue_effects(std::mem::take(&mut debug_requests));
         }
 
-        let mut components_want_render_after_frame = false;
         let mut any_component_presented = false;
+        let mut rendered_ready_component = false;
         'component: for index in 0..self.components.len() {
             let surface_id = self.components[index].surface_id.clone();
             // Ahead of the `wants_render` gate: a compositor state change is
@@ -167,7 +167,6 @@ impl Shell {
                         .presentation_engine
                         .surface_waiting_for_buffer_release(&surface_id))
             {
-                components_want_render_after_frame = true;
                 continue;
             }
             // A surface that still owes the compositor a configure must not be
@@ -189,9 +188,9 @@ impl Shell {
                     .presentation_engine
                     .surface_ready_to_present(&surface_id)
             {
-                components_want_render_after_frame = true;
                 continue;
             }
+            rendered_ready_component = true;
             let surface_size = {
                 let surface = self
                     .surfaces
@@ -830,10 +829,6 @@ impl Shell {
                 allocation_started,
             )?;
             any_component_presented |= presented;
-            if presented {
-                components_want_render_after_frame |=
-                    self.components[index].component.wants_render();
-            }
 
             let child_presented = match self.reconcile_child_surface_requests(
                 index,
@@ -851,12 +846,8 @@ impl Shell {
                 Err(error) => return Err(error),
             };
             any_component_presented |= child_presented;
-            // Reconciliation can invalidate the component without presenting
-            // a child yet (notably the staged first entrance paint).
-            components_want_render_after_frame |= self.components[index].component.wants_render();
         }
-        self.components_want_render = components_want_render_after_frame;
-        self.presented_last_frame = any_component_presented;
+        self.render_stalled = rendered_ready_component && !any_component_presented;
         Ok(())
     }
 
