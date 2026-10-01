@@ -4,7 +4,6 @@ use super::super::lookup::{lua_err, map_lua_error};
 use super::super::proxy::{channel_subscribers, dispatch_event_subscribers, interface_event_channel};
 use super::*;
 use mesh_core_elements::VariableStore;
-use mlua::Table;
 use mlua::{LuaSerdeExt, Value as LuaValue};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
