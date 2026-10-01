@@ -14,6 +14,10 @@ use std::time::{Duration, Instant};
 use std::os::unix::process::CommandExt;
 
 const CANCEL_REAP_GRACE: Duration = Duration::from_millis(250);
+
+/// Locale for every exec child. Providers parse tool output, which must not
+/// follow the user's locale: `upower -i` under `LC_ALL=sk_SK` prints `63,14 Wh`.
+pub(super) const CHILD_LOCALE: (&str, &str) = ("LC_ALL", "C.UTF-8");
 const EXEC_ARGV_PREFIX: &str = "exec.argv:";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -520,6 +524,7 @@ fn run_bounded_command(
     let mut command = StdCommand::new(program);
     command
         .args(args)
+        .env(CHILD_LOCALE.0, CHILD_LOCALE.1)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -705,6 +710,21 @@ mod tests {
             parse_executable_rule("exec.argv:sh:[\"-c\",\"test -S \\\"$1\\\"\",\"sh\",\"*\"]")
                 .is_some()
         );
+    }
+
+    #[test]
+    fn exec_children_run_in_a_fixed_locale() {
+        let service = service(SandboxConfig::default());
+        let result = service
+            .run(
+                "sh",
+                &["-c".to_string(), "printf '%s' \"$LC_ALL\"".to_string()],
+                1024,
+                Duration::from_secs(2),
+            )
+            .unwrap();
+        assert!(result.success);
+        assert_eq!(result.stdout, "C.UTF-8");
     }
 
     #[test]

@@ -484,6 +484,7 @@ pub(crate) fn spawn_stream_with_launch_program(
     let mut command = Command::new(&launch_program);
     command
         .args(stream.args())
+        .env(super::exec::CHILD_LOCALE.0, super::exec::CHILD_LOCALE.1)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null())
