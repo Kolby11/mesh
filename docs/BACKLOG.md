@@ -28,20 +28,9 @@ unless an item says otherwise. IDs point into the
 
 ### Priority 2 — Shell survival and bounded failure
 
-- [ ] **SH-02:** Make control-plane service calls non-fatal to the loop, queue
-      the latest durable write instead of rejecting it, and report `applied`
-      only after the follow-up commits.
-- [ ] **SH-03:** Attribute scheduler effects to their originating module, never
-      quarantine the core source, decay violations, prune causal chains.
-- [ ] **SH-12:** One `retire_component` path that dispatches unmount effects and
-      purges the retired surface's queued effects and surface-keyed state.
-- [ ] **RT-03 / RT-05:** Split non-terminal callback failures from terminal
-      `Failed`; distinguish a full event queue from a closed one and always
-      deliver the terminal record.
-- [ ] **RT-02 / RT-10:** Charge backend storage by delta against the storage
-      budget, and release pending side-effect budget on context teardown.
-- [ ] **SH-04:** Add a no-damage backoff so a component that wants to render but
-      presents nothing cannot busy-spin the loop; delete the write-only fields.
+- [ ] **SH-03 (attribution):** Carry the originating component on effects that
+      component callbacks return (`tick_components`, `deliver_service_event`,
+      input, broadcasts); they still merge into one batch charged to `@mesh/shell`.
 
 ### Priority 3 — Wrong output users see now
 
