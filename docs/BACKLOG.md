@@ -34,22 +34,11 @@ unless an item says otherwise. IDs point into the
 
 ### Priority 3 — Wrong output users see now
 
-- [ ] **UI-01:** Reject descendant/sibling whitespace in `parse_selector`
-      (`next()` skips it), then fix the dead rules in `volume-button.mesh` and
-      `view-tabs.mesh`.
-- [ ] **CMP-01:** Track template reads in the component environment so
-      `{label()}` re-renders when the helper's inputs change.
-- [ ] **UI-02:** Resolve custom properties in a first pass per node so a later
-      rule's `--x` applies to that node's own `var(--x)`.
 - [ ] **UI-03 / UI-04 / UI-05:** Keyframes from an authored snapshot with
       per-property stops, restore on completion, and override transitions only
       for the properties a keyframe animates.
 - [ ] **UI-06 / UI-07:** Share the paint child order (z-index) with every
       interaction walk; replace the non-transitive tab-order comparator.
-- [ ] **UI-08:** One `input_is_editable` check (eligible and not `readonly`) on
-      every keyboard, IME and delete-surrounding path.
-- [ ] **CMP-03:** Track script-assigned props explicitly instead of inferring
-      ownership from value equality in `merge_reloaded_props`.
 - [ ] **RND-09 (fixes RND-01, RND-08):** One final damage stage that collects all
       producers, converts once to device pixels, makes rects disjoint, and feeds
       clear, paint, SHM copy and `damage_buffer`.
@@ -61,8 +50,8 @@ unless an item says otherwise. IDs point into the
 - [ ] **RES-03 / RES-04 / RES-14:** ICU date formatting in the local zone plus
       `format_time`/`format_percent`; localize the clock and quick settings;
       apply `en` after a module's `defaultLocale`.
-- [ ] **RES-07:** Default `mesh.exec`/`exec_stream` children to `LC_ALL=C.UTF-8`
-      with an explicit capability-checked env option; upower misreads `63,14 Wh`.
+- [ ] **RES-07 (env option):** Exec children now run in `LC_ALL=C.UTF-8`; add an
+      explicit, capability-checked env option for tools that need another locale.
 
 ### Priority 4 — Contracts and syntax to settle before third-party modules
 
