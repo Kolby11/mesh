@@ -42,6 +42,16 @@ pub(in crate::shell) struct EffectSource {
     generation: u64,
 }
 
+const CORE_EFFECT_MODULE: &str = "@mesh/shell";
+
+impl EffectSource {
+    /// Effects the shell issues for itself. Over budget they are deferred,
+    /// never counted toward quarantine: dropping them would stop core.
+    fn is_core(&self) -> bool {
+        self.module_id == CORE_EFFECT_MODULE
+    }
+}
+
 #[derive(Debug, Clone)]
 struct EffectContext {
     source: EffectSource,
@@ -64,6 +74,8 @@ struct EffectFrameBudget {
     bytes: usize,
     source_counts: HashMap<EffectSource, usize>,
     source_bytes: HashMap<EffectSource, usize>,
+    /// Sources that exceeded their budget this frame; the rest decay.
+    over_budget: HashSet<EffectSource>,
 }
 
 #[derive(Debug, Default)]
@@ -254,6 +266,15 @@ impl EffectScheduler {
                 self.defer_source(&source);
                 self.report.source_budget_exceeded =
                     self.report.source_budget_exceeded.saturating_add(1);
+                if source.is_core() {
+                    self.report.deferred = self.deferred.len();
+                    continue;
+                }
+                let frame = self.frame.as_mut().expect("scheduler frame must be active");
+                if !frame.over_budget.insert(source.clone()) {
+                    self.report.deferred = self.deferred.len();
+                    continue;
+                }
                 let violations = self
                     .source_budget_violations
                     .entry(source.clone())
@@ -322,7 +343,21 @@ impl EffectScheduler {
             .retain(|transaction_id, _| live_transactions.contains(transaction_id));
         self.causal_counts
             .retain(|(transaction_id, _, _), _| live_transactions.contains(transaction_id));
-        self.frame = None;
+        self.blocked_causal_chains
+            .retain(|(transaction_id, _)| live_transactions.contains(transaction_id));
+        // A source that stayed within budget for a frame earns one violation
+        // back, so isolated bursts never add up to a quarantine.
+        let over_budget = self
+            .frame
+            .take()
+            .map(|frame| frame.over_budget)
+            .unwrap_or_default();
+        self.source_budget_violations.retain(|source, violations| {
+            if !over_budget.contains(source) {
+                *violations = violations.saturating_sub(1);
+            }
+            *violations > 0
+        });
         std::mem::take(&mut self.report)
     }
 
@@ -3689,6 +3724,61 @@ mod tests {
         assert_eq!(processed, MAX_EFFECTS_PER_SOURCE_PER_FRAME * 2);
         assert_eq!(report.deferred, 200 - processed);
         assert_eq!(scheduler.pending_len(), report.deferred);
+    }
+
+    fn run_over_budget_frame(scheduler: &mut EffectScheduler, source: &EffectSource) -> EffectSchedulerReport {
+        scheduler.enqueue_batch(
+            (0..MAX_EFFECTS_PER_SOURCE_PER_FRAME + 1)
+                .map(|index| (position_request(&format!("burst-{index}")), source.clone())),
+        );
+        scheduler.begin_frame();
+        while scheduler.next_effect().is_some() {}
+        scheduler.finish_frame()
+    }
+
+    fn run_idle_frames(scheduler: &mut EffectScheduler, frames: usize) {
+        for _ in 0..frames {
+            scheduler.begin_frame();
+            while scheduler.next_effect().is_some() {}
+            scheduler.finish_frame();
+        }
+    }
+
+    #[test]
+    fn effect_scheduler_never_quarantines_core_effects() {
+        let mut scheduler = EffectScheduler::default();
+        let core = scheduler_source(CORE_EFFECT_MODULE, "shell");
+        for _ in 0..MAX_SOURCE_BUDGET_VIOLATIONS * 2 {
+            let report = run_over_budget_frame(&mut scheduler, &core);
+            assert!(report.quarantined_sources.is_empty());
+            run_idle_frames(&mut scheduler, 1);
+        }
+        assert!(!scheduler.quarantined_sources.contains(&core));
+    }
+
+    #[test]
+    fn effect_scheduler_budget_violations_decay_in_frames_within_budget() {
+        let mut scheduler = EffectScheduler::default();
+        let source = scheduler_source("@test/bursty", "bursty");
+        for _ in 0..MAX_SOURCE_BUDGET_VIOLATIONS * 3 {
+            let report = run_over_budget_frame(&mut scheduler, &source);
+            assert!(report.quarantined_sources.is_empty());
+            run_idle_frames(&mut scheduler, 2);
+        }
+        assert!(!scheduler.quarantined_sources.contains(&source));
+    }
+
+    #[test]
+    fn effect_scheduler_quarantines_a_source_over_budget_in_consecutive_frames() {
+        let mut scheduler = EffectScheduler::default();
+        let source = scheduler_source("@test/flood", "flood");
+        let mut quarantined = false;
+        for _ in 0..MAX_SOURCE_BUDGET_VIOLATIONS {
+            quarantined |= !run_over_budget_frame(&mut scheduler, &source)
+                .quarantined_sources
+                .is_empty();
+        }
+        assert!(quarantined);
     }
 
     #[test]
