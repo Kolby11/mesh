@@ -65,7 +65,7 @@ fn inspect_hit_test_inner(
         return None;
     }
     let (child_x, child_y) = child_offsets_with_scroll(node, offset_x, offset_y);
-    for child in node.children.iter().rev() {
+    for child in mesh_core_elements::children_in_paint_order(node).rev() {
         if let Some(hit) = inspect_hit_test_inner(child, x, y, child_x, child_y) {
             return Some(hit);
         }
@@ -237,7 +237,7 @@ fn pointer_event_handler_hit_inner<'a>(
     }
 
     let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
-    for child in node.children.iter().rev() {
+    for child in mesh_core_elements::children_in_paint_order(node).rev() {
         if let Some(hit) =
             pointer_event_handler_hit_inner(child, x, y, event_name, child_offset_x, child_offset_y)
         {
@@ -275,7 +275,7 @@ fn pointer_press_hit_inner<'a>(
 
     let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
     let mut hit = PointerPressHit::default();
-    for child in node.children.iter().rev() {
+    for child in mesh_core_elements::children_in_paint_order(node).rev() {
         if let Some(child_hit) =
             pointer_press_hit_inner(child, x, y, child_offset_x, child_offset_y)
         {
@@ -328,7 +328,7 @@ fn pointer_hit_test_reversed<'a>(
         });
     let tooltip = owner_tooltip.or(inherited_tooltip);
     let (child_ox, child_oy) = child_offsets_with_scroll(node, offset_x, offset_y);
-    for child in node.children.iter().rev() {
+    for child in mesh_core_elements::children_in_paint_order(node).rev() {
         if let Some(mut hit) = pointer_hit_test_reversed(child, x, y, child_ox, child_oy, tooltip) {
             if let Some(key) = node.mesh_key() {
                 hit.path.push(key.to_owned());
@@ -556,7 +556,7 @@ fn find_node_path_reversed(
     }
 
     let (child_ox, child_oy) = child_offsets_with_scroll(node, offset_x, offset_y);
-    for child in node.children.iter().rev() {
+    for child in mesh_core_elements::children_in_paint_order(node).rev() {
         if let Some(mut path) = find_node_path_reversed(child, x, y, child_ox, child_oy) {
             if let Some(key) = node.mesh_key() {
                 path.push(key.to_owned());
@@ -871,7 +871,7 @@ fn inspect_hit_test_affine<'a>(
     }
     let child_world = child_world_transform(world, node);
     let child_clips = push_node_clip(clips, node, world);
-    for child in node.children.iter().rev() {
+    for child in mesh_core_elements::children_in_paint_order(node).rev() {
         if let Some(hit) = inspect_hit_test_affine(child, x, y, child_world, &child_clips) {
             return Some(hit);
         }
@@ -906,7 +906,7 @@ fn pointer_event_handler_hit_affine<'a>(
     }
     let child_world = child_world_transform(world, node);
     let child_clips = push_node_clip(clips, node, world);
-    for child in node.children.iter().rev() {
+    for child in mesh_core_elements::children_in_paint_order(node).rev() {
         if let Some(hit) =
             pointer_event_handler_hit_affine(child, x, y, event_name, child_world, &child_clips)
         {
@@ -940,7 +940,7 @@ fn pointer_press_hit_affine<'a>(
     let child_world = child_world_transform(world, node);
     let child_clips = push_node_clip(clips, node, world);
     let mut hit = PointerPressHit::default();
-    for child in node.children.iter().rev() {
+    for child in mesh_core_elements::children_in_paint_order(node).rev() {
         if let Some(child_hit) = pointer_press_hit_affine(child, x, y, child_world, &child_clips) {
             hit = child_hit;
             break;
@@ -989,7 +989,7 @@ fn pointer_hit_test_reversed_affine<'a>(
     let tooltip = owner_tooltip.or(inherited_tooltip);
     let child_world = child_world_transform(world, node);
     let child_clips = push_node_clip(clips, node, world);
-    for child in node.children.iter().rev() {
+    for child in mesh_core_elements::children_in_paint_order(node).rev() {
         if let Some(mut hit) =
             pointer_hit_test_reversed_affine(child, x, y, child_world, &child_clips, tooltip)
         {
@@ -1094,7 +1094,7 @@ fn find_node_path_reversed_affine(
     }
     let child_world = child_world_transform(world, node);
     let child_clips = push_node_clip(clips, node, world);
-    for child in node.children.iter().rev() {
+    for child in mesh_core_elements::children_in_paint_order(node).rev() {
         if let Some(mut path) =
             find_node_path_reversed_affine(child, x, y, child_world, &child_clips)
         {
@@ -1333,6 +1333,38 @@ mod tests {
         assert_eq!(
             target.bounds,
             find_node_bounds_by_key(&root, "button", 0.0, 0.0).unwrap()
+        );
+    }
+
+    #[test]
+    fn pointer_hits_the_sibling_painted_on_top_by_z_index() {
+        let mut root = WidgetNode::new("surface");
+        root.attributes.insert("_mesh_key".into(), "root".into());
+        root.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 120.0,
+            height: 80.0,
+        };
+        for (key, z_index) in [("raised", 1), ("authored-last", 0)] {
+            let mut button = WidgetNode::new("button");
+            button.attributes.insert("_mesh_key".into(), key.into());
+            button.computed_style.z_index = z_index;
+            button.layout = LayoutRect {
+                x: 10.0,
+                y: 10.0,
+                width: 60.0,
+                height: 30.0,
+            };
+            root.children.push(button);
+        }
+
+        let hit = pointer_press_hit(&root, 30.0, 20.0);
+
+        assert_eq!(hit.target.expect("button hit").key, "raised");
+        assert_eq!(
+            crate::focus::find_focusable_at(&root, 30.0, 20.0).as_deref(),
+            Some("raised")
         );
     }
 

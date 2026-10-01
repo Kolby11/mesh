@@ -616,7 +616,7 @@ fn focusable_at_point_with_transform(
     } else {
         clips.clone()
     };
-    for child in node.children.iter().rev() {
+    for child in crate::children_in_paint_order(node).rev() {
         if let Some(id) =
             focusable_at_point_with_transform(child, x, y, child_world, &child_clips, policy)
         {
@@ -729,7 +729,7 @@ fn hit_test_node_with_transform(
     } else {
         clips.clone()
     };
-    for child in node.children.iter().rev() {
+    for child in crate::children_in_paint_order(node).rev() {
         if let Some(id) = hit_test_node_with_transform(
             child,
             x,

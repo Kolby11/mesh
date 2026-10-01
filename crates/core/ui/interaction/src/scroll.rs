@@ -218,7 +218,7 @@ fn find_scrollable_at_with_offset(
 
     let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
 
-    for child in node.children.iter().rev() {
+    for child in mesh_core_elements::children_in_paint_order(node).rev() {
         if let Some(found) =
             find_scrollable_at_with_offset(child, x, y, child_offset_x, child_offset_y)
         {
@@ -264,7 +264,7 @@ fn find_scrollbar_at_with_offset(
     }
 
     let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
-    for child in node.children.iter().rev() {
+    for child in mesh_core_elements::children_in_paint_order(node).rev() {
         if let Some(hit) =
             find_scrollbar_at_with_offset(child, x, y, child_offset_x, child_offset_y)
         {
@@ -536,7 +536,7 @@ fn find_scrollable_at_affine(
     }
     let child_world = child_world_transform(world, node);
     let child_clips = push_node_clip(clips, node, world);
-    for child in node.children.iter().rev() {
+    for child in mesh_core_elements::children_in_paint_order(node).rev() {
         if let Some(found) = find_scrollable_at_affine(child, x, y, child_world, &child_clips) {
             return Some(found);
         }

@@ -821,30 +821,7 @@ pub(super) fn for_children_in_order(
 }
 
 pub(super) fn compute_child_order(node: &WidgetNode) -> Option<Arc<[usize]>> {
-    let child_count = node.children.len();
-    if child_count <= 1 {
-        return None;
-    }
-
-    let mut has_inversion = false;
-    let mut previous_z_index = node.children[0].computed_style.z_index;
-    for child in node.children.iter().skip(1) {
-        if previous_z_index > child.computed_style.z_index {
-            has_inversion = true;
-            break;
-        }
-        previous_z_index = child.computed_style.z_index;
-    }
-    if !has_inversion {
-        return None;
-    }
-
-    let mut child_order: Vec<usize> = (0..child_count).collect();
-    // Keep authored order for equal z-index values. Paint order is observable
-    // when siblings overlap, so an unstable tie break would make a retained
-    // display list depend on the sort implementation rather than the tree.
-    child_order.sort_by_key(|&index| node.children[index].computed_style.z_index);
-    Some(child_order.into_boxed_slice().into())
+    mesh_core_elements::paint_order_child_indices(node).map(Arc::from)
 }
 
 pub(super) fn node_is_explicitly_hidden(node: &WidgetNode) -> bool {

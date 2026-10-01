@@ -311,6 +311,65 @@ impl DerefMut for WidgetNode {
     }
 }
 
+/// Child indices in paint order, or `None` when that is the authored order.
+///
+/// Paint sorts siblings by ascending `z-index` and keeps authored order for
+/// equal values; the last child is painted on top. Every pointer walk must
+/// visit children in the reverse of this order so the child it hits is the
+/// one drawn on top.
+pub fn paint_order_child_indices(node: &WidgetNode) -> Option<Vec<usize>> {
+    let children = &node.children;
+    if children
+        .windows(2)
+        .all(|pair| pair[0].computed_style.z_index <= pair[1].computed_style.z_index)
+    {
+        return None;
+    }
+    let mut order = (0..children.len()).collect::<Vec<_>>();
+    order.sort_by_key(|&index| children[index].computed_style.z_index);
+    Some(order)
+}
+
+/// Children in paint order, bottom first. Iterate it in reverse for hit
+/// testing; see [`paint_order_child_indices`].
+pub fn children_in_paint_order(node: &WidgetNode) -> PaintOrderChildren<'_> {
+    match paint_order_child_indices(node) {
+        None => PaintOrderChildren::Authored(node.children.iter()),
+        Some(order) => PaintOrderChildren::Sorted {
+            children: &node.children,
+            order: order.into_iter(),
+        },
+    }
+}
+
+pub enum PaintOrderChildren<'a> {
+    Authored(std::slice::Iter<'a, WidgetNode>),
+    Sorted {
+        children: &'a [WidgetNode],
+        order: std::vec::IntoIter<usize>,
+    },
+}
+
+impl<'a> Iterator for PaintOrderChildren<'a> {
+    type Item = &'a WidgetNode;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Authored(children) => children.next(),
+            Self::Sorted { children, order } => order.next().map(|index| &children[index]),
+        }
+    }
+}
+
+impl DoubleEndedIterator for PaintOrderChildren<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Authored(children) => children.next_back(),
+            Self::Sorted { children, order } => order.next_back().map(|index| &children[index]),
+        }
+    }
+}
+
 impl WidgetNode {
     pub fn new(tag: impl Into<String>) -> Self {
         Self {
