@@ -1,13 +1,14 @@
 # Status
 
-**Updated:** 2026-10-01
+**Updated:** 2026-10-09
 
 ## Now
 
-Block review Priorities 1 and 2 are closed except SH-03's effect
-attribution: isolation and grants (`5dd71773`..`d5cb04fb`), then shell
-survival (`9518ebf7`..`03d263af`); see [October's log](log/2026-10.md). Next
-is Priority 3 (wrong output), starting with UI-01.
+Block review Priorities 1 and 2 are closed; SH-03's effect attribution was
+the last item. Priority 3 (wrong output) is in progress. UI-01, UI-02, UI-06,
+UI-07, UI-08, CMP-01, CMP-03, RES-01, RES-02 and RES-07's locale default have
+landed. Next are UI-03/04/05 (keyframes), RND-09, RND-06/07, RES-03/04/14 and
+the RES-07 env option. See [October's log](log/2026-10.md).
 
 Quick Settings and popover fixes landed 2026-09-30 (`eb9215f2`, `ada52286`).
 Promoted popovers paint from their unclipped origin, size to their content,

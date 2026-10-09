@@ -26,27 +26,16 @@ unless an item says otherwise. IDs point into the
 (evidence and tests); `A1`–`A8` point into the
 [module architecture direction](../.planning/todos/pending/2026-09-30-module-architecture-direction.md).
 
-### Priority 2 — Shell survival and bounded failure
-
-- [ ] **SH-03 (attribution):** Carry the originating component on effects that
-      component callbacks return (`tick_components`, `deliver_service_event`,
-      input, broadcasts); they still merge into one batch charged to `@mesh/shell`.
-
 ### Priority 3 — Wrong output users see now
 
 - [ ] **UI-03 / UI-04 / UI-05:** Keyframes from an authored snapshot with
       per-property stops, restore on completion, and override transitions only
       for the properties a keyframe animates.
-- [ ] **UI-06 / UI-07:** Share the paint child order (z-index) with every
-      interaction walk; replace the non-transitive tab-order comparator.
 - [ ] **RND-09 (fixes RND-01, RND-08):** One final damage stage that collects all
       producers, converts once to device pixels, makes rects disjoint, and feeds
       clear, paint, SHM copy and `damage_buffer`.
 - [ ] **RND-06 / RND-07:** Use the output size only for an unspecified configure
       axis; keep buffer scale consistent with buffer size without a viewport.
-- [ ] **RES-01 / RES-02:** Make bad user token overrides per-token diagnostics
-      (never a composition or graph-commit error); fix `var()` alias and nested
-      fallback parsing.
 - [ ] **RES-03 / RES-04 / RES-14:** ICU date formatting in the local zone plus
       `format_time`/`format_percent`; localize the clock and quick settings;
       apply `en` after a module's `defaultLocale`.
