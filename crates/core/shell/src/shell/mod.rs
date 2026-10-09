@@ -166,10 +166,10 @@ use surface_layout::{
 };
 use types::{
     BackendIdentity, CommandThrottleState, CompiledContractField, ComponentRuntime,
-    ContractValidationCache, DurableProfileWriteResult, IpcProfileSwitchResponse,
+    ContractValidationCache, DurableProfileWriteResult, EffectOrigin, IpcProfileSwitchResponse,
     LatestServiceState, PendingBoundServiceState, PendingServiceCommand, ProfileWriteOperation,
     ServiceCallRoute, ServiceCommandMsg, ServiceDeliveryIndex, SettingsWatchState, ShellCoreState,
-    ShellMessage, SurfaceState, TargetRef, ThemeWatchState,
+    ShellMessage, SourcedRequest, SurfaceState, TargetRef, ThemeWatchState,
 };
 
 /// An owned duplicate of the shell wake descriptor. Workers keep this handle

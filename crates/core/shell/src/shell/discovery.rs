@@ -2706,7 +2706,7 @@ impl Shell {
         &mut self,
         module_id: &str,
         graph: &InstalledModuleGraph,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let locale = self.prepare_locale_for_graph(graph)?;
         self.activate_frontend_module_with_locale(module_id, graph, locale)
     }
@@ -2716,7 +2716,7 @@ impl Shell {
         module_id: &str,
         graph: &InstalledModuleGraph,
         locale: LocaleEngine,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let previous_catalog = self.frontend_catalog.snapshot().catalog;
         let catalog = FrontendCatalog::from_modules_reusing(
             &self.modules,
@@ -2836,8 +2836,12 @@ impl Shell {
         let mut requests = VecDeque::new();
         for (component, component_requests) in mounted {
             let module_id = component.id().to_string();
-            requests.extend(component_requests);
             self.register_component(Box::new(component));
+            let origin = self.components.last().map(ComponentRuntime::effect_origin);
+            requests.extend(component_requests.into_iter().map(|request| SourcedRequest {
+                request,
+                origin: origin.clone(),
+            }));
             if let Some(module) = self.modules.get_mut(&module_id) {
                 let _ = module.mark_initialized();
                 if let Err(error) = module.mark_running() {
@@ -2858,7 +2862,7 @@ impl Shell {
         &mut self,
         module_id: &str,
         graph: Option<&InstalledModuleGraph>,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let locale = match graph {
             Some(graph) => self.prepare_locale_for_graph(graph)?,
             None => self.locale.clone(),
@@ -2934,12 +2938,13 @@ impl Shell {
         &mut self,
         index: usize,
         reason: &str,
-    ) -> VecDeque<CoreRequest> {
+    ) -> VecDeque<SourcedRequest> {
         self.invalidate_debug_snapshot_cache();
         let surface_id = self.components[index].surface_id.clone();
         let module_id = self.components[index].component.id().to_string();
+        let origin = self.components[index].effect_origin();
         let effects = match self.components[index].unmount() {
-            Ok(effects) => VecDeque::from(effects),
+            Ok(effects) => origin.attribute(effects).collect(),
             Err(error) => {
                 tracing::warn!(module_id, error = %error, "{reason} unmount failed");
                 self.contain_component_failure(index, "unmount", &error);
@@ -2966,7 +2971,7 @@ impl Shell {
         effects
     }
 
-    pub(super) fn unmount_components(&mut self) -> VecDeque<CoreRequest> {
+    pub(super) fn unmount_components(&mut self) -> VecDeque<SourcedRequest> {
         self.invalidate_debug_snapshot_cache();
         let mut requests = VecDeque::new();
         let module_ids = self
@@ -2975,8 +2980,11 @@ impl Shell {
             .map(|runtime| runtime.component.id().to_string())
             .collect::<HashSet<_>>();
         for component_index in 0..self.components.len() {
-            match self.components[component_index].unmount() {
-                Ok(component_requests) => requests.extend(component_requests),
+            let runtime = &mut self.components[component_index];
+            match runtime.unmount() {
+                Ok(component_requests) => {
+                    requests.extend(runtime.effect_origin().attribute(component_requests))
+                }
                 Err(error) => {
                     tracing::warn!(
                         component_id = self.components[component_index].component.id(),
@@ -3058,7 +3066,7 @@ impl Shell {
         self.service_delivery_index.mark_dirty();
     }
 
-    pub(super) fn mount_components(&mut self) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    pub(super) fn mount_components(&mut self) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let mut requests = VecDeque::new();
         for component_index in 0..self.components.len() {
             let module_id = self.components[component_index].component.id().to_string();
@@ -3077,9 +3085,10 @@ impl Shell {
                 diagnostics,
             };
             self.components[component_index].mounted = true;
-            match self.components[component_index].component.mount(ctx) {
+            let runtime = &mut self.components[component_index];
+            match runtime.component.mount(ctx) {
                 Ok(component_requests) => {
-                    requests.extend(component_requests);
+                    requests.extend(runtime.effect_origin().attribute(component_requests));
                     if let Some(module) = self.modules.get_mut(&module_id) {
                         let _ = module.mark_initialized();
                         if let Err(error) = module.mark_running() {

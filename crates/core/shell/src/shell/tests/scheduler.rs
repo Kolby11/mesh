@@ -108,3 +108,96 @@ fn render_skips_already_hidden_dirty_surface() {
 
     assert_eq!(state.lock().unwrap().render_calls, 0);
 }
+
+struct FloodingTickComponent;
+
+impl super::types::ShellComponent for FloodingTickComponent {
+    fn id(&self) -> &str {
+        "@test/flood"
+    }
+
+    fn surface_id(&self) -> &str {
+        "@test/flood"
+    }
+
+    fn mount(
+        &mut self,
+        _ctx: super::types::ComponentContext,
+    ) -> Result<Vec<CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn handle_core_event(
+        &mut self,
+        _event: &super::types::CoreEvent,
+    ) -> Result<Vec<CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn handle_service_event(
+        &mut self,
+        _event: &ServiceEvent,
+    ) -> Result<Vec<CoreRequest>, super::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn tick(&mut self) -> Result<Vec<CoreRequest>, super::types::ComponentError> {
+        Ok((0..100)
+            .map(|index| CoreRequest::PublishDiagnostics {
+                message: format!("flood {index}"),
+            })
+            .collect())
+    }
+
+    fn wants_render(&self) -> bool {
+        false
+    }
+
+    fn render(
+        &mut self,
+        _surface: &mut dyn mesh_core_wayland::ShellSurface,
+    ) -> Result<(), super::types::ComponentError> {
+        Ok(())
+    }
+
+    fn paint(
+        &mut self,
+        _theme: &mesh_core_theme::Theme,
+        _extent: crate::shell::types::SurfaceExtent,
+        _buffer: &mut mesh_core_render::PixelBuffer,
+        _scale: f32,
+    ) -> Result<(), super::types::ComponentError> {
+        Ok(())
+    }
+
+    fn theme_changed(&mut self) -> Result<(), super::types::ComponentError> {
+        Ok(())
+    }
+}
+
+/// `PublishDiagnostics` targets no surface, so before attribution a flood of
+/// it was charged to `@mesh/shell`, which is never quarantined.
+#[test]
+fn component_tick_effects_are_charged_to_the_component() {
+    let mut shell = Shell::new();
+    shell.register_component(Box::new(FloodingTickComponent));
+    let run_frame = |shell: &mut Shell| {
+        let requests = shell.tick_components().unwrap();
+        shell.enqueue_effects(requests);
+        shell.process_effects();
+    };
+
+    run_frame(&mut shell);
+    run_frame(&mut shell);
+    assert!(!shell.components[0].quarantined);
+    run_frame(&mut shell);
+
+    assert!(shell.components[0].quarantined);
+    assert!(shell.diagnostics.snapshot().iter().any(|entry| {
+        entry.module_id == "@test/flood"
+            && entry
+                .health
+                .to_string()
+                .contains("effect_scheduler_quarantined")
+    }));
+}

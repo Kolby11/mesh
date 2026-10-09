@@ -250,6 +250,43 @@ pub(super) struct CompiledContractField {
     pub(super) value_type: TypeExpr,
 }
 
+/// The component whose callback returned a request. The effect scheduler
+/// charges the request's budget to this component, not to the shell.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct EffectOrigin {
+    pub(super) module_id: String,
+    pub(super) runtime_id: String,
+}
+
+impl EffectOrigin {
+    pub(super) fn attribute(
+        &self,
+        requests: impl IntoIterator<Item = CoreRequest>,
+    ) -> impl Iterator<Item = SourcedRequest> {
+        requests.into_iter().map(|request| SourcedRequest {
+            request,
+            origin: Some(self.clone()),
+        })
+    }
+}
+
+/// A request on its way to the effect scheduler. Requests the shell builds
+/// itself have no origin and are charged by what they target.
+#[derive(Debug, Clone)]
+pub(super) struct SourcedRequest {
+    pub(super) request: CoreRequest,
+    pub(super) origin: Option<EffectOrigin>,
+}
+
+impl From<CoreRequest> for SourcedRequest {
+    fn from(request: CoreRequest) -> Self {
+        Self {
+            request,
+            origin: None,
+        }
+    }
+}
+
 impl ComponentRuntime {
     pub(super) fn new(component: Box<dyn ShellComponent>) -> Self {
         let surface_id = component.surface_id().to_string();
@@ -296,6 +333,13 @@ impl ComponentRuntime {
     pub(super) fn clear_failure_state(&mut self) {
         self.failure_count = 0;
         self.quarantined = false;
+    }
+
+    pub(super) fn effect_origin(&self) -> EffectOrigin {
+        EffectOrigin {
+            module_id: self.component.id().to_string(),
+            runtime_id: self.surface_id.clone(),
+        }
     }
 
     pub(super) fn unmount(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {

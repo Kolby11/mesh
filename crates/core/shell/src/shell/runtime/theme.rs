@@ -228,7 +228,7 @@ impl Shell {
         locale: Option<LocaleEngine>,
         theme_effect: bool,
         locale_effect: bool,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         if self.pending_control_plane_commit.is_some() || self.pending_profile_write.is_some() {
             return Err(ShellRunError::Package(
                 "settings mutation rejected while another durable control-plane write is pending"
@@ -271,7 +271,7 @@ impl Shell {
     /// settings-file path or a raw component namespace injected by the shell.
     pub(in crate::shell) fn sync_settings_service_state(
         &mut self,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let namespaces = self.settings_store.to_value();
         let revision = self.control_plane_revision.as_string();
         let payload = serde_json::json!({
@@ -297,7 +297,7 @@ impl Shell {
         locale: Option<LocaleEngine>,
         theme_effect: bool,
         locale_effect: bool,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         self.settings_store = Arc::new(commit.store);
         self.settings =
             mesh_core_config::resolve_shell_locale_settings(self.settings_store.shell());
@@ -349,7 +349,7 @@ impl Shell {
     fn commit_prepared_theme(
         &mut self,
         candidate: PreparedThemeState,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let previous_theme = self.theme.clone();
         let previous_watch = self.theme_watch.clone();
         self.install_prepared_theme(candidate);
@@ -378,7 +378,7 @@ impl Shell {
 
     pub(in crate::shell) fn reload_theme_if_changed(
         &mut self,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let now = std::time::Instant::now();
         if now < self.next_theme_reload_check {
             return Ok(VecDeque::new());
@@ -467,7 +467,7 @@ impl Shell {
 
     pub(in crate::shell) fn mark_components_theme_changed(
         &mut self,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let snapshot = self.theme.active_snapshot().clone();
         for component_index in 0..self.components.len() {
             if self.component_is_quarantined(component_index) {
@@ -492,7 +492,7 @@ impl Shell {
     pub(in crate::shell) fn apply_set_theme(
         &mut self,
         theme_id: &str,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let Some(graph) = self
             .installed_module_graph
             .as_ref()
@@ -548,7 +548,7 @@ impl Shell {
     pub(in crate::shell) fn apply_set_theme_mode(
         &mut self,
         mode: &str,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let mode = mode.trim();
         if mode.is_empty() {
             tracing::warn!("ignoring empty theme mode request");
@@ -600,7 +600,7 @@ impl Shell {
     pub(in crate::shell) fn apply_set_icon_theme(
         &mut self,
         theme_id: &str,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let theme_id = theme_id.trim();
         let available_host_theme = self
             .resource_snapshot
@@ -639,7 +639,7 @@ impl Shell {
     pub(in crate::shell) fn apply_set_font_family(
         &mut self,
         family: &str,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let family = family.trim();
         let available = self
             .resource_snapshot
@@ -758,7 +758,7 @@ impl Shell {
 
     pub(in crate::shell) fn sync_theme_service_state(
         &mut self,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let snapshot = self.theme.active_snapshot().clone();
         let previous_snapshot = self.last_published_theme_snapshot.clone();
         let payload = self.authoritative_theme_service_payload();
@@ -840,7 +840,7 @@ impl Shell {
 
     pub(in crate::shell) fn reload_locale_if_settings_changed(
         &mut self,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let requests = VecDeque::new();
         let now = std::time::Instant::now();
         if now < self.next_shell_settings_reload_check {
@@ -1053,7 +1053,7 @@ impl Shell {
 
     pub(in crate::shell) fn mark_components_locale_changed(
         &mut self,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let locale = self.locale.clone();
         let selection = locale.selection().clone();
         for component_index in 0..self.components.len() {
@@ -1076,7 +1076,7 @@ impl Shell {
     pub(in crate::shell) fn apply_set_locale(
         &mut self,
         locale: &str,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let locale = locale.trim();
         if locale.is_empty() {
             tracing::warn!("ignoring empty locale request");
@@ -1152,7 +1152,7 @@ impl Shell {
 
     pub(in crate::shell) fn sync_locale_service_state(
         &mut self,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let policy = self.settings.i18n.policy.as_str();
         let durable_revision = self.control_plane_revision.as_string();
         // As with theme, the shell supplies the host-derived snapshot while

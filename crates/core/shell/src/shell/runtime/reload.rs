@@ -73,7 +73,7 @@ impl Shell {
 
     pub(in crate::shell) fn tick_components(
         &mut self,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let mut requests = VecDeque::new();
         for component_index in 0..self.components.len() {
             if self.component_is_quarantined(component_index) {
@@ -83,8 +83,11 @@ impl Shell {
             if !wants_tick {
                 continue;
             }
-            match self.components[component_index].component.tick() {
-                Ok(component_requests) => requests.extend(component_requests),
+            let runtime = &mut self.components[component_index];
+            match runtime.component.tick() {
+                Ok(component_requests) => {
+                    requests.extend(runtime.effect_origin().attribute(component_requests))
+                }
                 Err(error) => {
                     self.contain_component_failure(component_index, "tick", &error);
                 }

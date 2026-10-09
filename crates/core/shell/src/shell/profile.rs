@@ -15,7 +15,7 @@ use std::hash::{Hash, Hasher};
 
 pub(super) struct PreparedProfileFrontend {
     component: FrontendSurfaceComponent,
-    requests: VecDeque<CoreRequest>,
+    requests: VecDeque<SourcedRequest>,
 }
 
 #[cfg(test)]
@@ -688,7 +688,7 @@ impl Shell {
     pub(in crate::shell) fn activate_graph_candidate(
         &mut self,
         graph: InstalledModuleGraph,
-    ) -> VecDeque<CoreRequest> {
+    ) -> VecDeque<SourcedRequest> {
         self.activate_graph_candidate_with_package_transaction(graph, None, None)
     }
 
@@ -697,7 +697,7 @@ impl Shell {
         graph: InstalledModuleGraph,
         package_transaction: Option<PackageTransaction>,
         package_rollback: Option<PackageRuntimeRollback>,
-    ) -> VecDeque<CoreRequest> {
+    ) -> VecDeque<SourcedRequest> {
         if self.profile_transition_pending() {
             tracing::warn!("graph activation rejected while another activation is pending");
             abort_package_transaction(package_transaction, package_rollback, self);
@@ -746,7 +746,7 @@ impl Shell {
     /// graph state changed. Source-only changes remain on the frontend reload
     /// path; module, provider, contribution, and resource deltas all enter the
     /// same activation coordinator.
-    pub(in crate::shell) fn reconcile_installed_graph(&mut self) -> VecDeque<CoreRequest> {
+    pub(in crate::shell) fn reconcile_installed_graph(&mut self) -> VecDeque<SourcedRequest> {
         let candidate = match self.load_installed_module_graph_candidate() {
             Ok(candidate) => candidate,
             Err(error) => {
@@ -780,7 +780,7 @@ impl Shell {
         &mut self,
         graph: InstalledModuleGraph,
         rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
-    ) -> VecDeque<CoreRequest> {
+    ) -> VecDeque<SourcedRequest> {
         self.begin_legacy_graph_activation_with_package_transaction(graph, rollback, None, None)
     }
 
@@ -790,7 +790,7 @@ impl Shell {
         mut rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
         package_transaction: Option<PackageTransaction>,
         package_rollback: Option<PackageRuntimeRollback>,
-    ) -> VecDeque<CoreRequest> {
+    ) -> VecDeque<SourcedRequest> {
         if !self.pending_backend_runtimes.is_empty() {
             abort_package_transaction(package_transaction, package_rollback, self);
             if let Some(rollback) = rollback {
@@ -845,7 +845,7 @@ impl Shell {
         &mut self,
         profile_id: &str,
         rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
-    ) -> VecDeque<CoreRequest> {
+    ) -> VecDeque<SourcedRequest> {
         self.begin_profile_activation_with_package_transaction(profile_id, rollback, None, None)
     }
 
@@ -855,7 +855,7 @@ impl Shell {
         rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
         package_transaction: Option<PackageTransaction>,
         package_rollback: Option<PackageRuntimeRollback>,
-    ) -> VecDeque<CoreRequest> {
+    ) -> VecDeque<SourcedRequest> {
         self.begin_profile_activation_with_package_transaction_and_ack(
             profile_id,
             rollback,
@@ -872,7 +872,7 @@ impl Shell {
         package_transaction: Option<PackageTransaction>,
         package_rollback: Option<PackageRuntimeRollback>,
         mut profile_switch_ack: Option<super::types::IpcProfileSwitchResponseSender>,
-    ) -> VecDeque<CoreRequest> {
+    ) -> VecDeque<SourcedRequest> {
         if !self.pending_backend_runtimes.is_empty() {
             abort_package_transaction(package_transaction, package_rollback, self);
             if let Some(rollback) = rollback {
@@ -1070,7 +1070,7 @@ impl Shell {
         slot: &str,
         nodes: Option<serde_json::Value>,
         expected_generation: &str,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         if self.profile_transition_pending() {
             return Err(ShellRunError::Package(
                 "node edit rejected while a profile switch is pending".into(),
@@ -1143,7 +1143,7 @@ impl Shell {
 
     pub(in crate::shell) fn sync_composition_service_state(
         &mut self,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let mode = self.composition_mode.service_name();
         let recovery_reason = self.composition_mode.recovery_reason().map(str::to_owned);
         let Some(profile_id) = self.active_profile_id.clone() else {
@@ -1291,7 +1291,7 @@ impl Shell {
         instance_id: Option<&str>,
         prop: &str,
         value: Option<serde_json::Value>,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let catalog = self.frontend_catalog.snapshot();
         let definition = catalog
             .catalog
@@ -1370,7 +1370,7 @@ impl Shell {
     pub(in crate::shell) fn apply_switch_profile(
         &mut self,
         profile_id: &str,
-    ) -> VecDeque<CoreRequest> {
+    ) -> VecDeque<SourcedRequest> {
         self.apply_switch_profile_with_ack(profile_id, None)
     }
 
@@ -1378,7 +1378,7 @@ impl Shell {
         &mut self,
         profile_id: &str,
         profile_switch_ack: Option<super::types::IpcProfileSwitchResponseSender>,
-    ) -> VecDeque<CoreRequest> {
+    ) -> VecDeque<SourcedRequest> {
         if self.pending_profile_write.is_some() || self.pending_control_plane_commit.is_some() {
             self.reject_profile_switch_with_ack(
                 profile_id,
@@ -1422,7 +1422,9 @@ impl Shell {
         )
     }
 
-    pub(in crate::shell) fn poll_pending_resource_preparation(&mut self) -> VecDeque<CoreRequest> {
+    pub(in crate::shell) fn poll_pending_resource_preparation(
+        &mut self,
+    ) -> VecDeque<SourcedRequest> {
         let Some(pending) = self.pending_resource_preparation.take() else {
             return VecDeque::new();
         };
@@ -1518,7 +1520,7 @@ impl Shell {
         mut package_transaction: Option<PackageTransaction>,
         mut package_rollback: Option<PackageRuntimeRollback>,
         mut profile_switch_ack: Option<super::types::IpcProfileSwitchResponseSender>,
-    ) -> VecDeque<CoreRequest> {
+    ) -> VecDeque<SourcedRequest> {
         macro_rules! reject_candidate {
             ($message:expr) => {{
                 if let Some(rollback) = rollback.take() {
@@ -1631,12 +1633,16 @@ impl Shell {
             let diagnostics = self
                 .diagnostics
                 .register_instance(root.module.clone(), instance_id.clone());
+            let origin = EffectOrigin {
+                module_id: root.module.clone(),
+                runtime_id: instance_id.clone(),
+            };
             let mut requests = match component.mount(ComponentContext {
                 component_id: root.module.clone(),
                 surface_id: instance_id.clone(),
                 diagnostics,
             }) {
-                Ok(requests) => VecDeque::from(requests),
+                Ok(requests) => origin.attribute(requests).collect::<VecDeque<_>>(),
                 Err(error) => {
                     reject_candidate!(error.to_string());
                 }
@@ -1652,7 +1658,7 @@ impl Shell {
                 };
                 if component.observes_service_event(&event) {
                     match component.handle_service_event_with_generation(&event, state.generation) {
-                        Ok(next) => requests.extend(next),
+                        Ok(next) => requests.extend(origin.attribute(next)),
                         Err(error) => {
                             reject_candidate!(error.to_string());
                         }
@@ -2011,7 +2017,7 @@ impl Shell {
         true
     }
 
-    fn commit_pending_profile_switch(&mut self) -> VecDeque<CoreRequest> {
+    fn commit_pending_profile_switch(&mut self) -> VecDeque<SourcedRequest> {
         let Some(mut pending) = self.pending_profile_switch.take() else {
             return VecDeque::new();
         };

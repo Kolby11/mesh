@@ -435,7 +435,7 @@ fn benchmark_run_request_does_not_enable_profiling() {
     );
     assert_eq!(emitted.len(), 1);
     assert!(matches!(
-        &emitted[0],
+        &emitted[0].request,
         CoreRequest::ToggleSurface { surface_id } if surface_id == "@mesh/audio-popover"
     ));
 
@@ -858,7 +858,12 @@ fn benchmark_run_request_rejects_unknown_scenario() {
         "rejected benchmark requests must not enable profiling"
     );
     assert!(shell.debug.latest_benchmark_run.is_none());
-    match emitted.as_slices().0 {
+    match emitted
+        .iter()
+        .map(|effect| &effect.request)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
         [CoreRequest::PublishDiagnostics { message }] => {
             assert!(message.contains("unknown debug benchmark scenario"));
             assert!(message.contains("not_a_scenario"));

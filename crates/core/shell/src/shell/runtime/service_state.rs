@@ -31,7 +31,7 @@ impl Shell {
     pub(in crate::shell) fn broadcast_service_event(
         &mut self,
         event: ServiceEvent,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let event = self.normalize_service_event(event);
         let profiling_started = self
             .profiling_enabled()
@@ -508,7 +508,7 @@ impl Shell {
     pub(in crate::shell) fn deliver_service_event(
         &mut self,
         event: &ServiceEvent,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         self.rebuild_service_delivery_index_if_needed();
         let mut requests = VecDeque::new();
         let mut component_failures = Vec::new();
@@ -555,7 +555,9 @@ impl Shell {
                             .component
                             .handle_service_event_with_generation(event, generation)
                         {
-                            Ok(emitted) => requests.extend(emitted),
+                            Ok(emitted) => {
+                                requests.extend(runtime.effect_origin().attribute(emitted))
+                            }
                             Err(error) => component_failures.push((component_index, error)),
                         };
                     } else {
@@ -578,7 +580,9 @@ impl Shell {
                                 .component
                                 .handle_service_event_with_generation(event, generation)
                             {
-                                Ok(emitted) => requests.extend(emitted),
+                                Ok(emitted) => {
+                                    requests.extend(runtime.effect_origin().attribute(emitted))
+                                }
                                 Err(error) => component_failures.push((component_index, error)),
                             };
                         }
@@ -616,7 +620,9 @@ impl Shell {
                     }
                     if runtime.component.observes_service_event(event) {
                         match runtime.component.handle_service_event(event) {
-                            Ok(emitted) => requests.extend(emitted),
+                            Ok(emitted) => {
+                                requests.extend(runtime.effect_origin().attribute(emitted))
+                            }
                             Err(error) => component_failures.push((component_index, error)),
                         }
                     }
@@ -634,7 +640,9 @@ impl Shell {
                             continue;
                         }
                         match runtime.component.handle_service_event(event) {
-                            Ok(emitted) => requests.extend(emitted),
+                            Ok(emitted) => {
+                                requests.extend(runtime.effect_origin().attribute(emitted))
+                            }
                             Err(error) => component_failures.push((component_index, error)),
                         }
                     }
@@ -731,7 +739,7 @@ impl Shell {
         interface: &str,
         name: &str,
         payload: serde_json::Value,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let warnings = self.service_event_contract_warnings(interface, name, &payload);
         if !warnings.is_empty() {
             for warning in warnings {
@@ -754,7 +762,7 @@ impl Shell {
         provider_id: String,
         name: String,
         payload: serde_json::Value,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         self.broadcast_backend_interface_event_at_generation(
             interface,
             provider_id,
@@ -771,7 +779,7 @@ impl Shell {
         name: String,
         payload: serde_json::Value,
         generation: u64,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let identity = self.backend_identity_for_interface(&interface);
         self.broadcast_backend_interface_event_at_identity(
             interface,
@@ -791,7 +799,7 @@ impl Shell {
         name: String,
         payload: serde_json::Value,
         generation: u64,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         if generation != 0
             && !self
                 .backend_runtimes
@@ -918,7 +926,7 @@ impl Shell {
 
     pub(in crate::shell) fn replay_cached_service_events(
         &mut self,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let mut requests = VecDeque::new();
         let latest_service_state = self.latest_service_state.clone();
         let replay_result: Result<(), ShellRunError> = (|| {

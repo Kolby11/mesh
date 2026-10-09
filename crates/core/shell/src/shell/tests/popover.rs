@@ -430,14 +430,14 @@ fn activating_popover_closes_promoted_sibling_from_same_trigger_surface() {
         .unwrap();
 
     assert!(emitted.iter().any(|request| matches!(
-        request,
+        &request.request,
         CoreRequest::HidePopover {
             surface_id,
             defer_for_hover_bridge: false,
         } if surface_id == "@mesh/quick-settings"
     )));
     assert!(emitted.iter().any(|request| matches!(
-        request,
+        &request.request,
         CoreRequest::ShowSurface { surface_id } if surface_id == "@mesh/language-popover"
     )));
 }

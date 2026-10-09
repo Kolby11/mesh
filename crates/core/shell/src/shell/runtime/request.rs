@@ -148,17 +148,27 @@ impl EffectScheduler {
         }
     }
 
-    fn enqueue_followups(&mut self, requests: impl IntoIterator<Item = CoreRequest>) {
+    /// Queue requests caused by the active effect in its transaction. A
+    /// request with its own source, such as one a component callback returned
+    /// while the effect ran, is charged to that source instead.
+    fn enqueue_followups(
+        &mut self,
+        requests: impl IntoIterator<Item = (CoreRequest, Option<EffectSource>)>,
+    ) {
         let Some(context) = self.active_context.clone() else {
             return;
         };
         let mut followup_context = context;
         followup_context.depth = followup_context.depth.saturating_add(1);
-        for request in requests {
+        for (request, source) in requests {
+            let mut context = followup_context.clone();
+            if let Some(source) = source {
+                context.source = source;
+            }
             self.enqueue_with_context(ScheduledEffect {
                 fingerprint: effect_fingerprint(&request),
                 request,
-                context: followup_context.clone(),
+                context,
                 call_id: None,
             });
         }
@@ -592,22 +602,40 @@ impl Shell {
         }
     }
 
+    fn effect_source_for_origin(&self, origin: EffectOrigin) -> EffectSource {
+        EffectSource {
+            module_id: origin.module_id,
+            runtime_id: origin.runtime_id,
+            generation: self.activation_generation,
+        }
+    }
+
     pub(in crate::shell) fn enqueue_effects(
         &mut self,
-        requests: impl IntoIterator<Item = CoreRequest>,
+        requests: impl IntoIterator<Item = impl Into<SourcedRequest>>,
     ) {
-        let requests = requests.into_iter().collect::<Vec<_>>();
+        let requests = requests.into_iter().map(Into::into).collect::<Vec<_>>();
         if requests.is_empty() {
             return;
         }
         if self.effect_scheduler.active_context().is_some() {
-            self.effect_scheduler.enqueue_followups(requests);
+            let followups = requests
+                .into_iter()
+                .map(|SourcedRequest { request, origin }| {
+                    let source = origin.map(|origin| self.effect_source_for_origin(origin));
+                    (request, source)
+                })
+                .collect::<Vec<_>>();
+            self.effect_scheduler.enqueue_followups(followups);
             return;
         }
         let sourced = requests
             .into_iter()
-            .map(|request| {
-                let source = self.effect_source_for_request(&request);
+            .map(|SourcedRequest { request, origin }| {
+                let source = match origin {
+                    Some(origin) => self.effect_source_for_origin(origin),
+                    None => self.effect_source_for_request(&request),
+                };
                 (request, source)
             })
             .collect::<Vec<_>>();
@@ -634,9 +662,9 @@ impl Shell {
             let source_module = context.source.module_id.clone();
             let writes_before = self.durable_write_pending();
             self.effect_scheduler.set_active_context(context);
-            let result = self.apply_request(request);
-            if let Ok(followups) = &result {
-                self.effect_scheduler.enqueue_followups(followups.iter().cloned());
+            let mut result = self.apply_request(request);
+            if let Ok(followups) = &mut result {
+                self.enqueue_effects(std::mem::take(followups));
             }
             self.effect_scheduler.clear_active_context();
             let started_write = !writes_before && self.durable_write_pending();
@@ -819,7 +847,7 @@ impl Shell {
         &mut self,
         operation: ProfileWriteOperation,
         result: Result<DurableProfileWriteResult, String>,
-    ) -> VecDeque<CoreRequest> {
+    ) -> VecDeque<SourcedRequest> {
         let result = match result {
             Ok(result) => result,
             Err(error) => {
@@ -962,7 +990,7 @@ impl Shell {
         &mut self,
         module_id: &str,
         enabled: bool,
-    ) -> VecDeque<CoreRequest> {
+    ) -> VecDeque<SourcedRequest> {
         if self.composition_mode.is_recovery() {
             let message = format!(
                 "cannot change module {module_id} while the shell is in configured composition recovery"
@@ -1585,17 +1613,17 @@ impl Shell {
     pub(in crate::shell) fn broadcast_core_event(
         &mut self,
         event: CoreEvent,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let mut requests = VecDeque::new();
         for component_index in 0..self.components.len() {
             if self.component_is_quarantined(component_index) {
                 continue;
             }
-            match self.components[component_index]
-                .component
-                .handle_core_event(&event)
-            {
-                Ok(component_requests) => requests.extend(component_requests),
+            let runtime = &mut self.components[component_index];
+            match runtime.component.handle_core_event(&event) {
+                Ok(component_requests) => {
+                    requests.extend(runtime.effect_origin().attribute(component_requests))
+                }
                 Err(error) => {
                     self.contain_component_failure(component_index, "callback", &error);
                 }
@@ -1606,7 +1634,7 @@ impl Shell {
 
     pub(in crate::shell) fn drain_requests(
         &mut self,
-        requests: &mut VecDeque<CoreRequest>,
+        requests: &mut VecDeque<impl Into<SourcedRequest>>,
     ) -> Result<(), ShellRunError> {
         self.enqueue_effects(std::mem::take(requests));
         let report = self.process_effects();
@@ -1641,7 +1669,7 @@ impl Shell {
     pub(in crate::shell) fn apply_request(
         &mut self,
         request: CoreRequest,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         if !self.shutdown_phase.accepts_external_work()
             && !self.shutdown_effects_allowed
             && !matches!(&request, CoreRequest::Shutdown)
@@ -1919,18 +1947,24 @@ impl Shell {
                 }
 
                 let mut emitted = self.sibling_popover_hides(&surface_id, &trigger_surface);
-                emitted.push_back(CoreRequest::ShowSurface {
-                    surface_id: surface_id.clone(),
-                });
+                emitted.push_back(
+                    CoreRequest::ShowSurface {
+                        surface_id: surface_id.clone(),
+                    }
+                    .into(),
+                );
                 if focus && !trigger_surface.is_empty() && !trigger_key.is_empty() {
-                    emitted.push_back(CoreRequest::TransferTabFocus {
-                        from_surface: trigger_surface.clone(),
-                        to_surface: surface_id.clone(),
-                        target: TabFocusTarget::First,
-                        return_target: Some((trigger_surface, trigger_key)),
-                        target_closes_on_leave: true,
-                        close_source: None,
-                    });
+                    emitted.push_back(
+                        CoreRequest::TransferTabFocus {
+                            from_surface: trigger_surface.clone(),
+                            to_surface: surface_id.clone(),
+                            target: TabFocusTarget::First,
+                            return_target: Some((trigger_surface, trigger_key)),
+                            target_closes_on_leave: true,
+                            close_source: None,
+                        }
+                        .into(),
+                    );
                 }
                 Ok(emitted)
             }
@@ -2629,12 +2663,15 @@ impl Shell {
     fn apply_run_debug_benchmark(
         &mut self,
         scenario_id: &str,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let Some(scenario) = benchmark_scenario_id(scenario_id) else {
             let mut emitted = VecDeque::new();
-            emitted.push_back(CoreRequest::PublishDiagnostics {
-                message: format!("unknown debug benchmark scenario: {scenario_id}"),
-            });
+            emitted.push_back(
+                CoreRequest::PublishDiagnostics {
+                    message: format!("unknown debug benchmark scenario: {scenario_id}"),
+                }
+                .into(),
+            );
             return Ok(emitted);
         };
 
@@ -2645,9 +2682,12 @@ impl Shell {
 
         let mut emitted = VecDeque::new();
         if scenario == BenchmarkScenarioId::SurfaceOpenClose {
-            emitted.push_back(CoreRequest::ToggleSurface {
-                surface_id: "@mesh/audio-popover".to_string(),
-            });
+            emitted.push_back(
+                CoreRequest::ToggleSurface {
+                    surface_id: "@mesh/audio-popover".to_string(),
+                }
+                .into(),
+            );
         }
         Ok(emitted)
     }
@@ -2664,7 +2704,7 @@ impl Shell {
         return_target: Option<(SurfaceId, String)>,
         target_closes_on_leave: bool,
         close_source: Option<SurfaceId>,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         tracing::info!(
             "apply_transfer_tab_focus from={from_surface} to={to_surface} return_target={return_target:?} target_closes_on_leave={target_closes_on_leave} close_source={close_source:?}"
         );
@@ -2755,7 +2795,7 @@ impl Shell {
 
         let mut emitted = VecDeque::new();
         if let Some(close) = close_source {
-            emitted.push_back(CoreRequest::HideSurface { surface_id: close });
+            emitted.push_back(CoreRequest::HideSurface { surface_id: close }.into());
         }
         Ok(emitted)
     }
@@ -2842,7 +2882,7 @@ impl Shell {
         &mut self,
         surface_id: SurfaceId,
         role: mesh_core_wayland::SurfaceRole,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         self.invalidate_debug_snapshot_cache();
         let Some(index) = self.component_index_for_surface(&surface_id) else {
             tracing::warn!(%surface_id, "cannot change surface role: no such surface");
@@ -2948,7 +2988,7 @@ impl Shell {
         surface_id: SurfaceId,
         node_key: String,
         role: mesh_core_wayland::SurfaceRole,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         if node_key.is_empty() || node_key == "root" {
             tracing::warn!(%surface_id, %node_key, "cannot change the role of the surface root as a widget");
             return Ok(VecDeque::new());
@@ -2989,7 +3029,7 @@ impl Shell {
         &mut self,
         surface_id: SurfaceId,
         visible: bool,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         tracing::info!("set_surface_visibility surface_id={surface_id} visible={visible}");
         let current_visible = self
             .core
@@ -3098,7 +3138,7 @@ impl Shell {
         &self,
         surface_id: &str,
         trigger_surface: &str,
-    ) -> VecDeque<CoreRequest> {
+    ) -> VecDeque<SourcedRequest> {
         if trigger_surface.is_empty() {
             return VecDeque::new();
         }
@@ -3109,9 +3149,12 @@ impl Shell {
                     && runtime.parent.popup_parent_surface.as_deref() == Some(trigger_surface)
                     && self.surface_is_effectively_visible(runtime.surface_id.as_str())
             })
-            .map(|runtime| CoreRequest::HidePopover {
-                surface_id: runtime.surface_id.clone(),
-                defer_for_hover_bridge: false,
+            .map(|runtime| {
+                CoreRequest::HidePopover {
+                    surface_id: runtime.surface_id.clone(),
+                    defer_for_hover_bridge: false,
+                }
+                .into()
             })
             .collect()
     }
@@ -3120,7 +3163,7 @@ impl Shell {
         &mut self,
         surface_id: SurfaceId,
         defer_for_hover_bridge: bool,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         if let Some((index, crate::shell::types::TargetRef::Child(child_index))) =
             self.component_target_for_surface(&surface_id)
             && self.components[index].children[child_index].kind
@@ -3217,7 +3260,7 @@ impl Shell {
     fn child_popover_pointer_leave_requests(
         &mut self,
         surface_id: &str,
-    ) -> Result<Option<VecDeque<CoreRequest>>, ShellRunError> {
+    ) -> Result<Option<VecDeque<SourcedRequest>>, ShellRunError> {
         let Some((index, crate::shell::types::TargetRef::Child(child_index))) =
             self.component_target_for_surface(surface_id)
         else {
@@ -3279,7 +3322,12 @@ impl Shell {
                 return Ok(None);
             }
         };
-        Ok(Some(VecDeque::from(emitted)))
+        Ok(Some(
+            self.components[index]
+                .effect_origin()
+                .attribute(emitted)
+                .collect(),
+        ))
     }
 
     fn surface_is_promoted_popover(&mut self, surface_id: &str) -> bool {
@@ -3305,7 +3353,7 @@ impl Shell {
         &mut self,
         surface_id: SurfaceId,
         visible: bool,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         self.invalidate_debug_snapshot_cache();
         if !visible {
             let is_window = self
@@ -3380,7 +3428,7 @@ impl Shell {
 
     pub(in crate::shell) fn complete_due_surface_transitions(
         &mut self,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let now = std::time::Instant::now();
         let due_popovers: Vec<_> = self
             .pending_popover_hides
@@ -3816,6 +3864,40 @@ mod tests {
     }
 
     #[test]
+    fn effect_scheduler_charges_sourced_followups_to_their_source() {
+        let mut scheduler = EffectScheduler::default();
+        let core = scheduler_source(CORE_EFFECT_MODULE, "shell");
+        let component = scheduler_source("@test/a", "a");
+        scheduler.enqueue_batch([(position_request("trigger"), core.clone())]);
+        scheduler.begin_frame();
+        let trigger = scheduler.next_effect().unwrap();
+        scheduler.set_active_context(trigger.context.clone());
+        scheduler.enqueue_followups([
+            (position_request("core-followup"), None),
+            (
+                position_request("component-followup"),
+                Some(component.clone()),
+            ),
+        ]);
+        scheduler.clear_active_context();
+
+        let followups = [
+            scheduler.next_effect().unwrap(),
+            scheduler.next_effect().unwrap(),
+        ];
+
+        assert_eq!(followups[0].context.source, core);
+        assert_eq!(followups[1].context.source, component);
+        for followup in &followups {
+            assert_eq!(
+                followup.context.transaction_id,
+                trigger.context.transaction_id
+            );
+            assert_eq!(followup.context.depth, 1);
+        }
+    }
+
+    #[test]
     fn effect_scheduler_breaks_repeated_causal_effects() {
         let mut scheduler = EffectScheduler::default();
         let source = scheduler_source("@test/cycle", "cycle");
@@ -3824,7 +3906,7 @@ mod tests {
 
         while let Some(effect) = scheduler.next_effect() {
             scheduler.set_active_context(effect.context.clone());
-            scheduler.enqueue_followups(std::iter::once(effect.request));
+            scheduler.enqueue_followups(std::iter::once((effect.request, None)));
             scheduler.clear_active_context();
         }
         let report = scheduler.finish_frame();

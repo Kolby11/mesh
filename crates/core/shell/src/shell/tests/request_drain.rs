@@ -118,7 +118,9 @@ fn durable_writes_wait_for_the_pending_write_and_the_latest_wins() {
 
     shell.pending_profile_write.take().unwrap().worker.join().unwrap();
     shell.release_parked_durable_writes();
-    shell.drain_requests(&mut VecDeque::new()).unwrap();
+    shell
+        .drain_requests(&mut VecDeque::<CoreRequest>::new())
+        .unwrap();
 
     assert!(shell.parked_durable_writes.is_empty());
     assert!(!shell.pending_service_call_routes.contains_key(&2));

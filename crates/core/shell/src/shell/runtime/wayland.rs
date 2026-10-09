@@ -534,7 +534,8 @@ impl Shell {
                 );
             }
             if !emitted.is_empty() {
-                self.enqueue_effects(emitted);
+                let origin = self.components[index].effect_origin();
+                self.enqueue_effects(origin.attribute(emitted));
             }
         }
 

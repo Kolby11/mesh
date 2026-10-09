@@ -39,7 +39,7 @@ impl Shell {
 
     pub(in crate::shell) fn publish_debug_snapshot(
         &mut self,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let now = Instant::now();
         let key = self.debug_snapshot_cache_key();
         let cache_matches = self

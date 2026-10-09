@@ -1193,7 +1193,7 @@ fn retiring_a_component_returns_its_unmount_effects_and_purges_its_queued_effect
         .unwrap();
 
     assert!(requests.iter().any(|request| matches!(
-        request,
+        &request.request,
         CoreRequest::PublishDiagnostics { message } if message == "unmounted"
     )));
     assert_eq!(shell.discard_scheduled_effects(), 0);

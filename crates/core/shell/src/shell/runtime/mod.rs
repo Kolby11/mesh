@@ -457,7 +457,7 @@ impl Shell {
             pending.extend(self.sync_locale_service_state()?);
             pending.extend(self.broadcast_core_event(CoreEvent::Started)?);
             if let Some(request) = shell_sound_request(SoundKind::Startup, &self.settings.sounds) {
-                pending.push_back(request);
+                pending.push_back(request.into());
             }
             self.enqueue_effects(std::mem::take(&mut pending));
 
@@ -700,7 +700,7 @@ impl Shell {
 
     pub(in crate::shell) fn handle_shell_message(
         &mut self,
-        pending: &mut VecDeque<CoreRequest>,
+        pending: &mut VecDeque<SourcedRequest>,
         message: ShellMessage,
     ) -> Result<(), ShellRunError> {
         if !self.shutdown_phase.accepts_external_work() {
@@ -990,7 +990,7 @@ impl Shell {
                 }
             }
             ShellMessage::Ipc(request) => {
-                pending.push_back(request);
+                pending.push_back(request.into());
             }
             ShellMessage::IpcProfileSwitch {
                 profile_id,

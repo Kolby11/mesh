@@ -24,7 +24,7 @@ impl Shell {
         available_only: bool,
         allow_elevated: bool,
         allow_high: bool,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         if source.trim().is_empty() {
             return Err(package_error("module source cannot be empty"));
         }
@@ -199,7 +199,7 @@ impl Shell {
         &mut self,
         module_id: &str,
         force: bool,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         ModuleId::parse(module_id).map_err(|error| package_error(error.to_string()))?;
 
         let graph_path = self.installed_module_graph_path();
@@ -504,7 +504,7 @@ impl Shell {
         available_only: bool,
         mut transaction: PackageTransaction,
         package_rollback: PackageRuntimeRollback,
-    ) -> Result<VecDeque<CoreRequest>, ShellRunError> {
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         macro_rules! package_try {
             ($result:expr) => {
                 match $result {
