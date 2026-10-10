@@ -156,6 +156,19 @@ impl FractionalScale {
         rounded.max(1.0) as i32
     }
 
+    /// The factor a surface renders at. Without a viewport the compositor
+    /// maps the buffer through the integer `set_buffer_scale` alone, so the
+    /// buffer must be the logical size times that integer: rendering at a
+    /// fractional factor would produce a size the buffer scale does not
+    /// divide, which is a protocol error.
+    pub fn render_factor(self, viewporter_available: bool) -> f32 {
+        if viewporter_available {
+            self.factor
+        } else {
+            self.protocol_buffer_scale(false) as f32
+        }
+    }
+
     fn cover_edges(self, left: f32, top: f32, right: f32, bottom: f32) -> DeviceRect {
         let left = self.floor_scaled(left);
         let top = self.floor_scaled(top);
@@ -246,5 +259,22 @@ mod tests {
         assert_eq!(scale.protocol_buffer_scale(true), 2);
         assert_eq!(scale.protocol_buffer_scale(false), 2);
         assert_eq!(FractionalScale::new(2.0).protocol_buffer_scale(true), 2);
+    }
+
+    #[test]
+    fn render_factor_without_a_viewport_keeps_buffers_divisible_by_their_scale() {
+        for factor in [1.25_f32, 1.5, 1.75, 2.0, 2.5] {
+            let scale = FractionalScale::new(factor);
+            let render = FractionalScale::new(scale.render_factor(false));
+            let buffer_scale = scale.protocol_buffer_scale(false) as u32;
+            for logical in [1_u32, 37, 101, 1919] {
+                assert_eq!(
+                    render.physical_extent(logical) % buffer_scale,
+                    0,
+                    "factor {factor}, logical {logical}"
+                );
+            }
+        }
+        assert_eq!(FractionalScale::new(1.5).render_factor(true), 1.5);
     }
 }

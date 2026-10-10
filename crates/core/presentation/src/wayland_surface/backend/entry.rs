@@ -233,6 +233,9 @@ pub(in crate::wayland_surface) struct SurfaceEntry {
     pub(in crate::wayland_surface) applied_keyboard_mode: KeyboardMode,
     pub(in crate::wayland_surface) width: u32,
     pub(in crate::wayland_surface) height: u32,
+    /// Which axes the latest layer configure sized. A zero axis leaves the
+    /// size to the client, so `width`/`height` keep the request there.
+    pub(in crate::wayland_surface) configured_axes: (bool, bool),
     pub(in crate::wayland_surface) configured: bool,
     /// Set until title/app_id have been pushed to the toplevel once. The first
     /// `apply_config` after creation sees a config equal to the one the entry
@@ -284,6 +287,7 @@ impl SurfaceEntry {
             role,
             width: cfg.surface_size().0,
             height: cfg.surface_size().1,
+            configured_axes: (false, false),
             padding: cfg.padding(),
             cfg,
             applied_keyboard_mode,
@@ -412,7 +416,10 @@ impl SurfaceEntry {
     }
 
     /// The input region this surface should currently have: its resolved
-    /// logical extent minus the reserve it declared.
+    /// logical extent minus the reserve it declared. When the compositor
+    /// configured less than content plus reserve, the reserve gives way
+    /// first, as it does in the shell's paint extent, so the content keeps
+    /// its input.
     ///
     /// Derived on every commit rather than pushed by the shell. A derived value
     /// cannot be missed by a caller, cannot be dropped because the surface did
@@ -423,7 +430,15 @@ impl SurfaceEntry {
         &self,
         extent: (u32, u32),
     ) -> Option<DamageRect> {
-        self.padding.content_rect(extent.0.max(1), extent.1.max(1))
+        let mut rect = self
+            .padding
+            .content_rect(extent.0.max(1), extent.1.max(1))?;
+        let (content_width, content_height) = self.cfg.content_size();
+        let available_width = extent.0.saturating_sub(self.padding.left);
+        let available_height = extent.1.saturating_sub(self.padding.top);
+        rect.width = rect.width.max(content_width.min(available_width));
+        rect.height = rect.height.max(content_height.min(available_height));
+        Some(rect)
     }
 
     pub(super) fn needs_reconfigure(

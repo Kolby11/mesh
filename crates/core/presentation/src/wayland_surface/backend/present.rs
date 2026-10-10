@@ -359,7 +359,10 @@ impl WaylandSurfaceBackend {
         self.state
             .surfaces
             .get(surface_id)
-            .map(|entry| entry.scale)
+            .map(|entry| {
+                mesh_core_render::FractionalScale::new(entry.scale)
+                    .render_factor(entry.viewport.is_some())
+            })
             .unwrap_or(1.0)
     }
 

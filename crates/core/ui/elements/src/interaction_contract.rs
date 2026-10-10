@@ -390,6 +390,30 @@ impl NodeEligibility {
     pub fn child(self, node: &WidgetNode) -> Self {
         Self::for_node(node, self)
     }
+
+    /// Resolve a node whose subtree is presented on its own child surface.
+    /// Its `hidden` marker and collapsed box only exclude it from the parent
+    /// surface's paint and hit testing; the child surface still delivers
+    /// input to it, so its targets stay eligible.
+    fn promoted_surface_root(node: &WidgetNode, parent: Self) -> Self {
+        let attributes = LocalStateAttributes::read(node);
+        let visual_visible = parent.visual_visible
+            && node.computed_style.display != Display::None
+            && matches!(node.computed_style.visibility, Visibility::Visible);
+        Self {
+            visual_visible,
+            semantic_visible: parent.semantic_visible
+                && visual_visible
+                && !attributes.aria_hidden
+                && !attributes.inert,
+            has_geometry: parent.has_geometry,
+            disabled: parent.disabled
+                || node.state.disabled
+                || attributes.disabled
+                || attributes.aria_disabled,
+            inert: parent.inert || attributes.inert,
+        }
+    }
 }
 
 /// Resolve the shared policy for a root node.
@@ -407,6 +431,9 @@ pub fn child_eligibility(parent: NodeEligibility, node: &WidgetNode) -> NodeElig
 /// inherit this policy; captured and key-addressed targets need this explicit
 /// check because they can outlive a state change on the node or one of its
 /// ancestors.
+///
+/// Nodes inside a promoted popover or promoted window are judged as their
+/// child surface sees them, not by the parent surface's exclusion marker.
 pub fn node_can_receive_target(
     root: &WidgetNode,
     target: crate::tree::NodeId,
@@ -418,7 +445,11 @@ pub fn node_can_receive_target(
         interaction: InteractionTarget,
         parent: NodeEligibility,
     ) -> bool {
-        let policy = parent.child(node);
+        let policy = if node.is_promoted_popover() || node.is_promoted_window() {
+            NodeEligibility::promoted_surface_root(node, parent)
+        } else {
+            parent.child(node)
+        };
         if node.id == target {
             return policy.allows(interaction);
         }

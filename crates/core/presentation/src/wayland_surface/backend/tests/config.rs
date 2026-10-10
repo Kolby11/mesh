@@ -261,9 +261,24 @@ fn dynamic_top_surface_uses_output_width_when_configure_width_is_unspecified() {
     set_requested_size(&mut cfg, (0, 50), SurfacePadding::default());
 
     assert_eq!(
-        resolved_surface_size_for_config(&cfg, 1, 50, Some((1920, 1080))),
+        resolved_surface_size_for_config(&cfg, 1, 50, (false, true), Some((1920, 1080))),
         (1920, 50),
         "top bars with width=0 must paint across the output even when the compositor leaves configure width unspecified"
+    );
+}
+
+#[test]
+fn dynamic_top_surface_keeps_a_configured_width_narrower_than_the_output() {
+    let mut cfg = base_cfg();
+    cfg.edge = Some(Edge::Top);
+    cfg.margin_left = 8;
+    cfg.margin_right = 8;
+    set_requested_size(&mut cfg, (0, 50), SurfacePadding::default());
+
+    assert_eq!(
+        resolved_surface_size_for_config(&cfg, 1904, 50, (true, true), Some((1920, 1080))),
+        (1904, 50),
+        "a margin-8 top bar is configured 16px narrower than its output and must paint at that width"
     );
 }
 
@@ -274,7 +289,7 @@ fn dynamic_left_surface_uses_output_height_when_configure_height_is_unspecified(
     set_requested_size(&mut cfg, (56, 0), SurfacePadding::default());
 
     assert_eq!(
-        resolved_surface_size_for_config(&cfg, 56, 1, Some((1920, 1080))),
+        resolved_surface_size_for_config(&cfg, 56, 1, (true, false), Some((1920, 1080))),
         (56, 1080),
         "left rails with height=0 must paint across the output height when the compositor leaves configure height unspecified"
     );
@@ -286,7 +301,7 @@ fn dynamic_surface_padding_uses_the_resolved_extent() {
     cfg.edge = Some(Edge::Top);
     set_requested_size(&mut cfg, (0, 50), SurfacePadding::trailing(0, 12));
 
-    let extent = resolved_surface_size_for_config(&cfg, 1, 50, Some((1920, 1080)));
+    let extent = resolved_surface_size_for_config(&cfg, 1, 50, (false, true), Some((1920, 1080)));
     assert_eq!(extent, (1920, 50));
     assert_eq!(
         cfg.padding().content_rect(extent.0, extent.1),

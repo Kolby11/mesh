@@ -4789,3 +4789,22 @@ calls `mesh.shell.toggle_surface`. The publish side publishes
 `shell.toggle-debug-overlay`, the cheapest remaining `shell.*` channel. Over
 five runs, publish took 138.7–142.7 ms and typed 123.4–130.4 ms, a 1.08–1.14×
 ratio. Most of each ~6.5 µs is the handler call itself.
+
+## 2026-10-10 — `navigation_hover_profile` after the popup-leave fix
+
+Release, `navigation_hover_profile`, the same 25 cycles × 4 triggers as the
+previous entry. Five runs:
+
+| Metric | Tasks + typed shell calls (prior entry) | Popup leave fixed |
+| --- | --- | --- |
+| Step p50 | 1.793–1.922 ms | 2.103–2.121 ms |
+| Step p90 | 2.623–3.786 ms | 4.021–4.048 ms |
+| Dispatch p50 | 0.171–0.179 ms | 0.211–0.217 ms |
+| Popovers open at the end | 4 | 0 |
+
+The workloads are not the same. Before the fix, the popup's `PointerLeave`
+dispatched nothing, so no close bridge was scheduled and no popover ever
+closed. Now every cycle runs the popup's leave handlers, a `task.delay`
+bridge, and the close and its animation frames. The extra time is that
+work. It is not a cost added to the old path: the eligibility walk change is two
+flag reads per visited node. The bench now asserts that every popover closes.

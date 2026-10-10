@@ -739,13 +739,29 @@ fn join_schema_path(prefix: &str, key: &str) -> String {
     }
 }
 
-/// `MESH_SETTINGS_PATH` wins; otherwise a checked-out repo uses
-/// `config/settings.json` so a dev shell stays out of the user's dotfiles.
+static SETTINGS_PATH_OVERRIDE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Replace the checkout and home fallbacks of [`default_settings_path`] with
+/// `path` for the rest of the process; `MESH_SETTINGS_PATH` still wins. Test
+/// harnesses use this so a suite that commits settings writes a private copy
+/// instead of the checkout's `config/settings.json`. The first call wins;
+/// later calls return the path already in effect.
+#[doc(hidden)]
+pub fn override_default_settings_path(path: PathBuf) -> &'static Path {
+    SETTINGS_PATH_OVERRIDE.get_or_init(|| path)
+}
+
+/// `MESH_SETTINGS_PATH` wins, then a process override; otherwise a
+/// checked-out repo uses `config/settings.json` so a dev shell stays out of
+/// the user's dotfiles.
 pub fn default_settings_path() -> PathBuf {
     if let Ok(path) = std::env::var("MESH_SETTINGS_PATH") {
         if !path.trim().is_empty() {
             return PathBuf::from(path);
         }
+    }
+    if let Some(path) = SETTINGS_PATH_OVERRIDE.get() {
+        return path.clone();
     }
 
     let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

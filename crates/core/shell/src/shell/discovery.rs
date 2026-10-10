@@ -1788,8 +1788,29 @@ pub(in crate::shell) fn startup_composition(
     }
 }
 
+/// Unit tests construct real shells, and their settings commits must not
+/// rewrite the checkout's `config/settings.json`. Every shell in the test
+/// process shares one private copy of it instead.
+#[cfg(test)]
+fn isolate_test_settings() {
+    static ISOLATED: std::sync::Once = std::sync::Once::new();
+    ISOLATED.call_once(|| {
+        let source = mesh_core_config::default_settings_path();
+        let dir =
+            std::env::temp_dir().join(format!("mesh-shell-test-settings-{}", std::process::id()));
+        let target = dir.join("settings.json");
+        let _ = std::fs::create_dir_all(&dir);
+        if std::fs::copy(&source, &target).is_err() {
+            let _ = std::fs::write(&target, "{}");
+        }
+        mesh_core_config::override_default_settings_path(target);
+    });
+}
+
 impl Shell {
     pub fn new() -> Self {
+        #[cfg(test)]
+        isolate_test_settings();
         let config_path = mesh_core_config::default_config_path();
         let config = load_config(&config_path).unwrap_or_else(|e| {
             tracing::warn!("failed to load config, using defaults: {e}");
@@ -2612,12 +2633,11 @@ impl Shell {
         let resources = self.prepare_resource_snapshot(&active_graph, &self.settings_store)?;
         self.commit_resource_snapshot(&resources)?;
         self.sync_module_graph_health(&active_graph);
-        let (effective_capabilities, capability_failures) =
-            super::profile::candidate_capabilities(
-                &self.capability_policy,
-                &active_graph,
-                &self.modules,
-            );
+        let (effective_capabilities, capability_failures) = super::profile::candidate_capabilities(
+            &self.capability_policy,
+            &active_graph,
+            &self.modules,
+        );
         self.effective_capabilities = effective_capabilities;
         self.record_capability_failures(&capability_failures);
         let ids: Vec<String> = self.modules.keys().cloned().collect();
@@ -2838,10 +2858,14 @@ impl Shell {
             let module_id = component.id().to_string();
             self.register_component(Box::new(component));
             let origin = self.components.last().map(ComponentRuntime::effect_origin);
-            requests.extend(component_requests.into_iter().map(|request| SourcedRequest {
-                request,
-                origin: origin.clone(),
-            }));
+            requests.extend(
+                component_requests
+                    .into_iter()
+                    .map(|request| SourcedRequest {
+                        request,
+                        origin: origin.clone(),
+                    }),
+            );
             if let Some(module) = self.modules.get_mut(&module_id) {
                 let _ = module.mark_initialized();
                 if let Err(error) = module.mark_running() {

@@ -341,7 +341,7 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
 }
 
 #[test]
-fn navigation_theme_and_language_popovers_close_when_trigger_hover_leaves() {
+fn navigation_hover_popovers_close_when_trigger_hover_leaves() {
     let theme = default_theme();
     let width = 960;
     let height = 80;
@@ -354,6 +354,10 @@ fn navigation_theme_and_language_popovers_close_when_trigger_hover_leaves() {
         (
             "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageEnter",
             "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageLeave",
+        ),
+        (
+            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onSettingsEnter",
+            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onSettingsLeave",
         ),
     ] {
         let mut component =

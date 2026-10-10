@@ -31,8 +31,12 @@ unless an item says otherwise. IDs point into the
 - [ ] **RND-09 (fixes RND-01, RND-08):** One final damage stage that collects all
       producers, converts once to device pixels, makes rects disjoint, and feeds
       clear, paint, SHM copy and `damage_buffer`.
-- [ ] **RND-06 / RND-07:** Use the output size only for an unspecified configure
-      axis; keep buffer scale consistent with buffer size without a viewport.
+- [ ] Composition editor header: the title is clipped and the Close button
+      overlaps it at window size (seen in niri, same at `819fbbcb`).
+- [ ] Settings Wi-Fi empty state overflows its card on both sides, and the
+      Bluetooth sidebar item has no icon.
+- [ ] `@mesh/debug-inspector` fails activation at startup with "no
+      activation-resolved capability grant".
 - [ ] **RES-03 / RES-04 / RES-14:** ICU date formatting in the local zone plus
       `format_time`/`format_percent`; localize the clock and quick settings;
       apply `en` after a module's `defaultLocale`.
@@ -389,10 +393,6 @@ of payoff.
 - [ ] One hover-intent mechanism: the shell defers popover hides by 180 ms,
       while six modules run their own 400 ms `task.delay` close bridge.
       [Design](../.planning/todos/pending/2026-10-10-script-timers-and-typed-shell-ops.md).
-- [ ] A promoted popup's own pointer-leave never schedules its close bridge
-      (`navigation_language_popover_closes_when_pointer_leaves_promoted_popup`
-      fails; `navigation_hover_profile` ends with every popover open). Find
-      whether the shell or only the test harness drops the leave.
 
 ### Rendering and paint
 

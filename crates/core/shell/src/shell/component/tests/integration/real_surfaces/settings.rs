@@ -388,3 +388,33 @@ fn settings_nav_item_answers_with_one_tooltip_for_the_whole_row() {
         );
     }
 }
+
+#[test]
+fn settings_fits_a_narrower_configure_and_keeps_requesting_its_size() {
+    let theme = default_theme();
+    let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
+    let (width, height) = (695, 700);
+    let mut buffer = PixelBuffer::new(width, height);
+    settings
+        .paint(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+
+    let tree = settings.last_tree.as_ref().expect("rendered settings tree");
+    assert_eq!(tree.layout.width, width as f32);
+    let pop_out = first_node_with_class_token(tree, "pop-out-button").expect("pop-out button");
+    assert!(
+        pop_out.layout.x + pop_out.layout.width <= width as f32,
+        "the header actions must stay inside a configure narrower than 920px: {:?}",
+        pop_out.layout
+    );
+    assert_eq!(
+        settings.requested_layout_size(),
+        (920, 700),
+        "the surface keeps requesting its declared size so a wider output gets it back"
+    );
+}

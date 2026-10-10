@@ -608,24 +608,37 @@ pub(super) fn resolved_surface_size(
     if entry.role.is_popup() || entry.role.is_window() {
         return (entry.width.max(1), entry.height.max(1));
     }
-    resolved_surface_size_for_config(&entry.cfg, entry.width, entry.height, output_size)
+    resolved_surface_size_for_config(
+        &entry.cfg,
+        entry.width,
+        entry.height,
+        entry.configured_axes,
+        output_size,
+    )
 }
 
 pub(super) fn resolved_surface_size_for_config(
     cfg: &SurfaceConfig,
     configured_width: u32,
     configured_height: u32,
+    configured_axes: (bool, bool),
     output_size: Option<(u32, u32)>,
 ) -> (u32, u32) {
     let (output_width, output_height) = output_size.unwrap_or((0, 0));
+    // The output size stands in only for a spanning axis the compositor has
+    // not configured; a configured width already accounts for margins.
     let width = match cfg.edge {
-        Some(Edge::Top) | Some(Edge::Bottom) if cfg.wire_size.width.is_span() => {
+        Some(Edge::Top) | Some(Edge::Bottom)
+            if cfg.wire_size.width.is_span() && !configured_axes.0 =>
+        {
             configured_width.max(output_width).max(1)
         }
         _ => configured_width.max(1),
     };
     let height = match cfg.edge {
-        Some(Edge::Left) | Some(Edge::Right) if cfg.wire_size.height.is_span() => {
+        Some(Edge::Left) | Some(Edge::Right)
+            if cfg.wire_size.height.is_span() && !configured_axes.1 =>
+        {
             configured_height.max(output_height).max(1)
         }
         _ => configured_height.max(1),

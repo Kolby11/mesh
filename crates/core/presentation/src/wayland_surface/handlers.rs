@@ -227,7 +227,13 @@ impl LayerShellHandler for State {
             if h > 0 {
                 entry.height = h;
             }
+            entry.configured_axes = (w > 0, h > 0);
             entry.accept_configure();
+            tracing::debug!(
+                requested = ?entry.cfg.surface_size(),
+                configured = ?(w, h),
+                "layer_shell: layer configure applied"
+            );
         }
     }
 }

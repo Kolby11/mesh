@@ -116,7 +116,15 @@ fn measured_surface_geometry(
         .then(|| tree.children.first())
         .flatten()
         .unwrap_or(tree);
-    let content_size = measure_content_size(tree, fallback.0, fallback.1);
+    let measured = measure_content_size(tree, fallback.0, fallback.1);
+    // A root with a definite size keeps requesting it after a compositor
+    // configured less and the root shrank to fit (`max-width: 100%`).
+    // Requesting the shrunk size instead would never ask for the full size
+    // back once a larger output allows it.
+    let content_size = (
+        measured.0.max(definite_px(root.computed_style.width)),
+        measured.1.max(definite_px(root.computed_style.height)),
+    );
     let margins = [
         css_edge_to_i32(root.computed_style.margin.top),
         css_edge_to_i32(root.computed_style.margin.right),
@@ -138,6 +146,15 @@ fn measured_surface_geometry(
         content_size,
         margins,
         exclusive_zone,
+    }
+}
+
+fn definite_px(dimension: mesh_core_elements::Dimension) -> u32 {
+    match dimension {
+        mesh_core_elements::Dimension::Px(value) if value.is_finite() && value > 0.0 => {
+            value.ceil() as u32
+        }
+        _ => 0,
     }
 }
 
@@ -832,12 +849,13 @@ impl ShellComponent for FrontendSurfaceComponent {
         // measured itself yet fell back to the padded surface and laid its first
         // frame out — and recorded `last_surface_size` — against the tooltip
         // reserve, e.g. 1920x201 for a 1920x56 bar.
-        let content_width = if requested_width == 0 {
+        let bound = extent.compositor_bound();
+        let content_width = if requested_width == 0 || (bound && extent.content_width_known()) {
             extent.content_width().max(1)
         } else {
             requested_width.max(1)
         };
-        let content_height = if requested_height == 0 {
+        let content_height = if requested_height == 0 || (bound && extent.content_height_known()) {
             extent.content_height().max(1)
         } else {
             requested_height.max(1)

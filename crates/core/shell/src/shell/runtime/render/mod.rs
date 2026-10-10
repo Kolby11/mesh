@@ -596,6 +596,8 @@ impl Shell {
                 // layout, maximize, interactive resize) that decision is
                 // binding and the content lays out into it, rather than the
                 // CSS-measured size being sent as a request.
+                let mut compositor_bound = false;
+                let mut configured_layer_buffer = None;
                 if let Some((window_width, window_height)) =
                     self.presentation_engine.window_configured_size(&surface_id)
                 {
@@ -603,6 +605,28 @@ impl Shell {
                     height = window_height.max(1);
                     width_known = true;
                     height_known = true;
+                    compositor_bound = true;
+                } else if !is_popup
+                    && let Some(configured) =
+                        self.presentation_engine.surface_size_if_known(&surface_id)
+                {
+                    // A layer configure binds a fixed axis as well, when the
+                    // compositor gives less than the request (an output
+                    // narrower or shorter than the surface). The tooltip
+                    // reserve gives way first; the content shrinks only when
+                    // even it does not fit. The buffer is capped at the
+                    // configure either way: a larger one would be scaled into
+                    // the configured box, while pointer coordinates arrive in
+                    // that box unscaled.
+                    if inner_requested_width != 0 && configured.0 < width {
+                        width = configured.0.max(1);
+                        compositor_bound = true;
+                    }
+                    if inner_requested_height != 0 && configured.1 < height {
+                        height = configured.1.max(1);
+                        compositor_bound = true;
+                    }
+                    configured_layer_buffer = Some(configured);
                 }
                 let resolved_size = (width, height);
                 if self.components[index].parent.known_surface_size != Some(resolved_size) {
@@ -675,7 +699,15 @@ impl Shell {
                         width,
                         height,
                     );
+                    let (padded_width, padded_height) = match configured_layer_buffer {
+                        Some((buffer_width, buffer_height)) => (
+                            padded_width.min(buffer_width.max(width)),
+                            padded_height.min(buffer_height.max(height)),
+                        ),
+                        None => (padded_width, padded_height),
+                    };
                     SurfaceExtent::padded(extent_content, (padded_width, padded_height))
+                        .bound_by_compositor(compositor_bound)
                 };
                 (paint_width, paint_height) = paint_extent.padded;
                 let scale_policy = mesh_core_render::FractionalScale::new(scale);

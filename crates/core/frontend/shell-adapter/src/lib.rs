@@ -249,6 +249,10 @@ pub struct SurfaceExtent {
     /// This is used while a promoted popup is measuring before its first
     /// `xdg_popup` configure.
     intrinsic_bound: bool,
+    /// The compositor decided `content` (a window configure, or a layer
+    /// configure narrower than the request), so it binds layout even after the
+    /// surface has measured a different size of its own.
+    compositor_bound: bool,
 }
 
 impl SurfaceExtent {
@@ -259,6 +263,7 @@ impl SurfaceExtent {
             content: (width, height),
             padded: (width, height),
             intrinsic_bound: false,
+            compositor_bound: false,
         }
     }
 
@@ -270,6 +275,7 @@ impl SurfaceExtent {
             content,
             padded: (padded.0.max(content.0), padded.1.max(content.1)),
             intrinsic_bound: false,
+            compositor_bound: false,
         }
     }
 
@@ -284,7 +290,21 @@ impl SurfaceExtent {
             content: bound,
             padded: bound,
             intrinsic_bound: true,
+            compositor_bound: false,
         }
+    }
+
+    /// Mark `content` as decided by the compositor. See
+    /// [`SurfaceExtent::compositor_bound`].
+    pub fn bound_by_compositor(mut self, bound: bool) -> Self {
+        self.compositor_bound = bound && !self.intrinsic_bound;
+        self
+    }
+
+    /// Whether layout must use `content` on its known axes rather than the
+    /// surface's own measured size.
+    pub fn compositor_bound(&self) -> bool {
+        self.compositor_bound
     }
 
     pub fn content_width(&self) -> u32 {

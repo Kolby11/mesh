@@ -549,10 +549,7 @@ fn navigation_hover_profile() {
     let elapsed = started.elapsed();
     let publishes = component.drained_script_events - events_before;
 
-    // Let the pending bridges fire. A popup's own pointer-leave does not
-    // reach its close bridge in this harness (the known failure of
-    // `navigation_language_popover_closes_when_pointer_leaves_promoted_popup`),
-    // so popovers left open are reported rather than asserted.
+    // Let the pending bridges fire.
     std::thread::sleep(Duration::from_millis(450));
     component.tick().unwrap();
     component.paint(&theme, extent(), &mut buffer, 1.0).unwrap();
@@ -595,4 +592,8 @@ fn navigation_hover_profile() {
         ms(percentile(&handler_times, 0.5))
     );
     eprintln!("MESH_PERF metric=navigation_hover_publishes value={publishes}");
+    assert_eq!(
+        still_open, 0,
+        "every popover should close once its hover bridge expires"
+    );
 }

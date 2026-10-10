@@ -213,8 +213,11 @@ end
         exclusive-zone: none;
         width: 920px;
         height: 700px;
-        min-width: 920px;
-        min-height: 700px;
+        /* The size above is a request. A compositor that configures less (an
+           output narrower than 920px) gets a layout that fits, not one the
+           surface clips. */
+        max-width: 100%;
+        max-height: 100%;
         background: var(--color-surface);
         color: var(--color-on-surface);
         border-width: 1px;
@@ -223,11 +226,14 @@ end
         border-radius: var(--radius-lg);
     }
 
-    /* Popped out into a window: square off the corners. A floating layer
-       surface reads as chrome sitting over the desktop, but a window with
-       client-side decorations owns its whole rectangle, and rounded corners
-       there fight whatever the compositor draws around it. */
+    /* Popped out into a window: fill the size the compositor configured and
+       square off the corners. A floating layer surface reads as chrome sitting
+       over the desktop, but a window with client-side decorations owns its
+       whole rectangle, and rounded corners there fight whatever the compositor
+       draws around it. */
     .settings-shell:windowed {
+        width: 100%;
+        height: 100%;
         border-radius: 0;
     }
 

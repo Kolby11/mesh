@@ -31,6 +31,7 @@ settings_tooltip_disabled = "false"
 quick_settings = nil
 local quick_settings_connected = false
 local connect_quick_settings
+local hide_settings_selector
 local CLOSE_BRIDGE_DELAY_MS = 400
 local close_bridge = nil
 
@@ -74,7 +75,7 @@ local function show_settings_selector(event)
     end
 end
 
-local function hide_settings_selector(bridge)
+hide_settings_selector = function(bridge)
     if not settings_surface_hidden then
         if bridge == true then
             schedule_bridge_close()
