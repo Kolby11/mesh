@@ -256,17 +256,19 @@ fn keyframe_animation_unknown_rule_stays_conservative() {
                 offset: 0.0,
                 style,
                 easing: None,
+                properties: mesh_core_elements::TransitionProperties::of_property("width"),
             },
             mesh_core_animation::keyframes::KeyframeStop {
                 offset: 1.0,
                 style,
                 easing: None,
+                properties: mesh_core_elements::TransitionProperties::of_property("width"),
             },
         ],
     };
 
     assert_eq!(
-        crate::shell::component::animation::keyframe_rule_animation_bucket(&rule),
+        crate::shell::component::animation::keyframe_rule_animation_bucket(&rule, &style),
         mesh_core_elements::style::AnimationPropertyBucket::None
     );
 }
@@ -782,6 +784,144 @@ fn keyframe_animation_infinite_keeps_render_requests_active() {
     component.dirty = false;
 
     assert!(component.wants_render());
+}
+
+fn panel_opacity(component: &FrontendSurfaceComponent) -> f32 {
+    fn find(node: &WidgetNode) -> Option<f32> {
+        if node.class_tokens().iter().any(|class| class == "panel") {
+            return Some(node.computed_style.opacity);
+        }
+        node.children.iter().find_map(find)
+    }
+    find(component.last_tree.as_ref().expect("painted tree")).expect("panel node")
+}
+
+/// Paint one animation-only frame with the keyframe timeline at `elapsed`.
+fn paint_keyframe_frame_at(component: &mut FrontendSurfaceComponent, elapsed: Duration) {
+    let started_at = Instant::now()
+        .checked_sub(elapsed)
+        .expect("monotonic instant subtraction");
+    for animation in component.keyframe_animations.values_mut() {
+        animation.started_at = started_at;
+    }
+    component.dirty = false;
+    let mut buffer = PixelBuffer::new(120, 40);
+    component
+        .paint(
+            &default_theme(),
+            SurfaceExtent::unpadded(120, 40),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+}
+
+/// Animation-only frames reuse the previous computed style. Sampling from it
+/// would start each frame from the last animated value instead of the
+/// authored one, so a missing 100% stop drifts toward the start.
+#[test]
+fn keyframes_sample_the_authored_value_across_animation_only_frames() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box class="panel" /></template>
+<style>
+.panel { opacity: 0.8; animation: fade 1000ms linear infinite; }
+@keyframes fade {
+  0% { opacity: 0; }
+}
+</style>
+"#,
+    );
+    let mut buffer = PixelBuffer::new(120, 40);
+    component
+        .paint(
+            &default_theme(),
+            SurfaceExtent::unpadded(120, 40),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+
+    paint_keyframe_frame_at(&mut component, Duration::from_millis(250));
+    paint_keyframe_frame_at(&mut component, Duration::from_millis(500));
+
+    assert!(
+        (panel_opacity(&component) - 0.4).abs() < 0.02,
+        "{}",
+        panel_opacity(&component)
+    );
+}
+
+#[test]
+fn a_finished_keyframe_animation_without_fill_restores_the_authored_value() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box class="panel" /></template>
+<style>
+.panel { opacity: 0.8; animation: fade 1000ms linear 1; }
+@keyframes fade {
+  0% { opacity: 0; }
+  100% { opacity: 0.2; }
+}
+</style>
+"#,
+    );
+    let mut buffer = PixelBuffer::new(120, 40);
+    component
+        .paint(
+            &default_theme(),
+            SurfaceExtent::unpadded(120, 40),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    paint_keyframe_frame_at(&mut component, Duration::from_millis(500));
+    assert!((panel_opacity(&component) - 0.1).abs() < 0.02);
+
+    paint_keyframe_frame_at(&mut component, Duration::from_millis(2000));
+
+    assert_eq!(panel_opacity(&component), 0.8);
+}
+
+#[test]
+fn a_keyframe_animation_leaves_transitions_on_other_properties_running() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template>
+<style>
+@keyframes fade {
+  0% { opacity: 0; }
+}
+</style>
+"#,
+    );
+    let mut previous = transition_test_tree(mesh_core_elements::TransitionProperties {
+        background_color: true,
+        opacity: true,
+        ..mesh_core_elements::TransitionProperties::none()
+    });
+    previous.children[0].computed_style.animations =
+        vec![mesh_core_elements::style::AnimationStyle {
+            name: Some("fade".into()),
+            duration_ms: 1000,
+            iteration_count: mesh_core_elements::style::AnimationIterationCount::Infinite,
+            ..mesh_core_elements::style::AnimationStyle::default()
+        }];
+    previous.children[0].computed_style.background_color = mesh_core_elements::style::Color::BLACK;
+    let mut next = previous.clone();
+    next.children[0].computed_style.background_color = mesh_core_elements::style::Color::WHITE;
+    let id = next.children[0].id;
+
+    component.last_tree = Some(previous);
+    component.apply_style_animations(&mut next);
+
+    let transition = component
+        .transitions
+        .unfinished(id, Instant::now())
+        .next()
+        .expect("background transition");
+    assert!(transition.source.properties.background_color);
+    assert!(!component.keyframe_animations.is_empty());
 }
 
 #[test]

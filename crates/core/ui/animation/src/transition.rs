@@ -273,6 +273,47 @@ impl AnimatableStyle {
             || (props.animates_inset_bottom() && self.inset_bottom != other.inset_bottom)
             || (props.animates_inset_left() && self.inset_left != other.inset_left)
     }
+    /// The properties in `props` whose values differ between `self` and
+    /// `other`.
+    pub fn differing(&self, other: &Self, props: TransitionProperties) -> TransitionProperties {
+        let props = props.intersection(TransitionProperties::all());
+        macro_rules! differing {
+            ($($field:ident),*) => {
+                TransitionProperties {
+                    all: false,
+                    $($field: props.$field && self.$field != other.$field,)*
+                }
+            };
+        }
+        differing!(
+            border_radius,
+            border_width,
+            opacity,
+            background_color,
+            border_color,
+            color,
+            width,
+            height,
+            min_width,
+            max_width,
+            min_height,
+            max_height,
+            padding,
+            margin,
+            transform,
+            box_shadow,
+            filter,
+            backdrop_filter,
+            font_size,
+            letter_spacing,
+            line_height,
+            gap,
+            inset_top,
+            inset_right,
+            inset_bottom,
+            inset_left
+        )
+    }
 }
 
 /// Clamp each corner radius to half the shorter box side — the largest radius

@@ -13,8 +13,8 @@ use mesh_core_animation::{
 };
 use mesh_core_component::style as component_style;
 use mesh_core_elements::{
-    NodeId, StyleResolver, TransitionStyle, WidgetNode,
-    style::{AnimationPlayState, AnimationPropertyBucket},
+    NodeId, StyleResolver, TransitionProperties, TransitionStyle, WidgetNode,
+    style::{AnimationPlayState, AnimationPropertyBucket, AnimationStyle},
 };
 use mesh_core_theme::{Theme, ThemeKeyframeStop};
 
@@ -41,44 +41,43 @@ fn merge_animation_bucket(
     }
 }
 
-pub(super) fn keyframe_rule_animation_bucket(rule: &RenderKeyframeRule) -> AnimationPropertyBucket {
-    let mut bucket = AnimationPropertyBucket::None;
-    for pair in rule.stops.windows(2) {
-        let previous = pair[0].style;
-        let next = pair[1].style;
-        let changed = mesh_core_elements::TransitionProperties {
-            border_radius: previous.border_radius != next.border_radius,
-            border_width: previous.border_width != next.border_width,
-            opacity: previous.opacity != next.opacity,
-            background_color: previous.background_color != next.background_color,
-            border_color: previous.border_color != next.border_color,
-            color: previous.color != next.color,
-            width: previous.width != next.width,
-            height: previous.height != next.height,
-            min_width: previous.min_width != next.min_width,
-            max_width: previous.max_width != next.max_width,
-            min_height: previous.min_height != next.min_height,
-            max_height: previous.max_height != next.max_height,
-            padding: previous.padding != next.padding,
-            margin: previous.margin != next.margin,
-            transform: previous.transform != next.transform,
-            box_shadow: previous.box_shadow != next.box_shadow,
-            filter: previous.filter != next.filter,
-            backdrop_filter: previous.backdrop_filter != next.backdrop_filter,
-            font_size: previous.font_size != next.font_size,
-            letter_spacing: previous.letter_spacing != next.letter_spacing,
-            line_height: previous.line_height != next.line_height,
-            gap: previous.gap != next.gap,
-            inset_top: previous.inset_top != next.inset_top,
-            inset_right: previous.inset_right != next.inset_right,
-            inset_bottom: previous.inset_bottom != next.inset_bottom,
-            inset_left: previous.inset_left != next.inset_left,
-            ..mesh_core_elements::TransitionProperties::none()
-        }
-        .animation_bucket();
-        bucket = merge_animation_bucket(bucket, changed);
-    }
-    bucket
+/// The strongest bucket among the properties `rule` moves away from `base`.
+/// A property every stop declares at its `base` value never changes, so it
+/// cannot force a relayout.
+pub(super) fn keyframe_rule_animation_bucket(
+    rule: &RenderKeyframeRule,
+    base: &AnimatableStyle,
+) -> AnimationPropertyBucket {
+    rule.stops
+        .iter()
+        .fold(TransitionProperties::none(), |changed, stop| {
+            changed.union(stop.style.differing(base, stop.properties))
+        })
+        .animation_bucket()
+}
+
+/// The authored values of a node's keyframe-animated properties, and the
+/// values the last animation pass wrote over them.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct KeyframeBaseStyle {
+    authored: AnimatableStyle,
+    applied: AnimatableStyle,
+}
+
+/// One named animation declared on a node, with its resolved stops.
+struct NodeKeyframeAnimation {
+    list_index: u32,
+    style: AnimationStyle,
+    name: String,
+    stops: Vec<component_style::KeyframeStop>,
+}
+
+fn declared_properties(declarations: &[component_style::Declaration]) -> TransitionProperties {
+    declarations
+        .iter()
+        .fold(TransitionProperties::none(), |properties, declaration| {
+            properties.union(TransitionProperties::of_property(&declaration.property))
+        })
 }
 
 impl FrontendSurfaceComponent {
@@ -180,6 +179,15 @@ impl FrontendSurfaceComponent {
             .retain(|key, _| live_keyframe_keys.contains(key));
         self.keyframe_animation_slots
             .retain(|_, key| live_keyframe_keys.contains(key));
+        if !self.keyframe_base_styles.is_empty() {
+            let animated_nodes = self
+                .keyframe_animation_slots
+                .keys()
+                .map(|(node_id, _)| *node_id)
+                .collect::<HashSet<_>>();
+            self.keyframe_base_styles
+                .retain(|node_id, _| animated_nodes.contains(node_id));
+        }
         if self.motion_policy.reduced_motion {
             self.keyframe_animations.clear();
             self.keyframe_rules.clear();
@@ -235,6 +243,16 @@ impl FrontendSurfaceComponent {
             let node_id = node.id;
             let before_sampling = AnimatableStyle::from_node(node);
             live_keys.insert(node_id);
+            let keyframes = self.node_keyframe_animations(node, theme);
+            let keyframe_properties = keyframes
+                .iter()
+                .flat_map(|animation| &animation.stops)
+                .fold(TransitionProperties::none(), |properties, stop| {
+                    properties.union(declared_properties(&stop.declarations))
+                });
+            if !keyframe_properties.is_empty() {
+                self.restore_keyframe_base(node, keyframe_properties);
+            }
             let previous_style = if entering {
                 // A promoted child is mapped from this exact paint. Snap its
                 // first buffer to the authored entrance state; on the next
@@ -249,6 +267,7 @@ impl FrontendSurfaceComponent {
                     previous_styles,
                     now,
                     has_active_animation,
+                    keyframe_properties,
                 )
             };
             let mut animation_is_live = false;
@@ -263,13 +282,18 @@ impl FrontendSurfaceComponent {
             }
             animation_is_live |= self.apply_node_keyframe_animation(
                 node,
+                keyframes,
                 resolver,
-                theme,
                 now,
                 live_keyframe_keys,
                 has_active_keyframe_animation,
                 active_keyframe_bucket,
             );
+            if !keyframe_properties.is_empty()
+                && let Some(base) = self.keyframe_base_styles.get_mut(&node_id)
+            {
+                base.applied = AnimatableStyle::from_node(node);
+            }
             // Live animations stay dirty even when a delay or a repeated pass
             // holds their sample constant. Completion can write an endpoint
             // after `unfinished` becomes false, so also compare with the input
@@ -314,19 +338,8 @@ impl FrontendSurfaceComponent {
         previous_styles: &HashMap<NodeId, AnimatableStyle>,
         now: Instant,
         has_active_animation: &mut bool,
+        keyframe_properties: TransitionProperties,
     ) -> Option<AnimatableStyle> {
-        if node
-            .computed_style
-            .animations
-            .iter()
-            .any(|a| a.name.is_some())
-        {
-            // CSS animations own their animated properties; do not layer
-            // transition playback on top of the same node.
-            self.transitions.remove(key);
-            return previous_styles.get(&key).copied();
-        }
-
         // The value shown for this node last frame: the in-flight transition's
         // current value if one exists, otherwise the previous tree snapshot,
         // otherwise the node's own desired style (nothing to animate from).
@@ -336,6 +349,10 @@ impl FrontendSurfaceComponent {
             .displayed_style(key, now, desired)
             .or_else(|| previous_styles.get(&key).copied())
             .unwrap_or(desired);
+        // Keyframe animations own the properties they animate: their values
+        // never start a transition, and the keyframe pass overwrites them.
+        let previous_displayed =
+            AnimatableStyle::overlay(previous_displayed, desired, keyframe_properties);
 
         if self.transitions.step_node_with_policy(
             key,
@@ -349,53 +366,92 @@ impl FrontendSurfaceComponent {
         Some(previous_displayed)
     }
 
+    /// The named animations declared on `node`, with their stops. An
+    /// unresolved name is reported and skipped but keeps its list index.
+    fn node_keyframe_animations(
+        &self,
+        node: &WidgetNode,
+        theme: &Theme,
+    ) -> Vec<NodeKeyframeAnimation> {
+        if node.mesh_key().is_none() {
+            return Vec::new();
+        }
+        node.computed_style
+            .animations
+            .iter()
+            .filter(|animation| animation.name.is_some())
+            .enumerate()
+            .filter_map(|(list_index, animation)| {
+                let name = animation.name.clone()?;
+                let stops = self
+                    .find_component_keyframe_rule(&name)
+                    .map(|rule| rule.stops.clone())
+                    .or_else(|| theme_keyframe_stops(theme, &name));
+                let Some(stops) = stops else {
+                    self.record_runtime_animation_diagnostic(format!(
+                        "unresolved animation '{name}'"
+                    ));
+                    return None;
+                };
+                Some(NodeKeyframeAnimation {
+                    list_index: u32::try_from(list_index).unwrap_or(u32::MAX),
+                    style: animation.clone(),
+                    name,
+                    stops,
+                })
+            })
+            .collect()
+    }
+
+    /// Put the authored values of `properties` back on `node` before
+    /// keyframes sample it. Animation-only frames reuse the previous frame's
+    /// computed style, which holds the values the last pass wrote; sampling
+    /// from those would drift, and `fill-mode: none` would never restore.
+    fn restore_keyframe_base(&mut self, node: &mut WidgetNode, properties: TransitionProperties) {
+        let current = AnimatableStyle::from_node(node);
+        // A node still showing what the last pass wrote was not restyled, so
+        // its authored value is the stored one. Any other value is freshly
+        // resolved and becomes the new authored value.
+        let authored = match self.keyframe_base_styles.get(&node.id) {
+            Some(base) if !current.differs(&base.applied, properties) => {
+                AnimatableStyle::overlay(current, base.authored, properties)
+            }
+            _ => current,
+        };
+        if authored != current {
+            authored.apply_to_node(node);
+        }
+        self.keyframe_base_styles.insert(
+            node.id,
+            KeyframeBaseStyle {
+                authored,
+                applied: authored,
+            },
+        );
+    }
+
     /// Returns whether this node still has a running, unfinished keyframe
     /// animation, so the caller can keep it dirty for as long as it produces
     /// new values.
     fn apply_node_keyframe_animation(
         &mut self,
         node: &mut WidgetNode,
+        animations: Vec<NodeKeyframeAnimation>,
         resolver: &StyleResolver,
-        theme: &Theme,
         now: Instant,
         live_keyframe_keys: &mut HashSet<AnimationInstanceId>,
         has_active_keyframe_animation: &mut bool,
         active_keyframe_bucket: &mut AnimationPropertyBucket,
     ) -> bool {
-        // Apply all named keyframe animations on this node
-        let animations: Vec<_> = node
-            .computed_style
-            .animations
-            .iter()
-            .filter(|a| a.name.is_some())
-            .cloned()
-            .collect();
-
-        if animations.is_empty() {
-            return false;
-        }
-
-        let Some(_) = node.mesh_key() else {
-            return false;
-        };
-
         let mut node_is_live = false;
 
-        for (list_index, animation_style) in animations.into_iter().enumerate() {
-            let animation_name = animation_style.name.clone().unwrap();
-
-            let stops = self
-                .find_component_keyframe_rule(&animation_name)
-                .map(|rule| rule.stops.clone())
-                .or_else(|| theme_keyframe_stops(theme, &animation_name));
-            let Some(stops) = stops else {
-                self.record_runtime_animation_diagnostic(format!(
-                    "unresolved animation '{animation_name}'"
-                ));
-                continue;
-            };
-
-            let list_index = u32::try_from(list_index).unwrap_or(u32::MAX);
+        for NodeKeyframeAnimation {
+            list_index,
+            style: animation_style,
+            name: animation_name,
+            stops,
+        } in animations
+        {
             let declaration_generation =
                 Self::animation_declaration_generation(&animation_style, &stops);
             let instance_id = AnimationInstanceId::new(node.id, list_index, declaration_generation);
@@ -420,7 +476,10 @@ impl FrontendSurfaceComponent {
 
             let render_rule =
                 self.build_render_keyframe_rule(&animation_key, &stops, node, resolver);
-            let keyframe_bucket = keyframe_rule_animation_bucket(&render_rule);
+            // Earlier animations in the list are the underlying value of
+            // later ones, so each samples from the node as it stands.
+            let base = AnimatableStyle::from_node(node);
+            let keyframe_bucket = keyframe_rule_animation_bucket(&render_rule, &base);
             self.keyframe_rules.insert(instance_id, render_rule.clone());
 
             let existing = if lifecycle == AnimationLifecycle::Continued {
@@ -458,8 +517,7 @@ impl FrontendSurfaceComponent {
 
             let mut registry = KeyframeRegistry::new();
             registry.insert(render_rule);
-            if let Some(current) = active.current(&registry, AnimatableStyle::from_node(node), now)
-            {
+            if let Some(current) = active.current(&registry, base, now) {
                 current.apply_to_node(node);
             }
 
@@ -477,7 +535,7 @@ impl FrontendSurfaceComponent {
                 *active_keyframe_bucket =
                     merge_animation_bucket(*active_keyframe_bucket, keyframe_bucket);
             }
-        } // end for animation_style in animations
+        }
 
         node_is_live
     }
@@ -549,6 +607,7 @@ impl FrontendSurfaceComponent {
                 offset: stop.offset,
                 style: AnimatableStyle::from_node(&styled_node),
                 easing: stop.easing.map(Into::into),
+                properties: declared_properties(&stop.declarations),
             });
         }
 

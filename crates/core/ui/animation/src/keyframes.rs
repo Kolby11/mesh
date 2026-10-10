@@ -5,8 +5,10 @@
 //! for a given timestamp.
 
 use std::collections::HashMap;
+use std::iter;
 use std::time::{Duration, Instant};
 
+use mesh_core_elements::TransitionProperties;
 use mesh_core_elements::style::{
     AnimationDirection, AnimationFillMode, AnimationIterationCount, AnimationPlayState,
 };
@@ -20,8 +22,10 @@ use crate::Interpolate;
 pub struct KeyframeStop {
     /// Position in the timeline, normalized to `[0.0, 1.0]`.
     pub offset: f32,
-    /// Style snapshot at this stop.
+    /// Style snapshot at this stop. Only `properties` are read from it.
     pub style: AnimatableStyle,
+    /// The properties this stop declares.
+    pub properties: TransitionProperties,
     /// Segment-local easing override starting at this stop.
     pub easing: Option<Easing>,
 }
@@ -31,6 +35,17 @@ pub struct KeyframeStop {
 pub struct KeyframeRule {
     pub name: String,
     pub stops: Vec<KeyframeStop>,
+}
+
+impl KeyframeRule {
+    /// Every property some stop declares.
+    pub fn animated_properties(&self) -> TransitionProperties {
+        self.stops
+            .iter()
+            .fold(TransitionProperties::none(), |properties, stop| {
+                properties.union(stop.properties)
+            })
+    }
 }
 
 /// Lookup table shared across nodes that reference an animation name.
@@ -227,39 +242,78 @@ impl ActiveKeyframeAnimation {
         }
     }
 
+    /// Sample every animated property at `progress`. Each property
+    /// interpolates between the nearest stops that declare it; with no
+    /// declaring stop at or before `progress` it starts from `base` (the
+    /// implicit 0% keyframe), and with none after it ends at `base` (the
+    /// implicit 100% keyframe). Properties no stop declares keep `base`.
     fn sample_rule(
         &self,
         rule: &KeyframeRule,
         base: AnimatableStyle,
         progress: f32,
     ) -> AnimatableStyle {
-        if rule.stops.len() == 1 {
-            return base.lerp(rule.stops[0].style, 1.0);
-        }
-
         let progress = progress.clamp(0.0, 1.0);
-        let first = &rule.stops[0];
-        if progress <= first.offset {
-            return base.lerp(first.style, 1.0);
-        }
-
-        let last = rule.stops.last().expect("checked len above");
-        if progress >= last.offset {
-            return base.lerp(last.style, 1.0);
-        }
-
-        for window in rule.stops.windows(2) {
-            let from = &window[0];
-            let to = &window[1];
-            if progress <= to.offset {
-                let span = (to.offset - from.offset).max(f32::EPSILON);
-                let local = ((progress - from.offset) / span).clamp(0.0, 1.0);
-                let easing = from.easing.unwrap_or(self.easing);
-                return from.style.lerp(to.style, apply_easing(easing, local));
+        let mut sampled = base;
+        let mut unresolved = rule.animated_properties();
+        let stops_before = rule
+            .stops
+            .iter()
+            .rev()
+            .filter(|stop| stop.offset <= progress)
+            .map(Some)
+            .chain(iter::once(None));
+        for from in stops_before {
+            if unresolved.is_empty() {
+                break;
+            }
+            let (from_offset, from_style, from_easing, mut pending) = match from {
+                Some(stop) => (
+                    stop.offset,
+                    stop.style,
+                    stop.easing,
+                    unresolved.intersection(stop.properties),
+                ),
+                None => (0.0, base, None, unresolved),
+            };
+            if pending.is_empty() {
+                continue;
+            }
+            unresolved = unresolved.difference(pending);
+            let easing = from_easing.unwrap_or(self.easing);
+            let stops_after = rule
+                .stops
+                .iter()
+                .filter(|stop| stop.offset > progress)
+                .map(Some)
+                .chain(iter::once(None));
+            for to in stops_after {
+                if pending.is_empty() {
+                    break;
+                }
+                let (to_offset, to_style, properties) = match to {
+                    Some(stop) => (
+                        stop.offset,
+                        stop.style,
+                        pending.intersection(stop.properties),
+                    ),
+                    None => (1.0, base, pending),
+                };
+                if properties.is_empty() {
+                    continue;
+                }
+                pending = pending.difference(properties);
+                let span = to_offset - from_offset;
+                let value = if span <= f32::EPSILON {
+                    from_style
+                } else {
+                    let local = ((progress - from_offset) / span).clamp(0.0, 1.0);
+                    from_style.lerp(to_style, apply_easing(easing, local))
+                };
+                sampled = AnimatableStyle::overlay(sampled, value, properties);
             }
         }
-
-        last.style
+        sampled
     }
 }
 
@@ -303,6 +357,21 @@ mod tests {
         }
     }
 
+    fn opacity_and_transform() -> TransitionProperties {
+        TransitionProperties {
+            opacity: true,
+            transform: true,
+            ..TransitionProperties::none()
+        }
+    }
+
+    fn opacity() -> TransitionProperties {
+        TransitionProperties {
+            opacity: true,
+            ..TransitionProperties::none()
+        }
+    }
+
     fn registry() -> KeyframeRegistry {
         let mut registry = KeyframeRegistry::new();
         registry.insert(KeyframeRule {
@@ -312,16 +381,19 @@ mod tests {
                     offset: 0.0,
                     style: style(0.0, 0.0),
                     easing: None,
+                    properties: opacity_and_transform(),
                 },
                 KeyframeStop {
                     offset: 0.5,
                     style: style(0.5, 50.0),
                     easing: None,
+                    properties: opacity_and_transform(),
                 },
                 KeyframeStop {
                     offset: 1.0,
                     style: style(1.0, 100.0),
                     easing: None,
+                    properties: opacity_and_transform(),
                 },
             ],
         });
@@ -353,6 +425,61 @@ mod tests {
             .expect("current style");
         assert!((current.opacity - 0.25).abs() < 0.001);
         assert!((current.transform.translate_x - 25.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn a_property_skips_stops_that_do_not_declare_it() {
+        let mut registry = registry();
+        registry
+            .rules
+            .get_mut("pulse")
+            .expect("test keyframe rule")
+            .stops[1]
+            .properties = TransitionProperties {
+            transform: true,
+            ..TransitionProperties::none()
+        };
+        let animation = animation();
+        let current = animation
+            .current(
+                &registry,
+                style(0.7, 0.0),
+                animation.started_at + Duration::from_millis(250),
+            )
+            .expect("current style");
+
+        // Opacity runs 0% -> 100% directly; the 50% stop only moves transform.
+        assert!((current.opacity - 0.25).abs() < 0.001);
+        assert!((current.transform.translate_x - 25.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn missing_end_stops_interpolate_from_and_to_the_base() {
+        let mut registry = KeyframeRegistry::new();
+        registry.insert(KeyframeRule {
+            name: "pulse".into(),
+            stops: vec![KeyframeStop {
+                offset: 0.5,
+                style: style(0.0, 0.0),
+                easing: None,
+                properties: opacity(),
+            }],
+        });
+        let animation = animation();
+        let base = style(1.0, 40.0);
+        let at = |millis| {
+            animation
+                .current(
+                    &registry,
+                    base,
+                    animation.started_at + Duration::from_millis(millis),
+                )
+                .expect("current style")
+        };
+
+        assert!((at(250).opacity - 0.5).abs() < 0.001);
+        assert!((at(750).opacity - 0.5).abs() < 0.001);
+        assert_eq!(at(250).transform.translate_x, 40.0);
     }
 
     #[test]

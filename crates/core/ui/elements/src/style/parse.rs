@@ -230,50 +230,13 @@ pub(super) fn parse_overflow(value: &str) -> Overflow {
 }
 
 pub(super) fn parse_transition_properties(value: &str) -> TransitionProperties {
-    let mut properties = TransitionProperties::none();
-    for property in value
+    value
         .split(',')
         .map(str::trim)
         .filter(|part| !part.is_empty())
-    {
-        match property {
-            "all" => return TransitionProperties::all(),
-            "border-radius" => properties.border_radius = true,
-            "border-width" => properties.border_width = true,
-            "opacity" => properties.opacity = true,
-            "background-color" | "background" => properties.background_color = true,
-            "border-color" => properties.border_color = true,
-            "color" => properties.color = true,
-            "width" => properties.width = true,
-            "height" => properties.height = true,
-            "padding" => properties.padding = true,
-            "margin" => properties.margin = true,
-            "transform" => properties.transform = true,
-            "box-shadow" => properties.box_shadow = true,
-            "filter" => properties.filter = true,
-            "backdrop-filter" => properties.backdrop_filter = true,
-            "min-width" => properties.min_width = true,
-            "max-width" => properties.max_width = true,
-            "min-height" => properties.min_height = true,
-            "max-height" => properties.max_height = true,
-            "font-size" => properties.font_size = true,
-            "letter-spacing" => properties.letter_spacing = true,
-            "line-height" => properties.line_height = true,
-            "gap" => properties.gap = true,
-            "top" => properties.inset_top = true,
-            "right" => properties.inset_right = true,
-            "bottom" => properties.inset_bottom = true,
-            "left" => properties.inset_left = true,
-            "inset" => {
-                properties.inset_top = true;
-                properties.inset_right = true;
-                properties.inset_bottom = true;
-                properties.inset_left = true;
-            }
-            _ => {}
-        }
-    }
-    properties
+        .fold(TransitionProperties::none(), |properties, property| {
+            properties.union(TransitionProperties::of_property(property))
+        })
 }
 
 pub(super) fn parse_transition_property_list(value: &str) -> Vec<TransitionProperties> {

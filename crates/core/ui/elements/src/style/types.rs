@@ -1145,6 +1145,72 @@ impl TransitionProperties {
         merged
     }
 
+    /// The properties both masks name.
+    pub fn intersection(self, other: Self) -> Self {
+        self.difference(self.difference(other))
+    }
+
+    /// The animatable properties a declaration of `property` writes. A
+    /// longhand such as `padding-left` names the property it is part of; a
+    /// shorthand such as `border` names every property it sets. `all` names
+    /// everything, and a property that is not animatable names nothing.
+    pub fn of_property(property: &str) -> Self {
+        let mut properties = Self::none();
+        match property {
+            "all" => return Self::all(),
+            "opacity" => properties.opacity = true,
+            "background" | "background-color" => properties.background_color = true,
+            "color" => properties.color = true,
+            "width" => properties.width = true,
+            "height" => properties.height = true,
+            "min-width" => properties.min_width = true,
+            "max-width" => properties.max_width = true,
+            "min-height" => properties.min_height = true,
+            "max-height" => properties.max_height = true,
+            "transform" => properties.transform = true,
+            "box-shadow" => properties.box_shadow = true,
+            "filter" => properties.filter = true,
+            "backdrop-filter" => properties.backdrop_filter = true,
+            "font" => {
+                properties.font_size = true;
+                properties.line_height = true;
+            }
+            "font-size" => properties.font_size = true,
+            "letter-spacing" => properties.letter_spacing = true,
+            "line-height" => properties.line_height = true,
+            "gap" | "column-gap" | "row-gap" | "gap-x" => properties.gap = true,
+            "top" => properties.inset_top = true,
+            "right" => properties.inset_right = true,
+            "bottom" => properties.inset_bottom = true,
+            "left" => properties.inset_left = true,
+            "inset" => {
+                properties.inset_top = true;
+                properties.inset_right = true;
+                properties.inset_bottom = true;
+                properties.inset_left = true;
+            }
+            _ if property.starts_with("padding") => properties.padding = true,
+            _ if property.starts_with("margin") => properties.margin = true,
+            _ if property.starts_with("border") => {
+                if property.ends_with("radius") {
+                    properties.border_radius = true;
+                } else if property.ends_with("width") {
+                    properties.border_width = true;
+                } else if property.ends_with("color") {
+                    properties.border_color = true;
+                } else if matches!(
+                    property,
+                    "border" | "border-top" | "border-right" | "border-bottom" | "border-left"
+                ) {
+                    properties.border_width = true;
+                    properties.border_color = true;
+                }
+            }
+            _ => {}
+        }
+        properties
+    }
+
     /// The properties this mask names that `other` does not.
     pub fn difference(self, other: Self) -> Self {
         if other.all {

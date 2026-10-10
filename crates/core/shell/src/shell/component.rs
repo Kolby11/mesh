@@ -1048,6 +1048,9 @@ pub(super) struct FrontendSurfaceComponent {
     /// replacement and cancellation observable at the shell boundary without
     /// making renderers infer lifecycle from map mutations.
     keyframe_animation_lifecycles: HashMap<(NodeId, u32), mesh_core_animation::AnimationLifecycle>,
+    /// Authored values of each keyframe-animated node, kept for the frames
+    /// that reuse the previous frame's animated computed style.
+    keyframe_base_styles: HashMap<NodeId, animation::KeyframeBaseStyle>,
     previous_visual_styles_scratch:
         HashMap<NodeId, mesh_core_animation::transition::AnimatableStyle>,
     /// Per-animation-pass key sets. Retain their hash-table allocations across
@@ -1399,6 +1402,7 @@ impl FrontendSurfaceComponent {
             keyframe_rules: HashMap::new(),
             keyframe_animation_slots: HashMap::new(),
             keyframe_animation_lifecycles: HashMap::new(),
+            keyframe_base_styles: HashMap::new(),
             previous_visual_styles_scratch: HashMap::new(),
             animation_live_keys_scratch: HashSet::new(),
             animation_live_keyframe_keys_scratch: HashSet::new(),
