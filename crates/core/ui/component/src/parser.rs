@@ -2498,6 +2498,87 @@ local Thing = require("@mesh/thing")
         }
     }
 
+    fn element_binding(source: &str, attribute: &str) -> Option<String> {
+        let file = parse_component(source).unwrap();
+        let template = file.template.unwrap();
+        let TemplateNode::Element(element) = &template.root[0] else {
+            panic!("expected element");
+        };
+        assert!(
+            !element
+                .attributes
+                .iter()
+                .any(|attr| attr.name.contains(':') && attr.name != "bind:this"),
+            "directives must be lowered: {:?}",
+            element.attributes
+        );
+        element
+            .attributes
+            .iter()
+            .find(|attr| attr.name == attribute)
+            .map(|attr| match &attr.value {
+                AttributeValue::Binding(expression) => expression.clone(),
+                other => panic!("expected a binding, got {other:?}"),
+            })
+    }
+
+    #[test]
+    fn class_and_style_directives_lower_to_one_binding() {
+        let class = element_binding(
+            r#"<template><box class="row é" class:active={selected} class:is-off={not on}/></template>"#,
+            "class",
+        )
+        .unwrap();
+        assert_eq!(
+            class,
+            r#""row \u{e9}" .. ((selected) and " active" or "") .. ((not on) and " is-off" or "")"#
+        );
+
+        let style = element_binding(
+            r#"<template><box style="padding: 2px" style:background-color={tint}/></template>"#,
+            "style",
+        )
+        .unwrap();
+        assert_eq!(
+            style,
+            r#""padding: 2px; " .. (((tint) == nil or (tint) == false) and "" or ("background-color: " .. (tint) .. "; "))"#
+        );
+
+        let bound = element_binding(
+            r#"<template><box class={base} class:on={x}/></template>"#,
+            "class",
+        )
+        .unwrap();
+        assert_eq!(bound, r#"((base) or "") .. ((x) and " on" or "")"#);
+    }
+
+    #[test]
+    fn elements_without_directives_keep_their_attributes() {
+        let file =
+            parse_component(r#"<template><box class="row" style="gap: 1px"/></template>"#).unwrap();
+        let TemplateNode::Element(element) = &file.template.unwrap().root[0] else {
+            panic!("expected element");
+        };
+        assert!(
+            element
+                .attributes
+                .iter()
+                .all(|attr| matches!(attr.value, AttributeValue::Static(_)))
+        );
+    }
+
+    #[test]
+    fn malformed_directives_are_rejected() {
+        for source in [
+            r#"<template><box class:={x}/></template>"#,
+            r#"<template><box class:a.b={x}/></template>"#,
+            r#"<template><box style:Color={x}/></template>"#,
+            r#"<template><box class:on="yes"/></template>"#,
+        ] {
+            assert!(parse_component(source).is_err(), "{source} should fail");
+        }
+    }
+
     #[test]
     fn parse_keyed_for_loop() {
         let file = parse_component(

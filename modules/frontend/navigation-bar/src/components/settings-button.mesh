@@ -30,20 +30,23 @@ settings_tooltip_disabled = "false"
 
 quick_settings = nil
 local quick_settings_connected = false
-local CLOSE_BRIDGE_KEY = "quick-settings-close"
-local CLOSE_BRIDGE_DELAY_MS = 400
 local connect_quick_settings
+local CLOSE_BRIDGE_DELAY_MS = 400
+local close_bridge = nil
 
 local function cancel_bridge_close()
-    mesh.events.publish("shell.cancel-handler", { key = CLOSE_BRIDGE_KEY })
+    if close_bridge ~= nil then
+        close_bridge:cancel()
+        close_bridge = nil
+    end
 end
 
 local function schedule_bridge_close()
-    mesh.events.publish("shell.schedule-handler", {
-        key = CLOSE_BRIDGE_KEY,
-        handler = "closeSettingsBridge",
-        delay_ms = CLOSE_BRIDGE_DELAY_MS,
-    })
+    cancel_bridge_close()
+    close_bridge = task.delay(CLOSE_BRIDGE_DELAY_MS, function()
+        close_bridge = nil
+        hide_settings_selector(false)
+    end)
 end
 
 -- The quick-settings popup is a promoted child surface that covers the space
@@ -110,7 +113,7 @@ function onOpenSettings()
     -- released by the next pointer leave, so a later hover works normally.
     settings_launcher_blocked = true
     cancel_bridge_close()
-    mesh.events.publish("shell.show-surface", { surface_id = "@mesh/settings" })
+    mesh.shell.show_surface("@mesh/settings")
     hide_settings_selector(false)
     -- Settings owns focus once its window opens. Leaving focus on the launcher
     -- makes it look permanently active while the separate window is visible.
@@ -132,10 +135,6 @@ end
 
 function onQuickSettingsEnter()
     cancel_bridge_close()
-end
-
-function closeSettingsBridge()
-    hide_settings_selector(false)
 end
 </script>
 

@@ -88,6 +88,8 @@ impl ScriptContext {
         )?;
         self.install_log_api(&mesh_log)?;
         self.install_popover_api(&mesh_popover)?;
+        self.install_task_api(globals)?;
+        self.install_shell_api(&mesh)?;
 
         mesh.set("service", mesh_core_service).map_err(lua_err)?;
         mesh.set("events", mesh_core_events).map_err(lua_err)?;
@@ -158,7 +160,7 @@ impl ScriptContext {
                     .create_function(move |lua, (channel, payload): (String, Option<LuaValue>)| {
                         let payload = payload.unwrap_or(LuaValue::Nil);
                         let payload = lua.from_value::<Value>(payload)?;
-                        tracing::info!("{} published event {}", module_id, channel);
+                        tracing::debug!("{} published event {}", module_id, channel);
                         Self::queue_authorized_event(
                             &published_events,
                             &pending_side_channels,
@@ -278,27 +280,18 @@ impl ScriptContext {
         }
 
         if has_locale_write {
-            let published_events_for_locale = Arc::clone(&self.shared_published_events);
-            let pending_side_channels_for_locale = Arc::clone(&self.pending_side_channels);
-            let module_id_for_locale = self.module_id.clone();
-            let capabilities_for_locale = self.capabilities.clone();
-            let interface_catalog_for_locale = self.interface_catalog.clone();
-            let resources_for_locale = self.realm_policy.budget();
+            let queue = self.shell_effects.clone();
             mesh_locale
                 .set(
                     "set",
                     self.lua()
                         .create_function(move |_lua, locale: String| {
-                            Self::queue_authorized_event(
-                                &published_events_for_locale,
-                                &pending_side_channels_for_locale,
-                                "shell.set-locale".to_string(),
-                                serde_json::json!({ "locale": locale }),
-                                &module_id_for_locale,
-                                &capabilities_for_locale,
-                                &interface_catalog_for_locale,
-                                &resources_for_locale,
-                            )
+                            if locale.is_empty() {
+                                return Err(LuaError::external(
+                                    "mesh.locale.set expects a non-empty locale",
+                                ));
+                            }
+                            queue.push(mesh_core_frontend_abi::FrontendEffect::SetLocale { locale })
                         })
                         .map_err(lua_err)?,
                 )
@@ -361,129 +354,60 @@ impl ScriptContext {
     }
 
     fn install_popover_api(&mut self, mesh_popover: &Table) -> Result<(), ScriptError> {
-        let published_events_for_popover = Arc::clone(&self.shared_published_events);
-        let pending_side_channels_for_popover = Arc::clone(&self.pending_side_channels);
-        let module_id_for_popover = self.module_id.clone();
-        let capabilities_for_popover = self.capabilities.clone();
-        let interface_catalog_for_popover = self.interface_catalog.clone();
-        let resources_for_popover = self.realm_policy.budget();
+        let granted = self
+            .capabilities
+            .is_granted(&mesh_core_capability::Capability::new(
+                super::shell_api::SHELL_SURFACE_CAPABILITY,
+            ));
+        let queue = self.shell_effects.clone();
         mesh_popover
             .set(
                 "activate",
                 self.lua()
                     .create_function(move |_lua, args: Variadic<LuaValue>| {
                         let Some(LuaValue::String(surface_id)) = args.first() else {
-                            return Err(LuaError::FromLuaConversionError {
-                                from: "nil",
-                                to: "String".to_string(),
-                                message: Some("mesh.popover.activate expects a surface id".into()),
-                            });
+                            return Err(LuaError::external(
+                                "mesh.popover.activate expects a surface id",
+                            ));
                         };
+                        if !granted {
+                            return Err(LuaError::external(ScriptError::CapabilityDenied(
+                                "mesh.popover.activate requires the shell.surface capability"
+                                    .into(),
+                            )));
+                        }
                         let surface_id = surface_id.to_str()?.to_string();
-                        let event = match args.get(1) {
-                            Some(LuaValue::Table(table)) => Some(table.clone()),
-                            _ => None,
-                        };
-                        let focus = match args.get(2) {
-                            Some(LuaValue::Boolean(value)) => *value,
-                            Some(LuaValue::Table(table)) => table
-                                .get::<Option<bool>>("focus")?
-                                .or_else(|| {
-                                    table.get::<Option<bool>>("focus_on_open").ok().flatten()
-                                })
-                                .unwrap_or(true),
-                            _ => true,
-                        };
-                        let (trigger_surface, trigger_key) = if let Some(event_tbl) = event {
-                            let surface = event_tbl
-                                .get::<Table>("surface")
-                                .ok()
-                                .and_then(|s| s.get::<String>("id").ok())
-                                .unwrap_or_default();
-                            let key = event_tbl
-                                .get::<Table>("current")
-                                .ok()
-                                .and_then(|c| c.get::<String>("key").ok())
-                                .or_else(|| {
-                                    event_tbl
-                                        .get::<Table>("current_target")
-                                        .ok()
-                                        .and_then(|c| c.get::<String>("key").ok())
-                                })
-                                .unwrap_or_default();
-                            (surface, key)
-                        } else {
-                            (String::new(), String::new())
-                        };
-                        let payload = serde_json::json!({
-                            "surface_id": surface_id,
-                            "trigger_surface": trigger_surface,
-                            "trigger_key": trigger_key,
-                            "focus": focus,
-                        });
-                        tracing::info!(
-                            "{} called mesh.popover.activate target={} trigger_surface={} trigger_key={} focus={}",
-                            module_id_for_popover, surface_id, trigger_surface, trigger_key, focus
-                        );
-                        Self::queue_authorized_event(
-                            &published_events_for_popover,
-                            &pending_side_channels_for_popover,
-                            "shell.activate-popover".to_string(),
-                            payload,
-                            &module_id_for_popover,
-                            &capabilities_for_popover,
-                            &interface_catalog_for_popover,
-                            &resources_for_popover,
-                        )
+                        queue.push(super::shell_api::activate_popover_effect(
+                            surface_id,
+                            args.get(1),
+                            args.get(2),
+                        )?)
                     })
                     .map_err(lua_err)?,
             )
             .map_err(lua_err)?;
 
-        let published_events_for_popover = Arc::clone(&self.shared_published_events);
-        let pending_side_channels_for_popover = Arc::clone(&self.pending_side_channels);
-        let module_id_for_popover = self.module_id.clone();
-        let capabilities_for_popover = self.capabilities.clone();
-        let interface_catalog_for_popover = self.interface_catalog.clone();
-        let resources_for_popover = self.realm_policy.budget();
+        let queue = self.shell_effects.clone();
         mesh_popover
             .set(
                 "hide",
                 self.lua()
                     .create_function(move |_lua, args: Variadic<LuaValue>| {
                         let Some(LuaValue::String(surface_id)) = args.first() else {
-                            return Err(LuaError::FromLuaConversionError {
-                                from: "nil",
-                                to: "String".to_string(),
-                                message: Some("mesh.popover.hide expects a surface id".into()),
-                            });
+                            return Err(LuaError::external(
+                                "mesh.popover.hide expects a surface id",
+                            ));
                         };
+                        if !granted {
+                            return Err(LuaError::external(ScriptError::CapabilityDenied(
+                                "mesh.popover.hide requires the shell.surface capability".into(),
+                            )));
+                        }
                         let surface_id = surface_id.to_str()?.to_string();
-                        let defer_for_hover_bridge = match args.get(1) {
-                            Some(LuaValue::Table(table)) => table
-                                .get::<Option<bool>>("bridge")?
-                                .or_else(|| {
-                                    table
-                                        .get::<Option<bool>>("defer_for_hover_bridge")
-                                        .ok()
-                                        .flatten()
-                                })
-                                .unwrap_or(false),
-                            _ => false,
-                        };
-                        Self::queue_authorized_event(
-                            &published_events_for_popover,
-                            &pending_side_channels_for_popover,
-                            "shell.hide-popover".to_string(),
-                            serde_json::json!({
-                                "surface_id": surface_id,
-                                "defer_for_hover_bridge": defer_for_hover_bridge,
-                            }),
-                            &module_id_for_popover,
-                            &capabilities_for_popover,
-                            &interface_catalog_for_popover,
-                            &resources_for_popover,
-                        )
+                        queue.push(super::shell_api::hide_popover_effect(
+                            surface_id,
+                            args.get(1),
+                        )?)
                     })
                     .map_err(lua_err)?,
             )

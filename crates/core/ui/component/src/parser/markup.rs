@@ -657,7 +657,127 @@ fn parse_xml_attributes(
         });
     }
 
-    Ok(attrs)
+    desugar_directives(attrs, element_span)
+}
+
+/// Lower `class:name={cond}` and `style:prop={value}` into the element's one
+/// `class` / `style` binding, so directives reuse ordinary binding evaluation,
+/// dependency tracking and retained diffing instead of a second path.
+///
+/// `class:name` adds `name` while `cond` is truthy. `style:prop` appends
+/// `prop: value;` unless `value` is `nil` or `false`. Static and bound
+/// `class` / `style` values come first, in that order.
+fn desugar_directives(
+    attrs: Vec<Attribute>,
+    element_span: SourceSpan,
+) -> Result<Vec<Attribute>, ParseError> {
+    if !attrs
+        .iter()
+        .any(|attr| attr.name.starts_with("class:") || attr.name.starts_with("style:"))
+    {
+        return Ok(attrs);
+    }
+    let mut out = Vec::with_capacity(attrs.len());
+    let mut class_base: Option<(String, Option<SourceSpan>)> = None;
+    let mut style_base: Option<(String, Option<SourceSpan>)> = None;
+    let mut class_parts = Vec::new();
+    let mut style_parts = Vec::new();
+    for attr in attrs {
+        let directive = attr
+            .name
+            .strip_prefix("class:")
+            .map(|name| (true, name))
+            .or_else(|| attr.name.strip_prefix("style:").map(|name| (false, name)));
+        if let Some((is_class, name)) = directive {
+            let valid = if is_class {
+                !name.is_empty()
+                    && name
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+            } else {
+                !name.is_empty()
+                    && name
+                        .bytes()
+                        .all(|byte| byte.is_ascii_lowercase() || byte == b'-')
+            };
+            if !valid {
+                return Err(ParseError::InvalidTemplate {
+                    message: format!("invalid directive name `{}`", attr.name),
+                    span: attr.span.unwrap_or(element_span),
+                });
+            }
+            let AttributeValue::Binding(expression) = &attr.value else {
+                return Err(ParseError::InvalidTemplate {
+                    message: format!("`{}` expects an expression in braces", attr.name),
+                    span: attr.span.unwrap_or(element_span),
+                });
+            };
+            if is_class {
+                class_parts.push(format!("(({expression}) and \" {name}\" or \"\")"));
+            } else {
+                style_parts.push(format!(
+                    "((({expression}) == nil or ({expression}) == false) and \"\" or \
+                     (\"{name}: \" .. ({expression}) .. \"; \"))"
+                ));
+            }
+            continue;
+        }
+        let base = match (&attr.name[..], &attr.value) {
+            ("class", AttributeValue::Static(value)) => Some(luau_string_literal(value.trim())),
+            ("style", AttributeValue::Static(value)) => {
+                Some(luau_string_literal(&format!("{}; ", value.trim())))
+            }
+            ("class", AttributeValue::Binding(expression)) => {
+                Some(format!("(({expression}) or \"\")"))
+            }
+            ("style", AttributeValue::Binding(expression)) => {
+                Some(format!("(({expression}) or \"\") .. \"; \""))
+            }
+            _ => None,
+        };
+        match (attr.name.as_str(), base) {
+            ("class", Some(base)) => class_base = Some((base, attr.span)),
+            ("style", Some(base)) => style_base = Some((base, attr.span)),
+            _ => out.push(attr),
+        }
+    }
+    for (name, base, parts) in [
+        ("class", class_base, class_parts),
+        ("style", style_base, style_parts),
+    ] {
+        if base.is_none() && parts.is_empty() {
+            continue;
+        }
+        let (base, span) = base.unwrap_or_else(|| ("\"\"".into(), None));
+        let expression = std::iter::once(base)
+            .chain(parts)
+            .collect::<Vec<_>>()
+            .join(" .. ");
+        out.push(Attribute {
+            name: name.into(),
+            value: AttributeValue::Binding(expression),
+            quoted_expression: false,
+            span: span.or(Some(element_span)),
+        });
+    }
+    Ok(out)
+}
+
+/// An ASCII-only Luau string literal for `value`; template expressions reject
+/// non-ASCII source.
+fn luau_string_literal(value: &str) -> String {
+    let mut literal = String::with_capacity(value.len() + 2);
+    literal.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => literal.push_str("\\\""),
+            '\\' => literal.push_str("\\\\"),
+            ' '..='~' => literal.push(character),
+            other => literal.push_str(&format!("\\u{{{:x}}}", u32::from(other))),
+        }
+    }
+    literal.push('"');
+    literal
 }
 
 /// Returns true if the attribute name is an `on...` event handler (`onclick`, `oninput`, etc.).

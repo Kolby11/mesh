@@ -1,9 +1,26 @@
 use super::diagnostics::record_localized_miss as record_localized_miss_diagnostic;
 use super::*;
+use mesh_core_frontend_abi::{EffectScope, EffectSource, FrontendEffect};
 use mesh_core_scripting::{ScriptDiagnosticCategory, ScriptError};
 
-fn scheduled_handler_target(instance_key: &str, handler: &str) -> HandlerTarget {
-    HandlerTarget::embedded(instance_key, handler)
+/// Drain a runtime's typed `mesh.shell` effects together with the caller
+/// scope they are lowered under. The scope is only built when there is
+/// something to lower.
+fn take_shell_effects(
+    runtime: &mut EmbeddedFrontendRuntime,
+) -> Option<(EffectScope, Vec<FrontendEffect>)> {
+    if !runtime.script_ctx.has_shell_effects() {
+        return None;
+    }
+    let effects = runtime.script_ctx.drain_shell_effects();
+    let scope = EffectScope::new(
+        EffectSource::new(
+            runtime.script_ctx.module_id.clone(),
+            Some(runtime.script_ctx.instance_id.clone()),
+        ),
+        runtime.script_ctx.capabilities.clone(),
+    );
+    Some((scope, effects))
 }
 
 fn render_stack_contains_cycle(stack: &[String], module_id: &str) -> bool {
@@ -124,6 +141,7 @@ impl FrontendSurfaceComponent {
             // Lifecycle side channels cannot be applied after the surface is
             // removed. Drain them before the shared VM/runtime is dropped.
             runtime.script_ctx.drain_published_events();
+            runtime.script_ctx.drain_shell_effects();
             runtime.script_ctx.drain_element_actions();
         }
         (runtimes.into_iter().collect(), first_error)
@@ -164,6 +182,7 @@ impl FrontendSurfaceComponent {
                 );
             }
             runtime.script_ctx.drain_published_events();
+            runtime.script_ctx.drain_shell_effects();
             runtime.script_ctx.drain_element_actions();
         }
         drop(runtimes);
@@ -200,11 +219,11 @@ impl FrontendSurfaceComponent {
             .complete_service_call(call_id, status, result.clone())
     }
 
-    fn drain_local_script_events(
-        &mut self,
-        instance_key: &str,
-        events: Vec<PublishedEvent>,
-    ) -> Vec<CoreRequest> {
+    fn drain_local_script_events(&mut self, events: Vec<PublishedEvent>) -> Vec<CoreRequest> {
+        #[cfg(test)]
+        {
+            self.drained_script_events += events.len() as u64;
+        }
         let mut shell_events = Vec::new();
         for event in events {
             if event.channel.starts_with("shell.")
@@ -223,40 +242,7 @@ impl FrontendSurfaceComponent {
                 );
                 continue;
             }
-            match event.channel.as_str() {
-                "shell.schedule-handler" => {
-                    let Some(key) = event.payload.get("key").and_then(|value| value.as_str())
-                    else {
-                        continue;
-                    };
-                    let Some(handler) = event
-                        .payload
-                        .get("handler")
-                        .and_then(|value| value.as_str())
-                    else {
-                        continue;
-                    };
-                    let delay_ms = event
-                        .payload
-                        .get("delay_ms")
-                        .and_then(|value| value.as_u64())
-                        .unwrap_or(0)
-                        .min(5_000);
-                    self.scheduled_handlers.insert(
-                        key.to_string(),
-                        ScheduledHandler {
-                            target: scheduled_handler_target(instance_key, handler),
-                            deadline: Instant::now() + Duration::from_millis(delay_ms),
-                        },
-                    );
-                }
-                "shell.cancel-handler" => {
-                    if let Some(key) = event.payload.get("key").and_then(|value| value.as_str()) {
-                        self.scheduled_handlers.remove(key);
-                    }
-                }
-                _ => shell_events.push(event),
-            }
+            shell_events.push(event);
         }
         script_events_to_requests_at(shell_events, self.current_frontend_effect_revision())
     }
@@ -1195,40 +1181,86 @@ impl FrontendSurfaceComponent {
         )
         .entered();
         let (handler_name, merged_args) = unpack_handler_args(target.handler(), args);
+        self.run_script_call(target.instance_key(), handler_name.as_ref(), |script_ctx| {
+            script_ctx
+                .call_handler(handler_name.as_ref(), merged_args.as_ref())
+                .map(|()| Vec::new())
+        })
+    }
+
+    /// The earliest pending `task` deadline across this surface's runtimes.
+    pub(super) fn next_script_task_deadline(&self) -> Option<Instant> {
+        self.runtimes
+            .lock()
+            .unwrap()
+            .values()
+            .filter_map(|runtime| runtime.script_ctx.next_task_deadline())
+            .min()
+    }
+
+    /// Run every runtime's due `task.delay` / `task.spawn` work and process it
+    /// as a handler call: state sync, invalidation, published events and
+    /// element actions.
+    pub(super) fn run_due_script_tasks(
+        &mut self,
+        now: Instant,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let due: Vec<Arc<str>> = self
+            .runtimes
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, runtime)| {
+                runtime
+                    .script_ctx
+                    .next_task_deadline()
+                    .is_some_and(|deadline| deadline <= now)
+            })
+            .map(|(key, _)| Arc::clone(key))
+            .collect();
+        let mut requests = Vec::new();
+        for instance_key in due {
+            requests.extend(
+                self.run_script_call(Some(&instance_key), "task", |script_ctx| {
+                    Ok(script_ctx.run_due_tasks(now))
+                })?,
+            );
+        }
+        Ok(requests)
+    }
+
+    /// Run `call` against one runtime's script context, then apply what it
+    /// did. `Err` means the call failed as a whole: it is reported and its
+    /// effects are dropped. `Ok` carries errors from independent callbacks
+    /// that failed while the rest of the call completed; each is reported and
+    /// the call's effects are applied.
+    fn run_script_call(
+        &mut self,
+        instance_key: Option<&str>,
+        label: &str,
+        call: impl FnOnce(&mut ScriptContext) -> Result<Vec<ScriptError>, ScriptError>,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
         let mut runtimes = self.runtimes.lock().unwrap();
-        let instance_key = target
-            .instance_key()
-            .unwrap_or_else(|| self.root_instance_key());
+        let explicit_instance = instance_key;
+        let instance_key = instance_key.unwrap_or_else(|| self.root_instance_key());
         let Some(runtime) = runtimes.get_mut(instance_key) else {
             return Ok(Vec::new());
         };
-        if let Err(source) = runtime
-            .script_ctx
-            .call_handler(handler_name.as_ref(), merged_args.as_ref())
-        {
-            let error_message = source.to_string();
-            let component_id = runtime.module_id.clone();
-            tracing::warn!(
-                component_id = %component_id,
-                handler = %handler_name,
-                error = %error_message,
-                "frontend event handler failed"
-            );
-            if let Some(diagnostics) = &self.diagnostics {
-                diagnostics.record_handler_error_with_source(
-                    component_id.clone(),
-                    handler_name.to_string(),
-                    error_message,
-                    Some(runtime.source_path.display().to_string()),
-                    runtime.script_source_span,
-                );
+        match call(&mut runtime.script_ctx) {
+            Err(source) => {
+                Self::record_script_call_error(&self.diagnostics, runtime, label, &source);
+                Self::drain_script_diagnostics(&self.diagnostics, runtime);
+                let generation = runtime.script_ctx.state().mutation_generation();
+                let runtime_key = instance_key.to_string();
+                drop(runtimes);
+                self.sync_runtime_generation(&runtime_key, generation);
+                return Ok(Vec::new());
             }
-            Self::drain_script_diagnostics(&self.diagnostics, runtime);
-            let generation = runtime.script_ctx.state().mutation_generation();
-            let runtime_key = instance_key.to_string();
-            drop(runtimes);
-            self.sync_runtime_generation(&runtime_key, generation);
-            return Ok(Vec::new());
+            Ok(partial_errors) => {
+                for source in &partial_errors {
+                    Self::record_script_call_error(&self.diagnostics, runtime, label, source);
+                }
+            }
         }
         Self::normalize_script_props(&self.diagnostics, runtime);
         Self::drain_script_diagnostics(&self.diagnostics, runtime);
@@ -1238,14 +1270,16 @@ impl FrontendSurfaceComponent {
             runtime.script_ctx.state_mut().clear_dirty();
         }
         let published = runtime.script_ctx.drain_published_events();
+        let shell_effects = take_shell_effects(runtime);
         let generation = runtime.script_ctx.state().mutation_generation();
         let runtime_key = instance_key.to_string();
         drop(runtimes);
         self.sync_runtime_generation(&runtime_key, generation);
 
-        let (mut events, neighbors_dirty) = match target.instance_key() {
+        let (mut events, neighbors_dirty) = match explicit_instance {
             Some(instance_key) => {
-                let mut events = self.drain_local_script_events(instance_key, published);
+                let mut events = self.drain_local_script_events(published);
+                events.extend(self.lower_shell_effects(shell_effects));
                 let (neighbors_dirty, mut neighbor_events) =
                     self.resync_binding_neighbors(instance_key);
                 events.append(&mut neighbor_events);
@@ -1253,16 +1287,16 @@ impl FrontendSurfaceComponent {
             }
             None => {
                 // The root ID is borrowed from `self` for the runtime lookup above.
-                // Most ordinary handlers neither publish scheduling events nor
-                // participate in live bindings, so avoid cloning that ID before
-                // every dispatch. The uncommon post-dispatch paths still receive
-                // an owned key, preserving their existing behavior.
+                // Most ordinary handlers neither publish events nor participate
+                // in live bindings, so avoid cloning that ID before every
+                // dispatch.
                 let needs_neighbor_sync = self.has_binding_neighbors(self.root_instance_key());
-                if published.is_empty() && !needs_neighbor_sync {
+                if published.is_empty() && shell_effects.is_none() && !needs_neighbor_sync {
                     (Vec::new(), false)
                 } else {
                     let instance_key = self.root_instance_key().to_string();
-                    let mut events = self.drain_local_script_events(&instance_key, published);
+                    let mut events = self.drain_local_script_events(published);
+                    events.extend(self.lower_shell_effects(shell_effects));
                     let (neighbors_dirty, mut neighbor_events) = if needs_neighbor_sync {
                         self.resync_binding_neighbors(&instance_key)
                     } else {
@@ -1297,6 +1331,40 @@ impl FrontendSurfaceComponent {
         }
 
         Ok(events)
+    }
+
+    fn lower_shell_effects(
+        &self,
+        effects: Option<(EffectScope, Vec<FrontendEffect>)>,
+    ) -> Vec<CoreRequest> {
+        let Some((scope, effects)) = effects else {
+            return Vec::new();
+        };
+        typed_effects_to_requests_at(scope, effects, self.current_frontend_effect_revision())
+    }
+
+    fn record_script_call_error(
+        diagnostics: &Option<Diagnostics>,
+        runtime: &EmbeddedFrontendRuntime,
+        label: &str,
+        source: &ScriptError,
+    ) {
+        let error_message = source.to_string();
+        tracing::warn!(
+            component_id = %runtime.module_id,
+            handler = %label,
+            error = %error_message,
+            "frontend event handler failed"
+        );
+        if let Some(diagnostics) = diagnostics {
+            diagnostics.record_handler_error_with_source(
+                runtime.module_id.clone(),
+                label.to_string(),
+                error_message,
+                Some(runtime.source_path.display().to_string()),
+                runtime.script_source_span,
+            );
+        }
     }
 
     fn has_binding_neighbors(&self, instance_key: &str) -> bool {
@@ -1366,10 +1434,12 @@ impl FrontendSurfaceComponent {
                 state_dirty = true;
             }
             let published = neighbor.script_ctx.drain_published_events();
+            let shell_effects = take_shell_effects(neighbor);
             let generation = neighbor.script_ctx.state().mutation_generation();
             drop(runtimes);
             self.sync_runtime_generation(&neighbor_key, generation);
-            events.extend(self.drain_local_script_events(&neighbor_key, published));
+            events.extend(self.drain_local_script_events(published));
+            events.extend(self.lower_shell_effects(shell_effects));
         }
         (state_dirty, events)
     }
@@ -2020,8 +2090,7 @@ pub(super) fn merge_reloaded_props(
         }
     }
     for (name, value) in &next {
-        if !previous.contains_key(name)
-            && merged.get(name).is_some_and(|current| current != value)
+        if !previous.contains_key(name) && merged.get(name).is_some_and(|current| current != value)
         {
             script_owned.insert(name.clone());
         }
@@ -2114,9 +2183,11 @@ mod prop_resolution_tests {
                 "instances": { "instance": { "width": "36px" } }
             }
         });
-        let mut script_ctx =
-            ScriptContext::new("@test/props", mesh_core_capability::CapabilitySet::default())
-                .expect("script context");
+        let mut script_ctx = ScriptContext::new(
+            "@test/props",
+            mesh_core_capability::CapabilitySet::default(),
+        )
+        .expect("script context");
         script_ctx
             .load_script(
                 r#"
@@ -2392,17 +2463,9 @@ fn keybind_trigger_descriptor(trigger: &mesh_core_module::KeybindTrigger) -> ser
 }
 
 #[cfg(test)]
-mod scheduled_handler_tests {
+mod runtime_key_tests {
     use super::*;
-    use std::collections::HashMap;
-    use std::time::{Duration, Instant};
-
-    #[test]
-    fn scheduled_handler_target_carries_typed_owner() {
-        let target = scheduled_handler_target("@mesh/panel/local:Clock", "close");
-        assert_eq!(target.handler(), "close");
-        assert_eq!(target.instance_key(), Some("@mesh/panel/local:Clock"));
-    }
+    use std::time::Instant;
 
     #[test]
     fn runtime_key_helpers_match_legacy_behavior() {
@@ -2454,108 +2517,6 @@ mod scheduled_handler_tests {
 
         eprintln!(
             "embedded runtime helpers: format/full scan {old_time:?}; presized/short-circuit {new_time:?}; ratio {:.2}x",
-            old_time.as_secs_f64() / new_time.as_secs_f64()
-        );
-        assert_eq!(old_total, new_total);
-        assert!(new_time < old_time);
-    }
-
-    // cargo test -p mesh-core-shell --release -- scheduled_handler_name_presizing_beats_format_benchmark --ignored --nocapture
-    #[test]
-    #[ignore = "release-only scheduled handler namespace microbenchmark"]
-    fn scheduled_handler_name_presizing_beats_format_benchmark() {
-        let instance_key = "@mesh/panel/local:StatusCluster/import:NetworkControls";
-        let handler = "onConnectionStateChanged";
-        let iterations = 1_000_000;
-
-        let old_started = Instant::now();
-        let mut old_total = 0usize;
-        for _ in 0..iterations {
-            old_total ^=
-                std::hint::black_box(format!("__mesh_embed__::{instance_key}::{handler}").len());
-        }
-        let old_time = old_started.elapsed();
-
-        let new_started = Instant::now();
-        let mut new_total = 0usize;
-        for _ in 0..iterations {
-            new_total ^= std::hint::black_box(
-                scheduled_handler_target(instance_key, handler).dynamic_heap_bytes(),
-            );
-        }
-        let new_time = new_started.elapsed();
-
-        eprintln!(
-            "scheduled handler namespace: format {old_time:?}; presized {new_time:?}; ratio {:.2}x",
-            old_time.as_secs_f64() / new_time.as_secs_f64()
-        );
-        assert_eq!(old_total, 0);
-        assert_eq!(new_total, 0);
-        assert!(new_time < old_time);
-    }
-
-    // cargo test -p mesh-core-shell --release -- scheduled_handler_cached_name_beats_tick_format --ignored --nocapture
-    #[test]
-    #[ignore = "release-only scheduled handler dispatch microbenchmark"]
-    fn scheduled_handler_cached_name_beats_tick_format() {
-        let now = Instant::now();
-        let old_handlers = (0..256)
-            .map(|index| {
-                (
-                    format!("handler-{index}"),
-                    (
-                        format!("@mesh/panel/local:Child{index}"),
-                        "closeBridge".to_string(),
-                        now - Duration::from_millis(1),
-                    ),
-                )
-            })
-            .collect::<HashMap<_, _>>();
-        let new_handlers = old_handlers
-            .iter()
-            .map(|(key, (instance_key, handler, deadline))| {
-                (
-                    key.clone(),
-                    ScheduledHandler {
-                        target: scheduled_handler_target(instance_key, handler),
-                        deadline: *deadline,
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>();
-        let iterations = 20_000usize;
-
-        let old_started = Instant::now();
-        let mut old_total = 0usize;
-        for _ in 0..iterations {
-            let due = old_handlers
-                .iter()
-                .filter(|(_, (_, _, deadline))| *deadline <= now)
-                .map(|(key, (instance_key, handler, _))| {
-                    (
-                        key.clone(),
-                        format!("__mesh_embed__::{instance_key}::{handler}"),
-                    )
-                })
-                .collect::<Vec<_>>();
-            old_total = old_total.wrapping_add(std::hint::black_box(due.len()));
-        }
-        let old_time = old_started.elapsed();
-
-        let new_started = Instant::now();
-        let mut new_total = 0usize;
-        for _ in 0..iterations {
-            let due = new_handlers
-                .iter()
-                .filter(|(_, scheduled)| scheduled.deadline <= now)
-                .map(|(key, scheduled)| (key.clone(), scheduled.target.clone()))
-                .collect::<Vec<_>>();
-            new_total = new_total.wrapping_add(std::hint::black_box(due.len()));
-        }
-        let new_time = new_started.elapsed();
-
-        eprintln!(
-            "scheduled handler dispatch prep: format-on-tick {old_time:?}; cached-name {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert_eq!(old_total, new_total);

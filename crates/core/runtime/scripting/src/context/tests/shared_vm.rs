@@ -109,26 +109,36 @@ fn thread_vm_reclaims_dropped_context_environments() {
             reclaimed < live,
             "dropping contexts must make their _ENV graphs collectible"
         );
-        let second_wave: Vec<_> = (0..64)
-            .map(|index| {
-                let mut context =
-                    ScriptContext::new(format!("@mesh/gc-{index}"), CapabilitySet::default()).unwrap();
-                context
-                    .load_script(&format!(
-                        "payload = {{ name = 'context-{index}', values = table.create(128, {index}) }}"
-                    ))
-                    .unwrap();
-                context
-            })
-            .collect();
-        drop(second_wave);
-        lua.gc_collect().unwrap();
-        lua.gc_collect().unwrap();
-        let second_reclaimed = lua.used_memory();
-        assert!(
-            second_reclaimed <= reclaimed.saturating_add(64 * 1024),
-            "repeated create/drop waves must not retain another set of _ENV graphs: first={reclaimed}, second={second_reclaimed}"
-        );
+        // A leak grows with every wave. The first waves can still grow the
+        // realm's own tables (strings, registry), so compare later waves with
+        // the second one instead of the first.
+        let wave = |lua: &mlua::Lua| {
+            let contexts: Vec<_> = (0..64)
+                .map(|index| {
+                    let mut context =
+                        ScriptContext::new(format!("@mesh/gc-{index}"), CapabilitySet::default())
+                            .unwrap();
+                    context
+                        .load_script(&format!(
+                            "payload = {{ name = 'context-{index}', values = table.create(128, {index}) }}"
+                        ))
+                        .unwrap();
+                    context
+                })
+                .collect();
+            drop(contexts);
+            lua.gc_collect().unwrap();
+            lua.gc_collect().unwrap();
+            lua.used_memory()
+        };
+        let settled = wave(&lua);
+        for _ in 0..3 {
+            let retained = wave(&lua);
+            assert!(
+                retained <= settled.saturating_add(64 * 1024),
+                "repeated create/drop waves must not retain another set of _ENV graphs: settled={settled}, now={retained}"
+            );
+        }
     })
     .join()
     .unwrap();
@@ -356,14 +366,20 @@ function init() end
     parent.install_live_binding("child", &child).unwrap();
     parent.call_handler("probe", &[]).unwrap();
 
-    assert_eq!(parent.state.get("has_getfenv"), Some(serde_json::json!(false)));
+    assert_eq!(
+        parent.state.get("has_getfenv"),
+        Some(serde_json::json!(false))
+    );
     assert_eq!(parent.state.get("nested_value"), Some(serde_json::json!(7)));
     assert_eq!(parent.state.get("iterated"), Some(serde_json::json!(2)));
     assert_eq!(
         parent.state.get("read_value"),
         Some(serde_json::json!("child-secret"))
     );
-    assert_eq!(parent.state.get("written_value"), Some(serde_json::json!(9)));
+    assert_eq!(
+        parent.state.get("written_value"),
+        Some(serde_json::json!(9))
+    );
     assert_eq!(
         parent.state.get("subscribers_hidden"),
         Some(serde_json::json!(true))

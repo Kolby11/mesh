@@ -39,20 +39,23 @@ audio_surface_hidden = true
 audio_aria_expanded = "false"
 audio_pointer_inside = false
 audio_dragging = false
-local CLOSE_BRIDGE_KEY = "audio-popover-close"
-local CLOSE_BRIDGE_DELAY_MS = 400
 local do_close
+local CLOSE_BRIDGE_DELAY_MS = 400
+local close_bridge = nil
 
 local function cancel_bridge_close()
-    mesh.events.publish("shell.cancel-handler", { key = CLOSE_BRIDGE_KEY })
+    if close_bridge ~= nil then
+        close_bridge:cancel()
+        close_bridge = nil
+    end
 end
 
 local function schedule_bridge_close()
-    mesh.events.publish("shell.schedule-handler", {
-        key = CLOSE_BRIDGE_KEY,
-        handler = "closeAudioPopoverBridge",
-        delay_ms = CLOSE_BRIDGE_DELAY_MS,
-    })
+    cancel_bridge_close()
+    close_bridge = task.delay(CLOSE_BRIDGE_DELAY_MS, function()
+        close_bridge = nil
+        do_close()
+    end)
 end
 
 local function sync_trigger_state()
@@ -193,10 +196,6 @@ function onVolumeLeave()
     if not audio_surface_hidden and not audio_dragging then
         schedule_bridge_close()
     end
-end
-
-function closeAudioPopoverBridge()
-    do_close()
 end
 
 function onAudioToggle()

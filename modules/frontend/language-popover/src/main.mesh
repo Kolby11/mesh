@@ -70,19 +70,24 @@ current_flag = FLAGS["en"]
 local locale_changed = nil
 
 open = false
-local CLOSE_BRIDGE_KEY = "language-popover-close"
 local CLOSE_BRIDGE_DELAY_MS = 400
+local close_bridge = nil
+local close_from_bridge
 
 local function cancel_bridge_close()
-    mesh.events.publish("shell.cancel-handler", { key = CLOSE_BRIDGE_KEY })
+    if close_bridge ~= nil then
+        close_bridge:cancel()
+        close_bridge = nil
+    end
 end
 
 local function schedule_bridge_close()
-    mesh.events.publish("shell.schedule-handler", {
-        key = CLOSE_BRIDGE_KEY,
-        handler = "closeLanguagePopoverBridge",
-        delay_ms = CLOSE_BRIDGE_DELAY_MS,
-    })
+    cancel_bridge_close()
+    close_bridge = task.delay(CLOSE_BRIDGE_DELAY_MS, function()
+        close_bridge = nil
+        close_from_bridge()
+    end)
+    self.CloseScheduled:fire()
 end
 
 selected_locale = "en"
@@ -322,13 +327,19 @@ function onOptionKeyDown(event)
     end
 end
 
-function closeLanguagePopoverBridge()
+close_from_bridge = function()
     pointer_inside = false
     open = false
     -- Closed: the next open starts from the selected locale again.
     recenter_ring()
     sync_options()
     self.CloseRequested:fire()
+end
+
+-- Called by the trigger when the pointer comes back to it, so a close this
+-- popover scheduled on leave does not fire under the cursor.
+function cancelPendingClose()
+    cancel_bridge_close()
 end
 </script>
 

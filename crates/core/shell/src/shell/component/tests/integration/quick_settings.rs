@@ -137,14 +137,14 @@ fn real_core_surfaces_quick_settings_close_publishes_hide_surface() {
     ctx.load_script(
         r#"
 function onClose()
-    mesh.events.publish("shell.hide-surface", { surface_id = "@mesh/quick-settings" })
+    mesh.shell.hide_surface("@mesh/quick-settings")
 end
 "#,
     )
     .unwrap();
 
     ctx.call_handler("onClose", &[]).unwrap();
-    let requests = crate::shell::service::script_events_to_requests(ctx.drain_published_events());
+    let requests = crate::shell::service::context_shell_requests(&mut ctx);
 
     match requests.as_slice() {
         [CoreRequest::HideSurface { surface_id }] => {
@@ -160,7 +160,7 @@ fn quick_settings_open_settings_publishes_show_settings_surface() {
     ctx.load_script(
         r#"
 function onOpenSettings()
-    mesh.events.publish("shell.show-surface", { surface_id = "@mesh/settings" })
+    mesh.shell.show_surface("@mesh/settings")
     mesh.popover.hide("@mesh/quick-settings")
 end
 "#,
@@ -168,7 +168,7 @@ end
     .unwrap();
 
     ctx.call_handler("onOpenSettings", &[]).unwrap();
-    let requests = crate::shell::service::script_events_to_requests(ctx.drain_published_events());
+    let requests = crate::shell::service::context_shell_requests(&mut ctx);
 
     match requests.as_slice() {
         [
@@ -223,11 +223,7 @@ function onToggleAudioSurface(event)
     local margin_top = 0
 
     if audio_surface_hidden then
-        mesh.events.publish("shell.position-surface", {
-            surface_id = audio_surface_id,
-            margin_top = margin_top,
-            margin_left = margin_left
-        })
+        mesh.shell.position_surface(audio_surface_id, margin_top, margin_left)
     end
 
     audio_surface_hidden = not audio_surface_hidden

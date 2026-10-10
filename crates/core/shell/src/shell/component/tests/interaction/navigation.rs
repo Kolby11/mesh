@@ -1882,7 +1882,10 @@ fn navigation_quick_settings_popup_animates_open_and_close() {
     component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
     let (entering_opacity, entering_transformed) = popover_style(&component, &key);
     assert_eq!(entering_opacity, 0.0, "the popup should start transparent");
-    assert!(entering_transformed, "the popup should start offset and scaled");
+    assert!(
+        entering_transformed,
+        "the popup should start offset and scaled"
+    );
     component.set_entering_child_keys_from_slice(&[]);
     component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
     std::thread::sleep(Duration::from_millis(40));
@@ -1899,12 +1902,15 @@ fn navigation_quick_settings_popup_animates_open_and_close() {
     component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
     assert_eq!(popover_style(&component, &key).0, 1.0);
 
+    // Leaving the trigger closes the popup once its hover bridge runs out.
     component
         .call_namespaced_handler(
-            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::closeSettingsBridge",
+            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onSettingsLeave",
             &[],
         )
         .unwrap();
+    std::thread::sleep(Duration::from_millis(420));
+    component.tick().unwrap();
     assert!(component.child_hide_transition_ms(&key) >= 150);
     component.set_closing_child_keys_from_slice(&[key.as_str()]);
     component.paint(&theme, extent, &mut buffer, 1.0).unwrap();

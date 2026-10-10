@@ -306,6 +306,45 @@ are supplied through a temporary locals-first function environment. Tooling and
 VM-less preview paths may use static approximation, but that approximation is
 not the language specification.
 
+### Class and style directives
+
+`class:name={condition}` adds the class `name` while the condition is truthy.
+`style:property={value}` sets one inline declaration, and leaves it out
+while the value is `nil` or `false`. Both combine with a static or bound
+`class` / `style` on the same element.
+
+```xml
+<button
+  class="chip"
+  class:chip--on={active}
+  class:chip--busy={pending ~= nil}
+  style:background-color={swatch}
+>{label}</button>
+```
+
+Directives are shorthand for one `class` / `style` binding expression, so they
+are tracked and diffed like any other binding. Class names may contain
+letters, digits, `-` and `_`; style properties are lowercase with `-`.
+
+### Conditional and list blocks
+
+`{#if}` renders its children while a condition is truthy, with optional
+`{:else if}` and `{:else}` branches. `{#for}` repeats its children for each
+item of a list; give it a `key` whenever items can be reordered, inserted or
+removed, so each row keeps its identity and state.
+
+```xml
+{#if devices and #devices > 0}
+  {#for device in devices key={device.id}}
+    <list-item>{device.name}</list-item>
+  {/for}
+{:else if scanning}
+  <text>Searching…</text>
+{:else}
+  <empty-state>No devices</empty-state>
+{/if}
+```
+
 ### Two-way binding
 
 Use `bind:attr="variable"` to sync an element's attribute back to script
@@ -732,6 +771,59 @@ Wayland shell: `wlr-layer-shell-v1` plus `xdg_popup` support through
 layer-shell `get_popup`. wlroots-family compositors, KDE, and Hyprland are in
 scope; GNOME's lack of stable layer-shell support is a non-goal for this path.
 
+### Shell requests
+
+`mesh.shell` asks the shell to act on surfaces. Every function needs the
+module's `shell.surface` capability; arguments and the capability are checked
+at the call, which raises an error on failure.
+
+| Call | Effect |
+| --- | --- |
+| `mesh.shell.show_surface(id)` / `hide_surface(id)` / `toggle_surface(id)` | Show, hide or toggle a surface. |
+| `mesh.shell.activate_popover(id, event?, { focus = bool }?)` | Open a popover surface anchored to the element in `event`. Same as `mesh.popover.activate`. |
+| `mesh.shell.hide_popover(id, { defer = bool }?)` | Hide a popover surface; `defer` waits out the shell hover bridge. Same as `mesh.popover.hide`. |
+| `mesh.shell.set_surface_role(id, "layer" \| "window")` / `toggle_surface_role(id)` | Move a promotable surface between shell chrome and a window. |
+| `mesh.shell.promote_widget(id, node_key)` / `demote_widget(id, node_key)` / `set_widget_role(id, node_key, role)` | Promote an embedded widget to its own window, or dock it back. |
+| `mesh.shell.position_surface(id, margin_top, margin_left)` | Move a surface; margins are whole pixels. |
+
+`mesh.events.publish` is for broadcasting to other modules. Publishing a
+retired `shell.*` channel such as `shell.show-surface` raises an error that
+names the `mesh.shell` replacement.
+
+### Timers and tasks
+
+The `task` library schedules work on the component instance. Delays are in
+milliseconds.
+
+| Call | Effect |
+| --- | --- |
+| `task.delay(ms, fn)` | Run `fn` once, `ms` from now. Returns a handle. |
+| `task.spawn(fn, ...)` | Run `fn(...)` as a task now, until it finishes or sleeps. Returns a handle while it sleeps, otherwise `nil`. |
+| `task.sleep(ms)` | Suspend the current task. Only valid inside `task.spawn`. |
+| `handle:cancel()` / `task.cancel(handle)` | Drop a pending task. Returns whether it was still pending. |
+
+```lua
+local close_timer = nil
+
+function onTriggerLeave()
+    if close_timer then close_timer:cancel() end
+    close_timer = task.delay(400, function()
+        close_timer = nil
+        open = false
+    end)
+end
+```
+
+Tasks run like event handlers: with the same execution budget, and with state
+changes and published events applied afterwards. Scheduling and cancelling stay
+inside the script, so neither reaches the shell. Pending tasks belong to the
+instance and are dropped when it unmounts or reloads. A delay must be a
+finite number between 0 and 24 hours, and one instance may have at most 256
+pending tasks; anything else raises an error at the call. An error inside a
+task is reported as a handler error and does not stop other due tasks.
+The removed `shell.schedule-handler` and `shell.cancel-handler` channels now
+raise an error that points to `task.delay`.
+
 ---
 
 ## Style block
@@ -856,7 +948,7 @@ function render(self)
 end
 
 function onVolumeClick()
-  mesh.events.publish("shell.toggle-surface", { surface_id = "@mesh/quick-settings" })
+  mesh.shell.toggle_surface("@mesh/quick-settings")
 end
 </script>
 

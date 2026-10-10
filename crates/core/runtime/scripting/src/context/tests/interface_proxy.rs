@@ -2,6 +2,7 @@ use super::super::*;
 use super::common::*;
 use mesh_core_capability::{Capability, CapabilitySet};
 use mesh_core_elements::VariableStore;
+use mesh_core_frontend_abi::{FrontendEffect, SurfaceEffect, SurfaceRole};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -845,7 +846,7 @@ end
 }
 
 #[test]
-fn popover_activate_publishes_focus_option_and_trigger_target() {
+fn popover_activate_queues_focus_option_and_trigger_target() {
     let caps = CapabilitySet::from_ids(["shell.surface"]);
     let mut ctx = ScriptContext::new("@test/nav", caps).unwrap();
     ctx.load_script(
@@ -862,26 +863,33 @@ end
 
     ctx.call_init().unwrap();
 
-    let published = ctx.drain_published_events();
-    assert_eq!(published.len(), 1);
-    assert_eq!(published[0].channel, "shell.activate-popover");
-    assert_eq!(
-        published[0].payload,
-        serde_json::json!({
-            "surface_id": "@test/popover",
-            "trigger_surface": "@test/nav",
-            "trigger_key": "volume-button",
-            "focus": false,
-        })
+    assert!(ctx.drain_published_events().is_empty());
+    let effects = ctx.drain_shell_effects();
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [FrontendEffect::Surface(SurfaceEffect::ActivatePopover {
+                surface_id,
+                trigger_surface,
+                trigger_key,
+                focus: false,
+            })] if surface_id == "@test/popover"
+                && trigger_surface == "@test/nav"
+                && trigger_key == "volume-button"
+        ),
+        "{effects:?}"
     );
 }
 
 #[test]
-fn raw_shell_event_requires_the_registry_capability() {
+fn shell_calls_require_the_surface_capability_at_the_call() {
     let mut ctx = ScriptContext::new("@test/unprivileged", CapabilitySet::default()).unwrap();
     ctx.load_script(
         r#"
-function init()
+function typed()
+    mesh.shell.show_surface("@mesh/settings")
+end
+function raw()
     mesh.events.publish("shell.show-surface", { surface_id = "@mesh/settings" })
 end
 "#,
@@ -889,13 +897,78 @@ end
     .unwrap();
 
     let error = ctx
-        .call_init()
-        .expect_err("unprivileged shell event must fail");
-    assert!(matches!(
-        error,
-        ScriptError::OperationRejected(message) if message.contains("shell.surface")
-    ));
+        .call_handler("typed", &[])
+        .expect_err("unprivileged shell call must fail");
+    assert!(error.to_string().contains("shell.surface"), "{error}");
+    let error = ctx
+        .call_handler("raw", &[])
+        .expect_err("removed shell channel must fail");
+    assert!(
+        error.to_string().contains("mesh.shell.show_surface"),
+        "{error}"
+    );
     assert!(ctx.drain_published_events().is_empty());
+    assert!(ctx.drain_shell_effects().is_empty());
+}
+
+#[test]
+fn shell_calls_validate_arguments_at_the_call() {
+    let caps = CapabilitySet::from_ids(["shell.surface"]);
+    let mut ctx = ScriptContext::new("@test/panel", caps).unwrap();
+    ctx.load_script(
+        r#"
+function missing_id() mesh.shell.show_surface() end
+function empty_id() mesh.shell.hide_surface("") end
+function bad_role() mesh.shell.set_surface_role("@test/panel", "floating") end
+function bad_margin() mesh.shell.position_surface("@test/panel", "top", 0) end
+function huge_margin() mesh.shell.position_surface("@test/panel", 2^40, 0) end
+function ok()
+    mesh.shell.set_surface_role("@test/panel", "TopLevel")
+    mesh.shell.position_surface("@test/panel", 4, -8)
+    mesh.shell.promote_widget("@test/panel", "root/widgets/media")
+end
+"#,
+    )
+    .unwrap();
+
+    for handler in [
+        "missing_id",
+        "empty_id",
+        "bad_role",
+        "bad_margin",
+        "huge_margin",
+    ] {
+        assert!(
+            ctx.call_handler(handler, &[]).is_err(),
+            "{handler} should raise"
+        );
+    }
+    assert!(ctx.drain_shell_effects().is_empty());
+
+    ctx.call_handler("ok", &[]).unwrap();
+    let effects = ctx.drain_shell_effects();
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [
+                FrontendEffect::Surface(SurfaceEffect::SetRole {
+                    role: SurfaceRole::Window,
+                    ..
+                }),
+                FrontendEffect::Surface(SurfaceEffect::Position {
+                    margin_top: 4,
+                    margin_left: -8,
+                    ..
+                }),
+                FrontendEffect::Surface(SurfaceEffect::SetChildRole {
+                    node_key,
+                    role: SurfaceRole::Window,
+                    ..
+                }),
+            ] if node_key == "root/widgets/media"
+        ),
+        "{effects:?}"
+    );
 }
 
 #[test]
@@ -913,15 +986,16 @@ end
 
     ctx.call_init().unwrap();
 
-    let published = ctx.drain_published_events();
-    assert_eq!(published.len(), 1);
-    assert_eq!(published[0].channel, "shell.hide-popover");
-    assert_eq!(
-        published[0].payload,
-        serde_json::json!({
-            "surface_id": "@test/popover",
-            "defer_for_hover_bridge": true,
-        })
+    let effects = ctx.drain_shell_effects();
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [FrontendEffect::Surface(SurfaceEffect::HidePopover {
+                surface_id,
+                defer_for_hover_bridge: true,
+            })] if surface_id == "@test/popover"
+        ),
+        "{effects:?}"
     );
 }
 

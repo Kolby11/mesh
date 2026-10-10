@@ -462,3 +462,71 @@ fn tracking_store_records_dotted_reads() {
     let reads = t.into_reads();
     assert_eq!(reads, vec![("audio".to_string(), "percent".to_string())]);
 }
+
+#[test]
+fn class_and_style_directives_follow_script_state() {
+    let component = mesh_core_component::parse_component(
+        r#"
+<template>
+  <box class="row" class:active={selected} class:muted={muted} style:opacity={fade} style:color={tint} />
+</template>
+<style>
+  .active { opacity: 0.5; }
+</style>
+"#,
+    )
+    .unwrap();
+    let manifest = test_manifest();
+    let theme = mesh_core_theme::default_theme();
+    let build = |values: serde_json::Value| {
+        let store = MapStore(
+            values
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+        );
+        build_widget_tree_from_component(
+            &component,
+            &manifest,
+            &theme,
+            240.0,
+            80.0,
+            None,
+            "root",
+            Some(&store),
+            &[],
+        )
+    };
+
+    let on = build(serde_json::json!({
+        "selected": true, "muted": false, "fade": serde_json::Value::Null, "tint": "#ff0000"
+    }));
+    let node = on.children.first().expect("box");
+    let classes: Vec<_> = node
+        .attributes
+        .get("class")
+        .expect("class")
+        .split_whitespace()
+        .collect();
+    assert_eq!(classes, ["row", "active"]);
+    assert_eq!(node.computed_style.opacity, 0.5);
+    let style = node.attributes.get("style").expect("style");
+    assert!(style.contains("color: #ff0000;"), "{style}");
+    assert!(!style.contains("opacity"), "{style}");
+
+    let off = build(serde_json::json!({
+        "selected": false, "muted": true, "fade": 0.25, "tint": false
+    }));
+    let node = off.children.first().expect("box");
+    let classes: Vec<_> = node
+        .attributes
+        .get("class")
+        .expect("class")
+        .split_whitespace()
+        .collect();
+    assert_eq!(classes, ["row", "muted"]);
+    assert_eq!(node.computed_style.opacity, 0.25);
+    assert!(!node.attributes.get("style").unwrap().contains("color"));
+}

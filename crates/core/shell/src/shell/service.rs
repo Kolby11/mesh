@@ -6,7 +6,7 @@ use mesh_core_capability::Capability;
 use mesh_core_capability::CapabilityCatalog;
 use mesh_core_frontend_abi::{
     DebugEffect, EffectScope, EffectSource, FrontendEffect, FrontendEffectRevision,
-    ScopedFrontendEffect, ServiceEffect, SurfaceEffect, SurfaceRole,
+    ScopedFrontendEffect, ServiceEffect,
 };
 use mesh_core_frontend_shell_adapter::ShellEffectAdapter;
 use mesh_core_scripting::{OperationRegistry, OperationRejection, PublishedEvent, ScriptState};
@@ -194,6 +194,44 @@ pub(super) fn script_events_to_requests_at(
         .collect()
 }
 
+/// Lower typed `mesh.shell` effects. They were validated and authorized at
+/// the Luau call, so no channel matching or payload reading happens here; the
+/// ABI adapter still checks the effect against its caller scope.
+pub(super) fn typed_effects_to_requests_at(
+    scope: EffectScope,
+    effects: Vec<FrontendEffect>,
+    revision: FrontendEffectRevision,
+) -> Vec<CoreRequest> {
+    effects
+        .into_iter()
+        .map(|effect| {
+            let effect = ScopedFrontendEffect::new(scope.clone(), effect).with_revision(revision);
+            ShellEffectAdapter::lower_at(effect, revision).unwrap_or_else(|error| {
+                CoreRequest::PublishDiagnostics {
+                    message: error.to_string(),
+                }
+            })
+        })
+        .collect()
+}
+
+/// Lower a standalone context's typed shell effects the way a live
+/// component does, for tests that drive a `ScriptContext` directly.
+#[cfg(test)]
+pub(crate) fn context_shell_requests(
+    ctx: &mut mesh_core_scripting::ScriptContext,
+) -> Vec<CoreRequest> {
+    let scope = EffectScope::new(
+        EffectSource::new(ctx.module_id.clone(), Some(ctx.instance_id.clone())),
+        ctx.capabilities.clone(),
+    );
+    typed_effects_to_requests_at(
+        scope,
+        ctx.drain_shell_effects(),
+        FrontendEffectRevision::new(0, 0),
+    )
+}
+
 fn lower_frontend_effect(
     event: &PublishedEvent,
     effect: FrontendEffect,
@@ -280,174 +318,6 @@ fn script_event_to_request_at(
                 revision,
             ))
         }
-        "shell.show-surface" => event
-            .payload
-            .get("surface_id")
-            .and_then(|v| v.as_str())
-            .map(|id| {
-                lower_frontend_effect(
-                    &event,
-                    FrontendEffect::Surface(SurfaceEffect::Show {
-                        surface_id: id.to_string(),
-                    }),
-                    revision,
-                )
-            }),
-        "shell.hide-surface" => event
-            .payload
-            .get("surface_id")
-            .and_then(|v| v.as_str())
-            .map(|id| {
-                lower_frontend_effect(
-                    &event,
-                    FrontendEffect::Surface(SurfaceEffect::Hide {
-                        surface_id: id.to_string(),
-                    }),
-                    revision,
-                )
-            }),
-        "shell.hide-popover" => {
-            let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
-            let defer_for_hover_bridge = event
-                .payload
-                .get("defer_for_hover_bridge")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            Some(lower_frontend_effect(
-                &event,
-                FrontendEffect::Surface(SurfaceEffect::HidePopover {
-                    surface_id: surface_id.to_string(),
-                    defer_for_hover_bridge,
-                }),
-                revision,
-            ))
-        }
-        "shell.set-surface-role" => {
-            let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
-            let role = event
-                .payload
-                .get("role")
-                .and_then(|v| v.as_str())
-                .and_then(mesh_core_surface_config::parse_surface_role)
-                .map(|role| match role {
-                    mesh_core_wayland::SurfaceRole::Layer => SurfaceRole::Layer,
-                    mesh_core_wayland::SurfaceRole::Window => SurfaceRole::Window,
-                })?;
-            Some(lower_frontend_effect(
-                &event,
-                FrontendEffect::Surface(SurfaceEffect::SetRole {
-                    surface_id: surface_id.to_string(),
-                    role,
-                }),
-                revision,
-            ))
-        }
-        "shell.toggle-surface-role" => event
-            .payload
-            .get("surface_id")
-            .and_then(|v| v.as_str())
-            .map(|id| {
-                lower_frontend_effect(
-                    &event,
-                    FrontendEffect::Surface(SurfaceEffect::ToggleRole {
-                        surface_id: id.to_string(),
-                    }),
-                    revision,
-                )
-            }),
-        "shell.promote-widget" | "shell.demote-widget" | "shell.set-widget-role" => {
-            let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
-            let node_key = event.payload.get("node_key").and_then(|v| v.as_str())?;
-            let role = match event.channel.as_str() {
-                "shell.promote-widget" => SurfaceRole::Window,
-                "shell.demote-widget" => SurfaceRole::Layer,
-                _ => event
-                    .payload
-                    .get("role")
-                    .and_then(|v| v.as_str())
-                    .and_then(mesh_core_surface_config::parse_surface_role)
-                    .map(|role| match role {
-                        mesh_core_wayland::SurfaceRole::Layer => SurfaceRole::Layer,
-                        mesh_core_wayland::SurfaceRole::Window => SurfaceRole::Window,
-                    })?,
-            };
-            Some(lower_frontend_effect(
-                &event,
-                FrontendEffect::Surface(SurfaceEffect::SetChildRole {
-                    surface_id: surface_id.to_string(),
-                    node_key: node_key.to_string(),
-                    role,
-                }),
-                revision,
-            ))
-        }
-        "shell.toggle-surface" => event
-            .payload
-            .get("surface_id")
-            .and_then(|v| v.as_str())
-            .map(|id| {
-                lower_frontend_effect(
-                    &event,
-                    FrontendEffect::Surface(SurfaceEffect::Toggle {
-                        surface_id: id.to_string(),
-                    }),
-                    revision,
-                )
-            }),
-        "shell.position-surface" => {
-            let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
-            let margin_top = payload_i32(&event.payload, "margin_top")?;
-            let margin_left = payload_i32(&event.payload, "margin_left")?;
-            Some(lower_frontend_effect(
-                &event,
-                FrontendEffect::Surface(SurfaceEffect::Position {
-                    surface_id: surface_id.to_string(),
-                    margin_top,
-                    margin_left,
-                }),
-                revision,
-            ))
-        }
-        "shell.activate-popover" => {
-            let surface_id = event.payload.get("surface_id").and_then(|v| v.as_str())?;
-            let trigger_surface = event
-                .payload
-                .get("trigger_surface")
-                .and_then(|v| v.as_str())?;
-            let trigger_key = event.payload.get("trigger_key").and_then(|v| v.as_str())?;
-            let focus = event
-                .payload
-                .get("focus")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(true);
-            Some(lower_frontend_effect(
-                &event,
-                FrontendEffect::Surface(SurfaceEffect::ActivatePopover {
-                    surface_id: surface_id.to_string(),
-                    trigger_surface: trigger_surface.to_string(),
-                    trigger_key: trigger_key.to_string(),
-                    focus,
-                }),
-                revision,
-            ))
-        }
-        // Emitted by the `mesh.locale.set` host API, which enforces
-        // `locale.write` before it publishes. The gate is at that boundary, so
-        // this arm stays a plain channel rather than becoming a service method
-        // — a second route in would mean two capability names for one write.
-        "shell.set-locale" => event
-            .payload
-            .get("locale")
-            .and_then(|v| v.as_str())
-            .map(|locale| {
-                lower_frontend_effect(
-                    &event,
-                    FrontendEffect::SetLocale {
-                        locale: locale.to_string(),
-                    },
-                    revision,
-                )
-            }),
         "shell.toggle-debug-overlay" => Some(lower_frontend_effect(
             &event,
             FrontendEffect::Debug(DebugEffect::ToggleOverlay),
@@ -576,6 +446,7 @@ fn payload_i32(payload: &serde_json::Value, key: &str) -> Option<i32> {
 mod tests {
     use super::*;
     use mesh_core_elements::VariableStore;
+    use mesh_core_frontend_abi::{SurfaceEffect, SurfaceRole};
 
     #[test]
     fn apply_service_update_does_not_leak_metadata_without_read_capability() {
@@ -700,29 +571,32 @@ mod tests {
         ));
     }
 
+    fn typed(effects: Vec<FrontendEffect>, module: &str, granted: &[&str]) -> Vec<CoreRequest> {
+        let scope = EffectScope::new(
+            EffectSource::new(module, Some(format!("{module}#0"))),
+            mesh_core_capability::CapabilitySet::from_ids(granted.iter().copied()),
+        );
+        typed_effects_to_requests_at(scope, effects, FrontendEffectRevision::new(0, 0))
+    }
+
     #[test]
-    fn script_events_to_requests_maps_widget_role_operations() {
-        let requests = script_events_to_requests(vec![
-            event_with(
-                "shell.promote-widget",
-                serde_json::json!({
-                    "surface_id": "@mesh/panel",
-                    "node_key": "root/widgets/media"
+    fn typed_shell_effects_map_widget_role_operations() {
+        let requests = typed(
+            vec![
+                FrontendEffect::Surface(SurfaceEffect::SetChildRole {
+                    surface_id: "@mesh/panel".into(),
+                    node_key: "root/widgets/media".into(),
+                    role: SurfaceRole::Window,
                 }),
-                "@mesh/panel",
-                &["shell.surface"],
-            ),
-            event_with(
-                "shell.set-widget-role",
-                serde_json::json!({
-                    "surface_id": "@mesh/panel",
-                    "node_key": "root/widgets/media",
-                    "role": "layer"
+                FrontendEffect::Surface(SurfaceEffect::SetChildRole {
+                    surface_id: "@mesh/panel".into(),
+                    node_key: "root/widgets/media".into(),
+                    role: SurfaceRole::Layer,
                 }),
-                "@mesh/panel",
-                &["shell.surface"],
-            ),
-        ]);
+            ],
+            "@mesh/panel",
+            &["shell.surface"],
+        );
 
         assert!(matches!(
             &requests[..],
@@ -742,6 +616,21 @@ mod tests {
                 && second_surface_id == surface_id
                 && second_node_key == node_key
         ));
+    }
+
+    #[test]
+    fn typed_shell_effects_still_need_the_caller_capability() {
+        let requests = typed(
+            vec![FrontendEffect::Surface(SurfaceEffect::Show {
+                surface_id: "@mesh/settings".into(),
+            })],
+            "@mesh/panel",
+            &[],
+        );
+        assert!(
+            matches!(&requests[..], [CoreRequest::PublishDiagnostics { .. }]),
+            "{requests:?}"
+        );
     }
 
     /// Composition and configuration writes are ordinary service commands, so
@@ -945,21 +834,17 @@ mod tests {
     }
 
     #[test]
-    fn script_events_to_requests_maps_popover_focus_option() {
-        let capabilities = mesh_core_capability::CapabilitySet::from_ids(["shell.surface"]);
-        let requests = script_events_to_requests(vec![PublishedEvent {
-            channel: "shell.activate-popover".into(),
-            payload: serde_json::json!({
-                "surface_id": "@mesh/audio-popover",
-                "trigger_surface": "@mesh/navigation-bar",
-                "trigger_key": "volume-button",
-                "focus": false,
-            }),
-            source_module_id: "@mesh/navigation-bar".into(),
-            source_capabilities: capabilities,
-            call_id: None,
-            source_instance_id: None,
-        }]);
+    fn typed_shell_effects_map_popover_focus_option() {
+        let requests = typed(
+            vec![FrontendEffect::Surface(SurfaceEffect::ActivatePopover {
+                surface_id: "@mesh/audio-popover".into(),
+                trigger_surface: "@mesh/navigation-bar".into(),
+                trigger_key: "volume-button".into(),
+                focus: false,
+            })],
+            "@mesh/navigation-bar",
+            &["shell.surface"],
+        );
 
         match requests.as_slice() {
             [
@@ -980,19 +865,15 @@ mod tests {
     }
 
     #[test]
-    fn script_events_to_requests_maps_popover_hover_bridge_hide() {
-        let capabilities = mesh_core_capability::CapabilitySet::from_ids(["shell.surface"]);
-        let requests = script_events_to_requests(vec![PublishedEvent {
-            channel: "shell.hide-popover".into(),
-            payload: serde_json::json!({
-                "surface_id": "@mesh/quick-settings",
-                "defer_for_hover_bridge": true,
-            }),
-            source_module_id: "@mesh/quick-settings".into(),
-            source_capabilities: capabilities,
-            call_id: None,
-            source_instance_id: None,
-        }]);
+    fn typed_shell_effects_map_popover_hover_bridge_hide() {
+        let requests = typed(
+            vec![FrontendEffect::Surface(SurfaceEffect::HidePopover {
+                surface_id: "@mesh/quick-settings".into(),
+                defer_for_hover_bridge: true,
+            })],
+            "@mesh/quick-settings",
+            &["shell.surface"],
+        );
 
         match requests.as_slice() {
             [
@@ -1143,41 +1024,24 @@ mod tests {
     }
 
     #[test]
-    fn script_events_to_requests_rejects_malformed_position_margins() {
-        let capabilities = mesh_core_capability::CapabilitySet::from_ids(["shell.surface"]);
-        let requests = script_events_to_requests(vec![
-            PublishedEvent {
-                channel: "shell.position-surface".into(),
-                payload: serde_json::json!({
-                    "surface_id": "@mesh/popover",
-                    "margin_top": i64::MAX,
-                    "margin_left": i64::MIN,
-                }),
-                source_module_id: "@mesh/navigation-bar".into(),
-                source_capabilities: capabilities.clone(),
-                call_id: None,
-                source_instance_id: None,
-            },
-            PublishedEvent {
-                channel: "shell.position-surface".into(),
-                payload: serde_json::json!({
-                    "surface_id": "@mesh/popover",
-                    "margin_top": "bad",
-                    "margin_left": 24,
-                }),
-                source_module_id: "@mesh/navigation-bar".into(),
-                source_capabilities: capabilities,
-                call_id: None,
-                source_instance_id: None,
-            },
-        ]);
+    fn script_events_to_requests_rejects_removed_surface_channels() {
+        let requests = script_events_to_requests(vec![event_with(
+            "shell.position-surface",
+            serde_json::json!({
+                "surface_id": "@mesh/popover",
+                "margin_top": 4,
+                "margin_left": 24,
+            }),
+            "@mesh/navigation-bar",
+            &["shell.surface"],
+        )]);
 
-        assert_eq!(requests.len(), 2);
-        assert!(requests.iter().all(|request| matches!(
-            request,
-            CoreRequest::PublishDiagnostics { message }
-                if message.contains("Malformed payload")
-        )));
+        match requests.as_slice() {
+            [CoreRequest::PublishDiagnostics { message }] => {
+                assert!(message.contains("mesh.shell.position_surface"), "{message}");
+            }
+            other => panic!("removed channels must not lower, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1511,5 +1375,62 @@ mod tests {
         );
         assert_eq!(old_total, new_total);
         assert!(new_time < old_time);
+    }
+
+    // cargo test -p mesh-core-shell --release -- typed_shell_call_beats_publish_path --ignored --nocapture
+    #[test]
+    #[ignore = "release-only typed shell call vs publish path microbenchmark"]
+    fn typed_shell_call_beats_publish_path() {
+        // The publish side uses a debug channel only because every surface
+        // channel is now removed; both run a handler with one shell request,
+        // drain it and lower it to a `CoreRequest`.
+        let capabilities = mesh_core_capability::CapabilitySet::from_ids([
+            "shell.surface",
+            "service.debug.control",
+        ]);
+        let mut ctx =
+            mesh_core_scripting::ScriptContext::new("@mesh/debug-inspector", capabilities).unwrap();
+        ctx.load_script(
+            r#"
+function published()
+    mesh.events.publish("shell.toggle-debug-overlay", {})
+end
+function typed()
+    mesh.shell.toggle_surface("@mesh/settings")
+end
+"#,
+        )
+        .unwrap();
+        let iterations = 20_000;
+        for _ in 0..1_000 {
+            ctx.call_handler("published", &[]).unwrap();
+            script_events_to_requests(ctx.drain_published_events());
+            ctx.call_handler("typed", &[]).unwrap();
+            context_shell_requests(&mut ctx);
+        }
+
+        let started = std::time::Instant::now();
+        let mut published_requests = 0;
+        for _ in 0..iterations {
+            ctx.call_handler("published", &[]).unwrap();
+            published_requests += script_events_to_requests(ctx.drain_published_events()).len();
+        }
+        let published_time = started.elapsed();
+
+        let started = std::time::Instant::now();
+        let mut typed_requests = 0;
+        for _ in 0..iterations {
+            ctx.call_handler("typed", &[]).unwrap();
+            typed_requests += context_shell_requests(&mut ctx).len();
+        }
+        let typed_time = started.elapsed();
+
+        eprintln!(
+            "shell call x{iterations}: publish path {published_time:?}; typed call {typed_time:?}; ratio {:.2}x",
+            published_time.as_secs_f64() / typed_time.as_secs_f64()
+        );
+        assert_eq!(published_requests, iterations);
+        assert_eq!(typed_requests, iterations);
+        assert!(typed_time < published_time);
     }
 }

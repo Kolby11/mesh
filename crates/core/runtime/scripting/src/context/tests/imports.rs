@@ -267,10 +267,15 @@ end
     .unwrap();
     ctx.call_init().unwrap();
 
-    let events = ctx.drain_published_events();
-    assert_eq!(events.len(), 1);
-    assert_eq!(events[0].channel, "shell.set-locale");
-    assert_eq!(events[0].payload, serde_json::json!({ "locale": "sk" }));
+    assert!(ctx.drain_published_events().is_empty());
+    let effects = ctx.drain_shell_effects();
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [mesh_core_frontend_abi::FrontendEffect::SetLocale { locale }] if locale == "sk"
+        ),
+        "{effects:?}"
+    );
 }
 
 #[test]

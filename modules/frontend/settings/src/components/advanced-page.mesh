@@ -170,9 +170,7 @@ local debug_service = require("mesh.debug")
 local t = import("mesh.i18n", "t")
 
 function openCompositionEditor()
-    mesh.events.publish("shell.show-surface", {
-        surface_id = "@mesh/composition-editor",
-    })
+    mesh.shell.show_surface("@mesh/composition-editor")
 end
 
 providers_count = ""

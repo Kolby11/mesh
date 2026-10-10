@@ -731,6 +731,16 @@ fn diagnose_frontend_source_contracts(
                             module.id, channel, file_name
                         ),
                     });
+                } else if is_removed_shell_event_channel(channel) {
+                    diagnostics.push(ModuleGraphDiagnostic {
+                        module_id: module.id.clone(),
+                        contribution_id: Some(format!("{}:event:{}", module.id, file_name)),
+                        status: "removed_shell_event_publish".into(),
+                        message: format!(
+                            "module {} publishes removed shell event '{}' in {}; call the typed mesh.shell, task or mesh.locale API instead",
+                            module.id, channel, file_name
+                        ),
+                    });
                 } else if channel.starts_with("shell.")
                     && !is_declared_shell_event_channel(&channel)
                 {

@@ -14,32 +14,22 @@ use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShellOperation {
-    ShowSurface,
-    HideSurface,
-    HidePopover,
-    SetSurfaceRole,
-    ToggleSurfaceRole,
-    PromoteWidget,
-    DemoteWidget,
-    SetWidgetRole,
-    ToggleSurface,
-    PositionSurface,
-    ActivatePopover,
-    SetLocale,
     ToggleDebugOverlay,
     ToggleDebugLayoutBounds,
     ToggleDebugElementPicker,
     OpenDebugSource,
     ToggleDebugProfiling,
     RunDebugBenchmark,
-    ScheduleHandler,
-    CancelHandler,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OperationRejection {
     UnknownChannel {
         channel: String,
+    },
+    Removed {
+        channel: String,
+        replacement: &'static str,
     },
     MalformedPayload {
         channel: String,
@@ -66,6 +56,13 @@ impl fmt::Display for OperationRejection {
             Self::UnknownChannel { channel } => {
                 write!(f, "Unknown shell channel '{channel}'")
             }
+            Self::Removed {
+                channel,
+                replacement,
+            } => write!(
+                f,
+                "Shell channel '{channel}' was removed; use {replacement}"
+            ),
             Self::MalformedPayload { channel, reason } => {
                 write!(f, "Malformed payload for '{channel}': {reason}")
             }
@@ -110,6 +107,12 @@ impl OperationRegistry {
     ) -> Result<Option<ShellOperation>, OperationRejection> {
         if !channel.starts_with("shell.") {
             return Ok(None);
+        }
+        if let Some(replacement) = removed_channel_replacement(channel) {
+            return Err(OperationRejection::Removed {
+                channel: channel.to_string(),
+                replacement,
+            });
         }
         let Some((operation, capability, caller)) = definition(channel) else {
             return Err(OperationRejection::UnknownChannel {
@@ -394,22 +397,6 @@ fn definition(
     channel: &str,
 ) -> Option<(ShellOperation, Option<&'static str>, Option<&'static str>)> {
     let definition = match channel {
-        "shell.show-surface" => (ShellOperation::ShowSurface, Some("shell.surface"), None),
-        "shell.hide-surface" => (ShellOperation::HideSurface, Some("shell.surface"), None),
-        "shell.hide-popover" => (ShellOperation::HidePopover, Some("shell.surface"), None),
-        "shell.set-surface-role" => (ShellOperation::SetSurfaceRole, Some("shell.surface"), None),
-        "shell.toggle-surface-role" => (
-            ShellOperation::ToggleSurfaceRole,
-            Some("shell.surface"),
-            None,
-        ),
-        "shell.promote-widget" => (ShellOperation::PromoteWidget, Some("shell.surface"), None),
-        "shell.demote-widget" => (ShellOperation::DemoteWidget, Some("shell.surface"), None),
-        "shell.set-widget-role" => (ShellOperation::SetWidgetRole, Some("shell.surface"), None),
-        "shell.toggle-surface" => (ShellOperation::ToggleSurface, Some("shell.surface"), None),
-        "shell.position-surface" => (ShellOperation::PositionSurface, Some("shell.surface"), None),
-        "shell.activate-popover" => (ShellOperation::ActivatePopover, Some("shell.surface"), None),
-        "shell.set-locale" => (ShellOperation::SetLocale, Some("locale.write"), None),
         "shell.toggle-debug-overlay" => (
             ShellOperation::ToggleDebugOverlay,
             Some("service.debug.control"),
@@ -440,51 +427,50 @@ fn definition(
             Some("service.debug.control"),
             Some("@mesh/debug-inspector"),
         ),
-        "shell.schedule-handler" => (ShellOperation::ScheduleHandler, None, None),
-        "shell.cancel-handler" => (ShellOperation::CancelHandler, None, None),
         _ => return None,
     };
     Some(definition)
 }
 
+fn removed_channel_replacement(channel: &str) -> Option<&'static str> {
+    match channel {
+        "shell.show-surface" => Some("`mesh.shell.show_surface(surface_id)`"),
+        "shell.hide-surface" => Some("`mesh.shell.hide_surface(surface_id)`"),
+        "shell.toggle-surface" => Some("`mesh.shell.toggle_surface(surface_id)`"),
+        "shell.hide-popover" => Some("`mesh.shell.hide_popover(surface_id, { defer = bool })`"),
+        "shell.set-surface-role" => Some("`mesh.shell.set_surface_role(surface_id, role)`"),
+        "shell.toggle-surface-role" => Some("`mesh.shell.toggle_surface_role(surface_id)`"),
+        "shell.promote-widget" => Some("`mesh.shell.promote_widget(surface_id, node_key)`"),
+        "shell.demote-widget" => Some("`mesh.shell.demote_widget(surface_id, node_key)`"),
+        "shell.set-widget-role" => Some("`mesh.shell.set_widget_role(surface_id, node_key, role)`"),
+        "shell.position-surface" => {
+            Some("`mesh.shell.position_surface(surface_id, margin_top, margin_left)`")
+        }
+        "shell.activate-popover" => {
+            Some("`mesh.shell.activate_popover(surface_id, event, options)`")
+        }
+        "shell.set-locale" => Some("`mesh.locale.set(locale)`"),
+        "shell.schedule-handler" => Some("`task.delay(ms, fn)`"),
+        "shell.cancel-handler" => Some("the `cancel()` method of a `task.delay` handle"),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 enum PayloadShape {
     Empty,
-    SurfaceId,
-    HidePopover,
-    SurfaceRole,
-    WidgetTarget,
-    WidgetRole,
-    PositionSurface,
-    ActivatePopover,
-    Locale,
     OpenDebugSource,
     DebugBenchmark,
-    ScheduleHandler,
-    CancelHandler,
 }
 
 fn payload_shape(operation: ShellOperation) -> PayloadShape {
     match operation {
-        ShellOperation::ShowSurface
-        | ShellOperation::HideSurface
-        | ShellOperation::ToggleSurfaceRole
-        | ShellOperation::ToggleSurface => PayloadShape::SurfaceId,
-        ShellOperation::HidePopover => PayloadShape::HidePopover,
-        ShellOperation::SetSurfaceRole => PayloadShape::SurfaceRole,
-        ShellOperation::PromoteWidget | ShellOperation::DemoteWidget => PayloadShape::WidgetTarget,
-        ShellOperation::SetWidgetRole => PayloadShape::WidgetRole,
-        ShellOperation::PositionSurface => PayloadShape::PositionSurface,
-        ShellOperation::ActivatePopover => PayloadShape::ActivatePopover,
-        ShellOperation::SetLocale => PayloadShape::Locale,
         ShellOperation::ToggleDebugOverlay
         | ShellOperation::ToggleDebugLayoutBounds
         | ShellOperation::ToggleDebugElementPicker
         | ShellOperation::ToggleDebugProfiling => PayloadShape::Empty,
         ShellOperation::OpenDebugSource => PayloadShape::OpenDebugSource,
         ShellOperation::RunDebugBenchmark => PayloadShape::DebugBenchmark,
-        ShellOperation::ScheduleHandler => PayloadShape::ScheduleHandler,
-        ShellOperation::CancelHandler => PayloadShape::CancelHandler,
     }
 }
 
@@ -507,67 +493,6 @@ fn validate_payload_shape(shape: PayloadShape, payload: &Value) -> Result<(), St
         .ok_or_else(|| "payload must be an object".to_string())?;
     match shape {
         PayloadShape::Empty => expect_keys(object, &[]),
-        PayloadShape::SurfaceId => {
-            expect_keys(object, &["surface_id"])?;
-            require_string(object, "surface_id").map(|_| ())
-        }
-        PayloadShape::HidePopover => {
-            expect_keys(object, &["surface_id", "defer_for_hover_bridge"])?;
-            require_string(object, "surface_id")?;
-            optional_bool(object, "defer_for_hover_bridge")
-        }
-        PayloadShape::SurfaceRole => {
-            expect_keys(object, &["surface_id", "role"])?;
-            require_string(object, "surface_id")?;
-            let role = require_string(object, "role")?;
-            if matches!(
-                role.trim().to_ascii_lowercase().as_str(),
-                "layer" | "window" | "toplevel"
-            ) {
-                Ok(())
-            } else {
-                Err("role must be layer, window, or toplevel".into())
-            }
-        }
-        PayloadShape::WidgetTarget => {
-            expect_keys(object, &["surface_id", "node_key"])?;
-            require_string(object, "surface_id")?;
-            require_string(object, "node_key").map(|_| ())
-        }
-        PayloadShape::WidgetRole => {
-            expect_keys(object, &["surface_id", "node_key", "role"])?;
-            require_string(object, "surface_id")?;
-            require_string(object, "node_key")?;
-            let role = require_string(object, "role")?;
-            if matches!(
-                role.trim().to_ascii_lowercase().as_str(),
-                "layer" | "window" | "toplevel"
-            ) {
-                Ok(())
-            } else {
-                Err("role must be layer, window, or toplevel".into())
-            }
-        }
-        PayloadShape::PositionSurface => {
-            expect_keys(object, &["surface_id", "margin_top", "margin_left"])?;
-            require_string(object, "surface_id")?;
-            require_i32(object, "margin_top")?;
-            require_i32(object, "margin_left")
-        }
-        PayloadShape::ActivatePopover => {
-            expect_keys(
-                object,
-                &["surface_id", "trigger_surface", "trigger_key", "focus"],
-            )?;
-            require_string(object, "surface_id")?;
-            require_string(object, "trigger_surface")?;
-            require_string(object, "trigger_key")?;
-            optional_bool(object, "focus")
-        }
-        PayloadShape::Locale => {
-            expect_keys(object, &["locale"])?;
-            require_string(object, "locale").map(|_| ())
-        }
         PayloadShape::OpenDebugSource => {
             expect_keys(object, &["path", "line"])?;
             require_string(object, "path")?;
@@ -584,24 +509,6 @@ fn validate_payload_shape(shape: PayloadShape, payload: &Value) -> Result<(), St
         PayloadShape::DebugBenchmark => {
             expect_keys(object, &["scenario_id"])?;
             require_string(object, "scenario_id").map(|_| ())
-        }
-        PayloadShape::ScheduleHandler => {
-            expect_keys(object, &["key", "handler", "delay_ms"])?;
-            require_string(object, "key")?;
-            require_string(object, "handler")?;
-            if let Some(delay) = object.get("delay_ms") {
-                let delay = delay
-                    .as_u64()
-                    .ok_or_else(|| "delay_ms must be an integer".to_string())?;
-                if delay > 5_000 {
-                    return Err("delay_ms must be at most 5000".into());
-                }
-            }
-            Ok(())
-        }
-        PayloadShape::CancelHandler => {
-            expect_keys(object, &["key"])?;
-            require_string(object, "key").map(|_| ())
         }
     }
 }
@@ -628,26 +535,6 @@ fn require_string<'a>(object: &'a Map<String, Value>, key: &str) -> Result<&'a s
     Ok(value)
 }
 
-fn optional_bool(object: &Map<String, Value>, key: &str) -> Result<(), String> {
-    if let Some(value) = object.get(key)
-        && !value.is_boolean()
-    {
-        return Err(format!("field '{key}' must be a boolean"));
-    }
-    Ok(())
-}
-
-fn require_i32(object: &Map<String, Value>, key: &str) -> Result<(), String> {
-    let value = object
-        .get(key)
-        .ok_or_else(|| format!("missing field '{key}'"))?
-        .as_i64()
-        .ok_or_else(|| format!("field '{key}' must be an integer"))?;
-    i32::try_from(value)
-        .map(|_| ())
-        .map_err(|_| format!("field '{key}' is outside the i32 range"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -671,100 +558,25 @@ mod tests {
     }
 
     #[test]
-    fn registry_requires_surface_capability_and_valid_payload() {
+    fn removed_channels_name_their_typed_replacement() {
         let registry = OperationRegistry::builtin();
-        let payload = serde_json::json!({ "surface_id": "@mesh/settings" });
-        assert!(matches!(
-            registry.authorize_event(
-                "shell.show-surface",
-                &payload,
-                "@mesh/widget",
-                &CapabilitySet::default(),
-            ),
-            Err(OperationRejection::Unauthorized { .. })
-        ));
-        assert!(
-            registry
+        for (channel, replacement) in [
+            ("shell.show-surface", "mesh.shell.show_surface"),
+            ("shell.promote-widget", "mesh.shell.promote_widget"),
+            ("shell.set-locale", "mesh.locale.set"),
+            ("shell.schedule-handler", "task.delay"),
+        ] {
+            let rejection = registry
                 .authorize_event(
-                    "shell.show-surface",
-                    &payload,
+                    channel,
+                    &serde_json::json!({ "surface_id": "@mesh/settings" }),
                     "@mesh/widget",
-                    &capabilities(&["shell.surface"]),
+                    &capabilities(&["shell.surface", "locale.write"]),
                 )
-                .is_ok()
-        );
-    }
-
-    #[test]
-    fn registry_rejects_malformed_position_instead_of_coercing_it() {
-        let result = OperationRegistry::builtin().authorize_event(
-            "shell.position-surface",
-            &serde_json::json!({
-                "surface_id": "@mesh/popover",
-                "margin_top": "bad",
-                "margin_left": 0,
-            }),
-            "@mesh/widget",
-            &capabilities(&["shell.surface"]),
-        );
-        assert!(matches!(
-            result,
-            Err(OperationRejection::MalformedPayload { .. })
-        ));
-    }
-
-    #[test]
-    fn widget_role_operations_require_a_surface_and_node_target() {
-        let registry = OperationRegistry::builtin();
-        let capabilities = capabilities(&["shell.surface"]);
-        let target = serde_json::json!({
-            "surface_id": "@mesh/panel",
-            "node_key": "root/widgets/media"
-        });
-
-        assert_eq!(
-            registry
-                .authorize_event(
-                    "shell.promote-widget",
-                    &target,
-                    "@mesh/panel",
-                    &capabilities,
-                )
-                .unwrap(),
-            Some(ShellOperation::PromoteWidget)
-        );
-        assert_eq!(
-            registry
-                .authorize_event("shell.demote-widget", &target, "@mesh/panel", &capabilities,)
-                .unwrap(),
-            Some(ShellOperation::DemoteWidget)
-        );
-        assert_eq!(
-            registry
-                .authorize_event(
-                    "shell.set-widget-role",
-                    &serde_json::json!({
-                        "surface_id": "@mesh/panel",
-                        "node_key": "root/widgets/media",
-                        "role": "toplevel"
-                    }),
-                    "@mesh/panel",
-                    &capabilities,
-                )
-                .unwrap(),
-            Some(ShellOperation::SetWidgetRole)
-        );
-
-        let malformed = registry.authorize_event(
-            "shell.promote-widget",
-            &serde_json::json!({ "surface_id": "@mesh/panel" }),
-            "@mesh/panel",
-            &capabilities,
-        );
-        assert!(matches!(
-            malformed,
-            Err(OperationRejection::MalformedPayload { .. })
-        ));
+                .unwrap_err();
+            assert!(matches!(rejection, OperationRejection::Removed { .. }));
+            assert!(rejection.to_string().contains(replacement), "{rejection}");
+        }
     }
 
     #[test]

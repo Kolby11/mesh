@@ -293,12 +293,12 @@ fn scalar_write_log_beats_known_global_reads() {
 
 #[test]
 fn side_channel_pending_flag_drains_published_events() {
-    let capabilities = CapabilitySet::from_ids(["shell.surface"]);
-    let mut ctx = ScriptContext::new("@test/side-channel-flag", capabilities).unwrap();
+    let capabilities = CapabilitySet::from_ids(["service.debug.control"]);
+    let mut ctx = ScriptContext::new("@mesh/debug-inspector", capabilities).unwrap();
     ctx.load_script(
         r#"
 function publish()
-    mesh.events.publish("shell.show-surface", { surface_id = "@test/panel" })
+    mesh.events.publish("shell.toggle-debug-overlay", {})
 end
 "#,
     )
@@ -311,7 +311,7 @@ end
 
     let events = ctx.drain_published_events();
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0].channel, "shell.show-surface");
+    assert_eq!(events[0].channel, "shell.toggle-debug-overlay");
     assert!(!ctx.pending_side_channels_for_test());
 }
 

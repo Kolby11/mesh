@@ -136,6 +136,10 @@ pub struct ScriptContext {
     /// `props.at(name, scope)`. Rust-owned so a republished `props` table
     /// keeps answering without copying the snapshot into Luau.
     pub(super) prop_layers: Arc<Mutex<serde_json::Value>>,
+    /// Pending `task.delay` / `task.spawn` work owned by this instance.
+    pub(super) tasks: super::tasks::SharedTaskQueue,
+    /// Typed `mesh.shell` effects waiting for the shell to drain them.
+    pub(super) shell_effects: super::shell_api::ShellEffectQueue,
 }
 
 impl Drop for ScriptContext {
@@ -162,6 +166,7 @@ impl ScriptContext {
         }
         self.shared_vm = Some(vm.handle());
         self.realm_policy = vm.policy();
+        self.shell_effects = super::shell_api::ShellEffectQueue::new(self.realm_policy.budget());
         self.shared_element_metrics = Arc::clone(&vm.element_metrics);
     }
 
@@ -319,7 +324,6 @@ impl ScriptContext {
             optional_interfaces: Arc::new(HashSet::new()),
             vm: None,
             shared_vm: None,
-            realm_policy,
             env_table: None,
             reactive_scalar_globals: None,
             interface_catalog: Arc::new(ResolvedServiceCatalog::default()),
@@ -359,6 +363,9 @@ impl ScriptContext {
             locale_cell: Arc::new(Mutex::new(LocaleCell::default())),
             localized_misses: Arc::new(Mutex::new(Vec::new())),
             prop_layers: Arc::new(Mutex::new(serde_json::Value::Null)),
+            tasks: Arc::default(),
+            shell_effects: super::shell_api::ShellEffectQueue::new(realm_policy.budget()),
+            realm_policy,
         })
     }
 
@@ -479,6 +486,7 @@ impl ScriptContext {
     /// Tear down this context's `_ENV` graph. ScriptContext methods must not be
     /// called afterward without a subsequent `ensure_initialized()`.
     pub fn uninit(&mut self) {
+        self.tasks.lock().unwrap().clear();
         self.cached_self_table = None;
         self.service_context_state.lock().unwrap().clear();
         self.service_call_completions.lock().unwrap().clear();
@@ -548,6 +556,7 @@ impl ScriptContext {
     /// side-effect budget to the realm. The realm outlives this context, so
     /// anything still queued at reload or teardown must be released here.
     fn release_pending_side_effects(&mut self) {
+        self.shell_effects.drain();
         let published_event_count = self.published_events.len();
         let published_event_bytes = self
             .published_events

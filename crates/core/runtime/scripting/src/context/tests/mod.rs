@@ -8,4 +8,5 @@ mod shared_vm;
 mod state;
 mod storage;
 mod sync;
+mod tasks;
 mod template;

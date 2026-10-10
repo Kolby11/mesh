@@ -273,10 +273,13 @@ impl Shell {
         if self.pending_resource_preparation.is_some() {
             return Duration::from_millis(1);
         }
-        if mesh_core_render::icon_resolution_jobs_pending()
-            || mesh_core_render::icon_raster_jobs_pending()
-            || mesh_core_render::glyph_raster_jobs_pending()
-            || mesh_core_render::image_decode_jobs_pending()
+        // With the completion waker installed, the resource worker writes the
+        // loop eventfd when a job settles, so pending jobs need no polling.
+        if !mesh_core_render::resource_completion_waker_installed()
+            && (mesh_core_render::icon_resolution_jobs_pending()
+                || mesh_core_render::icon_raster_jobs_pending()
+                || mesh_core_render::glyph_raster_jobs_pending()
+                || mesh_core_render::image_decode_jobs_pending())
         {
             return Duration::from_millis(1);
         }
@@ -429,6 +432,10 @@ impl Shell {
             .map_err(|e| ShellRunError::EventfdCreate(format!("eventfd wake handle: {e}")))?;
         self.eventfd_fd = Some(eventfd);
         self.wake_handle = Some(wake.clone());
+        let resource_wake = wake.clone();
+        mesh_core_render::set_resource_completion_waker(Some(std::sync::Arc::new(move || {
+            resource_wake.wake()
+        })));
 
         self.file_watcher_tx = Some(tx.clone());
         self.reconcile_file_watcher();
@@ -663,6 +670,7 @@ impl Shell {
         self.bound_service_state_transactions.clear();
         self.command_throttle.clear();
         self.candidate_preview = None;
+        mesh_core_render::set_resource_completion_waker(None);
         self.wake_handle.take();
         self.eventfd_fd.take();
         let _ = std::fs::remove_file(ipc_socket_path);

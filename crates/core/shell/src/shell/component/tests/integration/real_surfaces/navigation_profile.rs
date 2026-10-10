@@ -389,3 +389,210 @@ fn navigation_frame_cost_profile() {
     }
     dump_stages("paint only", component.take_profiling_records(), frames);
 }
+
+fn collect_popover_triggers<'a>(node: &'a WidgetNode, out: &mut Vec<&'a WidgetNode>) {
+    if node.attributes.get("aria-haspopup").map(String::as_str) == Some("true")
+        && node.event_handlers.contains_key("pointerenter")
+    {
+        out.push(node);
+    }
+    for child in &node.children {
+        collect_popover_triggers(child, out);
+    }
+}
+
+fn percentile(sorted: &[Duration], fraction: f64) -> Duration {
+    if sorted.is_empty() {
+        return Duration::ZERO;
+    }
+    let index = ((sorted.len() - 1) as f64 * fraction).round() as usize;
+    sorted[index]
+}
+
+// cargo test -p mesh-core-shell --release -- navigation_hover_profile --ignored --nocapture
+//
+// The hover-intent workload: the pointer enters each of the bar's popover
+// triggers, the popover opens, the pointer crosses into the promoted popup,
+// leaves it, and moves on to the next trigger before the close bridge fires.
+// Every step is one input event followed by the frame the shell would paint.
+#[test]
+#[ignore = "release-only navigation-bar hover-intent profile"]
+fn navigation_hover_profile() {
+    let cycles = std::env::var("MESH_BENCH_CYCLES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(25u32);
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(WIDTH, HEIGHT);
+    let mut component = navigation_surface(&theme, &mut buffer);
+    if let Some((_, measured_height)) = component.measured_size {
+        SETTLED.store(measured_height, std::sync::atomic::Ordering::Relaxed);
+    }
+    for _ in 0..4 {
+        component.invalidate_paint();
+        component.paint(&theme, extent(), &mut buffer, 1.0).unwrap();
+    }
+    let height = SETTLED.load(std::sync::atomic::Ordering::Relaxed);
+
+    let tree = component
+        .last_tree
+        .as_ref()
+        .expect("rendered navigation bar");
+    let mut trigger_nodes = Vec::new();
+    collect_popover_triggers(tree, &mut trigger_nodes);
+    let triggers: Vec<(String, f32, f32)> = trigger_nodes
+        .iter()
+        .map(|node| {
+            let key = node.mesh_key().expect("trigger key").to_owned();
+            let (left, top, right, bottom) =
+                mesh_core_interaction::find_node_bounds_by_key(tree, &key, 0.0, 0.0)
+                    .expect("trigger bounds");
+            (key, (left + right) / 2.0, (top + bottom) / 2.0)
+        })
+        .collect();
+    assert_eq!(
+        triggers.len(),
+        4,
+        "expected the volume, theme, language and settings triggers"
+    );
+    // A point on the bar that no trigger covers, between the start slot and
+    // the right cluster.
+    let gap = (WIDTH as f32 / 2.0, height as f32 / 2.0);
+
+    let mut step_times = Vec::new();
+    let mut handler_times = Vec::new();
+    let mut opened = 0u32;
+    let mut painted = 0u32;
+    let events_before = component.drained_script_events;
+
+    let mut step = |component: &mut FrontendSurfaceComponent,
+                    painted: &mut u32,
+                    input: &mut dyn FnMut(&mut FrontendSurfaceComponent)| {
+        let started = Instant::now();
+        input(component);
+        let handled = started.elapsed();
+        *painted += u32::from(paint_if_wanted(component, &theme, &mut buffer));
+        step_times.push(started.elapsed());
+        handler_times.push(handled);
+    };
+
+    let started = Instant::now();
+    for _ in 0..cycles {
+        for (key, x, y) in &triggers {
+            let (x, y) = (*x, *y);
+            // The trigger's popover is its sibling in the button shell.
+            let shell_prefix = key.rsplit_once('/').map_or("", |(parent, _)| parent);
+            step(&mut component, &mut painted, &mut |component| {
+                component
+                    .handle_input(&theme, WIDTH, height, ComponentInput::PointerMove { x, y })
+                    .unwrap();
+            });
+            let Some(popup) = component
+                .child_surface_requests()
+                .into_iter()
+                .find(|request| request.node_key.starts_with(shell_prefix))
+            else {
+                step(&mut component, &mut painted, &mut |component| {
+                    component
+                        .handle_input(
+                            &theme,
+                            WIDTH,
+                            height,
+                            ComponentInput::PointerMove { x: gap.0, y: gap.1 },
+                        )
+                        .unwrap();
+                });
+                continue;
+            };
+            opened += 1;
+            let (cw, ch) = popup.content_size;
+            let (pad_left, pad_top, ..) = popup.content_padding;
+            let offset = (pad_left as f32, pad_top as f32);
+            // The pointer leaves the bar surface for the popup surface, as
+            // Wayland reports it: schedules the close bridge.
+            step(&mut component, &mut painted, &mut |component| {
+                component
+                    .handle_input(&theme, WIDTH, height, ComponentInput::PointerLeave)
+                    .unwrap();
+            });
+            // Enter the popup: cancels it.
+            step(&mut component, &mut painted, &mut |component| {
+                component
+                    .handle_child_surface_input(
+                        &popup.node_key,
+                        &theme,
+                        cw,
+                        ch,
+                        offset,
+                        ComponentInput::PointerMove {
+                            x: offset.0 + cw as f32 / 2.0,
+                            y: offset.1 + ch as f32 / 2.0,
+                        },
+                    )
+                    .unwrap();
+            });
+            // Leave the popup: schedules it again.
+            step(&mut component, &mut painted, &mut |component| {
+                component
+                    .handle_child_surface_input(
+                        &popup.node_key,
+                        &theme,
+                        cw,
+                        ch,
+                        offset,
+                        ComponentInput::PointerLeave,
+                    )
+                    .unwrap();
+            });
+        }
+    }
+    let elapsed = started.elapsed();
+    let publishes = component.drained_script_events - events_before;
+
+    // Let the pending bridges fire. A popup's own pointer-leave does not
+    // reach its close bridge in this harness (the known failure of
+    // `navigation_language_popover_closes_when_pointer_leaves_promoted_popup`),
+    // so popovers left open are reported rather than asserted.
+    std::thread::sleep(Duration::from_millis(450));
+    component.tick().unwrap();
+    component.paint(&theme, extent(), &mut buffer, 1.0).unwrap();
+    let still_open = component.child_surface_requests().len();
+
+    let steps = step_times.len();
+    step_times.sort();
+    handler_times.sort();
+    let mean = |times: &[Duration]| times.iter().sum::<Duration>() / times.len().max(1) as u32;
+    let ms = |duration: Duration| duration.as_secs_f64() * 1000.0;
+    eprintln!(
+        "hover cycles: {cycles} x {} triggers, {opened} popover opens, {steps} steps, \
+         {painted} frames painted, {:.3}ms total",
+        triggers.len(),
+        ms(elapsed)
+    );
+    eprintln!(
+        "step (input + frame): p50 {:.4}ms p90 {:.4}ms mean {:.4}ms",
+        ms(percentile(&step_times, 0.5)),
+        ms(percentile(&step_times, 0.9)),
+        ms(mean(&step_times))
+    );
+    eprintln!(
+        "input dispatch only:  p50 {:.4}ms p90 {:.4}ms mean {:.4}ms",
+        ms(percentile(&handler_times, 0.5)),
+        ms(percentile(&handler_times, 0.9)),
+        ms(mean(&handler_times))
+    );
+    eprintln!(
+        "script publishes: {publishes} total, {:.2} per popover open; \
+         {still_open} popovers open after the bridges fired",
+        publishes as f64 / f64::from(opened.max(1))
+    );
+    eprintln!(
+        "MESH_PERF metric=navigation_hover_step_p50_ms value={:.4}",
+        ms(percentile(&step_times, 0.5))
+    );
+    eprintln!(
+        "MESH_PERF metric=navigation_hover_dispatch_p50_ms value={:.4}",
+        ms(percentile(&handler_times, 0.5))
+    );
+    eprintln!("MESH_PERF metric=navigation_hover_publishes value={publishes}");
+}

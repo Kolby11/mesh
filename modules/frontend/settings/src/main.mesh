@@ -184,7 +184,7 @@ function showDevice() activate("device") end
 function showAdvanced() activate("advanced") end
 
 function onClose()
-    mesh.events.publish("shell.hide-surface", { surface_id = "@mesh/settings" })
+    mesh.shell.hide_surface("@mesh/settings")
 end
 
 -- Move this surface between shell chrome and an ordinary compositor window.
@@ -192,17 +192,11 @@ end
 -- same scroll position and service subscriptions — only the Wayland object is
 -- swapped, so these handlers state the target role and nothing else.
 function onPopOut()
-    mesh.events.publish("shell.set-surface-role", {
-        surface_id = "@mesh/settings",
-        role = "window",
-    })
+    mesh.shell.set_surface_role("@mesh/settings", "window")
 end
 
 function onDockBack()
-    mesh.events.publish("shell.set-surface-role", {
-        surface_id = "@mesh/settings",
-        role = "layer",
-    })
+    mesh.shell.set_surface_role("@mesh/settings", "layer")
 end
 </script>
 

@@ -5,8 +5,10 @@ mod helpers;
 mod host_api;
 mod lifecycle;
 mod prop_layers;
+mod shell_api;
 mod state;
 mod sync;
+mod tasks;
 mod template;
 mod vm;
 

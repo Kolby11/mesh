@@ -1941,7 +1941,7 @@ impl Shell {
                         self.components[idx].parent.last_popup_size = None;
                         self.components[idx].component.set_popup_promoted(true);
                     }
-                    tracing::info!(
+                    tracing::debug!(
                         "ActivatePopover: promoting {surface_id} as xdg_popup child of {trigger_surface} trigger_rect=({anchor_x},{anchor_w}) bar_h={trigger_exclusive_zone}"
                     );
                 }
@@ -2705,7 +2705,7 @@ impl Shell {
         target_closes_on_leave: bool,
         close_source: Option<SurfaceId>,
     ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
-        tracing::info!(
+        tracing::debug!(
             "apply_transfer_tab_focus from={from_surface} to={to_surface} return_target={return_target:?} target_closes_on_leave={target_closes_on_leave} close_source={close_source:?}"
         );
         if let Some(index) = self.component_index_for_surface(from_surface) {
@@ -2786,7 +2786,7 @@ impl Shell {
             false
         };
 
-        tracing::info!("apply_transfer_tab_focus target_found={target_found} to={to_surface}");
+        tracing::debug!("apply_transfer_tab_focus target_found={target_found} to={to_surface}");
         if !target_found {
             return Ok(VecDeque::new());
         }
@@ -3030,7 +3030,7 @@ impl Shell {
         surface_id: SurfaceId,
         visible: bool,
     ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
-        tracing::info!("set_surface_visibility surface_id={surface_id} visible={visible}");
+        tracing::debug!("set_surface_visibility surface_id={surface_id} visible={visible}");
         let current_visible = self
             .core
             .surfaces
@@ -3378,7 +3378,7 @@ impl Shell {
                         runtime.parent.last_popup_size = None;
                         runtime.component.set_popup_promoted(false);
                         self.presentation_engine.destroy_popup(&surface_id);
-                        tracing::info!(
+                        tracing::debug!(
                             "set_surface_visibility_now: destroyed xdg_popup for {surface_id}"
                         );
                     }

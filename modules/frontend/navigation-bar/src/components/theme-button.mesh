@@ -2,7 +2,8 @@
     <stack class="nav-button-shell">
         <button
             ref="themeButton"
-            class={trigger_class}
+            class="theme-trigger"
+            class:theme-trigger-open={not theme_surface_hidden}
             onclick={onThemeToggle}
             onpointerenter={onThemeEnter}
             onpointerleave={onThemeLeave}
@@ -29,28 +30,37 @@ theme_tooltip_disabled = "false"
 theme_is_dark = true
 theme_surface_hidden = true
 theme_aria_expanded = "false"
-trigger_class = "theme-trigger"
 
 theme_popover = nil
 local theme_popover_connected = false
-local CLOSE_BRIDGE_KEY = "theme-popover-close"
-local CLOSE_BRIDGE_DELAY_MS = 400
 local do_close
+local CLOSE_BRIDGE_DELAY_MS = 400
+local close_bridge = nil
+local popover_close_pending = false
 
 local function cancel_bridge_close()
-    mesh.events.publish("shell.cancel-handler", { key = CLOSE_BRIDGE_KEY })
+    if close_bridge ~= nil then
+        close_bridge:cancel()
+        close_bridge = nil
+    end
+    -- The popover runs its own close after the pointer leaves it; returning
+    -- to the trigger has to stop that one too. Only call across when one is
+    -- pending: each call through `bind:this` resyncs the popover's state.
+    if popover_close_pending and theme_popover ~= nil then
+        popover_close_pending = false
+        theme_popover.cancelPendingClose()
+    end
 end
 
 local function schedule_bridge_close()
-    mesh.events.publish("shell.schedule-handler", {
-        key = CLOSE_BRIDGE_KEY,
-        handler = "closeThemeBridge",
-        delay_ms = CLOSE_BRIDGE_DELAY_MS,
-    })
+    cancel_bridge_close()
+    close_bridge = task.delay(CLOSE_BRIDGE_DELAY_MS, function()
+        close_bridge = nil
+        do_close()
+    end)
 end
 
 local function sync_trigger_state()
-    trigger_class = theme_surface_hidden and "theme-trigger" or "theme-trigger theme-trigger-open"
     theme_aria_expanded = theme_surface_hidden and "false" or "true"
     if theme_surface_hidden then
         theme_tooltip = t(theme_tooltip_key)
@@ -78,6 +88,9 @@ local function connect_popover()
     theme_popover.PopoverEnter:on(function()
         cancel_bridge_close()
     end)
+    theme_popover.CloseScheduled:on(function()
+        popover_close_pending = true
+    end)
     theme_popover.CloseRequested:on(function()
         do_close()
     end)
@@ -98,6 +111,7 @@ end
 
 do_close = function()
     cancel_bridge_close()
+    popover_close_pending = false
     if theme_popover and not theme_surface_hidden then
         theme_popover.open = false
         theme_surface_hidden = true
@@ -135,10 +149,6 @@ function onThemeLeave()
     if not theme_surface_hidden then
         schedule_bridge_close()
     end
-end
-
-function closeThemeBridge()
-    do_close()
 end
 </script>
 

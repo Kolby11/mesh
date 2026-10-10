@@ -439,9 +439,7 @@ function resetSlot(slot_key)
 end
 
 function closeEditor()
-    mesh.events.publish("shell.hide-surface", {
-        surface_id = "@mesh/composition-editor",
-    })
+    mesh.shell.hide_surface("@mesh/composition-editor")
 end
 </script>
 

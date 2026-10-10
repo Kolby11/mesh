@@ -1,7 +1,7 @@
 use super::service::{
     ServiceCapabilities, apply_service_update_with_name,
     apply_service_update_with_name_and_fingerprint, script_events_to_requests_at,
-    seed_service_context, service_capabilities,
+    seed_service_context, service_capabilities, typed_effects_to_requests_at,
 };
 use super::surface_layout::{SurfaceLayoutSettings, resolve_frontend_module_settings_with_props};
 use super::types::{
@@ -17,10 +17,9 @@ use mesh_core_interaction::{
     collect_focus_traversal, find_click_handler, find_event_handler, find_node_bounds_by_key,
     find_node_by_key, find_node_path_at, find_node_with_bounds_by_key, find_nodes_by_keys,
     find_scrollable_at_with_limits, find_scrollbar_at, is_editable_input_key, is_input_key,
-    is_slider_key,
-    measure_content_size, next_focus_target, node_can_receive_target as tree_target_is_eligible,
-    node_is_source, pointer_event_handler_hit, pointer_press_hit, scroll_into_view_offsets,
-    scroll_limits, source_element_tag,
+    is_slider_key, measure_content_size, next_focus_target,
+    node_can_receive_target as tree_target_is_eligible, node_is_source, pointer_event_handler_hit,
+    pointer_press_hit, scroll_into_view_offsets, scroll_limits, source_element_tag,
 };
 mod animation;
 mod catalog;
@@ -450,12 +449,6 @@ pub(super) struct ScrollInertia {
     pub(super) max_y: f32,
 }
 
-#[derive(Debug, Clone)]
-struct ScheduledHandler {
-    target: HandlerTarget,
-    deadline: Instant,
-}
-
 impl ComponentDirtyFlags {
     pub(super) const TREE_REBUILD: Self = Self::SCRIPT
         .union(Self::STATE)
@@ -870,7 +863,6 @@ pub(super) struct FrontendSurfaceComponent {
     /// paths valid for this frame.
     render_hooks_changed_templates: bool,
     pub(super) scroll_offsets: HashMap<NodeId, ScrollOffsetState>,
-    scheduled_handlers: HashMap<String, ScheduledHandler>,
     /// In-flight smooth-scroll animations keyed by scroll-container node ID.
     /// Ticked at the top of `finalize_tree`; each writes an eased offset into
     /// `scroll_offsets` until it settles, then is dropped. Started by
@@ -979,6 +971,9 @@ pub(super) struct FrontendSurfaceComponent {
     force_full_retained_update: bool,
     #[cfg(test)]
     style_animation_passes: u64,
+    /// `mesh.events.publish` calls drained from every runtime on this surface.
+    #[cfg(test)]
+    drained_script_events: u64,
     /// True only when the pending style frame was requested exclusively by
     /// the animation pass. Any unrelated invalidation clears this marker.
     animation_only_dirty: bool,
@@ -1326,7 +1321,6 @@ impl FrontendSurfaceComponent {
             render_hooks_pending: true,
             render_hooks_changed_templates: false,
             scroll_offsets: HashMap::new(),
-            scheduled_handlers: HashMap::new(),
             scroll_animations: HashMap::new(),
             scroll_inertia: HashMap::new(),
             active_scrollbar_drag: None,
@@ -1378,6 +1372,8 @@ impl FrontendSurfaceComponent {
             force_full_retained_update: false,
             #[cfg(test)]
             style_animation_passes: 0,
+            #[cfg(test)]
+            drained_script_events: 0,
             animation_only_dirty: false,
             next_frame_only_dirty: false,
             node_service_field_deps: NodeServiceFieldDependencies::default(),

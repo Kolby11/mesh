@@ -291,14 +291,7 @@ fn collect_keybind_subscription_from_attributes(
 pub(super) fn is_declared_shell_event_channel(channel: &str) -> bool {
     matches!(
         channel,
-        "shell.show-surface"
-            | "shell.hide-surface"
-            | "shell.hide-popover"
-            | "shell.toggle-surface"
-            | "shell.position-surface"
-            | "shell.activate-popover"
-            | "shell.set-theme"
-            | "shell.set-locale"
+        "shell.set-theme"
             | "shell.set-provider"
             | "shell.set-module-enabled"
             | "shell.set-module-prop"
@@ -311,6 +304,28 @@ pub(super) fn is_declared_shell_event_channel(channel: &str) -> bool {
             | "shell.brightness-up"
             | "shell.set-brightness"
             | "shell.toggle-calendar"
+    )
+}
+
+/// Shell channels replaced by typed host calls (`mesh.shell.*`, `task.*`,
+/// `mesh.locale.set`). Publishing one raises an error at runtime.
+pub(super) fn is_removed_shell_event_channel(channel: &str) -> bool {
+    matches!(
+        channel,
+        "shell.show-surface"
+            | "shell.hide-surface"
+            | "shell.toggle-surface"
+            | "shell.hide-popover"
+            | "shell.set-surface-role"
+            | "shell.toggle-surface-role"
+            | "shell.promote-widget"
+            | "shell.demote-widget"
+            | "shell.set-widget-role"
+            | "shell.position-surface"
+            | "shell.activate-popover"
+            | "shell.set-locale"
+            | "shell.schedule-handler"
+            | "shell.cancel-handler"
     )
 }
 
@@ -453,7 +468,9 @@ fn read_bounded(path: &Path, limit: u64) -> Option<Result<String, String>> {
     let mut content = String::new();
     file.take(limit + 1).read_to_string(&mut content).ok()?;
     if content.len() as u64 > limit {
-        return Some(Err(format!("source file grew past the {limit}-byte budget")));
+        return Some(Err(format!(
+            "source file grew past the {limit}-byte budget"
+        )));
     }
     Some(Ok(content))
 }

@@ -13,6 +13,7 @@ mesh-core-theme = { workspace = true }
 mesh-core-locale = { workspace = true }
 mesh-core-config = { workspace = true }
 mesh-core-capability = { workspace = true }
+mesh-core-frontend-abi = { workspace = true }
 mesh-core-service = { workspace = true }
 mesh-core-runtime = { workspace = true }
 

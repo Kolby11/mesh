@@ -595,7 +595,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 .is_some_and(|appeared| appeared.elapsed() < self.tooltip_fade_duration());
         tooltip_delay_pending
             || tooltip_fade_pending
-            || !self.scheduled_handlers.is_empty()
+            || self.next_script_task_deadline().is_some()
             || self
                 .touch_gestures
                 .values()
@@ -608,12 +608,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             return Some(std::time::Instant::now());
         }
 
-        if let Some(deadline) = self
-            .scheduled_handlers
-            .values()
-            .map(|scheduled| scheduled.deadline)
-            .min()
-        {
+        if let Some(deadline) = self.next_script_task_deadline() {
             return Some(deadline);
         }
 
@@ -649,18 +644,7 @@ impl ShellComponent for FrontendSurfaceComponent {
 
     fn tick(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
         let now = std::time::Instant::now();
-        let due_handlers: Vec<_> = self
-            .scheduled_handlers
-            .iter()
-            .filter(|(_, scheduled)| scheduled.deadline <= now)
-            .map(|(key, scheduled)| (key.clone(), scheduled.target.clone()))
-            .collect();
-
-        let mut requests = Vec::new();
-        for (key, target) in due_handlers {
-            self.scheduled_handlers.remove(&key);
-            requests.extend(self.call_handler_target(&target, &[])?);
-        }
+        let mut requests = self.run_due_script_tasks(now)?;
 
         let due_long_presses = self.due_long_presses(now);
         if !due_long_presses.is_empty()
@@ -1712,6 +1696,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                     );
                 }
                 runtime.script_ctx.drain_published_events();
+                runtime.script_ctx.drain_shell_effects();
                 runtime.script_ctx.drain_element_actions();
             } else {
                 retained.insert(instance_key, runtime);
@@ -1733,7 +1718,6 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.portal_hidden_bindings.get_mut().clear();
         self.pending_surface_states.get_mut().clear();
         self.ref_node_keys.get_mut().clear();
-        self.scheduled_handlers.clear();
         self.render_hooks_pending = true;
         self.reset_render_caches();
         self.invalidate_script_state();

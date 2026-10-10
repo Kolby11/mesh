@@ -2155,6 +2155,7 @@ dependencies = [
  "mesh-core-config",
  "mesh-core-elements",
  "mesh-core-expression",
+ "mesh-core-frontend-abi",
  "mesh-core-locale",
  "mesh-core-runtime",
  "mesh-core-service",

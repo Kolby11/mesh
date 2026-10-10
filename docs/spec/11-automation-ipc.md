@@ -104,9 +104,9 @@ layout changes).
 
 ### 4.2 Surface control
 
-Thin wrappers over the declared shell channels
-(`shell.show-surface` / `hide` / `toggle`, `shell.set-theme`,
-`shell.set-locale`):
+Thin wrappers over the shell's surface, theme and locale requests (the same
+operations scripts reach through `mesh.shell`, `mesh.theme` and
+`mesh.locale.set`):
 
 ```
 surface.show / hide / toggle { surface }

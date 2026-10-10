@@ -228,8 +228,8 @@ paths trigger it:
 
 | Trigger | Reaches |
 | ------- | ------- |
-| `mesh.events.publish("shell.set-surface-role", { surface_id, role })` | in-surface controls (a "pop out" button) |
-| `shell.toggle-surface-role` on the same channel | a control that flips whichever role is current |
+| `mesh.shell.set_surface_role(surface_id, role)` | in-surface controls (a "pop out" button) |
+| `mesh.shell.toggle_surface_role(surface_id)` | a control that flips whichever role is current |
 | `shell:promote_surface:<id>`, `shell:demote_surface:<id>`, `shell:toggle_surface_role:<id>` over the automation IPC | a *compositor* keybind, since MESH keybinds are focused-surface actions and cannot grab a global hotkey ([11](11-automation-ipc.md)) |
 
 A component tells the two apart in CSS with `:windowed`
@@ -250,9 +250,10 @@ VM in place, removes its pixels from the parent layout, and paints the keyed
 subtree into an independent `xdg_toplevel`. Its state, live `bind:this`
 references, handlers, and service subscriptions therefore continue across the
 move. A widget can be controlled from Luau with
-`shell.promote-widget` / `shell.demote-widget`, each carrying the owning
-`surface_id` and retained `node_key`; `shell.set-widget-role` is the explicit
-role form. Closing the promoted window demotes the widget back into its parent.
+`mesh.shell.promote_widget(surface_id, node_key)` /
+`mesh.shell.demote_widget(surface_id, node_key)`, which take the owning surface
+and the retained node key; `mesh.shell.set_widget_role(surface_id, node_key,
+role)` is the explicit role form. Closing the promoted window demotes the widget back into its parent.
 
 Surface **sizing is CSS**: the laid-out box of the component root
 (`width: 100%` spans the anchored edge, `fit-content` shrinks to content,
@@ -585,13 +586,22 @@ named channel.** There is no second messaging mechanism.
   provider publishes; payloads validate against the contract. Frontends
   subscribe via direct named channels on the proxy
   (`audio.VolumeChanged:on(fn)`).
-- **Unowned shell channels** (`shell.toggle-surface`, `shell.show-surface`, …)
-  are published through `mesh.events` by any module holding the capability.
-  Interface-domain commands must go through the interface proxy, not raw
-  channel publishes (`raw_interface_domain_event_publish` diagnostic);
-  unknown `shell.*` publishes report `unknown_shell_event_publish`.
+- **Shell requests** are typed host calls, not channels. **Shipped:**
+  `mesh.shell.show_surface`, `hide_surface`, `toggle_surface`, `hide_popover`,
+  `activate_popover`, `set_surface_role`, `toggle_surface_role`,
+  `promote_widget`, `demote_widget`, `set_widget_role` and
+  `position_surface`, plus `mesh.locale.set` and the `task` library. Each
+  validates its arguments and the `shell.surface` (or `locale.write`)
+  capability at the call and raises a Luau error there; the request reaches
+  the shell as a typed effect with no JSON payload. Publishing one of the
+  removed `shell.*` surface, locale or scheduler channels raises an error that
+  names its replacement, and the module scan reports
+  `removed_shell_event_publish`. Interface-domain commands must go through the
+  interface proxy, not raw channel publishes
+  (`raw_interface_domain_event_publish` diagnostic); unknown `shell.*`
+  publishes report `unknown_shell_event_publish`.
 
-  `shell.*` carries **surface and debug requests only**. Changing composition
+  The remaining `shell.*` channels carry **debug requests only**. Changing composition
   or configuration is not a shell channel: those are methods on core-provided
   interfaces (§5.4), because mutations need typed arguments, operation-specific
   authorization, and an acknowledged success or rejection. Typed asynchronous

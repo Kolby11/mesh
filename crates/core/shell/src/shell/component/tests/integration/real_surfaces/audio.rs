@@ -184,11 +184,7 @@ function onToggleAudioSurface(event)
     local margin_top = 0
 
     if audio_surface_hidden then
-        mesh.events.publish("shell.position-surface", {
-            surface_id = audio_surface_id,
-            margin_top = margin_top,
-            margin_left = margin_left
-        })
+        mesh.shell.position_surface(audio_surface_id, margin_top, margin_left)
     end
 
     audio_surface_hidden = not audio_surface_hidden

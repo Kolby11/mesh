@@ -2,13 +2,46 @@ use mesh_core_resources::{
     ResourceByteBudget, ResourceByteReservation, ResourcePreparationToken, resource_revision,
 };
 use std::sync::mpsc::{self, SyncSender};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 const RESOURCE_BROKER_QUEUE_CAPACITY: usize = 128;
 const RESOURCE_BROKER_MAX_BYTES: usize = 64 * 1024 * 1024;
 
 type ResourceWork = Box<dyn FnOnce(ResourceBrokerContext) + Send + 'static>;
 type ResourceCancellation = Box<dyn FnOnce(ResourceByteReservation) + Send + 'static>;
+
+type CompletionWaker = Arc<dyn Fn() + Send + Sync>;
+
+static COMPLETION_WAKER: RwLock<Option<CompletionWaker>> = RwLock::new(None);
+
+/// Install the callback the resource worker runs after each job settles,
+/// whether it produced a result or was cancelled. The shell passes its loop
+/// wake so it can sleep until a result is ready instead of polling. `None`
+/// removes it.
+pub fn set_resource_completion_waker(waker: Option<CompletionWaker>) {
+    *COMPLETION_WAKER
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = waker;
+}
+
+/// Whether a completion waker is installed, so a scheduler knows that pending
+/// resource work will wake it.
+pub fn resource_completion_waker_installed() -> bool {
+    COMPLETION_WAKER
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .is_some()
+}
+
+fn wake_after_completion() {
+    let waker = COMPLETION_WAKER
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    if let Some(waker) = waker {
+        waker();
+    }
+}
 
 struct ResourceJob {
     generation: u64,
@@ -165,6 +198,7 @@ fn resource_worker(state: Arc<ResourceBrokerState>, receiver: mpsc::Receiver<Res
         } = job;
         if !is_current_generation(&state, generation, &token) {
             cancellation(reservation);
+            wake_after_completion();
             continue;
         }
         let context = ResourceBrokerContext {
@@ -175,6 +209,7 @@ fn resource_worker(state: Arc<ResourceBrokerState>, receiver: mpsc::Receiver<Res
             cancellation: Some(cancellation),
         };
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(context)));
+        wake_after_completion();
     }
 }
 
