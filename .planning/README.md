@@ -45,8 +45,7 @@ inside a checklist gets silently rewritten.
   STATUS.md      current position: in flight, next, blocked
   log/           dated history; append-only
   todos/pending/ standalone plans too big for a backlog line
-  codebase/      current structural analysis and audit evidence
-  renderer/      current renderer migration decisions
+  codebase/      audit reports and evidence (codebase/audits/<date>-<name>/)
 ```
 
 ### `log/`
@@ -54,11 +53,15 @@ inside a checklist gets silently rewritten.
 Dated history. See [`log/README.md`](log/README.md) for what goes where and the
 entry format. Current files:
 
-- `2026-07.md` — the running monthly work log.
+- `YYYY-MM.md` — the running monthly work log, one file per month.
 - `performance-log.md` — performance history and the rejected-experiments
   table, back to 2026-07-02.
 - `sections.md` — the current package-oriented concern map; section letters
   (A–V) in older records are historical references.
+- `sections/<NN-name>/improvements.md` — per-section audit improvement notes
+  that backlog items link to.
+- `<topic>-YYYY-MM-DD.md` — one completed effort too large for the monthly
+  file, or an archived plan (e.g. `renderer-migration-2026-05-23.md`).
 
 ### `todos/`
 

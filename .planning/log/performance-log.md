@@ -4752,3 +4752,40 @@ workflow, beginning with its partial-repaint blur pixel test rather than a cache
 Final renderer serial suite: 266 passed, 0 failed, 36 ignored. Touched files
 pass rustfmt and `git diff --check`. The existing local settings revision-only
 change is checkpointed in a separate chore commit; no preference values change.
+
+## 2026-10-10 — hover-intent workload: script tasks and typed shell calls
+
+New gate: `navigation_hover_profile` (release, ignored, in
+`real_surfaces/navigation_profile.rs`). It runs a 1920-wide navigation bar,
+25 cycles over its 4 popover triggers, 400 steps in all. Each trigger step is:
+pointer move onto the trigger (the popover opens), bar `PointerLeave` (the
+close bridge is scheduled), pointer move into the promoted popup (cancel), and
+popup `PointerLeave`. Each step is one input followed by the frame the shell
+would paint. It reports step (input + frame) and input-dispatch percentiles,
+plus `mesh.events.publish` calls drained (a test-only counter).
+
+Baseline: detached worktree at `7614977e` with only the bench and the counter
+added. Five runs per side, nothing else compiling. Both sides end with 4
+popovers still open, from the known popup-leave defect (see the October log).
+
+| Metric | `7614977e` | Tasks + typed shell calls |
+| --- | --- | --- |
+| Publishes per run (per popover open) | 454 (4.54) | 0 |
+| Step p50 | 1.775–1.960 ms | 1.793–1.922 ms |
+| Step p90 | 2.225–3.763 ms | 2.623–3.786 ms |
+| Dispatch p50 | 0.160–0.190 ms | 0.171–0.179 ms |
+| Dispatch p90 | 0.323–0.393 ms | 0.347–0.378 ms |
+
+The removed publishes do not show in time on this workload; paint dominates
+each step. An intermediate version, where the theme and language triggers
+called `cancelPendingClose()` through `bind:this` on every cancel, measured
+dispatch p50 at 0.188–0.205 ms over five runs. Each such call resyncs the
+popover's state. It now crosses only while the popover has a close pending.
+
+Microbenchmark `typed_shell_call_beats_publish_path` (release, ignored,
+`shell/service.rs`) compares 20,000 handler calls that each queue one shell
+request, followed by drain and lowering to a `CoreRequest`. The typed side
+calls `mesh.shell.toggle_surface`. The publish side publishes
+`shell.toggle-debug-overlay`, the cheapest remaining `shell.*` channel. Over
+five runs, publish took 138.7–142.7 ms and typed 123.4–130.4 ms, a 1.08–1.14×
+ratio. Most of each ~6.5 µs is the handler call itself.

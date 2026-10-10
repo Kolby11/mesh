@@ -137,13 +137,64 @@ Each needs its named workload from the report before any change lands.
       per-parse thread spawns, per-call Lua allocations in template expressions,
       per-call ICU formatter construction.
 
-## Platform philosophy
+## Authoring model
 
+Goal: components written as plain Luau, with the framework owning dependency
+tracking, validation and scheduling.
+[Review and evidence](../.planning/todos/pending/2026-10-10-authoring-model.md).
 
-## 2026-08-31 read-only audit findings — Section 1
+- [ ] Move shipped modules' precomputed class strings, inline styles and
+      `hidden` flags onto the shipped `class:` / `style:` directives and
+      `{#if}`; only the two nav-bar popover triggers use them so far.
+- [ ] Re-run `render(self)` only for instances whose tracked reads changed; today
+      any dirtying service update re-runs every instance's hook on the surface.
+      Then evaluate `computed` values and `mesh.watch(proxy, field, fn)`.
+- [ ] Typed proxy fields from compiled contracts (with S03-DEAD-001): range-checked
+      values, defaults, and a defined absent-optional-service value, so modules
+      drop their `tonumber`/clamp/`pcall(require)` guards.
+- [ ] One service call path: typed proxy methods only. Retire
+      `mesh.events.publish("mesh.<svc>.<method>")`, which shipped modules use
+      alongside the proxies.
+- [ ] Optimistic pending values on proxy methods, reconciled with emitted state
+      through contract coalescing keys (RT-09), replacing the hand-written
+      set-then-reconcile pattern in sliders.
+- [ ] Plain `.luau` libraries shareable between modules (`require` of a library
+      export); helpers such as volume-icon thresholds exist in three copies.
+- [ ] `self` at script top level, plus event forwarding in markup
+      (`onpointerenter={self.PopoverEnter}`), replacing `init` captures and
+      one-line forwarding handlers.
+- [ ] Locale matching helper (`mesh.locale.is("sk")`) alongside RES-03's
+      formatters, and document when `render(self)` runs.
 
-The following Section 1 findings remain open; IDs preserve their audit evidence
-for a future report or rerun.
+## Runtime architecture direction
+
+Larger changes to the runtime model under scripts; the platform model stays.
+Each needs a design and a measured prototype before it is adopted.
+[Direction note](../.planning/todos/pending/2026-10-10-runtime-architecture-direction.md)
+(suggested order inside).
+
+- [ ] **D1:** Compile-time fine-grained reactivity: top-level variables become
+      signals, template expressions bind straight to node properties, and
+      `render()` is retired. Prototype on the navigation bar first.
+- [ ] **D2:** Service calls, exec, sockets and file reads that yield inside
+      `task.spawn` instead of answering through events or callbacks. The
+      per-instance scheduler (`task.delay`/`spawn`/`sleep`) has shipped.
+- [ ] **D3:** Object capabilities for services: authorize when a service proxy
+      is acquired, then calls are plain typed calls. `mesh.shell` has shipped
+      this way; service methods still authorize per call.
+- [ ] **D4:** Typed values end to end: contract-generated types, validators and
+      `.d.luau`; providers send field patches; no JSON on the frame path.
+- [ ] **D5:** Headless interaction primitives in core (popover, menu, tooltip,
+      hover intent, focus scope, dismissal) that modules compose.
+- [ ] **D6:** Immutable scene snapshot committed to a render thread with GPU
+      raster; re-scope the scroll raster cache and in-surface blur plans first.
+- [ ] **D7:** Styles compiled to typed form with dependency-indexed incremental
+      selector matching; class/state changes restyle only matching nodes.
+- [ ] **D8:** Event-driven backend host APIs (D-Bus signals, PipeWire, netlink,
+      inotify) on D2 coroutines; polling becomes the fallback.
+- [ ] **D9:** CI performance gates per workload: idle wakeups, hover, service
+      poll, scroll, popover open, theme switch.
+
 
 ## 2026-09-01 whole-codebase audit — new open tasks
 
@@ -255,9 +306,6 @@ evidence and test workloads are in the linked reports.
 - [ ] **S15-PERF-001 / S15-PERF-002:** Benchmark shell-loop fairness and
       profile/catalog preparation across module, surface, provider, and message
       loads before changing scheduling or sharing. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/15-shell-core-and-orchestration.md)
-
-## Shell core and orchestration
-
 - [ ] Replace split profile/runtime mutation with one revisioned activation
       coordinator: immutable candidate graph/interfaces/resources, full root and
       provider identities, ready hidden replacements, atomic commit, and
@@ -338,6 +386,13 @@ of payoff.
 - [ ] Storage reads still clone per Lua access. Needs shared immutable JSON
       values or lock avoidance — two cache designs were measured and reverted
       (I; see log).
+- [ ] One hover-intent mechanism: the shell defers popover hides by 180 ms,
+      while six modules run their own 400 ms `task.delay` close bridge.
+      [Design](../.planning/todos/pending/2026-10-10-script-timers-and-typed-shell-ops.md).
+- [ ] A promoted popup's own pointer-leave never schedules its close bridge
+      (`navigation_language_popover_closes_when_pointer_leaves_promoted_popup`
+      fails; `navigation_hover_profile` ends with every popover open). Find
+      whether the shell or only the test harness drops the leave.
 
 ### Rendering and paint
 
@@ -369,6 +424,16 @@ of payoff.
       per frame. Low priority until rotation ships; scratch-buffer reuse was
       measured and rejected (see log).
 
+### Idle and scheduling
+
+- [ ] Idle wakeups: theme, settings and frontend metadata polls keep separate
+      deadlines and keep running while inotify is healthy, plus a 1 s watch
+      reconcile (see SH-13). Coalesce them into one deadline, or stop polling
+      when the watcher is healthy and rescan on queue overflow.
+- [ ] Backend `emit` validates the payload JSON, then `publish_changed_update`
+      validates it again and deep-clones it into `last_payload`; validate once
+      and keep a fingerprint instead of the clone.
+
 ### Startup and catalog
 
 - [ ] Narrow frontend catalog index rebuilds to graph deltas. Compiled sources
@@ -382,17 +447,3 @@ of payoff.
       retained identity into raster resources and tiles. Plans:
       [GPU backend](../.planning/todos/pending/2026-07-15-gpu-rendering-backend.md) and
       [persistent scene renderer](../.planning/todos/pending/2026-09-20-persistent-scene-renderer.md).
-
----
-
-## Attack order
-
-Updated 2026-07-30.
-
-1. **Structural-sharing memo hits**, narrow invalidation, and affected-subtree
-   re-evaluation.
-2. **Runtime style-diagnostic invalidation** and typed declarations.
-3. **Incremental shared frontend catalog**, single retained renderer, and the
-   per-surface prepare/paint/present split with batched Wayland commits.
-4. **Direct SHM paint** and fractional-scale partial damage, re-tested with
-   upload instrumentation (D).

@@ -1,0 +1,135 @@
+# Runtime architecture direction: what a from-scratch design would change
+
+**Status:** direction proposal, 2026-10-10. Accepted for planning. No design
+details are settled and nothing is implemented. Backlog lines are under
+"Runtime architecture direction" in
+[`docs/BACKLOG.md`](../../../docs/BACKLOG.md). This note builds on
+[the authoring-model review](2026-10-10-authoring-model.md) and
+[script timers and typed shell ops](2026-10-10-script-timers-and-typed-shell-ops.md).
+
+## What stays
+
+The module, contract, capability and profile architecture stays, together
+with Luau, separate backend providers, retained rendering, and the
+"core owns mechanisms, modules own experiences" boundary
+([00](../../../docs/spec/00-philosophy.md)). Everything below changes the
+runtime model *under* scripts, not the platform model.
+
+## D1. Change tracking at write time (compile-time fine-grained reactivity)
+
+**Today:** the runtime reconstructs what changed after a script runs: it scans
+globals, converts state to JSON, runs `render()` for every instance, re-evaluates
+templates and diffs the tree. Memoization, narrow invalidation, fingerprints and
+the retained diff exist largely to make that reconstruction cheaper.
+
+**Direction** (the Svelte 5 / Solid model):
+
+- The `.mesh` compiler rewrites top-level variables that templates read into
+  signals. Authors keep writing `volume = 42`; the write is tracked.
+- Each `{expr}` becomes an effect bound to one node property, so a write updates
+  only the properties that depend on it. There is no tree rebuild and no diff.
+- Service proxy fields are signals. Reading `audio.percent` inside an expression
+  subscribes to that field only.
+- The script body runs once as setup. `render()` is retired. Derived state is an
+  expression or `computed(fn)`; side effects use `effect(fn)` with automatic
+  cleanup.
+- Keyed `{#each}` keeps list reconciliation. Collections used as list sources
+  are deep-proxied stores; other state is scalar or replaced wholesale.
+
+**Migration:** compiled bindings can coexist with the current template
+evaluation and retained diff, which remains the fallback for constructs the
+compiler cannot bind directly. Convert shipped modules component by component.
+
+**Open:** whether signals are Rust-owned values (backlog item R) or Luau-side
+cells. Also how deep-store mutation is tracked without the table reconstruction
+costs already rejected for storage reads (see the rejected-experiments table).
+
+## D2. Async as coroutines with structured lifetime
+
+- Each component gets one task scheduler built on Luau coroutines:
+  `task.delay(ms, fn)`, `task.spawn`, `task.sleep`.
+- Service methods, exec, sockets and file reads yield instead of returning
+  through events or callbacks.
+- Tasks are owned by the component instance and cancelled on unmount or
+  reload.
+- This subsumes `mesh.timer`, the `shell.*-handler` channels, and the
+  set-then-reconcile command pattern.
+- Budgets apply per resumption. The frame loop wakes on the earliest task
+  deadline, as it does today for scheduled handlers.
+
+## D3. Capabilities checked at acquisition (object capabilities)
+
+- `require("mesh.audio")` returns a capability object only when the grant
+  exists. Calls on it are plain calls with no per-call string authorization.
+- Shell operations become a capability object too (`mesh.shell`).
+- `mesh.events.publish` is kept only for explicit broadcast between modules,
+  and is never used for RPC.
+- Typed arguments are validated once, at the call boundary.
+
+## D4. Typed values end to end
+
+- Compiled contracts (S03-DEAD-001) generate payload types, validators and
+  Luau type definitions (`.d.luau`). The LSP and the Luau analyzer then
+  type-check scripts and template expressions.
+- Providers send typed field patches instead of whole JSON snapshots, and
+  validation happens once, at the provider boundary.
+- Frontends see typed, range-checked fields, with a defined value for an absent
+  optional service.
+- JSON is kept for persistence and IPC only, not the frame path.
+
+## D5. Headless interaction primitives in core
+
+Popover, menu, tooltip, hover intent, focus scope, dismissal, and roving focus
+become core element behaviors that modules compose (the Radix / React Aria
+model), subject to the element admission test in 00 §4. This subsumes the
+hover-intent backlog item and the per-module bridges.
+
+## D6. Threaded scene commit and GPU raster
+
+- The UI thread produces an immutable scene/layer snapshot per frame and
+  commits it to a render thread (the Chromium compositor-commit / Flutter
+  layer-tree model).
+- Raster runs on the GPU. Scrolling becomes layer translation, and blur and
+  opacity become layer effects.
+- Presentation stays damage-driven, so idle cost does not rise.
+- Extends the existing GPU lanes
+  ([GPU backend](2026-07-15-gpu-rendering-backend.md),
+  [persistent scene renderer](2026-09-20-persistent-scene-renderer.md)) and
+  SH-11's immutable `PaintContext`. It would make much of the scroll raster cache
+  and in-surface blur work unnecessary, so re-check those plans against this
+  before investing further.
+
+## D7. Styles compiled to typed form with incremental matching
+
+- Theme tokens are resolved to typed values once per theme load.
+- Selectors are matched through dependency indexes, so a class or state change
+  is a bitset flip that re-styles only matching nodes.
+- Pick the supported CSS subset partly for incremental matchability.
+- Extends the existing "typed style declarations" and interning items.
+
+## D8. Event-driven backends by default
+
+- First-class async host APIs for D-Bus signals, PipeWire, netlink, inotify and
+  Wayland protocols, built on D2's coroutines.
+- Polling and monitor subprocesses become fallbacks.
+- Extends the existing D-Bus signal subscription item.
+
+## D9. Performance budgets per workload
+
+- Each workload has a gate in CI: idle wakeups per minute, hover frame, service
+  poll update, scroll frame, popover open, and theme switch.
+- Each direction item above lands with its gate's before and after
+  measurements.
+
+## Suggested order
+
+1. **D3 + D4.** They cost little and are boundary-only. They also unblock D1
+   and D2.
+2. **D2.** The task scheduler is self-contained and removes the event-RPC
+   patterns.
+3. **D1.** Prototype on one surface, the navigation bar. Compare against the
+   retained-diff path with `navigation_frame_cost_profile`. Then expand.
+4. **D5**, alongside D1, as module code is rewritten.
+5. **D6 / D7** on the existing GPU and style lanes. Re-scope the scroll
+   raster cache and blur plans first.
+6. **D8** as providers are touched. **D9** from now on.

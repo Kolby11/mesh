@@ -1,7 +1,8 @@
 # Renderer Ownership
 
 This document records current source ownership. Historical renderer adoption
-research and migration gates are retained under `.planning/renderer/`.
+research and migration gates are retained in
+[`.planning/log/renderer-migration-2026-05-23.md`](../.planning/log/renderer-migration-2026-05-23.md).
 
 ## Authoritative boundaries
 

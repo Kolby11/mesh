@@ -7,7 +7,7 @@ Status: design for an experimental, reversible renderer lane
 Related architecture:
 - docs/architecture/rendering-comparison.md
 - docs/frontend/renderer-contract.md
-- .planning/renderer/migration.md
+- .planning/log/renderer-migration-2026-05-23.md
 - .planning/todos/pending/2026-07-15-gpu-rendering-backend.md
 
 ## Goal

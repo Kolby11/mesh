@@ -20,6 +20,38 @@ There is **one** backlog. Never create a competing TODO list, task file, or
 progress tracker anywhere else in the repo, and never add a "TODO" section to a
 doc — put the item in `docs/BACKLOG.md` or it does not exist.
 
+### Where markdown files live
+
+Every Markdown file has exactly one home. Before creating one, find its row
+here. If no row fits, the content belongs in an existing file, a commit message,
+or nowhere.
+
+| Content | Location | Read it when | Keep it current by |
+| --- | --- | --- | --- |
+| Open work | `docs/BACKLOG.md` | Starting any session that changes code | Adding items before starting work; deleting them when done |
+| What is in flight | `.planning/STATUS.md` | Starting a session | Overwriting it when in-flight work changes; one page: Now / Next / Blocked |
+| Design for a backlog item | `.planning/todos/pending/YYYY-MM-DD-<topic>.md` | Starting the linked backlog item | Linking it from its backlog line; deleting it when the work lands |
+| Dated history | `.planning/log/YYYY-MM.md` | Before touching an area: has this been tried? | Appending an entry when work lands; never editing past entries |
+| Performance history and rejected experiments | `.planning/log/performance-log.md` | Before any optimization | Appending the measurement with every performance change |
+| A large completed effort or an archived plan | `.planning/log/<topic>-YYYY-MM-DD.md` | Following a link from the log | Leaving a one-line pointer in that month's log |
+| Audit reports and evidence | `.planning/codebase/audits/YYYY-MM-DD-<name>/` | Working on an item that links to them | Treating it as read-only after the audit |
+| Public contract | `docs/spec/NN-*.md` | Changing behavior in that area | Updating it in the same commit as the behavior, keeping `Shipped`/`Target` accurate |
+| Current guides and references | `docs/<area>/*.md`, listed in `docs/README.md` | Authoring or maintaining that area | Updating it in the same commit; adding new guides to `docs/README.md` |
+| Crate or tool notes | `README.md` inside the crate or tool | Working in that crate | Keeping it short; it states ownership, not progress |
+| Agent instructions | `AGENTS.md` (this file); `CLAUDE.md` only points here | Every session | Editing this file only |
+
+Never put Markdown anywhere else:
+
+- No status, plan, notes or TODO files in module directories, crate
+  directories, `scripts/` or the repo root.
+- No per-session or per-agent reports in the tree. Scratch output goes in your
+  tool's scratch or temp directory.
+- Agent worktrees stay under the ignored `.claude/worktrees/`. Remove them
+  when the task ends.
+- Profiling reports go in the ignored `profiles/`.
+- Do not create a new top-level planning directory. Extend `.planning/` only
+  by updating `.planning/README.md`.
+
 ### When you finish a piece of work
 
 1. **Delete the item from `docs/BACKLOG.md`.** Do not mark it `[x]` and leave
@@ -28,8 +60,12 @@ doc — put the item in `docs/BACKLOG.md` or it does not exist.
    [`.planning/log/performance-log.md`](.planning/log/performance-log.md);
    everything else goes in the current month's `.planning/log/YYYY-MM.md`.
    Create that file if the month has none.
-3. **Update [`.planning/STATUS.md`](.planning/STATUS.md)** if what is in flight
+3. **Delete its design note** from `.planning/todos/pending/`, if it had one.
+   The log entry records the outcome; git keeps the note.
+4. **Update [`.planning/STATUS.md`](.planning/STATUS.md)** if what is in flight
    changed. It is short and disposable — overwrite it.
+5. **Update the spec and guides** whose described behavior changed, in the same
+   commit.
 
 ### When you start something new that isn't in the backlog
 
@@ -52,6 +88,10 @@ it is not done. If it needs a design before it can be executed, write that in
   more than one never tried. Check the rejected-experiments table in
   `.planning/log/performance-log.md` *before* attempting an obvious
   optimization — several are already known dead ends.
+- **No orphans.** Every file in `.planning/todos/pending/` is linked from a
+  backlog line. A note whose work has landed, or that nothing links to, is
+  deleted. Check this when you touch the backlog.
+
 Full rules: [`.planning/README.md`](.planning/README.md).
 
 ---

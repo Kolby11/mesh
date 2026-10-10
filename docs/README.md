@@ -17,8 +17,7 @@ MESH uses four explicit document classes:
    testing, module indexes, and implementation references verified against the
    source tree.
 3. **[`../.planning/`](../.planning/README.md) — intent and evidence.** Current
-   status, audit evidence, pending design notes, renderer migration decisions,
-   and dated history. These may explain why a decision was made but do not
+   status, audit evidence, pending design notes, and dated history. These may explain why a decision was made but do not
    override the specification.
 4. **[`BACKLOG.md`](BACKLOG.md) — unfinished work.** The only active backlog;
    other documents may link to it but must not maintain competing TODO lists.
@@ -58,6 +57,7 @@ keyboard behavior, automation, and MCP direction.
 
 - [Crate boundaries](crate-boundaries.md)
 - [Renderer ownership](renderer-ownership.md)
+- [Rendering architecture comparison](architecture/rendering-comparison.md)
 - [Performance profiling](performance-profiling.md)
 
 ## Progress and history
