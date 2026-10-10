@@ -28,9 +28,6 @@ unless an item says otherwise. IDs point into the
 
 ### Priority 3 — Wrong output users see now
 
-- [ ] **UI-03 / UI-04 / UI-05:** Keyframes from an authored snapshot with
-      per-property stops, restore on completion, and override transitions only
-      for the properties a keyframe animates.
 - [ ] **RND-09 (fixes RND-01, RND-08):** One final damage stage that collects all
       producers, converts once to device pixels, makes rects disjoint, and feeds
       clear, paint, SHM copy and `damage_buffer`.
