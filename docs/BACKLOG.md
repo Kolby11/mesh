@@ -37,11 +37,6 @@ unless an item says otherwise. IDs point into the
       Bluetooth sidebar item has no icon.
 - [ ] `@mesh/debug-inspector` fails activation at startup with "no
       activation-resolved capability grant".
-- [ ] **RES-03 / RES-04 / RES-14:** ICU date formatting in the local zone plus
-      `format_time`/`format_percent`; localize the clock and quick settings;
-      apply `en` after a module's `defaultLocale`.
-- [ ] **RES-07 (env option):** Exec children now run in `LC_ALL=C.UTF-8`; add an
-      explicit, capability-checked env option for tools that need another locale.
 
 ### Priority 4 — Contracts and syntax to settle before third-party modules
 

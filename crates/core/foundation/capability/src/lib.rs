@@ -120,7 +120,10 @@ impl CapabilityCatalog {
     ///
     /// Invalid declarations are skipped and returned: a bad declaration in
     /// one interface must not deny unrelated modules their grants.
-    pub fn with_service_permissions<I>(mut self, declarations: I) -> (Self, Vec<ServicePermissionError>)
+    pub fn with_service_permissions<I>(
+        mut self,
+        declarations: I,
+    ) -> (Self, Vec<ServicePermissionError>)
     where
         I: IntoIterator<Item = ServicePermissionDeclaration>,
     {
@@ -200,6 +203,7 @@ impl CapabilityCatalog {
             | "service.settings.read"
             | "service.wm.read" => PrivilegeLevel::Standard,
             "exec.launch-app"
+            | "exec.locale"
             | "shell.clipboard.write"
             | "shell.notification"
             | "fs.write"
@@ -222,7 +226,10 @@ impl CapabilityCatalog {
             "exec.command" | "shell.screenshot" | "dbus.system" | "net.socket" | "locale.write" => {
                 PrivilegeLevel::High
             }
-            value if value.starts_with("exec.argv:") && parse_exec_argv_capability(value).is_some() => {
+            value
+                if value.starts_with("exec.argv:")
+                    && parse_exec_argv_capability(value).is_some() =>
+            {
                 PrivilegeLevel::High
             }
             _ => return None,
@@ -271,14 +278,12 @@ impl CapabilityCatalog {
 
 fn valid_permission_operation(operation: &str) -> bool {
     !operation.is_empty()
-        && operation
-            .split('.')
-            .all(|segment| {
-                !segment.is_empty()
-                    && segment
-                        .chars()
-                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
-            })
+        && operation.split('.').all(|segment| {
+            !segment.is_empty()
+                && segment
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+        })
 }
 
 /// Split an `exec.argv:<program>:<json-args>` grant. `None` arguments means
@@ -311,9 +316,33 @@ const EXEC_SHELLS: &[&str] = &["sh", "bash", "dash", "zsh", "ksh", "mksh", "ash"
 /// Programs that interpret an argument as code or run another program named by
 /// one. A wildcard anywhere in their arguments grants arbitrary execution.
 const EXEC_INTERPRETERS: &[&str] = &[
-    "env", "xargs", "sudo", "doas", "pkexec", "nice", "nohup", "timeout", "setsid", "stdbuf",
-    "busybox", "awk", "gawk", "mawk", "nawk", "sed", "find", "perl", "ruby", "node", "deno",
-    "bun", "php", "lua", "luajit", "tclsh", "osascript",
+    "env",
+    "xargs",
+    "sudo",
+    "doas",
+    "pkexec",
+    "nice",
+    "nohup",
+    "timeout",
+    "setsid",
+    "stdbuf",
+    "busybox",
+    "awk",
+    "gawk",
+    "mawk",
+    "nawk",
+    "sed",
+    "find",
+    "perl",
+    "ruby",
+    "node",
+    "deno",
+    "bun",
+    "php",
+    "lua",
+    "luajit",
+    "tclsh",
+    "osascript",
 ];
 const EXEC_INTERPRETER_PREFIXES: &[&str] = &["python", "perl", "ruby", "lua", "node", "php"];
 
@@ -336,7 +365,9 @@ pub fn exec_argv_grant_error(program: &str, arguments: Option<&[String]>) -> Opt
         return None;
     }
     let Some(arguments) = arguments else {
-        return Some(format!("{name} interprets code; it cannot allow any argument list"));
+        return Some(format!(
+            "{name} interprets code; it cannot allow any argument list"
+        ));
     };
     let first_data_argument = if shell {
         arguments
@@ -766,20 +797,35 @@ mod tests {
             declaration("acme.sensors", "service.acme.sensors.calibrate", "high"),
         ]);
         assert!(errors.is_empty(), "{errors:?}");
-        assert_eq!(catalog.validate("service.weather.read"), Ok(PrivilegeLevel::Standard));
-        assert_eq!(catalog.validate("service.weather.refresh"), Ok(PrivilegeLevel::Elevated));
+        assert_eq!(
+            catalog.validate("service.weather.read"),
+            Ok(PrivilegeLevel::Standard)
+        );
+        assert_eq!(
+            catalog.validate("service.weather.refresh"),
+            Ok(PrivilegeLevel::Elevated)
+        );
         assert_eq!(
             catalog.validate("service.acme.sensors.calibrate"),
             Ok(PrivilegeLevel::High)
         );
-        assert!(CapabilityCatalog::builtin().validate("service.weather.read").is_err());
+        assert!(
+            CapabilityCatalog::builtin()
+                .validate("service.weather.read")
+                .is_err()
+        );
 
         let policy = CapabilityPolicy::from_approvals([(
             "@me/forecast".to_string(),
             vec!["service.weather.read".to_string()],
         )]);
         let granted = policy
-            .resolve_in(&catalog, "@me/forecast", &["service.weather.read".into()], &[])
+            .resolve_in(
+                &catalog,
+                "@me/forecast",
+                &["service.weather.read".into()],
+                &[],
+            )
             .expect("a declared permission resolves");
         assert!(granted.granted_ids().any(|id| id == "service.weather.read"));
         assert!(
@@ -812,8 +858,14 @@ mod tests {
         assert!(reasons[4].1.contains("privilege level 'root'"));
         assert!(reasons[5].1.contains("built-in"));
         // Redeclaring one's own permission is idempotent.
-        assert_eq!(catalog.validate("service.weather.read"), Ok(PrivilegeLevel::Standard));
-        assert!(catalog.validate("net.http").is_ok(), "host powers are untouched");
+        assert_eq!(
+            catalog.validate("service.weather.read"),
+            Ok(PrivilegeLevel::Standard)
+        );
+        assert!(
+            catalog.validate("net.http").is_ok(),
+            "host powers are untouched"
+        );
         assert_eq!(
             catalog.service_permissions()["service.weather.read"].owner,
             "mesh.weather"

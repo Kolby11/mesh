@@ -58,7 +58,7 @@ end
 local function sync_audio_copy(percent)
     local safe = clamp_percent(percent)
     slider_value = safe
-    audio_percent_label = string.format("%d%%", safe)
+    audio_percent_label = mesh.locale.format_percent(safe)
 end
 
 if audio and audio.VolumeChanged then

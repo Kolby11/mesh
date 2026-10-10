@@ -15,9 +15,55 @@ use std::os::unix::process::CommandExt;
 
 const CANCEL_REAP_GRACE: Duration = Duration::from_millis(250);
 
-/// Locale for every exec child. Providers parse tool output, which must not
-/// follow the user's locale: `upower -i` under `LC_ALL=sk_SK` prints `63,14 Wh`.
+/// Locale for every exec child unless the call asks for another one.
+/// Providers parse tool output, which must not follow the user's locale:
+/// `upower -i` under `LC_ALL=sk_SK` prints `63,14 Wh`.
 pub(super) const CHILD_LOCALE: (&str, &str) = ("LC_ALL", "C.UTF-8");
+
+/// Grants the `locale` option of `mesh.exec` / `mesh.exec_stream`, for tools
+/// whose output is shown to the user rather than parsed.
+pub(super) const EXEC_LOCALE_CAPABILITY: &str = "exec.locale";
+
+/// The locale an exec child runs in.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) enum ExecLocale {
+    /// `LC_ALL=C.UTF-8`, so output parses the same on every host.
+    #[default]
+    Neutral,
+    /// The shell's own environment, untouched.
+    Inherit,
+    /// `LC_ALL` set to a validated POSIX locale name such as `sk_SK.UTF-8`.
+    Named(String),
+}
+
+impl ExecLocale {
+    /// Parse the script-facing option: `"inherit"`, `"C.UTF-8"`, or a locale
+    /// name of letters, digits and `_ . @ -`, at most 64 bytes.
+    pub(super) fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "inherit" => Ok(Self::Inherit),
+            "C.UTF-8" => Ok(Self::Neutral),
+            name if !name.is_empty()
+                && name.len() <= 64
+                && name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"_.@-".contains(&byte)) =>
+            {
+                Ok(Self::Named(name.to_string()))
+            }
+            other => Err(format!("invalid exec locale '{other}'")),
+        }
+    }
+
+    /// The `LC_ALL` value the child gets, or `None` to leave the shell's.
+    pub(super) fn lc_all(&self) -> Option<&str> {
+        match self {
+            Self::Neutral => Some(CHILD_LOCALE.1),
+            Self::Inherit => None,
+            Self::Named(name) => Some(name),
+        }
+    }
+}
 const EXEC_ARGV_PREFIX: &str = "exec.argv:";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -256,7 +302,14 @@ impl ExecService {
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or(program);
-        self.run_with_argv0(program, argv0, args, output_limit, timeout)
+        self.run_with_argv0(
+            program,
+            argv0,
+            args,
+            &ExecLocale::Neutral,
+            output_limit,
+            timeout,
+        )
     }
 
     fn run_with_argv0(
@@ -264,6 +317,7 @@ impl ExecService {
         program: &str,
         argv0: &str,
         args: &[String],
+        locale: &ExecLocale,
         output_limit: usize,
         timeout: Duration,
     ) -> Result<ExecOutcome, ExecRunError> {
@@ -278,6 +332,7 @@ impl ExecService {
         let program = program.to_string();
         let argv0 = argv0.to_string();
         let args = args.to_vec();
+        let locale = locale.clone();
 
         let mut state = self.state.lock().unwrap();
         if state.shutting_down {
@@ -298,6 +353,7 @@ impl ExecService {
                     &program,
                     &argv0,
                     &args,
+                    &locale,
                     output_limit,
                     timeout,
                     worker_cancel,
@@ -400,6 +456,7 @@ pub(super) fn run_exec(
     program: &str,
     argv0: &str,
     args: &[String],
+    locale: &ExecLocale,
     service: &ExecService,
 ) -> mlua::Result<LuaValue> {
     let resources = &service.resources;
@@ -409,6 +466,7 @@ pub(super) fn run_exec(
             program,
             argv0,
             args,
+            locale,
             resources.output_limit() as usize,
             resources.child_process_timeout(),
         )
@@ -517,14 +575,17 @@ fn run_bounded_command(
     program: &str,
     argv0: &str,
     args: &[String],
+    locale: &ExecLocale,
     output_limit: usize,
     timeout: Duration,
     cancel: Arc<AtomicBool>,
 ) -> std::io::Result<ExecOutcome> {
     let mut command = StdCommand::new(program);
+    if let Some(value) = locale.lc_all() {
+        command.env(CHILD_LOCALE.0, value);
+    }
     command
         .args(args)
-        .env(CHILD_LOCALE.0, CHILD_LOCALE.1)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -697,7 +758,10 @@ mod tests {
             dispatch,
             "hl.dsp.focus({ workspace = \"\" }) os.execute(\"x\") --\" })"
         ));
-        assert!(glob_match("UNIX-CONNECT:*", "UNIX-CONNECT:/run/user/1000/hypr/s.sock"));
+        assert!(glob_match(
+            "UNIX-CONNECT:*",
+            "UNIX-CONNECT:/run/user/1000/hypr/s.sock"
+        ));
         assert!(!glob_match("UNIX-CONNECT:*", "UNIX-CONNECT:/tmp/s,fork"));
     }
 
@@ -725,6 +789,51 @@ mod tests {
             .unwrap();
         assert!(result.success);
         assert_eq!(result.stdout, "C.UTF-8");
+    }
+
+    #[test]
+    fn a_named_exec_locale_reaches_the_child_and_inherit_leaves_the_shells() {
+        let service = service(SandboxConfig::default());
+        let print_lc_all = ["-c".to_string(), "printf '%s' \"$LC_ALL\"".to_string()];
+        let named = service
+            .run_with_argv0(
+                "sh",
+                "sh",
+                &print_lc_all,
+                &ExecLocale::parse("sk_SK.UTF-8").unwrap(),
+                1024,
+                Duration::from_secs(2),
+            )
+            .unwrap();
+        assert_eq!(named.stdout, "sk_SK.UTF-8");
+
+        let inherited = service
+            .run_with_argv0(
+                "sh",
+                "sh",
+                &print_lc_all,
+                &ExecLocale::Inherit,
+                1024,
+                Duration::from_secs(2),
+            )
+            .unwrap();
+        assert_eq!(
+            inherited.stdout,
+            std::env::var("LC_ALL").unwrap_or_default()
+        );
+    }
+
+    #[test]
+    fn exec_locale_names_are_restricted() {
+        assert_eq!(ExecLocale::parse("inherit"), Ok(ExecLocale::Inherit));
+        assert_eq!(ExecLocale::parse("C.UTF-8"), Ok(ExecLocale::Neutral));
+        assert_eq!(
+            ExecLocale::parse("sr_RS.UTF-8@latin"),
+            Ok(ExecLocale::Named("sr_RS.UTF-8@latin".into()))
+        );
+        for bad in ["", "sk SK", "x;rm", "a/b", &"x".repeat(65)] {
+            assert!(ExecLocale::parse(bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
@@ -839,7 +948,14 @@ mod tests {
         assert!(policy.allows("printf", &args));
         let launch = policy.canonical_launch_program("printf", &args).unwrap();
         let outcome = service(SandboxConfig::default())
-            .run_with_argv0(&launch, "printf", &args, 1024, Duration::from_secs(1))
+            .run_with_argv0(
+                &launch,
+                "printf",
+                &args,
+                &ExecLocale::Neutral,
+                1024,
+                Duration::from_secs(1),
+            )
             .unwrap();
         assert!(outcome.success, "{outcome:?}");
     }

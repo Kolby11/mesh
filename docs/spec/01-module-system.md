@@ -966,6 +966,13 @@ without the grant.
   running an exact `-c` script with whole-argument `*` positional values after
   it (`["-c","test -S \"$1\"","sh","*"]`). Basename grants such as `exec.wpctl` are not executable policy. The explicit
   high-risk `exec.command` capability remains the unrestricted override.
+- **Shipped — exec locale.** Exec children run in `LC_ALL=C.UTF-8` so a
+  provider parses the same tool output on every host. A call can ask for
+  another locale with an options table, `mesh.exec(program, args, { locale =
+  "sk_SK.UTF-8" })` (also on `mesh.exec_stream`). `"inherit"` keeps the shell's
+  own environment. The option requires the elevated `exec.locale` capability,
+  sets only `LC_ALL`, and accepts names of letters, digits and `_ . @ -` up to
+  64 bytes; no other environment variable is settable.
 - **Shipped:** the core catalog explicitly enumerates host powers and the
   built-in service permissions; unknown names are rejected.
 - **Shipped — interface-declared service permissions.** Host powers remain

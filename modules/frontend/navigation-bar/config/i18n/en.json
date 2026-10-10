@@ -36,5 +36,6 @@
   "nav.now_playing": "Now playing",
   "keybind.mute.label": "Mute audio",
   "keybind.mute.description": "Toggle audio mute",
-  "keybind.category.audio": "Audio"
+  "keybind.category.audio": "Audio",
+  "nav.clock_full_date": "{date} at {time}"
 }

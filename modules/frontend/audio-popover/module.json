@@ -9,7 +9,11 @@
       "interfaces": {
         "mesh.audio": ">=1.0"
       },
-      "capabilities": ["service.audio.read", "service.audio.control"]
+      "capabilities": [
+        "service.audio.read",
+        "service.audio.control",
+        "locale.read"
+      ]
     },
     "entry": "src/main.mesh",
     "accessibility": {

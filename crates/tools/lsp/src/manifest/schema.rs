@@ -67,6 +67,7 @@ pub const KNOWN_CAPABILITIES: &[&str] = &[
     "locale.read",
     "locale.write",
     "exec.launch-app",
+    "exec.locale",
 ];
 
 /// Resolve the schema root for a flavor.

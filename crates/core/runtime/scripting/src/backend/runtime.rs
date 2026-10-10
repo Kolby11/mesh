@@ -3,8 +3,8 @@ use super::command::{
 };
 use super::event::BackendEventRegistry;
 use super::exec::{
-    ExecService, ExecutableCapabilityPolicy, exec_denied_to_lua, missing_exec_capability,
-    missing_exec_stream_capability, run_exec,
+    EXEC_LOCALE_CAPABILITY, ExecLocale, ExecService, ExecutableCapabilityPolicy,
+    exec_denied_to_lua, missing_exec_capability, missing_exec_stream_capability, run_exec,
 };
 use super::exec_stream::{
     StreamEvent, StreamEventKind, StreamHandle, StreamState, StreamStatus,
@@ -105,6 +105,24 @@ struct BackendRuntime {
 
 const BACKEND_STARTUP_HOST_ERROR: &str =
     "backend host side effects are unavailable before start(self)";
+
+/// Read the `locale` option of `mesh.exec` / `mesh.exec_stream`. Absent, the
+/// child runs in `C.UTF-8`; present, it needs `exec.locale`.
+fn exec_locale_option(options: Option<&Table>, granted: bool) -> mlua::Result<ExecLocale> {
+    let Some(value) = options
+        .map(|options| options.get::<Option<String>>("locale"))
+        .transpose()?
+        .flatten()
+    else {
+        return Ok(ExecLocale::Neutral);
+    };
+    if !granted {
+        return Err(mlua::Error::external(format!(
+            "the exec locale option requires the {EXEC_LOCALE_CAPABILITY} capability"
+        )));
+    }
+    ExecLocale::parse(&value).map_err(mlua::Error::external)
+}
 
 fn require_started(host_side_effects_enabled: &AtomicBool) -> mlua::Result<()> {
     if host_side_effects_enabled.load(Ordering::Acquire) {
@@ -1114,11 +1132,13 @@ impl BackendScriptContext {
         let resources = self.policy.budget();
         let exec = self.exec.clone();
         let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
+        let locale_granted = self.capabilities.contains(EXEC_LOCALE_CAPABILITY);
         mesh.set(
             "exec",
             self.lua_ref()?.create_function(
-                move |lua, (program, args): (String, Vec<String>)| {
+                move |lua, (program, args, options): (String, Vec<String>, Option<Table>)| {
                     require_started(&host_side_effects_enabled)?;
+                    let locale = exec_locale_option(options.as_ref(), locale_granted)?;
                     if let Some(required) =
                         missing_exec_capability(&executable_policy, &program, &args)
                     {
@@ -1138,6 +1158,7 @@ impl BackendScriptContext {
                         launch_program.as_deref().unwrap_or(&program),
                         &program,
                         &args,
+                        &locale,
                         &exec,
                     )
                 },
@@ -1151,8 +1172,9 @@ impl BackendScriptContext {
         mesh.set(
             "exec_stream",
             self.lua_ref()?.create_function(
-                move |_lua, (program, args): (String, Vec<String>)| {
+                move |_lua, (program, args, options): (String, Vec<String>, Option<Table>)| {
                     require_started(&host_side_effects_enabled)?;
+                    let locale = exec_locale_option(options.as_ref(), locale_granted)?;
                     if let Some(required) =
                         missing_exec_stream_capability(&executable_policy, &program, &args)
                     {
@@ -1173,6 +1195,7 @@ impl BackendScriptContext {
                         args,
                         launch_program,
                         program.clone(),
+                        &locale,
                     ) {
                         Ok(handle) => Ok(LuaValue::Table(stream_handle_table(_lua, &handle)?)),
                         Err(err) => {

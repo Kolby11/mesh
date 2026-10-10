@@ -35,7 +35,7 @@ end
 
 local function update_brightness_copy(level)
     brightness_level = math.max(0, math.min(100, math.floor(tonumber(level) or 100)))
-    brightness_label = string.format("%d%%", brightness_level)
+    brightness_label = mesh.locale.format_percent(brightness_level)
 
     if brightness_level == 0 then
         brightness_icon = "display-brightness-off"

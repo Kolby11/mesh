@@ -13,22 +13,24 @@
 </template>
 
 <script lang="luau">
-clock_time = "00:00"
-clock_date = "Jan 01"
+local t = import("mesh.i18n", "t")
+
+clock_time = ""
+clock_date = ""
 clock_full_date = ""
 clock_aria_label = ""
 
-local MONTHS = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"}
-local DAYS   = {"Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"}
-
+-- Time and date come from the locale service's CLDR formatters in the local
+-- time zone, so the month name, field order and hour cycle follow the
+-- selected language (Slovak reads "10. 10." and "21:05").
 function render(self)
-    local t = os.date("*t")
-    clock_time = string.format("%02d:%02d", t.hour, t.min)
-    clock_date = string.format("%s %02d", MONTHS[t.month], t.day)
-    clock_full_date = string.format(
-        "%s, %s %d, %d at %s",
-        DAYS[t.wday], MONTHS[t.month], t.day, t.year, clock_time
-    )
+    local now = os.time()
+    clock_time = mesh.locale.format_time(now)
+    clock_date = mesh.locale.format_date(now, "month_day")
+    clock_full_date = t("nav.clock_full_date", {
+        date = mesh.locale.format_date(now, "full"),
+        time = clock_time,
+    })
     clock_aria_label = clock_full_date
 end
 

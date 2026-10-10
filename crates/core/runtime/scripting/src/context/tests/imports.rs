@@ -118,7 +118,10 @@ fn locale_host_exposes_locale_aware_formatters() {
 function init()
     local locale = require("mesh.locale")
     number = locale.format_number(1234567.89)
-    date = locale.format_date(0, "short")
+    -- Noon UTC is the same calendar day in every zone from UTC-12 to +11.
+    date = locale.format_date(43200, "short")
+    percent = locale.format_percent(55)
+    time_type = type(locale.format_time(43200))
     duration = locale.format_duration(3675)
 end
 "#,
@@ -130,7 +133,12 @@ end
         ctx.state.get("number"),
         Some(serde_json::json!("1,234,567.89"))
     );
-    assert_eq!(ctx.state.get("date"), Some(serde_json::json!("01/01/1970")));
+    assert_eq!(ctx.state.get("date"), Some(serde_json::json!("1/1/70")));
+    assert_eq!(ctx.state.get("percent"), Some(serde_json::json!("55%")));
+    assert_eq!(
+        ctx.state.get("time_type"),
+        Some(serde_json::json!("string"))
+    );
     assert_eq!(
         ctx.state.get("duration"),
         Some(serde_json::json!("1 h 1 min"))

@@ -468,7 +468,14 @@ fn spawn_stream(
     program: String,
     args: Vec<String>,
 ) -> std::io::Result<StreamHandle> {
-    spawn_stream_with_launch_program(state, program.clone(), args, program.clone(), program)
+    spawn_stream_with_launch_program(
+        state,
+        program.clone(),
+        args,
+        program.clone(),
+        program,
+        &super::exec::ExecLocale::Neutral,
+    )
 }
 
 /// Spawn a stream while retaining the author-facing program in its handle but
@@ -479,12 +486,15 @@ pub(crate) fn spawn_stream_with_launch_program(
     args: Vec<String>,
     launch_program: String,
     argv0: String,
+    locale: &super::exec::ExecLocale,
 ) -> std::io::Result<StreamHandle> {
     let stream = state.register(program, args)?;
     let mut command = Command::new(&launch_program);
+    if let Some(value) = locale.lc_all() {
+        command.env(super::exec::CHILD_LOCALE.0, value);
+    }
     command
         .args(stream.args())
-        .env(super::exec::CHILD_LOCALE.0, super::exec::CHILD_LOCALE.1)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null())

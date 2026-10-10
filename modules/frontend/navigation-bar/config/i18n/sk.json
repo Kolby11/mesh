@@ -36,5 +36,6 @@
   "nav.now_playing": "Prehrava sa",
   "keybind.mute.label": "Stlmit zvuk",
   "keybind.mute.description": "Prepnut stlmenie zvuku",
-  "keybind.category.audio": "Zvuk"
+  "keybind.category.audio": "Zvuk",
+  "nav.clock_full_date": "{date} o {time}"
 }

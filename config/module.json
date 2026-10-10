@@ -17,7 +17,11 @@
       "mesh.brightness": "@mesh/backlight-brightness"
     },
     "capabilityApprovals": {
-      "@mesh/audio-popover": ["service.audio.control", "service.audio.read"],
+      "@mesh/audio-popover": [
+        "locale.read",
+        "service.audio.control",
+        "service.audio.read"
+      ],
       "@mesh/backlight-brightness": [
         "exec.argv:brightnessctl:[\"-m\"]",
         "exec.argv:brightnessctl:[\"set\",\"*\"]",

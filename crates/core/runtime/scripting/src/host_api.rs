@@ -15,6 +15,8 @@
 /// mesh.locale.current()       → string         (requires locale.read)
 /// mesh.locale.format_number(value) → string   (requires locale.read)
 /// mesh.locale.format_date(timestamp, style?)  (requires locale.read)
+/// mesh.locale.format_time(timestamp, style?)  (requires locale.read)
+/// mesh.locale.format_percent(value)           (requires locale.read)
 /// mesh.locale.format_duration(seconds)        (requires locale.read)
 /// mesh.locale.set(locale)     → publishes locale change request (requires locale.write)
 /// mesh.config()               → table          (backend helper; full module settings)

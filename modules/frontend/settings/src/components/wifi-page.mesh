@@ -104,7 +104,7 @@ local function signal_label(entry)
     local signal = tonumber(entry.signal or entry.strength or entry.quality)
     if signal == nil then return "wifi.signal_unavailable", "" end
     signal = math.max(0, math.min(100, math.floor(signal + 0.5)))
-    local suffix = " · " .. tostring(signal) .. "%"
+    local suffix = " · " .. mesh.locale.format_percent(signal)
     if signal >= 75 then return "wifi.signal_excellent", suffix end
     if signal >= 50 then return "wifi.signal_good", suffix end
     if signal >= 25 then return "wifi.signal_fair", suffix end

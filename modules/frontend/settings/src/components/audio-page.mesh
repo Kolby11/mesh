@@ -99,7 +99,7 @@ end
 
 local function sync_volume(percent, muted)
     volume_percent = clamp_percent(percent)
-    volume_label = string.format("%d%%", volume_percent)
+    volume_label = mesh.locale.format_percent(volume_percent)
     if muted or volume_percent == 0 then
         volume_icon = "audio-volume-muted"
     elseif volume_percent < 34 then

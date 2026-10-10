@@ -92,7 +92,7 @@ end
 
 local function sync_volume(percent, muted)
     volume_percent = percent
-    volume_label   = string.format("%d%%", percent)
+    volume_label   = mesh.locale.format_percent(percent)
     volume_icon    = volume_icon_for(percent, muted)
 end
 
@@ -124,7 +124,7 @@ function render(self)
 
     if brightness and brightness.level ~= nil then
         brightness_level = math.max(0, math.min(100, math.floor(tonumber(brightness.level) or 100)))
-        brightness_label = string.format("%d%%", brightness_level)
+        brightness_label = mesh.locale.format_percent(brightness_level)
     end
 
     if theme then
@@ -158,7 +158,7 @@ function onBrightnessChange(event)
     end
     local val = math.max(0, math.min(100, math.floor(tonumber(event.value) or 100)))
     brightness_level = val
-    brightness_label = string.format("%d%%", val)
+    brightness_label = mesh.locale.format_percent(val)
     brightness.set(val)
 end
 

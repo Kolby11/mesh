@@ -61,7 +61,7 @@ function format_health(health_percent)
     if health_percent == nil or health_percent <= 0 then
         return "--"
     end
-    return string.format("%.1f%%", health_percent)
+    return mesh.locale.format_percent(string.format("%.1f", health_percent))
 end
 
 function battery_icon_for(percent_value)
@@ -96,7 +96,7 @@ function render(self)
     local charging = power.charging or false
 
     battery_icon_name = battery_icon_for(percent_value)
-    battery_label = string.format("%d%%", percent_value)
+    battery_label = mesh.locale.format_percent(percent_value)
     remaining_key = charging and "nav.time_to_full" or "nav.time_to_empty"
     remaining_label = charging and format_minutes(power.time_to_full_minutes)
         or format_minutes(power.time_remaining_minutes)

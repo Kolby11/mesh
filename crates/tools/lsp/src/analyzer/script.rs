@@ -112,6 +112,8 @@ static CALL_PARAMS: &[(&str, &str)] = &[
     ("locale.current", "()"),
     ("locale.format_number", "($1)"),
     ("locale.format_date", "($1, \"$2\")"),
+    ("locale.format_time", "($1, \"$2\")"),
+    ("locale.format_percent", "($1)"),
     ("locale.format_duration", "($1)"),
     ("locale.set", "(\"$1\")"),
     ("ui.request_redraw", "()"),

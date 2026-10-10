@@ -797,29 +797,34 @@ impl LocaleSnapshot {
     /// The one precedence order for a module's catalogs, highest first: each
     /// locale of the fallback chain (all layers, language packs included),
     /// then the module's own default locale when the chain omits it (module
-    /// layers only). Point lookups take the first match along this order and
-    /// bulk projections apply it in reverse, so both agree by construction.
+    /// layers only), then English as the last resort. Point lookups take the
+    /// first match along this order and bulk projections apply it in reverse,
+    /// so both agree by construction.
     fn module_lookup_order<'a>(
         &'a self,
         module_id: &str,
     ) -> impl DoubleEndedIterator<Item = (&'a str, bool)> + 'a {
+        let in_chain = |candidate: &str| {
+            self.selection
+                .chain()
+                .iter()
+                .any(|locale| locale == candidate)
+        };
         let default_locale = self
             .catalogs
             .module_defaults
             .get(module_id)
             .map(String::as_str)
-            .filter(|default_locale| {
-                !self
-                    .selection
-                    .chain()
-                    .iter()
-                    .any(|locale| locale == default_locale)
-            });
+            .filter(|default_locale| !in_chain(default_locale));
+        let last_resort = (!in_chain(LAST_RESORT_LOCALE)
+            && default_locale != Some(LAST_RESORT_LOCALE))
+        .then_some((LAST_RESORT_LOCALE, true));
         self.selection
             .chain()
             .iter()
             .map(|locale| (locale.as_str(), true))
             .chain(default_locale.map(|locale| (locale, false)))
+            .chain(last_resort)
     }
 
     fn translate_in_module(&self, key: &str, module_id: &str) -> Option<&CatalogEntry> {
@@ -853,12 +858,25 @@ impl LocaleSnapshot {
     }
 
     fn resolve_in_core<'a>(&'a self, key: &str, args: &HashMap<String, String>) -> Option<&'a str> {
-        for locale in self.selection.chain() {
-            if let Some(entry) = self.catalogs.core.get(locale).and_then(|m| m.get(key)) {
-                return entry.resolve(args, locale);
-            }
-        }
-        None
+        let last_resort = (!self
+            .selection
+            .chain()
+            .iter()
+            .any(|locale| locale == LAST_RESORT_LOCALE))
+        .then_some(LAST_RESORT_LOCALE);
+        self.selection
+            .chain()
+            .iter()
+            .map(String::as_str)
+            .chain(last_resort)
+            .find_map(|locale| {
+                self.catalogs
+                    .core
+                    .get(locale)
+                    .and_then(|m| m.get(key))
+                    .map(|entry| (entry, locale))
+            })
+            .and_then(|(entry, locale)| entry.resolve(args, locale))
     }
 
     fn resolve_in_module<'a>(
@@ -867,22 +885,12 @@ impl LocaleSnapshot {
         module_id: &str,
         args: &HashMap<String, String>,
     ) -> Option<&'a str> {
-        for locale in self.selection.chain() {
-            if let Some(entry) = self.module_entry(module_id, locale, key, true) {
-                return entry.resolve(args, locale);
-            }
-        }
-        if let Some(default_locale) = self.catalogs.module_defaults.get(module_id)
-            && !self
-                .selection
-                .chain()
-                .iter()
-                .any(|locale| locale == default_locale)
-            && let Some(entry) = self.module_entry(module_id, default_locale, key, false)
-        {
-            return entry.resolve(args, default_locale);
-        }
-        None
+        self.module_lookup_order(module_id)
+            .find_map(|(locale, packs)| {
+                self.module_entry(module_id, locale, key, packs)
+                    .map(|entry| (entry, locale))
+            })
+            .and_then(|(entry, locale)| entry.resolve(args, locale))
     }
 
     fn module_entry(
@@ -1247,49 +1255,177 @@ pub fn format_number(locale: &str, value: f64) -> Result<String, LocaleFormatErr
     format_number_value(locale, &value)
 }
 
-/// Format a Unix timestamp in UTC using a small, stable set of shell-facing
-/// date styles. The date fields and month names are locale-aware; keeping the
-/// accepted style set bounded makes script output deterministic across hosts.
+/// A wall-clock reading in some time zone, already resolved from a Unix
+/// timestamp. [`format_date`] and [`format_time`] read the host's local zone;
+/// the `_at` variants take one directly so results are reproducible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WallClock {
+    pub year: i32,
+    pub month: u8,
+    pub day: u8,
+    pub hour: u8,
+    pub minute: u8,
+    pub second: u8,
+}
+
+impl WallClock {
+    /// The reading in the host's local zone (`TZ`, then `/etc/localtime`).
+    pub fn local(timestamp_seconds: i64) -> Result<Self, LocaleFormatError> {
+        check_timestamp_range(timestamp_seconds)?;
+        let time: libc::time_t = timestamp_seconds
+            .try_into()
+            .map_err(|_| LocaleFormatError::DateOutOfRange)?;
+        // SAFETY: `localtime_r` writes only into the caller-owned `tm` and
+        // returns null on failure; both pointers are valid for the call.
+        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+        let result = unsafe { libc::localtime_r(&time, &mut tm) };
+        if result.is_null() {
+            return Self::utc(timestamp_seconds);
+        }
+        Ok(Self {
+            year: tm.tm_year + 1900,
+            month: (tm.tm_mon + 1) as u8,
+            day: tm.tm_mday as u8,
+            hour: tm.tm_hour as u8,
+            minute: tm.tm_min as u8,
+            second: tm.tm_sec.min(59) as u8,
+        })
+    }
+
+    pub fn utc(timestamp_seconds: i64) -> Result<Self, LocaleFormatError> {
+        check_timestamp_range(timestamp_seconds)?;
+        let (year, month, day) = civil_date_from_days(timestamp_seconds.div_euclid(86_400));
+        let seconds = timestamp_seconds.rem_euclid(86_400);
+        Ok(Self {
+            year: year as i32,
+            month: month as u8,
+            day: day as u8,
+            hour: (seconds / 3_600) as u8,
+            minute: (seconds % 3_600 / 60) as u8,
+            second: (seconds % 60) as u8,
+        })
+    }
+}
+
+fn check_timestamp_range(timestamp_seconds: i64) -> Result<(), LocaleFormatError> {
+    const MIN_TIMESTAMP: i64 = -62_135_596_800; // 0001-01-01T00:00:00Z
+    const MAX_TIMESTAMP: i64 = 253_402_300_799; // 9999-12-31T23:59:59Z
+    if (MIN_TIMESTAMP..=MAX_TIMESTAMP).contains(&timestamp_seconds) {
+        Ok(())
+    } else {
+        Err(LocaleFormatError::DateOutOfRange)
+    }
+}
+
+fn formatter_data_error(error: impl fmt::Display) -> LocaleFormatError {
+    LocaleFormatError::FormatterData {
+        message: error.to_string(),
+    }
+}
+
+/// Format a Unix timestamp as a date in the host's local zone with CLDR
+/// patterns for `locale`.
+///
+/// Styles: `short` (`10/10/26`), `medium` (`Oct 10, 2026`), `long`
+/// (`October 10, 2026`), `full` (`Saturday, October 10, 2026`) and
+/// `month_day` (`Oct 10`). The examples are `en`; every locale gets its own
+/// order, separators and month forms (Slovak `10. októbra 2026`).
 pub fn format_date(
     locale: &str,
     timestamp_seconds: i64,
     style: &str,
 ) -> Result<String, LocaleFormatError> {
-    let locale = normalized_icu_locale(locale)?;
-    if !matches!(style, "short" | "long") {
-        return Err(LocaleFormatError::InvalidDateStyle {
-            style: style.to_string(),
-        });
-    }
-    const MIN_TIMESTAMP: i64 = -62_135_596_800; // 0001-01-01T00:00:00Z
-    const MAX_TIMESTAMP: i64 = 253_402_300_799; // 9999-12-31T23:59:59Z
-    if !(MIN_TIMESTAMP..=MAX_TIMESTAMP).contains(&timestamp_seconds) {
-        return Err(LocaleFormatError::DateOutOfRange);
-    }
-    let (year, month, day) = civil_date_from_days(timestamp_seconds.div_euclid(86_400));
-    let language = locale.id.language.to_string();
-    let region = locale.id.region.map(|region| region.to_string());
-    if style == "short" {
-        return Ok(match language.as_str() {
-            "en" if !matches!(region.as_deref(), Some("GB" | "AU" | "NZ" | "IE")) => {
-                format!("{month:02}/{day:02}/{year:04}")
-            }
-            "en" | "fr" => format!("{day:02}/{month:02}/{year:04}"),
-            "de" | "cs" | "sk" | "ru" | "uk" => {
-                format!("{day:02}.{month:02}.{year:04}")
-            }
-            "ja" | "zh" | "ko" => format!("{year:04}/{month:02}/{day:02}"),
-            _ => format!("{year:04}-{month:02}-{day:02}"),
-        });
-    }
+    format_date_at(locale, WallClock::local(timestamp_seconds)?, style)
+}
 
-    let month_name = localized_month_name(&language, month);
+/// [`format_date`] for an already-resolved wall clock.
+pub fn format_date_at(
+    locale: &str,
+    clock: WallClock,
+    style: &str,
+) -> Result<String, LocaleFormatError> {
+    use icu_datetime::FixedCalendarDateTimeFormatter;
+    use icu_datetime::fieldsets::{MD, YMD, YMDE};
+    use icu_datetime::input::Date;
+
+    let locale = normalized_icu_locale(locale)?;
+    let date = Date::try_new_gregorian(clock.year, clock.month, clock.day)
+        .map_err(|_| LocaleFormatError::DateOutOfRange)?;
+    let prefs: icu_datetime::DateTimeFormatterPreferences = (&locale).into();
+    macro_rules! render {
+        ($fields:expr) => {
+            FixedCalendarDateTimeFormatter::<icu_calendar::Gregorian, _>::try_new(prefs, $fields)
+                .map(|formatter| formatter.format(&date).to_string())
+                .map_err(formatter_data_error)
+        };
+    }
+    match style {
+        "short" => render!(YMD::short()),
+        "medium" => render!(YMD::medium()),
+        "long" => render!(YMD::long()),
+        "full" => render!(YMDE::long()),
+        "month_day" => render!(MD::medium()),
+        _ => Err(LocaleFormatError::InvalidDateStyle {
+            style: style.to_string(),
+        }),
+    }
+}
+
+/// Format the time of day of a Unix timestamp in the host's local zone,
+/// with the locale's hour cycle. Styles: `short` (hours and minutes) and
+/// `medium` (with seconds).
+pub fn format_time(
+    locale: &str,
+    timestamp_seconds: i64,
+    style: &str,
+) -> Result<String, LocaleFormatError> {
+    format_time_at(locale, WallClock::local(timestamp_seconds)?, style)
+}
+
+/// [`format_time`] for an already-resolved wall clock.
+pub fn format_time_at(
+    locale: &str,
+    clock: WallClock,
+    style: &str,
+) -> Result<String, LocaleFormatError> {
+    use icu_datetime::NoCalendarFormatter;
+    use icu_datetime::fieldsets::T;
+    use icu_datetime::input::Time;
+
+    let locale = normalized_icu_locale(locale)?;
+    let fields = match style {
+        "short" => T::hm(),
+        "medium" => T::hms(),
+        _ => {
+            return Err(LocaleFormatError::InvalidDateStyle {
+                style: style.to_string(),
+            });
+        }
+    };
+    let time = Time::try_new(clock.hour, clock.minute, clock.second, 0)
+        .map_err(|_| LocaleFormatError::DateOutOfRange)?;
+    let formatter =
+        NoCalendarFormatter::try_new((&locale).into(), fields).map_err(formatter_data_error)?;
+    Ok(formatter.format(&time).to_string())
+}
+
+/// Format a percentage given in percent units (`55` is "55 %"), with the
+/// locale's decimal symbols and its percent sign placement.
+///
+/// The placement table covers the shipped locales from CLDR's percent
+/// patterns: a no-break space before the sign in most of continental
+/// Europe, a narrow one in French, a leading sign in Turkish, and a plain
+/// suffix elsewhere.
+pub fn format_percent(locale: &str, value: &str) -> Result<String, LocaleFormatError> {
+    let number = format_number_value(locale, value)?;
+    let language = normalized_icu_locale(locale)?.id.language;
     Ok(match language.as_str() {
-        "en" => format!("{month_name} {day}, {year}"),
-        "de" => format!("{day}. {month_name} {year}"),
-        "fr" => format!("{day} {month_name} {year}"),
-        "cs" | "sk" | "ru" | "uk" => format!("{day}. {month_name} {year}"),
-        _ => format!("{year}-{month:02}-{day:02}"),
+        "sk" | "cs" | "de" | "es" | "sv" | "ru" | "fi" | "nb" | "da" => {
+            format!("{number}\u{a0}%")
+        }
+        "fr" => format!("{number}\u{202f}%"),
+        "tr" => format!("%{number}"),
+        _ => format!("{number}%"),
     })
 }
 
@@ -1337,75 +1473,6 @@ fn normalized_icu_locale(locale: &str) -> Result<IcuLocale, LocaleFormatError> {
         locale: locale.to_string(),
     })?;
     IcuLocale::try_from_str(&locale).map_err(|_| LocaleFormatError::InvalidLocale { locale })
-}
-
-fn localized_month_name(language: &str, month: u32) -> &'static str {
-    const ENGLISH: [&str; 12] = [
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-    ];
-    const GERMAN: [&str; 12] = [
-        "Januar",
-        "Februar",
-        "März",
-        "April",
-        "Mai",
-        "Juni",
-        "Juli",
-        "August",
-        "September",
-        "Oktober",
-        "November",
-        "Dezember",
-    ];
-    const FRENCH: [&str; 12] = [
-        "janvier",
-        "février",
-        "mars",
-        "avril",
-        "mai",
-        "juin",
-        "juillet",
-        "août",
-        "septembre",
-        "octobre",
-        "novembre",
-        "décembre",
-    ];
-    const SLOVAK: [&str; 12] = [
-        "január",
-        "február",
-        "marec",
-        "apríl",
-        "máj",
-        "jún",
-        "júl",
-        "august",
-        "september",
-        "október",
-        "november",
-        "december",
-    ];
-    let names = match language {
-        "de" => &GERMAN,
-        "fr" => &FRENCH,
-        "cs" | "sk" => &SLOVAK,
-        _ => &ENGLISH,
-    };
-    names
-        .get(month.saturating_sub(1) as usize)
-        .copied()
-        .unwrap_or("?")
 }
 
 fn civil_date_from_days(days: i64) -> (i64, u32, u32) {
@@ -1532,10 +1599,12 @@ impl ModuleTranslator<'_> {
     /// retaining effective catalog provenance for diagnostics.
     pub fn owned(&self) -> OwnedModuleTranslator {
         let mut effective = HashMap::<&str, (&CatalogEntry, &str, &CatalogProvenance)>::new();
-        self.snapshot
-            .for_each_module_entry_by_precedence(self.module_id, |key, entry, locale, source| {
+        self.snapshot.for_each_module_entry_by_precedence(
+            self.module_id,
+            |key, entry, locale, source| {
                 effective.insert(key, (entry, locale, source));
-            });
+            },
+        );
         let mut entries = HashMap::with_capacity(effective.len());
         let mut entry_locales = HashMap::with_capacity(effective.len());
         let mut sources = HashMap::with_capacity(effective.len());
@@ -2227,9 +2296,12 @@ fn complete_fallback_chain(active: &str, fallback: &str) -> Vec<String> {
     for parent in locale_parents(fallback) {
         append(&parent);
     }
-    append("en");
     chain
 }
+
+/// Catalogs every lookup falls back to after the user's chain and, for a
+/// module, after its own `defaultLocale` (07 §5).
+const LAST_RESORT_LOCALE: &str = "en";
 
 fn direction_for(locale: &str) -> LocaleDirection {
     let language = locale.split('-').next().unwrap_or_default();
@@ -2375,7 +2447,8 @@ mod tests {
         assert_eq!(selection.fallback(), "en-US");
         assert_eq!(
             selection.chain(),
-            &["zh-Hant-TW", "zh-Hant", "zh", "en-US", "en"]
+            &["zh-Hant-TW", "zh-Hant", "zh", "en-US", "en"],
+            "an English fallback still contributes its own parent"
         );
         assert_eq!(selection.direction(), LocaleDirection::Ltr);
         assert_eq!(selection.revision(), 7);
@@ -2387,18 +2460,12 @@ mod tests {
     #[test]
     fn locale_changes_replace_stale_chain_and_increment_revision() {
         let mut engine = LocaleEngine::with_fallback_locale("sk-SK", "de-DE");
-        assert_eq!(
-            engine.fallback_chain(),
-            &["sk-SK", "sk", "de-DE", "de", "en"]
-        );
+        assert_eq!(engine.fallback_chain(), &["sk-SK", "sk", "de-DE", "de"]);
         assert_eq!(engine.revision(), 1);
 
         assert!(engine.try_set_locale("fr-FR").unwrap());
         assert_eq!(engine.current(), "fr-FR");
-        assert_eq!(
-            engine.fallback_chain(),
-            &["fr-FR", "fr", "de-DE", "de", "en"]
-        );
+        assert_eq!(engine.fallback_chain(), &["fr-FR", "fr", "de-DE", "de"]);
         assert_eq!(engine.revision(), 2);
         assert!(!engine.try_set_locale("fr-fr").unwrap());
         assert_eq!(engine.revision(), 2);
@@ -2548,6 +2615,63 @@ mod tests {
     }
 
     #[test]
+    fn dates_and_times_follow_cldr_patterns_per_locale() {
+        let clock = WallClock {
+            year: 2026,
+            month: 10,
+            day: 10,
+            hour: 21,
+            minute: 5,
+            second: 9,
+        };
+        assert_eq!(format_date_at("en", clock, "month_day").unwrap(), "Oct 10");
+        assert_eq!(format_date_at("sk", clock, "month_day").unwrap(), "10. 10.");
+        assert_eq!(format_date_at("de", clock, "month_day").unwrap(), "10.10.");
+        assert_eq!(
+            format_date_at("en", clock, "full").unwrap(),
+            "Saturday, October 10, 2026"
+        );
+        // RES-03: Slovak and Czech take the genitive month, and Czech no
+        // longer borrows Slovak names; Russian is no longer English.
+        assert_eq!(
+            format_date_at("sk", clock, "long").unwrap(),
+            "10. októbra 2026"
+        );
+        assert_eq!(
+            format_date_at("cs", clock, "long").unwrap(),
+            "10. října 2026"
+        );
+        assert_eq!(
+            format_date_at("ru", clock, "long").unwrap(),
+            "10 октября 2026\u{202f}г."
+        );
+        assert_eq!(format_time_at("sk", clock, "short").unwrap(), "21:05");
+        assert_eq!(
+            format_time_at("en", clock, "short").unwrap(),
+            "9:05\u{202f}PM"
+        );
+        assert_eq!(
+            format_time_at("en-GB", clock, "medium").unwrap(),
+            "21:05:09"
+        );
+        assert_eq!(format_percent("en", "55").unwrap(), "55%");
+        assert_eq!(format_percent("sk", "55").unwrap(), "55\u{a0}%");
+        assert_eq!(format_percent("tr", "55").unwrap(), "%55");
+    }
+
+    #[test]
+    fn local_wall_clock_agrees_with_utc_on_the_offset_libc_reports() {
+        let timestamp = 1_791_665_021;
+        let local = WallClock::local(timestamp).unwrap();
+        let utc = WallClock::utc(timestamp).unwrap();
+        let minutes = |clock: WallClock| i64::from(clock.hour) * 60 + i64::from(clock.minute);
+        let offset = (minutes(local) - minutes(utc)).rem_euclid(24 * 60);
+        assert_eq!(local.minute.abs_diff(utc.minute) % 15, 0);
+        assert!(offset < 24 * 60);
+        assert_eq!(WallClock::utc(0).unwrap().year, 1970);
+    }
+
+    #[test]
     fn locale_formatters_are_bounded_and_locale_aware() {
         assert_eq!(
             format_number_value("en-US", "1234567.89").unwrap(),
@@ -2557,11 +2681,9 @@ mod tests {
             format_number_value("sk-SK", "1234567.89").unwrap(),
             "1 234 567,89"
         );
-        assert_eq!(format_date("en-US", 0, "short").unwrap(), "01/01/1970");
-        assert_eq!(format_date("sk-SK", 0, "short").unwrap(), "01.01.1970");
         assert_eq!(format_duration("en", 3_675.0).unwrap(), "1 h 1 min");
         assert!(matches!(
-            format_date("en", 0, "full"),
+            format_date("en", 0, "weekday"),
             Err(LocaleFormatError::InvalidDateStyle { .. })
         ));
     }
@@ -2659,6 +2781,40 @@ mod tests {
         );
 
         for path in [module_path, first_pack_path, second_pack_path, default_path] {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn module_default_locale_wins_before_the_english_last_resort() {
+        let default_path = test_catalog_path("default-before-en-de");
+        let english_path = test_catalog_path("default-before-en-en");
+        std::fs::write(
+            &default_path,
+            serde_json::json!({ "greeting": "Hallo" }).to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            &english_path,
+            serde_json::json!({ "greeting": "Hello", "english-only": "Only" }).to_string(),
+        )
+        .unwrap();
+        let sources = vec![
+            CatalogSource::module("@mesh/example", "default", "de", default_path.clone()),
+            CatalogSource::module("@mesh/example", "en", "en", english_path.clone()),
+        ];
+        let defaults = HashMap::from([("@mesh/example".into(), "de".into())]);
+        let mut engine = LocaleEngine::with_fallback_locale("sk-SK", "sk");
+        let prepared = engine
+            .prepare_catalog_snapshot(&sources, &defaults)
+            .unwrap();
+        engine.replace_catalog_snapshot(prepared.snapshot());
+
+        let translator = engine.module_translator("@mesh/example");
+        assert_eq!(translator.translate("greeting"), Some("Hallo"));
+        assert_eq!(translator.translate("english-only"), Some("Only"));
+
+        for path in [default_path, english_path] {
             let _ = std::fs::remove_file(path);
         }
     }

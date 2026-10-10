@@ -119,7 +119,19 @@ pub static MESH_API_ENTRIES: &[MeshApiEntry] = &[
     MeshApiEntry {
         path: "locale.format_date",
         signature: "mesh.locale.format_date(timestamp: number|string, style?: string) -> string",
-        description: "Format a Unix timestamp using the active locale (requires the locale.read capability).",
+        description: "Format a Unix timestamp as a date in the local time zone with the active locale's CLDR patterns. Styles: short, medium, long, full, month_day (requires the locale.read capability).",
+        backend_only: false,
+    },
+    MeshApiEntry {
+        path: "locale.format_time",
+        signature: "mesh.locale.format_time(timestamp: number|string, style?: string) -> string",
+        description: "Format the local time of day of a Unix timestamp with the active locale's hour cycle. Styles: short, medium (requires the locale.read capability).",
+        backend_only: false,
+    },
+    MeshApiEntry {
+        path: "locale.format_percent",
+        signature: "mesh.locale.format_percent(value: number|string) -> string",
+        description: "Format a value in percent units (55 is 55 %) with the active locale's symbols (requires the locale.read capability).",
         backend_only: false,
     },
     MeshApiEntry {
@@ -144,8 +156,8 @@ pub static MESH_API_ENTRIES: &[MeshApiEntry] = &[
     // Exec (backend)
     MeshApiEntry {
         path: "exec",
-        signature: "mesh.exec(program: string, args: {string}?) -> {success, stdout, stderr, code}",
-        description: "Run an external program and return its output.",
+        signature: "mesh.exec(program: string, args: {string}?, options: {locale: string?}?) -> {success, stdout, stderr, code}",
+        description: "Run an external program and return its output. The child runs in LC_ALL=C.UTF-8 unless options.locale names another locale (requires exec.locale).",
         backend_only: true,
     },
     MeshApiEntry {

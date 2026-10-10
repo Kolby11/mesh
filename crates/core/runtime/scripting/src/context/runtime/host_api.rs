@@ -8,7 +8,9 @@ use super::super::{PublishedEvent, ScriptError, ScriptInterfaceImport};
 use super::*;
 use crate::host_api::{HostApiManifest, InterfaceProxy};
 use crate::operation::OperationRegistry;
-use mesh_core_locale::{format_date, format_duration, format_number_value};
+use mesh_core_locale::{
+    format_date, format_duration, format_number_value, format_percent, format_time,
+};
 use mlua::{Error as LuaError, LuaSerdeExt, Table, Value as LuaValue, Variadic};
 use serde_json::Value;
 use std::sync::{Arc, atomic::Ordering};
@@ -254,6 +256,49 @@ impl ScriptContext {
                                     .map_err(|error| LuaError::external(error.to_string()))
                             },
                         )
+                        .map_err(lua_err)?,
+                )
+                .map_err(lua_err)?;
+
+            let locale_cell_for_time = Arc::clone(&self.locale_cell);
+            mesh_locale
+                .set(
+                    "format_time",
+                    self.lua()
+                        .create_function(
+                            move |_lua, (timestamp, style): (LuaValue, Option<String>)| {
+                                let timestamp = lua_timestamp(timestamp)?;
+                                let style = style.unwrap_or_else(|| "short".into());
+                                let locale = locale_cell_for_time
+                                    .lock()
+                                    .unwrap()
+                                    .resolver
+                                    .locale()
+                                    .to_string();
+                                format_time(&locale, timestamp, &style)
+                                    .map_err(|error| LuaError::external(error.to_string()))
+                            },
+                        )
+                        .map_err(lua_err)?,
+                )
+                .map_err(lua_err)?;
+
+            let locale_cell_for_percent = Arc::clone(&self.locale_cell);
+            mesh_locale
+                .set(
+                    "format_percent",
+                    self.lua()
+                        .create_function(move |_lua, value: LuaValue| {
+                            let value = lua_number_string(value)?;
+                            let locale = locale_cell_for_percent
+                                .lock()
+                                .unwrap()
+                                .resolver
+                                .locale()
+                                .to_string();
+                            format_percent(&locale, &value)
+                                .map_err(|error| LuaError::external(error.to_string()))
+                        })
                         .map_err(lua_err)?,
                 )
                 .map_err(lua_err)?;

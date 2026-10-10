@@ -1804,6 +1804,34 @@ fn exec_returns_structured_result() {
 }
 
 #[test]
+fn exec_locale_option_needs_its_capability() {
+    let script = "function start()\nend\nfunction on_poll()\nlocal ok, result = pcall(mesh.exec, \"printenv\", {\"LC_ALL\"}, { locale = \"sk_SK.UTF-8\" })\nmesh.service.emit({ ok = ok, stdout = ok and result.stdout or \"\" })\nend";
+
+    let mut denied = BackendScriptContext::new_with_capabilities(
+        "@test/backend",
+        ["exec.argv:printenv:[\"LC_ALL\"]".into()],
+    );
+    denied.load_script(script).unwrap();
+    let payload = denied.run_poll().unwrap().unwrap();
+    assert_eq!(payload.get("ok").and_then(|v| v.as_bool()), Some(false));
+
+    let mut granted = BackendScriptContext::new_with_capabilities(
+        "@test/backend",
+        [
+            "exec.argv:printenv:[\"LC_ALL\"]".into(),
+            "exec.locale".into(),
+        ],
+    );
+    granted.load_script(script).unwrap();
+    let payload = granted.run_poll().unwrap().unwrap();
+    assert_eq!(payload.get("ok").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        payload.get("stdout").and_then(|v| v.as_str()),
+        Some("sk_SK.UTF-8\n")
+    );
+}
+
+#[test]
 fn exec_accepts_program_and_args() {
     let mut ctx = BackendScriptContext::new_with_capabilities(
         "@test/backend",

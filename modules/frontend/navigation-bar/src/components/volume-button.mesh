@@ -147,7 +147,7 @@ local function update_audio_copy(percent, muted)
     else
         audio_tooltip_key = "nav.volume_level"
     end
-    audio_tooltip_value = string.format("%d%%", safe)
+    audio_tooltip_value = mesh.locale.format_percent(safe)
 end
 
 if audio and audio.VolumeChanged then
