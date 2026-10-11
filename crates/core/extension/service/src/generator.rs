@@ -27,18 +27,58 @@ pub fn generate_contract_artifacts(contract: &CompiledContract) -> GeneratedCont
     }
 }
 
-/// Generate the typed surface a frontend consumer imports.
+/// Generate the Luau type declarations (`<interface>.d.luau`) for the proxy a
+/// frontend gets from `require("<interface>")`.
+///
+/// The proxy exposes every state field directly and under `state`, each event
+/// as a channel (directly and under `events`), and each method as a call that
+/// returns a ticket. `available` is always present: it reads `false` until the
+/// service publishes state. Ranges and defaults are documented on the field.
 pub fn generate_luau_consumer_types(contract: &CompiledContract) -> String {
     let mut output = generated_header(contract, "consumer types");
     for definition in contract.schemas.types.values() {
         render_type_definition(&mut output, definition);
     }
+    output.push_str(CONSUMER_PRELUDE);
 
-    writeln!(output, "export type State = {{").unwrap();
+    output.push_str("export type State = {\n");
+    if !contract
+        .schemas
+        .state_fields
+        .iter()
+        .any(|field| field.name == "available")
+    {
+        output.push_str("    available: boolean,\n");
+    }
     for field in contract.schemas.state_fields.iter() {
+        if let Some(description) = &field.description {
+            writeln!(output, "    -- {description}").unwrap();
+        }
+        let mut notes = Vec::new();
+        if field.minimum.is_some() || field.maximum.is_some() {
+            let bound = |value: &Option<serde_json::Number>| {
+                value.as_ref().map(ToString::to_string).unwrap_or_default()
+            };
+            notes.push(format!(
+                "range {}..{}",
+                bound(&field.minimum),
+                bound(&field.maximum)
+            ));
+        }
+        if let Some(default) = &field.default {
+            notes.push(format!("default {default}"));
+        }
+        if field.type_expr.base == BaseType::Int && !field.type_expr.array {
+            notes.push("integer".to_string());
+        }
+        let notes = if notes.is_empty() {
+            String::new()
+        } else {
+            format!(" -- {}", notes.join(", "))
+        };
         writeln!(
             output,
-            "    {}: {},",
+            "    {}: {},{notes}",
             field.name,
             luau_type(&field.type_expr)
         )
@@ -46,23 +86,51 @@ pub fn generate_luau_consumer_types(contract: &CompiledContract) -> String {
     }
     output.push_str("}\n\n");
 
-    output.push_str("export type Service = {\n");
-    output.push_str("    state: State,\n");
-    for method in contract.schemas.methods.iter() {
-        writeln!(output, "    {}: {},", method.name, luau_method_type(method)).unwrap();
-    }
+    output.push_str("export type Events = {\n");
     for event in contract.schemas.events.iter() {
         writeln!(
             output,
-            "    on_{}: (callback: (payload: {}) -> ()) -> (),",
+            "    {}: Channel<{}>,",
             event.name,
             luau_event_payload_type(event)
         )
         .unwrap();
     }
+    output.push_str("}\n\n");
+
+    output.push_str("export type Service = State & Events & {\n");
+    output.push_str("    state: State,\n    events: Events,\n");
+    for method in contract.schemas.methods.iter() {
+        writeln!(output, "    {}: {},", method.name, luau_method_type(method)).unwrap();
+    }
     output.push_str("}\n\nreturn {}\n");
     output
 }
+
+const CONSUMER_PRELUDE: &str = "\
+export type Channel<T> = {
+    on: (self: any, handler: (payload: T) -> ()) -> any,
+}
+
+export type CallSnapshot<R> = {
+    call_id: number,
+    done: boolean,
+    status: string?,
+    result: R?,
+}
+
+export type Ticket<R> = {
+    call_id: number,
+    status: string,
+    ok: boolean,
+    queued: boolean?,
+    error: string?,
+    poll: (self: any) -> CallSnapshot<R>,
+    await: (self: any) -> CallSnapshot<R>,
+    cancel: (self: any) -> boolean,
+}
+
+";
 
 /// Generate a provider skeleton with explicit `start(self)` setup and one
 /// handler per declared command. Implementations fill in host-specific logic.
@@ -246,18 +314,21 @@ fn render_type_definition(output: &mut String, definition: &CompiledTypeSchema) 
 }
 
 fn luau_method_type(method: &CompiledMethodSchema) -> String {
-    let args = method
-        .args
-        .iter()
-        .map(|arg| format!("{}: {}", arg.name, luau_type(&arg.type_expr)))
+    let args = std::iter::once("self: any".to_string())
+        .chain(
+            method
+                .args
+                .iter()
+                .map(|arg| format!("{}: {}", arg.name, luau_type(&arg.type_expr))),
+        )
         .collect::<Vec<_>>()
         .join(", ");
     let returns = method
         .returns
         .as_ref()
         .map(luau_type)
-        .unwrap_or_else(|| "()".to_string());
-    format!("({args}) -> {returns}")
+        .unwrap_or_else(|| "nil".to_string());
+    format!("({args}) -> Ticket<{returns}>")
 }
 
 fn luau_event_payload_type(event: &CompiledEventSchema) -> String {
@@ -292,7 +363,7 @@ fn luau_type(expr: &TypeExpr) -> String {
         BaseType::String => "string".to_string(),
         BaseType::Int | BaseType::Float => "number".to_string(),
         BaseType::Boolean => "boolean".to_string(),
-        BaseType::Object => "{{ [string]: unknown }}".to_string(),
+        BaseType::Object => "{ [string]: unknown }".to_string(),
         BaseType::Any => "unknown".to_string(),
         BaseType::Named(name) if name == "Result" => "{ ok: boolean, error: string? }".to_string(),
         BaseType::Named(name) => name.clone(),
@@ -352,6 +423,7 @@ mod tests {
                 name: "percent".into(),
                 field_type: "float".into(),
                 description: None,
+                ..Default::default()
             }],
             methods: vec![InterfaceMethod {
                 name: "set_percent".into(),
@@ -384,6 +456,39 @@ mod tests {
         assert!(artifacts.mock.contains("table.insert(self.calls"));
         assert!(artifacts.documentation.contains("Schema fingerprint"));
         assert!(artifacts.consumer_types.starts_with("-- GENERATED by MESH"));
+    }
+
+    #[test]
+    fn consumer_types_describe_the_proxy_surface() {
+        let contract = crate::contract::parse_compiled_contract(
+            "mesh.audio",
+            "1.0",
+            &serde_json::json!({
+                "state": [
+                    { "name": "percent", "type": "float", "minimum": 0, "maximum": 100,
+                      "description": "Output volume" },
+                    { "name": "muted", "type": "boolean", "default": false },
+                    { "name": "extra", "type": "object?" }
+                ],
+                "methods": [{ "name": "set_volume",
+                    "args": [{ "name": "percent", "type": "float" }], "returns": "Result" }],
+                "events": [{ "name": "VolumeChanged",
+                    "payload": [{ "name": "level", "type": "float" }] }]
+            }),
+        )
+        .unwrap();
+        let types = generate_luau_consumer_types(&contract);
+        for expected in [
+            "    available: boolean,\n",
+            "    -- Output volume\n    percent: number, -- range 0..100\n",
+            "    muted: boolean, -- default false\n",
+            "    extra: { [string]: unknown }?,\n",
+            "    VolumeChanged: Channel<{ level: number }>,\n",
+            "    set_volume: (self: any, percent: number) -> Ticket<{ ok: boolean, error: string? }>,\n",
+            "export type Service = State & Events & {\n",
+        ] {
+            assert!(types.contains(expected), "missing {expected:?} in\n{types}");
+        }
     }
 
     #[test]

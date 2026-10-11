@@ -46,6 +46,8 @@
             {
               "name": "level",
               "type": "float",
+              "minimum": 0,
+              "maximum": 100,
               "description": "Battery charge as a percentage (0.0-100.0)"
             },
             {
@@ -56,11 +58,13 @@
             {
               "name": "time_remaining_minutes",
               "type": "float",
+              "minimum": 0,
               "description": "Estimated minutes of remaining runtime on battery (0 if unknown/charging)"
             },
             {
               "name": "time_to_full_minutes",
               "type": "float",
+              "minimum": 0,
               "description": "Estimated minutes until full charge while charging (0 if unknown/discharging)"
             },
             {
@@ -81,6 +85,8 @@
             {
               "name": "health_percent",
               "type": "float",
+              "minimum": 0,
+              "maximum": 100,
               "description": "Battery health as a percentage of design capacity (0.0-100.0, 0 if unknown)"
             },
             {

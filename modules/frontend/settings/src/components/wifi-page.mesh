@@ -70,8 +70,7 @@
 <script lang="luau">
 hidden = false
 
-local network_ok, network = pcall(require, "mesh.network@>=1.0")
-if not network_ok then network = nil end
+local network = require("mesh.network@>=1.0")
 local t = import("mesh.i18n", "t")
 
 wifi_status = "wifi.waiting"
@@ -112,7 +111,7 @@ local function signal_label(entry)
 end
 
 function render()
-    if not network or network.available == false then
+    if network.available == false then
         wifi_status = "wifi.no_compatible_service"
         wifi_toggle_label = "common.unavailable"
         wifi_enabled = false
@@ -179,7 +178,7 @@ function render()
 end
 
 function onToggleWifi(value)
-    if not network or network.available == false or type(network.set_wifi_enabled) ~= "function" then
+    if network.available == false or type(network.set_wifi_enabled) ~= "function" then
         return
     end
     local requested = bool_value(value)
@@ -192,13 +191,13 @@ function onToggleWifi(value)
 end
 
 function onScan()
-    if network and type(network.scan) == "function" then
+    if type(network.scan) == "function" then
         network.scan()
     end
 end
 
 function onNetworkAction(connection_id, connected)
-    if connected or not network or connection_id == "" then return end
+    if connected or connection_id == "" then return end
     if type(network.connect) == "function" then
         network.connect(connection_id)
     end

@@ -119,12 +119,14 @@ pub(super) fn create_service_proxy(
         .filter(|name| !name.is_empty())
         .unwrap_or(interface_name);
     let observed_state_fields = Arc::new(Mutex::new(HashSet::new()));
+    let absent_state = Arc::new(absent_service_state(contract.as_deref()));
     let state_proxy = create_service_state_proxy(
         lua,
         service_name.clone(),
         Arc::clone(&service_context_state),
         Arc::clone(&tracked_service_fields),
         Arc::clone(&observed_state_fields),
+        Arc::clone(&absent_state),
     )?;
     let events_proxy = create_events_proxy(
         lua,
@@ -338,7 +340,13 @@ pub(super) fn create_service_proxy(
                 &service_name,
                 &key,
             );
-            service_payload_field(lua, &service_context_state, &service_name, &key)
+            service_payload_field(
+                lua,
+                &service_context_state,
+                &service_name,
+                &key,
+                &absent_state,
+            )
         })?,
     )?;
     meta.set(
@@ -584,6 +592,7 @@ fn create_service_state_proxy(
     service_context_state: Arc<Mutex<ServiceContextState>>,
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     observed_state_fields: Arc<Mutex<HashSet<String>>>,
+    absent_state: Arc<serde_json::Map<String, Value>>,
 ) -> mlua::Result<Table> {
     let state = lua.create_table()?;
     let meta = lua.create_table()?;
@@ -596,7 +605,13 @@ fn create_service_state_proxy(
                 &service_name,
                 &key,
             );
-            service_payload_field(lua, &service_context_state, &service_name, &key)
+            service_payload_field(
+                lua,
+                &service_context_state,
+                &service_name,
+                &key,
+                &absent_state,
+            )
         })?,
     )?;
     meta.set(
@@ -637,14 +652,30 @@ fn service_payload_field(
     service_context_state: &Arc<Mutex<ServiceContextState>>,
     service_name: &str,
     key: &str,
+    absent_state: &serde_json::Map<String, Value>,
 ) -> mlua::Result<LuaValue> {
     // Hold the lock only long enough to share the payload; the conversion
     // reads the field in place instead of deep-cloning it first.
     let payload = service_context_state.lock().unwrap().payload(service_name);
-    match payload.as_deref().and_then(|payload| payload.get(key)) {
-        Some(value) => lua.to_value(value),
-        None => Ok(LuaValue::Nil),
+    let value = match payload.as_deref() {
+        Some(payload) => payload.get(key),
+        None => absent_state.get(key),
+    };
+    value.map_or(Ok(LuaValue::Nil), |value| lua.to_value(value))
+}
+
+/// What a proxy reads before its service has published any state, including
+/// when no provider exists: `available` is false and each state field with a
+/// contract `default` reads that default. Other fields read nil.
+fn absent_service_state(contract: Option<&InterfaceContract>) -> serde_json::Map<String, Value> {
+    let mut state = serde_json::Map::new();
+    for field in contract.map_or(&[][..], |contract| &contract.state_fields) {
+        if let Some(default) = &field.default {
+            state.insert(field.name.clone(), default.clone());
+        }
     }
+    state.insert("available".to_string(), Value::Bool(false));
+    state
 }
 
 fn command_result_table(

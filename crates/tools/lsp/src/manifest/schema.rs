@@ -1229,6 +1229,35 @@ fn contract_node() -> Node {
             ],
         )
     };
+    let state_field = || {
+        let mut node = typed_field();
+        if let Kind::Object(fields) = &mut node.kind {
+            fields.extend([
+                field(
+                    "minimum",
+                    false,
+                    scalar(
+                        "Lowest value of an int or float field; providers are clamped to it.",
+                        "number",
+                    ),
+                ),
+                field(
+                    "maximum",
+                    false,
+                    scalar(
+                        "Highest value of an int or float field; providers are clamped to it.",
+                        "number",
+                    ),
+                ),
+                field(
+                    "default",
+                    false,
+                    scalar("Value used when a provider omits the field.", "any"),
+                ),
+            ]);
+        }
+        node
+    };
     obj(
         "Inline interface contract JSON: state fields, command methods, events, \
          named types, and consumer capabilities.",
@@ -1240,7 +1269,7 @@ fn contract_node() -> Node {
                     "Public state fields every provider must emit; read through \
                           the service proxy as plain field access.",
                     "array",
-                    Kind::Array(Box::new(typed_field())),
+                    Kind::Array(Box::new(state_field())),
                 ),
             ),
             field(

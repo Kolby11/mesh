@@ -29,6 +29,7 @@ fn main() {
         Some("start") | None => cmd_start(),
         Some("list") => cmd_list(),
         Some("services") => cmd_services(),
+        Some("types") => cmd_types(&args[2..]),
         Some("debug") => cmd_debug(&args[2..]),
         Some("ipc") => cmd_ipc(&args[2..]),
         Some("ipc-socket-path") => cmd_ipc_socket_path(),
@@ -138,6 +139,59 @@ fn cmd_services() {
         for (id, name, priority) in &backends {
             println!("  {name} ({id}) priority={priority}");
         }
+    }
+}
+
+/// Write `<interface>.d.luau` for every typed contract in the graph, or for
+/// the named interfaces only.
+fn cmd_types(args: &[String]) {
+    let mut out_dir = std::path::PathBuf::from("mesh-types");
+    let mut wanted = Vec::new();
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--out" => {
+                out_dir = args
+                    .next()
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| exit_error("--out needs a directory"));
+            }
+            other if other.starts_with('-') => exit_error(format!("unknown types flag: {other}")),
+            interface => wanted.push(mesh_core_service::canonical_interface_name(interface)),
+        }
+    }
+
+    let graph = load_authoring_snapshot();
+    let mut contracts = graph
+        .interface_contracts()
+        .iter()
+        .filter(|(interface, _)| wanted.is_empty() || wanted.contains(interface))
+        .collect::<Vec<_>>();
+    contracts.sort_by(|a, b| a.0.cmp(b.0));
+    for interface in &wanted {
+        if !contracts.iter().any(|(name, _)| *name == interface) {
+            exit_error(format!("no typed contract for {interface}"));
+        }
+    }
+    if contracts.is_empty() {
+        println!("no typed contracts found");
+        return;
+    }
+    if let Err(error) = std::fs::create_dir_all(&out_dir) {
+        exit_error(format!("failed to create {}: {error}", out_dir.display()));
+    }
+    for (interface, contract) in contracts {
+        let compiled = contract
+            .compile(mesh_core_service::DeclarationProvenance::unknown())
+            .unwrap_or_else(|error| exit_error(format!("{interface}: {error}")));
+        let path = out_dir.join(format!("{interface}.d.luau"));
+        if let Err(error) = std::fs::write(
+            &path,
+            mesh_core_service::generate_luau_consumer_types(&compiled),
+        ) {
+            exit_error(format!("failed to write {}: {error}", path.display()));
+        }
+        println!("{}", path.display());
     }
 }
 
@@ -1934,6 +1988,8 @@ fn cmd_help() {
     println!("  start     Start the shell (default)");
     println!("  list      List discovered modules");
     println!("  services  List available service backends");
+    println!("  types     Write <interface>.d.luau for each typed service contract");
+    println!("            [<interface>...] [--out <dir>]  (default dir: mesh-types)");
     println!("  debug     Toggle the debug overlay on the running shell");
     println!("            subcommands: profiling, tab");
     println!("  ipc       Send an IPC command to the running shell");

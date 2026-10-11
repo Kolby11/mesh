@@ -432,26 +432,31 @@ pub(in crate::shell) fn settings_catalog() -> InterfaceCatalog {
                         name: "current".into(),
                         field_type: "string".into(),
                         description: None,
+                        ..Default::default()
                     },
                     ContractStateField {
                         name: "theme_id".into(),
                         field_type: "string".into(),
                         description: None,
+                        ..Default::default()
                     },
                     ContractStateField {
                         name: "is_dark".into(),
                         field_type: "boolean".into(),
                         description: None,
+                        ..Default::default()
                     },
                     ContractStateField {
                         name: "themes".into(),
                         field_type: "any[]".into(),
                         description: None,
+                        ..Default::default()
                     },
                     ContractStateField {
                         name: "available".into(),
                         field_type: "any[]".into(),
                         description: None,
+                        ..Default::default()
                     },
                 ]
             } else {
@@ -479,16 +484,19 @@ pub(in crate::shell) fn settings_catalog() -> InterfaceCatalog {
                 name: "available".into(),
                 field_type: "boolean".into(),
                 description: None,
+                ..Default::default()
             },
             ContractStateField {
                 name: "percent".into(),
                 field_type: "float".into(),
                 description: None,
+                ..Default::default()
             },
             ContractStateField {
                 name: "muted".into(),
                 field_type: "boolean".into(),
                 description: None,
+                ..Default::default()
             },
         ],
         methods: vec![

@@ -77,16 +77,19 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
                 name: "available".into(),
                 field_type: "boolean".into(),
                 description: None,
+                ..Default::default()
             },
             ContractStateField {
                 name: "percent".into(),
                 field_type: "float".into(),
                 description: None,
+                ..Default::default()
             },
             ContractStateField {
                 name: "muted".into(),
                 field_type: "boolean".into(),
                 description: None,
+                ..Default::default()
             },
         ],
         methods: vec![
@@ -236,6 +239,7 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
             name: name.into(),
             field_type: field_type.into(),
             description: None,
+            ..Default::default()
         })
         .collect(),
         methods: vec![
@@ -294,6 +298,7 @@ pub(super) fn event_only_audio_network_catalog() -> InterfaceCatalog {
             name: "percent".into(),
             field_type: "float".into(),
             description: None,
+            ..Default::default()
         }],
         methods: Vec::new(),
         events: vec![InterfaceEvent {
@@ -375,6 +380,7 @@ pub(super) fn navigation_bar_catalog() -> InterfaceCatalog {
                     name: "level".into(),
                     field_type: "float".into(),
                     description: None,
+                    ..Default::default()
                 }],
                 vec![
                     InterfaceMethod {
@@ -451,61 +457,73 @@ pub(super) fn debug_catalog() -> InterfaceCatalog {
                 name: "overlay_enabled".into(),
                 field_type: "boolean".into(),
                 description: None,
+                ..Default::default()
             },
             ContractStateField {
                 name: "layout_bounds_enabled".into(),
                 field_type: "boolean".into(),
                 description: None,
+                ..Default::default()
             },
             ContractStateField {
                 name: "profiling_enabled".into(),
                 field_type: "boolean".into(),
                 description: None,
+                ..Default::default()
             },
             ContractStateField {
                 name: "profiling_session_id".into(),
                 field_type: "int".into(),
                 description: None,
+                ..Default::default()
             },
             ContractStateField {
                 name: "active_view".into(),
                 field_type: "string".into(),
                 description: None,
+                ..Default::default()
             },
             ContractStateField {
                 name: "modules".into(),
                 field_type: "any[]".into(),
                 description: None,
+                ..Default::default()
             },
             ContractStateField {
                 name: "module_graph".into(),
                 field_type: "any[]".into(),
                 description: None,
+                ..Default::default()
             },
             ContractStateField {
                 name: "interfaces".into(),
                 field_type: "any[]".into(),
                 description: None,
+                ..Default::default()
             },
             ContractStateField {
                 name: "backend_runtimes".into(),
                 field_type: "any[]".into(),
                 description: None,
+                ..Default::default()
             },
             ContractStateField {
                 name: "active_surfaces".into(),
                 field_type: "any[]".into(),
                 description: None,
+                ..Default::default()
             },
             ContractStateField {
                 name: "benchmarks".into(),
                 field_type: "object".into(),
                 description: None,
+                ..Default::default()
             },
             ContractStateField {
                 name: "profiling".into(),
                 field_type: "object".into(),
                 description: None,
+                ..Default::default()
             },
         ],
         methods: vec![

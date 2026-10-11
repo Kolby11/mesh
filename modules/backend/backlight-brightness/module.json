@@ -46,6 +46,8 @@
             {
               "name": "level",
               "type": "float",
+              "minimum": 0,
+              "maximum": 100,
               "description": "Current display brightness as a percentage (0.0-100.0)"
             },
             {

@@ -713,3 +713,107 @@ end
         matches!(err, ScriptError::LuaError(message) if message.contains("unsupported require: @mesh/audio@>=1.0"))
     );
 }
+
+fn contract_only_bluetooth_catalog() -> mesh_core_service::InterfaceCatalog {
+    let mut catalog = mesh_core_service::InterfaceCatalog::default();
+    catalog.register_contract(
+        mesh_core_service::parse_interface_contract(
+            "mesh.bluetooth",
+            "1.0",
+            &serde_json::json!({
+                "state": [
+                    { "name": "available", "type": "boolean" },
+                    { "name": "powered", "type": "boolean", "default": false },
+                    { "name": "adapter", "type": "string?" }
+                ]
+            }),
+        )
+        .unwrap(),
+    );
+    catalog
+}
+
+#[test]
+fn absent_optional_service_reads_as_unavailable_with_contract_defaults() {
+    let caps = CapabilitySet::from_ids(["service.bluetooth.read"]);
+    let mut ctx = ScriptContext::new("@mesh/settings", caps).unwrap();
+    ctx.set_interface_catalog(contract_only_bluetooth_catalog());
+    ctx.set_optional_interfaces(["mesh.bluetooth".to_string()].into_iter().collect());
+    ctx.load_script(
+        r#"
+available = nil
+powered = nil
+adapter_is_nil = nil
+
+function init()
+    local bluetooth = require("mesh.bluetooth@>=1.0")
+    available = bluetooth.available
+    powered = bluetooth.state.powered
+    adapter_is_nil = bluetooth.adapter == nil
+end
+"#,
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+
+    assert_eq!(ctx.state.get("available"), Some(Value::Bool(false)));
+    assert_eq!(ctx.state.get("powered"), Some(Value::Bool(false)));
+    assert_eq!(ctx.state.get("adapter_is_nil"), Some(Value::Bool(true)));
+    assert!(ctx.drain_diagnostics().is_empty());
+}
+
+#[test]
+fn absent_optional_import_binds_an_unavailable_proxy() {
+    let caps = CapabilitySet::from_ids(["service.bluetooth.read"]);
+    let mut ctx = ScriptContext::new("@mesh/settings", caps).unwrap();
+    ctx.set_interface_catalog(contract_only_bluetooth_catalog());
+    ctx.set_optional_interfaces(["mesh.bluetooth".to_string()].into_iter().collect());
+    ctx.load_script_with_interface_imports(
+        r#"
+available = nil
+
+function init()
+    available = bluetooth.available
+end
+"#,
+        &[ScriptInterfaceImport {
+            alias: "bluetooth".into(),
+            interface: "mesh.bluetooth".into(),
+            version: Some(">=1.0".into()),
+        }],
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+
+    assert_eq!(ctx.state.get("available"), Some(Value::Bool(false)));
+    assert!(!ctx.interface_bindings.contains_key("bluetooth"));
+}
+
+#[test]
+fn a_published_snapshot_replaces_the_absent_state() {
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
+    let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+    ctx.set_interface_catalog(audio_catalog());
+    ctx.load_script(
+        r#"
+local audio = require("mesh.audio")
+before = nil
+after = nil
+
+function read_before()
+    before = audio.available
+end
+
+function read_after()
+    after = audio.available
+end
+"#,
+    )
+    .unwrap();
+    ctx.call_handler("read_before", &[]).unwrap();
+    ctx.apply_service_payload("audio", &serde_json::json!({ "percent": 10 }));
+    ctx.call_handler("read_after", &[]).unwrap();
+
+    assert_eq!(ctx.state.get("before"), Some(Value::Bool(false)));
+    assert_eq!(ctx.state.get("after"), None);
+}

@@ -111,13 +111,7 @@ local function normalized_scroll_sensitivity()
 end
 
 local function update_audio_copy(percent, muted)
-    local safe = math.floor(tonumber(percent) or 0)
-    if safe < 0 then
-        safe = 0
-    end
-    if safe > 100 then
-        safe = 100
-    end
+    local safe = math.floor(percent)
     audio_percent = safe
 
     if muted or safe == 0 then
@@ -138,23 +132,14 @@ local function update_audio_copy(percent, muted)
     audio_tooltip_value = mesh.locale.format_percent(safe)
 end
 
-if audio and audio.VolumeChanged then
-    audio.VolumeChanged:on(function(event)
-        local percent = math.floor(tonumber(event.level) or 0)
-        if percent < 0 then
-            percent = 0
-        end
-        if percent > 100 then
-            percent = 100
-        end
-        local muted = audio.muted or false
-        update_audio_copy(percent, muted)
-    end)
-end
+audio.VolumeChanged:on(function(event)
+    -- Event payloads carry no declared range, unlike `audio.percent`.
+    update_audio_copy(math.clamp(event.level, 0, 100), audio.muted)
+end)
 
 function render(self)
     connect_audio_popover()
-    if not audio or audio.available == false then
+    if audio.available == false then
         icon_name = "audio-volume-muted"
         audio_tooltip_key = "nav.audio_service_unavailable"
         audio_tooltip_value = ""
@@ -162,15 +147,7 @@ function render(self)
         return
     end
 
-    local percent = math.floor(tonumber(audio.percent) or 0)
-    if percent < 0 then
-        percent = 0
-    end
-    if percent > 100 then
-        percent = 100
-    end
-    local muted = audio.muted or false
-    update_audio_copy(percent, muted)
+    update_audio_copy(audio.percent, audio.muted)
 end
 
 function onVolumeEnter(event)
@@ -187,7 +164,7 @@ function onVolumeLeave()
 end
 
 function onAudioToggle()
-    if not audio or audio.available == false then
+    if audio.available == false then
         return
     end
 
@@ -203,7 +180,7 @@ function onMuteKeybind()
 end
 
 function onVolumeScroll(event)
-    if not audio or audio.available == false or type(audio.set_volume) ~= "function" then
+    if audio.available == false or type(audio.set_volume) ~= "function" then
         return
     end
 
@@ -214,13 +191,9 @@ function onVolumeScroll(event)
     end
 
     local amount = normalized_scroll_sensitivity()
-    if dy > 0 then
-        update_audio_copy(audio_percent + amount, false)
-        audio.set_volume("default", audio_percent)
-    else
-        update_audio_copy(audio_percent - amount, false)
-        audio.set_volume("default", audio_percent)
-    end
+    local step = dy > 0 and amount or -amount
+    update_audio_copy(math.clamp(audio_percent + step, 0, 100), false)
+    audio.set_volume("default", audio_percent)
 end
 </script>
 

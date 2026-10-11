@@ -84,8 +84,7 @@
 <script lang="luau">
 hidden = false
 
-local bluetooth_ok, bluetooth = pcall(require, "mesh.bluetooth@>=1.0")
-if not bluetooth_ok then bluetooth = nil end
+local bluetooth = require("mesh.bluetooth@>=1.0")
 local t = import("mesh.i18n", "t")
 
 bluetooth_status = "bluetooth.waiting"
@@ -114,7 +113,7 @@ local function device_id(entry)
 end
 
 function render()
-    if not bluetooth or bluetooth.available == false then
+    if bluetooth.available == false then
         bluetooth_status = "bluetooth.no_compatible_service"
         bluetooth_toggle_label = "common.unavailable"
         bluetooth_enabled = false
@@ -189,7 +188,6 @@ function render()
 end
 
 function onToggleBluetooth()
-    if not bluetooth then return end
     local enabled = bluetooth.enabled == true or bluetooth.powered == true
     if type(bluetooth.set_enabled) == "function" then
         bluetooth.set_enabled(not enabled)
@@ -199,19 +197,19 @@ function onToggleBluetooth()
 end
 
 function onScan()
-    if bluetooth and type(bluetooth.scan) == "function" then
+    if type(bluetooth.scan) == "function" then
         bluetooth.scan()
     end
 end
 
 function onPair(id)
-    if bluetooth and id ~= "" and type(bluetooth.pair) == "function" then
+    if id ~= "" and type(bluetooth.pair) == "function" then
         bluetooth.pair(id)
     end
 end
 
 function onPairedAction(id, connected)
-    if not bluetooth or id == "" then return end
+    if id == "" then return end
     if connected and type(bluetooth.disconnect) == "function" then
         bluetooth.disconnect(id)
     elseif not connected and type(bluetooth.connect) == "function" then

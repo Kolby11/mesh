@@ -615,10 +615,9 @@ impl ScriptContext {
                         ScriptError::CapabilityDenied(canonical.clone()),
                     ));
                 }
-                if resolution.provider.is_none() {
-                    if optional_interfaces_for_require.contains(&canonical) {
-                        return Ok(LuaValue::Nil);
-                    }
+                if resolution.provider.is_none()
+                    && !optional_interfaces_for_require.contains(&canonical)
+                {
                     let reason = lookup_failure_reason(&interface_catalog, &resolution);
                     return Err(record_lookup_diagnostic_lua(
                         &diagnostics_for_require,
@@ -777,16 +776,9 @@ impl ScriptContext {
                 );
                 return Err(ScriptError::CapabilityDenied(canonical));
             }
-            if resolution.provider.is_none() {
-                // Optional interfaces resolve to `nil` rather than aborting: the
-                // script's own `require("mesh.x")` then returns nil via the lazy
-                // path. Leave the alias unbound so it falls through to nil.
-                if self.optional_interfaces.contains(&canonical) {
-                    globals
-                        .set(import.alias.as_str(), LuaValue::Nil)
-                        .map_err(lua_err)?;
-                    continue;
-                }
+            let absent_optional =
+                resolution.provider.is_none() && self.optional_interfaces.contains(&canonical);
+            if resolution.provider.is_none() && !absent_optional {
                 let reason = lookup_failure_reason(&self.interface_catalog, &resolution);
                 record_lookup_diagnostic(
                     &self.shared_diagnostics,
@@ -802,7 +794,9 @@ impl ScriptContext {
                 )));
             }
 
-            {
+            // An absent optional service still gets a proxy that reads as
+            // unavailable, but it has no provider to bind calls to.
+            if !absent_optional {
                 let mut shared_interface_bindings = self.shared_interface_bindings.lock().unwrap();
                 shared_interface_bindings
                     .bindings

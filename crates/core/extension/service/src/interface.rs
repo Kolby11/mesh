@@ -1094,11 +1094,14 @@ mod tests {
     #[should_panic(expected = "invalid contract for mesh.bad")]
     fn registering_an_invalid_known_contract_fails_loudly() {
         let mut contract = test_contract("mesh.bad", 0);
-        contract.state_fields.push(crate::contract::ContractStateField {
-            name: "flag".into(),
-            field_type: "bool".into(),
-            description: None,
-        });
+        contract
+            .state_fields
+            .push(crate::contract::ContractStateField {
+                name: "flag".into(),
+                field_type: "bool".into(),
+                description: None,
+                ..Default::default()
+            });
         InterfaceCatalog::default().register_contract(contract);
     }
 

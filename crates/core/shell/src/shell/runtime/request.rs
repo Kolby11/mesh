@@ -1,5 +1,4 @@
 use super::super::*;
-use super::service_state;
 use crate::shell::types::{
     DurableProfileWriteResult, PopoverSurfaceRelationship, PopoverTriggerReference,
     ProfileWriteOperation, TabFocusTarget,
@@ -2155,10 +2154,9 @@ impl Shell {
         let interface_canonical = canonical_interface_name_cow(interface);
         let service_caps = service_capabilities(interface_canonical.as_ref());
         let required = &service_caps.control;
-        let contract = self
-            .interfaces
-            .resolve(interface_canonical.as_ref(), None)
-            .contract;
+        let resolution = self.interfaces.resolve(interface_canonical.as_ref(), None);
+        let contract = resolution.contract;
+        let compiled_contract = resolution.compiled_contract;
         let authorized = contract.as_ref().map_or_else(
             || source_capabilities.is_granted(required),
             |contract| {
@@ -2260,9 +2258,8 @@ impl Shell {
             return result;
         }
 
-        if let Some(contract) = contract.as_ref() {
-            let warnings =
-                service_state::service_method_input_contract_warnings(contract, command, payload);
+        if let Some(contract) = compiled_contract.as_ref() {
+            let warnings = contract.method_input_warnings(command, payload);
             if !warnings.is_empty() {
                 let message = warnings.join("; ");
                 tracing::warn!(

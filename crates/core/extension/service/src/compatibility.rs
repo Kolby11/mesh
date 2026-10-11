@@ -9,7 +9,7 @@
 //! still work against `candidate`?"*. Additions are safe; removals, renames,
 //! and type changes are not.
 
-use crate::contract::{InterfaceArgument, InterfaceContract};
+use crate::contract::{ContractStateField, InterfaceArgument, InterfaceContract};
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -158,6 +158,15 @@ fn diff_state_fields(
         .iter()
         .map(|field| (field.name.as_str(), field.field_type.as_str()))
         .collect();
+    for field in &locked.state_fields {
+        if let Some(next) = candidate
+            .state_fields
+            .iter()
+            .find(|next| next.name == field.name && next.field_type == field.field_type)
+        {
+            diff_state_constraints(field, next, changes);
+        }
+    }
 
     for field in &locked.state_fields {
         match candidate_fields.get(field.name.as_str()) {
@@ -207,6 +216,72 @@ fn diff_state_fields(
                 detail: format!("state field '{}' was added", field.name),
             });
         }
+    }
+}
+
+/// Consumers rely on a field's range and on its presence when it has a
+/// default, so widening or dropping either breaks them; narrowing is additive.
+fn diff_state_constraints(
+    locked: &ContractStateField,
+    candidate: &ContractStateField,
+    changes: &mut Vec<ContractChange>,
+) {
+    let bound = |value: &Option<serde_json::Number>| value.as_ref().and_then(|n| n.as_f64());
+    let widened =
+        |locked: Option<f64>, candidate: Option<f64>, below: bool| match (locked, candidate) {
+            (Some(_), None) => Some(true),
+            (None, Some(_)) => Some(false),
+            (Some(locked), Some(candidate)) if locked != candidate => Some(if below {
+                candidate < locked
+            } else {
+                candidate > locked
+            }),
+            _ => None,
+        };
+    for (name, change) in [
+        (
+            "minimum",
+            widened(bound(&locked.minimum), bound(&candidate.minimum), true),
+        ),
+        (
+            "maximum",
+            widened(bound(&locked.maximum), bound(&candidate.maximum), false),
+        ),
+    ] {
+        if let Some(widened) = change {
+            changes.push(ContractChange {
+                class: if widened {
+                    CompatibilityClass::Breaking
+                } else {
+                    CompatibilityClass::Additive
+                },
+                path: format!("state.{}.{name}", locked.name),
+                detail: format!(
+                    "state field '{}' {} its {name}",
+                    locked.name,
+                    if widened { "widened" } else { "narrowed" }
+                ),
+            });
+        }
+    }
+    if locked.default != candidate.default {
+        let removed = candidate.default.is_none();
+        changes.push(ContractChange {
+            class: if removed {
+                CompatibilityClass::Breaking
+            } else {
+                CompatibilityClass::Additive
+            },
+            path: format!("state.{}.default", locked.name),
+            detail: if removed {
+                format!(
+                    "state field '{}' no longer has a default; providers omitting it break",
+                    locked.name
+                )
+            } else {
+                format!("state field '{}' default changed", locked.name)
+            },
+        });
     }
 }
 
@@ -693,6 +768,34 @@ mod tests {
         assert!(
             diff.breaking_changes()
                 .any(|change| change.path == "state.muted")
+        );
+    }
+
+    #[test]
+    fn widening_a_range_or_dropping_a_default_is_breaking() {
+        let with = |percent: &str, muted: &str| {
+            contract(&format!(
+                r#"{{"state":[{{"name":"percent","type":"float"{percent}}},
+                    {{"name":"muted","type":"boolean"{muted}}}]}}"#
+            ))
+        };
+        let locked = with(r#","minimum":0,"maximum":100"#, r#","default":false"#);
+        let narrowed = diff_contracts(
+            &locked,
+            &with(r#","minimum":10,"maximum":100"#, r#","default":false"#),
+        );
+        assert!(!narrowed.is_breaking());
+        let widened = diff_contracts(&locked, &with(r#","minimum":0"#, r#","default":false"#));
+        assert!(
+            widened
+                .breaking_changes()
+                .any(|change| change.path == "state.percent.maximum")
+        );
+        let dropped = diff_contracts(&locked, &with(r#","minimum":0,"maximum":100"#, ""));
+        assert!(
+            dropped
+                .breaking_changes()
+                .any(|change| change.path == "state.muted.default")
         );
     }
 

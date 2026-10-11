@@ -39,10 +39,10 @@ pub use contract::{
     CompiledOperationPolicy, CompiledSchemas, CompiledStateField, CompiledTypeSchema,
     ContractCapabilities, ContractError, ContractFeatureGroup, ContractStateField,
     DeclarationProvenance, FeatureNegotiation, InterfaceArgument, InterfaceContract,
-    InterfaceEvent, InterfaceMethod, InterfaceTypeDef, StateBinding, TypeExpr,
-    compile_interface_contract, contract_type_errors, negotiate_feature_groups,
-    parse_compiled_contract, parse_compiled_contract_with_provenance, parse_contract_version,
-    parse_interface_contract, parse_version_req,
+    InterfaceEvent, InterfaceMethod, InterfaceTypeDef, RUNTIME_METADATA_STATE_FIELDS, StateBinding,
+    TypeExpr, compile_interface_contract, contract_type_errors, json_type_name,
+    negotiate_feature_groups, parse_compiled_contract, parse_compiled_contract_with_provenance,
+    parse_contract_version, parse_interface_contract, parse_version_req,
 };
 pub use generator::{
     GeneratedContractArtifacts, generate_contract_artifacts, generate_contract_documentation,

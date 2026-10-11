@@ -10,10 +10,8 @@ pub use mesh_core_frontend_shell_adapter::{
 };
 use mesh_core_presentation::{LayerSurfaceSizePolicy, PopupConfig, SurfaceConfig};
 use mesh_core_render::{DamageRect, PixelBuffer};
-use mesh_core_service::{InterfaceContract, InterfaceTypeDef, TypeExpr};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::sync::oneshot;
 
@@ -233,21 +231,6 @@ impl ServiceDeliveryIndex {
         }
         self.delivery_epoch
     }
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct ContractValidationCache {
-    pub(super) contract: Arc<InterfaceContract>,
-    pub(super) types: HashMap<String, InterfaceTypeDef>,
-    pub(super) state_fields: Vec<CompiledContractField>,
-    pub(super) events: HashMap<String, Vec<CompiledContractField>>,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct CompiledContractField {
-    pub(super) name: String,
-    pub(super) field_type: String,
-    pub(super) value_type: TypeExpr,
 }
 
 /// The component whose callback returned a request. The effect scheduler

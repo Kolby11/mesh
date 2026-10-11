@@ -16,14 +16,14 @@
 
 <script lang="luau">
 local t = import("mesh.i18n", "t")
--- Optional interface: nil until a mesh.brightness provider is installed.
--- Without a provider the whole control hides instead of pretending to work.
+-- Optional interface: `available` stays false until a mesh.brightness
+-- provider publishes state, and the control hides instead of pretending to work.
 local brightness = require("mesh.brightness")
 
 brightness_level = 100
 brightness_label = "100%"
 brightness_icon = "display-brightness-high"
-brightness_available = brightness ~= nil
+brightness_available = false
 
 local function normalized_scroll_sensitivity()
     local amount = tonumber(props and props.scroll_sensitivity)
@@ -34,7 +34,7 @@ local function normalized_scroll_sensitivity()
 end
 
 local function update_brightness_copy(level)
-    brightness_level = math.max(0, math.min(100, math.floor(tonumber(level) or 100)))
+    brightness_level = math.floor(level)
     brightness_label = mesh.locale.format_percent(brightness_level)
 
     if brightness_level == 0 then
@@ -49,13 +49,14 @@ local function update_brightness_copy(level)
 end
 
 function render(self)
-    if brightness and brightness.level ~= nil then
+    brightness_available = brightness.available ~= false
+    if brightness_available then
         update_brightness_copy(brightness.level)
     end
 end
 
 function onBrightnessScroll(event)
-    if not brightness then
+    if not brightness_available then
         return
     end
 
@@ -69,13 +70,9 @@ function onBrightnessScroll(event)
 
     -- The input boundary normalizes wheel and trackpad deltas alike:
     -- positive is up and negative is down.
-    if dy > 0 then
-        update_brightness_copy(brightness_level + amount)
-        brightness.set(brightness_level)
-    else
-        update_brightness_copy(brightness_level - amount)
-        brightness.set(brightness_level)
-    end
+    local step = dy > 0 and amount or -amount
+    update_brightness_copy(math.clamp(brightness_level + step, 0, 100))
+    brightness.set(brightness_level)
 end
 </script>
 

@@ -1411,6 +1411,7 @@ fn builtin_contract(
                 name: (*name).to_string(),
                 field_type: (*field_type).to_string(),
                 description: None,
+                ..Default::default()
             })
             .collect(),
         methods: methods
@@ -2193,7 +2194,6 @@ impl Shell {
             latest_service_state: HashMap::new(),
             latest_service_health: HashMap::new(),
             latest_service_health_identities: HashMap::new(),
-            service_contract_validation: HashMap::new(),
             pending_bound_service_state: HashMap::new(),
             bound_service_state_transactions: HashMap::new(),
             command_throttle: HashMap::new(),

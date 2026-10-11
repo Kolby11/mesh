@@ -295,8 +295,11 @@ mesh.events.on("interface.health/mesh.audio", function(h)
 end)
 ```
 
-Optional interfaces use `pcall(require, …)`; a failed require and an
-unavailable interface render the same fallback path.
+An optional interface with no provider still resolves: `require` returns a
+proxy whose `available` reads `false`, whose fields read their contract
+`default` (or nil), and which has no event deliveries. Check
+`svc.available == false` instead of wrapping `require` in `pcall`. A required
+interface whose provider is missing still raises from `require`.
 
 ## 6. Future: registry and archives; signing integration
 

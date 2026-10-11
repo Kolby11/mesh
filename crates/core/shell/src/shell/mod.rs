@@ -165,11 +165,11 @@ use surface_layout::{
     prepare_theme_state_for_graph, selected_theme_mode,
 };
 use types::{
-    BackendIdentity, CommandThrottleState, CompiledContractField, ComponentRuntime,
-    ContractValidationCache, DurableProfileWriteResult, EffectOrigin, IpcProfileSwitchResponse,
-    LatestServiceState, PendingBoundServiceState, PendingServiceCommand, ProfileWriteOperation,
-    ServiceCallRoute, ServiceCommandMsg, ServiceDeliveryIndex, SettingsWatchState, ShellCoreState,
-    ShellMessage, SourcedRequest, SurfaceState, TargetRef, ThemeWatchState,
+    BackendIdentity, CommandThrottleState, ComponentRuntime, DurableProfileWriteResult,
+    EffectOrigin, IpcProfileSwitchResponse, LatestServiceState, PendingBoundServiceState,
+    PendingServiceCommand, ProfileWriteOperation, ServiceCallRoute, ServiceCommandMsg,
+    ServiceDeliveryIndex, SettingsWatchState, ShellCoreState, ShellMessage, SourcedRequest,
+    SurfaceState, TargetRef, ThemeWatchState,
 };
 
 /// An owned duplicate of the shell wake descriptor. Workers keep this handle
@@ -917,7 +917,6 @@ pub struct Shell {
     /// Identity for the cached health event; kept separate from the public
     /// event payload so generation metadata does not leak into service state.
     latest_service_health_identities: HashMap<String, BackendIdentity>,
-    service_contract_validation: HashMap<String, ContractValidationCache>,
     /// Command-bound service state awaiting provider confirmation, keyed by
     /// (interface, state field). Replacing an entry makes the newer CallId the
     /// sole owner of rollback for that field.

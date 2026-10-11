@@ -80,8 +80,7 @@
 hidden = false
 
 local debug_service = require("mesh.debug")
-local device_ok, device = pcall(require, "mesh.device@>=1.0")
-if not device_ok then device = nil end
+local device = require("mesh.device@>=1.0")
 local t = import("mesh.i18n", "t")
 
 device_name = "device.this_device"
@@ -109,21 +108,17 @@ local function value_or(value, fallback)
     return tostring(value)
 end
 
-local function format_memory(value)
-    local numeric = tonumber(value)
-    if numeric == nil then return value_or(value, "common.not_reported") end
-    if numeric > 1024 * 1024 * 1024 then
-        return string.format("%.1f GB", numeric / (1024 * 1024 * 1024))
+local function format_memory(bytes)
+    if bytes > 1024 * 1024 * 1024 then
+        return string.format("%.1f GB", bytes / (1024 * 1024 * 1024))
     end
-    if numeric > 1024 * 1024 then
-        return string.format("%.1f MB", numeric / (1024 * 1024))
+    if bytes > 1024 * 1024 then
+        return string.format("%.1f MB", bytes / (1024 * 1024))
     end
-    return tostring(numeric)
+    return tostring(bytes)
 end
 
-local function format_uptime(value)
-    local seconds = tonumber(value)
-    if seconds == nil or seconds < 0 then return value_or(value, "common.not_reported") end
+local function format_uptime(seconds)
     local days = math.floor(seconds / 86400)
     local hours = math.floor((seconds % 86400) / 3600)
     local minutes = math.floor((seconds % 3600) / 60)
@@ -153,7 +148,7 @@ function render()
     backend_count = tostring(backends)
     provider_count = tostring(bindings)
 
-    if not device or device.available == false then
+    if device.available == false then
         service_pill = "device.partial"
         service_active = false
         device_backend_notice = "device.runtime_live"
@@ -171,9 +166,9 @@ function render()
     architecture_label = value_or(device.architecture or device.arch, "common.not_reported")
     session_label = value_or(device.desktop or device.session, "device.mesh_session")
     processor_label = value_or(device.processor or device.cpu_model, "common.not_reported")
-    memory_label = format_memory(device.memory_total_bytes or device.memory_total)
+    memory_label = format_memory(device.memory_total_bytes)
     graphics_label = value_or(device.graphics or device.gpu_model, "common.not_reported")
-    uptime_label = format_uptime(device.uptime_seconds or device.uptime)
+    uptime_label = format_uptime(device.uptime_seconds)
     device_summary = os_label .. " · " .. architecture_label
     service_pill = "device.live"
     service_active = true

@@ -825,11 +825,9 @@ impl Shell {
                     .get(&interface)
                     .is_some_and(|slot| slot.generation == generation);
                 if provider_is_active {
-                    let contract = self.interfaces.resolve(&interface, None).contract;
+                    let contract = self.interfaces.resolve(&interface, None).compiled_contract;
                     let warnings = contract.as_ref().map_or_else(Vec::new, |contract| {
-                        service_state::service_method_result_contract_warnings(
-                            contract, &command, &result,
-                        )
+                        contract.method_result_warnings(&command, &result)
                     });
                     if warnings.is_empty() {
                         self.record_backend_method_result(

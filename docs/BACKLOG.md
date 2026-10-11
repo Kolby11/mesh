@@ -136,9 +136,9 @@ tracking, validation and scheduling.
 - [ ] Re-run `render(self)` only for instances whose tracked reads changed; today
       any dirtying service update re-runs every instance's hook on the surface.
       Then evaluate `computed` values and `mesh.watch(proxy, field, fn)`.
-- [ ] Typed proxy fields from compiled contracts (with S03-DEAD-001): range-checked
-      values, defaults, and a defined absent-optional-service value, so modules
-      drop their `tonumber`/clamp/`pcall(require)` guards.
+- [ ] A required service with no provider should `require` to the unavailable
+      proxy (01 §5) instead of raising, so settings can drop `pcall(require)` on
+      `mesh.audio` and `mesh.debug`. Optional services already do.
 - [ ] One service call path: typed proxy methods only. Retire
       `mesh.events.publish("mesh.<svc>.<method>")`, which shipped modules use
       alongside the proxies.
@@ -170,8 +170,9 @@ Each needs a design and a measured prototype before it is adopted.
 - [ ] **D3:** Object capabilities for services: authorize when a service proxy
       is acquired, then calls are plain typed calls. `mesh.shell` has shipped
       this way; service methods still authorize per call.
-- [ ] **D4:** Typed values end to end: contract-generated types, validators and
-      `.d.luau`; providers send field patches; no JSON on the frame path.
+- [ ] **D4:** Providers send typed field patches instead of whole snapshots, and
+      no JSON on the frame path. Validation, ranges/defaults and `.d.luau`
+      generation have shipped; the LSP does not read the `.d.luau` yet.
 - [ ] **D5:** Headless interaction primitives in core (popover, menu, tooltip,
       hover intent, focus scope, dismissal) that modules compose.
 - [ ] **D6:** Immutable scene snapshot committed to a render thread with GPU
@@ -212,8 +213,9 @@ evidence and test workloads are in the linked reports.
       views, and bound pending calls/events; add the specified fan-out/load
       measurements before changing representations. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/03-service-contracts.md)
 - [ ] **S03-DEAD-001 / S03-DEAD-003:** Make compiled contracts the canonical
-      source for runtime, Luau, and documentation projections, retaining raw
-      declarations only behind explicit compatibility/tooling adapters. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/03-service-contracts.md)
+      source for the Luau proxy, operation authorization and LSP; shell
+      validation already uses them. Keep raw declarations only behind explicit
+      compatibility/tooling adapters. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/03-service-contracts.md)
 
 ### Section 04 — Themes
 

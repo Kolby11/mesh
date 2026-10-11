@@ -278,21 +278,25 @@ pub(super) fn test_contract(interface: &str) -> InterfaceContract {
                 name: "available".to_string(),
                 field_type: "boolean".to_string(),
                 description: None,
+                ..Default::default()
             },
             ContractStateField {
                 name: "percent".to_string(),
                 field_type: "float".to_string(),
                 description: None,
+                ..Default::default()
             },
             ContractStateField {
                 name: "muted".to_string(),
                 field_type: "boolean".to_string(),
                 description: None,
+                ..Default::default()
             },
             ContractStateField {
                 name: "source_module".to_string(),
                 field_type: "string".to_string(),
                 description: None,
+                ..Default::default()
             },
         ],
         methods: vec![

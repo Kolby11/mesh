@@ -57,6 +57,9 @@ pub struct CompiledStateField {
     pub name: String,
     pub type_expr: TypeExpr,
     pub description: Option<String>,
+    pub minimum: Option<serde_json::Number>,
+    pub maximum: Option<serde_json::Number>,
+    pub default: Option<JsonValue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -222,6 +225,178 @@ impl CompiledContract {
         self.methods.iter().find(|method| method.name == name)
     }
 
+    /// Bring a provider state snapshot to the contract's shape, in place, and
+    /// return what could not be repaired. See [`Self::repair_state`] and
+    /// [`Self::state_warnings`]; the caller must reject a payload with warnings.
+    pub fn normalize_state(&self, payload: &mut JsonValue) -> Vec<String> {
+        self.repair_state(payload);
+        self.state_warnings(payload)
+    }
+
+    /// Fill absent state fields that declare a `default`, and clamp numbers of
+    /// the declared type into their `minimum`/`maximum` (an `int` stays
+    /// integral). Values of the wrong type are left for
+    /// [`Self::state_warnings`] to report.
+    pub fn repair_state(&self, payload: &mut JsonValue) {
+        let Some(object) = payload.as_object_mut() else {
+            return;
+        };
+        for field in self.schemas.state_fields.iter() {
+            match object.get_mut(&field.name) {
+                None => {
+                    if let Some(default) = &field.default {
+                        object.insert(field.name.clone(), default.clone());
+                    }
+                }
+                Some(value) => {
+                    if (field.minimum.is_some() || field.maximum.is_some())
+                        && field.type_expr.matches(value)
+                    {
+                        clamp_number(value, field);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Every way a state snapshot violates the contract: a non-object payload,
+    /// a missing required field, or a value of the wrong type. Fields in
+    /// [`RUNTIME_METADATA_STATE_FIELDS`] and undeclared extra fields are not
+    /// checked.
+    pub fn state_warnings(&self, payload: &JsonValue) -> Vec<String> {
+        let interface = &self.interface;
+        let Some(object) = payload.as_object() else {
+            return vec![format!(
+                "state for {interface} must be a JSON object, got {}",
+                json_type_name(payload)
+            )];
+        };
+        let mut warnings = Vec::new();
+        for field in self.schemas.state_fields.iter() {
+            if RUNTIME_METADATA_STATE_FIELDS.contains(&field.name.as_str()) {
+                continue;
+            }
+            match object.get(&field.name) {
+                None if !field.type_expr.optional => warnings.push(format!(
+                    "missing required state field '{}' for {interface}",
+                    field.name
+                )),
+                Some(value) if !field.type_expr.matches_with_types(value, &self.types) => warnings
+                    .push(format!(
+                        "state field '{}' for {interface} expected {}, got {}",
+                        field.name,
+                        field.type_expr,
+                        json_type_name(value)
+                    )),
+                _ => {}
+            }
+        }
+        warnings
+    }
+
+    /// Every way an emitted event payload violates the contract.
+    pub fn event_warnings(&self, event: &str, payload: &JsonValue) -> Vec<String> {
+        let interface = &self.interface;
+        let Some(schema) = self
+            .schemas
+            .events
+            .iter()
+            .find(|schema| schema.name == event)
+        else {
+            return vec![format!("event '{event}' is not declared for {interface}")];
+        };
+        let Some(object) = payload.as_object() else {
+            return vec![format!(
+                "event '{event}' for {interface} must be a JSON object, got {}",
+                json_type_name(payload)
+            )];
+        };
+        if schema.payload.is_empty() {
+            return if object.is_empty() {
+                Vec::new()
+            } else {
+                vec![format!(
+                    "event '{event}' for {interface} expected an empty object payload"
+                )]
+            };
+        }
+        self.field_warnings(&schema.payload, object, |field, problem| match problem {
+            None => format!(
+                "event '{event}' for {interface} missing required payload field '{}'",
+                field.name
+            ),
+            Some(got) => format!(
+                "event '{event}' for {interface} payload field '{}' expected {}, got {got}",
+                field.name, field.type_expr
+            ),
+        })
+    }
+
+    /// Every way a method call's argument object violates the contract.
+    pub fn method_input_warnings(&self, method: &str, payload: &JsonValue) -> Vec<String> {
+        let interface = &self.interface;
+        let Some(schema) = self.method_schema(method) else {
+            return vec![format!("method '{method}' is not declared for {interface}")];
+        };
+        let Some(object) = payload.as_object() else {
+            return vec![format!(
+                "method '{method}' for {interface} must receive a JSON object, got {}",
+                json_type_name(payload)
+            )];
+        };
+        self.field_warnings(&schema.args, object, |field, problem| match problem {
+            None => format!(
+                "method '{method}' for {interface} missing required argument '{}'",
+                field.name
+            ),
+            Some(got) => format!(
+                "method '{method}' for {interface} argument '{}' expected {}, got {got}",
+                field.name, field.type_expr
+            ),
+        })
+    }
+
+    /// Every way a provider's method result violates the declared return type.
+    pub fn method_result_warnings(&self, method: &str, result: &JsonValue) -> Vec<String> {
+        let interface = &self.interface;
+        let Some(schema) = self.method_schema(method) else {
+            return vec![format!("method '{method}' is not declared for {interface}")];
+        };
+        match &schema.returns {
+            Some(returns) if !returns.matches_with_types(result, &self.types) => vec![format!(
+                "method '{method}' for {interface} returned {returns}, got {}",
+                json_type_name(result)
+            )],
+            _ => Vec::new(),
+        }
+    }
+
+    pub fn method_schema(&self, name: &str) -> Option<&CompiledMethodSchema> {
+        self.schemas
+            .methods
+            .iter()
+            .find(|method| method.name == name)
+    }
+
+    fn field_warnings(
+        &self,
+        fields: &[CompiledField],
+        object: &serde_json::Map<String, JsonValue>,
+        message: impl Fn(&CompiledField, Option<&str>) -> String,
+    ) -> Vec<String> {
+        let mut warnings = Vec::new();
+        for field in fields {
+            match object.get(&field.name) {
+                None if !field.type_expr.optional => warnings.push(message(field, None)),
+                Some(value) if !field.type_expr.matches_with_types(value, &self.types) => {
+                    warnings.push(message(field, Some(json_type_name(value))))
+                }
+                _ => {}
+            }
+        }
+        warnings
+    }
+
     pub fn event(&self, name: &str) -> Option<&InterfaceEvent> {
         self.events.iter().find(|event| event.name == name)
     }
@@ -241,13 +416,22 @@ impl InterfaceContract {
 }
 
 /// A documented core state field that providers must include in emitted payloads.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `minimum`/`maximum` bound an `int` or `float` field; providers' values are
+/// clamped into the range. A field with a `default` may be omitted by the
+/// provider and is filled with that value.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ContractStateField {
     pub name: String,
     pub field_type: String,
-    #[allow(dead_code)]
     pub description: Option<String>,
+    pub minimum: Option<serde_json::Number>,
+    pub maximum: Option<serde_json::Number>,
+    pub default: Option<JsonValue>,
 }
+
+/// State fields the shell writes itself; providers never have to emit them.
+pub const RUNTIME_METADATA_STATE_FIELDS: &[&str] = &["source_module"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterfaceMethod {
@@ -412,6 +596,27 @@ pub enum BaseType {
     Named(String),
 }
 
+impl std::fmt::Display for TypeExpr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.base {
+            BaseType::String => f.write_str("string")?,
+            BaseType::Int => f.write_str("int")?,
+            BaseType::Float => f.write_str("float")?,
+            BaseType::Boolean => f.write_str("boolean")?,
+            BaseType::Object => f.write_str("object")?,
+            BaseType::Any => f.write_str("any")?,
+            BaseType::Named(name) => f.write_str(name)?,
+        }
+        if self.array {
+            f.write_str("[]")?;
+        }
+        if self.optional {
+            f.write_str("?")?;
+        }
+        Ok(())
+    }
+}
+
 /// Builtin named type for command results (`{ ok: boolean, error: string? }`).
 pub const BUILTIN_RESULT_TYPE: &str = "Result";
 
@@ -557,6 +762,42 @@ impl TypeExpr {
     }
 }
 
+fn clamp_number(value: &mut JsonValue, field: &CompiledStateField) {
+    let Some(number) = value.as_f64() else {
+        return;
+    };
+    let minimum = field.minimum.as_ref().and_then(serde_json::Number::as_f64);
+    let maximum = field.maximum.as_ref().and_then(serde_json::Number::as_f64);
+    let clamped = match (minimum, maximum) {
+        (Some(minimum), _) if number < minimum => minimum,
+        (_, Some(maximum)) if number > maximum => maximum,
+        _ => return,
+    };
+    *value = if field.type_expr.base == BaseType::Int {
+        // An int bound that is fractional rounds inward so the value stays in range.
+        let integral = if number < clamped {
+            clamped.ceil()
+        } else {
+            clamped.floor()
+        };
+        JsonValue::from(integral as i64)
+    } else {
+        serde_json::Number::from_f64(clamped).map_or(JsonValue::Null, JsonValue::Number)
+    };
+}
+
+/// The JSON type name used in contract diagnostics.
+pub fn json_type_name(value: &JsonValue) -> &'static str {
+    match value {
+        JsonValue::Null => "null",
+        JsonValue::Bool(_) => "boolean",
+        JsonValue::Number(_) => "number",
+        JsonValue::String(_) => "string",
+        JsonValue::Array(_) => "array",
+        JsonValue::Object(_) => "object",
+    }
+}
+
 fn arc_slice<T>(values: Vec<T>) -> Arc<[T]> {
     values.into()
 }
@@ -671,6 +912,9 @@ fn compile_schemas(contract: &InterfaceContract) -> Result<CompiledSchemas, Cont
                     &field.field_type,
                 )?,
                 description: field.description.clone(),
+                minimum: field.minimum.clone(),
+                maximum: field.maximum.clone(),
+                default: field.default.clone(),
             })
         })
         .collect::<Result<Vec<_>, ContractError>>()?;
@@ -908,6 +1152,16 @@ fn fingerprint_schemas(schemas: &CompiledSchemas) -> u64 {
     for field in schemas.state_fields.iter() {
         builder.string(&field.name);
         builder.type_expr(&field.type_expr);
+        for bound in [&field.minimum, &field.maximum] {
+            builder.string(&bound.as_ref().map(ToString::to_string).unwrap_or_default());
+        }
+        builder.string(
+            &field
+                .default
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_default(),
+        );
     }
     for method in schemas.methods.iter() {
         builder.string(&method.name);
@@ -1042,6 +1296,9 @@ pub fn parse_interface_contract(
                 name: field.name,
                 field_type: field.field_type,
                 description: field.description,
+                minimum: field.minimum,
+                maximum: field.maximum,
+                default: field.default,
             })
             .collect(),
         methods: parsed
@@ -1240,6 +1497,50 @@ fn named_type_cycle(
     cycle
 }
 
+fn state_constraint_errors(
+    errors: &mut Vec<String>,
+    contract: &InterfaceContract,
+    field: &ContractStateField,
+) {
+    let Ok(type_expr) = TypeExpr::parse(&field.field_type) else {
+        return;
+    };
+    let numeric = !type_expr.array && matches!(type_expr.base, BaseType::Int | BaseType::Float);
+    let minimum = field.minimum.as_ref().and_then(serde_json::Number::as_f64);
+    let maximum = field.maximum.as_ref().and_then(serde_json::Number::as_f64);
+    if (minimum.is_some() || maximum.is_some()) && !numeric {
+        errors.push(format!(
+            "state field '{}' declares minimum/maximum but its type '{}' is not int or float",
+            field.name, field.field_type
+        ));
+    }
+    if let (Some(minimum), Some(maximum)) = (minimum, maximum)
+        && minimum > maximum
+    {
+        errors.push(format!(
+            "state field '{}' minimum {minimum} is greater than maximum {maximum}",
+            field.name
+        ));
+    }
+    let Some(default) = &field.default else {
+        return;
+    };
+    if default.is_null() || !type_expr.matches_with_types(default, &contract.types) {
+        errors.push(format!(
+            "state field '{}' default {default} does not match its type '{}'",
+            field.name, field.field_type
+        ));
+    } else if let Some(value) = default.as_f64()
+        && (minimum.is_some_and(|minimum| value < minimum)
+            || maximum.is_some_and(|maximum| value > maximum))
+    {
+        errors.push(format!(
+            "state field '{}' default {default} is outside its declared range",
+            field.name
+        ));
+    }
+}
+
 /// Collect every type-grammar violation in the contract. Empty means valid.
 pub fn contract_type_errors(contract: &InterfaceContract) -> Vec<String> {
     let mut errors = Vec::new();
@@ -1253,6 +1554,7 @@ pub fn contract_type_errors(contract: &InterfaceContract) -> Vec<String> {
             format!("state field '{}'", field.name),
             &field.field_type,
         );
+        state_constraint_errors(&mut errors, contract, field);
     }
     for method in &contract.methods {
         for arg in &method.args {
@@ -1422,6 +1724,12 @@ struct ContractStateFieldJson {
     field_type: String,
     #[serde(default)]
     description: Option<String>,
+    #[serde(default)]
+    minimum: Option<serde_json::Number>,
+    #[serde(default)]
+    maximum: Option<serde_json::Number>,
+    #[serde(default)]
+    default: Option<JsonValue>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1970,5 +2278,149 @@ mod tests {
         let err = parse_interface_contract("mesh.test", "1.0", &contract).unwrap_err();
         assert!(matches!(err, ContractError::InvalidType { .. }));
         assert!(err.to_string().contains("recursive cycle"));
+    }
+
+    fn ranged_contract() -> CompiledContract {
+        parse_compiled_contract(
+            "mesh.test",
+            "1.0",
+            &serde_json::json!({
+                "state": [
+                    { "name": "percent", "type": "float", "minimum": 0, "maximum": 100 },
+                    { "name": "level", "type": "int", "minimum": 0, "maximum": 10 },
+                    { "name": "muted", "type": "boolean", "default": false },
+                    { "name": "label", "type": "string?" },
+                    { "name": "source_module", "type": "string" }
+                ]
+            }),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn normalize_state_clamps_ranges_and_fills_defaults() {
+        let contract = ranged_contract();
+        let mut payload = serde_json::json!({ "percent": 140.5, "level": -3, "extra": 1 });
+        assert!(contract.normalize_state(&mut payload).is_empty());
+        assert_eq!(
+            payload,
+            serde_json::json!({ "percent": 100.0, "level": 0, "muted": false, "extra": 1 })
+        );
+    }
+
+    #[test]
+    fn normalize_state_reports_what_it_cannot_repair() {
+        let contract = ranged_contract();
+        let mut payload = serde_json::json!({ "percent": "loud" });
+        let warnings = contract.normalize_state(&mut payload);
+        assert_eq!(
+            warnings,
+            [
+                "state field 'percent' for mesh.test expected float, got string",
+                "missing required state field 'level' for mesh.test",
+            ]
+        );
+        assert_eq!(
+            contract.normalize_state(&mut serde_json::json!([])),
+            ["state for mesh.test must be a JSON object, got array"]
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_state_constraints() {
+        for (field, message) in [
+            (
+                serde_json::json!({ "name": "on", "type": "boolean", "minimum": 0 }),
+                "is not int or float",
+            ),
+            (
+                serde_json::json!({ "name": "n", "type": "int", "minimum": 5, "maximum": 1 }),
+                "is greater than maximum",
+            ),
+            (
+                serde_json::json!({ "name": "n", "type": "int", "default": "x" }),
+                "does not match its type",
+            ),
+            (
+                serde_json::json!({ "name": "n", "type": "float", "maximum": 1, "default": 2 }),
+                "outside its declared range",
+            ),
+        ] {
+            let contract = serde_json::json!({ "state": [field] });
+            let err = parse_interface_contract("mesh.test", "1.0", &contract).unwrap_err();
+            assert!(err.to_string().contains(message), "{err}");
+        }
+    }
+
+    #[test]
+    fn state_constraints_change_the_schema_fingerprint() {
+        let unbounded = parse_compiled_contract(
+            "mesh.test",
+            "1.0",
+            &serde_json::json!({ "state": [{ "name": "percent", "type": "float" }] }),
+        )
+        .unwrap();
+        assert_ne!(
+            unbounded.schema_fingerprint,
+            ranged_contract().schema_fingerprint
+        );
+    }
+
+    #[test]
+    fn event_and_method_warnings_name_each_violation() {
+        let contract = parse_compiled_contract(
+            "mesh.audio",
+            "1.0",
+            &serde_json::json!({
+                "methods": [{
+                    "name": "set_volume",
+                    "args": [{ "name": "percent", "type": "float" }],
+                    "returns": "Result"
+                }],
+                "events": [
+                    { "name": "VolumeChanged", "payload": [
+                        { "name": "device_id", "type": "string" },
+                        { "name": "level", "type": "float" }
+                    ]},
+                    { "name": "Reset" }
+                ]
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            contract.event_warnings(
+                "VolumeChanged",
+                &serde_json::json!({ "device_id": 7, "other": true })
+            ),
+            [
+                "event 'VolumeChanged' for mesh.audio payload field 'device_id' expected string, got number",
+                "event 'VolumeChanged' for mesh.audio missing required payload field 'level'",
+            ]
+        );
+        assert_eq!(
+            contract.event_warnings("VolumeChanged", &serde_json::json!(42)),
+            ["event 'VolumeChanged' for mesh.audio must be a JSON object, got number"]
+        );
+        assert_eq!(
+            contract.event_warnings("Reset", &serde_json::json!({ "x": 1 })),
+            ["event 'Reset' for mesh.audio expected an empty object payload"]
+        );
+        assert_eq!(
+            contract.event_warnings("Gone", &serde_json::json!({})),
+            ["event 'Gone' is not declared for mesh.audio"]
+        );
+        assert_eq!(
+            contract.method_input_warnings("set_volume", &serde_json::json!({ "percent": "x" })),
+            ["method 'set_volume' for mesh.audio argument 'percent' expected float, got string"]
+        );
+        assert!(
+            contract
+                .method_result_warnings("set_volume", &serde_json::json!({ "ok": true }))
+                .is_empty()
+        );
+        assert_eq!(
+            contract.method_result_warnings("set_volume", &serde_json::json!(1)),
+            ["method 'set_volume' for mesh.audio returned Result, got number"]
+        );
     }
 }

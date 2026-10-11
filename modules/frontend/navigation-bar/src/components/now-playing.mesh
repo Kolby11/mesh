@@ -12,7 +12,7 @@ track_name = ""
 local media = require("mesh.media")
 
 function render(self)
-    if not media or not media.available then
+    if not media.available then
         is_playing = false
         track_name = ""
         return
