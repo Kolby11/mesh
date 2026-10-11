@@ -5,7 +5,7 @@ details are settled and nothing is implemented. Backlog lines are under
 "Runtime architecture direction" in
 [`docs/BACKLOG.md`](../../../docs/BACKLOG.md). This note builds on
 [the authoring-model review](2026-10-10-authoring-model.md) and
-[script timers and typed shell ops](2026-10-10-script-timers-and-typed-shell-ops.md).
+[script timers and typed shell ops](../../log/2026-10.md).
 
 ## What stays
 

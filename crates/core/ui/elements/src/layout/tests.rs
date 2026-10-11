@@ -186,7 +186,8 @@ fn intrinsic_text_width_rounds_up_so_the_painter_does_not_wrap() {
     // Settings" onto a clipped second line.
     let mut root = make_node("row", Dimension::Px(200.0), Dimension::Px(32.0));
     let mut text = make_node("text", Dimension::Auto, Dimension::Auto);
-    text.attributes.insert("content".into(), "Quick Settings".into());
+    text.attributes
+        .insert("content".into(), "Quick Settings".into());
     root.children.push(text);
 
     LayoutEngine::compute_with_intrinsic_cache_and_measurer(

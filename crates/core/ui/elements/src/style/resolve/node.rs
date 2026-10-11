@@ -1,7 +1,7 @@
-use super::declaration::DeclarationPass;
 use super::StyleResolver;
 use super::attrs::*;
 use super::cache::*;
+use super::declaration::DeclarationPass;
 use super::index::*;
 use super::matching::*;
 use crate::style::*;
@@ -410,7 +410,10 @@ impl<'a> StyleResolver<'a> {
                     });
                 }
 
-                for pass in [DeclarationPass::CustomProperties, DeclarationPass::Properties] {
+                for pass in [
+                    DeclarationPass::CustomProperties,
+                    DeclarationPass::Properties,
+                ] {
                     self.apply_theme_style_rules(
                         &mut style,
                         attrs,

@@ -40,23 +40,11 @@ audio_aria_expanded = "false"
 audio_pointer_inside = false
 audio_dragging = false
 local do_close
-local CLOSE_BRIDGE_DELAY_MS = 400
-local close_bridge = nil
-
-local function cancel_bridge_close()
-    if close_bridge ~= nil then
-        close_bridge:cancel()
-        close_bridge = nil
-    end
-end
-
-local function schedule_bridge_close()
-    cancel_bridge_close()
-    close_bridge = task.delay(CLOSE_BRIDGE_DELAY_MS, function()
-        close_bridge = nil
-        do_close()
-    end)
-end
+-- One close timer for the trigger and its popover: leaving either schedules
+-- it, entering either (or dragging the slider) cancels it.
+local hover = mesh.ui.hover_intent(function()
+    do_close()
+end)
 
 local function sync_trigger_state()
     audio_aria_expanded = audio_surface_hidden and "false" or "true"
@@ -69,22 +57,22 @@ local function connect_audio_popover()
     audio_popover_connected = true
     audio_popover.PopoverEnter:on(function()
         audio_pointer_inside = true
-        cancel_bridge_close()
+        hover.cancel()
     end)
     audio_popover.PopoverLeave:on(function()
         audio_pointer_inside = false
         if not audio_dragging then
-            schedule_bridge_close()
+            hover.leave()
         end
     end)
     audio_popover.DragStart:on(function()
         audio_dragging = true
-        cancel_bridge_close()
+        hover.cancel()
     end)
     audio_popover.DragEnd:on(function()
         audio_dragging = false
         if not audio_pointer_inside then
-            schedule_bridge_close()
+            hover.leave()
         end
     end)
     audio_popover.CloseRequested:on(function()
@@ -98,7 +86,7 @@ end
 local function do_open()
     connect_audio_popover()
     if audio_popover and audio_surface_hidden then
-        cancel_bridge_close()
+        hover.cancel()
         audio_popover.open = true
         audio_surface_hidden = false
         sync_trigger_state()
@@ -106,7 +94,7 @@ local function do_open()
 end
 
 do_close = function()
-    cancel_bridge_close()
+    hover.cancel()
     if audio_popover and not audio_surface_hidden then
         audio_popover.open = false
         audio_surface_hidden = true
@@ -187,14 +175,14 @@ end
 
 function onVolumeEnter(event)
     audio_pointer_inside = true
-    cancel_bridge_close()
+    hover.cancel()
     do_open()
 end
 
 function onVolumeLeave()
     audio_pointer_inside = false
     if not audio_surface_hidden and not audio_dragging then
-        schedule_bridge_close()
+        hover.leave()
     end
 end
 

@@ -292,7 +292,10 @@ impl<'a> StyleResolver<'a> {
                 let declarations =
                     indexed_theme_defaults(self.theme.revision(), &rule.declarations);
                 let selector = format!("@theme:{scope}:rule:{index}");
-                for declaration in declarations.iter().filter(|declaration| pass.includes(declaration)) {
+                for declaration in declarations
+                    .iter()
+                    .filter(|declaration| pass.includes(declaration))
+                {
                     let diagnostic_sink = diagnostics
                         .as_mut()
                         .map(|diagnostics| (selector.as_str(), &mut **diagnostics));

@@ -25,7 +25,10 @@ pub(in crate::shell) const COMMAND_THROTTLE_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(100);
 const SERVICE_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
 const MAX_COALESCED_COMMAND_KEYS: usize = 256;
-const POPOVER_HOVER_BRIDGE_DELAY: std::time::Duration = std::time::Duration::from_millis(180);
+/// Surface popovers and scripted `mesh.ui.hover_intent` bridges share one
+/// delay, so every popover in the shell forgives the same pointer trip.
+const POPOVER_HOVER_BRIDGE_DELAY: std::time::Duration =
+    mesh_core_elements::HOVER_INTENT_CLOSE_DELAY;
 const DEBUG_INSPECTOR_SURFACE_ID: &str = "@mesh/debug-inspector";
 const MAX_EFFECTS_PER_FRAME: usize = 512;
 const MAX_EFFECT_BYTES_PER_FRAME: usize = 512 * 1024;
@@ -2315,33 +2318,33 @@ impl Shell {
                     .enqueue_tracked_followup(request, call_id.raw());
                 serde_json::json!({ "ok": true, "queued": true, "status": "queued" })
             } else {
-            let writes_before = self.durable_write_pending();
-            let result = self.apply_request(request);
-            match result {
-                Ok(follow_ups) => {
-                    self.enqueue_effects(follow_ups);
-                    if !writes_before && self.durable_write_pending() {
-                        self.await_durable_write(call_id.raw());
-                        serde_json::json!({ "ok": true, "queued": true, "status": "queued" })
-                    } else {
-                        serde_json::json!({ "ok": true, "status": "applied" })
+                let writes_before = self.durable_write_pending();
+                let result = self.apply_request(request);
+                match result {
+                    Ok(follow_ups) => {
+                        self.enqueue_effects(follow_ups);
+                        if !writes_before && self.durable_write_pending() {
+                            self.await_durable_write(call_id.raw());
+                            serde_json::json!({ "ok": true, "queued": true, "status": "queued" })
+                        } else {
+                            serde_json::json!({ "ok": true, "status": "applied" })
+                        }
+                    }
+                    Err(error) => {
+                        let message = error.to_string();
+                        tracing::warn!(
+                            interface,
+                            command,
+                            error = %message,
+                            "core service command failed"
+                        );
+                        serde_json::json!({
+                            "ok": false,
+                            "error": message,
+                            "status": "failed",
+                        })
                     }
                 }
-                Err(error) => {
-                    let message = error.to_string();
-                    tracing::warn!(
-                        interface,
-                        command,
-                        error = %message,
-                        "core service command failed"
-                    );
-                    serde_json::json!({
-                        "ok": false,
-                        "error": message,
-                        "status": "failed",
-                    })
-                }
-            }
             }
         } else if self.service_handlers.contains_key(interface) {
             let coalesce = self.service_command_is_coalescable(interface, command);
@@ -3808,7 +3811,10 @@ mod tests {
         assert_eq!(scheduler.pending_len(), report.deferred);
     }
 
-    fn run_over_budget_frame(scheduler: &mut EffectScheduler, source: &EffectSource) -> EffectSchedulerReport {
+    fn run_over_budget_frame(
+        scheduler: &mut EffectScheduler,
+        source: &EffectSource,
+    ) -> EffectSchedulerReport {
         scheduler.enqueue_batch(
             (0..MAX_EFFECTS_PER_SOURCE_PER_FRAME + 1)
                 .map(|index| (position_request(&format!("burst-{index}")), source.clone())),
@@ -3915,4 +3921,3 @@ mod tests {
         assert_eq!(scheduler.pending_len(), 0);
     }
 }
-

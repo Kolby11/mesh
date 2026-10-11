@@ -243,3 +243,53 @@ end
     let error = ctx.call_handler("old", &[]).unwrap_err();
     assert!(error.to_string().contains("task.delay"), "{error}");
 }
+
+#[test]
+fn hover_intent_shares_one_close_timer_between_trigger_and_popup() {
+    let mut ctx = context(
+        r#"
+closes = 0
+local intent = mesh.ui.hover_intent(function()
+    closes += 1
+end)
+function trigger_leave() intent.leave() end
+function popup_enter() intent.enter() end
+function popup_leave() intent:leave() end
+function check() pending = intent.pending() end
+"#,
+    );
+    // Leave the trigger, cross into the popup: the close is cancelled.
+    ctx.call_handler("trigger_leave", &[]).unwrap();
+    ctx.call_handler("popup_enter", &[]).unwrap();
+    assert_eq!(ctx.next_task_deadline(), None);
+    assert!(ctx.run_due_tasks(later(1_000)).is_empty());
+    assert_eq!(ctx.state.get("closes"), Some(serde_json::json!(0)));
+
+    // Leave the popup: one close after the platform delay, not before.
+    let left = Instant::now();
+    ctx.call_handler("popup_leave", &[]).unwrap();
+    ctx.call_handler("check", &[]).unwrap();
+    assert_eq!(ctx.state.get("pending"), Some(serde_json::json!(true)));
+    let deadline = ctx.next_task_deadline().expect("close scheduled");
+    assert!(deadline >= left + mesh_core_elements::HOVER_INTENT_CLOSE_DELAY);
+    assert!(ctx.run_due_tasks(deadline).is_empty());
+    assert_eq!(ctx.state.get("closes"), Some(serde_json::json!(1)));
+    ctx.call_handler("check", &[]).unwrap();
+    assert_eq!(ctx.state.get("pending"), Some(serde_json::json!(false)));
+}
+
+#[test]
+fn hover_intent_rescheduling_keeps_a_single_pending_close() {
+    let mut ctx = context(
+        r#"
+closes = 0
+local intent = mesh.ui.hover_intent(function() closes += 1 end, { delay = 20 })
+function leave() intent.leave() end
+"#,
+    );
+    ctx.call_handler("leave", &[]).unwrap();
+    ctx.call_handler("leave", &[]).unwrap();
+    assert_eq!(ctx.pending_task_count(), 1);
+    assert!(ctx.run_due_tasks(later(1_000)).is_empty());
+    assert_eq!(ctx.state.get("closes"), Some(serde_json::json!(1)));
+}

@@ -8,6 +8,12 @@ use crate::layout::LayoutRect;
 use crate::style::{Display, Transform2D, Visibility};
 use crate::tree::WidgetNode;
 
+/// How long hover intent keeps a popover open after the pointer leaves its
+/// trigger or its popup, so crossing the gap between them (or returning to
+/// the trigger) does not close it under the cursor. One value serves the
+/// shell's surface popovers and the scripted `mesh.ui.hover_intent` helper.
+pub const HOVER_INTENT_CLOSE_DELAY: std::time::Duration = std::time::Duration::from_millis(400);
+
 /// A two-dimensional affine transform in surface coordinates.
 ///
 /// Points are represented as column vectors: `x' = m11*x + m21*y + tx` and

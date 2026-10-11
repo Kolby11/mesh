@@ -803,13 +803,13 @@ milliseconds.
 | `handle:cancel()` / `task.cancel(handle)` | Drop a pending task. Returns whether it was still pending. |
 
 ```lua
-local close_timer = nil
+local refresh = nil
 
-function onTriggerLeave()
-    if close_timer then close_timer:cancel() end
-    close_timer = task.delay(400, function()
-        close_timer = nil
-        open = false
+function onQueryChanged()
+    if refresh then refresh:cancel() end
+    refresh = task.delay(150, function()
+        refresh = nil
+        run_search()
     end)
 end
 ```
@@ -823,6 +823,30 @@ pending tasks; anything else raises an error at the call. An error inside a
 task is reported as a handler error and does not stop other due tasks.
 The removed `shell.schedule-handler` and `shell.cancel-handler` channels now
 raise an error that points to `task.delay`.
+
+### Hover intent
+
+A hover popover closes a moment after the pointer leaves, so crossing the gap
+to the popup, or coming back to the trigger, does not close it under the
+cursor. `mesh.ui.hover_intent(on_close, options?)` is that behaviour, built on
+`task.delay`. It returns an intent with `enter()`, `leave()`, `cancel()` and
+`pending()`. `leave()` schedules `on_close` after the platform delay (400 ms,
+the same delay the shell gives surface popovers; `options.delay` overrides it),
+and `enter()` or `cancel()` drops it. Give the trigger one intent and forward
+the popup's enter and leave to it, so the popup runs no timer of its own:
+
+```lua
+local hover = mesh.ui.hover_intent(function()
+    popover.open = false
+end)
+
+function onTriggerEnter() hover.enter(); popover.open = true end
+function onTriggerLeave() hover.leave() end
+
+-- in render(self), once `bind:this` has resolved the popover:
+popover.PopoverEnter:on(hover.enter)
+popover.PopoverLeave:on(hover.leave)
+```
 
 ---
 

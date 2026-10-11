@@ -4808,3 +4808,20 @@ closed. Now every cycle runs the popup's leave handlers, a `task.delay`
 bridge, and the close and its animation frames. The extra time is that
 work. It is not a cost added to the old path: the eligibility walk change is two
 flag reads per visited node. The bench now asserts that every popover closes.
+
+## 2026-10-11 — `navigation_hover_profile` with one hover intent
+
+Release, `navigation_hover_profile`, same workload (25 cycles × 4 triggers).
+Five runs each.
+
+| Metric | Popup leave fixed (2026-10-10) | One hover intent |
+| --- | --- | --- |
+| Step p50 | 2.103–2.121 ms | 1.927–2.042 ms |
+| Step p90 | 4.021–4.048 ms | 3.196–3.668 ms |
+| Dispatch p50 | 0.211–0.217 ms | 0.205–0.217 ms |
+| Popovers open at the end | 0 | 0 |
+
+Each popup leave used to schedule two timers (the popover's and, through
+`PopoverLeave`, the trigger's) and resync across `bind:this` on every cancel.
+Now it schedules one. Dispatch is within noise; the step gain comes from the
+frames that no longer run the popover-side close.

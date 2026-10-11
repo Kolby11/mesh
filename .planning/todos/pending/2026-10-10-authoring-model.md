@@ -3,7 +3,7 @@
 **Status:** review, 2026-10-10. Nothing implemented. Backlog lines are in
 "Authoring model" in [`docs/BACKLOG.md`](../../../docs/BACKLOG.md). Timers,
 typed shell calls and hover intent are in
-[the scheduler note](2026-10-10-script-timers-and-typed-shell-ops.md).
+[the scheduler note](../../log/2026-10.md).
 
 ## Goal
 

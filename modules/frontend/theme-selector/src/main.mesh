@@ -34,25 +34,9 @@ local theme = require("mesh.theme")
 local BubbleOptions = require("@mesh/bubble-options")
 
 open = false
-local CLOSE_BRIDGE_DELAY_MS = 400
-local close_bridge = nil
-local close_from_bridge
-
-local function cancel_bridge_close()
-    if close_bridge ~= nil then
-        close_bridge:cancel()
-        close_bridge = nil
-    end
-end
-
-local function schedule_bridge_close()
-    cancel_bridge_close()
-    close_bridge = task.delay(CLOSE_BRIDGE_DELAY_MS, function()
-        close_bridge = nil
-        close_from_bridge()
-    end)
-    self.CloseScheduled:fire()
-end
+-- Whether the last render saw the popover open, so closing it (which the
+-- trigger does through its hover intent) re-centres the ring once.
+local was_open = false
 
 -- One descriptor per visible slot; BubbleOptions owns its structural classes.
 items = {}
@@ -230,6 +214,12 @@ function render(self)
         window_centred = true
         centre_window_on(current)
     end
+    if was_open and not open then
+        -- Closed: the next open starts from the active theme again.
+        pointer_inside = false
+        centre_window_on(current)
+    end
+    was_open = open
     sync_options(current)
 end
 
@@ -247,7 +237,7 @@ end
 -- Scrolling turns the ring one theme at a time, and keeps the popover alive:
 -- browsing the bubbles is a way of choosing, not of leaving.
 function onThemeScroll(event)
-    cancel_bridge_close()
+    self.PopoverEnter:fire(event)
     local step = scroll_step(event)
     if step == 0 then
         return
@@ -263,26 +253,24 @@ function onThemeScroll(event)
     sync_options(active_theme())
 end
 
+-- The trigger owns the hover intent: entering and leaving are only reported,
+-- and the trigger's single close timer decides when the popover closes.
 function onPopoverEnter(event)
     pointer_inside = true
-    cancel_bridge_close()
     self.PopoverEnter:fire(event)
 end
 
 function onPopoverLeave()
     pointer_inside = false
-    schedule_bridge_close()
     self.PopoverLeave:fire()
 end
 
 function onOptionFocus(event)
-    cancel_bridge_close()
     self.PopoverEnter:fire(event)
 end
 
 function onOptionPointerEnter(event)
     pointer_inside = true
-    cancel_bridge_close()
     self.PopoverEnter:fire(event)
 end
 
@@ -293,31 +281,16 @@ function onOptionBlur(_event)
     if pointer_inside then
         return
     end
-    schedule_bridge_close()
+    self.PopoverLeave:fire()
 end
 
 function onOptionKeyDown(event)
     if event and event.key == "Escape" then
-        cancel_bridge_close()
         open = false
         self.KeyboardDismissRequested:fire()
     end
 end
 
-close_from_bridge = function()
-    pointer_inside = false
-    open = false
-    -- Closed: the next open starts from the active theme again.
-    centre_window_on(active_theme())
-    sync_options(active_theme())
-    self.CloseRequested:fire()
-end
-
--- Called by the trigger when the pointer comes back to it, so a close this
--- popover scheduled on leave does not fire under the cursor.
-function cancelPendingClose()
-    cancel_bridge_close()
-end
 </script>
 
 <style>

@@ -373,9 +373,6 @@ of payoff.
 - [ ] Storage reads still clone per Lua access. Needs shared immutable JSON
       values or lock avoidance — two cache designs were measured and reverted
       (I; see log).
-- [ ] One hover-intent mechanism: the shell defers popover hides by 180 ms,
-      while six modules run their own 400 ms `task.delay` close bridge.
-      [Design](../.planning/todos/pending/2026-10-10-script-timers-and-typed-shell-ops.md).
 
 ### Rendering and paint
 

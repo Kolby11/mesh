@@ -90,7 +90,7 @@ impl ScriptContext {
         )?;
         self.install_log_api(&mesh_log)?;
         self.install_popover_api(&mesh_popover)?;
-        self.install_task_api(globals)?;
+        self.install_task_api(globals, &mesh_ui_api)?;
         self.install_shell_api(&mesh)?;
 
         mesh.set("service", mesh_core_service).map_err(lua_err)?;

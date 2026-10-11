@@ -50,10 +50,10 @@ pub use frame::{
     SemanticDiff, SemanticField, StableNodeIdentity,
 };
 pub use interaction_contract::{
-    AffineClip, AffineClipStack, AffineTransform, InteractionTarget, NodeEligibility,
-    child_eligibility, child_transform, local_transform, node_can_receive_target, node_clip,
-    node_eligibility, node_layout_bounds, node_transform, root_transform, transformed_layout_at,
-    transformed_layout_for, transformed_offset,
+    AffineClip, AffineClipStack, AffineTransform, HOVER_INTENT_CLOSE_DELAY, InteractionTarget,
+    NodeEligibility, child_eligibility, child_transform, local_transform, node_can_receive_target,
+    node_clip, node_eligibility, node_layout_bounds, node_transform, root_transform,
+    transformed_layout_at, transformed_layout_for, transformed_offset,
 };
 pub use layout::{
     IntrinsicLayoutCache, LayoutEngine, LayoutRect, PerSurfaceLayoutState, TextMeasureContext,
