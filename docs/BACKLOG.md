@@ -26,9 +26,6 @@ unless an item says otherwise. IDs point into the
 (evidence and tests); `A1`–`A8` point into the
 [module architecture direction](../.planning/todos/pending/2026-09-30-module-architecture-direction.md).
 
-### Priority 3 — Wrong output users see now
-
-
 ### Priority 4 — Contracts and syntax to settle before third-party modules
 
 - [ ] **A1:** Extract `mesh.wm`, `mesh.power`, `mesh.brightness` into interface
