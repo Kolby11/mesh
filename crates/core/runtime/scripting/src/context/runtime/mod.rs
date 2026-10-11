@@ -16,3 +16,4 @@ pub use context::*;
 pub use vm::*;
 
 pub(in crate::context::runtime) use helpers::*;
+pub(in crate::context) use tasks::{AwaitedCall, realm_await_function};

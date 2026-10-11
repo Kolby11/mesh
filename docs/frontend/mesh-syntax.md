@@ -798,8 +798,9 @@ milliseconds.
 | Call | Effect |
 | --- | --- |
 | `task.delay(ms, fn)` | Run `fn` once, `ms` from now. Returns a handle. |
-| `task.spawn(fn, ...)` | Run `fn(...)` as a task now, until it finishes or sleeps. Returns a handle while it sleeps, otherwise `nil`. |
+| `task.spawn(fn, ...)` | Run `fn(...)` as a task now, until it finishes, sleeps or awaits. Returns a handle while it is suspended, otherwise `nil`. |
 | `task.sleep(ms)` | Suspend the current task. Only valid inside `task.spawn`. |
+| `ticket:await()` | Inside `task.spawn`, suspend the task until the service call completes, then return its snapshot (`done`, `status`, `result`). Elsewhere it returns the current snapshot without waiting, like `ticket:poll()`. |
 | `handle:cancel()` / `task.cancel(handle)` | Drop a pending task. Returns whether it was still pending. |
 
 ```lua
@@ -823,6 +824,22 @@ pending tasks; anything else raises an error at the call. An error inside a
 task is reported as a handler error and does not stop other due tasks.
 The removed `shell.schedule-handler` and `shell.cancel-handler` channels now
 raise an error that points to `task.delay`.
+
+```lua
+local audio = require("mesh.audio")
+
+function onReset()
+    task.spawn(function()
+        local done = audio:set_volume("default", 50):await()
+        if done.status ~= "ok" then
+            reset_error = done.result and done.result.error or done.status
+        end
+    end)
+end
+```
+
+A task awaiting a call has no deadline, so it costs no wakeups; the call's
+completion makes it due. One call can be awaited by one task at a time.
 
 ### Hover intent
 

@@ -5,6 +5,9 @@
 //! (`task.spawn` + `task.sleep`), so a pending task never crosses into the
 //! shell: the shell only asks for the earliest deadline and, once it passes,
 //! calls [`ScriptContext::run_due_tasks`]. Cancelling is a local queue removal.
+//! A task that awaits a service call (`ticket:await()`) is parked by call id
+//! instead of by deadline and becomes due when
+//! [`ScriptContext::complete_service_call`] delivers the result.
 //! Tasks belong to the context and are dropped with it on unmount or reload.
 
 use super::super::ScriptError;
@@ -32,6 +35,10 @@ pub(crate) struct TaskQueue {
     next_id: u64,
     by_deadline: BTreeMap<(Instant, u64), TaskBody>,
     deadlines: HashMap<u64, Instant>,
+    /// Coroutines waiting on a service call, keyed by call id.
+    awaiting: HashMap<u64, (u64, RegistryKey)>,
+    /// Task id to the call id it awaits, so a handle can cancel it.
+    awaiting_calls: HashMap<u64, u64>,
 }
 
 impl std::fmt::Debug for TaskQueue {
@@ -44,17 +51,46 @@ impl std::fmt::Debug for TaskQueue {
 }
 
 impl TaskQueue {
-    fn insert(&mut self, deadline: Instant, body: TaskBody) -> mlua::Result<u64> {
-        if self.deadlines.len() >= MAX_PENDING_TASKS {
+    fn allocate_id(&mut self) -> mlua::Result<u64> {
+        if self.len() >= MAX_PENDING_TASKS {
             return Err(mlua::Error::external(format!(
                 "too many pending tasks (limit {MAX_PENDING_TASKS})"
             )));
         }
         self.next_id += 1;
-        let id = self.next_id;
+        Ok(self.next_id)
+    }
+
+    fn insert(&mut self, deadline: Instant, body: TaskBody) -> mlua::Result<u64> {
+        let id = self.allocate_id()?;
         self.by_deadline.insert((deadline, id), body);
         self.deadlines.insert(id, deadline);
         Ok(id)
+    }
+
+    /// Park a coroutine until `call_id` completes. A call has one awaiter; a
+    /// second task awaiting the same call is an error rather than a lost wakeup.
+    fn park(&mut self, id: Option<u64>, call_id: u64, thread: RegistryKey) -> mlua::Result<u64> {
+        if self.awaiting.contains_key(&call_id) {
+            return Err(mlua::Error::external(format!(
+                "service call {call_id} is already awaited by another task"
+            )));
+        }
+        let id = match id {
+            Some(id) => id,
+            None => self.allocate_id()?,
+        };
+        self.awaiting.insert(call_id, (id, thread));
+        self.awaiting_calls.insert(id, call_id);
+        Ok(id)
+    }
+
+    /// Make the task awaiting `call_id`, if any, due now.
+    pub(crate) fn wake(&mut self, call_id: u64) {
+        if let Some((id, thread)) = self.awaiting.remove(&call_id) {
+            self.awaiting_calls.remove(&id);
+            self.reinsert(id, Instant::now(), TaskBody::Resume(thread));
+        }
     }
 
     fn reinsert(&mut self, id: u64, deadline: Instant, body: TaskBody) {
@@ -63,6 +99,10 @@ impl TaskQueue {
     }
 
     fn cancel(&mut self, id: u64) -> bool {
+        if let Some(call_id) = self.awaiting_calls.remove(&id) {
+            self.awaiting.remove(&call_id);
+            return true;
+        }
         let Some(deadline) = self.deadlines.remove(&id) else {
             return false;
         };
@@ -90,10 +130,12 @@ impl TaskQueue {
     pub(crate) fn clear(&mut self) {
         self.by_deadline.clear();
         self.deadlines.clear();
+        self.awaiting.clear();
+        self.awaiting_calls.clear();
     }
 
     pub(crate) fn len(&self) -> usize {
-        self.deadlines.len()
+        self.deadlines.len() + self.awaiting.len()
     }
 }
 
@@ -123,9 +165,11 @@ fn delay_ms(value: LuaValue, what: &str) -> mlua::Result<Duration> {
     Ok(Duration::from_secs_f64(ms / 1000.0))
 }
 
-/// The value a coroutine yields to ask the scheduler to resume it later.
-/// Private to the realm, so no script can forge a sleep request.
+/// The values a coroutine yields to ask the scheduler to resume it later:
+/// after a delay, or once a service call completes. Private to the realm, so
+/// no script can forge either request.
 const SLEEP_TOKEN_KEY: &str = "__mesh_task_sleep";
+const AWAIT_TOKEN_KEY: &str = "__mesh_task_await";
 
 fn task_handle(lua: &mlua::Lua, queue: &SharedTaskQueue, id: u64) -> mlua::Result<Table> {
     let handle = lua.create_table()?;
@@ -139,7 +183,8 @@ fn task_handle(lua: &mlua::Lua, queue: &SharedTaskQueue, id: u64) -> mlua::Resul
 }
 
 /// Run `thread` until it finishes or yields. A `task.sleep` yield is queued
-/// for resumption under `id` (or a new id); anything else ends the task.
+/// for resumption under `id` (or a new id) and a `ticket:await()` yield is
+/// parked on its call; any other yield ends the task with an error.
 fn drive(
     lua: &mlua::Lua,
     queue: &SharedTaskQueue,
@@ -151,14 +196,23 @@ fn drive(
     if thread.status() != ThreadStatus::Resumable {
         return Ok(None);
     }
-    let token: LuaValue = lua.named_registry_value(SLEEP_TOKEN_KEY)?;
     let mut values = yielded.into_iter();
-    let is_sleep = values
-        .next()
-        .is_some_and(|first| first.to_pointer() == token.to_pointer());
-    if !is_sleep {
+    let first = values.next().unwrap_or(LuaValue::Nil);
+    let is_token = |key: &str| -> mlua::Result<bool> {
+        let token: LuaValue = lua.named_registry_value(key)?;
+        Ok(!token.is_nil() && first.to_pointer() == token.to_pointer())
+    };
+    if is_token(AWAIT_TOKEN_KEY)? {
+        let call_id = match values.next() {
+            Some(LuaValue::UserData(call)) => call.borrow::<AwaitedCall>()?.0,
+            _ => return Err(mlua::Error::external("ticket:await() lost its call id")),
+        };
+        let key = lua.create_registry_value(thread)?;
+        return queue.lock().unwrap().park(id, call_id, key).map(Some);
+    }
+    if !is_token(SLEEP_TOKEN_KEY)? {
         return Err(mlua::Error::external(
-            "a task may only yield through task.sleep",
+            "a task may only yield through task.sleep or ticket:await()",
         ));
     }
     let wait = delay_ms(values.next().unwrap_or(LuaValue::Nil), "task.sleep")?;
@@ -200,6 +254,47 @@ fn realm_sleep_function(lua: &mlua::Lua) -> mlua::Result<Function> {
         .call::<Function>(token)?;
     lua.set_named_registry_value(SLEEP_FUNCTION_KEY, &sleep)?;
     Ok(sleep)
+}
+
+const AWAIT_FUNCTION_KEY: &str = "__mesh_task_await_fn";
+
+/// A ticket's call id, carried opaquely through the `await` yield. Frontend
+/// call ids start at 2^63, beyond what a Luau number holds exactly.
+pub(crate) struct AwaitedCall(pub(crate) u64);
+
+impl mlua::UserData for AwaitedCall {}
+
+/// The `await` of a service call ticket, compiled once per realm and bound to
+/// each ticket. Inside `task.spawn` it suspends the task until the call
+/// completes; elsewhere (a handler cannot yield) it returns the current
+/// snapshot without blocking, as `poll` does.
+pub(crate) fn realm_await_function(lua: &mlua::Lua) -> mlua::Result<Function> {
+    if let Some(await_fn) = lua.named_registry_value::<Option<Function>>(AWAIT_FUNCTION_KEY)? {
+        return Ok(await_fn);
+    }
+    let token = lua.create_table()?;
+    lua.set_named_registry_value(AWAIT_TOKEN_KEY, &token)?;
+    let await_fn = lua
+        .load(
+            r#"
+            local token = ...
+            return function(ticket)
+                local snapshot = ticket.poll()
+                if snapshot.done or not coroutine.isyieldable() then
+                    return snapshot
+                end
+                repeat
+                    coroutine.yield(token, ticket.__mesh_awaited_call)
+                    snapshot = ticket.poll()
+                until snapshot.done
+                return snapshot
+            end
+            "#,
+        )
+        .set_name("=ticket.await")
+        .call::<Function>(token)?;
+    lua.set_named_registry_value(AWAIT_FUNCTION_KEY, &await_fn)?;
+    Ok(await_fn)
 }
 
 const HOVER_INTENT_FACTORY_KEY: &str = "__mesh_hover_intent_factory";

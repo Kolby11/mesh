@@ -293,3 +293,104 @@ function leave() intent.leave() end
     assert!(ctx.run_due_tasks(later(1_000)).is_empty());
     assert_eq!(ctx.state.get("closes"), Some(serde_json::json!(1)));
 }
+
+fn audio_context(source: &str) -> ScriptContext {
+    let caps = CapabilitySet::from_ids(["service.audio.read", "service.audio.control"]);
+    let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
+    ctx.set_interface_catalog(super::common::audio_catalog());
+    ctx.load_script(source).unwrap();
+    ctx
+}
+
+fn published_call_id(ctx: &mut ScriptContext) -> u64 {
+    ctx.drain_published_events()
+        .iter()
+        .find_map(|event| event.call_id)
+        .expect("service call should publish a call id")
+}
+
+#[test]
+fn await_suspends_a_task_until_its_service_call_completes() {
+    let mut ctx = audio_context(
+        r#"
+local audio = require("mesh.audio@>=1.0")
+step = "idle"
+result_percent = -1
+function start()
+    task.spawn(function()
+        step = "calling"
+        local done = audio:set_volume("default", 40):await()
+        step = done.status
+        result_percent = done.result.percent
+    end)
+end
+"#,
+    );
+    ctx.call_handler("start", &[]).unwrap();
+    let call_id = published_call_id(&mut ctx);
+    assert_eq!(ctx.state.get("step"), Some(serde_json::json!("calling")));
+    assert_eq!(ctx.pending_task_count(), 1);
+    assert_eq!(
+        ctx.next_task_deadline(),
+        None,
+        "an awaiting task has no deadline"
+    );
+
+    assert!(ctx.complete_service_call(
+        call_id,
+        "ok",
+        serde_json::json!({ "ok": true, "percent": 40 })
+    ));
+    let due = ctx
+        .next_task_deadline()
+        .expect("completion makes the task due");
+    assert!(ctx.run_due_tasks(due).is_empty());
+    assert_eq!(ctx.state.get("step"), Some(serde_json::json!("ok")));
+    assert_eq!(ctx.state.get("result_percent"), Some(serde_json::json!(40)));
+    assert_eq!(ctx.pending_task_count(), 0);
+}
+
+#[test]
+fn await_outside_a_task_returns_the_snapshot_without_blocking() {
+    let mut ctx = audio_context(
+        r#"
+local audio = require("mesh.audio@>=1.0")
+function call()
+    local snapshot = audio:set_volume("default", 40).await()
+    done = snapshot.done
+end
+"#,
+    );
+    ctx.call_handler("call", &[]).unwrap();
+    assert_eq!(ctx.state.get("done"), Some(serde_json::json!(false)));
+    assert_eq!(ctx.pending_task_count(), 0);
+}
+
+#[test]
+fn cancelling_an_awaiting_task_drops_it() {
+    let mut ctx = audio_context(
+        r#"
+local audio = require("mesh.audio@>=1.0")
+resumed = false
+local handle
+function start()
+    handle = task.spawn(function()
+        audio:set_volume("default", 40):await()
+        resumed = true
+    end)
+end
+function stop()
+    cancelled = handle:cancel()
+end
+"#,
+    );
+    ctx.call_handler("start", &[]).unwrap();
+    let call_id = published_call_id(&mut ctx);
+    ctx.call_handler("stop", &[]).unwrap();
+    assert_eq!(ctx.state.get("cancelled"), Some(serde_json::json!(true)));
+    assert_eq!(ctx.pending_task_count(), 0);
+
+    ctx.complete_service_call(call_id, "ok", serde_json::json!({ "ok": true }));
+    assert_eq!(ctx.next_task_deadline(), None);
+    assert_eq!(ctx.state.get("resumed"), Some(serde_json::json!(false)));
+}

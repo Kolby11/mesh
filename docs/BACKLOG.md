@@ -164,9 +164,9 @@ Each needs a design and a measured prototype before it is adopted.
       `MESH_TEMPLATE_PATCHING=1` (nav-bar audio poll 4.0–4.4 → 2.2–2.3 ms).
       Adopt by default, then extend to service-field reads and keyed lists,
       and retire `render()` in favour of derived expressions.
-- [ ] **D2:** Service calls, exec, sockets and file reads that yield inside
-      `task.spawn` instead of answering through events or callbacks. The
-      per-instance scheduler (`task.delay`/`spawn`/`sleep`) has shipped.
+- [ ] **D2:** Backends have no task scheduler, so `mesh.exec`, sockets and file
+      reads block the backend thread. Give backends `task.spawn` and make those
+      calls yield (with D8). Frontend `ticket:await()` has shipped.
 - [ ] **D3:** Object capabilities for services: authorize when a service proxy
       is acquired, then calls are plain typed calls. `mesh.shell` has shipped
       this way; service methods still authorize per call.

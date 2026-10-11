@@ -736,11 +736,12 @@ fn create_service_call_ticket(
     let poll = lua.create_function(move |lua, _args: mlua::Variadic<LuaValue>| {
         service_call_snapshot(lua, call_id, &poll_completions)
     })?;
-    ticket.set("poll", poll.clone())?;
-    // Handler execution is synchronous, so `await` is a cooperative poll
-    // point. It has the same stable shape as poll and can be called from a
-    // later tick/handler without blocking the shell thread.
-    ticket.set("await", poll)?;
+    ticket.set("poll", poll)?;
+    ticket.raw_set("__mesh_awaited_call", super::runtime::AwaitedCall(call_id))?;
+    ticket.set(
+        "await",
+        super::runtime::realm_await_function(lua)?.bind(ticket.clone())?,
+    )?;
 
     let cancel_completions = Arc::clone(&completions);
     let cancel_events = Arc::clone(&published_events);

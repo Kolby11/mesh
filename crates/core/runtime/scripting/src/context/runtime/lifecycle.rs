@@ -316,7 +316,8 @@ impl ScriptContext {
         events
     }
 
-    /// Deliver a terminal result to a ticket created by this context.
+    /// Deliver a terminal result to a ticket created by this context, and
+    /// make a task suspended in that ticket's `await` due.
     ///
     /// The result is intentionally stored outside Lua. A backend completion
     /// can therefore arrive between handler calls without mutating the shared
@@ -338,6 +339,8 @@ impl ScriptContext {
                 result,
             },
         );
+        drop(completions);
+        self.tasks.lock().unwrap().wake(call_id);
         true
     }
 
