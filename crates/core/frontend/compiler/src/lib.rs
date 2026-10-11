@@ -30,10 +30,11 @@ pub use compile::{
     compile_frontend_module_revision, is_frontend_module, validate_component_import_props,
 };
 pub use render::{
-    PreparedComponentStyleRules, build_embedded_widget_tree_from_component,
+    PreparedComponentStyleRules, TemplateBindingPatch, build_embedded_widget_tree_from_component,
     build_embedded_widget_tree_from_component_with_prepared_styles,
     build_embedded_widget_tree_from_component_with_prepared_styles_and_owner,
-    build_widget_tree_from_component, props_settings_schema, resolve_css_props,
+    build_widget_tree_from_component, patch_template_bindings, props_settings_schema,
+    resolve_css_props,
 };
 pub use tags::UiTag;
 
@@ -81,6 +82,9 @@ impl VariableStore for LayeredStore<'_> {
     }
     fn loop_identity(&self) -> Option<&str> {
         self.loop_identity.as_deref()
+    }
+    fn in_loop(&self) -> bool {
+        true
     }
     fn record_template_service_reads(&self, reads: &[(String, String)]) {
         self.base.record_template_service_reads(reads);

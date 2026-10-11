@@ -1901,8 +1901,8 @@ mod parse_cache_tests {
     use super::*;
 
     fn settings_module() -> (Manifest, PathBuf) {
-        let module_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../../modules/frontend/settings");
+        let module_dir =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../modules/frontend/settings");
         let loaded = mesh_core_module::manifest::load_canonical_manifest(&module_dir)
             .expect("settings manifest should load");
         (loaded.manifest, module_dir)
@@ -1914,10 +1914,23 @@ mod parse_cache_tests {
         parsed_component_cache::clear();
         let cold = compile_frontend_module(&manifest, &module_dir).expect("cold compile");
         let warm = compile_frontend_module(&manifest, &module_dir).expect("warm compile");
-        assert_eq!(format!("{:?}", cold.component), format!("{:?}", warm.component));
         assert_eq!(
-            format!("{:?}", cold.local_components.keys().collect::<std::collections::BTreeSet<_>>()),
-            format!("{:?}", warm.local_components.keys().collect::<std::collections::BTreeSet<_>>())
+            format!("{:?}", cold.component),
+            format!("{:?}", warm.component)
+        );
+        assert_eq!(
+            format!(
+                "{:?}",
+                cold.local_components
+                    .keys()
+                    .collect::<std::collections::BTreeSet<_>>()
+            ),
+            format!(
+                "{:?}",
+                warm.local_components
+                    .keys()
+                    .collect::<std::collections::BTreeSet<_>>()
+            )
         );
         assert_eq!(cold.watched_paths.len(), warm.watched_paths.len());
     }

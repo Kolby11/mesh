@@ -152,6 +152,66 @@ impl ScriptContext {
                 .any(|name| cache.template_member_reads.contains(name))
     }
 
+    /// The template expressions that read any public member written since the
+    /// template last consumed this instance's state, together with those
+    /// members. `None` when that cannot be answered exactly: before the first
+    /// complete evaluation, when a write carried no member name, or when an
+    /// expression calls a component function (its reads are hidden inside the
+    /// call).
+    pub fn template_expressions_reading_changes(&self) -> Option<(Vec<String>, Vec<String>)> {
+        if !self.template_dependencies_ready || self.changed_public_members.is_empty() {
+            return None;
+        }
+        if !self
+            .template_expression_cache
+            .lock()
+            .unwrap()
+            .opaque_expressions
+            .is_empty()
+        {
+            return None;
+        }
+        let all_reads: Table = self
+            .env()
+            .get("__mesh_template_expression_member_reads")
+            .ok()?;
+        let env = self.env();
+        let mut readers = Vec::new();
+        for entry in all_reads.pairs::<String, Table>() {
+            let (source, reads) = entry.ok()?;
+            // A component function hides its reads, wherever the expression
+            // ran (loop bodies are not recorded as opaque by evaluation).
+            for read in reads.pairs::<String, bool>() {
+                let (name, _) = read.ok()?;
+                if !self.builtin_globals.contains(&name)
+                    && matches!(
+                        env.raw_get::<LuaValue>(name.as_str()),
+                        Ok(LuaValue::Function(_))
+                    )
+                {
+                    return None;
+                }
+            }
+            if self.changed_public_members.iter().any(|member| {
+                reads
+                    .raw_get::<Option<bool>>(member.as_str())
+                    .ok()
+                    .flatten()
+                    == Some(true)
+            }) {
+                readers.push(source);
+            }
+        }
+        Some((readers, self.changed_public_members.clone()))
+    }
+
+    /// Mark the pending public-member writes as applied without a template
+    /// rebuild, after the caller re-evaluated every expression that reads them.
+    pub fn consume_template_changes(&mut self) {
+        self.changed_public_members.clear();
+        self.state.clear_dirty();
+    }
+
     /// Whether this runtime has completed a template evaluation, so its
     /// recorded read sets describe what the component actually consumes. Before
     /// that, an empty read set means "not yet known", not "reads nothing".

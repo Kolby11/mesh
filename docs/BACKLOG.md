@@ -160,9 +160,10 @@ Each needs a design and a measured prototype before it is adopted.
 [Direction note](../.planning/todos/pending/2026-10-10-runtime-architecture-direction.md)
 (suggested order inside).
 
-- [ ] **D1:** Compile-time fine-grained reactivity: top-level variables become
-      signals, template expressions bind straight to node properties, and
-      `render()` is retired. Prototype on the navigation bar first.
+- [ ] **D1:** Write-time binding patches are prototyped behind
+      `MESH_TEMPLATE_PATCHING=1` (nav-bar audio poll 4.0–4.4 → 2.2–2.3 ms).
+      Adopt by default, then extend to service-field reads and keyed lists,
+      and retire `render()` in favour of derived expressions.
 - [ ] **D2:** Service calls, exec, sockets and file reads that yield inside
       `task.spawn` instead of answering through events or callbacks. The
       per-instance scheduler (`task.delay`/`spawn`/`sleep`) has shipped.

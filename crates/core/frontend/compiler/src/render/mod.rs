@@ -915,10 +915,16 @@ fn build_element_node(
         node.attributes.insert("class".into(), classes.join(" "));
     }
 
-    if tag == "text"
+    let inline_text = tag == "text"
         && !element.children.is_empty()
-        && element.children.iter().all(is_inline_template_node)
+        && element.children.iter().all(is_inline_template_node);
+    if let Some(state) = state
+        && !state.in_loop()
     {
+        record_template_bindings(&mut node, element, inline_text, instance_key);
+    }
+
+    if inline_text {
         let content: String = element
             .children
             .iter()
@@ -990,6 +996,115 @@ fn build_element_node(
         .collect();
 
     node
+}
+
+/// Record where this element's bound properties come from, so a later script
+/// write can re-evaluate just them (see [`patch_template_bindings`]).
+fn record_template_bindings(
+    node: &mut WidgetNode,
+    element: &ElementNode,
+    inline_text: bool,
+    instance_key: &str,
+) {
+    let attributes: Vec<(String, String)> = element
+        .attributes
+        .iter()
+        .filter_map(|attribute| match &attribute.value {
+            AttributeValue::Binding(expression) | AttributeValue::TwoWayBinding(expression)
+                if !elements::is_event_handler_attribute(&attribute.name) =>
+            {
+                Some((attribute.name.clone(), expression.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    let inline_content = (inline_text
+        && element
+            .children
+            .iter()
+            .any(|child| matches!(child, TemplateNode::Expr(_))))
+    .then(|| element.children.clone().into());
+    if attributes.is_empty() && inline_content.is_none() {
+        return;
+    }
+    node.set_template_bindings(std::sync::Arc::new(mesh_core_elements::TemplateBindings {
+        instance_key: instance_key.into(),
+        attributes,
+        inline_content,
+    }));
+}
+
+/// What [`patch_template_bindings`] changed on a node.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TemplateBindingPatch {
+    pub changed: bool,
+    /// Text content changed, so the node needs relayout, not only restyle.
+    pub content_changed: bool,
+}
+
+/// Re-evaluate a node's recorded bindings against `state` and write the
+/// results into it, exactly as a template rebuild would. Accessibility is
+/// re-derived from the patched attributes.
+pub fn patch_template_bindings(
+    node: &mut WidgetNode,
+    state: &dyn VariableStore,
+    composition: Option<&dyn FrontendCompositionResolver>,
+) -> TemplateBindingPatch {
+    let Some(bindings) = node.template_bindings().cloned() else {
+        return TemplateBindingPatch::default();
+    };
+    let mut patch = TemplateBindingPatch::default();
+    for (name, expression) in &bindings.attributes {
+        let value = expr_eval::evaluate_template_expression(
+            expression,
+            Some(state),
+            &bindings.instance_key,
+            composition,
+        );
+        let mut next = mesh_core_elements::AttributeMap::new();
+        next.insert_value(mesh_core_elements::AttrKey::new(name), value);
+        let next_value = next.get(name.as_str()).cloned();
+        if node.attributes.get(name.as_str()).cloned() != next_value {
+            match next_value {
+                Some(value) => {
+                    node.attributes.insert(name.clone().into(), value);
+                }
+                None => {
+                    node.attributes.remove(name.as_str());
+                }
+            }
+            patch.changed = true;
+        }
+    }
+    if let Some(parts) = bindings.inline_content.as_deref() {
+        let content: String = parts
+            .iter()
+            .map(|part| {
+                elements::resolve_inline_content(
+                    part,
+                    Some(state),
+                    &bindings.instance_key,
+                    composition,
+                )
+            })
+            .collect();
+        if node.attributes.get("content").map(String::as_str) != Some(content.as_str()) {
+            node.attributes.insert("content".into(), content);
+            patch.changed = true;
+            patch.content_changed = true;
+        }
+    }
+    if patch.changed {
+        let source_tag = node
+            .attributes
+            .get("data-mesh-element")
+            .cloned()
+            .unwrap_or_else(|| node.tag.clone());
+        let tag = node.tag.clone();
+        node.accessibility =
+            elements::accessibility_for_element(&source_tag, &tag, &node.attributes);
+    }
+    patch
 }
 
 #[cfg(test)]

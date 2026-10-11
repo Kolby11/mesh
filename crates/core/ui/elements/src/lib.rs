@@ -76,7 +76,7 @@ pub use style::{
 };
 pub use tree::EventHandlerCall;
 pub use tree::{
-    ElementState, NodeId, PaintOrderChildren, WidgetNode, WidgetScrollMetrics,
+    ElementState, NodeId, PaintOrderChildren, TemplateBindings, WidgetNode, WidgetScrollMetrics,
     WidgetTreeValidationError, WindowSurfaceState, children_in_paint_order,
     paint_order_child_indices, validate_widget_tree,
 };
@@ -103,6 +103,11 @@ pub trait VariableStore {
     /// Stable identity inherited from a keyed `{#for}` iteration, if any.
     fn loop_identity(&self) -> Option<&str> {
         None
+    }
+    /// Whether this store is evaluating a `{#for}` body, where expressions
+    /// also read the loop item and cannot be re-evaluated on their own.
+    fn in_loop(&self) -> bool {
+        false
     }
     fn record_template_service_reads(&self, reads: &[(String, String)]) {
         let _ = reads;

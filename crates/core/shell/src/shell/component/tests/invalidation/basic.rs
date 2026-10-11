@@ -2548,3 +2548,88 @@ fn retained_paint_path_records_phase26_cpu_attribution_stages() {
     // proven by the text cache traffic the snapshot captured.
     assert!(invalidation.text.layout_hits + invalidation.text.layout_misses > 0);
 }
+
+fn content_of(node: &WidgetNode, text: &str) -> bool {
+    node.attributes.get("content").map(String::as_str) == Some(text)
+        || node.children.iter().any(|child| content_of(child, text))
+}
+
+#[test]
+fn template_patching_applies_a_bound_write_without_a_rebuild() {
+    let mut component = test_frontend_component(
+        r#"
+<script lang="luau">
+label = "before"
+function update() label = "after" end
+</script>
+<template>
+  <column>
+    <text>{label}</text>
+    <text>unchanged row one</text>
+    <text>unchanged row two</text>
+  </column>
+</template>
+"#,
+    );
+    component.template_patching = true;
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(640, 160);
+    let mut buffer = PixelBuffer::new(640, 160);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    while component.wants_render() {
+        component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    }
+
+    component.call_namespaced_handler("update", &[]).unwrap();
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    let snapshot = component
+        .take_invalidation_snapshot()
+        .expect("handler paint records invalidation");
+
+    assert_eq!(snapshot.component.script_narrow, 0);
+    assert!(!snapshot.full_rebuild);
+    assert!(!snapshot.paint.full_surface_damage);
+    assert!(snapshot.paint.damage_area < snapshot.paint.surface_area);
+    let tree = component.last_tree.as_ref().expect("tree");
+    assert!(content_of(tree, "after"));
+    assert!(!content_of(tree, "before"));
+
+    // The patched frame matches what a full rebuild paints.
+    let mut rebuilt = PixelBuffer::new(640, 160);
+    component.invalidate_script_state();
+    component.paint(&theme, extent, &mut rebuilt, 1.0).unwrap();
+    assert_eq!(buffer.data(), rebuilt.data());
+}
+
+#[test]
+fn template_patching_leaves_conditional_reads_to_the_template() {
+    let mut component = test_frontend_component(
+        r#"
+<script lang="luau">
+shown = false
+label = "hidden"
+function show()
+    shown = true
+    label = "visible"
+end
+</script>
+<template>
+  <column>
+    {#if shown}
+      <text>{label}</text>
+    {/if}
+  </column>
+</template>
+"#,
+    );
+    component.template_patching = true;
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(320, 80);
+    let mut buffer = PixelBuffer::new(320, 80);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+
+    component.call_namespaced_handler("show", &[]).unwrap();
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    let tree = component.last_tree.as_ref().expect("tree");
+    assert!(content_of(tree, "visible"), "the {{#if}} body must appear");
+}

@@ -4825,3 +4825,27 @@ Each popup leave used to schedule two timers (the popover's and, through
 `PopoverLeave`, the trigger's) and resync across `bind:this` on every cancel.
 Now it schedules one. Dispatch is within noise; the step gain comes from the
 frames that no longer run the popover-side close.
+
+## 2026-10-11 — D1 prototype: binding patches on the navigation bar
+
+Release, `navigation_frame_cost_profile` (1920-wide bar, 60 frames per loop),
+`MESH_TEMPLATE_PATCHING` off vs on, interleaved, five runs each:
+
+| Loop | Off | On |
+| --- | --- | --- |
+| Audio poll (read) | 4.033–4.431 ms | 2.212–2.322 ms |
+| Pointer move | 0.790–0.878 ms | 0.806–1.052 ms |
+| Paint only | 0.315–0.331 ms | 0.320–0.368 ms |
+| Render hooks alone | 0.509–0.541 ms | 0.559–0.618 ms |
+
+Audio-poll stages with patching on, one run: no `tree_build` (1.99 ms per
+frame off), `style_restyle` 0.200 ms (1.81 off), `layout` 0.245 ms (0.11 off;
+the patched text relayouts). About 1.5 ms per frame remains outside the frame
+stages: render hooks, the patch's expression evaluation, and service delivery.
+
+`navigation_hover_profile`, three runs each: step p50 1.97–2.01 ms off and
+1.88–1.98 ms on, dispatch p50 0.245–0.260 ms off and 0.195–0.258 ms on.
+Within noise: hover frames are interaction restyles, not script writes.
+
+Pointer move and render hooks overlap between modes; no regression is claimed
+or ruled out at this sample size.

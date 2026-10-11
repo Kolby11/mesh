@@ -692,6 +692,7 @@ impl FrontendSurfaceComponent {
             } else {
                 InteractionChangedNodeIds::default()
             };
+        self.patched_binding_nodes.clear();
         let interaction_snapshot_valid = self.interaction_snapshot_valid;
         let index_cache = &mut self.cached_style_rule_index;
         let mut reused_retained_layout = false;
@@ -1157,6 +1158,9 @@ impl FrontendSurfaceComponent {
                 changed_ids.insert(*node_id);
             }
         }
+
+        // Nodes whose bound properties a script write patched in place.
+        changed_ids.extend(self.patched_binding_nodes.iter().copied());
 
         if changed_ids.is_empty() {
             return InteractionChangedNodeIds::default(); // first frame: no previous state

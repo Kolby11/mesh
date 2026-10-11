@@ -32,6 +32,7 @@ mod rendering;
 mod runtime;
 mod runtime_tree;
 mod shell_component;
+mod template_patch;
 mod tooltip;
 
 pub(in crate::shell) use catalog::{
@@ -982,6 +983,13 @@ pub(super) struct FrontendSurfaceComponent {
     /// presented frame, never by an immediate corrective pass.
     next_frame_only_dirty: bool,
     node_service_field_deps: NodeServiceFieldDependencies,
+    /// Nodes whose bound properties `try_patch_template_writes` updated since
+    /// the last restyle; the targeted restyle treats them as changed.
+    patched_binding_nodes: HashSet<NodeId>,
+    /// Whether script writes may be applied by patching bindings in place
+    /// (the D1 prototype). Off by default until it is measured and adopted;
+    /// `MESH_TEMPLATE_PATCHING=1` turns it on.
+    template_patching: bool,
     /// Template nodes whose tracked service fields changed since the last
     /// paint. `None` means a narrow invalidation without an authoritative
     /// service-node scope and therefore requires normal template evaluation.
@@ -1382,6 +1390,9 @@ impl FrontendSurfaceComponent {
             animation_only_dirty: false,
             next_frame_only_dirty: false,
             node_service_field_deps: NodeServiceFieldDependencies::default(),
+            patched_binding_nodes: HashSet::new(),
+            template_patching: std::env::var_os("MESH_TEMPLATE_PATCHING")
+                .is_some_and(|value| value == "1"),
             pending_service_template_nodes: None,
             selective_service_build_supported,
             #[cfg(test)]
@@ -1684,6 +1695,15 @@ impl FrontendSurfaceComponent {
     /// structural fallback and pixel damage.
     pub(super) fn invalidate_script_state_narrow(&mut self) {
         self.invalidate(ComponentDirtyFlags::SCRIPT_NARROW);
+    }
+
+    /// A write that `try_patch_template_writes` applied no longer needs the
+    /// narrow template pass that was requested so render hooks would run.
+    pub(super) fn drop_script_narrow_after_patch(&mut self) {
+        self.dirty_types.remove(ComponentDirtyFlags::SCRIPT_NARROW);
+        if self.dirty_types.is_empty() && !self.style_only_dirty {
+            self.dirty = false;
+        }
     }
 
     pub(super) fn invalidate_service_template_nodes(&mut self, nodes: HashSet<NodeId>) {

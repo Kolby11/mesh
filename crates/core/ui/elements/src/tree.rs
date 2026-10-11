@@ -261,8 +261,46 @@ pub struct WidgetNodeAuthored {
     accessibility_baseline: Option<AccessibilityInfo>,
     module_id: Option<Arc<str>>,
     pub service_field_reads: Vec<(String, String)>,
+    /// Where this node's bound properties come from, so a script write can
+    /// re-evaluate exactly them instead of rebuilding the tree.
+    template_bindings: Option<Arc<TemplateBindings>>,
     /// Shell-owned composition flags that must survive memoized subtree reuse.
     composition: WidgetCompositionMetadata,
+}
+
+/// The template sources of an element's bound properties, recorded at build
+/// time for elements outside `{#for}` bodies. Re-evaluating them against the
+/// owning instance's script state reproduces exactly what a rebuild would
+/// write into these properties.
+#[derive(Debug, Clone)]
+#[doc(hidden)]
+pub struct TemplateBindings {
+    /// The component instance whose script state the expressions read.
+    pub instance_key: Arc<str>,
+    /// `(attribute, expression)` for every non-handler `name={expression}`.
+    pub attributes: Vec<(String, String)>,
+    /// The inline children of a `<text>` whose `content` they produce.
+    pub inline_content: Option<Arc<[mesh_core_component::TemplateNode]>>,
+}
+
+impl TemplateBindings {
+    /// Every expression source these bindings evaluate.
+    pub fn expressions(&self) -> impl Iterator<Item = &str> {
+        self.attributes
+            .iter()
+            .map(|(_, expression)| expression.as_str())
+            .chain(
+                self.inline_content
+                    .iter()
+                    .flat_map(|parts| parts.iter())
+                    .filter_map(|part| match part {
+                        mesh_core_component::TemplateNode::Expr(expr) => {
+                            Some(expr.expression.as_str())
+                        }
+                        _ => None,
+                    }),
+            )
+    }
 }
 
 /// Typed metadata added while component trees are composed.
@@ -393,9 +431,20 @@ impl WidgetNode {
                 accessibility_baseline: None,
                 module_id: None,
                 service_field_reads: Vec::new(),
+                template_bindings: None,
                 composition: WidgetCompositionMetadata::default(),
             }),
         }
+    }
+
+    #[doc(hidden)]
+    pub fn set_template_bindings(&mut self, bindings: Arc<TemplateBindings>) {
+        self.template_bindings = Some(bindings);
+    }
+
+    #[doc(hidden)]
+    pub fn template_bindings(&self) -> Option<&Arc<TemplateBindings>> {
+        self.template_bindings.as_ref()
     }
 
     #[doc(hidden)]

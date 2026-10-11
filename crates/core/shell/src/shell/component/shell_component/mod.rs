@@ -930,6 +930,9 @@ impl ShellComponent for FrontendSurfaceComponent {
             Default::default()
         };
         let surface_css_props = self.surface_css_props();
+        // Patched bindings changed authored attributes without a rebuild, so
+        // their nodes still need the post-update style diagnostics.
+        let bindings_patched = !self.patched_binding_nodes.is_empty();
         let mut tree_was_rebuilt = false;
         let mut tree = if dirty_types.contains(ComponentDirtyFlags::SCRIPT_NARROW)
             && !combined_script_and_interaction_update
@@ -1047,7 +1050,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             Some("rebuild"),
         );
         self.capture_finalized_frame(&tree);
-        if tree_was_rebuilt {
+        if tree_was_rebuilt || bindings_patched {
             self.record_runtime_style_diagnostics_after_retained_update(
                 &mut tree,
                 theme,

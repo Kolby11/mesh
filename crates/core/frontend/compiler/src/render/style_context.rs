@@ -220,6 +220,9 @@ impl VariableStore for TrackingVariableStore<'_> {
     fn loop_identity(&self) -> Option<&str> {
         self.inner.loop_identity()
     }
+    fn in_loop(&self) -> bool {
+        self.inner.in_loop()
+    }
     fn record_template_service_reads(&self, reads: &[(String, String)]) {
         self.reads.borrow_mut().extend_from_slice(reads);
     }

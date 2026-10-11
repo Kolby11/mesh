@@ -296,10 +296,12 @@ impl FrontendSurfaceComponent {
 
     pub(super) fn call_render_hooks(&mut self) {
         let mut state_dirty = false;
+        let mut written = Vec::new();
         let mut runtimes = self.runtimes.lock().unwrap();
-        for runtime in runtimes.values_mut() {
+        for (instance_key, runtime) in runtimes.iter_mut() {
             if Self::call_runtime_render_hook(&self.diagnostics, runtime) {
                 state_dirty = true;
+                written.push(instance_key.to_string());
             }
         }
         let generations = runtimes
@@ -314,6 +316,10 @@ impl FrontendSurfaceComponent {
         drop(runtimes);
         for (instance_key, generation) in generations {
             self.sync_runtime_generation(&instance_key, generation);
+        }
+        if state_dirty && self.template_patching && self.try_patch_template_writes(&written) {
+            self.drop_script_narrow_after_patch();
+            return;
         }
         if state_dirty {
             self.render_hooks_changed_templates = true;
@@ -894,6 +900,13 @@ impl FrontendSurfaceComponent {
         bounded_error_widget(message)
     }
 
+    pub(super) fn has_template_expression_failure_for(&self, instance_key: &str) -> bool {
+        self.template_expression_failure
+            .borrow()
+            .as_ref()
+            .is_some_and(|(failed_instance_key, _)| failed_instance_key == instance_key)
+    }
+
     pub(super) fn take_template_expression_failure_for(
         &self,
         instance_key: &str,
@@ -1307,7 +1320,11 @@ impl FrontendSurfaceComponent {
                 }
             }
         };
-        if state_affects_template || neighbors_dirty {
+        let patched = state_affects_template
+            && !neighbors_dirty
+            && self.template_patching
+            && self.try_patch_template_writes(std::slice::from_ref(&runtime_key));
+        if (state_affects_template || neighbors_dirty) && !patched {
             // The retained-tree/display-list diff is authoritative for both
             // structural fallback and pixel damage. Handler writes therefore
             // start on the narrow path: ordinary bound-value changes repaint
