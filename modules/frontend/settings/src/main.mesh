@@ -13,42 +13,42 @@
                 </row>
 
                 <column class="settings-navigation" aria-label={t('settings.categories')}>
-                    <button class={wifi_nav_class} onclick={showWifi} title={t('nav.wifi.tooltip')}>
+                    <button class="settings-nav-item" class:settings-nav-item-active={active_page == "wifi"} onclick={showWifi} title={t('nav.wifi.tooltip')}>
                         <icon class="nav-icon" name="wifi" size="18" />
                         <column class="nav-copy">
                             <text class="nav-title">{t('nav.wifi')}</text>
                             <text class="nav-subtitle">{t('nav.wifi.subtitle')}</text>
                         </column>
                     </button>
-                    <button class={audio_nav_class} onclick={showAudio} title={t('nav.audio.tooltip')}>
+                    <button class="settings-nav-item" class:settings-nav-item-active={active_page == "audio"} onclick={showAudio} title={t('nav.audio.tooltip')}>
                         <icon class="nav-icon" name="audio-volume-high" size="18" />
                         <column class="nav-copy">
                             <text class="nav-title">{t('nav.audio')}</text>
                             <text class="nav-subtitle">{t('nav.audio.subtitle')}</text>
                         </column>
                     </button>
-                    <button class={bluetooth_nav_class} onclick={showBluetooth} title={t('nav.bluetooth.tooltip')}>
+                    <button class="settings-nav-item" class:settings-nav-item-active={active_page == "bluetooth"} onclick={showBluetooth} title={t('nav.bluetooth.tooltip')}>
                         <icon class="nav-icon" name="bluetooth" size="18" />
                         <column class="nav-copy">
                             <text class="nav-title">{t('nav.bluetooth')}</text>
                             <text class="nav-subtitle">{t('nav.bluetooth.subtitle')}</text>
                         </column>
                     </button>
-                    <button class={appearance_nav_class} onclick={showAppearance} title={t('nav.appearance.tooltip')}>
+                    <button class="settings-nav-item" class:settings-nav-item-active={active_page == "appearance"} onclick={showAppearance} title={t('nav.appearance.tooltip')}>
                         <icon class="nav-icon" name="applications-graphics" size="18" />
                         <column class="nav-copy">
                             <text class="nav-title">{t('nav.appearance')}</text>
                             <text class="nav-subtitle">{t('nav.appearance.subtitle')}</text>
                         </column>
                     </button>
-                    <button class={device_nav_class} onclick={showDevice} title={t('nav.device.tooltip')}>
+                    <button class="settings-nav-item" class:settings-nav-item-active={active_page == "device"} onclick={showDevice} title={t('nav.device.tooltip')}>
                         <icon class="nav-icon" name="computer" size="18" />
                         <column class="nav-copy">
                             <text class="nav-title">{t('nav.device')}</text>
                             <text class="nav-subtitle">{t('nav.device.subtitle')}</text>
                         </column>
                     </button>
-                    <button class={advanced_nav_class} onclick={showAdvanced} title={t('nav.advanced.tooltip')}>
+                    <button class="settings-nav-item" class:settings-nav-item-active={active_page == "advanced"} onclick={showAdvanced} title={t('nav.advanced.tooltip')}>
                         <icon class="nav-icon" name="settings" size="18" />
                         <column class="nav-copy">
                             <text class="nav-title">{t('nav.advanced')}</text>
@@ -69,8 +69,8 @@
                 <row class="settings-header">
                     <column class="header-copy">
                         <text class="page-eyebrow">{t('settings.eyebrow')}</text>
-                        <text class="page-title">{t(page_title)}</text>
-                        <text class="page-subtitle">{t(page_subtitle)}</text>
+                        <text class="page-title">{t('page.' .. active_page .. '.title')}</text>
+                        <text class="page-subtitle">{t('page.' .. active_page .. '.subtitle')}</text>
                     </column>
                     <row class="settings-header-actions">
                         <button class="header-button pop-out-button" onclick={onPopOut} aria-label={t('settings.pop_out')}>
@@ -87,22 +87,22 @@
 
                 <scroll ref="settings_scroll" class="settings-scroll">
                     <column class="settings-page-stack">
-                        <column class="settings-page-slot" hidden={wifi_hidden}>
+                        <column class="settings-page-slot" hidden={active_page ~= "wifi"}>
                             <WifiPage />
                         </column>
-                        <column class="settings-page-slot" hidden={audio_hidden}>
+                        <column class="settings-page-slot" hidden={active_page ~= "audio"}>
                             <AudioPage />
                         </column>
-                        <column class="settings-page-slot" hidden={bluetooth_hidden}>
+                        <column class="settings-page-slot" hidden={active_page ~= "bluetooth"}>
                             <BluetoothPage />
                         </column>
-                        <column class="settings-page-slot" hidden={appearance_hidden}>
+                        <column class="settings-page-slot" hidden={active_page ~= "appearance"}>
                             <AppearancePage />
                         </column>
-                        <column class="settings-page-slot" hidden={device_hidden}>
+                        <column class="settings-page-slot" hidden={active_page ~= "device"}>
                             <DeviceInfoPage />
                         </column>
-                        <column class="settings-page-slot" hidden={advanced_hidden}>
+                        <column class="settings-page-slot" hidden={active_page ~= "advanced"}>
                             <AdvancedPage />
                         </column>
                     </column>
@@ -121,59 +121,13 @@ local DeviceInfoPage = require("./components/device-info-page.mesh")
 local WifiPage = require("./components/wifi-page.mesh")
 local t = import("mesh.i18n", "t")
 
+-- The active page drives the nav highlight, the visible page slot and the
+-- header copy straight from the template.
 active_page = "wifi"
-page_title = "page.wifi.title"
-page_subtitle = "page.wifi.subtitle"
-
-wifi_hidden = false
-audio_hidden = true
-bluetooth_hidden = true
-appearance_hidden = true
-device_hidden = true
-advanced_hidden = true
-
-wifi_nav_class = "settings-nav-item settings-nav-item-active"
-audio_nav_class = "settings-nav-item"
-bluetooth_nav_class = "settings-nav-item"
-appearance_nav_class = "settings-nav-item"
-device_nav_class = "settings-nav-item"
-advanced_nav_class = "settings-nav-item"
-
-local function page_copy(page)
-    local key = "page." .. tostring(page or "wifi")
-    return {
-        title = key .. ".title",
-        subtitle = key .. ".subtitle",
-    }
-end
 
 local function activate(page)
     active_page = page
-    local copy = page_copy(page)
-    page_title = copy.title
-    page_subtitle = copy.subtitle
-
-    wifi_hidden = page ~= "wifi"
-    audio_hidden = page ~= "audio"
-    bluetooth_hidden = page ~= "bluetooth"
-    appearance_hidden = page ~= "appearance"
-    device_hidden = page ~= "device"
-    advanced_hidden = page ~= "advanced"
-
-    wifi_nav_class = page == "wifi" and "settings-nav-item settings-nav-item-active" or "settings-nav-item"
-    audio_nav_class = page == "audio" and "settings-nav-item settings-nav-item-active" or "settings-nav-item"
-    bluetooth_nav_class = page == "bluetooth" and "settings-nav-item settings-nav-item-active" or "settings-nav-item"
-    appearance_nav_class = page == "appearance" and "settings-nav-item settings-nav-item-active" or "settings-nav-item"
-    device_nav_class = page == "device" and "settings-nav-item settings-nav-item-active" or "settings-nav-item"
-    advanced_nav_class = page == "advanced" and "settings-nav-item settings-nav-item-active" or "settings-nav-item"
-
     refs.settings_scroll:scroll_to(0)
-end
-
-function render()
-    local copy = page_copy(active_page)
-    page_title = copy.title
-    page_subtitle = copy.subtitle
 end
 
 function showWifi() activate("wifi") end

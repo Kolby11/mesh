@@ -5,7 +5,7 @@
                 <text class="settings-control-title">{t('audio.service')}</text>
                 <text class="settings-card-meta">{t(audio_status)}</text>
             </column>
-            <text class={service_pill_class}>{t(service_pill)}</text>
+            <text class="settings-status-pill" class:settings-status-pill-active={service_active}>{t(service_pill)}</text>
         </row>
 
         <column class="settings-section">
@@ -14,7 +14,7 @@
                     <text class="settings-section-title">{t('audio.volume')}</text>
                     <text class="settings-section-copy">{t('audio.volume.copy')}</text>
                 </column>
-                <button class={mute_button_class} onclick={onToggleMute} disabled={controls_disabled}>
+                <button class:settings-primary-button={muted_state} class:settings-secondary-button={not muted_state} onclick={onToggleMute} disabled={controls_disabled}>
                     {t(mute_button_label)}
                 </button>
             </row>
@@ -73,12 +73,12 @@ local t = import("mesh.i18n", "t")
 
 audio_status = "audio.waiting"
 service_pill = "common.unavailable"
-service_pill_class = "settings-status-pill"
+service_active = false
 volume_percent = 0
 volume_label = "0%"
 volume_icon = "audio-volume-muted"
 mute_button_label = "audio.mute"
-mute_button_class = "settings-secondary-button"
+muted_state = false
 controls_disabled = true
 output_name = "audio.default_output"
 output_description = "audio.discovery_unavailable"
@@ -110,14 +110,14 @@ local function sync_volume(percent, muted)
         volume_icon = "audio-volume-high"
     end
     mute_button_label = muted and "audio.unmute" or "audio.mute"
-    mute_button_class = muted and "settings-primary-button" or "settings-secondary-button"
+    muted_state = muted
 end
 
 function render()
     if not audio or audio.available == false then
         audio_status = "audio.install_backend"
         service_pill = "common.unavailable"
-        service_pill_class = "settings-status-pill"
+        service_active = false
         controls_disabled = true
         provider_label = "common.no_active_provider"
         control_path = "common.unavailable"
@@ -129,7 +129,7 @@ function render()
     controls_disabled = false
     audio_status = muted and "audio.output_muted" or "audio.output_active"
     service_pill = muted and "audio.muted" or "common.active"
-    service_pill_class = "settings-status-pill settings-status-pill-active"
+    service_active = true
     provider_label = tostring(audio.source_module or "audio.active_provider")
     control_path = type(audio.set_volume) == "function" and "audio.read_control" or "audio.read_only"
     output_name = tostring(audio.output_name or audio.device_name or "audio.default_system_output")

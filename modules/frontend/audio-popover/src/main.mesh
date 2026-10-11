@@ -18,7 +18,7 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
         onpointerleave={onPopoverLeave}
         aria-label="Audio controls"
     >
-        <column class={props.blur_enabled and "audio-popover audio-popover-blur" or "audio-popover"}>
+        <column class="audio-popover" class:audio-popover-blur={props.blur_enabled}>
             <slider
                 class="audio-slider"
                 min="0"

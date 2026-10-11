@@ -11,7 +11,8 @@
         <column class="settings-section">
             <text class="settings-section-title">{t('advanced.active_providers')}</text>
             <text class="settings-section-copy">{providers_count .. t(providers_summary) .. providers_notice_separator .. t(provider_notice)}</text>
-            <list class="settings-list" label={t('advanced.active_backend_providers')} hidden={providers_hidden}>
+            {#if #provider_rows > 0}
+            <list class="settings-list" label={t('advanced.active_backend_providers')}>
                 {#for row in provider_rows}
                     <list-item class="settings-card">
                         <column class="settings-card-copy">
@@ -28,10 +29,12 @@
                     </list-item>
                 {/for}
             </list>
-            <empty-state class="settings-empty-state" hidden={providers_empty_hidden}>
+            {:else}
+            <empty-state class="settings-empty-state">
                 <text class="settings-card-title">{t('advanced.no_active_bindings')}</text>
                 <text class="settings-section-copy">{t('advanced.bindings_waiting')}</text>
             </empty-state>
+            {/if}
         </column>
 
         <column class="settings-section">
@@ -48,7 +51,8 @@
                     onchange={onModuleFilterChange}
                 />
             </row>
-            <list class="settings-list" label={t('advanced.installed_modules')} hidden={modules_hidden}>
+            {#if #module_rows > 0}
+            <list class="settings-list" label={t('advanced.installed_modules')}>
                 {#for row in module_rows}
                     <list-item class="settings-card">
                         <column class="settings-card-copy">
@@ -58,16 +62,18 @@
                             </row>
                             <text class="settings-card-meta">{t(row.status) .. row.status_details}</text>
                             <text class="settings-card-meta">{t('advanced.uses') .. ' ' .. row.interface_count .. ' ' .. t('advanced.interface_count') .. ' · ' .. t('advanced.settings') .. ' ' .. t(row.settings_list)}</text>
-                            <text class="settings-card-meta module-detail" hidden={row.details_hidden}>{t('advanced.required_interfaces') .. ': ' .. row.required_interfaces}</text>
-                            <text class="settings-card-meta module-detail" hidden={row.details_hidden}>{t('advanced.optional_interfaces') .. ': ' .. row.optional_interfaces}</text>
-                            <text class="settings-card-meta module-detail" hidden={row.details_hidden}>{t('advanced.provides') .. ': ' .. row.provides}</text>
-                            <text class="settings-card-meta module-detail" hidden={row.details_hidden}>{t('advanced.module_dependencies') .. ': ' .. row.modules}</text>
-                            <text class="settings-card-meta module-detail" hidden={row.details_hidden}>{t('advanced.capabilities') .. ': ' .. row.capabilities}</text>
-                            <text class="settings-card-meta module-detail" hidden={row.details_hidden}>{t('advanced.resources') .. ': ' .. row.resources}</text>
-                            <text class="settings-card-meta module-detail" hidden={row.details_hidden}>{t('advanced.native_binaries') .. ': ' .. row.native_binaries}</text>
-                            <text class="settings-card-meta module-detail" hidden={row.details_hidden}>{t('advanced.i18n_catalogs') .. ': ' .. row.i18n_catalogs}</text>
-                            <text class="settings-card-meta module-detail" hidden={row.details_hidden}>{t('advanced.keybinds') .. ': ' .. row.keybinds}</text>
-                            <text class="settings-card-meta module-detail" hidden={row.details_hidden}>{t('advanced.health') .. ': ' .. row.health}</text>
+                            {#if row.details_visible}
+                                <text class="settings-card-meta module-detail">{t('advanced.required_interfaces') .. ': ' .. row.required_interfaces}</text>
+                                <text class="settings-card-meta module-detail">{t('advanced.optional_interfaces') .. ': ' .. row.optional_interfaces}</text>
+                                <text class="settings-card-meta module-detail">{t('advanced.provides') .. ': ' .. row.provides}</text>
+                                <text class="settings-card-meta module-detail">{t('advanced.module_dependencies') .. ': ' .. row.modules}</text>
+                                <text class="settings-card-meta module-detail">{t('advanced.capabilities') .. ': ' .. row.capabilities}</text>
+                                <text class="settings-card-meta module-detail">{t('advanced.resources') .. ': ' .. row.resources}</text>
+                                <text class="settings-card-meta module-detail">{t('advanced.native_binaries') .. ': ' .. row.native_binaries}</text>
+                                <text class="settings-card-meta module-detail">{t('advanced.i18n_catalogs') .. ': ' .. row.i18n_catalogs}</text>
+                                <text class="settings-card-meta module-detail">{t('advanced.keybinds') .. ': ' .. row.keybinds}</text>
+                                <text class="settings-card-meta module-detail">{t('advanced.health') .. ': ' .. row.health}</text>
+                            {/if}
                         </column>
                         <column class="module-actions">
                             <button
@@ -77,7 +83,7 @@
                                 {t(row.details_action)}
                             </button>
                             <button
-                                class={row.button_class}
+                                class:settings-danger-button={row.enabled} class:settings-primary-button={not row.enabled}
                                 hidden={row.action_hidden}
                                 onclick={onModuleToggle(row.module_id, row.enabled)}
                             >
@@ -87,10 +93,12 @@
                     </list-item>
                 {/for}
             </list>
-            <empty-state class="settings-empty-state" hidden={modules_empty_hidden}>
+            {:else}
+            <empty-state class="settings-empty-state">
                 <text class="settings-card-title">{t('advanced.no_matching_modules')}</text>
                 <text class="settings-section-copy">{t('advanced.clear_filter')}</text>
             </empty-state>
+            {/if}
         </column>
 
         <column class="settings-section">
@@ -98,7 +106,8 @@
                 <text class="settings-section-title">{t('advanced.module_preferences')}</text>
                 <text class="settings-section-copy">{t('advanced.module_preferences.copy')}</text>
             </column>
-            <list class="settings-list" label={t('advanced.module_preferences')} hidden={props_hidden}>
+            {#if #prop_rows > 0}
+            <list class="settings-list" label={t('advanced.module_preferences')}>
                 {#for row in prop_rows}
                     <list-item class="settings-card settings-prop-card">
                         <column class="settings-card-copy settings-prop-copy">
@@ -112,23 +121,23 @@
                         >
                             {row.scope_label}
                         </button>
+                        {#if row.control == "bool"}
                         <button
                             class="settings-secondary-button settings-prop-control"
-                            hidden={row.bool_hidden}
                             onclick={onPropToggle(row.module_id, row.name, row.value, row.scope_instance_id)}
                         >
                             {row.value and t('common.enabled') or t('common.disabled')}
                         </button>
+                        {:else if row.control == "enum"}
                         <button
                             class="settings-secondary-button settings-prop-control"
-                            hidden={row.enum_hidden}
                             onclick={onPropEnumNext(row.module_id, row.name, row.value, row.options, row.scope_instance_id)}
                         >
                             {row.display_value}
                         </button>
+                        {:else if row.control == "number"}
                         <slider
                             class="settings-slider settings-prop-slider"
-                            hidden={row.number_hidden}
                             min={row.minimum}
                             max={row.maximum}
                             step={row.step}
@@ -136,14 +145,17 @@
                             label={row.label}
                             onchange={onPropNumber(row.module_id, row.name, row.scope_instance_id)}
                         />
+                        {:else}
                         <input
                             class="module-filter settings-prop-control"
-                            hidden={row.text_hidden}
                             value={row.display_value}
                             label={row.label}
                             onchange={onPropText(row.module_id, row.name, row.type, row.scope_instance_id)}
                         />
-                        <text class="settings-value" hidden={row.number_hidden}>{row.display_value}</text>
+                        {/if}
+                        {#if row.control == "number"}
+                        <text class="settings-value">{row.display_value}</text>
+                        {/if}
                         <button
                             class="settings-secondary-button"
                             hidden={row.reset_hidden}
@@ -154,10 +166,12 @@
                     </list-item>
                 {/for}
             </list>
-        <empty-state class="settings-empty-state" hidden={props_empty_hidden}>
+            {:else}
+            <empty-state class="settings-empty-state">
             <text class="settings-card-title">{t('advanced.no_module_preferences')}</text>
             <text class="settings-section-copy">{t('advanced.no_module_preferences.copy')}</text>
         </empty-state>
+            {/if}
         <slot extension-point="mesh.settings.page" />
     </column>
     </column>
@@ -186,12 +200,6 @@ provider_rows = {}
 module_rows = {}
 prop_rows = {}
 selected_module_id = ""
-providers_hidden = true
-providers_empty_hidden = false
-modules_hidden = true
-modules_empty_hidden = false
-props_hidden = true
-props_empty_hidden = false
 
 local provider_candidates = {}
 local pending_providers = {}
@@ -370,8 +378,6 @@ function render()
             action_hidden = #candidates < 2,
         }
     end
-    providers_hidden = #provider_rows == 0
-    providers_empty_hidden = #provider_rows > 0
     providers_count = #providers == 0 and "" or (tostring(#providers) .. " ")
     providers_summary = #providers == 0 and "advanced.no_bindings_published"
         or "advanced.binding_count"
@@ -423,8 +429,7 @@ function render()
             enabled = enabled,
             action = enabled and "common.disable" or "common.enable",
             action_hidden = not action_allowed,
-            button_class = enabled and "settings-danger-button" or "settings-primary-button",
-            details_hidden = not details_visible,
+            details_visible = details_visible,
             details_action = details_visible and "advanced.hide_details" or "advanced.show_details",
             required_interfaces = interface_summary(uses.interfaces, module_providers),
             optional_interfaces = interface_summary(uses.optional_interfaces, module_providers),
@@ -496,10 +501,12 @@ function render()
                 minimum = tonumber(definition.minimum) or 0,
                 maximum = tonumber(definition.maximum) or 100,
                 step = tonumber(definition.step) or 1,
-                bool_hidden = prop_type ~= "bool",
-                enum_hidden = prop_type ~= "enum",
-                number_hidden = not bounded_number,
-                text_hidden = prop_type == "bool" or prop_type == "enum" or bounded_number,
+                -- Which editor the row shows: bool and enum props step through
+                -- values, bounded numbers slide, everything else is typed.
+                control = (prop_type == "bool" and "bool")
+                    or (prop_type == "enum" and "enum")
+                    or (bounded_number and "number")
+                    or "text",
                 reset_hidden = not has_override,
                 instances = instances,
                 scope_instance_id = selected_instance,
@@ -514,10 +521,6 @@ function render()
         if a.module_id == b.module_id then return a.name < b.name end
         return a.module_id < b.module_id
     end)
-    modules_hidden = #module_rows == 0
-    modules_empty_hidden = #module_rows > 0
-    props_hidden = #prop_rows == 0
-    props_empty_hidden = #prop_rows > 0
     modules_match_count = #graph == 0 and "" or (tostring(#matched) .. " ")
     modules_of = #graph == 0 and "" or "advanced.of"
     modules_total_count = #graph == 0 and "" or (" " .. tostring(#graph) .. " ")
@@ -654,7 +657,7 @@ function onModuleDetails(module_id)
     local updated = {}
     for _, row in ipairs(module_rows) do
         local visible = row.module_id == selected_module_id
-        row.details_hidden = not visible
+        row.details_visible = visible
         row.details_action = visible and "advanced.hide_details" or "advanced.show_details"
         updated[#updated + 1] = row
     end

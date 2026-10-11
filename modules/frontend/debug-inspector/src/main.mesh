@@ -3,7 +3,8 @@
         <column class="inspector-root">
             <row class="inspector-header">
                 <button
-                    class={picker_header_button_class}
+                    class="inspect-trigger"
+                    class:inspect-trigger-active={picking}
                     onclick={onToggleElementPicker}
                     aria-label={picker_button_label}
                     tooltip={picker_button_label}
@@ -31,20 +32,15 @@
                 onSurfaces={showSurfaces}
                 onBackendServices={showBackendServices}
                 onBenchmark={showBenchmark}
-                overview_tab_class={overview_tab_class}
-                elements_tab_class={elements_tab_class}
-                modules_tab_class={modules_tab_class}
-                surfaces_tab_class={surfaces_tab_class}
-                backend_tab_class={backend_tab_class}
-                benchmark_tab_class={benchmark_tab_class}
+                active_view={active_view}
             />
 
             <column class="inspector-body">
                 <ElementsView
-                    hidden={elements_hidden}
+                    hidden={active_view ~= "elements"}
                     onTogglePicker={onToggleElementPicker}
                     onOpenSource={onOpenSelectedSource}
-                    picker_button_class={picker_button_class}
+                    picking={picking}
                     picker_button_label={picker_button_label}
                     picker_button_text={picker_button_text}
                     empty_hidden={element_empty_hidden}
@@ -63,7 +59,7 @@
                 />
 
                 <OverviewView
-                    hidden={overview_hidden}
+                    hidden={active_view ~= "overview"}
                     state_title={overview_state_title}
                     state_copy={overview_state_copy}
                     off_hidden={overview_off_hidden}
@@ -87,7 +83,7 @@
                 />
 
                 <ModulesView
-                    hidden={modules_hidden}
+                    hidden={active_view ~= "modules"}
                     state_copy={modules_state_copy}
                     filter_value={module_filter_value}
                     onFilterChange={onModuleFilterChange}
@@ -96,21 +92,21 @@
                 />
 
                 <SurfacesView
-                    hidden={surfaces_hidden}
+                    hidden={active_view ~= "surfaces"}
                     state_copy={surfaces_state_copy}
                     empty_hidden={surfaces_empty_hidden}
                     rows={surface_rows}
                 />
 
                 <BackendServicesView
-                    hidden={backend_hidden}
+                    hidden={active_view ~= "backend_services"}
                     state_copy={backend_state_copy}
                     empty_hidden={backend_empty_hidden}
                     rows={backend_rows}
                 />
 
                 <BenchmarkView
-                    hidden={benchmark_hidden}
+                    hidden={active_view ~= "benchmark"}
                     rows={benchmark_rows}
                     onRunScenario={runBenchmarkScenarioById}
                 />
@@ -132,18 +128,6 @@ local debug_service = require("mesh.debug")
 
 active_view = "overview"
 last_service_active_view = ""
-overview_hidden = false
-elements_hidden = true
-modules_hidden = true
-surfaces_hidden = true
-backend_hidden = true
-benchmark_hidden = true
-overview_tab_class = "view-tab view-tab-active"
-elements_tab_class = "view-tab"
-modules_tab_class = "view-tab"
-surfaces_tab_class = "view-tab"
-backend_tab_class = "view-tab"
-benchmark_tab_class = "view-tab"
 session_status = "Debug overlay connected"
 profiling_badge = "Idle"
 profiling_copy = "Profiling stays off until you explicitly start it."
@@ -185,10 +169,9 @@ backend_empty = true
 backend_empty_hidden = false
 backend_rows = {}
 benchmark_rows = {}
-picker_button_class = "picker-button"
+picking = false
 picker_button_label = "Inspect element (Ctrl+Shift+C)"
 picker_button_text = "Select element"
-picker_header_button_class = "inspect-trigger"
 picker_header_button_text = "Inspect element"
 element_empty_hidden = false
 element_details_hidden = true
@@ -212,18 +195,6 @@ local function count_list(value)
 end
 
 local function sync_view_state()
-    overview_hidden = active_view ~= "overview"
-    elements_hidden = active_view ~= "elements"
-    modules_hidden = active_view ~= "modules"
-    surfaces_hidden = active_view ~= "surfaces"
-    backend_hidden = active_view ~= "backend_services"
-    benchmark_hidden = active_view ~= "benchmark"
-    overview_tab_class = active_view == "overview" and "view-tab view-tab-active" or "view-tab"
-    elements_tab_class = active_view == "elements" and "view-tab view-tab-active" or "view-tab"
-    modules_tab_class = active_view == "modules" and "view-tab view-tab-active" or "view-tab"
-    surfaces_tab_class = active_view == "surfaces" and "view-tab view-tab-active" or "view-tab"
-    backend_tab_class = active_view == "backend_services" and "view-tab view-tab-active" or "view-tab"
-    benchmark_tab_class = active_view == "benchmark" and "view-tab view-tab-active" or "view-tab"
 end
 
 local function service_view_id(value)
@@ -867,16 +838,14 @@ local function sync_element_inspector()
     local selected = debug_service and debug_service.inspected_element
     local picking = debug_service and debug_service.element_picker_enabled
     if picking then
-        picker_button_class = "picker-button picker-button-active"
+        picking = true
         picker_button_text = "Picking…"
         picker_button_label = "Stop selecting an element"
-        picker_header_button_class = "inspect-trigger inspect-trigger-active"
         picker_header_button_text = "Click an element…"
     else
-        picker_button_class = "picker-button"
+        picking = false
         picker_button_text = "Select element"
         picker_button_label = "Inspect element (Ctrl+Shift+C)"
-        picker_header_button_class = "inspect-trigger"
         picker_header_button_text = "Inspect element"
     end
     if type(selected) ~= "table" then

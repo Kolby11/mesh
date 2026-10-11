@@ -137,8 +137,8 @@ fn shipped_workspace_button_publishes_focus_workspace_request() {
 
     ctx.call_handler("onSwitch2", &[]).unwrap();
     assert_eq!(
-        ctx.state().get("indicator_style"),
-        Some(serde_json::json!("transform: translateX(26px);"))
+        ctx.state().get("active_offset"),
+        Some(serde_json::json!(26))
     );
     let requests = crate::shell::service::script_events_to_requests(ctx.drain_published_events());
 

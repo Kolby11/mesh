@@ -8,7 +8,7 @@
                 <text class="device-name">{t(device_name)}</text>
                 <text class="settings-card-meta">{t(device_summary)}</text>
             </column>
-            <text class={service_pill_class}>{t(service_pill)}</text>
+            <text class="settings-status-pill" class:settings-status-pill-active={service_active}>{t(service_pill)}</text>
         </row>
 
         <column class="settings-section">
@@ -87,7 +87,7 @@ local t = import("mesh.i18n", "t")
 device_name = "device.this_device"
 device_summary = "device.identity_unpublished"
 service_pill = "device.partial"
-service_pill_class = "settings-status-pill"
+service_active = false
 os_label = "common.not_reported"
 kernel_label = "common.not_reported"
 architecture_label = "common.not_reported"
@@ -155,7 +155,7 @@ function render()
 
     if not device or device.available == false then
         service_pill = "device.partial"
-        service_pill_class = "settings-status-pill"
+        service_active = false
         device_backend_notice = "device.runtime_live"
         device_backend_joiner = ""
         device_backend_source = ""
@@ -176,7 +176,7 @@ function render()
     uptime_label = format_uptime(device.uptime_seconds or device.uptime)
     device_summary = os_label .. " · " .. architecture_label
     service_pill = "device.live"
-    service_pill_class = "settings-status-pill settings-status-pill-active"
+    service_active = true
     device_backend_notice = "device.supplied_by"
     device_backend_joiner = " "
     device_backend_source = value_or(device.source_module, "device.active_provider")

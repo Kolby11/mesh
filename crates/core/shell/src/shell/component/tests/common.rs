@@ -1236,6 +1236,7 @@ pub(super) fn real_frontend_module_component(
             &["en", "sk"],
         ),
         ("@mesh/settings", &settings_dir, &["en", "sk"]),
+        ("@mesh/quick-settings", &quick_settings_dir, &["en", "sk"]),
     ] {
         for catalog_locale in locales {
             sources.push(

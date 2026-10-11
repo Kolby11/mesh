@@ -1,33 +1,29 @@
 <template>
   <tabs class="view-tabs" label="Debug inspector views">
-    <tab class={overview_tab_class} onactivate={onOverview} onclick={onOverview} aria-label="Overview" tooltip="Overview">
+    <tab class="view-tab" class:view-tab-active={active_view == "overview"} onactivate={onOverview} onclick={onOverview} aria-label="Overview" tooltip="Overview">
       <text class="view-tab-icon">▦</text>
     </tab>
-    <tab class={elements_tab_class} onactivate={onElements} onclick={onElements} aria-label="Elements" tooltip="Elements">
+    <tab class="view-tab" class:view-tab-active={active_view == "elements"} onactivate={onElements} onclick={onElements} aria-label="Elements" tooltip="Elements">
       <text class="view-tab-icon">⌖</text>
     </tab>
-    <tab class={modules_tab_class} onactivate={onModules} onclick={onModules} aria-label="Modules" tooltip="Modules">
+    <tab class="view-tab" class:view-tab-active={active_view == "modules"} onactivate={onModules} onclick={onModules} aria-label="Modules" tooltip="Modules">
       <text class="view-tab-icon">◫</text>
     </tab>
-    <tab class={surfaces_tab_class} onactivate={onSurfaces} onclick={onSurfaces} aria-label="Surfaces" tooltip="Surfaces">
+    <tab class="view-tab" class:view-tab-active={active_view == "surfaces"} onactivate={onSurfaces} onclick={onSurfaces} aria-label="Surfaces" tooltip="Surfaces">
       <text class="view-tab-icon">▱</text>
     </tab>
-    <tab class={backend_tab_class} onactivate={onBackendServices} onclick={onBackendServices} aria-label="Backends" tooltip="Backends">
+    <tab class="view-tab" class:view-tab-active={active_view == "backend_services"} onactivate={onBackendServices} onclick={onBackendServices} aria-label="Backends" tooltip="Backends">
       <text class="view-tab-icon">⚙</text>
     </tab>
-    <tab class={benchmark_tab_class} onactivate={onBenchmark} onclick={onBenchmark} aria-label="Benchmarks" tooltip="Benchmarks">
+    <tab class="view-tab" class:view-tab-active={active_view == "benchmark"} onactivate={onBenchmark} onclick={onBenchmark} aria-label="Benchmarks" tooltip="Benchmarks">
       <text class="view-tab-icon">◷</text>
     </tab>
   </tabs>
 </template>
 
 <script lang="luau">
-overview_tab_class = "view-tab"
-elements_tab_class = "view-tab"
-modules_tab_class = "view-tab"
-surfaces_tab_class = "view-tab"
-backend_tab_class = "view-tab"
-benchmark_tab_class = "view-tab"
+-- The parent's current view; the matching tab is marked active.
+active_view = "overview"
 
 onOverview = nil
 onElements = nil

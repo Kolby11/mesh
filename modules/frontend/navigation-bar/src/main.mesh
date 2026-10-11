@@ -6,7 +6,7 @@ corner_radius:   { type: "size", default: "var(--radius-lg)", label: "Corner rad
 </props>
 
 <template>
-    <row class={props.blur_enabled and "nav-shell nav-shell-blur" or "nav-shell"}>
+    <row class="nav-shell" class:nav-shell-blur={props.blur_enabled}>
         <row class="status-cluster">
             <slot name="start" extension-point="mesh.navigation.item" mode="customizable" />
         </row>

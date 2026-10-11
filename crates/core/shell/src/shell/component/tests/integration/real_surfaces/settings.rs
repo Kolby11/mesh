@@ -418,3 +418,77 @@ fn settings_fits_a_narrower_configure_and_keeps_requesting_its_size() {
         "the surface keeps requesting its declared size so a wider output gets it back"
     );
 }
+
+#[test]
+fn settings_navigation_classes_and_language_options_derive_from_template_state() {
+    let theme = default_theme();
+    let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
+    let mut buffer = PixelBuffer::new(920, 900);
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
+    let active_handler = |settings: &FrontendSurfaceComponent| {
+        let tree = settings.last_tree.as_ref().expect("settings tree");
+        assert_eq!(count_class_token(tree, "settings-nav-item-active"), 1);
+        first_node_with_class_token(tree, "settings-nav-item-active")
+            .and_then(|node| node.event_handlers.get("click").cloned())
+            .expect("active nav item handler")
+    };
+    assert!(active_handler(&settings).contains("showWifi"));
+
+    settings
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAudio", &[])
+        .unwrap();
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
+    assert!(active_handler(&settings).contains("showAudio"));
+
+    let tree = settings.last_tree.as_ref().expect("settings tree");
+    assert_eq!(
+        count_class_token(tree, "language-option-active"),
+        1,
+        "exactly one of the English/Slovak options is marked active"
+    );
+}
+
+#[test]
+fn settings_pages_render_their_template_conditionals_without_errors() {
+    let theme = default_theme();
+    let mut settings =
+        real_frontend_module_component("@mesh/settings", super::super::debug::settings_catalog());
+    let mut buffer = PixelBuffer::new(920, 900);
+    for handler in [
+        "showWifi",
+        "showAudio",
+        "showBluetooth",
+        "showAppearance",
+        "showDevice",
+        "showAdvanced",
+    ] {
+        settings
+            .call_namespaced_handler(&format!("__mesh_embed__::@mesh/settings::{handler}"), &[])
+            .unwrap();
+        settings
+            .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+            .unwrap();
+    }
+    let diagnostics = settings.diagnostics.as_ref().expect("diagnostics handle");
+    let script_errors: Vec<_> = diagnostics
+        .active_issues()
+        .into_iter()
+        .filter(|issue| issue.message.contains("script error"))
+        .map(|issue| issue.message)
+        .collect();
+    assert!(
+        script_errors.is_empty(),
+        "every page's {{#if}} / class: / style: bindings should evaluate: {script_errors:#?}"
+    );
+    let tree = settings.last_tree.as_ref().expect("settings tree");
+    assert!(
+        count_class_token(tree, "settings-empty-state")
+            + count_class_token(tree, "settings-prop-card")
+            > 0,
+        "the advanced page shows either its rows or their empty states"
+    );
+}

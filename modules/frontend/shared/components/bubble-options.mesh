@@ -7,7 +7,8 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
 <template>
     <box
         class="bubble-options-stage"
-        style={bubbleStageStyle()}
+        style:width={bubbleStageWidth() .. "px"}
+        style:height={bubbleStageHeight() .. "px"}
         role="menu"
         onscroll={onscroll}
         ontwofingerscroll={onscroll}
@@ -16,7 +17,8 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
         {#for item in items}
             <button
                 class={bubbleOptionClass(item.id)}
-                style={bubbleOptionStyle(item.id)}
+                style:left={bubbleOptionLeft(item.id) .. "px"}
+                style:top={bubbleOptionTop(item.id) .. "px"}
                 role="menuitemradio"
                 aria-checked={item.active}
                 onclick={onselect(item.id)}
@@ -29,7 +31,7 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
                 aria-label={item.title}
             >
                 <box class={bubbleMotionClass(item.id)}>
-                    <box class={blurCoreClass(item.core_class)}>
+                    <box class={item.core_class} class:bubble-option-core-blur={props.blur_enabled}>
                         <icon class={item.icon_class} name={item.icon} size="14" />
                         <text class={item.text_class}>{item.text}</text>
                     </box>
@@ -86,25 +88,27 @@ local function itemIndex(id)
     return 1
 end
 
-function bubbleStageStyle()
+function bubbleStageWidth()
     local count = math.max(#items, 1)
-    local width = HORIZONTAL_PADDING * 2 + ITEM_SIZE + HORIZONTAL_STEP * (count - 1)
-    local height = TOP_OFFSET + ARC_DEPTH + ITEM_SIZE + BOTTOM_SLACK
-    return "width: " .. width .. "px; height: " .. height .. "px;"
+    return HORIZONTAL_PADDING * 2 + ITEM_SIZE + HORIZONTAL_STEP * (count - 1)
 end
 
-function bubbleOptionStyle(id)
+function bubbleStageHeight()
+    return TOP_OFFSET + ARC_DEPTH + ITEM_SIZE + BOTTOM_SLACK
+end
+
+function bubbleOptionLeft(id)
+    return HORIZONTAL_PADDING + HORIZONTAL_STEP * (itemIndex(id) - 1)
+end
+
+-- Options sit on a parabolic arc: highest in the middle, level at the ends.
+function bubbleOptionTop(id)
     local count = math.max(#items, 1)
-    local index = itemIndex(id)
-    local left = HORIZONTAL_PADDING + HORIZONTAL_STEP * (index - 1)
-    local top = TOP_OFFSET
-
-    if count > 1 then
-        local normalized = (2 * (index - 1) / (count - 1)) - 1
-        top = TOP_OFFSET + ARC_DEPTH * (1 - normalized * normalized)
+    if count <= 1 then
+        return TOP_OFFSET
     end
-
-    return string.format("left: %.2fpx; top: %.2fpx;", left, top)
+    local normalized = (2 * (itemIndex(id) - 1) / (count - 1)) - 1
+    return string.format("%.2f", TOP_OFFSET + ARC_DEPTH * (1 - normalized * normalized))
 end
 
 -- Decode the caller's rotation token into direction and replay phase. Two
@@ -162,13 +166,6 @@ function bubbleOptionClass(id)
         return "bubble-option"
     end
     return "bubble-option bubble-option-arriving-" .. phase
-end
-
-function blurCoreClass(core_class)
-    if props.blur_enabled then
-        return core_class .. " bubble-option-core-blur"
-    end
-    return core_class
 end
 </script>
 

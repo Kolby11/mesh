@@ -5,7 +5,7 @@
         <text class="section-title">Element inspector</text>
         <text class="section-copy">Pick any visible element, then inspect its source and computed box model.</text>
       </column>
-      <button class={picker_button_class} onclick={onTogglePicker} aria-label={picker_button_label}>
+      <button class="picker-button" class:picker-button-active={picking} onclick={onTogglePicker} aria-label={picker_button_label}>
         <text class="picker-button-text">{picker_button_text}</text>
       </button>
     </row>
@@ -47,7 +47,7 @@
 hidden = false
 empty_hidden = false
 details_hidden = true
-picker_button_class = "picker-button"
+picking = false
 picker_button_label = "Start selecting an element"
 picker_button_text = "Select element"
 element_title = "element"

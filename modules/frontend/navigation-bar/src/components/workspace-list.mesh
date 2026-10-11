@@ -1,21 +1,21 @@
 <template>
   <row class="workspace-list" onpointerleave={onWorkspaceLeave}>
-    <box class="ws-active-trail" style={trail_style} aria-hidden="true" />
-    <box class="{hover_class}" style={hover_style} aria-hidden="true" />
-    <box class="ws-active-indicator" style={indicator_style} aria-hidden="true" />
-    <button class="{ws1_class}" onclick={onSwitch1} onpointerenter={onWorkspaceEnter1} title="Workspace 1" aria-label="Workspace 1">
+    <box class="ws-active-trail" style:transform={"translateX(" .. active_offset .. "px)"} aria-hidden="true" />
+    <box class="ws-hover" class:ws-hover-visible={hover_visible} style:transform={"translateX(" .. hover_offset .. "px)"} aria-hidden="true" />
+    <box class="ws-active-indicator" style:transform={"translateX(" .. active_offset .. "px)"} aria-hidden="true" />
+    <button class="ws-btn" class:ws-btn-active={ws_active == 1} onclick={onSwitch1} onpointerenter={onWorkspaceEnter1} title="Workspace 1" aria-label="Workspace 1">
       <text class="ws-num">1</text>
     </button>
-    <button class="{ws2_class}" onclick={onSwitch2} onpointerenter={onWorkspaceEnter2} title="Workspace 2" aria-label="Workspace 2">
+    <button class="ws-btn" class:ws-btn-active={ws_active == 2} onclick={onSwitch2} onpointerenter={onWorkspaceEnter2} title="Workspace 2" aria-label="Workspace 2">
       <text class="ws-num">2</text>
     </button>
-    <button class="{ws3_class}" onclick={onSwitch3} onpointerenter={onWorkspaceEnter3} title="Workspace 3" aria-label="Workspace 3">
+    <button class="ws-btn" class:ws-btn-active={ws_active == 3} onclick={onSwitch3} onpointerenter={onWorkspaceEnter3} title="Workspace 3" aria-label="Workspace 3">
       <text class="ws-num">3</text>
     </button>
-    <button class="{ws4_class}" onclick={onSwitch4} onpointerenter={onWorkspaceEnter4} title="Workspace 4" aria-label="Workspace 4">
+    <button class="ws-btn" class:ws-btn-active={ws_active == 4} onclick={onSwitch4} onpointerenter={onWorkspaceEnter4} title="Workspace 4" aria-label="Workspace 4">
       <text class="ws-num">4</text>
     </button>
-    <button class="{ws5_class}" onclick={onSwitch5} onpointerenter={onWorkspaceEnter5} title="Workspace 5" aria-label="Workspace 5">
+    <button class="ws-btn" class:ws-btn-active={ws_active == 5} onclick={onSwitch5} onpointerenter={onWorkspaceEnter5} title="Workspace 5" aria-label="Workspace 5">
       <text class="ws-num">5</text>
     </button>
   </row>
@@ -23,15 +23,10 @@
 
 <script lang="luau">
 ws_active = 1
-ws1_class = "ws-btn ws-btn-active"
-ws2_class = "ws-btn"
-ws3_class = "ws-btn"
-ws4_class = "ws-btn"
-ws5_class = "ws-btn"
-indicator_style = "transform: translateX(0px);"
-trail_style = "transform: translateX(0px);"
-hover_style = "transform: translateX(0px);"
-hover_class = "ws-hover"
+-- Offsets of the active and hovered pills, in px along the row.
+active_offset = 0
+hover_offset = 0
+hover_visible = false
 
 local wm = require("mesh.wm")
 
@@ -47,32 +42,22 @@ local WS_SLOT_STRIDE = 26
 
 local function sync_indicator()
     local slot = math.max(1, math.min(5, ws_active))
-    local offset = (slot - 1) * WS_SLOT_STRIDE
-    indicator_style = string.format("transform: translateX(%dpx);", offset)
-    trail_style = string.format("transform: translateX(%dpx);", offset)
+    active_offset = (slot - 1) * WS_SLOT_STRIDE
 end
 
 -- The hover pill stays mounted and only moves, so travelling between
 -- workspaces slides one shape across the row instead of fading two.
 local function sync_hover(slot)
     if slot == nil then
-        hover_class = "ws-hover"
+        hover_visible = false
         return
     end
     local clamped = math.max(1, math.min(5, slot))
-    hover_style = string.format(
-        "transform: translateX(%dpx);",
-        (clamped - 1) * WS_SLOT_STRIDE
-    )
-    hover_class = "ws-hover ws-hover-visible"
+    hover_offset = (clamped - 1) * WS_SLOT_STRIDE
+    hover_visible = true
 end
 
 local function sync_classes()
-    ws1_class = ws_active == 1 and "ws-btn ws-btn-active" or "ws-btn"
-    ws2_class = ws_active == 2 and "ws-btn ws-btn-active" or "ws-btn"
-    ws3_class = ws_active == 3 and "ws-btn ws-btn-active" or "ws-btn"
-    ws4_class = ws_active == 4 and "ws-btn ws-btn-active" or "ws-btn"
-    ws5_class = ws_active == 5 and "ws-btn ws-btn-active" or "ws-btn"
     sync_indicator()
 end
 

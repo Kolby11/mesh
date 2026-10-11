@@ -5,16 +5,16 @@
             <text class="settings-section-copy">{t('appearance.theme.copy')}</text>
             <row class="theme-grid">
                 {#for row in theme_rows}
-                    <button class={row.button_class} onclick={onThemeSelect(row.id)}>
-                        <box class="theme-preview" style={row.preview_style}>
-                            <column class="theme-preview-sidebar" style={row.sidebar_style}>
-                                <box class="theme-preview-dot" style={row.primary_style} />
-                                <box class="theme-preview-line" style={row.outline_style} />
-                                <box class="theme-preview-line theme-preview-line-short" style={row.outline_style} />
+                    <button class="theme-option" class:theme-option-active={row.active} onclick={onThemeSelect(row.id)}>
+                        <box class="theme-preview" style:background={row.palette.surface}>
+                            <column class="theme-preview-sidebar" style:background={row.palette.surface_container_low}>
+                                <box class="theme-preview-dot" style:background={row.palette.primary} />
+                                <box class="theme-preview-line" style:background={row.palette.outline_variant} />
+                                <box class="theme-preview-line theme-preview-line-short" style:background={row.palette.outline_variant} />
                             </column>
                             <column class="theme-preview-body">
-                                <box class="theme-preview-heading" style={row.heading_style} />
-                                <box class="theme-preview-panel" style={row.panel_style} />
+                                <box class="theme-preview-heading" style:background={row.palette.on_surface} />
+                                <box class="theme-preview-panel" style:background={row.palette.surface_container_high} />
                             </column>
                         </box>
                         <row class="theme-option-copy">
@@ -22,7 +22,7 @@
                                 <text class="settings-card-title">{row.label}</text>
                                 <text class="settings-card-meta">{row.id}</text>
                             </column>
-                            <text class="theme-check" hidden={row.check_hidden}>✓</text>
+                            <text class="theme-check" hidden={not row.active}>✓</text>
                         </row>
                     </button>
                 {/for}
@@ -34,12 +34,12 @@
             <text class="settings-section-copy">{t('appearance.icons.copy')}</text>
             <scroll class="settings-list resource-list">
                 {#for row in icon_theme_rows key={row.id}}
-                    <button class={row.button_class} onclick={onIconThemeSelect(row.id)}>
+                    <button class="resource-option language-option" class:language-option-active={row.id == icon_theme_value} onclick={onIconThemeSelect(row.id)}>
                         <column class="settings-card-copy">
                             <text class="settings-card-title">{row.name}</text>
                             <text class="settings-card-meta">{row.detail}</text>
                         </column>
-                        <text class="language-check" hidden={row.check_hidden}>{t('common.selected')}</text>
+                        <text class="language-check" hidden={row.id ~= icon_theme_value}>{t('common.selected')}</text>
                     </button>
                 {/for}
             </scroll>
@@ -51,12 +51,12 @@
             <text class="settings-section-copy">{t('appearance.fonts.copy')}</text>
             <scroll class="settings-list resource-list">
                 {#for row in font_rows key={row.name}}
-                    <button class={row.button_class} style={row.preview_style} onclick={onFontSelect(row.name)}>
+                    <button class="resource-option language-option" class:language-option-active={row.name == font_value} style:font-family={row.family} onclick={onFontSelect(row.name)}>
                         <column class="settings-card-copy">
                             <text class="settings-card-title">{row.name}</text>
                             <text class="settings-card-meta">{row.detail}</text>
                         </column>
-                        <text class="language-check" hidden={row.check_hidden}>{t('common.selected')}</text>
+                        <text class="language-check" hidden={row.name ~= font_value}>{t('common.selected')}</text>
                     </button>
                 {/for}
             </scroll>
@@ -67,19 +67,19 @@
             <text class="settings-section-title">{t('appearance.language')}</text>
             <text class="settings-section-copy">{t('appearance.language.copy')}</text>
             <column class="settings-list">
-                <button class={english_class} onclick={onLocaleEnglish}>
+                <button class="language-option" class:language-option-active={not locale_slovak} onclick={onLocaleEnglish}>
                     <column class="settings-card-copy">
                         <text class="settings-card-title">{t('language.english.native')}</text>
                         <text class="settings-card-meta">{t('language.english.detail')}</text>
                     </column>
-                    <text class="language-check" hidden={english_check_hidden}>{t('common.selected')}</text>
+                    <text class="language-check" hidden={locale_slovak}>{t('common.selected')}</text>
                 </button>
-                <button class={slovak_class} onclick={onLocaleSlovak}>
+                <button class="language-option" class:language-option-active={locale_slovak} onclick={onLocaleSlovak}>
                     <column class="settings-card-copy">
                         <text class="settings-card-title">{t('language.slovak.native')}</text>
                         <text class="settings-card-meta">{t('language.slovak.detail')}</text>
                     </column>
-                    <text class="language-check" hidden={slovak_check_hidden}>{t('common.selected')}</text>
+                    <text class="language-check" hidden={not locale_slovak}>{t('common.selected')}</text>
                 </button>
             </column>
         </column>
@@ -125,10 +125,7 @@ icon_theme_value = "hicolor"
 font_value = "system-ui"
 icon_more_hidden = true
 font_more_hidden = true
-english_class = "language-option language-option-active"
-slovak_class = "language-option"
-english_check_hidden = false
-slovak_check_hidden = true
+locale_slovak = false
 
 local RESOURCE_PAGE_SIZE = 24
 local icon_limit = RESOURCE_PAGE_SIZE
@@ -267,14 +264,8 @@ local function sync_theme(theme_id)
         rows[index] = {
             id = option.id,
             label = option.label,
-            preview_style = "background: " .. palette.surface,
-            sidebar_style = "background: " .. palette.surface_container_low,
-            primary_style = "background: " .. palette.primary,
-            outline_style = "background: " .. palette.outline_variant,
-            heading_style = "background: " .. palette.on_surface,
-            panel_style = "background: " .. palette.surface_container_high,
-            button_class = active and "theme-option theme-option-active" or "theme-option",
-            check_hidden = not active,
+            palette = palette,
+            active = active,
         }
     end
     theme_rows = rows
@@ -283,10 +274,7 @@ end
 local function sync_locale(locale)
     locale_value = tostring(locale or "en")
     local slovak = locale_value == "sk" or string.find(locale_value, "sk-", 1, true) == 1
-    english_class = slovak and "language-option" or "language-option language-option-active"
-    slovak_class = slovak and "language-option language-option-active" or "language-option"
-    english_check_hidden = slovak
-    slovak_check_hidden = not slovak
+    locale_slovak = slovak
 end
 
 local function sync_system_resources()
@@ -306,10 +294,6 @@ local function sync_system_resources()
                 detail = #inherits > 0
                     and (id .. " · " .. t('appearance.inherits') .. " " .. table.concat(inherits, ", "))
                     or id,
-                button_class = id == icon_theme_value
-                    and "resource-option language-option language-option-active"
-                    or "resource-option language-option",
-                check_hidden = id ~= icon_theme_value,
             }
         else
             icon_more_hidden = false
@@ -327,11 +311,7 @@ local function sync_system_resources()
             fonts[index] = {
                 name = name,
                 detail = kind .. " · " .. tostring(face_count) .. " " .. t('appearance.font.faces'),
-                preview_style = "font-family: '" .. string.gsub(name, "'", "\\'") .. "'",
-                button_class = name == font_value
-                    and "resource-option language-option language-option-active"
-                    or "resource-option language-option",
-                check_hidden = name ~= font_value,
+                family = "'" .. string.gsub(name, "'", "\\'") .. "'",
             }
         else
             font_more_hidden = false

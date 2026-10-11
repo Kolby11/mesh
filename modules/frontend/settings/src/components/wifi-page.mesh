@@ -5,7 +5,7 @@
                 <text class="settings-control-title">{t('nav.wifi')}</text>
                 <text class="settings-card-meta">{t(wifi_status)}</text>
             </column>
-            <button class={wifi_toggle_class} onclick={onToggleWifi} disabled={controls_disabled}>
+            <button class:settings-primary-button={wifi_enabled} class:settings-secondary-button={not wifi_enabled} onclick={onToggleWifi} disabled={controls_disabled}>
                 {t(wifi_toggle_label)}
             </button>
         </row>
@@ -19,7 +19,8 @@
                 <button class="settings-secondary-button" onclick={onScan} disabled={scan_disabled}>{t('common.scan')}</button>
             </row>
 
-            <list class="settings-list" label={t('wifi.available_wifi_networks')} hidden={networks_hidden}>
+            {#if #network_rows > 0}
+            <list class="settings-list" label={t('wifi.available_wifi_networks')}>
                 {#for row in network_rows}
                     <list-item class="settings-card">
                         <icon name="wifi" size="20" />
@@ -28,7 +29,7 @@
                             <text class="settings-card-meta">{t(row.details) .. row.details_suffix .. t(row.security)}</text>
                         </column>
                         <button
-                            class={row.button_class}
+                            class:settings-primary-button={row.connected} class:settings-secondary-button={not row.connected}
                             onclick={onNetworkAction(row.id, row.connected)}
                             disabled={row.disabled}
                         >
@@ -37,12 +38,13 @@
                     </list-item>
                 {/for}
             </list>
-
-            <empty-state class="settings-empty-state" hidden={empty_hidden}>
+            {:else}
+            <empty-state class="settings-empty-state">
                 <icon name="wifi" size="24" />
                 <text class="settings-card-title">{t(empty_title)}</text>
                 <text class="settings-section-copy">{t(empty_copy)}</text>
             </empty-state>
+            {/if}
         </column>
 
         <column class="settings-section">
@@ -74,14 +76,12 @@ local t = import("mesh.i18n", "t")
 
 wifi_status = "wifi.waiting"
 wifi_toggle_label = "common.unavailable"
-wifi_toggle_class = "settings-secondary-button"
+wifi_enabled = false
 controls_disabled = true
 scan_disabled = true
 network_count = ""
 network_summary = "wifi.networks_waiting"
 network_rows = {}
-networks_hidden = true
-empty_hidden = false
 empty_title = "wifi.service_unavailable"
 empty_copy = "wifi.install_provider"
 active_network = "common.not_connected"
@@ -115,12 +115,10 @@ function render()
     if not network or network.available == false then
         wifi_status = "wifi.no_compatible_service"
         wifi_toggle_label = "common.unavailable"
-        wifi_toggle_class = "settings-secondary-button"
+        wifi_enabled = false
         controls_disabled = true
         scan_disabled = true
         network_rows = {}
-        networks_hidden = true
-        empty_hidden = false
         network_count = ""
         empty_title = "wifi.service_unavailable"
         empty_copy = "wifi.install_provider"
@@ -135,7 +133,7 @@ function render()
     controls_disabled = not control_allowed
     scan_disabled = not enabled or type(network.scan) ~= "function"
     wifi_toggle_label = enabled and "common.turn_off" or "common.turn_on"
-    wifi_toggle_class = enabled and "settings-primary-button" or "settings-secondary-button"
+    wifi_enabled = enabled
     wifi_status = enabled and "wifi.enabled" or "wifi.disabled"
     provider_label = tostring(network.source_module or "wifi.active_provider")
     interface_name = tostring(network.interface_name or network.device_name or "wifi.wireless_adapter")
@@ -155,7 +153,6 @@ function render()
                 security = secure and "wifi.secured" or "",
                 connected = connected,
                 action = connected and "common.connected" or "common.connect",
-                button_class = connected and "settings-primary-button" or "settings-secondary-button",
                 disabled = connected or not control_allowed,
             }
             if connected then
@@ -164,8 +161,6 @@ function render()
         end
     end
 
-    networks_hidden = #network_rows == 0
-    empty_hidden = #network_rows > 0
     if not enabled then
         network_count = ""
         empty_title = "wifi.turned_off"

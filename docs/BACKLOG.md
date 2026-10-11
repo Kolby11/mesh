@@ -130,9 +130,9 @@ Goal: components written as plain Luau, with the framework owning dependency
 tracking, validation and scheduling.
 [Review and evidence](../.planning/todos/pending/2026-10-10-authoring-model.md).
 
-- [ ] Move shipped modules' precomputed class strings, inline styles and
-      `hidden` flags onto the shipped `class:` / `style:` directives and
-      `{#if}`; only the two nav-bar popover triggers use them so far.
+- [ ] The debug-inspector views still compute their empty-state and section
+      `hidden` flags in script, and bubble-options builds rotation class names
+      in functions; move them to `{#if}` and per-item data when next touched.
 - [ ] Re-run `render(self)` only for instances whose tracked reads changed; today
       any dirtying service update re-runs every instance's hook on the surface.
       Then evaluate `computed` values and `mesh.watch(proxy, field, fn)`.

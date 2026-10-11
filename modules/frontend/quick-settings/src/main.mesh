@@ -2,7 +2,7 @@
   <popover
     open={open}
     class="qs-shell"
-    aria-label="Quick Settings"
+    aria-label={t('qs.title')}
     anchor-ref="settingsButton"
     anchor="bottom"
     gravity="bottom"
@@ -12,7 +12,7 @@
     <column class="qs-panel">
 
       <row class="qs-header">
-        <text class="qs-title">Quick Settings</text>
+        <text class="qs-title">{t('qs.title')}</text>
       </row>
 
       <row class="qs-control-row">
@@ -23,7 +23,7 @@
           onchange={onVolumeChange}
           min="0"
           max="100"
-          aria-label="Volume"
+          aria-label={t('qs.volume')}
         />
         <text class="qs-row-value">{volume_label}</text>
       </row>
@@ -36,7 +36,7 @@
           onchange={onBrightnessChange}
           min="0"
           max="100"
-          aria-label="Brightness"
+          aria-label={t('qs.brightness')}
         />
         <text class="qs-row-value">{brightness_label}</text>
       </row>
@@ -44,18 +44,18 @@
       <separator class="qs-sep" />
 
       <row class="qs-section-row">
-        <text class="qs-section-label">Theme</text>
+        <text class="qs-section-label">{t('qs.theme')}</text>
         <row class="qs-chip-row">
-          <button class="{theme_dark_class}" onclick={onThemeDark}><text class="qs-chip-text">Dark</text></button>
-          <button class="{theme_light_class}" onclick={onThemeLight}><text class="qs-chip-text">Light</text></button>
+          <button class="qs-chip" class:qs-chip-active={theme_is_dark} onclick={onThemeDark}><text class="qs-chip-text">{t('qs.theme.dark')}</text></button>
+          <button class="qs-chip" class:qs-chip-active={not theme_is_dark} onclick={onThemeLight}><text class="qs-chip-text">{t('qs.theme.light')}</text></button>
         </row>
       </row>
 
       <row class="qs-section-row">
-        <text class="qs-section-label">Language</text>
+        <text class="qs-section-label">{t('qs.language')}</text>
         <row class="qs-chip-row">
-          <button class="{lang_en_class}" onclick={onLangEn}><text class="qs-chip-text">English</text></button>
-          <button class="{lang_sk_class}" onclick={onLangSk}><text class="qs-chip-text">Slovak</text></button>
+          <button class="qs-chip" class:qs-chip-active={not locale_is_sk} onclick={onLangEn}><text class="qs-chip-text">{t('qs.language.english')}</text></button>
+          <button class="qs-chip" class:qs-chip-active={locale_is_sk} onclick={onLangSk}><text class="qs-chip-text">{t('qs.language.slovak')}</text></button>
         </row>
       </row>
 
@@ -64,6 +64,7 @@
 </template>
 
 <script lang="luau">
+local t = import("mesh.i18n", "t")
 open = false
 volume_percent   = 0
 volume_label     = "0%"
@@ -72,11 +73,8 @@ volume_icon      = "audio-volume-muted"
 brightness_level = 100
 brightness_label = "100%"
 
-theme_dark_class  = "qs-chip qs-chip-active"
-theme_light_class = "qs-chip"
-
-lang_en_class = "qs-chip qs-chip-active"
-lang_sk_class = "qs-chip"
+theme_is_dark = true
+locale_is_sk = false
 
 local audio      = require("mesh.audio")
 local brightness = require("mesh.brightness")
@@ -97,23 +95,11 @@ local function sync_volume(percent, muted)
 end
 
 local function sync_theme(is_dark)
-    if is_dark then
-        theme_dark_class  = "qs-chip qs-chip-active"
-        theme_light_class = "qs-chip"
-    else
-        theme_dark_class  = "qs-chip"
-        theme_light_class = "qs-chip qs-chip-active"
-    end
+    theme_is_dark = is_dark
 end
 
 local function sync_lang(is_sk)
-    if is_sk then
-        lang_en_class = "qs-chip"
-        lang_sk_class = "qs-chip qs-chip-active"
-    else
-        lang_en_class = "qs-chip qs-chip-active"
-        lang_sk_class = "qs-chip"
-    end
+    locale_is_sk = is_sk
 end
 
 function render(self)

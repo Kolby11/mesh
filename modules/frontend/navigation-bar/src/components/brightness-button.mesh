@@ -4,7 +4,7 @@
 
 <template>
   <button
-    class="brightness-button {brightness_button_class}"
+    class="brightness-button" class:brightness-unavailable={not brightness_available}
     onscroll={onBrightnessScroll}
     ontwofingerscroll={onBrightnessScroll}
     title={t('nav.brightness') .. ' ' .. brightness_label}
@@ -23,7 +23,7 @@ local brightness = require("mesh.brightness")
 brightness_level = 100
 brightness_label = "100%"
 brightness_icon = "display-brightness-high"
-brightness_button_class = brightness and "" or "brightness-unavailable"
+brightness_available = brightness ~= nil
 
 local function normalized_scroll_sensitivity()
     local amount = tonumber(props and props.scroll_sensitivity)
