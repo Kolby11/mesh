@@ -6,7 +6,7 @@ use mesh_core_module::ModuleHealthRecord;
 use rayon::prelude::*;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-const BUILTIN_DEBUG_INSPECTOR_ID: &str = "@mesh/debug-inspector";
+pub(super) const BUILTIN_DEBUG_INSPECTOR_ID: &str = "@mesh/debug-inspector";
 
 pub(in crate::shell) fn installed_module_graph_path() -> PathBuf {
     if let Ok(path) = std::env::var("MESH_MODULE_GRAPH_PATH")

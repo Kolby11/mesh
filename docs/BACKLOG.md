@@ -28,12 +28,6 @@ unless an item says otherwise. IDs point into the
 
 ### Priority 3 — Wrong output users see now
 
-- [ ] Composition editor header: the title is clipped and the Close button
-      overlaps it at window size (seen in niri, same at `819fbbcb`).
-- [ ] Settings Wi-Fi empty state overflows its card on both sides, and the
-      Bluetooth sidebar item has no icon.
-- [ ] `@mesh/debug-inspector` fails activation at startup with "no
-      activation-resolved capability grant".
 
 ### Priority 4 — Contracts and syntax to settle before third-party modules
 

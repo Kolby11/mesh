@@ -8,14 +8,13 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Now
 
-- **Block review Priority 3 (wrong output).** RND-06/07, the popup
-  pointer-leave and layer/window configure sizing landed on 2026-10-10 after
-  the first Wayland run (niri, nested). Next are RND-09, RES-03/04/14, the
-  RES-07 env option, and the three live-run defects now listed in the tier.
-  See [October's log](log/2026-10.md).
+- **Runtime direction work, items 4–10 of the 2026-10-10 session list.**
+  Block review Priority 3 closed on 2026-10-11 (see
+  [October's log](log/2026-10.md)). In order: one hover-intent mechanism,
+  `class:` / `style:` / `{#if}` across shipped modules, the D1 prototype on the
+  navigation bar, D4 with S03-DEAD-001, D2, D3, and one service call path.
 - **Scroll wave 4 item 15:** the [bounded scroll raster cache](todos/pending/2026-09-30-scroll-raster-cache.md).
-  Pixel tests for byte shifting and exposed-strip repair pass. The cache is
-  not wired into production; re-check the plan against D6 first.
+  It is not wired into production yet; re-check the plan against D6 first.
 
 ## Next
 

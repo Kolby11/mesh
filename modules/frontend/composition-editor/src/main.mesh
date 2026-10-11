@@ -453,15 +453,40 @@ end
     color: var(--color-on-surface);
 }
 
+/* The editor is a resizable window: the size above is only the first
+   request, and the compositor's configure is what it fills. */
+.editor:windowed {
+    width: 100%;
+    height: 100%;
+}
+
 .header, .slot-heading, .node, .palette-items {
     align-items: center;
+}
+
+/* The column has a fixed height and the workspace grows into it, so the
+   header must not be the item that shrinks; its copy takes the remaining
+   width and wraps, while Close keeps its size at the trailing edge. */
+.header {
+    flex-shrink: 0;
+    gap: var(--spacing-md);
+    justify-content: space-between;
+}
+.header-copy {
+    flex-grow: 1;
+    flex-shrink: 1;
+    min-width: 0;
+}
+.close {
+    flex-shrink: 0;
 }
 
 .header-copy, .slot-list, .nodes, .palette, .inspector {
     gap: var(--spacing-sm);
 }
 
-.title { font-size: 26px; font-weight: 700; }
+.title { height: auto; font-size: 26px; font-weight: 700; flex-shrink: 0; }
+.eyebrow, .subtitle { flex-shrink: 0; }
 .eyebrow, .slot-contract, .node-id, .palette-label, .status {
     color: var(--color-on-surface-variant);
     font-size: 12px;

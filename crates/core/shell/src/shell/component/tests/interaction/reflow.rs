@@ -1205,7 +1205,10 @@ import EdgePopover from "@mesh/test-popover"
         .unwrap(),
         public_props: Default::default(),
         local_components: HashMap::new(),
-        module_component_imports: HashMap::from([("EdgePopover".into(), "@mesh/test-popover".into())]),
+        module_component_imports: HashMap::from([(
+            "EdgePopover".into(),
+            "@mesh/test-popover".into(),
+        )]),
         watched_paths: Vec::new(),
     };
     let popover = CompiledFrontendModule {
@@ -1288,7 +1291,10 @@ fn promoted_popover_keeps_its_intrinsic_size_beyond_the_parent_edge() {
     };
     let tree = component.last_tree.as_ref().expect("tree");
     let panel = first_node_by_class(tree, "panel").expect("panel");
-    assert_eq!(panel.layout.width, 300.0, "a fixed-width panel must not shrink");
+    assert_eq!(
+        panel.layout.width, 300.0,
+        "a fixed-width panel must not shrink"
+    );
     let note = first_node_by_class(tree, "note").expect("note");
     assert!(
         note.layout.height < 2.0 * 22.0,

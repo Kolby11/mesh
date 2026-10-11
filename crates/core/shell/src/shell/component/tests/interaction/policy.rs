@@ -741,9 +741,7 @@ end
             pressed: true,
         },
         ComponentInput::Char { ch: 'A' },
-        ComponentInput::TextInput {
-            text: "bc".into(),
-        },
+        ComponentInput::TextInput { text: "bc".into() },
         ComponentInput::TextDelete {
             before_bytes: 1,
             after_bytes: 0,

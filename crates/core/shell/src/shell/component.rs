@@ -1352,7 +1352,12 @@ impl FrontendSurfaceComponent {
             measured_size: None,
             unmeasured_root_axes: (false, false),
             last_surface_size: None,
-            window_states: WindowSurfaceState::default(),
+            // A surface declared `role: "window"` is windowed from its first
+            // frame; only role changes flip it later.
+            window_states: WindowSurfaceState {
+                windowed: settings_state.layout.role == mesh_core_wayland::SurfaceRole::Window,
+                ..WindowSurfaceState::default()
+            },
             last_painted_buffer_size: None,
             surface_pixels_invalid: true,
             locale: Arc::new(LocaleSnapshot::new("en", "en")),
@@ -1484,6 +1489,8 @@ impl FrontendSurfaceComponent {
         self.settings_diagnostics = settings_state.diagnostics;
         self.surface_layout = settings_state.layout;
         self.visible = self.surface_layout.visible_on_start;
+        self.window_states.windowed =
+            self.surface_layout.role == mesh_core_wayland::SurfaceRole::Window;
         self
     }
 

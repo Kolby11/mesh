@@ -1400,7 +1400,9 @@ impl FrontendSurfaceComponent {
         resolver: &StyleResolver,
         context: StyleContext,
     ) {
-        self.record_runtime_style_diagnostics_for_single_node(node, rules, index, resolver, context);
+        self.record_runtime_style_diagnostics_for_single_node(
+            node, rules, index, resolver, context,
+        );
         for child in &mut node.children {
             self.record_runtime_style_diagnostics_for_node(child, rules, index, resolver, context);
         }
