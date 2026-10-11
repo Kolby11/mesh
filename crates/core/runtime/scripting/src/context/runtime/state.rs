@@ -1,7 +1,9 @@
 use super::super::ScriptError;
 use super::super::element_ref::install_bound_element_proxies;
 use super::super::lookup::{lua_err, map_lua_error};
-use super::super::proxy::{channel_subscribers, dispatch_event_subscribers, interface_event_channel};
+use super::super::proxy::{
+    channel_subscribers, dispatch_event_subscribers, interface_event_channel,
+};
 use super::*;
 use mesh_core_elements::VariableStore;
 use mlua::{LuaSerdeExt, Value as LuaValue};
@@ -464,11 +466,13 @@ mod tests {
             .expect("set environment metatable");
         let blocked_write = context
             .lua()
-            .create_function(|_, _: (mlua::Table, String, LuaValue)| -> mlua::Result<()> {
-                Err(mlua::Error::RuntimeError(
-                    "blocked member write".to_string(),
-                ))
-            })
+            .create_function(
+                |_, _: (mlua::Table, String, LuaValue)| -> mlua::Result<()> {
+                    Err(mlua::Error::RuntimeError(
+                        "blocked member write".to_string(),
+                    ))
+                },
+            )
             .expect("blocked write function");
         metatable
             .set("__newindex", blocked_write)

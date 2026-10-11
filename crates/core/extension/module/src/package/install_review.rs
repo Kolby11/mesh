@@ -8,8 +8,7 @@
 
 use super::{
     ModuleManifest, ModuleManifestError, TrustPolicy, TrustTier, check_installable_module_id,
-    load_module_signature,
-    module_tree_digest,
+    load_module_signature, module_tree_digest,
 };
 use mesh_core_capability::{
     CapabilityCatalog, CapabilityPolicyError, PrivilegeLevel, ServicePermissionDeclaration,
@@ -158,7 +157,10 @@ pub fn review_capabilities(
 /// The installed catalog plus the permissions the candidate's own interface
 /// declarations carry. Declarations that fail validation are left out, so a
 /// request for one reviews as unknown.
-pub fn candidate_catalog(installed: &CapabilityCatalog, manifest: &ModuleManifest) -> CapabilityCatalog {
+pub fn candidate_catalog(
+    installed: &CapabilityCatalog,
+    manifest: &ModuleManifest,
+) -> CapabilityCatalog {
     let declarations = manifest
         .mesh
         .interface
@@ -302,7 +304,9 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            error.to_string().contains("'@me/forecast' requests unknown capability"),
+            error
+                .to_string()
+                .contains("'@me/forecast' requests unknown capability"),
             "{error}"
         );
     }

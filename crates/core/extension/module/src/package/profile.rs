@@ -125,7 +125,9 @@ fn default_entrypoint() -> String {
 /// The source module of a `module-id:contribution-id` placement reference,
 /// parsed the same way activation queues it.
 fn placement_module(contribution: &str) -> Option<&str> {
-    contribution.rsplit_once(':').map(|(module_id, _)| module_id)
+    contribution
+        .rsplit_once(':')
+        .map(|(module_id, _)| module_id)
 }
 
 fn validate_unique_ordered_ids(field: &str, values: &[String]) -> Result<(), ModuleManifestError> {
@@ -1182,7 +1184,11 @@ mod tests {
         ));
         fs::create_dir_all(&root).unwrap();
         let paths = ProfilePaths::from_root_graph(&root.join("module.json")).unwrap();
-        assert_eq!(paths.active_profile_id().unwrap(), None, "a missing pointer is no profile");
+        assert_eq!(
+            paths.active_profile_id().unwrap(),
+            None,
+            "a missing pointer is no profile"
+        );
 
         let outside = root.join("outside-pointer");
         std::os::unix::fs::symlink(&outside, paths.active_profile_path()).unwrap();
@@ -1198,7 +1204,10 @@ mod tests {
 
         fs::remove_file(paths.active_profile_path()).unwrap();
         fs::write(paths.active_profile_path(), "desktop\n").unwrap();
-        assert_eq!(paths.active_profile_id().unwrap().as_deref(), Some("desktop"));
+        assert_eq!(
+            paths.active_profile_id().unwrap().as_deref(),
+            Some("desktop")
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1220,7 +1229,10 @@ mod tests {
         assert!(!profile.references_module("@me/items"));
         let nodes = &profile.node_slots["@me/panel#top"]["start"].nodes;
         assert_eq!(
-            nodes.iter().map(|node| node.id.as_str()).collect::<Vec<_>>(),
+            nodes
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
             ["tray"]
         );
         assert!(profile.references_module("@me/tray"));
@@ -1245,7 +1257,10 @@ mod tests {
         assert_eq!(active, HashSet::from(["@me/clock".to_string()]));
 
         let error = profile.add_root(&backend).unwrap_err().to_string();
-        assert!(error.contains("only frontend and component modules"), "{error}");
+        assert!(
+            error.contains("only frontend and component modules"),
+            "{error}"
+        );
     }
 
     #[test]

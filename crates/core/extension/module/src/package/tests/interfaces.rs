@@ -228,9 +228,9 @@ fn provider_priority_cannot_replace_an_inline_interface_contract() {
     assert!(graph.declared_interface("mesh.example").is_none());
     for module_id in ["@mesh/example-backend", "@other/example-backend"] {
         assert!(
-            graph.diagnostics().iter().any(|d| d.status
-                == "conflicting_interface_declaration"
-                && d.module_id == module_id),
+            graph.diagnostics().iter().any(
+                |d| d.status == "conflicting_interface_declaration" && d.module_id == module_id
+            ),
             "every declarer should get a conflict diagnostic; got: {:?}",
             graph.diagnostics()
         );
@@ -936,9 +936,21 @@ fn interface_contracts_declare_owned_service_permissions() {
         .map(|diagnostic| (diagnostic.module_id.as_str(), diagnostic.message.as_str()))
         .collect::<Vec<_>>();
     assert_eq!(refused.len(), 2, "{refused:#?}");
-    assert!(refused.iter().all(|(module_id, _)| *module_id == "@acme/weather"));
-    assert!(refused.iter().any(|(_, message)| message.contains("service.audio.control")));
-    assert!(refused.iter().any(|(_, message)| message.contains("'root'")));
+    assert!(
+        refused
+            .iter()
+            .all(|(module_id, _)| *module_id == "@acme/weather")
+    );
+    assert!(
+        refused
+            .iter()
+            .any(|(_, message)| message.contains("service.audio.control"))
+    );
+    assert!(
+        refused
+            .iter()
+            .any(|(_, message)| message.contains("'root'"))
+    );
 }
 
 /// The one required-provider rule (spec 01 §5, spec 02 §3): a consumer whose
@@ -985,7 +997,13 @@ fn a_missing_required_provider_degrades_while_an_unusable_one_blocks() {
         InterfaceRelationship::Base,
         None,
     );
-    declared_only.manifest.mesh.interface.as_mut().unwrap().version = Some("1.0".into());
+    declared_only
+        .manifest
+        .mesh
+        .interface
+        .as_mut()
+        .unwrap()
+        .version = Some("1.0".into());
     // Implemented, but only at a version the consumer rejects.
     let old_provider = with_inline_contracts(loaded_module(
         "@me/old-provider",

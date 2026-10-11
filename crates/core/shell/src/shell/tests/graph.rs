@@ -716,7 +716,12 @@ fn one_module_with_unresolvable_capabilities_does_not_withhold_grants_from_the_r
     assert!(!granted.contains_key("@test/bad"));
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0].0, "@test/bad");
-    assert!(failures[0].1.to_string().contains("service.nonexistent.read"));
+    assert!(
+        failures[0]
+            .1
+            .to_string()
+            .contains("service.nonexistent.read")
+    );
 }
 
 #[test]
@@ -724,7 +729,11 @@ fn live_reload_keeps_a_module_whose_manifest_is_mid_edit() {
     let root = tempfile::tempdir().unwrap();
     let module_dir = root.path().join("modules/widget");
     fs::create_dir_all(module_dir.join("src")).unwrap();
-    fs::write(module_dir.join("src/main.mesh"), "<template><box /></template>").unwrap();
+    fs::write(
+        module_dir.join("src/main.mesh"),
+        "<template><box /></template>",
+    )
+    .unwrap();
     let manifest = module_dir.join("module.json");
     fs::write(
         &manifest,

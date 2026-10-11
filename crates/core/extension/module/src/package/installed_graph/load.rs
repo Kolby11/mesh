@@ -13,7 +13,12 @@ use std::path::{Path, PathBuf};
 pub fn load_installed_module_graph(
     root_module_graph_path: &Path,
 ) -> Result<InstalledModuleGraph, ModuleManifestError> {
-    load_installed_module_graph_with(root_module_graph_path, None, None, load_each_module_manifest)
+    load_installed_module_graph_with(
+        root_module_graph_path,
+        None,
+        None,
+        load_each_module_manifest,
+    )
 }
 
 /// Resolve the installed graph against an explicit candidate profile without
@@ -197,7 +202,9 @@ fn load_installed_module_graph_with(
                     isolated.push(isolated_module_diagnostic(
                         module_id.clone(),
                         "module_manifest_retained",
-                        format!("installed module {module_id} keeps its last valid manifest: {error}"),
+                        format!(
+                            "installed module {module_id} keeps its last valid manifest: {error}"
+                        ),
                     ));
                     modules.push(retained);
                 }
@@ -434,14 +441,18 @@ pub(in crate::package) struct DiscoveredModuleDirs {
     pub(in crate::package) skipped: Vec<(PathBuf, String)>,
 }
 
-pub(in crate::package) fn discover_module_dirs_reporting(modules_dir: &Path) -> DiscoveredModuleDirs {
+pub(in crate::package) fn discover_module_dirs_reporting(
+    modules_dir: &Path,
+) -> DiscoveredModuleDirs {
     let mut discovered = DiscoveredModuleDirs::default();
     let metadata = match std::fs::symlink_metadata(modules_dir) {
         Ok(metadata) => metadata,
         // No modules directory yet is an empty installation, not a failure.
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return discovered,
         Err(error) => {
-            discovered.skipped.push((modules_dir.to_path_buf(), error.to_string()));
+            discovered
+                .skipped
+                .push((modules_dir.to_path_buf(), error.to_string()));
             return discovered;
         }
     };
@@ -455,7 +466,9 @@ pub(in crate::package) fn discover_module_dirs_reporting(modules_dir: &Path) -> 
     let root = match std::fs::canonicalize(modules_dir) {
         Ok(root) => root,
         Err(error) => {
-            discovered.skipped.push((modules_dir.to_path_buf(), error.to_string()));
+            discovered
+                .skipped
+                .push((modules_dir.to_path_buf(), error.to_string()));
             return discovered;
         }
     };
@@ -508,7 +521,9 @@ fn discover_module_dirs_into(
         let entry = match entry {
             Ok(entry) => entry,
             Err(error) => {
-                discovered.skipped.push((dir.to_path_buf(), error.to_string()));
+                discovered
+                    .skipped
+                    .push((dir.to_path_buf(), error.to_string()));
                 continue;
             }
         };

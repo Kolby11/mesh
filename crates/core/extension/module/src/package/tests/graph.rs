@@ -765,8 +765,8 @@ fn installed_module_graph_requires_a_typed_contract_for_every_provider() {
     }));
 
     // The same backend with an inline declaration needs no interface module.
-    let typed = InstalledModuleGraph::from_parts(root(), vec![with_inline_contracts(cputemp())])
-        .unwrap();
+    let typed =
+        InstalledModuleGraph::from_parts(root(), vec![with_inline_contracts(cputemp())]).unwrap();
     assert_eq!(
         typed.active_provider("me.cputemp").unwrap().module_id,
         "@me/cputemp-backend"

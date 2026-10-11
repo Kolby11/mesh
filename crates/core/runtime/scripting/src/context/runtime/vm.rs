@@ -84,7 +84,10 @@ pub(super) fn install_template_expressions(
     expressions: &[mesh_core_expression::SharedCompiledExpression],
 ) -> mlua::Result<()> {
     let all_member_reads = lua.create_table()?;
-    env.raw_set("__mesh_template_expression_member_reads", all_member_reads.clone())?;
+    env.raw_set(
+        "__mesh_template_expression_member_reads",
+        all_member_reads.clone(),
+    )?;
     if expressions.is_empty() {
         return Ok(());
     }

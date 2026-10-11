@@ -59,11 +59,7 @@ impl TrustTier {
     /// Tier for an unsigned installed source. Installed sources are never
     /// Core, whatever their module id.
     pub fn for_source(is_git: bool) -> Self {
-        if is_git {
-            Self::Community
-        } else {
-            Self::Local
-        }
+        if is_git { Self::Community } else { Self::Local }
     }
 
     pub fn requires_signature(self) -> bool {

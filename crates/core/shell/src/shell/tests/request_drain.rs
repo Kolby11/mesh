@@ -92,7 +92,8 @@ fn a_failing_core_service_effect_answers_its_call_without_stopping_the_shell() {
 
     assert!(!shell.pending_service_call_routes.contains_key(&7));
     assert!(shell.diagnostics.snapshot().iter().any(|entry| {
-        entry.module_id == "@test/caller" && entry.health.to_string().contains("shell_effect_failed")
+        entry.module_id == "@test/caller"
+            && entry.health.to_string().contains("shell_effect_failed")
     }));
 }
 
@@ -116,7 +117,13 @@ fn durable_writes_wait_for_the_pending_write_and_the_latest_wins() {
     );
     assert!(shell.pending_service_call_routes.contains_key(&2));
 
-    shell.pending_profile_write.take().unwrap().worker.join().unwrap();
+    shell
+        .pending_profile_write
+        .take()
+        .unwrap()
+        .worker
+        .join()
+        .unwrap();
     shell.release_parked_durable_writes();
     shell
         .drain_requests(&mut VecDeque::<CoreRequest>::new())

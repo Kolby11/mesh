@@ -1518,7 +1518,10 @@ mod tests {
 
         // The digest of v1 as it would have been installed.
         let reference = config.join("reference");
-        git(&config, &["clone", "--quiet", upstream.to_str().unwrap(), "reference"]);
+        git(
+            &config,
+            &["clone", "--quiet", upstream.to_str().unwrap(), "reference"],
+        );
         git(&reference, &["checkout", "--quiet", &v1]);
         let v1_digest = module_tree_digest(&reference).unwrap();
 
@@ -1527,7 +1530,10 @@ mod tests {
         let installed = config.join("installed");
         std::fs::create_dir_all(&installed).unwrap();
         git(&installed, &["init", "--quiet", "--initial-branch=main"]);
-        git(&installed, &["config", "user.email", "test@example.invalid"]);
+        git(
+            &installed,
+            &["config", "user.email", "test@example.invalid"],
+        );
         git(&installed, &["config", "user.name", "Test"]);
         std::fs::write(installed.join("module.json"), "{}").unwrap();
         git(&installed, &["add", "."]);
@@ -1572,7 +1578,10 @@ mod tests {
             )
             .unwrap_err()
             .to_string();
-        assert!(error.contains("no source reproduces locked revision"), "{error}");
+        assert!(
+            error.contains("no source reproduces locked revision"),
+            "{error}"
+        );
 
         transaction.abort().unwrap();
         let _ = std::fs::remove_dir_all(&config);

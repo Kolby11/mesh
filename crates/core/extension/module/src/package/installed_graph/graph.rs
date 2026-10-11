@@ -739,8 +739,10 @@ impl InstalledModuleGraph {
                 } else if !existing.declares_same_contract(&candidate) {
                     let existing_id = existing.module_id.clone();
                     interface_declarations.remove(&name);
-                    conflicting_interfaces
-                        .insert(name.clone(), BTreeSet::from([existing_id, module_id.clone()]));
+                    conflicting_interfaces.insert(
+                        name.clone(),
+                        BTreeSet::from([existing_id, module_id.clone()]),
+                    );
                 }
             }
         }
@@ -827,13 +829,17 @@ impl InstalledModuleGraph {
         let mut permission_declarations = interface_contracts
             .values()
             .flat_map(|contract| {
-                contract.capabilities.permissions.iter().map(|(permission, level)| {
-                    mesh_core_capability::ServicePermissionDeclaration {
-                        interface: contract.interface.clone(),
-                        permission: permission.clone(),
-                        level: level.clone(),
-                    }
-                })
+                contract
+                    .capabilities
+                    .permissions
+                    .iter()
+                    .map(
+                        |(permission, level)| mesh_core_capability::ServicePermissionDeclaration {
+                            interface: contract.interface.clone(),
+                            permission: permission.clone(),
+                            level: level.clone(),
+                        },
+                    )
             })
             .collect::<Vec<_>>();
         permission_declarations.sort_by(|left, right| {
@@ -848,10 +854,7 @@ impl InstalledModuleGraph {
                 .map(|declaration| declaration.module_id.clone())
                 .unwrap_or_default();
             manual_diagnostics.push(ModuleGraphDiagnostic {
-                contribution_id: Some(format!(
-                    "{module_id}:permission:{}",
-                    error.permission
-                )),
+                contribution_id: Some(format!("{module_id}:permission:{}", error.permission)),
                 module_id,
                 status: "invalid_service_permission".into(),
                 message: error.to_string(),

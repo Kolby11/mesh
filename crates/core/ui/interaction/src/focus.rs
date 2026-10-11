@@ -269,8 +269,19 @@ mod tests {
     /// above A: a pairwise row test orders A<B, B<C and C<A.
     #[test]
     fn mixed_height_controls_get_one_order_whatever_the_input_order() {
-        let shapes = [("a", 0.0, 10.0, 20.0), ("b", 5.0, 0.0, 40.0), ("c", 10.0, 0.0, 5.0)];
-        let permutations = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+        let shapes = [
+            ("a", 0.0, 10.0, 20.0),
+            ("b", 5.0, 0.0, 40.0),
+            ("c", 10.0, 0.0, 5.0),
+        ];
+        let permutations = [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ];
         for permutation in permutations {
             let mut targets = permutation
                 .iter()
@@ -281,7 +292,10 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
             order_focus_targets(&mut targets);
-            let keys = targets.iter().map(|target| target.key.as_str()).collect::<Vec<_>>();
+            let keys = targets
+                .iter()
+                .map(|target| target.key.as_str())
+                .collect::<Vec<_>>();
             assert_eq!(keys, ["a", "b", "c"], "input order {permutation:?}");
         }
     }
@@ -296,7 +310,10 @@ mod tests {
         targets[1].tabindex = Some(2);
         targets[2].tabindex = Some(1);
         order_focus_targets(&mut targets);
-        let keys = targets.iter().map(|target| target.key.as_str()).collect::<Vec<_>>();
+        let keys = targets
+            .iter()
+            .map(|target| target.key.as_str())
+            .collect::<Vec<_>>();
         assert_eq!(keys, ["first", "second", "plain"]);
     }
 }

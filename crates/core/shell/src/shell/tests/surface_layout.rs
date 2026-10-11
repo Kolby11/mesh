@@ -964,5 +964,8 @@ fn ready_render_work_without_progress_backs_off_instead_of_spinning() {
     shell.render_stalled = true;
     let wait = shell.next_runtime_sleep(false);
     assert!(wait > Duration::ZERO, "no progress must not spin");
-    assert!(wait <= Duration::from_millis(16), "render work is retried within a frame");
+    assert!(
+        wait <= Duration::from_millis(16),
+        "render work is retried within a frame"
+    );
 }

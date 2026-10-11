@@ -2103,9 +2103,10 @@ mod tests {
     fn theme_with_tokens(tokens: &[(&str, &str)]) -> Theme {
         let mut theme = Theme::new("tokens", "Tokens");
         for (name, value) in tokens {
-            theme
-                .tokens
-                .insert((*name).to_string(), TokenValue::String((*value).to_string()));
+            theme.tokens.insert(
+                (*name).to_string(),
+                TokenValue::String((*value).to_string()),
+            );
         }
         theme
     }

@@ -4,9 +4,9 @@ use super::*;
 use mesh_core_capability::PrivilegeLevel;
 use mesh_core_module::package::{
     InstallApproval, InstallReviewError, InstalledModuleEntry, MeshLock, ModuleId, ModuleKind,
-    ModuleManifest, ModuleSource, PackageOperation, PackageOwner, PackageTransaction,
-    ProfilePaths, RootModuleGraphManifest, contained_path, load_authoring_snapshot,
-    module_install_path, review_install,
+    ModuleManifest, ModuleSource, PackageOperation, PackageOwner, PackageTransaction, ProfilePaths,
+    RootModuleGraphManifest, contained_path, load_authoring_snapshot, module_install_path,
+    review_install,
 };
 use std::collections::VecDeque;
 use std::fs;

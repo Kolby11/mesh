@@ -632,13 +632,16 @@ impl BackendLifecycleGuard {
 
     async fn finish(&mut self, ctx: &mut BackendScriptContext) {
         if let Err(err) = ctx.call_stop() {
-            let _ = self.tx.send(BackendServiceEvent::Failed {
-                service: Arc::clone(&self.service),
-                source_module: Arc::clone(&self.source_module),
-                stage: "stop".to_string(),
-                message: err.to_string(),
-                identity: backend_identity(&self.identity_handle),
-            }).await;
+            let _ = self
+                .tx
+                .send(BackendServiceEvent::Failed {
+                    service: Arc::clone(&self.service),
+                    source_module: Arc::clone(&self.source_module),
+                    stage: "stop".to_string(),
+                    message: err.to_string(),
+                    identity: backend_identity(&self.identity_handle),
+                })
+                .await;
         }
         ctx.shutdown_exec();
         ctx.shutdown_streams().await;
@@ -688,13 +691,15 @@ async fn run_backend_service(
 ) {
     if let Err(e) = ctx.load_script(&script_source) {
         tracing::error!("{} failed to load backend script: {e}", module_id.as_ref());
-        let _ = tx.send(BackendServiceEvent::Failed {
-            service: service_name,
-            source_module: module_id,
-            stage: "load".to_string(),
-            message: e.to_string(),
-            identity: backend_identity(&identity_handle),
-        }).await;
+        let _ = tx
+            .send(BackendServiceEvent::Failed {
+                service: service_name,
+                source_module: module_id,
+                stage: "load".to_string(),
+                message: e.to_string(),
+                identity: backend_identity(&identity_handle),
+            })
+            .await;
         return;
     }
     let init_payload = match ctx.call_init() {
@@ -704,12 +709,14 @@ async fn run_backend_service(
                 "{} failed to initialize backend script: {e}",
                 module_id.as_ref()
             );
-            let _ = tx.send(BackendServiceEvent::InitFailed {
-                service: service_name,
-                source_module: module_id,
-                message: e.to_string(),
-                identity: backend_identity(&identity_handle),
-            }).await;
+            let _ = tx
+                .send(BackendServiceEvent::InitFailed {
+                    service: service_name,
+                    source_module: module_id,
+                    message: e.to_string(),
+                    identity: backend_identity(&identity_handle),
+                })
+                .await;
             return;
         }
     };
@@ -735,7 +742,9 @@ async fn run_backend_service(
             &mut last_payload,
             payload,
             &identity_handle,
-        ).await {
+        )
+        .await
+        {
             return;
         }
     }
@@ -744,7 +753,8 @@ async fn run_backend_service(
             service: service_name.clone(),
             source_module: module_id.clone(),
             identity: backend_identity(&identity_handle),
-        }).await
+        })
+        .await
         .is_err()
     {
         return;
@@ -755,7 +765,9 @@ async fn run_backend_service(
         &module_id,
         ctx.drain_events(),
         &identity_handle,
-    ).await {
+    )
+    .await
+    {
         return;
     }
 
@@ -1061,20 +1073,22 @@ async fn run_backend_service(
         let pending_generation = call_generation(pending.call_id, generation);
         let pending_identity = call_identity(pending.call_id, backend_identity(&identity_handle));
         finish_call(pending.call_id);
-        let _ = tx.send(BackendServiceEvent::CommandResult(BackendCommandResult {
-            call_id: pending.call_id,
-            service: service_name.clone(),
-            source_module: module_id.clone(),
-            command: pending.command,
-            result: serde_json::json!({
-                "ok": false,
-                "status": "stale_generation",
-                "error": "backend runtime stopped before dispatch",
-            }),
-            outcome: BackendCommandOutcome::StaleGeneration,
-            generation: pending_generation,
-            identity: pending_identity,
-        })).await;
+        let _ = tx
+            .send(BackendServiceEvent::CommandResult(BackendCommandResult {
+                call_id: pending.call_id,
+                service: service_name.clone(),
+                source_module: module_id.clone(),
+                command: pending.command,
+                result: serde_json::json!({
+                    "ok": false,
+                    "status": "stale_generation",
+                    "error": "backend runtime stopped before dispatch",
+                }),
+                outcome: BackendCommandOutcome::StaleGeneration,
+                generation: pending_generation,
+                identity: pending_identity,
+            }))
+            .await;
     }
 }
 
@@ -1107,7 +1121,9 @@ async fn dispatch_stream_events(
                 tick,
                 &identity_handle,
                 stream_failures,
-            ).await {
+            )
+            .await
+            {
                 return false;
             }
         }
@@ -1138,7 +1154,9 @@ async fn dispatch_stream_events(
                             tick,
                             &identity_handle,
                             stream_failures,
-                        ).await {
+                        )
+                        .await
+                        {
                             return false;
                         }
                     }
@@ -1162,7 +1180,9 @@ async fn dispatch_stream_events(
                         tick,
                         &identity_handle,
                         stream_failures,
-                    ).await {
+                    )
+                    .await
+                    {
                         return false;
                     }
                 }
@@ -1178,7 +1198,8 @@ async fn dispatch_stream_events(
                         tick,
                         &identity_handle,
                         stream_failures,
-                    ).await
+                    )
+                    .await
                 {
                     return false;
                 }
@@ -1197,7 +1218,9 @@ async fn dispatch_stream_events(
             tick,
             &identity_handle,
             stream_failures,
-        ).await {
+        )
+        .await
+        {
             return false;
         }
     }
@@ -1228,40 +1251,50 @@ async fn publish_stream_callback_result(
                 last_payload,
                 payload,
                 identity_handle,
-            ).await && publish_script_events(
+            )
+            .await
+                && publish_script_events(
+                    tx,
+                    service_name,
+                    module_id,
+                    ctx.drain_events(),
+                    identity_handle,
+                )
+                .await
+        }
+        Ok(None) => {
+            publish_script_events(
                 tx,
                 service_name,
                 module_id,
                 ctx.drain_events(),
                 identity_handle,
-            ).await
+            )
+            .await
         }
-        Ok(None) => publish_script_events(
-            tx,
-            service_name,
-            module_id,
-            ctx.drain_events(),
-            identity_handle,
-        ).await,
         Err(err) => {
             *stream_failures += 1;
             let message = err.to_string();
-            let _ = tx.send(BackendServiceEvent::CallbackFailed {
-                service: service_name.clone(),
-                source_module: module_id.clone(),
-                stage: "stream".to_string(),
-                count: *stream_failures,
-                message: message.clone(),
-                identity: backend_identity(identity_handle),
-            }).await;
-            if *stream_failures >= MAX_CONSECUTIVE_CALLBACK_FAILURES {
-                let _ = tx.send(BackendServiceEvent::Failed {
+            let _ = tx
+                .send(BackendServiceEvent::CallbackFailed {
                     service: service_name.clone(),
                     source_module: module_id.clone(),
                     stage: "stream".to_string(),
-                    message,
+                    count: *stream_failures,
+                    message: message.clone(),
                     identity: backend_identity(identity_handle),
-                }).await;
+                })
+                .await;
+            if *stream_failures >= MAX_CONSECUTIVE_CALLBACK_FAILURES {
+                let _ = tx
+                    .send(BackendServiceEvent::Failed {
+                        service: service_name.clone(),
+                        source_module: module_id.clone(),
+                        stage: "stream".to_string(),
+                        message,
+                        identity: backend_identity(identity_handle),
+                    })
+                    .await;
                 false
             } else {
                 true
@@ -1290,13 +1323,15 @@ async fn publish_script_events(
             MAX_COMMAND_JSON_DEPTH,
             "backend event payload",
         ) {
-            let _ = tx.send(BackendServiceEvent::Failed {
-                service: Arc::clone(service_name),
-                source_module: Arc::clone(module_id),
-                stage: "event".to_string(),
-                message,
-                identity: event_identity,
-            }).await;
+            let _ = tx
+                .send(BackendServiceEvent::Failed {
+                    service: Arc::clone(service_name),
+                    source_module: Arc::clone(module_id),
+                    stage: "event".to_string(),
+                    message,
+                    identity: event_identity,
+                })
+                .await;
             return false;
         }
         if tx
@@ -1307,7 +1342,8 @@ async fn publish_script_events(
                 payload: event.payload,
                 generation: event.generation,
                 identity: event.identity,
-            })).await
+            }))
+            .await
             .is_err()
         {
             return false;
@@ -1333,13 +1369,15 @@ async fn publish_changed_update(
         MAX_COMMAND_JSON_DEPTH,
         "service state payload",
     ) {
-        let _ = tx.send(BackendServiceEvent::Failed {
-            service: Arc::clone(service_name),
-            source_module: Arc::clone(module_id),
-            stage: "state".to_string(),
-            message,
-            identity: backend_identity(identity_handle),
-        }).await;
+        let _ = tx
+            .send(BackendServiceEvent::Failed {
+                service: Arc::clone(service_name),
+                source_module: Arc::clone(module_id),
+                stage: "state".to_string(),
+                message,
+                identity: backend_identity(identity_handle),
+            })
+            .await;
         return false;
     }
     last_payload.replace(payload.clone());
@@ -1348,7 +1386,8 @@ async fn publish_changed_update(
         source_module: Arc::clone(module_id),
         payload,
         identity: backend_identity(identity_handle),
-    })).await
+    }))
+    .await
     .is_ok()
 }
 
@@ -1506,7 +1545,10 @@ mod tests {
         assert!(rx.recv().await.is_some());
         assert!(blocked.await.is_ok());
         drop(rx);
-        assert!(sender.send(event).await.is_err(), "a closed queue still fails");
+        assert!(
+            sender.send(event).await.is_err(),
+            "a closed queue still fails"
+        );
     }
 
     #[tokio::test]
@@ -2102,7 +2144,10 @@ mod tests {
                 break update;
             }
         };
-        assert_eq!(closed.payload.get("closed").and_then(|v| v.as_str()), Some("sh"));
+        assert_eq!(
+            closed.payload.get("closed").and_then(|v| v.as_str()),
+            Some("sh")
+        );
         assert_eq!(
             closed.payload.get("success").and_then(|v| v.as_bool()),
             Some(false)
@@ -2159,7 +2204,10 @@ mod tests {
             }
         };
         assert!(saw_callback_failure);
-        assert_eq!(good.payload.get("line").and_then(|v| v.as_str()), Some("good"));
+        assert_eq!(
+            good.payload.get("line").and_then(|v| v.as_str()),
+            Some("good")
+        );
 
         drop(cmd_tx);
         drop(update_rx);

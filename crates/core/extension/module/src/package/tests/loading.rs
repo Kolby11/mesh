@@ -414,18 +414,32 @@ fn an_invalid_or_unreadable_module_is_isolated_not_fatal() {
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
     let graph = graph.expect("one bad module must not abort the graph");
 
-    assert!(graph.module("@me/alpha").is_some_and(|module| module.enabled));
-    assert!(graph.module("@me/beta").is_some_and(|module| module.enabled));
+    assert!(
+        graph
+            .module("@me/alpha")
+            .is_some_and(|module| module.enabled)
+    );
+    assert!(
+        graph
+            .module("@me/beta")
+            .is_some_and(|module| module.enabled)
+    );
     let isolated = graph
         .diagnostics()
         .iter()
         .map(|diagnostic| (diagnostic.module_id.as_str(), diagnostic.status.as_str()))
         .filter(|(_, status)| status.starts_with("module_"))
         .collect::<Vec<_>>();
-    assert!(isolated.contains(&("broken", "module_manifest_invalid")), "{isolated:?}");
+    assert!(
+        isolated.contains(&("broken", "module_manifest_invalid")),
+        "{isolated:?}"
+    );
     // Running as root can read a 0o000 directory; only assert when it can't.
     if fs::read_dir(&locked).is_err() {
-        assert!(isolated.contains(&("locked", "module_discovery_failed")), "{isolated:?}");
+        assert!(
+            isolated.contains(&("locked", "module_discovery_failed")),
+            "{isolated:?}"
+        );
     }
 
     fs::remove_dir_all(root).unwrap();
@@ -459,7 +473,11 @@ fn a_module_mid_edit_keeps_its_last_valid_manifest() {
             .map(|module| (module.manifest.name.clone(), module.manifest_path.clone())),
         "the module keeps the manifest it had before the edit"
     );
-    assert!(retained.module("@me/beta").is_some_and(|module| module.enabled));
+    assert!(
+        retained
+            .module("@me/beta")
+            .is_some_and(|module| module.enabled)
+    );
     assert!(retained.diagnostics().iter().any(|diagnostic| {
         diagnostic.module_id == "@me/beta" && diagnostic.status == "module_manifest_retained"
     }));
@@ -500,7 +518,11 @@ fn an_explicit_module_mid_edit_keeps_its_last_valid_manifest_and_decisions() {
     fs::write(modules_dir.join("alpha/module.json"), "not json").unwrap();
     let retained = load_installed_module_graph_retaining(&graph_path, None, &previous)
         .expect("an invalid explicit module keeps its last manifest");
-    assert!(retained.module("@me/alpha").is_some_and(|module| module.enabled));
+    assert!(
+        retained
+            .module("@me/alpha")
+            .is_some_and(|module| module.enabled)
+    );
     assert!(retained.diagnostics().iter().any(|diagnostic| {
         diagnostic.module_id == "@me/alpha" && diagnostic.status == "module_manifest_retained"
     }));

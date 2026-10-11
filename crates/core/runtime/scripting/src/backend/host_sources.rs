@@ -91,94 +91,109 @@ where
 }
 
 /// Connect to a Unix stream socket and deliver its newline-delimited records.
-pub fn spawn_socket_stream(
-    state: &Arc<StreamState>,
-    path: &str,
-) -> std::io::Result<StreamHandle> {
+pub fn spawn_socket_stream(state: &Arc<StreamState>, path: &str) -> std::io::Result<StreamHandle> {
     // Connect synchronously so a missing socket is reported to the caller
     // instead of as an asynchronous failure record.
     let socket = StdUnixStream::connect(path)?;
     socket.set_nonblocking(true)?;
     let program = socket_stream_program(path);
-    spawn_source(state, program, path, move |state, stream, stop_rx| async move {
-        let socket = match UnixStream::from_std(socket) {
-            Ok(socket) => socket,
-            Err(error) => {
-                finish(&state, stream, Some(format!("socket registration failed: {error}")));
-                return;
+    spawn_source(
+        state,
+        program,
+        path,
+        move |state, stream, stop_rx| async move {
+            let socket = match UnixStream::from_std(socket) {
+                Ok(socket) => socket,
+                Err(error) => {
+                    finish(
+                        &state,
+                        stream,
+                        Some(format!("socket registration failed: {error}")),
+                    );
+                    return;
+                }
+            };
+            state.push_event(StreamEvent {
+                stream: stream.clone(),
+                kind: StreamEventKind::Started,
+            });
+            let reader = read_lines(Arc::clone(&state), stream.clone(), socket);
+            tokio::select! {
+                _ = reader => {}
+                _ = stop_rx => {}
             }
-        };
-        state.push_event(StreamEvent {
-            stream: stream.clone(),
-            kind: StreamEventKind::Started,
-        });
-        let reader = read_lines(Arc::clone(&state), stream.clone(), socket);
-        tokio::select! {
-            _ = reader => {}
-            _ = stop_rx => {}
-        }
-        finish(&state, stream, None);
-    })
+            finish(&state, stream, None);
+        },
+    )
 }
 
 /// Watch one path for content modification.
 pub fn spawn_path_watch(state: &Arc<StreamState>, path: &str) -> std::io::Result<StreamHandle> {
     let inotify = Inotify::watch(Path::new(path))?;
     let program = watch_program(path);
-    spawn_source(state, program, path, move |state, stream, mut stop_rx| async move {
-        let fd = match AsyncFd::new(inotify) {
-            Ok(fd) => fd,
-            Err(error) => {
-                finish(&state, stream, Some(format!("watch registration failed: {error}")));
-                return;
-            }
-        };
-        state.push_event(StreamEvent {
-            stream: stream.clone(),
-            kind: StreamEventKind::Started,
-        });
-        let mut failure = None;
-        loop {
-            tokio::select! {
-                _ = &mut stop_rx => break,
-                ready = fd.readable() => {
-                    let mut guard = match ready {
-                        Ok(guard) => guard,
-                        Err(error) => {
-                            failure = Some(format!("watch wait failed: {error}"));
-                            break;
-                        }
-                    };
-                    match guard.get_inner().drain() {
-                        Ok(summary) => {
-                            guard.clear_ready();
-                            if summary.modified {
-                                state.push_event(StreamEvent {
-                                    stream: stream.clone(),
-                                    kind: StreamEventKind::Line(WATCH_MODIFIED_LINE.to_string()),
-                                });
-                            }
-                            if summary.gone {
-                                state.push_event(StreamEvent {
-                                    stream: stream.clone(),
-                                    kind: StreamEventKind::Eof,
-                                });
+    spawn_source(
+        state,
+        program,
+        path,
+        move |state, stream, mut stop_rx| async move {
+            let fd = match AsyncFd::new(inotify) {
+                Ok(fd) => fd,
+                Err(error) => {
+                    finish(
+                        &state,
+                        stream,
+                        Some(format!("watch registration failed: {error}")),
+                    );
+                    return;
+                }
+            };
+            state.push_event(StreamEvent {
+                stream: stream.clone(),
+                kind: StreamEventKind::Started,
+            });
+            let mut failure = None;
+            loop {
+                tokio::select! {
+                    _ = &mut stop_rx => break,
+                    ready = fd.readable() => {
+                        let mut guard = match ready {
+                            Ok(guard) => guard,
+                            Err(error) => {
+                                failure = Some(format!("watch wait failed: {error}"));
                                 break;
                             }
-                        }
-                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                            guard.clear_ready();
-                        }
-                        Err(error) => {
-                            failure = Some(format!("watch read failed: {error}"));
-                            break;
+                        };
+                        match guard.get_inner().drain() {
+                            Ok(summary) => {
+                                guard.clear_ready();
+                                if summary.modified {
+                                    state.push_event(StreamEvent {
+                                        stream: stream.clone(),
+                                        kind: StreamEventKind::Line(WATCH_MODIFIED_LINE.to_string()),
+                                    });
+                                }
+                                if summary.gone {
+                                    state.push_event(StreamEvent {
+                                        stream: stream.clone(),
+                                        kind: StreamEventKind::Eof,
+                                    });
+                                    break;
+                                }
+                            }
+                            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                                guard.clear_ready();
+                            }
+                            Err(error) => {
+                                failure = Some(format!("watch read failed: {error}"));
+                                break;
+                            }
                         }
                     }
                 }
             }
-        }
-        finish(&state, stream, failure);
-    })
+            finish(&state, stream, failure);
+        },
+    )
 }
 
 fn finish(state: &Arc<StreamState>, stream: StreamHandle, failure: Option<String>) {
@@ -243,7 +258,9 @@ fn socket_request_inner(
     socket
         .set_write_timeout(Some(timeout))
         .map_err(|error| error.to_string())?;
-    socket.write_all(request).map_err(|error| error.to_string())?;
+    socket
+        .write_all(request)
+        .map_err(|error| error.to_string())?;
     // Half-close so peers that read to EOF see the end of the request.
     let _ = socket.shutdown(std::net::Shutdown::Write);
     let mut response = Vec::new();
@@ -354,14 +371,12 @@ impl Inotify {
             while offset + header <= read as usize {
                 // SAFETY: the kernel writes whole `inotify_event` records;
                 // read_unaligned tolerates the byte buffer's alignment.
-                let event: libc::inotify_event = unsafe {
-                    std::ptr::read_unaligned(buffer.as_ptr().add(offset).cast())
-                };
+                let event: libc::inotify_event =
+                    unsafe { std::ptr::read_unaligned(buffer.as_ptr().add(offset).cast()) };
                 if event.mask & (libc::IN_MODIFY | libc::IN_CLOSE_WRITE | libc::IN_ATTRIB) != 0 {
                     summary.modified = true;
                 }
-                if event.mask & (libc::IN_DELETE_SELF | libc::IN_MOVE_SELF | libc::IN_IGNORED)
-                    != 0
+                if event.mask & (libc::IN_DELETE_SELF | libc::IN_MOVE_SELF | libc::IN_IGNORED) != 0
                 {
                     summary.gone = true;
                 }
@@ -406,11 +421,15 @@ mod tests {
         let listener = UnixListener::bind(&path).unwrap();
         let server = std::thread::spawn(move || {
             let (mut peer, _) = listener.accept().unwrap();
-            peer.write_all(b"workspace>>2\nactivewindow>>kitty,shell\n").unwrap();
+            peer.write_all(b"workspace>>2\nactivewindow>>kitty,shell\n")
+                .unwrap();
         });
         let state = StreamState::new();
         let handle = spawn_socket_stream(&state, path.to_str().unwrap()).unwrap();
-        assert_eq!(handle.program(), socket_stream_program(path.to_str().unwrap()));
+        assert_eq!(
+            handle.program(),
+            socket_stream_program(path.to_str().unwrap())
+        );
         let events = collect_until(&state, |events| {
             events
                 .iter()
@@ -422,7 +441,10 @@ mod tests {
             lines(&events),
             vec!["workspace>>2", "activewindow>>kitty,shell"]
         );
-        assert!(matches!(events.first().unwrap().kind, StreamEventKind::Started));
+        assert!(matches!(
+            events.first().unwrap().kind,
+            StreamEventKind::Started
+        ));
         assert!(matches!(
             events.last().unwrap().kind,
             StreamEventKind::Exited(StreamExitStatus { success: true, .. })
@@ -467,9 +489,11 @@ mod tests {
                 .any(|event| matches!(event.kind, StreamEventKind::Exited(_)))
         })
         .await;
-        assert!(events
-            .iter()
-            .any(|event| matches!(event.kind, StreamEventKind::Eof)));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event.kind, StreamEventKind::Eof))
+        );
         state.shutdown().await;
     }
 

@@ -34,7 +34,11 @@ impl MethodSignature {
             .collect::<Vec<_>>();
         let required = args
             .iter()
-            .filter(|value_type| !value_type.as_ref().is_ok_and(|value_type| value_type.optional))
+            .filter(|value_type| {
+                !value_type
+                    .as_ref()
+                    .is_ok_and(|value_type| value_type.optional)
+            })
             .count();
         Self { args, required }
     }
@@ -223,8 +227,8 @@ pub(super) fn create_service_proxy(
                 let source_capabilities = source_capabilities.clone();
                 let service_call_completions = Arc::clone(&service_call_completions);
                 let method_resources = resources.clone();
-                let function = lua.create_function(
-                    move |lua, args: mlua::Variadic<LuaValue>| {
+                let function =
+                    lua.create_function(move |lua, args: mlua::Variadic<LuaValue>| {
                         let offset = consume_self_arg(&args)?;
                         let supplied = args.len().saturating_sub(offset);
                         let required = signature.required;
@@ -294,8 +298,8 @@ pub(super) fn create_service_proxy(
                             }
                             return Err(mlua::Error::runtime(rejection.to_string()));
                         }
-                        let output_bytes = envelope_json_len(&channel, &payload)
-                            .map_err(mlua::Error::external)?;
+                        let output_bytes =
+                            envelope_json_len(&channel, &payload).map_err(mlua::Error::external)?;
                         reserve_side_effect(&method_resources, output_bytes)
                             .map_err(mlua::Error::external)?;
                         pending_side_channels.store(true, Ordering::Release);
@@ -320,8 +324,7 @@ pub(super) fn create_service_proxy(
                             method_resources.clone(),
                         )
                         .map(LuaValue::Table)
-                    },
-                )?;
+                    })?;
                 // The contract is fixed for this proxy's lifetime, so later
                 // lookups of the same method bypass `__index` entirely.
                 proxy_table.raw_set(key.as_str(), function.clone())?;
@@ -867,7 +870,10 @@ mod envelope_tests {
     #[test]
     fn envelope_length_matches_serialized_envelope() {
         for (channel, payload) in [
-            ("mesh.audio.set_volume", serde_json::json!({ "percent": 42 })),
+            (
+                "mesh.audio.set_volume",
+                serde_json::json!({ "percent": 42 }),
+            ),
             ("mesh.wm.focus_workspace", serde_json::json!({})),
             (
                 "odd\"channel\\name",
