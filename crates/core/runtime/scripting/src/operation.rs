@@ -8,7 +8,7 @@
 
 use crate::policy::ResourceBudget;
 use mesh_core_capability::{Capability, CapabilityCatalog, CapabilitySet};
-use mesh_core_service::{InterfaceContract, InterfaceMethod, ResolvedServiceCatalog, TypeExpr};
+use mesh_core_service::{InterfaceContract, InterfaceMethod, ResolvedServiceCatalog};
 use serde_json::{Map, Value};
 use std::fmt;
 
@@ -30,6 +30,13 @@ pub enum OperationRejection {
     Removed {
         channel: String,
         replacement: &'static str,
+    },
+    /// A service method published as an event. Service calls go through the
+    /// typed proxy returned by `require(interface)`.
+    ServiceCallEvent {
+        channel: String,
+        interface: String,
+        method: String,
     },
     MalformedPayload {
         channel: String,
@@ -62,6 +69,14 @@ impl fmt::Display for OperationRejection {
             } => write!(
                 f,
                 "Shell channel '{channel}' was removed; use {replacement}"
+            ),
+            Self::ServiceCallEvent {
+                channel,
+                interface,
+                method,
+            } => write!(
+                f,
+                "Publishing service call '{channel}' was removed; call `require(\"{interface}\").{method}(...)` instead"
             ),
             Self::MalformedPayload { channel, reason } => {
                 write!(f, "Malformed payload for '{channel}': {reason}")
@@ -197,52 +212,21 @@ impl OperationRegistry {
                 channel: channel.to_string(),
             });
         };
-        if !interface.starts_with("mesh.") || interface == "mesh" || method.is_empty() {
-            return Err(OperationRejection::UnknownChannel {
+        let declared = interface.starts_with("mesh.")
+            && catalog
+                .resolve(interface, None)
+                .contract
+                .is_some_and(|contract| contract.methods.iter().any(|m| m.name == method));
+        if declared {
+            return Err(OperationRejection::ServiceCallEvent {
                 channel: channel.to_string(),
+                interface: interface.to_string(),
+                method: method.to_string(),
             });
         }
-        let resolution = catalog.resolve(interface, None);
-        let Some(contract) = resolution.contract.as_deref() else {
-            return Err(OperationRejection::UnknownChannel {
-                channel: channel.to_string(),
-            });
-        };
-        let Some(method_spec) = contract
-            .methods
-            .iter()
-            .find(|candidate| candidate.name == method)
-        else {
-            return Err(OperationRejection::UnknownChannel {
-                channel: channel.to_string(),
-            });
-        };
-        self.authorize_service_call(
-            channel,
-            method_spec,
-            contract,
-            payload,
-            module_id,
-            capabilities,
-        )?;
-        Ok(None)
-    }
-
-    /// Apply the same contract capability and exact payload decision to a
-    /// service proxy call that already resolved its interface method. Keeping
-    /// this decision here means direct `mesh.events.publish` and a typed proxy
-    /// cannot diverge before either one reserves queue resources.
-    pub(crate) fn authorize_service_call(
-        &self,
-        channel: &str,
-        method: &InterfaceMethod,
-        contract: &InterfaceContract,
-        payload: &Value,
-        module_id: &str,
-        capabilities: &CapabilitySet,
-    ) -> Result<(), OperationRejection> {
-        authorize_contract_capabilities(channel, module_id, capabilities, contract, method)?;
-        validate_fields(channel, &method.args, contract, payload)
+        Err(OperationRejection::UnknownChannel {
+            channel: channel.to_string(),
+        })
     }
 
     /// Validate an imperative element side effect before it enters the shell
@@ -293,85 +277,31 @@ fn malformed(channel: &str, reason: &str) -> OperationRejection {
     }
 }
 
-fn authorize_contract_capabilities(
-    channel: &str,
-    module_id: &str,
+/// Whether `capabilities` may call `method`: every capability the method
+/// declares, or `service.<name>.control` when it declares none. Service
+/// proxies decide this once, when they are acquired.
+pub(crate) fn method_capabilities_granted(
     capabilities: &CapabilitySet,
     contract: &InterfaceContract,
     method: &InterfaceMethod,
-) -> Result<(), OperationRejection> {
-    let service_name = contract
-        .interface
-        .strip_prefix("mesh.")
-        .unwrap_or(&contract.interface);
-    let declared = contract
+) -> bool {
+    match contract
         .capabilities
         .methods
         .get(&method.name)
-        .filter(|required| !required.is_empty());
-    if let Some(required) = declared {
-        for capability in required {
-            if !capabilities.is_granted(&Capability::new(capability)) {
-                return Err(OperationRejection::Unauthorized {
-                    channel: channel.to_string(),
-                    module_id: module_id.to_string(),
-                    capability: capability.clone(),
-                });
-            }
-        }
-    } else {
-        let capability = format!("service.{service_name}.control");
-        if !capabilities.is_granted(&Capability::new(&capability)) {
-            return Err(OperationRejection::Unauthorized {
-                channel: channel.to_string(),
-                module_id: module_id.to_string(),
-                capability,
-            });
-        }
-    }
-    Ok(())
-}
-
-fn validate_fields(
-    channel: &str,
-    fields: &[mesh_core_service::InterfaceArgument],
-    contract: &InterfaceContract,
-    payload: &Value,
-) -> Result<(), OperationRejection> {
-    let object = payload
-        .as_object()
-        .ok_or_else(|| malformed(channel, "payload must be an object"))?;
-    for field in fields {
-        let value = match object.get(&field.name) {
-            Some(value) => value,
-            None if field.arg_type.trim().ends_with('?') => continue,
-            None => {
-                return Err(malformed(
-                    channel,
-                    &format!("missing required field '{}'", field.name),
-                ));
-            }
-        };
-        let value_type = TypeExpr::parse(&field.arg_type).map_err(|error| {
-            malformed(
-                channel,
-                &format!("invalid type for '{}': {error}", field.name),
-            )
-        })?;
-        if !value_type.matches_with_types(value, &contract.types) {
-            return Err(malformed(
-                channel,
-                &format!("field '{}' expected {}", field.name, field.arg_type),
-            ));
-        }
-    }
-    if let Some(unknown) = object
-        .keys()
-        .find(|key| !fields.iter().any(|field| field.name == **key))
+        .filter(|required| !required.is_empty())
     {
-        return Err(malformed(channel, &format!("unexpected field '{unknown}'")));
+        Some(required) => required
+            .iter()
+            .all(|capability| capabilities.is_granted(&Capability::new(capability))),
+        None => {
+            let service_name = contract
+                .interface
+                .strip_prefix("mesh.")
+                .unwrap_or(&contract.interface);
+            capabilities.is_granted(&Capability::new(format!("service.{service_name}.control")))
+        }
     }
-    Ok(())
 }
 
 /// Reserve both the item and its retained serialized bytes as one operation.

@@ -150,12 +150,12 @@ end
 
 function onThemeDark()
     sync_theme(true)
-    mesh.events.publish("mesh.theme.set_theme", { theme_id = "mesh-default-dark" })
+    theme.set_theme("mesh-default-dark")
 end
 
 function onThemeLight()
     sync_theme(false)
-    mesh.events.publish("mesh.theme.set_theme", { theme_id = "mesh-default-light" })
+    theme.set_theme("mesh-default-light")
 end
 
 function onLangEn()

@@ -788,7 +788,10 @@ at the call, which raises an error on failure.
 
 `mesh.events.publish` is for broadcasting to other modules. Publishing a
 retired `shell.*` channel such as `shell.show-surface` raises an error that
-names the `mesh.shell` replacement.
+names the `mesh.shell` replacement, and publishing a service method such as
+`mesh.theme.set_theme` raises an error that names the proxy call
+(`require("mesh.theme").set_theme(...)`). Service calls go through the proxy
+only.
 
 ### Timers and tasks
 

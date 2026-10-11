@@ -1114,11 +1114,10 @@ fn selected_ui_font_reaches_component_text_defaults() {
     assert_eq!(style.font_family.as_ref(), "DejaVu Serif");
 }
 
-/// Live component dispatch authorizes published events against the catalog,
-/// not the shell operation registry, so this is the path that rejected every
-/// theme change with "Unknown shell channel 'mesh.theme.set_theme'".
+/// Service methods are called through the proxy only. Publishing one as an
+/// event, even with the capability, is rejected with the proxy call to use.
 #[test]
-fn a_capable_module_may_publish_the_theme_service_methods() {
+fn publishing_a_theme_service_method_names_the_proxy_call() {
     let shell = Shell::new();
     let catalog = shell.interfaces.resolved_catalog();
     let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.theme.control"]);
@@ -1132,8 +1131,11 @@ fn a_capable_module_may_publish_the_theme_service_methods() {
     );
 
     assert!(
-        outcome.is_ok(),
-        "a module holding service.theme.control must be able to set the theme: {:?}",
-        outcome.unwrap_err()
+        matches!(
+            outcome,
+            Err(mesh_core_scripting::OperationRejection::ServiceCallEvent { ref method, .. })
+                if method == "set_theme"
+        ),
+        "{outcome:?}"
     );
 }

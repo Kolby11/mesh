@@ -92,7 +92,7 @@ pub static MESH_API_ENTRIES: &[MeshApiEntry] = &[
     MeshApiEntry {
         path: "events.publish",
         signature: "mesh.events.publish(event_name: string, data: table?)",
-        description: "Publish an event to the shell event bus.",
+        description: "Broadcast an event to other modules. Call service methods on the proxy from `require(\"mesh.<service>\")`; publishing `mesh.<service>.<method>` raises an error.",
         backend_only: false,
     },
     // Theme

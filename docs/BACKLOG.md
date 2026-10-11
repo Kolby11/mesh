@@ -139,9 +139,9 @@ tracking, validation and scheduling.
 - [ ] A required service with no provider should `require` to the unavailable
       proxy (01 §5) instead of raising, so settings can drop `pcall(require)` on
       `mesh.audio` and `mesh.debug`. Optional services already do.
-- [ ] One service call path: typed proxy methods only. Retire
-      `mesh.events.publish("mesh.<svc>.<method>")`, which shipped modules use
-      alongside the proxies.
+- [ ] Remove `CoreRequest::ServiceCommand` and the call-id-less service branch of
+      `script_events_to_requests`: scripts can no longer publish service
+      methods, so only proxy `ServiceCall`s reach dispatch.
 - [ ] Optimistic pending values on proxy methods, reconciled with emitted state
       through contract coalescing keys (RT-09), replacing the hand-written
       set-then-reconcile pattern in sliders.
@@ -167,9 +167,9 @@ Each needs a design and a measured prototype before it is adopted.
 - [ ] **D2:** Backends have no task scheduler, so `mesh.exec`, sockets and file
       reads block the backend thread. Give backends `task.spawn` and make those
       calls yield (with D8). Frontend `ticket:await()` has shipped.
-- [ ] **D3:** Object capabilities for services: authorize when a service proxy
-      is acquired, then calls are plain typed calls. `mesh.shell` has shipped
-      this way; service methods still authorize per call.
+- [ ] **D3:** The shell still re-authorizes each proxy call at dispatch
+      (`can_call_contract_method`). The proxy is now the only service call
+      path; decide whether that check stays as defense in depth.
 - [ ] **D4:** Providers send typed field patches instead of whole snapshots, and
       no JSON on the frame path. Validation, ranges/defaults and `.d.luau`
       generation have shipped; the LSP does not read the `.d.luau` yet.

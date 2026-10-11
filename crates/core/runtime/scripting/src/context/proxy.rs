@@ -1,6 +1,6 @@
 use super::PublishedEvent;
 use super::state::ServiceContextState;
-use crate::operation::{OperationRegistry, OperationRejection, reserve_side_effect};
+use crate::operation::reserve_side_effect;
 use crate::policy::ResourceBudget;
 use mesh_core_capability::CapabilitySet;
 pub(super) use mesh_core_service::service_name_from_interface;
@@ -23,10 +23,17 @@ static NEXT_SERVICE_CALL_ID: AtomicU64 = AtomicU64::new(1 << 63);
 struct MethodSignature {
     args: Vec<Result<TypeExpr, String>>,
     required: usize,
+    /// Whether the proxy's holder may call the method, decided once when the
+    /// proxy is acquired (D3); calls then only check their arguments.
+    granted: bool,
 }
 
 impl MethodSignature {
-    fn new(method: &mesh_core_service::InterfaceMethod) -> Self {
+    fn new(
+        method: &mesh_core_service::InterfaceMethod,
+        contract: Option<&InterfaceContract>,
+        capabilities: &CapabilitySet,
+    ) -> Self {
         let args = method
             .args
             .iter()
@@ -40,7 +47,14 @@ impl MethodSignature {
                     .is_ok_and(|value_type| value_type.optional)
             })
             .count();
-        Self { args, required }
+        let granted = contract.is_some_and(|contract| {
+            crate::operation::method_capabilities_granted(capabilities, contract, method)
+        });
+        Self {
+            args,
+            required,
+            granted,
+        }
     }
 }
 
@@ -177,7 +191,16 @@ pub(super) fn create_service_proxy(
     // a parse failure is kept so each call reports it exactly as before.
     let method_signatures = methods
         .iter()
-        .map(|method| (method.name.clone(), Arc::new(MethodSignature::new(method))))
+        .map(|method| {
+            (
+                method.name.clone(),
+                Arc::new(MethodSignature::new(
+                    method,
+                    contract.as_deref(),
+                    &source_capabilities,
+                )),
+            )
+        })
         .collect::<HashMap<_, _>>();
 
     let contract_for_index = contract.clone();
@@ -276,29 +299,19 @@ pub(super) fn create_service_proxy(
                         let call_id = NEXT_SERVICE_CALL_ID.fetch_add(1, Ordering::Relaxed);
                         let payload = Value::Object(payload);
                         let channel = format!("{}.{}", iface, method.name);
-                        let Some(contract) = method_contract.as_ref() else {
+                        if method_contract.is_none() {
                             return Err(mlua::Error::runtime(
                                 "service method has no resolved interface contract",
                             ));
-                        };
-                        if let Err(rejection) = OperationRegistry::builtin().authorize_service_call(
-                            &channel,
-                            &method,
-                            contract,
-                            &payload,
-                            &source_module_id,
-                            &source_capabilities,
-                        ) {
-                            if matches!(rejection, OperationRejection::Unauthorized { .. }) {
-                                return command_result_table(
-                                    lua,
-                                    false,
-                                    false,
-                                    Some("capability denied"),
-                                )
-                                .map(LuaValue::Table);
-                            }
-                            return Err(mlua::Error::runtime(rejection.to_string()));
+                        }
+                        if !signature.granted {
+                            return command_result_table(
+                                lua,
+                                false,
+                                false,
+                                Some("capability denied"),
+                            )
+                            .map(LuaValue::Table);
                         }
                         let output_bytes =
                             envelope_json_len(&channel, &payload).map_err(mlua::Error::external)?;

@@ -224,13 +224,13 @@ local function publish_slot(slot, nodes, record_history)
         history_by_slot[slot.key][#history_by_slot[slot.key] + 1] = copy_nodes(slot.nodes)
         redo_by_slot[slot.key] = {}
     end
-    mesh.events.publish("mesh.composition.apply_node_slot", {
-        profile_id = composition.profile_id,
-        root_instance = slot.root_instance,
-        slot = slot.name,
-        nodes = nodes,
-        expected_generation = composition.generation,
-    })
+    composition.apply_node_slot(
+        composition.profile_id,
+        slot.root_instance,
+        slot.name,
+        nodes,
+        composition.generation
+    )
     status_text = "Applying " .. slot.name .. "…"
 end
 
@@ -429,12 +429,12 @@ function resetSlot(slot_key)
     history_by_slot[slot.key] = history_by_slot[slot.key] or {}
     history_by_slot[slot.key][#history_by_slot[slot.key] + 1] = copy_nodes(slot.nodes)
     redo_by_slot[slot.key] = {}
-    mesh.events.publish("mesh.composition.reset_node_slot", {
-        profile_id = composition.profile_id,
-        root_instance = slot.root_instance,
-        slot = slot.name,
-        expected_generation = composition.generation,
-    })
+    composition.reset_node_slot(
+        composition.profile_id,
+        slot.root_instance,
+        slot.name,
+        composition.generation
+    )
     status_text = "Resetting " .. slot.name .. "…"
 end
 

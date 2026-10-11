@@ -36,7 +36,7 @@ end
 }
 
 #[test]
-fn raw_service_event_publication_uses_the_interface_contract_boundary() {
+fn publishing_a_service_method_as_an_event_names_the_proxy_call() {
     let caps = CapabilitySet::from_ids(["service.audio.control"]);
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();
     ctx.set_interface_catalog(audio_catalog());
@@ -51,10 +51,12 @@ end
 "#,
     )
     .unwrap();
-    ctx.call_handler("publish", &[]).unwrap();
-    let events = ctx.drain_published_events();
-    assert_eq!(events.len(), 1);
-    assert_eq!(events[0].channel, "mesh.audio.set_volume");
+    let error = ctx.call_handler("publish", &[]).unwrap_err().to_string();
+    assert!(
+        error.contains(r#"call `require("mesh.audio").set_volume(...)` instead"#),
+        "{error}"
+    );
+    assert!(ctx.drain_published_events().is_empty());
 
     let mut ctx = ScriptContext::new("@mesh/test", CapabilitySet::default()).unwrap();
     ctx.set_interface_catalog(audio_catalog());
@@ -377,7 +379,7 @@ fn dropping_a_context_returns_its_queued_side_effect_budget_to_the_realm() {
         ctx.load_script(
             r#"
 function publish()
-    mesh.events.publish("mesh.audio.set_volume", { device_id = "default", percent = 55 })
+    require("mesh.audio").set_volume("default", 55)
 end
 "#,
         )

@@ -631,10 +631,7 @@ function onProviderNext(interface, current)
     local provider_id = candidates[(index % #candidates) + 1]
     pending_providers[interface] = provider_id
     provider_notice = "advanced.switching_live"
-    mesh.events.publish("mesh.packages.set_provider", {
-        interface = interface,
-        provider_id = provider_id,
-    })
+    require("mesh.packages").set_provider(interface, provider_id)
 end
 
 function onModuleToggle(module_id, current_enabled)
@@ -642,10 +639,7 @@ function onModuleToggle(module_id, current_enabled)
     local enabled = not current_enabled
     pending_module_enabled[module_id] = enabled
     module_notice = "advanced.applying_live"
-    mesh.events.publish("mesh.packages.set_module_enabled", {
-        module_id = module_id,
-        enabled = enabled,
-    })
+    require("mesh.packages").set_module_enabled(module_id, enabled)
 end
 
 function onModuleDetails(module_id)
