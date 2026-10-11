@@ -603,6 +603,7 @@ fn resource_reload_preserves_widget_caller_lineage() {
     let root = node(1, "box", 0.0, 0.0, 100.0, 40.0);
     let mut list = RetainedDisplayList::default();
     list.update_at_for_retained_generation(&root, 95, 0.0, 0.0, 100, 40, false, true);
+    let _resources = crate::resource_state_test_lock();
     mesh_core_resources::advance_resource_revision();
     assert!(list.caller_lineage_is_valid(&root, 95));
     let metrics = list.update_at_for_retained_generation(&root, 95, 0.0, 0.0, 100, 40, false, true);

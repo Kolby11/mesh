@@ -62,3 +62,14 @@ pub use surface::{
     set_tooltip_center_x, set_tooltip_paint_colors, set_tooltip_paint_font_family,
     set_tooltip_paint_opacity, set_tooltip_paint_scale,
 };
+
+/// Serializes tests that touch process-wide resource state: the global
+/// resource revision and the icon/image worker queues and caches. A revision
+/// bump from a parallel test makes an in-flight worker result stale, so the
+/// worker test sees nothing published.
+#[cfg(test)]
+pub(crate) fn resource_state_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}

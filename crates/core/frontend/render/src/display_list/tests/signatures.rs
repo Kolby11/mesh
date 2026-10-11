@@ -118,6 +118,7 @@ fn retained_dirty_contract_matches_shared_paint_signature_inputs() {
 #[test]
 fn resource_revision_invalidates_retained_font_paint_signatures() {
     let text = node(4, "text", 0.0, 0.0, 20.0, 20.0);
+    let _resources = crate::resource_state_test_lock();
     let before = primitive_signature(&text, DisplayPrimitiveSlot::Text);
     mesh_core_resources::advance_resource_revision();
     let after = primitive_signature(&text, DisplayPrimitiveSlot::Text);

@@ -1967,14 +1967,14 @@ mod tests {
     use super::*;
     use image::{ImageBuffer, Rgba};
     use std::fs;
-    use std::sync::{Mutex, MutexGuard, OnceLock};
+    use std::time::{Duration, Instant};
     #[cfg(unix)]
     use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
-    fn icon_test_lock() -> MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
-    }
+    use crate::resource_state_test_lock as icon_test_lock;
+
+    /// How long a test waits for a worker thread under a loaded parallel run.
+    const WORKER_WAIT: Duration = Duration::from_secs(5);
 
     fn tint() -> Color {
         Color {
@@ -2063,15 +2063,17 @@ mod tests {
             Some(true)
         );
 
-        let prepared = (0..1_000).find_map(|_| {
+        let deadline = Instant::now() + WORKER_WAIT;
+        while {
             drain_icon_raster_jobs();
-            let prepared = cached_variant(&key).is_some();
-            if !prepared {
-                std::thread::yield_now();
-            }
-            prepared.then_some(())
-        });
-        assert!(prepared.is_some(), "worker did not publish the SVG variant");
+            cached_variant(&key).is_none()
+        } {
+            assert!(
+                Instant::now() < deadline,
+                "worker did not publish the SVG variant"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
         assert!(poll_icon_raster_jobs());
         assert!(!icon_raster_jobs_pending());
     }
@@ -2098,12 +2100,14 @@ mod tests {
         };
 
         assert_eq!(schedule_image_decode_job(key.clone()), Some(true));
+        let deadline = Instant::now() + WORKER_WAIT;
         let image = loop {
             drain_image_decode_jobs();
             if let Some(image) = take_ready_image(&key) {
                 break image;
             }
-            std::thread::sleep(std::time::Duration::from_millis(1));
+            assert!(Instant::now() < deadline, "worker did not decode the image");
+            std::thread::sleep(Duration::from_millis(1));
         };
         assert_eq!(image.dimensions(), (2, 1));
         assert_eq!(image.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
@@ -2141,7 +2145,7 @@ mod tests {
             Some(true)
         );
 
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let deadline = Instant::now() + WORKER_WAIT;
         loop {
             drain_icon_raster_jobs();
             let ready = ICON_RASTER_QUEUE
@@ -2186,7 +2190,7 @@ mod tests {
                 break variant;
             }
             assert!(
-                std::time::Instant::now() < deadline + std::time::Duration::from_secs(2),
+                Instant::now() < deadline + WORKER_WAIT,
                 "worker did not republish the linked SVG after invalidation"
             );
             std::thread::sleep(std::time::Duration::from_millis(1));
