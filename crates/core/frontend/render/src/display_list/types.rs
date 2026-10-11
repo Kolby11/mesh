@@ -76,7 +76,7 @@ impl DamageRect {
             && self_bottom > other.y
     }
 
-    pub(super) fn union(self, other: Self) -> Self {
+    pub(crate) fn union(self, other: Self) -> Self {
         if self.width == 0 || self.height == 0 {
             return other;
         }

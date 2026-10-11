@@ -101,24 +101,19 @@ pub(super) fn extend_pending_damage(
         return;
     }
 
+    // Kept disjoint with the shared final-damage rule, so a slot reused
+    // after several busy frames copies and reports each pixel once.
+    let mut merged = mesh_core_render::DeviceDamage::from_device(pending);
     for rect in damage.iter().filter_map(|rect| clip_damage(*rect, bounds)) {
         if rect == bounds {
             pending.clear();
             pending.push(bounds);
             return;
         }
-        pending.push(rect);
+        merged.add(rect);
     }
-
-    if pending.len() > MAX_PROTOCOL_DAMAGE_RECTS {
-        let union = pending
-            .iter()
-            .copied()
-            .fold(None, |acc, rect| Some(union_damage(acc, rect)))
-            .unwrap_or(bounds);
-        pending.clear();
-        pending.push(union);
-    }
+    pending.clear();
+    pending.extend(merged.rects().iter().copied());
 }
 
 /// Restore the copied portion of a frame after a later presentation step

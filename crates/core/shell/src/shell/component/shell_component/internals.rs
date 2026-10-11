@@ -281,11 +281,18 @@ impl FrontendSurfaceComponent {
             );
         }
 
+        // RND-09: the final damage stage. Rects that overlap after device
+        // rounding would be cleared once and painted once per region, which
+        // composites translucent content over itself.
+        let device_damage = mesh_core_render::DeviceDamage::from_logical(
+            &effective_damage.rects,
+            scale,
+            buffer.width(),
+            buffer.height(),
+        );
         let mut physical_regions: smallvec::SmallVec<[(u32, u32, u32, u32); MAX_DAMAGE_RECTS]> =
-            smallvec::SmallVec::with_capacity(effective_damage.rects.len());
-        for &damage in &effective_damage.rects {
-            let physical_damage =
-                scale_damage_rect_to_buffer(damage, scale, buffer.width(), buffer.height());
+            smallvec::SmallVec::with_capacity(device_damage.rects().len());
+        for physical_damage in device_damage.rects() {
             buffer.clear_rect(
                 physical_damage.x,
                 physical_damage.y,

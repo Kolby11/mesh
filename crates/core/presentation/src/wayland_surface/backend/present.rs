@@ -122,13 +122,20 @@ impl WaylandSurfaceBackend {
             // Normalize logical damage to device-space edge coverage once. The
             // exact physical rectangles are reused for SHM copy and protocol
             // damage, so neither boundary can choose a different rounding rule.
-            let scale_policy = mesh_core_render::FractionalScale::new(scale);
+            // This is the shell's final damage stage (`DeviceDamage`), so the
+            // copied and reported rects are the ones the shell cleared and
+            // painted, disjoint.
             let mut shm_copy_damage: SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]> =
-                damage_rects
-                    .iter()
-                    .copied()
-                    .filter_map(|r| scale_policy.clip_damage_rect(r, physical_w, physical_h))
-                    .collect();
+                mesh_core_render::DeviceDamage::from_logical(
+                    damage_rects,
+                    scale,
+                    physical_w,
+                    physical_h,
+                )
+                .rects()
+                .iter()
+                .copied()
+                .collect();
             if shm_copy_damage.is_empty() {
                 // If the slice is empty (shouldn't normally reach here due to
                 // the skip gate in render.rs), upload the full buffer.

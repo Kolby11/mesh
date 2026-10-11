@@ -793,29 +793,22 @@ impl SurfaceEntry {
             .attach_to(wl_surface)
             .map_err(|error| PresentationError::BufferAttach(error.to_string()))?;
 
-        // The caller already normalized logical damage to device-space edge
-        // coverage. Clip that exact representation before sending it to the
-        // compositor; do not scale it again here.
-        let mut clipped_damage: SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]> = damage_rects
-            .iter()
-            .map(|r| clip_damage_rect_to_buffer(*r, physical_width, physical_height))
-            .filter(|r| r.width > 0 && r.height > 0)
-            .collect();
-
-        // The region actually copied into THIS shm buffer (`copy_damage`, already
-        // in physical coordinates) can be larger than the current frame's damage:
-        // a buffer that was busy across earlier frames accumulates their damage in
-        // `pending_damage` and refreshes all of it on reuse. The compositor only
-        // re-composites the regions we report here, so we must include the full
-        // copied region — otherwise the stale pixels outside `damage_rects` keep
-        // showing the previous buffer's content (the transparent rectangular cutout).
-        clipped_damage.extend(copy_damage.iter().filter_map(|rect| {
-            let clipped = clip_damage_rect_to_buffer(*rect, physical_width, physical_height);
-            (clipped.width > 0 && clipped.height > 0).then_some(clipped)
-        }));
+        // `copy_damage` is everything copied into this buffer: the current
+        // frame plus damage accumulated while the slot was busy. Report the
+        // disjoint union of both, clipped to the buffer, so a rect is never
+        // sent twice and the per-commit budget is not halved.
+        let mut reported = mesh_core_render::DeviceDamage::default();
+        for rect in damage_rects.iter().chain(copy_damage) {
+            reported.add(clip_damage_rect_to_buffer(
+                *rect,
+                physical_width,
+                physical_height,
+            ));
+        }
+        let clipped_damage = reported.rects();
 
         let protocol_damage =
-            protocol_damage_rects(&clipped_damage, physical_width, physical_height);
+            protocol_damage_rects(clipped_damage, physical_width, physical_height);
         for rect in protocol_damage.iter().copied() {
             wl_surface.damage_buffer(
                 rect.x as i32,

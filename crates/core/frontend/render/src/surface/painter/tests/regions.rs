@@ -444,3 +444,81 @@ fn checked_checkbox_rasterizes_checkmark_glyph() {
         "an unchecked checkbox paints no checkmark"
     );
 }
+
+#[test]
+fn damage_that_overlaps_after_device_rounding_repaints_translucent_content_once() {
+    // RND-01: at 1.5x, logical rects ending at 11 and starting at 10 round
+    // out to device columns 0..17 and 15..30, which share two columns. The
+    // final damage stage makes them disjoint, so the translucent children
+    // are composited once, exactly as a full repaint draws them.
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 64.0,
+            height: 32.0,
+        },
+        mesh_core_elements::style::Color {
+            r: 30,
+            g: 30,
+            b: 30,
+            a: 160,
+        },
+    );
+    root.id = 1;
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 64, 32, true, true);
+    let scale = 1.5;
+    let size = 96;
+    let selected = list.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 64,
+            height: 32,
+        }),
+        DisplayListRepaintPolicy::MinimalDamage,
+    );
+    let engine = FrontendRenderEngine::new();
+    let mut full = PixelBuffer::new(size, size);
+    engine.render_selected_display_list_for_module(&selected, &mut full, scale, None, None, None);
+
+    let logical = [
+        DamageRect {
+            x: 0,
+            y: 0,
+            width: 11,
+            height: 20,
+        },
+        DamageRect {
+            x: 10,
+            y: 0,
+            width: 10,
+            height: 20,
+        },
+    ];
+    let device = crate::DeviceDamage::from_logical(&logical, scale, size, size);
+    let mut partial = full.clone();
+    let mut regions = Vec::new();
+    for rect in device.rects() {
+        partial.clear_rect(
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            mesh_core_elements::style::Color::TRANSPARENT,
+        );
+        regions.push((rect.x, rect.y, rect.width, rect.height));
+    }
+    engine.render_selected_display_list_regions_for_module(
+        &selected,
+        &mut partial,
+        scale,
+        &regions,
+        None,
+        None,
+    );
+
+    assert_eq!(partial.data(), full.data());
+}

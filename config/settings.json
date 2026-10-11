@@ -1,5 +1,5 @@
 {
-  "revision": 146,
+  "revision": 150,
   "schemaVersion": 1,
   "shell": {
     "fonts": {
@@ -11,7 +11,7 @@
       "policy": "manual"
     },
     "icons": {
-      "default_pack": "Bibata-Original-Amber"
+      "default_pack": "default"
     },
     "render": {
       "blur": {
@@ -20,7 +20,7 @@
       }
     },
     "theme": {
-      "active": "@mesh/gruvbox-dark:gruvbox-dark"
+      "active": "mesh-default-dark"
     }
   }
 }

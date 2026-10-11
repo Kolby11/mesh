@@ -1,5 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
+mod device_damage;
 pub mod display_list;
 mod fractional_scale;
 pub mod library_adapters;
@@ -20,6 +21,7 @@ pub mod surface;
 
 #[cfg(feature = "renderer-accesskit")]
 pub use accesskit_adapter::build_accesskit_runtime_update;
+pub use device_damage::{DeviceDamage, MAX_DEVICE_DAMAGE_RECTS};
 pub use display_list::{
     BackdropBlurPolicy, DamageRect, DisplayBatchBarrierCounts, DisplayListClip, DisplayListMetrics,
     DisplayListRepaintPolicy, DisplayPaintCommand, DisplayPaintCommandKind, FramePaintDamage,
