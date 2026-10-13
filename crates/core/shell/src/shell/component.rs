@@ -856,13 +856,13 @@ pub(super) struct FrontendSurfaceComponent {
     slider_values: HashMap<NodeId, f32>,
     slider_script_values: HashMap<NodeId, f32>,
     checked_values: HashMap<NodeId, bool>,
-    render_hooks_pending: bool,
+    reactive_effects_pending: bool,
     /// Whether the render hooks run for the frame currently being painted
     /// wrote script state that a template expression actually reads. A render
     /// hook is only observable through that state, so a hook that ran without
     /// touching any template input leaves the retained and selective build
     /// paths valid for this frame.
-    render_hooks_changed_templates: bool,
+    effects_changed_templates: bool,
     pub(super) scroll_offsets: HashMap<NodeId, ScrollOffsetState>,
     /// In-flight smooth-scroll animations keyed by scroll-container node ID.
     /// Ticked at the top of `finalize_tree`; each writes an eased offset into
@@ -986,14 +986,13 @@ pub(super) struct FrontendSurfaceComponent {
     /// Nodes whose bound properties `try_patch_template_writes` updated since
     /// the last restyle; the targeted restyle treats them as changed.
     patched_binding_nodes: HashSet<NodeId>,
-    /// Whether script writes may be applied by patching bindings in place
-    /// (the D1 prototype). Off by default until it is measured and adopted;
-    /// `MESH_TEMPLATE_PATCHING=1` turns it on.
-    template_patching: bool,
     /// Template nodes whose tracked service fields changed since the last
     /// paint. `None` means a narrow invalidation without an authoritative
     /// service-node scope and therefore requires normal template evaluation.
     pending_service_template_nodes: Option<HashSet<NodeId>>,
+    pending_service_binding_readers: HashMap<String, HashSet<String>>,
+    template_patch_recovery_pending: Cell<bool>,
+    reactive_binding_pending: Cell<bool>,
     selective_service_build_supported: bool,
     #[cfg(test)]
     last_template_build_reused_nodes: usize,
@@ -1195,6 +1194,7 @@ impl ElementMetricUsage {
 #[derive(Debug)]
 struct EmbeddedFrontendRuntime {
     module_id: String,
+    unpatchable_template_expressions: HashSet<String>,
     /// Source ownership for diagnostics emitted after the component has been
     /// compiled. Embedded runtimes may belong to a different file than the
     /// surface's primary module.
@@ -1326,8 +1326,8 @@ impl FrontendSurfaceComponent {
             slider_values: HashMap::new(),
             slider_script_values: HashMap::new(),
             checked_values: HashMap::new(),
-            render_hooks_pending: true,
-            render_hooks_changed_templates: false,
+            reactive_effects_pending: true,
+            effects_changed_templates: false,
             scroll_offsets: HashMap::new(),
             scroll_animations: HashMap::new(),
             scroll_inertia: HashMap::new(),
@@ -1391,9 +1391,10 @@ impl FrontendSurfaceComponent {
             next_frame_only_dirty: false,
             node_service_field_deps: NodeServiceFieldDependencies::default(),
             patched_binding_nodes: HashSet::new(),
-            template_patching: std::env::var_os("MESH_TEMPLATE_PATCHING")
-                .is_some_and(|value| value == "1"),
             pending_service_template_nodes: None,
+            pending_service_binding_readers: HashMap::new(),
+            template_patch_recovery_pending: Cell::new(false),
+            reactive_binding_pending: Cell::new(false),
             selective_service_build_supported,
             #[cfg(test)]
             last_template_build_reused_nodes: 0,
@@ -1686,6 +1687,7 @@ impl FrontendSurfaceComponent {
         // continuous text and slider knob updates).
         self.surface_pixels_invalid = true;
         self.pending_service_template_nodes = None;
+        self.pending_service_binding_readers.clear();
         self.invalidate(ComponentDirtyFlags::TREE_REBUILD);
     }
 

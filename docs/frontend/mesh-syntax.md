@@ -383,9 +383,9 @@ network_id = nil
 network_name = ""
 display_name = ""
 
-function render(self)
+effect(function()
   display_name = network_name
-end
+end)
 ```
 
 They are the supported boundary for parent-to-child data flow. Do not document
@@ -427,7 +427,7 @@ to the child's live state:
 
   A subscriber runs in the parent's own scope, so assigning a public member
   from inside it (`audio_label` above) re-renders the parent's template in the
-  same tick — the parent does not have to poll the child from `render()`.
+  same tick — the parent does not have to poll the child from an effect.
 
 Only the child's **public members** and `self.<Event>` channels cross the
 boundary. Host internals (`self`, `module`, `mesh`, `require`, `__mesh_*`) and
@@ -672,8 +672,15 @@ Always include accessibility attributes where they add meaning. MESH treats thes
 ## Script block
 
 Logic lives in the `<script lang="luau">` block. Non-local variables declared
-here are public reactive component members; the template re-renders when they
-change. `local` variables and functions stay private to the script.
+here are public reactive component members; their template bindings update when
+they change. Element attributes and text patch in place when all readers of a
+changed member are recorded bindings. Direct service-field reads and function
+calls in element bindings also patch in place. Keyed loop bodies preserve
+iteration locals for patches; changing the collection or key reconciles the
+template. Structural conditions, unkeyed loops, component props, and pre-bound
+handler arguments use template evaluation and retained diffing. Calls
+conservatively invalidate on public writes because a helper can capture state.
+`local` variables and functions stay private to the script.
 
 ```xml
 <script lang="luau">
@@ -685,9 +692,9 @@ function onVolumeClick(event)
   audio.toggle_mute()
 end
 
-function render(self)
+effect(function(self)
   self.storage.last_volume = volume
-end
+end)
 </script>
 ```
 
@@ -704,34 +711,44 @@ locally in their own script code.
 
 ```xml
 <script lang="luau">
-volume_icon_name = "audio-volume-muted"
-volume_label = "0%"
-volume_tooltip = "Volume unavailable"
-
 local audio = require("mesh.audio@>=1.0")
 
-function render(self)
+local function volumeIcon()
   local audio_percent = audio.percent or 0
   local audio_muted = audio.muted or false
   if audio_muted or audio_percent == 0 then
-    volume_icon_name = "audio-volume-muted"
+    return "audio-volume-muted"
   elseif audio_percent < 34 then
-    volume_icon_name = "audio-volume-low"
+    return "audio-volume-low"
   elseif audio_percent < 67 then
-    volume_icon_name = "audio-volume-medium"
+    return "audio-volume-medium"
   else
-    volume_icon_name = "audio-volume-high"
+    return "audio-volume-high"
   end
-
-  volume_label = string.format("%d%%", audio_percent or 0)
-  volume_tooltip = string.format("Volume %d%%", audio_percent or 0)
 end
 </script>
+<template>
+  <row title={string.format("Volume %d%%", audio.percent or 0)}>
+    <icon name={volumeIcon()} />
+    <text>{string.format("%d%%", audio.percent or 0)}</text>
+  </row>
+</template>
 ```
 
-The template should read derived globals such as `volume_icon_name` and
-`volume_label`. The script reads proxy fields directly during `render(self)`
-and derives presentation state locally.
+Expressions and lexical helpers derive presentation directly from service
+fields. The runtime records those field reads and patches the element bindings
+when they change. The script body runs once as setup. Use template expressions
+and lexical helpers for derived presentation; `render(self)` is no longer
+scheduled and produces a migration diagnostic.
+
+Use `effect(fn)` for reactive side effects. Effects run after setup and when
+observed public scalar inputs or service fields change. Compound public values,
+props, and settings use conservative invalidation. Return a cleanup function to
+release resources before the next run and on reload or unmount. The returned
+handle supports `handle:cancel()`, which runs cleanup once. Effects run in
+registration order with bounded settling and a callback budget; one failing
+effect does not stop independent effects. Timed work uses `task.spawn` and
+`task.sleep` to write public state explicitly.
 
 For pointer-driven handlers like `onclick`, the callback also receives an
 event table with:
@@ -863,7 +880,7 @@ end)
 function onTriggerEnter() hover.enter(); popover.open = true end
 function onTriggerLeave() hover.leave() end
 
--- in render(self), once `bind:this` has resolved the popover:
+-- in an effect, once `bind:this` has resolved the popover:
 popover.PopoverEnter:on(hover.enter)
 popover.PopoverLeave:on(hover.leave)
 ```
@@ -974,7 +991,7 @@ volume_tooltip = "Volume unavailable"
 
 local audio = require("mesh.audio@>=1.0")
 
-function render(self)
+effect(function(self)
     local audio_percent = audio.percent or 0
     local audio_muted = audio.muted or false
     if audio_muted or audio_percent == 0 then
@@ -989,7 +1006,7 @@ function render(self)
 
     volume_label = string.format("%d%%", audio_percent or 0)
     volume_tooltip = string.format("Volume %d%%", audio_percent or 0)
-end
+end)
 
 function onVolumeClick()
   mesh.shell.toggle_surface("@mesh/quick-settings")

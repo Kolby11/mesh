@@ -144,6 +144,64 @@ pub fn collect_template_expressions(
     component.template_expressions.clone()
 }
 
+/// Expressions whose consumers require template evaluation rather than a
+/// property patch, even when the same source also occurs in an element binding.
+pub fn collect_unpatchable_template_expressions(component: &ComponentFile) -> HashSet<String> {
+    use mesh_core_component::template::{Attribute, AttributeValue, TemplateNode};
+    fn attributes(attributes: &[Attribute], all: bool, out: &mut HashSet<String>) {
+        for attribute in attributes {
+            match &attribute.value {
+                AttributeValue::Binding(source) | AttributeValue::TwoWayBinding(source)
+                    if all || attribute.name.starts_with("on") =>
+                {
+                    out.insert(source.trim().to_owned());
+                }
+                AttributeValue::EventHandlerCall { args, .. } => {
+                    out.extend(args.iter().map(|source| source.trim().to_owned()));
+                }
+                _ => {}
+            }
+        }
+    }
+    fn visit(nodes: &[TemplateNode], unkeyed: bool, out: &mut HashSet<String>) {
+        for node in nodes {
+            match node {
+                TemplateNode::Element(element) => {
+                    attributes(&element.attributes, unkeyed, out);
+                    visit(&element.children, unkeyed, out);
+                }
+                TemplateNode::Component(component) => {
+                    attributes(&component.props, true, out);
+                    visit(&component.children, unkeyed, out);
+                }
+                TemplateNode::If(condition) => {
+                    out.insert(condition.condition.trim().to_owned());
+                    visit(&condition.then_children, unkeyed, out);
+                    visit(&condition.else_children, unkeyed, out);
+                }
+                TemplateNode::For(repetition) => {
+                    out.insert(repetition.iterable.trim().to_owned());
+                    out.extend(repetition.key.iter().map(|source| source.trim().to_owned()));
+                    visit(
+                        &repetition.children,
+                        unkeyed || repetition.key.is_none(),
+                        out,
+                    );
+                }
+                TemplateNode::Expr(expression) if unkeyed => {
+                    out.insert(expression.expression.trim().to_owned());
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = HashSet::new();
+    if let Some(template) = &component.template {
+        visit(&template.root, false, &mut out);
+    }
+    out
+}
+
 #[derive(Debug, Clone)]
 pub struct CompiledFrontendModule {
     pub manifest: Manifest,

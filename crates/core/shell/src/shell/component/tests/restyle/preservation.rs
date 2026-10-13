@@ -10,9 +10,9 @@ fn state_preservation_restyle_service_payload_survives_hover_restyle() {
 <script lang="luau">
 local audio = require("mesh.audio")
 vol_pct = -1
-function render()
+effect(function()
     vol_pct = audio.percent or -1
-end
+end)
 </script>
 "#,
         audio_network_catalog(),
@@ -37,7 +37,7 @@ end
             .apply_service_payload("audio", &serde_json::json!({ "percent": 72 }));
         // Mark render hooks pending so render fires on next paint.
     }
-    component.render_hooks_pending = true;
+    component.reactive_effects_pending = true;
     component.dirty = true;
 
     // First paint with the service payload — render fires, vol_pct == 72.

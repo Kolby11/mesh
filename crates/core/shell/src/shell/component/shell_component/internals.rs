@@ -426,7 +426,7 @@ impl FrontendSurfaceComponent {
         }
         *self.runtimes.lock().unwrap() = runtimes;
         if needs_rebuild {
-            self.render_hooks_pending = true;
+            self.reactive_effects_pending = true;
             self.invalidate_script_state();
         }
         Ok(Vec::new())

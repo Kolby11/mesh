@@ -462,35 +462,55 @@ pub(super) fn run_exec(
     let resources = &service.resources;
     let outcome = {
         let _frame_pause = resources.pause_frame_clock();
-        service.run_with_argv0(
-            program,
-            argv0,
-            args,
-            locale,
-            resources.output_limit() as usize,
-            resources.child_process_timeout(),
-        )
-    };
-    let outcome = match outcome {
-        Ok(outcome) => outcome,
-        Err(ExecRunError::Resource(error)) => {
-            return Err(mlua::Error::external(error.to_string()));
-        }
-        Err(ExecRunError::Internal(error)) => {
-            tracing::debug!(program, error = %error, "backend exec worker failed");
-            ExecOutcome {
-                success: false,
-                stdout: String::new(),
-                stderr: error,
-                code: None,
-            }
-        }
+        command_outcome(program, argv0, args, locale, service).map_err(mlua::Error::external)?
     };
     let output_size = outcome.stdout.len().saturating_add(outcome.stderr.len());
     resources
         .reserve_output(output_size)
         .map_err(|error| mlua::Error::external(error.to_string()))?;
     exec_outcome_to_lua(lua, outcome)
+}
+
+fn command_outcome(
+    program: &str,
+    argv0: &str,
+    args: &[String],
+    locale: &ExecLocale,
+    service: &ExecService,
+) -> Result<ExecOutcome, String> {
+    let resources = &service.resources;
+    match service.run_with_argv0(
+        program,
+        argv0,
+        args,
+        locale,
+        resources.output_limit() as usize,
+        resources.child_process_timeout(),
+    ) {
+        Ok(outcome) => Ok(outcome),
+        Err(ExecRunError::Resource(error)) => Err(error.to_string()),
+        Err(ExecRunError::Internal(error)) => Ok(ExecOutcome {
+            success: false,
+            stdout: String::new(),
+            stderr: error,
+            code: None,
+        }),
+    }
+}
+
+pub(super) fn run_exec_json(
+    program: &str,
+    argv0: &str,
+    args: &[String],
+    locale: &ExecLocale,
+    service: &ExecService,
+) -> Result<serde_json::Value, String> {
+    let outcome = command_outcome(program, argv0, args, locale, service)?;
+    let mut value = serde_json::json!({ "success": outcome.success, "stdout": outcome.stdout, "stderr": outcome.stderr });
+    if let Some(code) = outcome.code {
+        value["code"] = code.into();
+    }
+    Ok(value)
 }
 
 pub(super) fn missing_exec_capability(

@@ -201,7 +201,7 @@ fn frontend_proxy_update_reaches_panel_or_quick_settings_render_state() {
 volumeIcon = "audio-volume-muted"
 volumeLevel = 0
 
-function render()
+effect(function()
     local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
     if not audio_ok or not audio then return end
     local pct = audio.percent or 0
@@ -216,7 +216,7 @@ function render()
     else
         volumeIcon = "audio-volume-high"
     end
-end
+end)
 "#,
     )
     .unwrap();
@@ -228,7 +228,7 @@ end
     );
 
     // The runtime calls the script's render handler on each rerender.
-    ctx.call_handler("render", &[]).unwrap();
+    assert!(ctx.run_reactive_effects().is_empty());
 
     // Verify that the template-visible reactive globals reflect the emitted payload,
     // proving rerender-visible service state without any callback registration.
@@ -254,10 +254,10 @@ end
     );
 }
 
-// ---------- integration test 2: proxy command becomes ServiceCommand ----
+// ---------- integration test 2: proxy command becomes ServiceCall ----
 
 /// Proves that a bundled control handler (e.g. quick-settings onToggleWiFi)
-/// calling a named proxy command method publishes a `CoreRequest::ServiceCommand`
+/// calling a named proxy command method publishes a `CoreRequest::ServiceCall`
 /// through the `script_events_to_requests` routing layer.
 #[test]
 fn frontend_proxy_command_from_bundled_handler_becomes_service_command_request() {
@@ -292,13 +292,7 @@ end
         "onToggleWiFi should publish at least one request"
     );
     match &requests[0] {
-        CoreRequest::ServiceCommand {
-            interface,
-            command,
-            payload,
-            ..
-        }
-        | CoreRequest::ServiceCall {
+        CoreRequest::ServiceCall {
             interface,
             command,
             payload,
@@ -318,7 +312,7 @@ end
                 "enabled should be true (toggled from false)"
             );
         }
-        other => panic!("expected ServiceCommand for network.set_wifi_enabled, got {other:?}"),
+        other => panic!("expected ServiceCall for network.set_wifi_enabled, got {other:?}"),
     }
 }
 
@@ -341,7 +335,7 @@ volumeLevel = "0"
 volumeIcon = "audio-volume-muted"
 batteryText = "N/A"
 
-function render()
+effect(function()
     local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
     if not audio_ok or not audio then
         volumeLevel = "0"
@@ -351,13 +345,13 @@ function render()
         return
     end
     volumeLevel = tostring(audio.percent or 0)
-end
+end)
 "#,
     )
     .unwrap();
 
     // No service payload applied — provider is absent.
-    ctx.call_handler("render", &[]).unwrap();
+    assert!(ctx.run_reactive_effects().is_empty());
 
     // Template-visible globals must be non-empty explanatory copy.
     assert_eq!(
@@ -390,7 +384,7 @@ audio_backend = "Unavailable"
 audio_tooltip = "Volume unavailable"
 icon_name = "audio-volume-muted"
 
-function render()
+effect(function()
     if not audio_ok or not audio or audio.available == false then
         audio_label = "Audio unavailable"
         audio_backend = "Unavailable"
@@ -418,7 +412,7 @@ function render()
     else
         icon_name = "audio-volume-high"
     end
-end
+end)
 "#,
     )
     .unwrap();
@@ -433,7 +427,7 @@ end
         }),
     );
 
-    ctx.call_handler("render", &[]).unwrap();
+    assert!(ctx.run_reactive_effects().is_empty());
 
     assert_eq!(ctx.state.get("audio_label"), Some(serde_json::json!("42%")));
     assert_eq!(
@@ -488,13 +482,7 @@ end
 
     match requests.as_slice() {
         [
-            CoreRequest::ServiceCommand {
-                interface,
-                command,
-                payload,
-                ..
-            }
-            | CoreRequest::ServiceCall {
+            CoreRequest::ServiceCall {
                 interface,
                 command,
                 payload,
@@ -546,13 +534,7 @@ end
 
     match requests.as_slice() {
         [
-            CoreRequest::ServiceCommand {
-                interface,
-                command,
-                payload,
-                ..
-            }
-            | CoreRequest::ServiceCall {
+            CoreRequest::ServiceCall {
                 interface,
                 command,
                 payload,
@@ -582,19 +564,19 @@ if not network_ok then network = nil end
 audio_status = ""
 network_status = ""
 
-function render()
+effect(function()
     if not audio_ok or not audio or audio.available == false then
         audio_status = "Audio unavailable"
     end
     if not network_ok or not network or network.available == false then
         network_status = "Network unavailable"
     end
-end
+end)
 "#,
     )
     .unwrap();
 
-    ctx.call_handler("render", &[]).unwrap();
+    assert!(ctx.run_reactive_effects().is_empty());
 
     assert_eq!(
         ctx.state.get("audio_status"),
@@ -629,9 +611,9 @@ local Child = require("./components/child.mesh")
 local audio = require("mesh.audio@>=1.0")
 label = "none"
 
-function render()
+effect(function()
     label = tostring(audio.percent or "none")
-end
+end)
 </script>
 "#,
         )],

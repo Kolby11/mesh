@@ -207,7 +207,7 @@ function init(self)
     set_current_theme(active_theme())
 end
 
-function render(self)
+effect(function(self)
     local current = active_theme()
     set_current_theme(current)
     if not window_centred then
@@ -221,7 +221,7 @@ function render(self)
     end
     was_open = open
     sync_options(current)
-end
+end)
 
 -- Selecting a theme does not close the popover: it stays open so the user can
 -- keep choosing. It closes on pointer leave (onPopoverLeave) or, for keyboard

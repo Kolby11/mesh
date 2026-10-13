@@ -127,7 +127,7 @@ local function format_uptime(seconds)
     return string.format("%dm", minutes)
 end
 
-function render()
+effect(function()
     local graph = {}
     if debug_service and type(debug_service.module_graph) == "table" then
         graph = debug_service.module_graph
@@ -176,7 +176,7 @@ function render()
     device_backend_joiner = " "
     device_backend_source = value_or(device.source_module, "device.active_provider")
     device_backend_period = "."
-end
+end)
 </script>
 
 <style>

@@ -393,7 +393,7 @@ fn shipped_navigation_volume_button_click_toggles_mute() {
     assert!(
         requests.iter().any(|request| matches!(
             request,
-            CoreRequest::ServiceCommand { interface, command, payload, .. }
+            CoreRequest::ServiceCall { interface, command, payload, .. }
                 if interface == "mesh.audio"
                     && command == "set_muted"
                     && payload == &serde_json::json!({
@@ -563,7 +563,7 @@ fn shipped_navigation_volume_scroll_reaches_audio_service_on_first_input() {
     assert!(
         requests.iter().any(|request| matches!(
             request,
-            CoreRequest::ServiceCommand { interface, command, payload, .. }
+            CoreRequest::ServiceCall { interface, command, payload, .. }
                 if interface == "mesh.audio"
                     && command == "set_volume"
                     && payload["device_id"] == serde_json::json!("default")
@@ -684,7 +684,7 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
     assert!(
         requests.iter().any(|request| matches!(
             request,
-            CoreRequest::ServiceCommand { interface, command, payload, .. }
+            CoreRequest::ServiceCall { interface, command, payload, .. }
                 if interface == "mesh.audio"
                     && command == "set_muted"
                     && payload == &serde_json::json!({

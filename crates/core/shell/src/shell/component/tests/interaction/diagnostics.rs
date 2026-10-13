@@ -202,13 +202,13 @@ if not audio_ok then audio = nil end
 
 audio_tooltip = "Volume unavailable"
 
-function render()
+effect(function()
     if not audio_ok or not audio then
         audio_tooltip = "Audio service unavailable"
         return
     end
     audio_tooltip = string.format("Volume %d%%", math.floor(tonumber(audio.percent) or 0))
-end
+end)
 </script>
 "#,
         audio_network_catalog(),
@@ -360,13 +360,13 @@ if not audio_ok then audio = nil end
 
 volumeLevel = 0
 
-function render()
+effect(function()
     if not audio_ok or not audio then
         volumeLevel = 0
         return
     end
     volumeLevel = audio.state.percent or 0
-end
+end)
 </script>
 "#,
         audio_network_catalog(),
@@ -419,11 +419,11 @@ if not audio_ok then audio = nil end
 
 volumeLevel = 0
 
-function render()
+effect(function()
     if audio_ok and audio then
         volumeLevel = audio.state.percent or 0
     end
-end
+end)
 </script>
 "#,
         audio_network_catalog(),
@@ -444,7 +444,7 @@ end
         .unwrap();
     component.clear_runtime_dirty_states();
     component.dirty = false;
-    component.render_hooks_pending = false;
+    component.reactive_effects_pending = false;
 
     {
         let runtimes = component.runtimes.lock().unwrap();
@@ -485,9 +485,9 @@ fn pcall_service_lookup_diagnostic_reaches_component_diagnostics() {
         r#"
 <template><box /></template>
 <script lang="luau">
-function render()
+effect(function()
     pcall(require, "mesh.missing@>=1.0")
-end
+end)
 </script>
 "#,
     );

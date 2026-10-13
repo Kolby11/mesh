@@ -225,7 +225,7 @@ function init(self)
     recenter_ring()
 end
 
-function render(self)
+effect(function(self)
     -- Re-centre only when the locale changed underneath us. Doing it every
     -- frame would undo `onOptionScroll` before the scrolled window was ever
     -- painted, which is why scrolling the bubbles used to do nothing.
@@ -249,7 +249,7 @@ function render(self)
     end
     was_open = open
     sync_options()
-end
+end)
 
 function onSelectOption(locale)
     select_locale(locale)

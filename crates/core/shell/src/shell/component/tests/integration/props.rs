@@ -20,9 +20,9 @@ const PROP_SOURCE: &str = r#"
 </style>
 <script lang="luau">
 label = ""
-function render(self)
+effect(function(self)
   label = props.track_width
-end
+end)
 </script>
 "#;
 

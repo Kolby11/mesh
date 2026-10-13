@@ -34,26 +34,27 @@ local function normalized_scroll_sensitivity()
 end
 
 local function update_brightness_copy(level)
-    brightness_level = math.floor(level)
-    brightness_label = mesh.locale.format_percent(brightness_level)
+    local safe = math.floor(level)
+    brightness_level = safe
+    brightness_label = mesh.locale.format_percent(safe)
 
-    if brightness_level == 0 then
+    if safe == 0 then
         brightness_icon = "display-brightness-off"
-    elseif brightness_level < 34 then
+    elseif safe < 34 then
         brightness_icon = "display-brightness-low"
-    elseif brightness_level < 67 then
+    elseif safe < 67 then
         brightness_icon = "display-brightness-medium"
     else
         brightness_icon = "display-brightness-high"
     end
 end
 
-function render(self)
+effect(function(self)
     brightness_available = brightness.available ~= false
     if brightness_available then
         update_brightness_copy(brightness.level)
     end
-end
+end)
 
 function onBrightnessScroll(event)
     if not brightness_available then

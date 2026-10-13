@@ -537,13 +537,6 @@ pub enum CoreRequest {
     PublishDiagnostics {
         message: String,
     },
-    ServiceCommand {
-        interface: String,
-        command: String,
-        payload: serde_json::Value,
-        source_module_id: String,
-        source_capabilities: CapabilitySet,
-    },
     /// A Luau service-proxy invocation whose terminal result must be routed
     /// back to the originating context's ticket.
     ServiceCall {
@@ -1120,17 +1113,6 @@ impl ShellEffectAdapter {
                 },
             },
             FrontendEffect::Service(effect) => match effect {
-                ServiceEffect::Command {
-                    interface,
-                    command,
-                    payload,
-                } => CoreRequest::ServiceCommand {
-                    interface,
-                    command,
-                    payload,
-                    source_module_id,
-                    source_capabilities,
-                },
                 ServiceEffect::Call {
                     interface,
                     command,
@@ -1212,10 +1194,12 @@ mod effect_adapter_tests {
                 mesh_core_capability::CapabilitySet::default(),
             )
             .with_revision(FrontendEffectRevision::new(4, 9)),
-            FrontendEffect::Service(ServiceEffect::Command {
+            FrontendEffect::Service(ServiceEffect::Call {
                 interface: "mesh.audio".into(),
                 command: "set_volume".into(),
                 payload: json!({ "percent": 50 }),
+                call_id: 1,
+                instance_id: "instance".into(),
             }),
         );
 

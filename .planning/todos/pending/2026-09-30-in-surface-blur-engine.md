@@ -6,6 +6,32 @@
 content inside a surface — a frosted panel over other widgets, a blurred card,
 a modal scrim — so components can use it freely instead of avoiding it.
 
+## D6 scope revision — 2026-10-13
+
+Separate blur correctness from raster-cache investment. The partial-repaint
+pixel regression, backdrop-root contract, and per-element routing remain useful
+on the current painter. Implementing persistent CPU blur caches is deferred
+until the immutable scene/render-thread prototype is measured.
+
+Scene snapshots must contain immutable filter/backdrop descriptions, complete
+read regions, dependencies on commands beneath, clip/root bounds, and resource
+generations. The render thread owns offscreens, cached outputs, GPU contexts,
+and eviction. UI code must not retain or mutate render-thread textures. A
+superseded scene remains alive while its render work uses those handles; retire
+resources only after that work completes. Surface removal and renderer shutdown
+must drain or cancel outstanding commits without publishing stale frames.
+
+The proposed CPU and GPU caches share semantic keys and pixel tests, but their
+storage and eviction are renderer implementations. Do not require a CPU raster
+snapshot or readback in the GPU commit path. Measure static backdrop reuse and
+scrolling beneath a frosted header separately: the latter changes the blur
+input every frame and tests GPU raster cost rather than cache hit rate.
+
+Phases 0–2 below precede cache adoption. Phases 3–5 require a measured renderer
+prototype and its resource-lifetime contract; phase 6 owns GPU residency. Until
+then these remain targets, and the current painter remains the correctness
+reference. No performance gain is assumed from this revision.
+
 ## Goal
 
 Component authors write ordinary CSS — `backdrop-filter: blur()` and
@@ -138,8 +164,8 @@ it does now, which is the transient use the spec already recommends.
 The painter's command stream does not change. On the Skia-GL backend
 (GPU backend plan, phases 2 and 4) the offscreens and cached blurs become GPU
 textures, Skia's GPU blur downsamples internally, and the caches become texture
-residency. Nothing here assumes the software painter, and nothing needs undoing
-when GPU paint lands.
+residency. The semantic contract carries across; offscreen allocation, cache residency,
+and synchronization must follow the renderer ownership established by D6.
 
 ## Phases
 

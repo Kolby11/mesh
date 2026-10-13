@@ -32,13 +32,7 @@ pub(super) fn service_request_parts(
     request: &CoreRequest,
 ) -> Option<(&str, &str, &serde_json::Value)> {
     match request {
-        CoreRequest::ServiceCommand {
-            interface,
-            command,
-            payload,
-            ..
-        }
-        | CoreRequest::ServiceCall {
+        CoreRequest::ServiceCall {
             interface,
             command,
             payload,

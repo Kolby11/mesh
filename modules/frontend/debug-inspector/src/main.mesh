@@ -917,7 +917,7 @@ function runBenchmarkScenarioById(scenario_id)
     debug_service.run_benchmark(scenario_id)
 end
 
-function render()
+effect(function()
     if not debug_service then
         sync_element_inspector()
         session_status = "Debug service unavailable"
@@ -1069,7 +1069,7 @@ function render()
         end
     end
     sync_benchmark_rows()
-end
+end)
 </script>
 
 <style>

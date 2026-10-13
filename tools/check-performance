@@ -25,6 +25,15 @@ run_benchmark() {
 }
 
 cd "$ROOT"
+cargo test -p mesh-core-scripting --release --lib context::tests::effects
+cargo test -p mesh-core-shell --release --lib legacy_render_is_not_automatically_scheduled
+cargo test -p mesh-core-shell --release --lib template_patching
+cargo test -p mesh-core-shell --release --lib service_field_update_patches
+cargo test -p mesh-core-shell --release --lib service_fields_patch_keyed
+cargo test -p mesh-core-shell --release --lib service_binding_failure
+cargo test -p mesh-core-shell --release --lib keyed_loop_bindings_capture_locals
+cargo test -p mesh-core-shell --release --lib template_function_call_patches
+cargo test -p mesh-core-shell --release --lib shared_binding_and_structural_expression
 run_benchmark mesh-core-shell narrow_handler_damage_beats_forced_full_repaint
 run_benchmark mesh-core-shell unbound_handler_write_eliminates_render_pipeline_benchmark
 run_benchmark mesh-core-shell contract_validation_lookup_borrows_interface_name
@@ -43,6 +52,7 @@ run_benchmark mesh-core-shell direct_dirty_refs_beat_rewalking_for_render_sync
 run_benchmark mesh-core-shell scroll_layout_scope_beats_full_fingerprinting
 run_benchmark mesh-core-shell paint_only_scoped_retained_end_to_end_benchmark
 run_benchmark mesh-core-shell child_display_list_lru_beats_flush_all
+run_benchmark mesh-core-scripting unchanged_effect_inputs_skip_callback_work_benchmark
 run_benchmark mesh-core-scripting template_dependency_rust_gate_beats_lua_table_lookup
 run_benchmark mesh-core-scripting thread_vm_handle_beats_fresh_vm_creation
 run_benchmark mesh-core-scripting lazy_element_metrics_beat_eager_snapshot_conversion

@@ -793,13 +793,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
-        [CoreRequest::ServiceCommand {
-            interface,
-            command,
-            payload,
-            ..
-        }
-        | CoreRequest::ServiceCall {
+        [CoreRequest::ServiceCall {
             interface,
             command,
             payload,
@@ -868,7 +862,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
-        [CoreRequest::ServiceCommand { interface, command, payload, .. }
+        [CoreRequest::ServiceCall { interface, command, payload, .. }
             | CoreRequest::ServiceCall { interface, command, payload, .. }]
             if interface == "mesh.settings"
                 && command == "set_prop"
@@ -912,7 +906,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
-        [CoreRequest::ServiceCommand { interface, command, payload, .. }
+        [CoreRequest::ServiceCall { interface, command, payload, .. }
             | CoreRequest::ServiceCall { interface, command, payload, .. }]
             if interface == "mesh.settings"
                 && command == "set_prop"
@@ -1028,13 +1022,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     match requests.as_slice() {
         [
-            CoreRequest::ServiceCommand {
-                interface,
-                command,
-                payload,
-                ..
-            }
-            | CoreRequest::ServiceCall {
+            CoreRequest::ServiceCall {
                 interface,
                 command,
                 payload,
@@ -1056,7 +1044,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
-        [CoreRequest::ServiceCommand { interface, command, payload, .. }
+        [CoreRequest::ServiceCall { interface, command, payload, .. }
             | CoreRequest::ServiceCall { interface, command, payload, .. }]
             if interface == "mesh.theme"
                 && command == "set_icon_theme"
@@ -1071,7 +1059,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
-        [CoreRequest::ServiceCommand { interface, command, payload, .. }
+        [CoreRequest::ServiceCall { interface, command, payload, .. }
             | CoreRequest::ServiceCall { interface, command, payload, .. }]
             if interface == "mesh.theme"
                 && command == "set_font_family"
@@ -1089,7 +1077,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
-        [CoreRequest::ServiceCommand { interface, command, payload, .. }
+        [CoreRequest::ServiceCall { interface, command, payload, .. }
             | CoreRequest::ServiceCall { interface, command, payload, .. }]
             if interface == "mesh.packages"
                 && command == "set_provider"
@@ -1109,7 +1097,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .unwrap();
     assert!(matches!(
         requests.as_slice(),
-        [CoreRequest::ServiceCommand { interface, command, payload, .. }
+        [CoreRequest::ServiceCall { interface, command, payload, .. }
             | CoreRequest::ServiceCall { interface, command, payload, .. }]
             if interface == "mesh.packages"
                 && command == "set_module_enabled"

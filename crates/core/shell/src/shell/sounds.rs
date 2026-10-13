@@ -1,11 +1,10 @@
 #![allow(dead_code)] // Sound variants await their corresponding module providers.
 
-use super::types::CoreRequest;
 /// Shell sound event dispatch.
 ///
 /// Core maps semantic shell events to a typed service request. Normal interface
 /// routing selects and invokes the active provider; the module does playback.
-use mesh_core_capability::CapabilityCatalog;
+use mesh_core_capability::{CapabilityCatalog, CapabilitySet};
 use mesh_core_config::ShellSounds;
 
 pub(super) enum SoundKind {
@@ -17,8 +16,18 @@ pub(super) enum SoundKind {
     Notification,
 }
 
-/// Build the generic interface request for a configured shell sound.
-pub(super) fn shell_sound_request(kind: SoundKind, sounds: &ShellSounds) -> Option<CoreRequest> {
+/// A core-triggered call of a declared service method, dispatched like any
+/// other caller's.
+pub(super) struct ShellSoundCall {
+    pub(super) interface: &'static str,
+    pub(super) command: &'static str,
+    pub(super) payload: serde_json::Value,
+    pub(super) source_module_id: &'static str,
+    pub(super) source_capabilities: CapabilitySet,
+}
+
+/// Build the generic interface call for a configured shell sound.
+pub(super) fn shell_sound_request(kind: SoundKind, sounds: &ShellSounds) -> Option<ShellSoundCall> {
     let path = match kind {
         SoundKind::Startup => sounds.startup.as_deref(),
         SoundKind::Shutdown => sounds.shutdown.as_deref(),
@@ -33,11 +42,11 @@ pub(super) fn shell_sound_request(kind: SoundKind, sounds: &ShellSounds) -> Opti
         .capability_set(["service.audio.control"])
         .expect("built-in sound routing capability must remain in the catalog");
 
-    Some(CoreRequest::ServiceCommand {
-        interface: "mesh.audio".to_string(),
-        command: "play_sound".to_string(),
+    Some(ShellSoundCall {
+        interface: "mesh.audio",
+        command: "play_sound",
         payload: serde_json::json!({ "path": path }),
-        source_module_id: "@mesh/shell".to_string(),
+        source_module_id: "@mesh/shell",
         source_capabilities,
     })
 }
@@ -56,16 +65,13 @@ mod tests {
 
         let request = shell_sound_request(SoundKind::Startup, &sounds)
             .expect("configured startup sound should produce a request");
-        let CoreRequest::ServiceCommand {
+        let ShellSoundCall {
             interface,
             command,
             payload,
             source_module_id,
             source_capabilities,
-        } = request
-        else {
-            panic!("shell sound must use generic service routing");
-        };
+        } = request;
 
         assert_eq!(interface, "mesh.audio");
         assert_eq!(command, "play_sound");

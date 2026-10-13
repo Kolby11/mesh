@@ -112,7 +112,7 @@ local function device_id(entry)
     return tostring(entry.id or entry.address or entry.path or "")
 end
 
-function render()
+effect(function()
     if bluetooth.available == false then
         bluetooth_status = "bluetooth.no_compatible_service"
         bluetooth_toggle_label = "common.unavailable"
@@ -185,7 +185,7 @@ function render()
         empty_title = "bluetooth.no_paired"
         empty_copy = "bluetooth.discovery_copy"
     end
-end
+end)
 
 function onToggleBluetooth()
     local enabled = bluetooth.enabled == true or bluetooth.powered == true

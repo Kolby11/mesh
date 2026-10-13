@@ -10,6 +10,7 @@ pub use errors::{
     PublishedEvent, ScriptDiagnostic, ScriptDiagnosticCategory, ScriptError, ScriptInterfaceImport,
     ServiceCallCompletion,
 };
+pub(crate) use runtime::tasks;
 pub use runtime::{ScriptContext, SurfaceVm};
 pub use state::{LocaleBoundState, ScriptState};
 

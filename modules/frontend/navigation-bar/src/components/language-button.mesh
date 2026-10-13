@@ -103,11 +103,11 @@ do_close = function()
     end
 end
 
-function render(self)
+effect(function(self)
     -- `bind:this` becomes available after the initial template evaluation.
     -- State updates then flow through the child event instead of being polled.
     connect_popover()
-end
+end)
 
 sync_trigger_state()
 

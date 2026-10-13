@@ -269,7 +269,7 @@ pub struct WidgetNodeAuthored {
 }
 
 /// The template sources of an element's bound properties, recorded at build
-/// time for elements outside `{#for}` bodies. Re-evaluating them against the
+/// time, including captured locals in keyed `{#for}` bodies. Re-evaluating them against the
 /// owning instance's script state reproduces exactly what a rebuild would
 /// write into these properties.
 #[derive(Debug, Clone)]
@@ -277,6 +277,7 @@ pub struct WidgetNodeAuthored {
 pub struct TemplateBindings {
     /// The component instance whose script state the expressions read.
     pub instance_key: Arc<str>,
+    pub locals: Option<Arc<serde_json::Map<String, serde_json::Value>>>,
     /// `(attribute, expression)` for every non-handler `name={expression}`.
     pub attributes: Vec<(String, String)>,
     /// The inline children of a `<text>` whose `content` they produce.

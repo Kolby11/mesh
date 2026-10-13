@@ -1,7 +1,8 @@
 use mesh_core_capability::CapabilitySet;
 pub use mesh_core_runtime::BackendIdentity;
 use mesh_core_scripting::{
-    BackendScriptContext, BackendScriptError, StreamEvent, StreamEventKind, StreamHandle,
+    BackendCommandRun, BackendScriptContext, BackendScriptError, StreamEvent, StreamEventKind,
+    StreamHandle,
 };
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
@@ -88,6 +89,8 @@ struct CallControl {
     cancelled: bool,
     generation: u64,
     identity: mesh_core_runtime::BackendIdentity,
+    /// Wakes the backend loop when a suspended handler is cancelled.
+    waker: Option<Arc<tokio::sync::Notify>>,
 }
 
 fn call_controls() -> &'static Mutex<HashMap<CallId, CallControl>> {
@@ -122,6 +125,7 @@ pub fn register_call_for_generation_and_identity(
             cancelled: false,
             generation,
             identity,
+            waker: None,
         },
     );
 }
@@ -149,16 +153,35 @@ fn call_identity(
         .unwrap_or(fallback)
 }
 
-/// Cancel a queued call. A backend that has already started the synchronous
-/// Luau handler cannot be interrupted safely, but queued calls observe this
-/// flag before entering the handler and still produce a terminal result.
+/// Cancel a call. Queued calls observe this flag before entering the
+/// handler; a handler suspended on a host operation is dropped at its next
+/// wakeup. A handler running synchronously cannot be interrupted. Every
+/// cancelled call still produces a terminal result.
 pub fn cancel_call(call_id: CallId) -> bool {
     let mut controls = call_controls().lock().unwrap();
     let Some(control) = controls.get_mut(&call_id) else {
         return false;
     };
     control.cancelled = true;
+    if let Some(waker) = &control.waker {
+        waker.notify_one();
+    }
     true
+}
+
+/// Route a later [`cancel_call`] of a suspended handler to `waker`.
+fn watch_suspended_call(call_id: CallId, waker: &Arc<tokio::sync::Notify>) {
+    if let Some(control) = call_controls().lock().unwrap().get_mut(&call_id) {
+        control.waker = Some(Arc::clone(waker));
+    }
+}
+
+fn call_cancelled(call_id: CallId) -> bool {
+    call_controls()
+        .lock()
+        .unwrap()
+        .get(&call_id)
+        .is_some_and(|control| control.cancelled)
 }
 
 fn take_pre_execution_outcome(call_id: CallId) -> Option<BackendCommandOutcome> {
@@ -702,7 +725,8 @@ async fn run_backend_service(
             .await;
         return;
     }
-    let init_payload = match ctx.call_init() {
+    let task_wakeup = ctx.task_wakeup();
+    let mut init_payload = match ctx.call_init() {
         Ok(payload) => payload,
         Err(e) => {
             tracing::error!(
@@ -721,12 +745,39 @@ async fn run_backend_service(
         }
     };
 
+    // A `start(self)` that suspended on a host operation finishes before the
+    // provider is ready; commands stay queued until then.
+    while ctx.start_pending() {
+        task_ready(&task_wakeup, ctx.next_task_deadline()).await;
+        let run = ctx.run_due_tasks(std::time::Instant::now());
+        for error in run.errors {
+            if !send_task_failure(&tx, &service_name, &module_id, error, &identity_handle).await {
+                return;
+            }
+        }
+        if run.state.is_some() {
+            init_payload = run.state;
+        }
+        if let Some(Err(e)) = run.start {
+            let _ = tx
+                .send(BackendServiceEvent::InitFailed {
+                    service: service_name,
+                    source_module: module_id,
+                    message: e.to_string(),
+                    identity: backend_identity(&identity_handle),
+                })
+                .await;
+            return;
+        }
+    }
+
     let mut interval_ms = bounded_poll_interval_ms(&ctx);
     let mut tick = make_interval(interval_ms, true);
     let mut last_payload: Option<serde_json::Value> = None;
     let mut consecutive_poll_failures = 0;
     let mut consecutive_stream_failures = 0;
     let stream_state = ctx.stream_state();
+    let mut suspended_commands: HashMap<u64, SuspendedCommand> = HashMap::new();
     let mut coalesced_command_index = HashMap::new();
     let poll_enabled = ctx.has_poll_handler();
 
@@ -772,7 +823,56 @@ async fn run_backend_service(
     }
 
     loop {
+        let task_deadline = ctx.next_task_deadline();
         tokio::select! {
+            _ = task_ready(&task_wakeup, task_deadline) => {
+                let cancelled: Vec<u64> = suspended_commands
+                    .iter()
+                    .filter(|(_, pending)| call_cancelled(pending.call_id))
+                    .map(|(task, _)| *task)
+                    .collect();
+                for task in cancelled {
+                    ctx.cancel_task(task);
+                    let pending = suspended_commands.remove(&task).expect("listed above");
+                    if !send_command_result(&tx, &service_name, &module_id, pending, BackendCommandOutcome::Cancelled, serde_json::json!({
+                        "ok": false,
+                        "status": "cancelled",
+                        "error": "cancelled",
+                    })).await { return; }
+                }
+                let run = ctx.run_due_tasks(std::time::Instant::now());
+                for error in run.errors {
+                    if !send_task_failure(&tx, &service_name, &module_id, error, &identity_handle).await { return; }
+                }
+                let mut stop = false;
+                for poll in run.polls {
+                    if let Err(err) = poll {
+                        if !record_poll_failure(&tx, &service_name, &module_id, err, &mut consecutive_poll_failures, &identity_handle).await {
+                            stop = true;
+                        }
+                    } else {
+                        consecutive_poll_failures = 0;
+                    }
+                }
+                for (task, outcome) in run.commands {
+                    let Some(pending) = suspended_commands.remove(&task) else { continue };
+                    let (outcome, result) = match outcome {
+                        Ok(outcome) => (terminal_outcome(&outcome), outcome.result),
+                        Err(err) => (BackendCommandOutcome::Failed, serde_json::json!({
+                            "ok": false,
+                            "status": "failed",
+                            "error": err.to_string(),
+                        })),
+                    };
+                    if !send_command_result(&tx, &service_name, &module_id, pending, outcome, result).await { return; }
+                }
+                refresh_interval(&ctx, &mut interval_ms, &mut tick);
+                if let Some(payload) = run.state {
+                    if !publish_changed_update(&tx, &service_name, &module_id, &mut last_payload, payload, &identity_handle).await { break; }
+                }
+                if !publish_script_events(&tx, &service_name, &module_id, ctx.drain_events(), &identity_handle).await { break; }
+                if stop { break; }
+            }
             _ = stream_state.wait_for_event() => {
                 let events = stream_state.drain_events();
                 if !dispatch_stream_events(
@@ -792,31 +892,18 @@ async fn run_backend_service(
             }
             // A provider without `on_poll` is purely event- and command-driven:
             // it never needs a periodic wakeup.
-            _ = tick.tick(), if poll_enabled => {
+            // A poll suspended on a host operation finishes before the next
+            // one starts.
+            _ = tick.tick(), if poll_enabled && !ctx.poll_in_flight() => {
                 let payload = match ctx.run_poll() {
                     Ok(payload) => {
-                        consecutive_poll_failures = 0;
+                        if !ctx.poll_in_flight() {
+                            consecutive_poll_failures = 0;
+                        }
                         payload
                     }
                     Err(err) => {
-                        consecutive_poll_failures += 1;
-                        let message = err.to_string();
-                        let _ = tx.send(BackendServiceEvent::CallbackFailed {
-                            service: service_name.clone(),
-                            source_module: module_id.clone(),
-                            stage: "poll".to_string(),
-                            count: consecutive_poll_failures,
-                            message: message.clone(),
-                            identity: backend_identity(&identity_handle),
-                        }).await;
-                        if consecutive_poll_failures >= MAX_CONSECUTIVE_CALLBACK_FAILURES {
-                            let _ = tx.send(BackendServiceEvent::Failed {
-                                service: service_name.clone(),
-                                source_module: module_id.clone(),
-                                stage: "poll".to_string(),
-                                message,
-                                identity: backend_identity(&identity_handle),
-                            }).await;
+                        if !record_poll_failure(&tx, &service_name, &module_id, err, &mut consecutive_poll_failures, &identity_handle).await {
                             break;
                         }
                         refresh_interval(&ctx, &mut interval_ms, &mut tick);
@@ -995,19 +1082,41 @@ async fn run_backend_service(
                         continue;
                     }
                     match ctx.run_command_with_result(&msg.command, &msg.payload) {
-                        Ok(outcome) => {
+                        Ok(BackendCommandRun::Suspended { task, state }) => {
                             refresh_interval(&ctx, &mut interval_ms, &mut tick);
-                            let terminal_outcome = if outcome.error.is_some()
-                                || outcome
-                                    .result
-                                    .get("ok")
-                                    .and_then(|value| value.as_bool())
-                                    == Some(false)
-                            {
-                                BackendCommandOutcome::Failed
-                            } else {
-                                BackendCommandOutcome::Completed
-                            };
+                            watch_suspended_call(call_id, &task_wakeup);
+                            suspended_commands.insert(task, SuspendedCommand {
+                                call_id,
+                                command,
+                                generation,
+                                identity: command_identity,
+                            });
+                            if let Some(payload) = state {
+                                if !publish_changed_update(
+                                    &tx,
+                                    &service_name,
+                                    &module_id,
+                                    &mut last_payload,
+                                    payload,
+                                    &identity_handle,
+                                ).await {
+                                    stop = true;
+                                    break;
+                                }
+                            }
+                            if !publish_script_events(
+                                &tx,
+                                &service_name,
+                                &module_id,
+                                ctx.drain_events(),
+                                &identity_handle,
+                            ).await {
+                                stop = true;
+                            }
+                        }
+                        Ok(BackendCommandRun::Finished(outcome)) => {
+                            refresh_interval(&ctx, &mut interval_ms, &mut tick);
+                            let terminal_outcome = terminal_outcome(&outcome);
                             finish_call(call_id);
                             if tx.send(BackendServiceEvent::CommandResult(BackendCommandResult {
                                 call_id,
@@ -1069,6 +1178,21 @@ async fn run_backend_service(
             }
         }
     }
+    for (_, pending) in suspended_commands {
+        let _ = send_command_result(
+            &tx,
+            &service_name,
+            &module_id,
+            pending,
+            BackendCommandOutcome::StaleGeneration,
+            serde_json::json!({
+                "ok": false,
+                "status": "stale_generation",
+                "error": "backend runtime stopped before the command finished",
+            }),
+        )
+        .await;
+    }
     while let Some(pending) = cmd_rx.try_recv() {
         let pending_generation = call_generation(pending.call_id, generation);
         let pending_identity = call_identity(pending.call_id, backend_identity(&identity_handle));
@@ -1090,6 +1214,122 @@ async fn run_backend_service(
             }))
             .await;
     }
+}
+
+/// A command whose handler suspended on a host operation.
+struct SuspendedCommand {
+    call_id: CallId,
+    command: String,
+    generation: u64,
+    identity: mesh_core_runtime::BackendIdentity,
+}
+
+fn terminal_outcome(
+    outcome: &mesh_core_scripting::backend::BackendCommandOutcome,
+) -> BackendCommandOutcome {
+    if outcome.error.is_some()
+        || outcome.result.get("ok").and_then(|value| value.as_bool()) == Some(false)
+    {
+        BackendCommandOutcome::Failed
+    } else {
+        BackendCommandOutcome::Completed
+    }
+}
+
+async fn send_command_result(
+    tx: &BackendEventSender,
+    service_name: &Arc<str>,
+    module_id: &Arc<str>,
+    pending: SuspendedCommand,
+    outcome: BackendCommandOutcome,
+    result: serde_json::Value,
+) -> bool {
+    finish_call(pending.call_id);
+    tx.send(BackendServiceEvent::CommandResult(BackendCommandResult {
+        call_id: pending.call_id,
+        service: Arc::clone(service_name),
+        source_module: Arc::clone(module_id),
+        command: pending.command,
+        result,
+        outcome,
+        generation: pending.generation,
+        identity: pending.identity,
+    }))
+    .await
+    .is_ok()
+}
+
+/// Resolve when a backend task is due or a host operation or cancellation
+/// woke the loop.
+async fn task_ready(wakeup: &tokio::sync::Notify, deadline: Option<std::time::Instant>) {
+    let due = async {
+        match deadline {
+            Some(deadline) => {
+                tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await
+            }
+            None => std::future::pending().await,
+        }
+    };
+    tokio::select! {
+        _ = wakeup.notified() => {}
+        _ = due => {}
+    }
+}
+
+async fn send_task_failure(
+    tx: &BackendEventSender,
+    service_name: &Arc<str>,
+    module_id: &Arc<str>,
+    error: BackendScriptError,
+    identity_handle: &std::sync::Arc<std::sync::RwLock<mesh_core_runtime::BackendIdentity>>,
+) -> bool {
+    tx.send(BackendServiceEvent::CallbackFailed {
+        service: Arc::clone(service_name),
+        source_module: Arc::clone(module_id),
+        stage: "task".into(),
+        count: 1,
+        message: error.to_string(),
+        identity: backend_identity(identity_handle),
+    })
+    .await
+    .is_ok()
+}
+
+/// Report a failed poll. Returns false once failures in a row reach
+/// `MAX_CONSECUTIVE_CALLBACK_FAILURES` and the provider must stop.
+async fn record_poll_failure(
+    tx: &BackendEventSender,
+    service_name: &Arc<str>,
+    module_id: &Arc<str>,
+    error: BackendScriptError,
+    consecutive_failures: &mut u32,
+    identity_handle: &std::sync::Arc<std::sync::RwLock<mesh_core_runtime::BackendIdentity>>,
+) -> bool {
+    *consecutive_failures += 1;
+    let message = error.to_string();
+    let _ = tx
+        .send(BackendServiceEvent::CallbackFailed {
+            service: Arc::clone(service_name),
+            source_module: Arc::clone(module_id),
+            stage: "poll".to_string(),
+            count: *consecutive_failures,
+            message: message.clone(),
+            identity: backend_identity(identity_handle),
+        })
+        .await;
+    if *consecutive_failures < MAX_CONSECUTIVE_CALLBACK_FAILURES {
+        return true;
+    }
+    let _ = tx
+        .send(BackendServiceEvent::Failed {
+            service: Arc::clone(service_name),
+            source_module: Arc::clone(module_id),
+            stage: "poll".to_string(),
+            message,
+            identity: backend_identity(identity_handle),
+        })
+        .await;
+    false
 }
 
 async fn dispatch_stream_events(
@@ -2680,6 +2920,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn backend_task_deadlines_publish_without_a_poll_handler() {
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/task-deadline".into(),
+            "audio".into(),
+            CapabilitySet::default(),
+            serde_json::json!({}),
+            r#"
+state = { value = 0 }
+function start(self)
+    task.spawn(function()
+        task.sleep(10)
+        state.value = 7
+    end)
+end
+"#
+            .into(),
+            event_tx,
+            cmd_rx,
+        ));
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                match event_rx.recv().await.expect("backend event channel") {
+                    BackendServiceEvent::Update(update) if update.payload["value"] == 7 => break,
+                    BackendServiceEvent::Failed { message, .. } => {
+                        panic!("backend failed: {message}")
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("task deadline should wake a backend with no polling");
+        drop(cmd_tx);
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn cancelling_backend_service_still_emits_one_terminal_record() {
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let (_cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -3181,5 +3463,146 @@ mod tests {
             .await
             .expect("backend task should exit after command channel closes")
             .expect("backend task should not panic");
+    }
+
+    const WAITING_PROVIDER: &str = r#"
+state = { ready = false }
+local function wait_for(path)
+    return mesh.exec("sh", {"-c", 'while [ ! -e "$1" ]; do sleep 0.01; done; printf ok', "mesh-test", path})
+end
+function start(self)
+    state.ready = wait_for(mesh.config().start).stdout == "ok"
+end
+function on_command_fetch(self)
+    local amount = mesh.service.payload().amount
+    return { ok = wait_for(mesh.config().command).success, amount = amount }
+end
+function on_command_quick(self)
+    return { ok = true }
+end
+"#;
+
+    fn waiting_provider(
+        name: &str,
+    ) -> (
+        PathBuf,
+        mpsc::UnboundedReceiver<BackendServiceEvent>,
+        mpsc::UnboundedSender<BackendServiceCommand>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let root = std::env::temp_dir().join(format!(
+            "mesh-backend-{name}-{}-{}",
+            std::process::id(),
+            CallId::next().raw()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        let task = tokio::spawn(spawn_backend_service(
+            format!("@test/{name}"),
+            "audio".into(),
+            CapabilitySet::from_ids(["exec.command"]),
+            serde_json::json!({
+                "start": root.join("start"),
+                "command": root.join("command"),
+            }),
+            WAITING_PROVIDER.into(),
+            event_tx,
+            cmd_rx,
+        ));
+        (root, event_rx, cmd_tx, task)
+    }
+
+    fn command(name: &str, payload: serde_json::Value) -> (CallId, BackendServiceCommand) {
+        let call_id = CallId::next();
+        register_call(call_id, Duration::from_secs(5));
+        (
+            call_id,
+            BackendServiceCommand {
+                call_id,
+                command: name.into(),
+                payload,
+                coalesce: false,
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn provider_is_ready_only_after_a_suspended_start_finishes() {
+        let (root, mut event_rx, cmd_tx, task) = waiting_provider("async-start");
+        let early = tokio::time::timeout(Duration::from_millis(100), async {
+            loop {
+                if let BackendServiceEvent::Started { .. } = event_rx.recv().await.unwrap() {
+                    break;
+                }
+            }
+        })
+        .await;
+        assert!(
+            early.is_err(),
+            "provider became ready before start finished"
+        );
+        std::fs::write(root.join("start"), "").unwrap();
+        let state = next_update(&mut event_rx, "start should publish its final state").await;
+        assert_eq!(state.payload["ready"], true);
+        drop(cmd_tx);
+        tokio::time::timeout(Duration::from_secs(3), task)
+            .await
+            .unwrap()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn suspended_command_replies_after_later_commands() {
+        let (root, mut event_rx, cmd_tx, task) = waiting_provider("async-command");
+        std::fs::write(root.join("start"), "").unwrap();
+        let (slow, fetch) = command("fetch", serde_json::json!({ "amount": 4 }));
+        let (quick, quick_command) = command("quick", serde_json::json!({}));
+        cmd_tx.send(fetch).unwrap();
+        cmd_tx.send(quick_command).unwrap();
+        let first = next_command_result(&mut event_rx, "quick command should not wait").await;
+        assert_eq!(first.call_id, quick);
+        std::fs::write(root.join("command"), "").unwrap();
+        let second = next_command_result(&mut event_rx, "suspended command should reply").await;
+        assert_eq!(second.call_id, slow);
+        assert_eq!(second.outcome, BackendCommandOutcome::Completed);
+        assert_eq!(
+            second.result,
+            serde_json::json!({ "ok": true, "amount": 4 })
+        );
+        drop(cmd_tx);
+        tokio::time::timeout(Duration::from_secs(3), task)
+            .await
+            .unwrap()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_suspended_command_settles_it_as_cancelled() {
+        let (root, mut event_rx, cmd_tx, task) = waiting_provider("async-cancel");
+        std::fs::write(root.join("start"), "").unwrap();
+        let (slow, fetch) = command("fetch", serde_json::json!({ "amount": 1 }));
+        let (quick, quick_command) = command("quick", serde_json::json!({}));
+        cmd_tx.send(fetch).unwrap();
+        cmd_tx.send(quick_command).unwrap();
+        assert_eq!(
+            next_command_result(&mut event_rx, "quick command should reply")
+                .await
+                .call_id,
+            quick
+        );
+        assert!(cancel_call(slow));
+        let cancelled = next_command_result(&mut event_rx, "cancel should settle the call").await;
+        assert_eq!(cancelled.call_id, slow);
+        assert_eq!(cancelled.outcome, BackendCommandOutcome::Cancelled);
+        drop(cmd_tx);
+        tokio::time::timeout(Duration::from_secs(3), task)
+            .await
+            .unwrap()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(root);
     }
 }

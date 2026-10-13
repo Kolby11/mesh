@@ -1327,6 +1327,9 @@ impl FrontendSurfaceComponent {
             );
             return;
         }
+        if parent.script_ctx.reactive_effects_need_run() {
+            self.reactive_binding_pending.set(true);
+        }
         drop(runtimes);
 
         // Record the link so the parent's event handlers can re-sync this child

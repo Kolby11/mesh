@@ -463,8 +463,9 @@ contract-less binding.
   range (an `int` stays integral), and anything else that violates the
   contract rejects the snapshot with a `service_contract_warning`. Frontends
   therefore read range-checked values. Before a service publishes state (or
-  when an optional service has no provider), its proxy reads `available` as
-  `false` and each field as its default. Widening or dropping a range, or
+  when no provider is installed, for an optional or a required service; see
+  §5), its proxy reads `available` as `false` and each field as its default,
+  and `require` and static imports return that proxy instead of raising. Widening or dropping a range, or
   dropping a default, is a breaking contract change; narrowing is additive.
 - **Reactive command state.** A method may declare
   `"stateBinding": { "field", "fromArg" }` or
@@ -939,6 +940,18 @@ default for a malformed argument.
   `on_poll(self)`, `on_command_<method>()` returning `{ ok = true }` /
   `{ ok = false, error = "…" }`, and fire declared events via
   `self.EventName:fire(payload)`.
+- **Shipped — backend tasks.** Backends have the frontend `task` library
+  (`task.spawn`, `task.delay`, `task.sleep`, `task.cancel`) once `start(self)`
+  runs. `start`, `on_poll` and `on_command_<method>` run as coroutines, as do
+  tasks: inside them `mesh.exec`, `mesh.socket_request` and `mesh.read_file`
+  (`fs.read`, absolute regular files up to the output limit) suspend the
+  callback while a host worker runs, and other callbacks keep running. The
+  provider becomes ready when `start` finishes; a poll that suspended
+  finishes before the next poll starts; a suspended command replies when its
+  handler returns and is dropped if the caller cancels. Only a command that
+  fails before suspending has `state` rolled back. Stream hooks, `stop` and
+  calls from contexts Luau cannot yield from (metamethods, `table.sort`
+  comparators) still block.
 - Core-triggered service actions use that same declared method and generic
   dispatcher. For example, startup playback calls `mesh.audio.play_sound`
   rather than sending directly to a known backend handler.

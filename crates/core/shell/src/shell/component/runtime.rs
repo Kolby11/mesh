@@ -279,27 +279,23 @@ impl FrontendSurfaceComponent {
         self.call_handler_target(handler, &merged_args)
     }
 
-    /// Run the pending render hooks before the paint path decides how to
-    /// produce this frame's tree, and report whether they changed anything a
-    /// template reads. Running them first is what makes the answer usable: a
-    /// hook that only refreshes state no template consumes then leaves the
-    /// retained and selective build paths available for the frame, instead of
-    /// forcing a full template rebuild merely because a `render()` exists.
-    pub(super) fn run_pending_render_hooks(&mut self) {
-        self.render_hooks_changed_templates = false;
-        if !self.render_hooks_pending {
+    /// Settle pending effects before choosing the template update path.
+    /// Writes with no template consumers preserve the retained tree.
+    pub(super) fn run_pending_effects(&mut self) {
+        self.effects_changed_templates = false;
+        if !self.reactive_effects_pending {
             return;
         }
-        self.call_render_hooks();
-        self.render_hooks_pending = false;
+        self.flush_reactive_effects();
+        self.reactive_effects_pending = false;
     }
 
-    pub(super) fn call_render_hooks(&mut self) {
+    pub(super) fn flush_reactive_effects(&mut self) {
         let mut state_dirty = false;
         let mut written = Vec::new();
         let mut runtimes = self.runtimes.lock().unwrap();
         for (instance_key, runtime) in runtimes.iter_mut() {
-            if Self::call_runtime_render_hook(&self.diagnostics, runtime) {
+            if Self::flush_runtime_effects(&self.diagnostics, runtime) {
                 state_dirty = true;
                 written.push(instance_key.to_string());
             }
@@ -317,19 +313,18 @@ impl FrontendSurfaceComponent {
         for (instance_key, generation) in generations {
             self.sync_runtime_generation(&instance_key, generation);
         }
-        if state_dirty && self.template_patching && self.try_patch_template_writes(&written) {
+        if (state_dirty
+            || self.pending_service_template_nodes.is_some()
+            || !self.pending_service_binding_readers.is_empty())
+            && self.try_patch_template_writes(&written)
+        {
             self.drop_script_narrow_after_patch();
             return;
         }
         if state_dirty {
-            self.render_hooks_changed_templates = true;
-            // A render hook reached here because a service update invalidated
-            // this component narrowly. Shipped components read services in
-            // Luau and assign derived template variables from `render()`, so
-            // escalating that write to `TREE_REBUILD` would put every poll on
-            // the full-rebuild, full-surface-damage path. Keep the frame on the
-            // narrow path instead: the template is still evaluated, and the
-            // retained diff decides between scoped and full synchronization.
+            self.effects_changed_templates = true;
+            // Service projections preserve narrow invalidation so retained
+            // reconciliation decides whether structural synchronization is needed.
             if self
                 .dirty_types
                 .contains(ComponentDirtyFlags::SCRIPT_NARROW)
@@ -342,45 +337,32 @@ impl FrontendSurfaceComponent {
     }
 
     #[cfg(test)]
-    pub(super) fn has_render_hooks(&self) -> bool {
+    pub(super) fn has_reactive_effects(&self) -> bool {
         let mut runtimes = self.runtimes.lock().unwrap();
         runtimes
             .values_mut()
-            .any(|runtime| runtime.script_ctx.has_handler("render"))
+            .any(|runtime| runtime.script_ctx.has_reactive_effects())
     }
 
-    pub(super) fn call_runtime_render_hook(
+    pub(super) fn flush_runtime_effects(
         diagnostics: &Option<Diagnostics>,
         runtime: &mut EmbeddedFrontendRuntime,
     ) -> bool {
-        if !runtime.script_ctx.has_handler("render") {
+        if !runtime.script_ctx.has_reactive_effects() {
             return false;
+        }
+        let generation_before = runtime.script_ctx.state().mutation_generation();
+
+        for error in runtime.script_ctx.run_reactive_effects() {
+            Self::record_script_call_error(diagnostics, runtime, "effect", &error);
         }
 
-        if let Err(source) = runtime.script_ctx.call_render_lifecycle() {
-            let component_id = runtime.module_id.clone();
-            let error_message = source.to_string();
-            tracing::warn!(
-                component_id = %component_id,
-                handler = "render",
-                error = %error_message,
-                "frontend render hook failed"
-            );
-            if let Some(diagnostics) = diagnostics {
-                diagnostics.record_handler_error_with_source(
-                    component_id,
-                    "render".to_string(),
-                    error_message,
-                    Some(runtime.source_path.display().to_string()),
-                    runtime.script_source_span,
-                );
-            }
-            Self::drain_script_diagnostics(diagnostics, runtime);
-            return false;
-        }
         Self::normalize_script_props(diagnostics, runtime);
         Self::drain_script_diagnostics(diagnostics, runtime);
-        // A render hook that refreshed state no template expression reads has
+        if runtime.script_ctx.state().mutation_generation() == generation_before {
+            return false;
+        }
+        // An effect that refreshed state no template expression reads has
         // no effect on the tree, exactly as for an event handler. Clear the
         // dirty flag so the frame is not rebuilt for an invisible write.
         if runtime.script_ctx.state().is_dirty()
@@ -407,6 +389,10 @@ impl FrontendSurfaceComponent {
         };
         for diagnostic in runtime.script_ctx.drain_diagnostics() {
             let (category, message) = match diagnostic.category {
+                ScriptDiagnosticCategory::Lifecycle => (
+                    mesh_core_diagnostics::DiagnosticCategory::Script,
+                    diagnostic.reason.clone(),
+                ),
                 ScriptDiagnosticCategory::InterfaceUnavailable => (
                     mesh_core_diagnostics::DiagnosticCategory::Interface,
                     format!(
@@ -788,6 +774,8 @@ impl FrontendSurfaceComponent {
 
         let mut runtime = EmbeddedFrontendRuntime {
             module_id: component_id,
+            unpatchable_template_expressions:
+                mesh_core_frontend::collect_unpatchable_template_expressions(component),
             source_path: source_path.to_path_buf(),
             script_source_span: component.script.as_ref().map(|script| {
                 mesh_core_diagnostics::DiagnosticSourceSpan::new(script.span.start, script.span.end)
@@ -875,7 +863,7 @@ impl FrontendSurfaceComponent {
         }
 
         let mut runtime = self.create_runtime(instance_key, compiled, props)?;
-        Self::call_runtime_render_hook(&self.diagnostics, &mut runtime);
+        Self::flush_runtime_effects(&self.diagnostics, &mut runtime);
         apply_runtime_props(&mut runtime, props, false).map_err(|source| {
             ComponentError::Script {
                 component_id: runtime.module_id.clone(),
@@ -967,7 +955,7 @@ impl FrontendSurfaceComponent {
             source_path,
             props,
         )?;
-        Self::call_runtime_render_hook(&self.diagnostics, &mut runtime);
+        Self::flush_runtime_effects(&self.diagnostics, &mut runtime);
         apply_runtime_props(&mut runtime, props, false).map_err(|source| {
             ComponentError::Script {
                 component_id: runtime.module_id.clone(),
@@ -1259,6 +1247,11 @@ impl FrontendSurfaceComponent {
         let Some(runtime) = runtimes.get_mut(instance_key) else {
             return Ok(Vec::new());
         };
+        // Bindings may have been installed by the last paint. Settle their
+        // effects before the handler can write optimistic interaction state.
+        for error in runtime.script_ctx.run_reactive_effects() {
+            Self::record_script_call_error(&self.diagnostics, runtime, "effect", &error);
+        }
         match call(&mut runtime.script_ctx) {
             Err(source) => {
                 Self::record_script_call_error(&self.diagnostics, runtime, label, &source);
@@ -1277,6 +1270,9 @@ impl FrontendSurfaceComponent {
         }
         Self::normalize_script_props(&self.diagnostics, runtime);
         Self::drain_script_diagnostics(&self.diagnostics, runtime);
+        for error in runtime.script_ctx.run_reactive_effects() {
+            Self::record_script_call_error(&self.diagnostics, runtime, "effect", &error);
+        }
         let state_dirty = runtime.script_ctx.state().is_dirty();
         let state_affects_template = runtime.script_ctx.dirty_state_affects_template();
         if state_dirty && !state_affects_template {
@@ -1322,7 +1318,6 @@ impl FrontendSurfaceComponent {
         };
         let patched = state_affects_template
             && !neighbors_dirty
-            && self.template_patching
             && self.try_patch_template_writes(std::slice::from_ref(&runtime_key));
         if (state_affects_template || neighbors_dirty) && !patched {
             // The retained-tree/display-list diff is authoritative for both
@@ -1444,7 +1439,11 @@ impl FrontendSurfaceComponent {
             if !neighbor.script_ctx.take_live_binding_external_accessed() {
                 continue;
             }
+            neighbor.script_ctx.invalidate_reactive_effects();
             neighbor.script_ctx.resync_state();
+            for error in neighbor.script_ctx.run_reactive_effects() {
+                Self::record_script_call_error(&self.diagnostics, neighbor, "effect", &error);
+            }
             Self::normalize_script_props(&self.diagnostics, neighbor);
             Self::drain_script_diagnostics(&self.diagnostics, neighbor);
             if neighbor.script_ctx.state().is_dirty() {

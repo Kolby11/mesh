@@ -318,7 +318,7 @@ local function update_local_prop(module_id, name, value, has_override, instance_
     end
 end
 
-function render()
+effect(function()
     local graph = {}
     if debug_service and type(debug_service.module_graph) == "table" then
         graph = debug_service.module_graph
@@ -527,7 +527,7 @@ function render()
     modules_summary = #graph == 0 and "advanced.no_modules_published"
         or "advanced.modules_match"
     modules_notice_separator = module_notice == "" and "" or " · "
-end
+end)
 
 local function publish_prop(channel, module_id, name, value, instance_id)
     local payload = { module_id = module_id, prop = name }

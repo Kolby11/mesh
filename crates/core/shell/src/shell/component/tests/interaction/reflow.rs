@@ -325,9 +325,9 @@ input:checked {
 </template>
 <script lang="luau">
 render_count = 0
-function render()
+effect(function()
     render_count = render_count + 1
-end
+end)
 </script>
 "#,
     );
@@ -423,9 +423,9 @@ text {
 </template>
 <script lang="luau">
 render_count = 0
-function render()
+effect(function()
     render_count = render_count + 1
-end
+end)
 </script>
 "#,
     );
@@ -652,7 +652,7 @@ local function update_audio_copy(percent, muted)
     end
 end
 
-function render()
+effect(function()
     if not audio_ok or not audio then
         icon_name = "audio-volume-muted"
         audio_tooltip = "Audio service unavailable"
@@ -663,7 +663,7 @@ function render()
     local percent = math.floor(tonumber(audio.percent) or 0)
     local muted = audio.muted or false
     update_audio_copy(percent, muted)
-end
+end)
 
 function onVolumeChange(value)
     handler_value_type = type(value)
@@ -687,9 +687,9 @@ end
             "audio",
             &serde_json::json!({ "percent": 20, "muted": false }),
         );
-        runtime.script_ctx.call_handler("render", &[]).unwrap();
+        assert!(runtime.script_ctx.run_reactive_effects().is_empty());
     }
-    component.render_hooks_pending = false;
+    component.reactive_effects_pending = false;
 
     let mut slider = event_node(
         "slider",
@@ -754,13 +754,7 @@ end
 
     match requests.as_slice() {
         [
-            CoreRequest::ServiceCommand {
-                interface,
-                command,
-                payload,
-                ..
-            }
-            | CoreRequest::ServiceCall {
+            CoreRequest::ServiceCall {
                 interface,
                 command,
                 payload,

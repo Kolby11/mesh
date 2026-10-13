@@ -81,8 +81,11 @@ impl ScriptContext {
                             continue;
                         }
                         if let Ok(value) = self.lua().from_value::<Value>(lua_value) {
+                            let generation = self.state.mutation_generation();
                             self.state.set(key.clone(), value);
-                            record_changed_public_member(&mut self.changed_public_members, key);
+                            if self.state.mutation_generation() != generation {
+                                record_changed_public_member(&mut self.changed_public_members, key);
+                            }
                         }
                     }
                 }
@@ -162,6 +165,7 @@ impl ScriptContext {
         }
 
         if self.pending_redraw.swap(false, Ordering::AcqRel) {
+            self.invalidate_reactive_effects();
             self.state.dirty = true;
         }
     }
@@ -199,6 +203,9 @@ impl ScriptContext {
                 .any(|key| tracked_storage_keys.contains(key))
             {
                 self.state.dirty = true;
+                if !self.tracking_effect_members.load(Ordering::Acquire) {
+                    self.invalidate_reactive_effects();
+                }
             }
         }
         let shared_interface_bindings = self.shared_interface_bindings.lock().unwrap();

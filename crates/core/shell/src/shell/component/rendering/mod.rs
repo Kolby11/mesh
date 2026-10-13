@@ -316,9 +316,9 @@ impl FrontendSurfaceComponent {
         selective: Option<(&WidgetNode, &HashSet<NodeId>)>,
     ) -> WidgetNode {
         let _span = tracing::debug_span!("build_tree", surface = %self.id()).entered();
-        if self.render_hooks_pending {
-            self.call_render_hooks();
-            self.render_hooks_pending = false;
+        if self.reactive_effects_pending {
+            self.flush_reactive_effects();
+            self.reactive_effects_pending = false;
         }
         self.refresh_active_theme(theme);
         let root_state = self
@@ -379,6 +379,8 @@ impl FrontendSurfaceComponent {
                 .cloned()
                 .or_else(|| self.last_tree.clone())
                 .unwrap_or_else(|| self.build_error_widget(failure));
+        } else {
+            self.template_patch_recovery_pending.set(false);
         }
         if let Err(error) = mesh_core_elements::validate_widget_tree(&tree) {
             tracing::error!(
@@ -405,6 +407,8 @@ impl FrontendSurfaceComponent {
         for runtime in self.runtimes.lock().unwrap().values_mut() {
             runtime.script_ctx.mark_template_dependencies_ready();
         }
+        self.pending_service_template_nodes = None;
+        self.pending_service_binding_readers.clear();
         let localized_misses = self
             .runtimes
             .lock()
@@ -438,6 +442,7 @@ impl FrontendSurfaceComponent {
     ) -> WidgetNode {
         let previous = self.last_tree.take();
         let pending_service_nodes = self.pending_service_template_nodes.take();
+        self.pending_service_binding_readers.clear();
         let scope_is_safe = !self.surface_exiting
             && !self.surface_entering
             && self.closing_child_keys.is_empty()
@@ -452,9 +457,10 @@ impl FrontendSurfaceComponent {
         // a template input can invalidate nodes outside the service-derived
         // set, so gate on what the hooks did rather than on their existence.
         let can_selectively_build = scope_is_safe
+            && !self.template_patch_recovery_pending.get()
             && !selective_rebuild_nodes.is_empty()
             && self.selective_service_build_supported
-            && !self.render_hooks_changed_templates;
+            && !self.effects_changed_templates;
         #[cfg(test)]
         let can_selectively_build = can_selectively_build && !self.force_full_template_build;
         let tree = if can_selectively_build {

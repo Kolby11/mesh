@@ -160,6 +160,38 @@ pub fn props_settings_schema(block: Option<&PropsBlock>) -> Option<serde_json::V
     mesh_core_component::props_settings_schema(block)
 }
 
+pub(super) struct BoundTemplateStore<'a> {
+    pub base: &'a dyn VariableStore,
+    pub locals: Option<&'a serde_json::Map<String, serde_json::Value>>,
+}
+
+impl VariableStore for BoundTemplateStore<'_> {
+    fn get(&self, name: &str) -> Option<serde_json::Value> {
+        self.get_ref(name).cloned().or_else(|| self.base.get(name))
+    }
+    fn get_ref<'a>(&'a self, name: &str) -> Option<&'a serde_json::Value> {
+        self.locals
+            .and_then(|locals| locals.get(name))
+            .or_else(|| self.base.get_ref(name))
+    }
+    fn keys(&self) -> Vec<String> {
+        let mut keys = self.base.keys();
+        if let Some(locals) = self.locals {
+            keys.extend(locals.keys().cloned());
+        }
+        keys
+    }
+    fn template_locals(&self) -> serde_json::Map<String, serde_json::Value> {
+        self.locals.cloned().unwrap_or_default()
+    }
+    fn translate(&self, key: &str) -> Option<String> {
+        self.base.translate(key)
+    }
+    fn record_template_service_reads(&self, reads: &[(String, String)]) {
+        self.base.record_template_service_reads(reads);
+    }
+}
+
 pub(super) struct TrackingVariableStore<'a> {
     pub(super) inner: &'a dyn VariableStore,
     pub(super) reads: std::cell::RefCell<Vec<(String, String)>>,

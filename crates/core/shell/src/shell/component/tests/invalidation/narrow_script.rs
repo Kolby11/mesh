@@ -255,7 +255,7 @@ fn direct_audio_service_component_with_hook_body(
         ""
     };
     let render_hook = render_hook_body
-        .map(|body| format!("function render() {body} end"))
+        .map(|body| format!("effect(function() {body} end)"))
         .unwrap_or_default();
     test_frontend_component_with_catalog(
         &format!(
@@ -294,7 +294,7 @@ fn prime_audio_component(
 }
 
 #[test]
-fn service_field_update_reuses_clean_static_template_subtrees() {
+fn service_field_update_patches_bindings_without_template_evaluation() {
     let mut component = direct_audio_service_component(64, false, false);
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(640, 160);
@@ -317,19 +317,101 @@ fn service_field_update_reuses_clean_static_template_subtrees() {
 
     apply_audio_update(&mut component, 20, false);
     assert!(component.compiled.supports_selective_service_build());
-    assert!(!component.has_render_hooks());
+    assert!(!component.has_reactive_effects());
     assert!(component.pending_service_template_nodes.is_some());
     component
         .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
         .unwrap();
 
     assert!(rendered_text(&component).iter().any(|text| text == "20"));
-    assert!(
-        component.last_template_build_reused_nodes >= 64,
-        "every clean static row should retain its authored payload; reused {}",
-        component.last_template_build_reused_nodes
-    );
+    let snapshot = component.take_invalidation_snapshot().unwrap();
+    assert_eq!(snapshot.patched_node_count, 1);
+    assert_eq!(snapshot.component.script_narrow, 0);
+    assert!(!snapshot.full_rebuild);
     assert!(component.retained_tree.last_update_was_scoped());
+}
+
+#[test]
+fn service_fields_patch_keyed_rows_and_preserve_conditional_fallback() {
+    let source = r#"
+<script lang="luau">
+local audio = require('mesh.audio@>=1.0')
+items = {{id = "a"}, {id = "b"}}
+</script>
+<template><column style="width: 640px; height: 160px">
+{#for item in items key={item.id}}<text>{item.id .. ':' .. tostring(audio.percent)}</text>{/for}
+{#if audio.muted}<text>muted</text>{/if}
+</column></template>
+"#;
+    let mut component = test_frontend_component_with_catalog(
+        source,
+        audio_network_catalog(),
+        &["service.audio.read"],
+    );
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(640, 160);
+    let mut buffer = PixelBuffer::new(640, 160);
+    prime_audio_component(&mut component, &theme, &mut buffer);
+    apply_audio_update(&mut component, 20, false);
+    apply_audio_update(&mut component, 30, false);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    let snapshot = component.take_invalidation_snapshot().unwrap();
+    assert_eq!(snapshot.patched_node_count, 2);
+    assert_eq!(snapshot.component.script_narrow, 0);
+    let text = rendered_text(&component);
+    assert!(text.iter().any(|text| text == "a:30"));
+    assert!(text.iter().any(|text| text == "b:30"));
+    let mut rebuilt = PixelBuffer::new(640, 160);
+    component.invalidate_script_state();
+    component.paint(&theme, extent, &mut rebuilt, 1.0).unwrap();
+    assert_eq!(buffer.data(), rebuilt.data());
+
+    apply_audio_update(&mut component, 40, true);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    let snapshot = component.take_invalidation_snapshot().unwrap();
+    assert_eq!(snapshot.patched_node_count, 0);
+    assert_eq!(snapshot.component.script_narrow, 1);
+    assert!(rendered_text(&component).iter().any(|text| text == "muted"));
+    component.invalidate_script_state();
+    component.paint(&theme, extent, &mut rebuilt, 1.0).unwrap();
+    assert_eq!(buffer.data(), rebuilt.data());
+}
+
+#[test]
+fn service_binding_failure_does_not_publish_partial_patches() {
+    let source = r#"
+<script lang="luau">
+local audio = require('mesh.audio@>=1.0')
+local function label()
+    if audio.percent == 20 and audio.muted then error("invalid presentation value") end
+    return tostring(audio.percent)
+end
+</script>
+<template><column style="width: 640px; height: 160px"><text>{audio.percent}</text><text>{label()}</text><text>{audio.muted}</text></column></template>
+"#;
+    let mut component = test_frontend_component_with_catalog(
+        source,
+        audio_network_catalog(),
+        &["service.audio.read"],
+    );
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(640, 160);
+    let mut buffer = PixelBuffer::new(640, 160);
+    prime_audio_component(&mut component, &theme, &mut buffer);
+    let previous = buffer.data().to_vec();
+    apply_audio_update(&mut component, 20, true);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    assert_eq!(buffer.data(), previous.as_slice());
+    assert!(!rendered_text(&component).iter().any(|text| text == "20"));
+    apply_audio_update(&mut component, 20, false);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    assert_eq!(
+        rendered_text(&component)
+            .iter()
+            .filter(|text| text.as_str() == "20")
+            .count(),
+        2
+    );
 }
 
 #[test]
@@ -351,9 +433,7 @@ fn dynamic_service_template_keeps_full_evaluation_fallback() {
 }
 
 #[test]
-fn service_template_with_writing_render_hook_keeps_full_evaluation_fallback() {
-    // The hook writes a member the template renders, so nodes outside the
-    // service-derived set can change and the selective build is unsafe.
+fn service_template_patches_direct_reads_and_effect_writes_together() {
     let mut component = direct_audio_service_component_with_hook_body(
         16,
         false,
@@ -364,7 +444,7 @@ fn service_template_with_writing_render_hook_keeps_full_evaluation_fallback() {
     prime_audio_component(&mut component, &theme, &mut buffer);
 
     apply_audio_update(&mut component, 20, false);
-    assert!(component.has_render_hooks());
+    assert!(component.has_reactive_effects());
     component
         .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
         .unwrap();
@@ -373,33 +453,31 @@ fn service_template_with_writing_render_hook_keeps_full_evaluation_fallback() {
     assert!(text.iter().any(|text| text == "20"));
     assert!(
         text.iter().any(|text| text == "20!"),
-        "the render hook's write must reach the template: {text:?}"
+        "the effect's write must reach the template: {text:?}"
     );
     assert_eq!(component.last_template_build_reused_nodes, 0);
+    let snapshot = component.take_invalidation_snapshot().unwrap();
+    assert_eq!(snapshot.patched_node_count, 2);
+    assert_eq!(snapshot.component.script_narrow, 0);
 }
 
 #[test]
-fn service_template_with_inert_render_hook_still_reuses_clean_subtrees() {
-    // Merely declaring `render()` is not a reason to rebuild the whole
-    // template. The hook runs before the frame picks its path; when it writes
-    // nothing a template reads, the service-derived selective build stands.
+fn service_template_with_inert_effect_still_patches_bindings() {
     let mut component = direct_audio_service_component(16, false, true);
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(640, 160);
     prime_audio_component(&mut component, &theme, &mut buffer);
 
     apply_audio_update(&mut component, 20, false);
-    assert!(component.has_render_hooks());
+    assert!(component.has_reactive_effects());
     component
         .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
         .unwrap();
 
     assert!(rendered_text(&component).iter().any(|text| text == "20"));
-    assert!(
-        component.last_template_build_reused_nodes >= 16,
-        "clean static rows should be retained; reused {}",
-        component.last_template_build_reused_nodes
-    );
+    let snapshot = component.take_invalidation_snapshot().unwrap();
+    assert_eq!(snapshot.patched_node_count, 1);
+    assert_eq!(snapshot.component.script_narrow, 0);
 }
 
 // cargo test -p mesh-core-shell --release -- affected_template_eval_beats_full_rebuild --ignored --nocapture
@@ -472,7 +550,13 @@ fn affected_template_eval_beats_full_rebuild() {
     }
 
     assert_eq!(selective_buffer.data(), full_buffer.data());
-    assert!(selective.last_template_build_reused_nodes >= 1_024);
+    assert_eq!(
+        selective
+            .take_invalidation_snapshot()
+            .unwrap()
+            .patched_node_count,
+        1
+    );
     let speedup = full_time.as_secs_f64() / selective_time.as_secs_f64();
     eprintln!(
         "affected template evaluation over {iterations} one-field-dirty 1,026-node service frames: full {full_time:?}; selective {selective_time:?}; ratio {speedup:.3}x"
@@ -663,10 +747,10 @@ fn derived_audio_service_component(
 local audio = require("mesh.audio@>=1.0")
 label = "0%"
 visible = true
-function render()
+effect(function()
   label = string.format("%d%%", tonumber(audio.percent) or 0)
   visible = not audio.muted
-end
+end)
 </script>
 "#,
             (0..static_nodes)
@@ -760,4 +844,24 @@ fn derived_service_narrow_end_to_end_benchmark() {
         times[1],
         times[0].as_secs_f64() / times[1].as_secs_f64()
     );
+}
+
+#[test]
+fn legacy_render_is_not_automatically_scheduled() {
+    let mut component = test_frontend_component(
+        r#"
+<template><text>{label}</text></template>
+<script lang="luau">
+label = "setup"
+function render() label = "legacy" end
+</script>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(160, 40);
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 40), &mut buffer, 1.0)
+        .unwrap();
+    assert!(rendered_text(&component).iter().any(|text| text == "setup"));
+    assert!(!component.has_reactive_effects());
 }

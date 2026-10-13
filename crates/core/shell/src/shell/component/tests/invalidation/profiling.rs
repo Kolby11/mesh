@@ -607,9 +607,10 @@ fn phase98_profiling_backend_update_reduced_churn() {
         .expect("profiling snapshot");
 
     eprintln!(
-        "PHASE98_PROOF scenario=backend_update narrow_path={} affected_node_count={} full_rebuild={} component_invalidations={:?}",
+        "PHASE98_PROOF scenario=backend_update narrow_path={} affected_node_count={} patched_node_count={} full_rebuild={} component_invalidations={:?}",
         invalidation.narrow_path,
         invalidation.affected_node_count,
+        invalidation.patched_node_count,
         invalidation.full_rebuild,
         invalidation.component
     );
@@ -621,8 +622,9 @@ fn phase98_profiling_backend_update_reduced_churn() {
     assert!(
         invalidation.full_rebuild
             || invalidation.narrow_path
-            || invalidation.component.script_narrow > 0,
-        "backend update should use either TREE_REBUILD or SCRIPT_NARROW path"
+            || invalidation.component.script_narrow > 0
+            || invalidation.patched_node_count > 0,
+        "backend update should rebuild, take SCRIPT_NARROW, or patch bindings"
     );
 }
 

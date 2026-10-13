@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod benchmarks;
 mod context;
+mod effects;
 mod helpers;
 mod host_api;
 mod lifecycle;
@@ -8,7 +9,7 @@ mod prop_layers;
 mod shell_api;
 mod state;
 mod sync;
-mod tasks;
+pub(crate) mod tasks;
 mod template;
 mod vm;
 

@@ -320,7 +320,7 @@ local function sync_system_resources()
     font_rows = fonts
 end
 
-function render()
+effect(function()
     local current_theme = "mesh-default-dark"
     if theme then
         current_theme = theme.current or theme.theme_id or current_theme
@@ -331,7 +331,7 @@ function render()
     sync_theme(current_theme)
     sync_locale(mesh.locale.current() or "en")
     sync_system_resources()
-end
+end)
 
 function onThemeSelect(theme_id)
     local selected = tostring(theme_id or "")

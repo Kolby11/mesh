@@ -96,6 +96,7 @@ impl FrontendSurfaceComponent {
         expression: &str,
         error: impl std::fmt::Display,
     ) {
+        self.template_patch_recovery_pending.set(true);
         let message = format!(
             "template expression '{expression}' failed for frontend runtime '{instance_key}': {error}; retaining the last-known-good tree or showing a bounded error placeholder until the expression recovers"
         );

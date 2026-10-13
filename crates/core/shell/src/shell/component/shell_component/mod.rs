@@ -66,6 +66,7 @@ impl FrontendSurfaceComponent {
         self.retained_tree = RetainedWidgetTree::default();
         self.retained_display_list = RetainedDisplayList::default();
         self.pending_service_template_nodes = None;
+        self.pending_service_binding_readers.clear();
         self.child_display_lists.get_mut().clear();
         #[cfg(test)]
         {
@@ -201,7 +202,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             );
             *self.runtime_failure.borrow_mut() = Some(message);
         }
-        self.render_hooks_pending = true;
+        self.reactive_effects_pending = true;
         self.invalidate_script_state();
         let requests = vec![CoreRequest::PublishDiagnostics {
             message: format!(
@@ -397,6 +398,10 @@ impl ShellComponent for FrontendSurfaceComponent {
             generation,
         );
         let mut needs_rebuild = false;
+        let mut service_binding_readers: HashMap<String, HashSet<String>> = HashMap::new();
+        let changed_fields = previous_payload
+            .as_ref()
+            .map(|previous| json_field_diff(service_name, previous, payload));
         let mut runtimes = {
             let mut runtimes = self.runtimes.lock().unwrap();
             std::mem::take(&mut *runtimes)
@@ -430,6 +435,18 @@ impl ShellComponent for FrontendSurfaceComponent {
                     runtime.script_ctx.state().mutation_generation(),
                 );
                 continue;
+            }
+            if let Some(fields) = &changed_fields
+                && let Some(readers) = runtime
+                    .script_ctx
+                    .template_expressions_reading_service_fields(fields)
+            {
+                if !readers.is_empty() {
+                    service_binding_readers
+                        .entry(instance_key.to_string())
+                        .or_default()
+                        .extend(readers);
+                }
             }
             // Capability is module-wide, so every component instance of a
             // module that declares `service.x.read` is handed the payload —
@@ -482,7 +499,13 @@ impl ShellComponent for FrontendSurfaceComponent {
         }
         *self.runtimes.lock().unwrap() = runtimes;
         if needs_rebuild {
-            self.render_hooks_pending = true;
+            for (instance_key, readers) in service_binding_readers {
+                self.pending_service_binding_readers
+                    .entry(instance_key)
+                    .or_default()
+                    .extend(readers);
+            }
+            self.reactive_effects_pending = true;
             let narrow_nodes = if let Some(ref prev) = previous_payload {
                 let fields = json_field_diff(service_name, prev, payload);
                 let mut nodes = HashSet::new();
@@ -876,11 +899,11 @@ impl ShellComponent for FrontendSurfaceComponent {
         // one that rebuilds at the new size — snapshotting first would leave
         // those flags pending and burn one extra full frame per resize.
         self.observe_surface_size(content_width, content_height);
-        // Run render hooks BEFORE the dirty flags are snapshotted, so a hook
+        // Settle effects BEFORE the dirty flags are snapshotted, so an effect
         // that does invalidate lands in this frame rather than costing an
-        // extra one, and so the path decision below can see whether the hooks
+        // extra one, and so the path decision below can see whether the effects
         // changed anything a template reads.
-        self.run_pending_render_hooks();
+        self.run_pending_effects();
         let animation_only_frame = std::mem::take(&mut self.animation_only_dirty);
         let (requires_tree_rebuild, can_use_retained_path, dirty_types, _) =
             self.take_dirty_for_paint();
@@ -914,7 +937,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         let use_retained_style_path = !requires_tree_rebuild
             && can_use_retained_path
             && self.last_tree.is_some()
-            && !self.render_hooks_pending
+            && !self.reactive_effects_pending
             && !combined_script_and_interaction_update;
         // Mirrors `finalize_tree`'s paint-only restyle: the retained styles are
         // reused as they are, so no transition can start this frame.
@@ -932,7 +955,8 @@ impl ShellComponent for FrontendSurfaceComponent {
         let surface_css_props = self.surface_css_props();
         // Patched bindings changed authored attributes without a rebuild, so
         // their nodes still need the post-update style diagnostics.
-        let bindings_patched = !self.patched_binding_nodes.is_empty();
+        let patched_node_count = self.patched_binding_nodes.len() as u64;
+        let bindings_patched = patched_node_count > 0;
         let mut tree_was_rebuilt = false;
         let mut tree = if dirty_types.contains(ComponentDirtyFlags::SCRIPT_NARROW)
             && !combined_script_and_interaction_update
@@ -1251,6 +1275,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             text: mesh_core_debug::TextCacheSnapshot::default(),
             narrow_path,
             affected_node_count: affected_count,
+            patched_node_count,
         });
         tracing::trace!(
             "retained widget tree '{}' generation={} dirty={:?}",
@@ -1369,6 +1394,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.surface_pixels_invalid = false;
         self.clear_runtime_dirty_states();
         self.publish_frontend_frame();
+        if self.reactive_binding_pending.replace(false) {
+            self.reactive_effects_pending = true;
+            self.invalidate_script_state_narrow();
+        }
         if self.surface_entering {
             self.surface_entering = false;
             // A top-level layer surface reopens with one controlled entering
@@ -1405,7 +1434,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.transitions.clear();
         // Preserve keyframe timelines, but rebuild token-resolved rules.
         self.keyframe_rules.clear();
-        self.render_hooks_pending = true;
+        self.reactive_effects_pending = true;
         self.surface_pixels_invalid = true;
         self.invalidate_script_state();
         Ok(())
@@ -1443,7 +1472,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             self.sync_runtime_generation(&instance_key, generation);
         }
         self.reset_render_caches();
-        self.render_hooks_pending = true;
+        self.reactive_effects_pending = true;
         self.surface_pixels_invalid = true;
         self.invalidate_script_state();
         Ok(())
@@ -1668,7 +1697,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.register_runtime_generation(self.root_instance_key(), generation);
         self.runtime_failure.borrow_mut().take();
         self.resolve_frontend_runtime_issue("replacement initialization", self.root_instance_key());
-        self.render_hooks_pending = true;
+        self.reactive_effects_pending = true;
         self.invalidate_script_state();
         // Prepared local-component rules own cloned selectors and declarations
         // from the previous compilation. Keeping them would rebuild the fresh
@@ -1739,7 +1768,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.portal_hidden_bindings.get_mut().clear();
         self.pending_surface_states.get_mut().clear();
         self.ref_node_keys.get_mut().clear();
-        self.render_hooks_pending = true;
+        self.reactive_effects_pending = true;
         self.reset_render_caches();
         self.invalidate_script_state();
         true

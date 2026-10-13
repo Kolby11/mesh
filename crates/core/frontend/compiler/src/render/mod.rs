@@ -523,6 +523,20 @@ fn build_widget_node_inner(
         TemplateNode::Expr(expr) => {
             let mut node = WidgetNode::new("text");
             attach_module_id(&mut node, &manifest.package.id);
+            if let Some(state) = state
+                && (!state.in_loop() || state.loop_identity().is_some())
+            {
+                node.set_template_bindings(std::sync::Arc::new(
+                    mesh_core_elements::TemplateBindings {
+                        instance_key: instance_key.into(),
+                        locals: state
+                            .in_loop()
+                            .then(|| std::sync::Arc::new(state.template_locals())),
+                        attributes: Vec::new(),
+                        inline_content: Some(vec![TemplateNode::Expr(expr.clone())].into()),
+                    },
+                ));
+            }
             let tracking_store: Option<TrackingVariableStore> =
                 state.map(TrackingVariableStore::new);
             let effective = tracking_store.as_ref().map(|t| t as &dyn VariableStore);
@@ -919,9 +933,9 @@ fn build_element_node(
         && !element.children.is_empty()
         && element.children.iter().all(is_inline_template_node);
     if let Some(state) = state
-        && !state.in_loop()
+        && (!state.in_loop() || state.loop_identity().is_some())
     {
-        record_template_bindings(&mut node, element, inline_text, instance_key);
+        record_template_bindings(&mut node, element, inline_text, instance_key, state);
     }
 
     if inline_text {
@@ -1005,6 +1019,7 @@ fn record_template_bindings(
     element: &ElementNode,
     inline_text: bool,
     instance_key: &str,
+    state: &dyn VariableStore,
 ) {
     let attributes: Vec<(String, String)> = element
         .attributes
@@ -1029,6 +1044,9 @@ fn record_template_bindings(
     }
     node.set_template_bindings(std::sync::Arc::new(mesh_core_elements::TemplateBindings {
         instance_key: instance_key.into(),
+        locals: state
+            .in_loop()
+            .then(|| std::sync::Arc::new(state.template_locals())),
         attributes,
         inline_content,
     }));
@@ -1038,6 +1056,7 @@ fn record_template_bindings(
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TemplateBindingPatch {
     pub changed: bool,
+    pub dependencies_changed: bool,
     /// Text content changed, so the node needs relayout, not only restyle.
     pub content_changed: bool,
 }
@@ -1053,6 +1072,12 @@ pub fn patch_template_bindings(
     let Some(bindings) = node.template_bindings().cloned() else {
         return TemplateBindingPatch::default();
     };
+    let bound_state = BoundTemplateStore {
+        base: state,
+        locals: bindings.locals.as_deref(),
+    };
+    let tracking_state = TrackingVariableStore::new(&bound_state);
+    let state = &tracking_state as &dyn VariableStore;
     let mut patch = TemplateBindingPatch::default();
     for (name, expression) in &bindings.attributes {
         let value = expr_eval::evaluate_template_expression(
@@ -1104,6 +1129,15 @@ pub fn patch_template_bindings(
         node.accessibility =
             elements::accessibility_for_element(&source_tag, &tag, &node.attributes);
     }
+    let reads = tracking_state.into_reads();
+    patch.dependencies_changed = reads
+        .iter()
+        .any(|read| !node.service_field_reads.contains(read))
+        || node
+            .service_field_reads
+            .iter()
+            .any(|read| !reads.contains(read));
+    node.service_field_reads = reads;
     patch
 }
 

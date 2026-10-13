@@ -138,6 +138,11 @@ pub struct ScriptContext {
     pub(super) prop_layers: Arc<Mutex<serde_json::Value>>,
     /// Pending `task.delay` / `task.spawn` work owned by this instance.
     pub(super) tasks: super::tasks::SharedTaskQueue,
+    pub(super) effects: Arc<Mutex<super::effects::EffectQueue>>,
+    pub(super) effect_revision: Arc<std::sync::atomic::AtomicU64>,
+    pub(super) effect_member_reads: Arc<Mutex<Option<HashSet<String>>>>,
+    pub(super) tracking_effect_members: Arc<AtomicBool>,
+    pub(super) live_binding_generations: std::cell::RefCell<HashMap<String, u64>>,
     /// Typed `mesh.shell` effects waiting for the shell to drain them.
     pub(super) shell_effects: super::shell_api::ShellEffectQueue,
 }
@@ -364,6 +369,11 @@ impl ScriptContext {
             localized_misses: Arc::new(Mutex::new(Vec::new())),
             prop_layers: Arc::new(Mutex::new(serde_json::Value::Null)),
             tasks: Arc::default(),
+            effects: Arc::default(),
+            effect_revision: Arc::default(),
+            effect_member_reads: Arc::default(),
+            tracking_effect_members: Arc::default(),
+            live_binding_generations: std::cell::RefCell::default(),
             shell_effects: super::shell_api::ShellEffectQueue::new(realm_policy.budget()),
             realm_policy,
         })
@@ -391,6 +401,7 @@ impl ScriptContext {
     /// Replace the catalog behind `mesh.i18n.t()` with the owning module's
     /// scoped translator snapshot.
     pub fn set_i18n_translator(&mut self, translator: &ModuleTranslator<'_>) {
+        self.invalidate_reactive_effects();
         self.locale_cell.lock().unwrap().resolver = translator.owned();
         // Template expressions containing t(...) can otherwise remain in the
         // pure-member cache when the script members themselves did not change.
@@ -424,9 +435,16 @@ impl ScriptContext {
         let reactive_scalar_globals = lua.create_table().map_err(lua_err)?;
         let reactive_scalar_reads = reactive_scalar_globals.clone();
         let fallback_globals = lua.globals();
+        let effect_member_reads = Arc::clone(&self.effect_member_reads);
+        let tracking_effect_members = Arc::clone(&self.tracking_effect_members);
         meta.set(
             "__index",
             lua.create_function(move |_, (_table, key): (Table, String)| {
+                if tracking_effect_members.load(Ordering::Acquire)
+                    && let Some(reads) = effect_member_reads.lock().unwrap().as_mut()
+                {
+                    reads.insert(key.clone());
+                }
                 let value = reactive_scalar_reads.raw_get::<LuaValue>(key.as_str())?;
                 if matches!(value, LuaValue::Nil) {
                     fallback_globals.get::<LuaValue>(key.as_str())
@@ -486,6 +504,8 @@ impl ScriptContext {
     /// Tear down this context's `_ENV` graph. ScriptContext methods must not be
     /// called afterward without a subsequent `ensure_initialized()`.
     pub fn uninit(&mut self) {
+        self.clear_reactive_effects();
+        self.live_binding_generations.borrow_mut().clear();
         self.tasks.lock().unwrap().clear();
         self.cached_self_table = None;
         self.service_context_state.lock().unwrap().clear();
@@ -621,6 +641,8 @@ impl ScriptContext {
     ) -> Result<(), ScriptError> {
         self.ensure_initialized()?;
         self.restore_proxied_scalars_to_env().map_err(lua_err)?;
+        self.clear_reactive_effects();
+        self.live_binding_generations.borrow_mut().clear();
         self.interface_bindings.clear();
         self.user_global_keys.clear();
         self.user_global_key_set.clear();
@@ -655,6 +677,20 @@ impl ScriptContext {
             .exec()
             .map_err(map_lua_error)?;
         self.sync_state_from_lua();
+        if self.env().raw_get::<mlua::Function>("render").is_ok()
+            && self
+                .env()
+                .raw_get::<Table>("__mesh_template_expressions")
+                .is_ok()
+        {
+            self.diagnostics.push(ScriptDiagnostic {
+                module_id: self.module_id.clone(),
+                category: ScriptDiagnosticCategory::Lifecycle,
+                interface: "render".into(),
+                requested_version: None,
+                reason: "render() is no longer scheduled; derive values in template expressions and register side effects with effect(fn)".into(),
+            });
+        }
         tracing::debug!("loaded script for module {}", self.module_id);
         Ok(())
     }

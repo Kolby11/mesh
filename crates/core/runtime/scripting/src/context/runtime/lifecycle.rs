@@ -32,6 +32,9 @@ impl ScriptContext {
         if self.vm.is_none() || child.vm.is_none() {
             return Ok(());
         }
+        if self.live_binding_generations.borrow().get(binding) == Some(&child.generation) {
+            return Ok(());
+        }
         let lua = self.lua();
         let child_env = child.env().clone();
         let child_scalars = child
@@ -112,6 +115,10 @@ impl ScriptContext {
 
         proxy.set_metatable(Some(meta)).map_err(lua_err)?;
         self.env().set(binding, proxy).map_err(map_lua_error)?;
+        self.live_binding_generations
+            .borrow_mut()
+            .insert(binding.to_owned(), child.generation);
+        self.invalidate_reactive_effects();
         Ok(())
     }
 
@@ -190,6 +197,7 @@ impl ScriptContext {
             Ok(())
         })();
         if name == "unmount" {
+            self.clear_reactive_effects();
             // Storage must be durable even when authored teardown fails part
             // way through. The outer shell also invokes this explicitly so
             // every frontend implementation gets the same guarantee.

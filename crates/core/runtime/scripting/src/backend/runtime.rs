@@ -1,5 +1,6 @@
 use super::command::{
-    BackendCommandOutcome, BackendCommandRegistry, command_error_result, command_result_from_lua,
+    BackendCommandOutcome, BackendCommandRegistry, BackendCommandRun, command_error_result,
+    command_result_from_lua,
 };
 use super::event::BackendEventRegistry;
 use super::exec::{
@@ -13,6 +14,7 @@ use super::exec_stream::{
 use super::host_sources;
 use super::logging::log_message;
 use super::{BackendScriptError, MIN_POLL_INTERVAL_MS};
+use crate::context::tasks::{Driven, drive};
 use crate::operation::{release_side_effect, reserve_side_effect};
 use crate::policy::RuntimePolicy;
 use crate::session::RuntimeSession;
@@ -24,7 +26,7 @@ use crate::util::{default_runtime_storage_root, is_named_event_channel};
 use mesh_core_capability::CapabilitySet;
 use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value as JsonValue;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc, Mutex, RwLock,
@@ -73,6 +75,32 @@ pub struct BackendScriptContext {
     generation: u64,
     backend_identity: Arc<RwLock<mesh_core_runtime::BackendIdentity>>,
     session: RuntimeSession,
+    tasks: crate::context::tasks::SharedTaskQueue,
+    task_io: Arc<super::task_io::TaskIo>,
+    suspended: HashMap<u64, SuspendedCallback>,
+}
+
+/// A host callback that suspended on a host operation; its task id settles it.
+enum SuspendedCallback {
+    Start,
+    Poll,
+    Command { command: String, payload: JsonValue },
+}
+
+/// What one [`BackendScriptContext::run_due_tasks`] pass settled.
+#[derive(Debug, Default)]
+pub struct BackendTaskRun {
+    /// The state snapshot after every due task ran.
+    pub state: Option<JsonValue>,
+    /// Failures of tasks the script spawned itself.
+    pub errors: Vec<BackendScriptError>,
+    /// A suspended `start(self)` finished.
+    pub start: Option<Result<(), BackendScriptError>>,
+    /// Suspended `on_poll` calls that finished.
+    pub polls: Vec<Result<(), BackendScriptError>>,
+    /// Suspended commands that finished, by the task id
+    /// [`BackendCommandRun::Suspended`] returned.
+    pub commands: Vec<(u64, Result<BackendCommandOutcome, BackendScriptError>)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -246,6 +274,9 @@ impl BackendScriptContext {
             generation: 0,
             backend_identity: Arc::new(RwLock::new(mesh_core_runtime::BackendIdentity::default())),
             session,
+            tasks: Arc::default(),
+            task_io: Arc::default(),
+            suspended: HashMap::new(),
         }
     }
 
@@ -381,6 +412,7 @@ impl BackendScriptContext {
     /// entered. This keeps source-load failures from spawning processes,
     /// publishing events, changing polling, or mutating durable storage.
     pub fn load_script(&mut self, source: &str) -> Result<(), BackendScriptError> {
+        self.clear_tasks();
         self.host_side_effects_enabled
             .store(false, Ordering::Release);
         let _budget = self.policy.begin_callback();
@@ -439,14 +471,18 @@ impl BackendScriptContext {
                 })?;
         self.host_side_effects_enabled
             .store(true, Ordering::Release);
-        match entrypoint.call::<()>(current_self) {
-            Ok(()) => {
+        match self.invoke_callback(entrypoint, current_self) {
+            Ok(Driven::Finished(_)) => {
                 self.session
                     .mark_running()
                     .map_err(|error| BackendScriptError::Runtime {
                         module_id: self.module_id.clone(),
                         message: error.to_string(),
                     })?;
+                self.take_service_state_snapshot()
+            }
+            Ok(Driven::Suspended(task)) => {
+                self.suspended.insert(task, SuspendedCallback::Start);
                 self.take_service_state_snapshot()
             }
             Err(error) => {
@@ -465,6 +501,8 @@ impl BackendScriptContext {
             return Ok(());
         }
         self.stop_attempted = true;
+        self.task_io.close();
+        self.clear_tasks();
         self.session
             .begin_stop()
             .map_err(|error| BackendScriptError::Runtime {
@@ -497,6 +535,7 @@ impl BackendScriptContext {
                     })
             })()
         };
+        self.clear_tasks();
         self.flush_storage();
         self.session
             .finish_stop()
@@ -518,6 +557,155 @@ impl BackendScriptContext {
     /// stream supervisor is torn down.
     pub fn shutdown_exec(&self) {
         self.exec.shutdown();
+    }
+
+    pub fn task_wakeup(&self) -> Arc<tokio::sync::Notify> {
+        Arc::clone(&self.task_io.wakeup)
+    }
+
+    /// Earliest wakeup for tasks owned by this backend generation.
+    pub fn next_task_deadline(&self) -> Option<std::time::Instant> {
+        self.tasks.lock().unwrap().next_deadline()
+    }
+
+    pub fn pending_task_count(&self) -> usize {
+        self.tasks.lock().unwrap().len()
+    }
+
+    /// Whether `start(self)` suspended and has not finished. The provider is
+    /// not ready until it does.
+    pub fn start_pending(&self) -> bool {
+        self.suspended
+            .values()
+            .any(|callback| matches!(callback, SuspendedCallback::Start))
+    }
+
+    /// Whether an `on_poll` call suspended and has not finished; the next
+    /// poll waits for it so polls never overlap.
+    pub fn poll_in_flight(&self) -> bool {
+        self.suspended
+            .values()
+            .any(|callback| matches!(callback, SuspendedCallback::Poll))
+    }
+
+    /// Drop a suspended callback or task. Returns whether it was pending.
+    pub fn cancel_task(&mut self, task: u64) -> bool {
+        let removed = self.suspended.remove(&task).is_some();
+        self.tasks.lock().unwrap().cancel(task) || removed
+    }
+
+    fn clear_tasks(&mut self) {
+        self.tasks.lock().unwrap().clear();
+        self.suspended.clear();
+    }
+
+    /// Run a lifecycle, poll or command handler as a coroutine, so host
+    /// operations inside it suspend instead of blocking the backend thread.
+    fn invoke_callback(
+        &self,
+        handler: Function,
+        args: impl mlua::IntoLuaMulti,
+    ) -> mlua::Result<Driven> {
+        let lua = self.lua_ref()?;
+        let args = args.into_lua_multi(lua)?;
+        let thread = lua.create_thread(handler)?;
+        drive(lua, &self.tasks, thread, args, None)
+    }
+
+    /// Resume due tasks under individual callback budgets. A failed task is
+    /// dropped while independent tasks continue; output remains generation-scoped.
+    /// Suspended callbacks that finish are reported by kind; a command resumes
+    /// with its own payload.
+    pub fn run_due_tasks(&mut self, now: std::time::Instant) -> BackendTaskRun {
+        use crate::context::tasks::TaskBody;
+        let mut run = BackendTaskRun::default();
+        for id in self.task_io.drain_completed() {
+            self.tasks.lock().unwrap().wake_at(id, now);
+        }
+        let lua = match self.backend_lua() {
+            Ok(lua) => lua.clone(),
+            Err(error) => {
+                run.errors.push(error);
+                return run;
+            }
+        };
+        loop {
+            let Some((id, body)) = self.tasks.lock().unwrap().pop_due(now) else {
+                break;
+            };
+            let payload = match self.suspended.get(&id) {
+                Some(SuspendedCallback::Command { payload, .. }) => payload.clone(),
+                _ => JsonValue::Null,
+            };
+            self.runtime.lock().unwrap().current_payload = payload;
+            let result = {
+                let _budget = self.policy.begin_callback();
+                let thread = match body {
+                    TaskBody::Call(key) => lua
+                        .registry_value::<Function>(&key)
+                        .and_then(|callback| lua.create_thread(callback)),
+                    TaskBody::Resume(key) => lua.registry_value::<mlua::Thread>(&key),
+                };
+                thread.and_then(|thread| {
+                    drive(&lua, &self.tasks, thread, mlua::MultiValue::new(), Some(id))
+                })
+            };
+            let finished = match result {
+                Ok(Driven::Suspended(_)) => continue,
+                Ok(Driven::Finished(values)) => {
+                    Ok(values.into_iter().next().unwrap_or(LuaValue::Nil))
+                }
+                Err(error) => Err(error.to_string()),
+            };
+            let runtime_error = |message: String| BackendScriptError::Runtime {
+                module_id: self.module_id.clone(),
+                message,
+            };
+            match (self.suspended.remove(&id), finished) {
+                (None, Ok(_)) => {}
+                (None, Err(message)) => run.errors.push(runtime_error(message)),
+                (Some(SuspendedCallback::Start), Ok(_)) => {
+                    run.start = Some(
+                        self.session
+                            .mark_running()
+                            .map_err(|error| runtime_error(error.to_string())),
+                    );
+                }
+                (Some(SuspendedCallback::Start), Err(message)) => {
+                    self.session.record_failure(message.clone());
+                    run.start = Some(Err(runtime_error(message)));
+                }
+                (Some(SuspendedCallback::Poll), finished) => {
+                    run.polls.push(finished.map(|_| ()).map_err(runtime_error));
+                }
+                (Some(SuspendedCallback::Command { command, .. }), Ok(returned)) => {
+                    let outcome = self.command_result(&command, returned).map(|result| {
+                        BackendCommandOutcome {
+                            state: None,
+                            result,
+                            error: None,
+                        }
+                    });
+                    run.commands.push((id, outcome));
+                }
+                (Some(SuspendedCallback::Command { .. }), Err(message)) => {
+                    run.commands.push((
+                        id,
+                        Ok(BackendCommandOutcome {
+                            state: None,
+                            result: command_error_result(message.clone()),
+                            error: Some(message),
+                        }),
+                    ));
+                }
+            }
+        }
+        self.runtime.lock().unwrap().current_payload = JsonValue::Null;
+        match self.take_service_state_snapshot() {
+            Ok(state) => run.state = state,
+            Err(error) => run.errors.push(error),
+        }
+        run
     }
 
     /// Shared subprocess-stream state. The backend service loop awaits on
@@ -712,12 +900,16 @@ impl BackendScriptContext {
                     module_id: self.module_id.clone(),
                     message: err.to_string(),
                 })?;
-        handler
-            .call::<()>(current_self)
-            .map_err(|err| BackendScriptError::Runtime {
-                module_id: self.module_id.clone(),
-                message: err.to_string(),
-            })?;
+        if let Driven::Suspended(task) =
+            self.invoke_callback(handler, current_self).map_err(|err| {
+                BackendScriptError::Runtime {
+                    module_id: self.module_id.clone(),
+                    message: err.to_string(),
+                }
+            })?
+        {
+            self.suspended.insert(task, SuspendedCallback::Poll);
+        }
         self.take_service_state_snapshot()
     }
 
@@ -759,11 +951,15 @@ impl BackendScriptContext {
         self.take_service_state_snapshot()
     }
 
+    /// Run `on_command_<name>(self)` as a coroutine. A handler that suspends
+    /// on a host operation is reported as [`BackendCommandRun::Suspended`]
+    /// and settles from [`Self::run_due_tasks`]; only a handler that fails
+    /// before suspending has its `state` rolled back.
     pub fn run_command_with_result(
         &mut self,
         command: &str,
         payload: &JsonValue,
-    ) -> Result<BackendCommandOutcome, BackendScriptError> {
+    ) -> Result<BackendCommandRun, BackendScriptError> {
         let _budget = self.policy.begin_callback();
         self.host_side_effects_enabled
             .store(true, Ordering::Release);
@@ -774,7 +970,7 @@ impl BackendScriptContext {
         let handler_name = format!("on_command_{normalized}");
         if let Some(registry) = &self.command_registry {
             if let Err(message) = registry.validate_payload(command, payload) {
-                return Ok(BackendCommandOutcome {
+                return Ok(BackendCommandRun::Finished(BackendCommandOutcome {
                     state: None,
                     result: serde_json::json!({
                         "ok": false,
@@ -782,7 +978,7 @@ impl BackendScriptContext {
                         "error": message,
                     }),
                     error: None,
-                });
+                }));
             }
         }
 
@@ -790,11 +986,11 @@ impl BackendScriptContext {
         let handler = match globals.get::<Function>(handler_name.as_str()) {
             Ok(handler) => handler,
             Err(_) => {
-                return Ok(BackendCommandOutcome {
+                return Ok(BackendCommandRun::Finished(BackendCommandOutcome {
                     state: None,
                     result: command_error_result(format!("unsupported command: {command}")),
                     error: None,
-                });
+                }));
             }
         };
 
@@ -804,16 +1000,27 @@ impl BackendScriptContext {
                     module_id: self.module_id.clone(),
                     message: err.to_string(),
                 })?;
-        let returned = match handler.call::<LuaValue>(current_self) {
-            Ok(returned) => returned,
+        let returned = match self.invoke_callback(handler, current_self) {
+            Ok(Driven::Finished(values)) => values.into_iter().next().unwrap_or(LuaValue::Nil),
+            Ok(Driven::Suspended(task)) => {
+                self.suspended.insert(
+                    task,
+                    SuspendedCallback::Command {
+                        command: command.to_string(),
+                        payload: payload.clone(),
+                    },
+                );
+                let state = self.take_service_state_snapshot()?;
+                return Ok(BackendCommandRun::Suspended { task, state });
+            }
             Err(err) => {
                 let message = err.to_string();
                 self.rollback_command_state(previous_state);
-                return Ok(BackendCommandOutcome {
+                return Ok(BackendCommandRun::Finished(BackendCommandOutcome {
                     state: None,
                     result: command_error_result(message.clone()),
                     error: Some(message),
-                });
+                }));
             }
         };
         let state = match self.take_service_state_snapshot() {
@@ -823,50 +1030,47 @@ impl BackendScriptContext {
                 return Err(error);
             }
         };
-        let module_id = self.module_id.clone();
-        let lua = self.backend_lua()?;
-        let result = match command_result_from_lua(lua, &module_id, returned) {
-            Ok(result) => result,
+        match self.command_result(command, returned) {
+            Ok(result) => Ok(BackendCommandRun::Finished(BackendCommandOutcome {
+                state,
+                result,
+                error: None,
+            })),
             Err(error) => {
                 self.rollback_command_state(previous_state);
-                return Err(error);
+                Err(error)
             }
-        };
-        let result_bytes = match self
+        }
+    }
+
+    /// Convert a handler's return value into its command result and check it
+    /// against the output budget and the contract.
+    fn command_result(
+        &mut self,
+        command: &str,
+        returned: LuaValue,
+    ) -> Result<JsonValue, BackendScriptError> {
+        let result = command_result_from_lua(self.backend_lua()?, &self.module_id, returned)?;
+        let conversion_failed =
+            |message: String| BackendScriptError::CommandResultConversionFailed {
+                module_id: self.module_id.clone(),
+                message,
+            };
+        let result_bytes = self
             .policy
             .budget()
             .validate_json(&result, "command result")
-        {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                self.rollback_command_state(previous_state);
-                return Err(BackendScriptError::CommandResultConversionFailed {
-                    module_id: self.module_id.clone(),
-                    message: error.to_string(),
-                });
-            }
-        };
-        if let Err(error) = self.policy.budget().reserve_output(result_bytes) {
-            self.rollback_command_state(previous_state);
-            return Err(BackendScriptError::CommandResultConversionFailed {
-                module_id: self.module_id.clone(),
-                message: error.to_string(),
-            });
-        }
+            .map_err(|error| conversion_failed(error.to_string()))?;
+        self.policy
+            .budget()
+            .reserve_output(result_bytes)
+            .map_err(|error| conversion_failed(error.to_string()))?;
         if let Some(registry) = &self.command_registry {
-            if let Err(message) = registry.validate_result(command, &result) {
-                self.rollback_command_state(previous_state);
-                return Err(BackendScriptError::CommandResultConversionFailed {
-                    module_id: self.module_id.clone(),
-                    message,
-                });
-            }
+            registry
+                .validate_result(command, &result)
+                .map_err(conversion_failed)?;
         }
-        Ok(BackendCommandOutcome {
-            state,
-            result,
-            error: None,
-        })
+        Ok(result)
     }
 
     pub fn take_service_state_snapshot(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
@@ -972,8 +1176,23 @@ impl BackendScriptContext {
         let mesh = self.lua_ref()?.create_table()?;
         self.install_service_api(&mesh)?;
         self.install_exec_api(&mesh)?;
+        self.install_file_api(&mesh)?;
         self.install_config_api(&mesh)?;
         self.install_log_api(&mesh)?;
+        let task = crate::context::tasks::create_task_library(self.lua_ref()?, &self.tasks)?;
+        for name in ["spawn", "delay"] {
+            let callback: Function = task.get(name)?;
+            let started = Arc::clone(&self.host_side_effects_enabled);
+            task.set(
+                name,
+                self.lua_ref()?
+                    .create_function(move |_, args: mlua::MultiValue| {
+                        require_started(&started)?;
+                        callback.call::<mlua::MultiValue>(args)
+                    })?,
+            )?;
+        }
+        globals.set("task", task)?;
         globals.set("mesh", mesh)?;
         Ok(())
     }
@@ -1165,6 +1384,29 @@ impl BackendScriptContext {
             )?,
         )?;
 
+        let blocking: Function = mesh.get("exec")?;
+        let policy = self.exec_policy.clone();
+        let resources = self.policy.budget();
+        let exec = self.exec.clone();
+        let owner = Arc::clone(&self.task_io);
+        let started = Arc::clone(&self.host_side_effects_enabled);
+        let start = self.lua_ref()?.create_function(move |lua, (program, args, options): (String, Vec<String>, Option<Table>)| {
+            require_started(&started)?;
+            let locale = exec_locale_option(options.as_ref(), locale_granted)?;
+            if let Some(required) = missing_exec_capability(&policy, &program, &args) {
+                return super::task_io::TaskIo::ready(lua, serde_json::json!({
+                    "success": false, "stdout": "", "stderr": format!("denied mesh.exec(\"{program}\") without {required} or exec.command")
+                }), resources.clone());
+            }
+            let launch = policy.canonical_launch_program(&program, &args).unwrap_or_else(|| program.clone());
+            let exec = exec.clone();
+            owner.spawn(lua, resources.clone(), move || super::exec::run_exec_json(&launch, &program, &args, &locale, &exec))
+        })?;
+        mesh.set(
+            "exec",
+            super::task_io::yielding_host_function(self.lua_ref()?, blocking, start)?,
+        )?;
+
         let executable_policy = self.exec_policy.clone();
         let module_id = self.module_id.clone();
         let streams = Arc::clone(&self.streams);
@@ -1316,7 +1558,81 @@ impl BackendScriptContext {
                 },
             )?,
         )?;
+        let blocking: Function = mesh.get("socket_request")?;
+        let resources = self.policy.budget();
+        let owner = Arc::clone(&self.task_io);
+        let started = Arc::clone(&self.host_side_effects_enabled);
+        let start = self.lua_ref()?.create_function(move |lua, (path, request): (String, mlua::String)| {
+            require_started(&started)?;
+            if !granted {
+                return super::task_io::TaskIo::ready(lua, serde_json::json!({ "success": false, "response": "", "error": format!("missing capability {}", host_sources::SOCKET_CAPABILITY) }), resources.clone());
+            }
+            if !Path::new(&path).is_absolute() {
+                return Err(mlua::Error::external("mesh.socket_request requires an absolute path"));
+            }
+            let request = request.as_bytes().to_vec();
+            let timeout = resources.child_process_timeout();
+            let limit = resources.output_limit() as usize;
+            owner.spawn(lua, resources.clone(), move || {
+                let reply = host_sources::socket_request(&path, &request, timeout, limit);
+                Ok(serde_json::json!({ "success": reply.success, "response": reply.response, "error": reply.error }))
+            })
+        })?;
+        mesh.set(
+            "socket_request",
+            super::task_io::yielding_host_function(self.lua_ref()?, blocking, start)?,
+        )?;
         Ok(())
+    }
+
+    fn install_file_api(&mut self, mesh: &Table) -> mlua::Result<()> {
+        let granted = self.capabilities.contains("fs.read");
+        let resources = self.policy.budget();
+        let started = Arc::clone(&self.host_side_effects_enabled);
+        let blocking = self.lua_ref()?.create_function(move |lua, path: String| {
+            require_started(&started)?;
+            if !granted {
+                return Err(mlua::Error::external("missing capability fs.read"));
+            }
+            if !Path::new(&path).is_absolute() {
+                return Err(mlua::Error::external(
+                    "mesh.read_file requires an absolute path",
+                ));
+            }
+            let value = {
+                let _pause = resources.pause_frame_clock();
+                super::task_io::read_file(&path, resources.output_limit() as usize)
+            };
+            let bytes = resources
+                .validate_json(&value, "file reply")
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
+            resources
+                .reserve_output(bytes)
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
+            lua.to_value(&value)
+        })?;
+        let resources = self.policy.budget();
+        let started = Arc::clone(&self.host_side_effects_enabled);
+        let owner = Arc::clone(&self.task_io);
+        let start = self.lua_ref()?.create_function(move |lua, path: String| {
+            require_started(&started)?;
+            if !granted {
+                return Err(mlua::Error::external("missing capability fs.read"));
+            }
+            if !Path::new(&path).is_absolute() {
+                return Err(mlua::Error::external(
+                    "mesh.read_file requires an absolute path",
+                ));
+            }
+            let limit = resources.output_limit() as usize;
+            owner.spawn(lua, resources.clone(), move || {
+                Ok(super::task_io::read_file(&path, limit))
+            })
+        })?;
+        mesh.set(
+            "read_file",
+            super::task_io::yielding_host_function(self.lua_ref()?, blocking, start)?,
+        )
     }
 
     fn install_config_api(&mut self, mesh: &Table) -> mlua::Result<()> {
@@ -1529,6 +1845,8 @@ impl Drop for BackendScriptContext {
         // stop hook, but Rust-owned resources must still be reclaimed. The
         // normal lifecycle guard calls call_stop() first; both operations are
         // intentionally idempotent.
+        self.task_io.close();
+        self.clear_tasks();
         self.kill_streams();
         self.shutdown_exec();
         self.flush_storage();

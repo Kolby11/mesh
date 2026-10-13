@@ -963,9 +963,9 @@ fn memoized_rebuild_beats_full_child_reeval() {
 icon = "info"
 label = ""
 detail = ""
-function render(self)
+effect(function(self)
     detail = string.format("%s!", label)
-end
+end)
 </script>
 "#;
     // Distinct aliases: repeated same-alias instances share one runtime and

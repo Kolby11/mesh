@@ -133,25 +133,22 @@ tracking, validation and scheduling.
 - [ ] The debug-inspector views still compute their empty-state and section
       `hidden` flags in script, and bubble-options builds rotation class names
       in functions; move them to `{#if}` and per-item data when next touched.
-- [ ] Re-run `render(self)` only for instances whose tracked reads changed; today
-      any dirtying service update re-runs every instance's hook on the surface.
-      Then evaluate `computed` values and `mesh.watch(proxy, field, fn)`.
-- [ ] A required service with no provider should `require` to the unavailable
-      proxy (01 §5) instead of raising, so settings can drop `pcall(require)` on
-      `mesh.audio` and `mesh.debug`. Optional services already do.
-- [ ] Remove `CoreRequest::ServiceCommand` and the call-id-less service branch of
-      `script_events_to_requests`: scripts can no longer publish service
-      methods, so only proxy `ServiceCall`s reach dispatch.
+- [ ] Narrow compound public inputs and captured template-helper dependencies;
+      tables and function calls still use conservative invalidation.
 - [ ] Optimistic pending values on proxy methods, reconciled with emitted state
       through contract coalescing keys (RT-09), replacing the hand-written
       set-then-reconcile pattern in sliders.
+- [ ] A top-level `local x = require("mesh.*")` becomes a static interface
+      import bound for the whole surface, so a service update invalidates every
+      memoized sibling component; settings keeps `pcall(require)` on
+      `mesh.audio` and `mesh.debug` to avoid it. Bind imports per component.
 - [ ] Plain `.luau` libraries shareable between modules (`require` of a library
       export); helpers such as volume-icon thresholds exist in three copies.
 - [ ] `self` at script top level, plus event forwarding in markup
       (`onpointerenter={self.PopoverEnter}`), replacing `init` captures and
       one-line forwarding handlers.
 - [ ] Locale matching helper (`mesh.locale.is("sk")`) alongside RES-03's
-      formatters, and document when `render(self)` runs.
+      formatters.
 
 ## Runtime architecture direction
 
@@ -160,13 +157,9 @@ Each needs a design and a measured prototype before it is adopted.
 [Direction note](../.planning/todos/pending/2026-10-10-runtime-architecture-direction.md)
 (suggested order inside).
 
-- [ ] **D1:** Write-time binding patches are prototyped behind
-      `MESH_TEMPLATE_PATCHING=1` (nav-bar audio poll 4.0–4.4 → 2.2–2.3 ms).
-      Adopt by default, then extend to service-field reads and keyed lists,
-      and retire `render()` in favour of derived expressions.
-- [ ] **D2:** Backends have no task scheduler, so `mesh.exec`, sockets and file
-      reads block the backend thread. Give backends `task.spawn` and make those
-      calls yield (with D8). Frontend `ticket:await()` has shipped.
+- [ ] **D2:** Backend stream hooks and `stop(self)` still block on host calls;
+      move stream delivery onto D8's event-driven APIs, then measure host-worker
+      pool pressure (64 process-wide) under a real provider set.
 - [ ] **D3:** The shell still re-authorizes each proxy call at dispatch
       (`can_call_contract_method`). The proxy is now the only service call
       path; decide whether that check stays as defense in depth.

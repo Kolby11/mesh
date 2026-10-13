@@ -104,6 +104,7 @@ fn profiling_snapshot_exposes_typed_surface_invalidation_counts() {
             retained_path: true,
             narrow_path: false,
             affected_node_count: 0,
+            patched_node_count: 0,
             retained_generation: 7,
             component: ComponentInvalidationCounts {
                 state: 1,

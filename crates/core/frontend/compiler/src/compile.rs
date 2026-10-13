@@ -1183,7 +1183,7 @@ fn component_allowed_symbols(
                 .iter()
                 .map(|(_, local)| local.clone()),
         );
-        allowed.extend(script.metadata.public_functions.iter().cloned());
+        allowed.extend(script.metadata.functions.iter().cloned());
         allowed.extend(script.metadata.required_aliases.iter().cloned());
         allowed.extend(script.metadata.interface_proxies.keys().cloned());
     }
@@ -1505,6 +1505,26 @@ title = "Default"
         assert!(error.to_string().contains("missing_root"));
         assert_eq!(error.source_span(), Some(expected_span));
         assert_eq!(error.category(), FrontendDiagnosticCategory::Validation);
+    }
+
+    #[test]
+    fn lexical_template_helpers_remain_private_component_members() {
+        let root = component(
+            r#"
+<template><text>{label()}</text></template>
+<script lang="luau">
+local function label() return "Private helper" end
+</script>
+"#,
+        );
+        validate_standalone_imports(
+            &root,
+            &path("main.mesh"),
+            Path::new("/tmp"),
+            &HashMap::new(),
+        )
+        .expect("lexical helpers should be available to templates");
+        assert!(!public_component_fields(&root).contains("label"));
     }
 
     #[test]

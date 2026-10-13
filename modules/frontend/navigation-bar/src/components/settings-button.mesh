@@ -90,9 +90,9 @@ connect_quick_settings = function()
     end)
 end
 
-function render(self)
+effect(function(self)
     connect_quick_settings()
-end
+end)
 
 function onOpenSettings()
     -- A click is the explicit path into the full settings application. The

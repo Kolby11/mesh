@@ -110,7 +110,7 @@ local function signal_label(entry)
     return "wifi.signal_weak", suffix
 end
 
-function render()
+effect(function()
     if network.available == false then
         wifi_status = "wifi.no_compatible_service"
         wifi_toggle_label = "common.unavailable"
@@ -175,7 +175,7 @@ function render()
         network_count = tostring(#network_rows) .. " "
         network_summary = "wifi.network_count"
     end
-end
+end)
 
 function onToggleWifi(value)
     if network.available == false or type(network.set_wifi_enabled) ~= "function" then

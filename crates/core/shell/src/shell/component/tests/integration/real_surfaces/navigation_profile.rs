@@ -281,7 +281,7 @@ fn navigation_frame_cost_profile() {
 
     let started = Instant::now();
     for _ in 0..loop_frames("hooks") {
-        component.call_render_hooks();
+        component.flush_reactive_effects();
     }
     let hooks = started.elapsed();
 
@@ -335,7 +335,7 @@ fn navigation_frame_cost_profile() {
     report("media poll (unread)", unread_poll, frames);
     report("pointer move", hover, frames);
     report("paint only", paint_only, frames);
-    report("render hooks alone", hooks, frames);
+    report("reactive effects alone", hooks, frames);
     eprintln!(
         "MESH_PERF metric=navigation_audio_frame_ms value={:.4}",
         audio_poll.as_secs_f64() * 1000.0 / frames as f64

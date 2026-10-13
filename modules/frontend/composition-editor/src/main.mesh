@@ -262,7 +262,7 @@ function redoSlot(slot_key)
     publish_slot(slot, nodes, false)
 end
 
-function render(self)
+effect(function(self)
     if not composition then
         status_text = "The mesh.composition service is unavailable."
         slot_rows = {}
@@ -300,7 +300,7 @@ function render(self)
         local target = slot_by_key(pending.target_key)
         if target then publish_slot(target, pending.nodes) end
     end
-end
+end)
 
 function selectNode(slot_key, node_id)
     selected_slot_key = slot_key

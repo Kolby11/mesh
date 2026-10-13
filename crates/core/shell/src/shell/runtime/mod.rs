@@ -463,10 +463,16 @@ impl Shell {
             pending.extend(self.mark_components_locale_changed()?);
             pending.extend(self.sync_locale_service_state()?);
             pending.extend(self.broadcast_core_event(CoreEvent::Started)?);
-            if let Some(request) = shell_sound_request(SoundKind::Startup, &self.settings.sounds) {
-                pending.push_back(request.into());
-            }
             self.enqueue_effects(std::mem::take(&mut pending));
+            if let Some(sound) = shell_sound_request(SoundKind::Startup, &self.settings.sounds) {
+                let _ = self.dispatch_service_command(
+                    sound.interface,
+                    sound.command,
+                    &sound.payload,
+                    sound.source_module_id,
+                    &sound.source_capabilities,
+                );
+            }
 
             tracing::info!(
                 "MESH shell core is running with {} frontend component(s)",

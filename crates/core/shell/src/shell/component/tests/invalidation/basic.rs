@@ -139,11 +139,11 @@ function changeLabel() label = "done" end
         .call_namespaced_handler("changeLabel", &[])
         .unwrap();
     assert!(
-        component.dirty,
-        "bound write must still rebuild the template"
+        component.wants_render(),
+        "bound write must schedule a paint"
     );
     assert!(
-        component
+        !component
             .dirty_types
             .contains(ComponentDirtyFlags::SCRIPT_NARROW)
     );
@@ -203,16 +203,17 @@ function hide() visible = nil end
 }
 
 #[test]
-fn bound_handler_write_uses_sparse_pixel_damage() {
+fn template_function_call_patches_with_sparse_pixel_damage() {
     let mut component = test_frontend_component(
         r#"
 <script lang="luau">
 label = "before"
+function shown(value) return value end
 function update() label = "after" end
 </script>
 <template>
   <column>
-    <text>{label}</text>
+    <text>{shown(label)}</text>
     <text>unchanged row one</text>
     <text>unchanged row two</text>
     <text>unchanged row three</text>
@@ -239,11 +240,85 @@ function update() label = "after" end
         .take_invalidation_snapshot()
         .expect("handler paint records invalidation");
 
-    assert_eq!(snapshot.component.script_narrow, 1);
+    assert_eq!(snapshot.component.script_narrow, 0);
+    assert_eq!(snapshot.patched_node_count, 1);
     assert!(!snapshot.full_rebuild);
     assert!(!snapshot.paint.full_surface_damage);
     assert!(snapshot.paint.damage_area < snapshot.paint.surface_area);
     assert!(snapshot.paint.skipped_paint_pixels > 0);
+    let mut rebuilt = PixelBuffer::new(640, 160);
+    component.invalidate_script_state();
+    component
+        .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut rebuilt, 1.0)
+        .unwrap();
+    assert_eq!(buffer.data(), rebuilt.data());
+}
+
+#[test]
+fn keyed_loop_bindings_capture_locals_and_reconcile_collection_writes() {
+    let source = r#"
+<script lang="luau">
+items = {{id = "a", label = "one"}, {id = "b", label = "two"}}
+suffix = "before"
+local function shown(item) return item.label .. suffix end
+function update() suffix = suffix == "before" and "after" or "before" end
+function reorder() items = {{id = "b", label = "second"}, {id = "a", label = "first"}} end
+</script>
+<template><column style="width: 640px; height: 160px">
+{#for item in items key={item.id}}<text>{shown(item)}</text>{/for}
+</column></template>
+"#;
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(640, 160);
+    let mut patched = test_frontend_component(source);
+    let mut rebuilt = test_frontend_component(source);
+    rebuilt.force_full_template_build = true;
+    let mut actual = PixelBuffer::new(640, 160);
+    let mut expected = PixelBuffer::new(640, 160);
+    patched.paint(&theme, extent, &mut actual, 1.0).unwrap();
+    rebuilt.paint(&theme, extent, &mut expected, 1.0).unwrap();
+    for handler in ["update", "reorder", "update"] {
+        patched.call_namespaced_handler(handler, &[]).unwrap();
+        rebuilt.call_namespaced_handler(handler, &[]).unwrap();
+        patched.paint(&theme, extent, &mut actual, 1.0).unwrap();
+        rebuilt.invalidate_script_state();
+        rebuilt.paint(&theme, extent, &mut expected, 1.0).unwrap();
+        assert_eq!(actual.data(), expected.data(), "{handler}");
+        let snapshot = patched.take_invalidation_snapshot().unwrap();
+        if handler == "reorder" {
+            assert_eq!(snapshot.patched_node_count, 0);
+            assert_eq!(snapshot.component.script_narrow, 1);
+        } else {
+            assert_eq!(snapshot.patched_node_count, 2, "{handler}: {snapshot:?}");
+            assert_eq!(snapshot.component.script_narrow, 0);
+        }
+    }
+}
+
+#[test]
+fn shared_binding_and_structural_expression_cannot_patch_away_structure() {
+    let mut component = test_frontend_component(
+        r#"
+<script lang="luau">
+visible = true
+function hide() visible = false end
+</script>
+<template><column style="width: 320px; height: 100px">{#if visible}<text>{visible}</text>{/if}<text>always</text></column></template>
+"#,
+    );
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(320, 100);
+    let mut actual = PixelBuffer::new(320, 100);
+    component.paint(&theme, extent, &mut actual, 1.0).unwrap();
+    component.call_namespaced_handler("hide", &[]).unwrap();
+    component.paint(&theme, extent, &mut actual, 1.0).unwrap();
+    let snapshot = component.take_invalidation_snapshot().unwrap();
+    assert_eq!(snapshot.patched_node_count, 0);
+    assert!(snapshot.retained.removed > 0);
+    let mut expected = PixelBuffer::new(320, 100);
+    component.invalidate_script_state();
+    component.paint(&theme, extent, &mut expected, 1.0).unwrap();
+    assert_eq!(actual.data(), expected.data());
 }
 
 #[test]
@@ -2571,7 +2646,6 @@ function update() label = "after" end
 </template>
 "#,
     );
-    component.template_patching = true;
     let theme = default_theme();
     let extent = SurfaceExtent::unpadded(640, 160);
     let mut buffer = PixelBuffer::new(640, 160);
@@ -2587,6 +2661,7 @@ function update() label = "after" end
         .expect("handler paint records invalidation");
 
     assert_eq!(snapshot.component.script_narrow, 0);
+    assert!(snapshot.patched_node_count > 0);
     assert!(!snapshot.full_rebuild);
     assert!(!snapshot.paint.full_surface_damage);
     assert!(snapshot.paint.damage_area < snapshot.paint.surface_area);
@@ -2599,6 +2674,71 @@ function update() label = "after" end
     component.invalidate_script_state();
     component.paint(&theme, extent, &mut rebuilt, 1.0).unwrap();
     assert_eq!(buffer.data(), rebuilt.data());
+}
+
+#[test]
+fn template_patching_updates_style_and_accessibility_like_a_rebuild() {
+    let mut component = test_frontend_component(
+        r#"
+<script lang="luau">
+label = "before"
+tone = "before"
+function update()
+    label = "after"
+    tone = "after"
+end
+</script>
+<template>
+  <column style="width: 640px; height: 160px">
+    <button class={tone} aria-label={label}><text>{label}</text></button>
+    <text>unchanged</text>
+  </column>
+</template>
+<style>
+button.before { background: #ff0000; width: 100px; }
+button.after { background: #0000ff; width: 200px; }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(640, 160);
+    let mut buffer = PixelBuffer::new(640, 160);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    while component.wants_render() {
+        component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    }
+
+    component.call_namespaced_handler("update", &[]).unwrap();
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    let snapshot = component.take_invalidation_snapshot().unwrap();
+    assert!(snapshot.patched_node_count >= 2);
+    assert_eq!(snapshot.component.script_narrow, 0);
+    assert!(!snapshot.full_rebuild);
+    let patched_button = first_node_by_tag(component.last_tree.as_ref().unwrap(), "button")
+        .unwrap()
+        .clone();
+    assert_eq!(patched_button.attributes.get("class").unwrap(), "after");
+    assert_eq!(
+        patched_button.attributes.get("aria-label").unwrap(),
+        "after"
+    );
+
+    let mut rebuilt = PixelBuffer::new(640, 160);
+    component.invalidate_script_state();
+    component.paint(&theme, extent, &mut rebuilt, 1.0).unwrap();
+    let rebuilt_button =
+        first_node_by_tag(component.last_tree.as_ref().unwrap(), "button").unwrap();
+    assert_eq!(patched_button.accessibility.label.as_deref(), Some("after"));
+    assert_eq!(
+        patched_button.accessibility.label,
+        rebuilt_button.accessibility.label
+    );
+    assert_eq!(patched_button.layout.width, rebuilt_button.layout.width);
+    assert_eq!(patched_button.layout.height, rebuilt_button.layout.height);
+    assert!(
+        buffer.data() == rebuilt.data(),
+        "patched pixels differ from a rebuild"
+    );
 }
 
 #[test]
@@ -2622,7 +2762,6 @@ end
 </template>
 "#,
     );
-    component.template_patching = true;
     let theme = default_theme();
     let extent = SurfaceExtent::unpadded(320, 80);
     let mut buffer = PixelBuffer::new(320, 80);

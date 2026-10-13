@@ -790,6 +790,38 @@ end
 }
 
 #[test]
+fn required_service_with_no_provider_installed_requires_to_an_unavailable_proxy() {
+    let caps = CapabilitySet::from_ids(["service.bluetooth.read"]);
+    let mut ctx = ScriptContext::new("@mesh/settings", caps).unwrap();
+    ctx.set_interface_catalog(contract_only_bluetooth_catalog());
+    ctx.load_script_with_interface_imports(
+        r#"
+available = nil
+required_available = nil
+
+function init()
+    available = bluetooth.available
+    required_available = require("mesh.bluetooth@>=1.0").available
+end
+"#,
+        &[ScriptInterfaceImport {
+            alias: "bluetooth".into(),
+            interface: "mesh.bluetooth".into(),
+            version: Some(">=1.0".into()),
+        }],
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+
+    assert_eq!(ctx.state.get("available"), Some(Value::Bool(false)));
+    assert_eq!(
+        ctx.state.get("required_available"),
+        Some(Value::Bool(false))
+    );
+    assert!(!ctx.interface_bindings.contains_key("bluetooth"));
+}
+
+#[test]
 fn a_published_snapshot_replaces_the_absent_state() {
     let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();

@@ -33,6 +33,7 @@ pub struct ServiceCallCompletion {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScriptDiagnosticCategory {
+    Lifecycle,
     InterfaceUnavailable,
     Storage,
 }
@@ -40,6 +41,7 @@ pub enum ScriptDiagnosticCategory {
 impl ScriptDiagnosticCategory {
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Lifecycle => "lifecycle",
             Self::InterfaceUnavailable => "interface",
             Self::Storage => "storage",
         }

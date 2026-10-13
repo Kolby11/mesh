@@ -1,7 +1,10 @@
 # Runtime architecture direction: what a from-scratch design would change
 
-**Status:** direction proposal, 2026-10-10. Accepted for planning. No design
-details are settled and nothing is implemented. Backlog lines are under
+**Status:** accepted direction, 2026-10-10; partial implementation through
+2026-10-13. Binding patches cover direct service fields, keyed loop bodies,
+and template calls. Shipped frontend `render()` hooks are migrated to derived
+expressions and tracked effects; backend tasks and the remaining architecture
+tracks are still open. Backlog lines are under
 "Runtime architecture direction" in
 [`docs/BACKLOG.md`](../../../docs/BACKLOG.md). This note builds on
 [the authoring-model review](2026-10-10-authoring-model.md) and
@@ -17,7 +20,7 @@ runtime model *under* scripts, not the platform model.
 
 ## D1. Change tracking at write time (compile-time fine-grained reactivity)
 
-**Today:** the runtime reconstructs what changed after a script runs: it scans
+**Baseline at the review:** the runtime reconstructed what changed after a script ran: it scans
 globals, converts state to JSON, runs `render()` for every instance, re-evaluates
 templates and diffs the tree. Memoization, narrow invalidation, fingerprints and
 the retained diff exist largely to make that reconstruction cheaper.
@@ -40,6 +43,16 @@ the retained diff exist largely to make that reconstruction cheaper.
 evaluation and retained diff, which remains the fallback for constructs the
 compiler cannot bind directly. Convert shipped modules component by component.
 
+**Shipped D1 implementation (2026-10-13):** scalar writes are tracked through
+runtime proxies; recorded element bindings patch direct service fields, keyed
+loop bodies, and template calls. Structural readers retain reconciliation.
+Frontend setup runs once, automatic `render()` scheduling is retired with a
+migration diagnostic, and shipped hooks use derived expressions or `effect(fn)`.
+Effects track public scalar and service-field inputs, settle under callback
+budgets, and clean up on rerun, cancellation, reload, or unmount. Compound public
+inputs remain conservative. The clock updates public time at minute boundaries
+through its task scheduler. Current evidence is in the performance log.
+
 **Open:** whether signals are Rust-owned values (backlog item R) or Luau-side
 cells. Also how deep-store mutation is tracked without the table reconstruction
 costs already rejected for storage reads (see the rejected-experiments table).
@@ -56,6 +69,14 @@ costs already rejected for storage reads (see the rejected-experiments table).
   set-then-reconcile command pattern.
 - Budgets apply per resumption. The frame loop wakes on the earliest task
   deadline, as it does today for scheduled handlers.
+
+**Shipped D2 implementation (2026-10-13):** frontend and backend contexts own
+a deadline queue; `ticket:await()` parks frontend tasks on service calls.
+Backend `start`, `on_poll` and command handlers run as coroutines, and exec,
+socket and file reads suspend on a bounded host worker pool (64 process-wide).
+Readiness waits for `start`; polls never overlap; suspended commands reply
+late and honour cancellation. Stream hooks and `stop` still block, pending
+D8's event-driven host APIs.
 
 ## D3. Capabilities checked at acquisition (object capabilities)
 

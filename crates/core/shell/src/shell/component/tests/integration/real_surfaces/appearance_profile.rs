@@ -245,7 +245,7 @@ fn appearance_frame_cost_profile() {
 
     let started = Instant::now();
     for _ in 0..FRAMES {
-        settings.call_render_hooks();
+        settings.flush_reactive_effects();
     }
     let hooks = started.elapsed();
 

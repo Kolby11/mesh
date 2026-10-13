@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-11
+**Updated:** 2026-10-13
 
 What is in flight right now. One page, overwritten as work moves. History and
 measurements are in [`log/`](log/README.md). Open work is in
@@ -8,30 +8,26 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Now
 
-- **Runtime direction, items 7–10 of the 2026-10-10 list:** D4 typed contracts,
-  D2 `ticket:await()`, D3 acquisition-time grants and the single service call
-  path have landed (see [October's log](log/2026-10.md)). Their follow-ups are
-  backlog lines under "Runtime architecture direction" and "Authoring model".
-- **Render suite flake:** `surface::icon` worker tests share the global
-  resource revision with `display_list` tests; both now take
-  `resource_state_test_lock()`.
+- **Runtime direction follow-ups:** D1 template patching/effects, D2 task
+  scheduling with suspending backend callbacks, D3 grants and D4 typed
+  contracts have landed (see [October's log](log/2026-10.md)). Remaining D2
+  work (stream hooks, `stop`) waits on D8.
 - **Scroll wave 4 item 15:** the [bounded scroll raster cache](todos/pending/2026-09-30-scroll-raster-cache.md).
-  It is not wired into production yet; re-check the plan against D6 first.
+  Production wiring is deferred by the revised D6 ownership and measurement contract.
 
 ## Next
 
-- D1: make template patching the default, then extend it to service-field
-  reads and keyed lists.
-  [Direction note](todos/pending/2026-10-10-runtime-architecture-direction.md).
-- Backend task scheduler so `mesh.exec` and file reads yield (D2 with D8).
+- D8 event-driven backend host APIs, then D5 reusable interaction primitives.
 - Wave 5: the [in-surface blur engine](todos/pending/2026-09-30-in-surface-blur-engine.md).
 
 ## Blocked / known baselines
 
-- Known fixture failures: shell 28 (release, `a42ed2bd`), plus three
+- Known fixture failures (serial release, 2026-10-13): shell 27, plus three
   load-sensitive `shell::tests::scheduler` tests that fail in some full runs
-  and pass alone; elements 10; `mesh-core-module` 9 (same names before and
-  after 2026-10-11). Compare against these counts instead of treating them as
+  and pass alone; elements 10; `mesh-core-module` 9; `mesh-core-frontend` 2
+  (`phase87_layout_display_source_semantics_survive_lowering`,
+  `shipped_settings_surface_compiles_with_local_pages`, failing at
+  `3b7068c2` too). Compare against these counts instead of treating them as
   regressions.
 - `navigation_bar_catalog` has no `mesh.wm` provider, so navigation benches
   render the start slot as error placeholders.

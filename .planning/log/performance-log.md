@@ -4849,3 +4849,210 @@ Within noise: hover frames are interaction restyles, not script writes.
 
 Pointer move and render hooks overlap between modes; no regression is claimed
 or ruled out at this sample size.
+
+
+## 2026-10-13 — D1: binding patches enabled by default
+
+`working tree` · area: shell template updates and profiling
+
+Removed the `MESH_TEMPLATE_PATCHING=1` opt-in. Handler and render-hook writes
+whose readers are covered by recorded element bindings now use the existing
+in-place patch path. Profiling snapshots report `patched_node_count`, so a
+patched update is distinguishable from a narrow rebuild. Direct service-field
+reads, structural conditions, loops, component props, and component-function
+calls retain the template-evaluation fallback. The component contract and
+syntax guide describe the boundary; D1's remaining work stays in the backlog.
+
+**Measured.** Same workstation, release, `navigation_frame_cost_profile`,
+1920-wide navigation bar, 108 nodes, 60 events per loop, compositor-region
+backdrop policy. Three alternating before/after runs, desktop in use, no
+compilation running. Before: the previous release executable with
+`MESH_TEMPLATE_PATCHING=0`; after: the rebuilt default-path executable with
+no opt-in. Per-event ranges:
+
+| Loop | Before | Default patches |
+| --- | --- | --- |
+| Audio poll (read) | 4.450–4.652 ms | 2.302–3.112 ms |
+| Pointer move | 0.795–0.911 ms | 0.758–1.072 ms |
+| Paint only | 0.307–0.358 ms | 0.308–0.542 ms |
+| Render hooks alone | 0.458–0.508 ms | 0.497–0.585 ms |
+
+The first after run was slower across every loop; these ranges retain it.
+Only the audio-update improvement is supported by separated ranges. No
+relative timing gate was added: the structural regression
+`template_patching_applies_a_bound_write_without_a_rebuild` asserts patched
+nodes, no narrow rebuild, sparse damage, and equality with rebuilt pixels.
+
+**Validated.** Release binding-patch regressions pass (3/3), including class
+changes that alter width/background, accessibility labels, and pixel equality
+with a rebuild at a fixed surface extent. The first version of that test used
+a content-sized root and compared paints across different measured extents;
+fixing the root extent made the comparison valid. The unpatchable-function
+fallback and backend churn profiling regressions pass (2/2); the latter reports
+seven patched nodes and no rebuild. The serial shell suite before the final
+test-fixture adjustment matched the previous executable exactly: 846 passed,
+29 failed, with the new regression excluded. Rustfmt on all touched Rust files
+and `git diff --check` pass. Pending design notes remain linked from the backlog.
+
+**Final suite.** The final serial release shell run completed with 847 passed,
+29 failed, and 132 ignored. Its failure names exactly match the previous
+executable's serial baseline (846 passed, 29 failed); the added regression
+accounts for the extra pass. No new failures.
+
+
+## 2026-10-13 — D1: service fields, keyed rows, and template function patches
+
+`working tree` · area: scripting dependencies, frontend bindings, shell updates
+
+Service expressions record field reads per evaluation scope, including reads
+inside lexical helpers and keyed iterations. A proxy's lifetime read cache hid
+later expressions' dependencies; deduplication now belongs to the active read
+sink. Unchanged compound globals no longer appear as public writes. The compiler
+records structural, component-prop, unkeyed-body, and pre-bound-handler consumers
+so a property binding cannot accidentally cover a structural use of the same
+source. Keyed property bindings retain their iteration locals; collection/key
+changes still reconcile. Calls conservatively invalidate on public writes.
+
+Service updates and render-hook writes patch together. Dependency indexes rebuild
+only when the read set changes. Expression failures roll back the entire patch;
+failed-evaluation reads remain tracked, and recovery requires a complete template
+evaluation before either property patches or selective builds resume. The
+receiving-service example now derives presentation in expressions and lexical
+helpers without a render hook. Shipped-module `render()` migration remains open.
+
+**Measured.** Local AMD Ryzen 7 7840HS, x86_64 Linux, release in `nix develop`,
+desktop in use, no concurrent builds during the final measurements. Saved
+pre-session release executable versus the final rebuilt executable, three
+alternating paired samples. `affected_template_eval_beats_full_rebuild` runs
+100 one-field updates over a column with 1,024 static text rows, a service-bound
+text, and a hook-label text. Both variants also time the same full-template
+control and compare final pixels. The historical benchmark output labels this
+shape as 1,026 nodes; the authored column plus its children has 1,027 nodes.
+
+| Service workload, 100 updates | Before | Binding patches |
+| --- | --- | --- |
+| Update total | 6,874.552–6,962.127 ms | 619.242–662.531 ms |
+| Per update | 68.746–69.621 ms | 6.192–6.625 ms |
+| Full-template control total | 6,977.020–7,093.618 ms | 6,950.632–7,099.270 ms |
+
+The within-executable full-template/patch ratio is 10.549–11.299x. CI gate
+`affected_template_eval_speedup` now has baseline 6.0 and tolerance 25%, requiring
+at least 4.5x. All three final samples pass. The runner also checks patch counts,
+absence of narrow rebuilds, pixel equality, structural fallback, and atomic
+failure/recovery. An exploratory run of the unchanged executable failed its old
+1% assertion: full 7.008681 s, selective 6.963247 s, ratio 1.006525x; it was not
+silently counted as a passing baseline gate.
+
+**Navigation limitation.** Same machine/profile, final alternating samples of
+`navigation_frame_cost_profile`: 1920-wide shipped bar, 108 nodes, 60 events per
+loop, compositor-region backdrop policy. Its catalog still lacks a `mesh.wm`
+provider. These are per-event values, including events that do not paint.
+
+| Navigation loop | Before | Binding expansion |
+| --- | --- | --- |
+| Audio poll (read) | 2.503–2.801 ms | 3.037–3.227 ms |
+| Media poll (unread) | 0.012–0.015 ms | 0.013–0.016 ms |
+| Pointer move | 0.813–0.976 ms | 0.908–0.967 ms |
+| Paint only | 0.510–0.711 ms | 0.536–0.843 ms |
+| Render hooks alone | 0.884–1.068 ms | 1.011–1.219 ms |
+
+The navigation audio path regresses; the synthetic direct-service improvement
+is not a claim of an overall shell improvement. Tracking overhead in the
+existing render-hook workload remains open under D1 in the backlog. Removing
+redundant dependency queries and avoiding unchanged index reconstruction did not
+eliminate that regression. Other loop ranges overlap.
+
+**Validated.** Final serial release shell: 851 passed, 29 failed, 132 ignored;
+failure names exactly match the saved pre-session executable (847 passed,
+29 failed, 132 ignored). Final focused debug invalidation group: 64 passed,
+2 failures reproduced by the saved executable, 14 ignored. Scripting: 298 passed,
+0 failed, 26 ignored; expressions: 6 passed. Frontend: 84 passed, 2 failed,
+21 ignored; both failures reproduce in a clean HEAD worktree, which was removed.
+The earlier complete debug shell run had 852 passes and 27 baseline failures,
+before the added rollback/recovery regression. Workspace formatting, shell syntax
+for the CI runner, and `git diff --check` pass. All pending notes retain backlog
+links. Existing settings changes are preserved.
+
+## 2026-10-13 — D1 derived expressions and tracked effects replace frontend render hooks
+
+Area: frontend scripting and binding updates · uncommitted workspace.
+
+Automatic frontend `render()` scheduling is retired with a compiled-component
+migration diagnostic. Shipped frontend hooks now use lexical template helpers
+or `effect(fn)`. The clock writes public time at minute boundaries through its
+owned task instead of formatting on every frame. Effects track public scalar
+and service-field reads, conservatively observe compound public inputs, settle
+in registration order under callback budgets, and run cleanup before replacement
+and on cancellation, reload, or unmount. Independent failures remain local.
+Identical live child bindings are reused. Effects waiting on bindings settle
+before handlers so optimistic wheel/touchpad changes are not overwritten.
+Input equality accounts for host integers round-tripping as Luau floats inside
+props. Dependency selection uses the Rust read cache instead of Lua table probes.
+
+**Measured navigation.** Release, 1920-wide shipped navigation bar, 108 nodes,
+60 events per loop, compositor-region backdrop policy, three alternating paired
+samples on the same machine. Saved executables read module files at their baked
+workspace path: each baseline ran in a private bubblewrap mount with matching
+HEAD frontend sources; current sources were snapshotted for the final paired
+comparison. Workspace module files were never swapped. The fixture still has
+no `mesh.wm` provider. These figures divide by all events, including no-paint events.
+
+| Loop, ms/event | Before D1 | Current derived/effect implementation |
+| --- | --- | --- |
+| Audio update | 3.469–3.726 | 3.280–3.328 |
+| Unread media update | 0.014–0.014 | 0.016–0.017 |
+| Pointer move | 1.047–1.160 | 1.036–1.090 |
+| Paint only | 0.588–0.766 | 0.488–0.724 |
+| Hooks / unchanged effects | 0.789–1.081 | 0.015–0.025 |
+
+An additional three paired samples against the binding-expansion executable
+from the start of this session measured audio 3.943–4.042 ms before versus
+3.304–3.445 ms after; hooks 1.196–1.213 ms versus effects 0.015–0.028 ms.
+Earlier historical ranges were taken under different machine conditions and
+are retained above in their original entry; they are not an interleaved
+comparison against this migration. Unpaired exploratory current runs measured
+audio 3.348–3.428 ms and effects 0.025–0.028 ms. Pointer and paint ranges overlap;
+this entry does not claim a general rendering speedup or an idle-wakeup result.
+A 1,200-event audio-only perf sample attributed changed-frame work largely to
+style resolution and retained layout snapshots; it is diagnostic evidence,
+not a before/after benchmark or a reason to fold D7 into this change.
+
+**Binding workload.** Release, column plus 1,024 static texts, one service text,
+and one inert label: 1,027 authored nodes, 100 alternating one-field updates.
+Three current samples measured full-template control 6,971.667–7,027.274 ms and
+binding updates 610.418–635.192 ms (6.104–6.352 ms/update), ratio
+10.976–11.512x. Pixels match and exactly one node patches. Existing gate
+`affected_template_eval_speedup` requires 4.5x and passes all samples.
+
+**Effect gate.** Release, 32 service-reading label effects, 1,000 alternating
+unchanged and forced flushes per sample. `unchanged_effect_inputs_speedup`
+requires 2x. The performance runner also runs effect lifetime, failure, input
+equality, and legacy-hook retirement correctness checks. Final repeated
+measurements are recorded in the following entry if needed.
+
+**Validated.** Serial release shell: 852 passed, 29 failed, 132 ignored, with
+exactly the saved pre-migration failure names. Parallel release: 850 passed,
+31 failures, 132 ignored; the three additional scheduler failures are the
+known load-sensitive tests, while one baseline profiling failure passed.
+Debug shell: 853 passed, 28 failed, 132 ignored; its differing debug-snapshot
+failure passes alone. Release scripting: 306 passed, zero failed, 27 ignored.
+Frontend: 85 passed, the same two independently reproduced baseline failures,
+21 ignored. The lexical-helper test confirms private helpers are allowed in
+expressions without becoming public component fields. Workspace formatting,
+runner shell syntax, diff whitespace, and pending-note links pass. Existing
+settings changes remain byte-for-byte preserved.
+
+A standalone scripting release build initially found an old cached service
+contract artifact missing `ContractStateField.default`. Cleaning only that
+package's generated release artifacts and rebuilding resolved it; source
+contracts were unchanged. D1 leaves the backlog; structural reconciliation,
+compound dependency precision, backend async, and the other direction tracks
+remain open targets.
+
+### Final effect-gate measurements
+
+Same release workload described above, three samples: unchanged flushes
+4.779–7.755 ms total versus forced callbacks 245.114–354.096 ms total;
+45.657–51.291x. Gate `unchanged_effect_inputs_speedup` requires 2x and all
+samples pass. The full release scripting suite includes 306 passes, zero
+failures, and 27 ignored benchmarks.

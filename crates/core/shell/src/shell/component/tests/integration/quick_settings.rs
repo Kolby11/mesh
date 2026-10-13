@@ -59,13 +59,7 @@ end
 
     match requests.as_slice() {
         [
-            CoreRequest::ServiceCommand {
-                interface,
-                command,
-                payload,
-                ..
-            }
-            | CoreRequest::ServiceCall {
+            CoreRequest::ServiceCall {
                 interface,
                 command,
                 payload,

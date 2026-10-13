@@ -137,7 +137,7 @@ audio.VolumeChanged:on(function(event)
     update_audio_copy(math.clamp(event.level, 0, 100), audio.muted)
 end)
 
-function render(self)
+effect(function(self)
     connect_audio_popover()
     if audio.available == false then
         icon_name = "audio-volume-muted"
@@ -148,7 +148,7 @@ function render(self)
     end
 
     update_audio_copy(audio.percent, audio.muted)
-end
+end)
 
 function onVolumeEnter(event)
     audio_pointer_inside = true

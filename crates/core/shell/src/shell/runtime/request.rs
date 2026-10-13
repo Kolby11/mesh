@@ -582,9 +582,6 @@ impl Shell {
             CoreRequest::TransferTabFocus { from_surface, .. } => {
                 self.effect_source_for_surface(from_surface)
             }
-            CoreRequest::ServiceCommand {
-                source_module_id, ..
-            } => (source_module_id.clone(), source_module_id.clone()),
             CoreRequest::ServiceCall {
                 source_module_id,
                 source_instance_id,
@@ -1753,22 +1750,6 @@ impl Shell {
                 if let Err(err) = self.clipboard.write_text(&text) {
                     tracing::warn!(error = %err, "failed to write selection to clipboard");
                 }
-                Ok(VecDeque::new())
-            }
-            CoreRequest::ServiceCommand {
-                interface,
-                command,
-                payload,
-                source_module_id,
-                source_capabilities,
-            } => {
-                let _ = self.dispatch_service_command(
-                    &interface,
-                    &command,
-                    &payload,
-                    &source_module_id,
-                    &source_capabilities,
-                );
                 Ok(VecDeque::new())
             }
             CoreRequest::ServiceCall {
@@ -3578,7 +3559,6 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::HideSurface { .. } => "hide_surface",
         CoreRequest::HidePopover { .. } => "hide_popover",
         CoreRequest::PublishDiagnostics { .. } => "publish_diagnostics",
-        CoreRequest::ServiceCommand { .. } => "service_command",
         CoreRequest::ServiceCall { .. } => "service_call",
         CoreRequest::CancelServiceCall { .. } => "cancel_service_call",
         CoreRequest::WriteClipboard { .. } => "write_clipboard",

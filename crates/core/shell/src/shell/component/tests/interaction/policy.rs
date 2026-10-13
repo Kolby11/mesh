@@ -17,13 +17,13 @@ local theme_ok, theme = pcall(function()
 end)
 if not theme_ok then theme = nil end
 
-function render()
+effect(function()
     if theme and theme.is_dark == false then
         theme_label = "light"
     else
         theme_label = "dark"
     end
-end
+end)
 </script>
 <style>
 box {
@@ -331,13 +331,7 @@ fn audio_popover_first_slider_grab_dispatches_change() {
 
     match requests.as_slice() {
         [
-            CoreRequest::ServiceCommand {
-                interface,
-                command,
-                payload,
-                ..
-            }
-            | CoreRequest::ServiceCall {
+            CoreRequest::ServiceCall {
                 interface,
                 command,
                 payload,
@@ -633,13 +627,7 @@ fn audio_popover_slider_keyboard_still_steps_after_mouse_drag() {
 
     match requests.as_slice() {
         [
-            CoreRequest::ServiceCommand {
-                interface,
-                command,
-                payload,
-                ..
-            }
-            | CoreRequest::ServiceCall {
+            CoreRequest::ServiceCall {
                 interface,
                 command,
                 payload,

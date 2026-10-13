@@ -178,7 +178,7 @@ input:checked {
 </template>
 "#,
     );
-    component.render_hooks_pending = false;
+    component.reactive_effects_pending = false;
     component.focused_key = Some("root/0/1".into());
     component.hovered_path = ["root", "root/0", "root/0/2"]
         .map(runtime_node_id_for_key)

@@ -113,7 +113,7 @@ local function sync_volume(percent, muted)
     muted_state = muted
 end
 
-function render()
+effect(function()
     if not audio or audio.available == false then
         audio_status = "audio.install_backend"
         service_pill = "common.unavailable"
@@ -135,7 +135,7 @@ function render()
     output_name = tostring(audio.output_name or audio.device_name or "audio.default_system_output")
     output_description = tostring(audio.output_description or "audio.managed_by_backend")
     sync_volume(audio.percent, muted)
-end
+end)
 
 function onVolumeChange(value)
     if not audio or audio.available == false or type(audio.set_volume) ~= "function" then

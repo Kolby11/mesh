@@ -132,14 +132,12 @@ pub(super) fn create_service_proxy(
         .map(|c| c.interface.clone())
         .filter(|name| !name.is_empty())
         .unwrap_or(interface_name);
-    let observed_state_fields = Arc::new(Mutex::new(HashSet::new()));
     let absent_state = Arc::new(absent_service_state(contract.as_deref()));
     let state_proxy = create_service_state_proxy(
         lua,
         service_name.clone(),
         Arc::clone(&service_context_state),
         Arc::clone(&tracked_service_fields),
-        Arc::clone(&observed_state_fields),
         Arc::clone(&absent_state),
     )?;
     let events_proxy = create_events_proxy(
@@ -347,12 +345,7 @@ pub(super) fn create_service_proxy(
             }
 
             // Case B: state field read from the live service payload table.
-            record_tracked_field_once(
-                &tracked_service_fields,
-                &observed_state_fields,
-                &service_name,
-                &key,
-            );
+            record_tracked_field_once(&tracked_service_fields, &service_name, &key);
             service_payload_field(
                 lua,
                 &service_context_state,
@@ -604,7 +597,6 @@ fn create_service_state_proxy(
     service_name: String,
     service_context_state: Arc<Mutex<ServiceContextState>>,
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
-    observed_state_fields: Arc<Mutex<HashSet<String>>>,
     absent_state: Arc<serde_json::Map<String, Value>>,
 ) -> mlua::Result<Table> {
     let state = lua.create_table()?;
@@ -612,12 +604,7 @@ fn create_service_state_proxy(
     meta.set(
         "__index",
         lua.create_function(move |lua, (_table, key): (Table, String)| {
-            record_tracked_field_once(
-                &tracked_service_fields,
-                &observed_state_fields,
-                &service_name,
-                &key,
-            );
+            record_tracked_field_once(&tracked_service_fields, &service_name, &key);
             service_payload_field(
                 lua,
                 &service_context_state,
@@ -641,20 +628,19 @@ fn create_service_state_proxy(
 
 fn record_tracked_field_once(
     tracked_service_fields: &Arc<Mutex<HashMap<String, HashSet<String>>>>,
-    observed_state_fields: &Arc<Mutex<HashSet<String>>>,
     service_name: &str,
     key: &str,
 ) {
-    let mut observed = observed_state_fields.lock().unwrap();
-    if observed.contains(key) {
+    // Expression evaluation replaces the sink temporarily. Deduplicating on
+    // a proxy's lifetime would hide the same field from later expressions.
+    let mut tracked = tracked_service_fields.lock().unwrap();
+    if tracked
+        .get(service_name)
+        .is_some_and(|fields| fields.contains(key))
+    {
         return;
     }
-    observed.insert(key.to_string());
-    drop(observed);
-
-    tracked_service_fields
-        .lock()
-        .unwrap()
+    tracked
         .entry(service_name.to_string())
         .or_default()
         .insert(key.to_string());
@@ -824,22 +810,16 @@ fn json_type_name(value: &Value) -> &'static str {
 mod tests {
     use super::*;
 
-    fn sinks() -> (
-        Arc<Mutex<HashMap<String, HashSet<String>>>>,
-        Arc<Mutex<HashSet<String>>>,
-    ) {
-        (
-            Arc::new(Mutex::new(HashMap::new())),
-            Arc::new(Mutex::new(HashSet::new())),
-        )
+    fn sink() -> Arc<Mutex<HashMap<String, HashSet<String>>>> {
+        Arc::new(Mutex::new(HashMap::new()))
     }
 
     #[test]
     fn repeated_tracked_field_reads_record_once() {
-        let (tracked, observed) = sinks();
-        record_tracked_field_once(&tracked, &observed, "audio", "percent");
-        record_tracked_field_once(&tracked, &observed, "audio", "percent");
-        record_tracked_field_once(&tracked, &observed, "audio", "muted");
+        let tracked = sink();
+        record_tracked_field_once(&tracked, "audio", "percent");
+        record_tracked_field_once(&tracked, "audio", "percent");
+        record_tracked_field_once(&tracked, "audio", "muted");
 
         let tracked = tracked.lock().unwrap();
         let audio = tracked.get("audio").expect("audio reads");
@@ -848,23 +828,24 @@ mod tests {
         assert!(audio.contains("muted"));
     }
 
+    #[test]
+    fn a_new_expression_scope_records_a_previously_observed_field() {
+        let tracked = sink();
+        record_tracked_field_once(&tracked, "audio", "percent");
+        tracked.lock().unwrap().clear();
+        record_tracked_field_once(&tracked, "audio", "percent");
+        assert!(tracked.lock().unwrap()["audio"].contains("percent"));
+    }
+
     // cargo test -p mesh-core-scripting --release -- tracked_field_duplicate_read_gate_benchmark --ignored --nocapture
     #[test]
     #[ignore = "release-only tracked service-field read microbenchmark"]
     fn tracked_field_duplicate_read_gate_benchmark() {
         fn old_record(
             tracked_service_fields: &Arc<Mutex<HashMap<String, HashSet<String>>>>,
-            observed_state_fields: &Arc<Mutex<HashSet<String>>>,
             service_name: &str,
             key: &str,
         ) {
-            if !observed_state_fields
-                .lock()
-                .unwrap()
-                .insert(key.to_string())
-            {
-                return;
-            }
             tracked_service_fields
                 .lock()
                 .unwrap()
@@ -874,26 +855,24 @@ mod tests {
         }
 
         let iterations = 1_000_000usize;
-        let (old_tracked, old_observed) = sinks();
-        old_record(&old_tracked, &old_observed, "audio", "percent");
+        let old_tracked = sink();
+        old_record(&old_tracked, "audio", "percent");
         let old_started = std::time::Instant::now();
         for _ in 0..iterations {
             old_record(
                 std::hint::black_box(&old_tracked),
-                std::hint::black_box(&old_observed),
                 std::hint::black_box("audio"),
                 std::hint::black_box("percent"),
             );
         }
         let old_time = old_started.elapsed();
 
-        let (new_tracked, new_observed) = sinks();
-        record_tracked_field_once(&new_tracked, &new_observed, "audio", "percent");
+        let new_tracked = sink();
+        record_tracked_field_once(&new_tracked, "audio", "percent");
         let new_started = std::time::Instant::now();
         for _ in 0..iterations {
             record_tracked_field_once(
                 std::hint::black_box(&new_tracked),
-                std::hint::black_box(&new_observed),
                 std::hint::black_box("audio"),
                 std::hint::black_box("percent"),
             );

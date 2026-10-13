@@ -283,6 +283,9 @@ pub struct ProfilingInvalidationSnapshot {
     pub narrow_path: bool,
     /// Leaf plus ancestor chain dirtied on the narrow path.
     pub affected_node_count: u64,
+    /// Nodes whose bound properties script writes patched in place, without
+    /// a template rebuild.
+    pub patched_node_count: u64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]

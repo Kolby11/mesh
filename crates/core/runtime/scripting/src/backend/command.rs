@@ -158,6 +158,15 @@ pub struct BackendCommandOutcome {
     pub error: Option<String>,
 }
 
+/// How a command handler left the backend: finished, or suspended on a host
+/// operation. A suspended command settles from
+/// [`super::BackendScriptContext::run_due_tasks`] under the same task id.
+#[derive(Debug, Clone)]
+pub enum BackendCommandRun {
+    Finished(BackendCommandOutcome),
+    Suspended { task: u64, state: Option<JsonValue> },
+}
+
 pub(super) fn command_result_from_lua(
     lua: &Lua,
     module_id: &str,

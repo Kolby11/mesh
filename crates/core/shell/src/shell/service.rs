@@ -399,15 +399,14 @@ fn script_event_to_request_at(
                             revision,
                         )
                     } else {
-                        lower_frontend_effect(
-                            &event,
-                            FrontendEffect::Service(ServiceEffect::Command {
-                                interface: interface_name.to_string(),
-                                command: other[pos + 1..].to_string(),
-                                payload: event.payload.clone(),
-                            }),
-                            revision,
-                        )
+                        CoreRequest::PublishDiagnostics {
+                            message: OperationRejection::Dropped {
+                                channel: event.channel.clone(),
+                                reason: "service methods are called through interface proxies"
+                                    .into(),
+                            }
+                            .to_string(),
+                        }
                     }
                 } else {
                     tracing::warn!(
@@ -469,64 +468,22 @@ mod tests {
     }
 
     #[test]
-    fn script_events_to_requests_maps_named_proxy_commands() {
+    fn script_events_to_requests_rejects_service_methods_without_a_call() {
         let audio_caps = mesh_core_capability::CapabilitySet::from_ids(["service.audio.control"]);
-        let network_caps =
-            mesh_core_capability::CapabilitySet::from_ids(["service.network.control"]);
-        let requests = script_events_to_requests(vec![
-            PublishedEvent {
-                channel: "mesh.audio.set_volume".into(),
-                payload: serde_json::json!({ "percent": 55 }),
-                source_module_id: "@mesh/quick-settings".into(),
-                source_capabilities: audio_caps,
-                call_id: None,
-                source_instance_id: None,
-            },
-            PublishedEvent {
-                channel: "mesh.network.set_wifi_enabled".into(),
-                payload: serde_json::json!({ "enabled": true }),
-                source_module_id: "@mesh/quick-settings".into(),
-                source_capabilities: network_caps,
-                call_id: None,
-                source_instance_id: None,
-            },
-        ]);
+        let requests = script_events_to_requests(vec![PublishedEvent {
+            channel: "mesh.audio.set_volume".into(),
+            payload: serde_json::json!({ "percent": 55 }),
+            source_module_id: "@mesh/quick-settings".into(),
+            source_capabilities: audio_caps,
+            call_id: None,
+            source_instance_id: None,
+        }]);
 
-        assert_eq!(requests.len(), 2);
-        match &requests[0] {
-            CoreRequest::ServiceCommand {
-                interface,
-                command,
-                payload,
-                source_module_id,
-                source_capabilities,
-            } => {
-                assert_eq!(interface, "mesh.audio");
-                assert_eq!(command, "set_volume");
-                assert_eq!(payload, &serde_json::json!({ "percent": 55 }));
-                assert_eq!(source_module_id, "@mesh/quick-settings");
-                assert!(source_capabilities.is_granted(&Capability::new("service.audio.control")));
-            }
-            other => panic!("expected audio ServiceCommand, got {other:?}"),
-        }
-        match &requests[1] {
-            CoreRequest::ServiceCommand {
-                interface,
-                command,
-                payload,
-                source_module_id,
-                source_capabilities,
-            } => {
-                assert_eq!(interface, "mesh.network");
-                assert_eq!(command, "set_wifi_enabled");
-                assert_eq!(payload, &serde_json::json!({ "enabled": true }));
-                assert_eq!(source_module_id, "@mesh/quick-settings");
-                assert!(
-                    source_capabilities.is_granted(&Capability::new("service.network.control"))
-                );
-            }
-            other => panic!("expected network ServiceCommand, got {other:?}"),
-        }
+        assert!(matches!(
+            requests.as_slice(),
+            [CoreRequest::PublishDiagnostics { message }]
+                if message.contains("interface proxies")
+        ));
     }
 
     #[test]
@@ -649,8 +606,8 @@ mod tests {
             payload,
             source_module_id: module.into(),
             source_capabilities: capabilities,
-            call_id: None,
-            source_instance_id: None,
+            call_id: Some(1),
+            source_instance_id: Some(format!("{module}#test")),
         }
     }
 
@@ -668,7 +625,7 @@ mod tests {
 
         assert!(matches!(
             requests.as_slice(),
-            [CoreRequest::ServiceCommand { interface, command, .. }]
+            [CoreRequest::ServiceCall { interface, command, .. }]
                 if interface == "mesh.packages" && command == "set_provider"
         ));
     }
@@ -721,7 +678,7 @@ mod tests {
 
         assert!(matches!(
             requests.as_slice(),
-            [CoreRequest::ServiceCommand { interface, command, payload, .. }]
+            [CoreRequest::ServiceCall { interface, command, payload, .. }]
                 if interface == "mesh.packages"
                     && command == "set_module_enabled"
                     && payload == &serde_json::json!({
@@ -758,8 +715,8 @@ mod tests {
         assert!(matches!(
             requests.as_slice(),
             [
-                CoreRequest::ServiceCommand { interface, command, .. },
-                CoreRequest::ServiceCommand { interface: unset_interface, command: unset_command, .. },
+                CoreRequest::ServiceCall { interface, command, .. },
+                CoreRequest::ServiceCall { interface: unset_interface, command: unset_command, .. },
             ] if interface == "mesh.settings"
                 && command == "set_prop"
                 && unset_interface == interface
@@ -787,8 +744,8 @@ mod tests {
         assert!(matches!(
             requests.as_slice(),
             [
-                CoreRequest::ServiceCommand { command, .. },
-                CoreRequest::ServiceCommand { command: font_command, .. },
+                CoreRequest::ServiceCall { command, .. },
+                CoreRequest::ServiceCall { command: font_command, .. },
             ] if command == "set_icon_theme" && font_command == "set_font_family"
         ));
     }
@@ -827,7 +784,7 @@ mod tests {
 
         assert!(matches!(
             requests.as_slice(),
-            [CoreRequest::ServiceCommand { payload, .. }]
+            [CoreRequest::ServiceCall { payload, .. }]
                 if payload.get("instance_id")
                     == Some(&serde_json::json!("@mesh/navigation-bar#bottom"))
         ));
@@ -1319,10 +1276,12 @@ mod tests {
                 black_box(&command);
                 let required = service_command_control_capability(&interface);
                 if event.source_capabilities.is_granted(&required) {
-                    CoreRequest::ServiceCommand {
+                    CoreRequest::ServiceCall {
                         interface,
                         command,
                         payload: event.payload,
+                        call_id: 0,
+                        source_instance_id: String::new(),
                         source_module_id: event.source_module_id,
                         source_capabilities: event.source_capabilities,
                     }

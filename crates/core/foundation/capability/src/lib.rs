@@ -206,6 +206,7 @@ impl CapabilityCatalog {
             | "exec.locale"
             | "shell.clipboard.write"
             | "shell.notification"
+            | "fs.read"
             | "fs.write"
             | "fs.watch"
             | "dbus.session"

@@ -68,7 +68,8 @@ impl ScriptContext {
             }
             expression_reads
         };
-        let value: Value = self.lua().from_value(evaluated?).map_err(lua_err)?;
+        let value: Result<Value, ScriptError> =
+            evaluated.and_then(|value| self.lua().from_value(value).map_err(lua_err));
         let reads: Vec<_> = expression_reads
             .into_iter()
             .flat_map(|(service, fields)| {
@@ -77,7 +78,15 @@ impl ScriptContext {
                     .map(move |field| (service.clone(), field))
             })
             .collect();
-        if empty_locals {
+        {
+            let mut cache = self.template_expression_cache.lock().unwrap();
+            let dependencies = cache
+                .service_reads
+                .entry(expression_source.to_owned())
+                .or_default();
+            dependencies.extend(reads.iter().cloned());
+        }
+        {
             let member_reads = self
                 .env()
                 .get::<Table>("__mesh_template_expression_member_reads")
@@ -94,15 +103,9 @@ impl ScriptContext {
                     names
                 });
             if let Some(member_reads) = member_reads {
-                let env = self.env();
-                let calls_component_function = member_reads.iter().any(|name| {
-                    !self.builtin_globals.contains(name)
-                        && matches!(
-                            env.raw_get::<LuaValue>(name.as_str()),
-                            Ok(LuaValue::Function(_))
-                        )
-                });
-                let cacheable = reads.is_empty()
+                let calls_component_function = expression.calls_function();
+                let cacheable = empty_locals
+                    && reads.is_empty()
                     && !calls_component_function
                     && member_reads
                         .iter()
@@ -119,7 +122,7 @@ impl ScriptContext {
                 cache
                     .member_reads
                     .insert(expression_source.to_string(), member_reads);
-                if cacheable {
+                if cacheable && let Ok(value) = &value {
                     cache
                         .values
                         .insert(expression_source.to_string(), value.clone());
@@ -128,7 +131,7 @@ impl ScriptContext {
                 }
             }
         }
-        Ok((value, reads))
+        Ok((value?, reads))
     }
 
     /// Whether dirty public script members can affect an evaluated template
@@ -154,54 +157,25 @@ impl ScriptContext {
 
     /// The template expressions that read any public member written since the
     /// template last consumed this instance's state, together with those
-    /// members. `None` when that cannot be answered exactly: before the first
-    /// complete evaluation, when a write carried no member name, or when an
-    /// expression calls a component function (its reads are hidden inside the
-    /// call).
+    /// members. Function calls conservatively read every changed member because
+    /// their captured dependencies may be hidden inside a lexical closure.
+    /// `None` before complete evaluation or when a write carried no member name.
     pub fn template_expressions_reading_changes(&self) -> Option<(Vec<String>, Vec<String>)> {
         if !self.template_dependencies_ready || self.changed_public_members.is_empty() {
             return None;
         }
-        if !self
-            .template_expression_cache
-            .lock()
-            .unwrap()
-            .opaque_expressions
-            .is_empty()
-        {
-            return None;
-        }
-        let all_reads: Table = self
-            .env()
-            .get("__mesh_template_expression_member_reads")
-            .ok()?;
-        let env = self.env();
-        let mut readers = Vec::new();
-        for entry in all_reads.pairs::<String, Table>() {
-            let (source, reads) = entry.ok()?;
-            // A component function hides its reads, wherever the expression
-            // ran (loop bodies are not recorded as opaque by evaluation).
-            for read in reads.pairs::<String, bool>() {
-                let (name, _) = read.ok()?;
-                if !self.builtin_globals.contains(&name)
-                    && matches!(
-                        env.raw_get::<LuaValue>(name.as_str()),
-                        Ok(LuaValue::Function(_))
-                    )
-                {
-                    return None;
-                }
-            }
-            if self.changed_public_members.iter().any(|member| {
-                reads
-                    .raw_get::<Option<bool>>(member.as_str())
-                    .ok()
-                    .flatten()
-                    == Some(true)
-            }) {
-                readers.push(source);
-            }
-        }
+        let cache = self.template_expression_cache.lock().unwrap();
+        let readers = cache
+            .member_reads
+            .iter()
+            .filter(|(source, reads)| {
+                cache.opaque_expressions.contains(*source)
+                    || reads
+                        .iter()
+                        .any(|read| self.changed_public_members.contains(read))
+            })
+            .map(|(source, _)| source.clone())
+            .collect();
         Some((readers, self.changed_public_members.clone()))
     }
 
@@ -210,6 +184,34 @@ impl ScriptContext {
     pub fn consume_template_changes(&mut self) {
         self.changed_public_members.clear();
         self.state.clear_dirty();
+    }
+
+    /// Evaluated expressions that consume changed service fields, including
+    /// reads made inside lexical helper functions and keyed loop iterations.
+    pub fn template_expressions_reading_service_fields(
+        &self,
+        fields: &[(String, String)],
+    ) -> Option<Vec<String>> {
+        if !self.template_dependencies_ready {
+            return None;
+        }
+        let cache = self.template_expression_cache.lock().unwrap();
+        Some(
+            cache
+                .service_reads
+                .iter()
+                .filter(|(source, reads)| {
+                    fields.iter().any(|field| reads.contains(field))
+                        || cache.member_reads.get(*source).is_some_and(|members| {
+                            members.iter().any(|member| {
+                                member == "last_service_update"
+                                    || fields.iter().any(|(service, _)| member == service)
+                            })
+                        })
+                })
+                .map(|(source, _)| source.clone())
+                .collect(),
+        )
     }
 
     /// Whether this runtime has completed a template evaluation, so its

@@ -25,7 +25,7 @@ pub(crate) const MAX_PENDING_TASKS: usize = 256;
 /// The longest delay `task.delay` and `task.sleep` accept, in milliseconds.
 pub(crate) const MAX_TASK_DELAY_MS: f64 = 24.0 * 60.0 * 60.0 * 1000.0;
 
-enum TaskBody {
+pub(crate) enum TaskBody {
     Call(RegistryKey),
     Resume(RegistryKey),
 }
@@ -87,9 +87,13 @@ impl TaskQueue {
 
     /// Make the task awaiting `call_id`, if any, due now.
     pub(crate) fn wake(&mut self, call_id: u64) {
+        self.wake_at(call_id, Instant::now());
+    }
+
+    pub(crate) fn wake_at(&mut self, call_id: u64, deadline: Instant) {
         if let Some((id, thread)) = self.awaiting.remove(&call_id) {
             self.awaiting_calls.remove(&id);
-            self.reinsert(id, Instant::now(), TaskBody::Resume(thread));
+            self.reinsert(id, deadline, TaskBody::Resume(thread));
         }
     }
 
@@ -98,7 +102,7 @@ impl TaskQueue {
         self.deadlines.insert(id, deadline);
     }
 
-    fn cancel(&mut self, id: u64) -> bool {
+    pub(crate) fn cancel(&mut self, id: u64) -> bool {
         if let Some(call_id) = self.awaiting_calls.remove(&id) {
             self.awaiting.remove(&call_id);
             return true;
@@ -117,7 +121,7 @@ impl TaskQueue {
             .map(|(deadline, _)| *deadline)
     }
 
-    fn pop_due(&mut self, now: Instant) -> Option<(u64, TaskBody)> {
+    pub(crate) fn pop_due(&mut self, now: Instant) -> Option<(u64, TaskBody)> {
         let (&(deadline, id), _) = self.by_deadline.first_key_value()?;
         if deadline > now {
             return None;
@@ -182,19 +186,27 @@ fn task_handle(lua: &mlua::Lua, queue: &SharedTaskQueue, id: u64) -> mlua::Resul
     Ok(handle)
 }
 
+/// Where [`drive`] left a coroutine.
+pub(crate) enum Driven {
+    /// It returned these values.
+    Finished(MultiValue),
+    /// It is queued or parked under this task id.
+    Suspended(u64),
+}
+
 /// Run `thread` until it finishes or yields. A `task.sleep` yield is queued
 /// for resumption under `id` (or a new id) and a `ticket:await()` yield is
 /// parked on its call; any other yield ends the task with an error.
-fn drive(
+pub(crate) fn drive(
     lua: &mlua::Lua,
     queue: &SharedTaskQueue,
     thread: Thread,
     args: MultiValue,
     id: Option<u64>,
-) -> mlua::Result<Option<u64>> {
+) -> mlua::Result<Driven> {
     let yielded = thread.resume::<MultiValue>(args)?;
     if thread.status() != ThreadStatus::Resumable {
-        return Ok(None);
+        return Ok(Driven::Finished(yielded));
     }
     let mut values = yielded.into_iter();
     let first = values.next().unwrap_or(LuaValue::Nil);
@@ -208,7 +220,11 @@ fn drive(
             _ => return Err(mlua::Error::external("ticket:await() lost its call id")),
         };
         let key = lua.create_registry_value(thread)?;
-        return queue.lock().unwrap().park(id, call_id, key).map(Some);
+        return queue
+            .lock()
+            .unwrap()
+            .park(id, call_id, key)
+            .map(Driven::Suspended);
     }
     if !is_token(SLEEP_TOKEN_KEY)? {
         return Err(mlua::Error::external(
@@ -222,9 +238,11 @@ fn drive(
     match id {
         Some(id) => {
             queue.reinsert(id, deadline, TaskBody::Resume(key));
-            Ok(Some(id))
+            Ok(Driven::Suspended(id))
         }
-        None => queue.insert(deadline, TaskBody::Resume(key)).map(Some),
+        None => queue
+            .insert(deadline, TaskBody::Resume(key))
+            .map(Driven::Suspended),
     }
 }
 
@@ -353,6 +371,61 @@ fn realm_hover_intent_factory(lua: &mlua::Lua) -> mlua::Result<Function> {
     Ok(factory)
 }
 
+pub(crate) fn create_task_library(
+    lua: &mlua::Lua,
+    shared_queue: &SharedTaskQueue,
+) -> mlua::Result<Table> {
+    let sleep = realm_sleep_function(lua)?;
+    let task = lua.create_table()?;
+
+    let queue = Arc::clone(shared_queue);
+    task.set(
+        "delay",
+        lua.create_function(move |lua, (ms, callback): (LuaValue, Function)| {
+            let wait = delay_ms(ms, "task.delay")?;
+            let key = lua.create_registry_value(callback)?;
+            let id = queue
+                .lock()
+                .unwrap()
+                .insert(Instant::now() + wait, TaskBody::Call(key))?;
+            task_handle(lua, &queue, id)
+        })?,
+    )?;
+
+    let queue = Arc::clone(shared_queue);
+    task.set(
+        "spawn",
+        lua.create_function(move |lua, (callback, args): (Function, MultiValue)| {
+            let thread = lua.create_thread(callback)?;
+            match drive(lua, &queue, thread, args, None)? {
+                Driven::Suspended(id) => task_handle(lua, &queue, id).map(LuaValue::Table),
+                Driven::Finished(_) => Ok(LuaValue::Nil),
+            }
+        })?,
+    )?;
+
+    task.set("sleep", sleep)?;
+
+    let queue = Arc::clone(shared_queue);
+    task.set(
+        "cancel",
+        lua.create_function(move |_lua, handle: LuaValue| {
+            let id = match handle {
+                LuaValue::Table(handle) => handle.raw_get::<Option<u64>>("id")?,
+                LuaValue::Nil => None,
+                _ => {
+                    return Err(mlua::Error::external(
+                        "task.cancel expects a handle from task.delay or task.spawn",
+                    ));
+                }
+            };
+            Ok(id.is_some_and(|id| queue.lock().unwrap().cancel(id)))
+        })?,
+    )?;
+
+    Ok(task)
+}
+
 impl ScriptContext {
     pub(super) fn install_task_api(
         &mut self,
@@ -360,59 +433,7 @@ impl ScriptContext {
         mesh_ui: &Table,
     ) -> Result<(), ScriptError> {
         let lua = self.lua().clone();
-        let sleep = realm_sleep_function(&lua).map_err(lua_err)?;
-        let task = lua.create_table().map_err(lua_err)?;
-
-        let queue = Arc::clone(&self.tasks);
-        task.set(
-            "delay",
-            lua.create_function(move |lua, (ms, callback): (LuaValue, Function)| {
-                let wait = delay_ms(ms, "task.delay")?;
-                let key = lua.create_registry_value(callback)?;
-                let id = queue
-                    .lock()
-                    .unwrap()
-                    .insert(Instant::now() + wait, TaskBody::Call(key))?;
-                task_handle(lua, &queue, id)
-            })
-            .map_err(lua_err)?,
-        )
-        .map_err(lua_err)?;
-
-        let queue = Arc::clone(&self.tasks);
-        task.set(
-            "spawn",
-            lua.create_function(move |lua, (callback, args): (Function, MultiValue)| {
-                let thread = lua.create_thread(callback)?;
-                match drive(lua, &queue, thread, args, None)? {
-                    Some(id) => task_handle(lua, &queue, id).map(LuaValue::Table),
-                    None => Ok(LuaValue::Nil),
-                }
-            })
-            .map_err(lua_err)?,
-        )
-        .map_err(lua_err)?;
-
-        task.set("sleep", sleep).map_err(lua_err)?;
-
-        let queue = Arc::clone(&self.tasks);
-        task.set(
-            "cancel",
-            lua.create_function(move |_lua, handle: LuaValue| {
-                let id = match handle {
-                    LuaValue::Table(handle) => handle.raw_get::<Option<u64>>("id")?,
-                    LuaValue::Nil => None,
-                    _ => {
-                        return Err(mlua::Error::external(
-                            "task.cancel expects a handle from task.delay or task.spawn",
-                        ));
-                    }
-                };
-                Ok(id.is_some_and(|id| queue.lock().unwrap().cancel(id)))
-            })
-            .map_err(lua_err)?,
-        )
-        .map_err(lua_err)?;
+        let task = create_task_library(&lua, &self.tasks).map_err(lua_err)?;
 
         let delay: Function = task.get("delay").map_err(lua_err)?;
         let hover_intent = realm_hover_intent_factory(&lua)
@@ -467,7 +488,10 @@ impl ScriptContext {
             let result = match body {
                 TaskBody::Call(key) => lua
                     .registry_value::<Function>(&key)
-                    .and_then(|callback| callback.call::<()>(())),
+                    .and_then(|callback| lua.create_thread(callback))
+                    .and_then(|thread| {
+                        drive(&lua, &self.tasks, thread, MultiValue::new(), Some(id)).map(|_| ())
+                    }),
                 TaskBody::Resume(key) => lua.registry_value::<Thread>(&key).and_then(|thread| {
                     drive(&lua, &self.tasks, thread, MultiValue::new(), Some(id)).map(|_| ())
                 }),

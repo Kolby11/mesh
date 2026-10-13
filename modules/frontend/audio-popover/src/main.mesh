@@ -73,7 +73,7 @@ if audio and audio.VolumeChanged then
     end)
 end
 
-function render(self)
+effect(function(self)
     if not audio or audio.available == false then
         audio_percent_label = "--%"
         slider_value = 0
@@ -104,7 +104,7 @@ function render(self)
     end
 
     sync_audio_copy(percent)
-end
+end)
 
 function onVolumeChange(value)
     local pct = clamp_percent(value)

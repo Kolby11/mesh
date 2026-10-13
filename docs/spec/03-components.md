@@ -60,6 +60,25 @@ Component rules (shipped):
   display state (icon names, labels) is computed in the component's own
   script — never injected by the core.
 
+**Shipped incremental updates:** script writes and service-field changes whose
+template readers are all recorded element bindings patch those attributes and
+text in place by default.
+Patched nodes still receive style, layout, accessibility, and damage updates.
+Keyed loop bodies capture iteration locals for binding patches; collection and
+key changes still reconcile the template. Template function calls can patch
+element properties, with conservative invalidation for captured public state.
+Readers in structural conditions, loop sources or keys, unkeyed loop bodies,
+component props, or pre-bound handler arguments use template evaluation and
+retained diffing instead. Service updates and reactive-effect writes patch together;
+failed expressions retain the last good tree and use normal failure reporting.
+The script body runs once as setup. Templates and lexical helpers derive
+presentation; `effect(fn)` runs reactive side effects with tracked public scalar
+and service-field reads, conservative compound-input invalidation, per-callback
+budgets, and bounded settling. A returned cleanup runs before replacement and
+on reload or unmount; the returned handle supports idempotent `cancel()`.
+`render(self)` is no longer scheduled and compiled components receive a
+migration diagnostic. Finer structural reconciliation remains a **target**.
+
 ### 1.1 Popovers and escape-bounds UI
 
 **Status: shipped.** Surfaces are containers, not authoring units. An in-tree

@@ -1,7 +1,7 @@
 use super::super::element_ref::create_refs_proxy;
 use super::super::lookup::{
-    interface_error_message, lookup_failure_reason, lua_err, record_lookup_diagnostic,
-    record_lookup_diagnostic_lua,
+    degrades_to_unavailable, interface_error_message, lookup_failure_reason, lua_err,
+    record_lookup_diagnostic, record_lookup_diagnostic_lua,
 };
 use super::super::proxy::{create_event_channel, create_interface_proxy};
 use super::super::{PublishedEvent, ScriptError, ScriptInterfaceImport};
@@ -91,6 +91,7 @@ impl ScriptContext {
         self.install_log_api(&mesh_log)?;
         self.install_popover_api(&mesh_popover)?;
         self.install_task_api(globals, &mesh_ui_api)?;
+        self.install_effect_api(globals)?;
         self.install_shell_api(&mesh)?;
 
         mesh.set("service", mesh_core_service).map_err(lua_err)?;
@@ -617,6 +618,7 @@ impl ScriptContext {
                 }
                 if resolution.provider.is_none()
                     && !optional_interfaces_for_require.contains(&canonical)
+                    && !degrades_to_unavailable(&interface_catalog, &resolution)
                 {
                     let reason = lookup_failure_reason(&interface_catalog, &resolution);
                     return Err(record_lookup_diagnostic_lua(
@@ -776,9 +778,10 @@ impl ScriptContext {
                 );
                 return Err(ScriptError::CapabilityDenied(canonical));
             }
-            let absent_optional =
-                resolution.provider.is_none() && self.optional_interfaces.contains(&canonical);
-            if resolution.provider.is_none() && !absent_optional {
+            let absent = resolution.provider.is_none()
+                && (self.optional_interfaces.contains(&canonical)
+                    || degrades_to_unavailable(&self.interface_catalog, &resolution));
+            if resolution.provider.is_none() && !absent {
                 let reason = lookup_failure_reason(&self.interface_catalog, &resolution);
                 record_lookup_diagnostic(
                     &self.shared_diagnostics,
@@ -794,9 +797,9 @@ impl ScriptContext {
                 )));
             }
 
-            // An absent optional service still gets a proxy that reads as
-            // unavailable, but it has no provider to bind calls to.
-            if !absent_optional {
+            // An absent service still gets a proxy that reads as unavailable,
+            // but it has no provider to bind calls to.
+            if !absent {
                 let mut shared_interface_bindings = self.shared_interface_bindings.lock().unwrap();
                 shared_interface_bindings
                     .bindings

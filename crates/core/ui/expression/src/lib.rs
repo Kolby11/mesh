@@ -43,6 +43,7 @@ pub enum ExpressionEvaluationError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledExpression {
     source: String,
+    calls_function: bool,
 }
 
 pub type SharedCompiledExpression = Arc<CompiledExpression>;
@@ -50,6 +51,19 @@ pub type SharedCompiledExpression = Arc<CompiledExpression>;
 impl CompiledExpression {
     pub fn source(&self) -> &str {
         &self.source
+    }
+
+    pub fn calls_function(&self) -> bool {
+        self.calls_function
+    }
+}
+
+#[derive(Default)]
+struct FunctionCalls(bool);
+
+impl full_moon::visitors::Visitor for FunctionCalls {
+    fn visit_function_call(&mut self, _: &full_moon::ast::FunctionCall) {
+        self.0 = true;
     }
 }
 
@@ -76,7 +90,16 @@ pub fn compile_expression(
     let candidate = format!("return ({source})");
     let parsed = std::thread::Builder::new()
         .stack_size(PARSER_STACK_BYTES)
-        .spawn(move || full_moon::parse(&candidate).is_ok())
+        .spawn(move || {
+            use full_moon::visitors::Visitor;
+            full_moon::parse(&candidate)
+                .map(|ast| {
+                    let mut calls = FunctionCalls::default();
+                    calls.visit_ast(&ast);
+                    calls.0
+                })
+                .ok()
+        })
         .map_err(|error| ExpressionCompileError::ParserThread(error.to_string()))?
         .join()
         .map_err(|_| {
@@ -88,7 +111,7 @@ pub fn compile_expression(
                 },
             )
         })?;
-    if !parsed {
+    let Some(calls_function) = parsed else {
         return Err(non_ascii.map_or(
             ExpressionCompileError::Malformed,
             |(byte_offset, character)| ExpressionCompileError::NonAscii {
@@ -96,10 +119,11 @@ pub fn compile_expression(
                 byte_offset,
             },
         ));
-    }
+    };
 
     let compiled = Arc::new(CompiledExpression {
         source: source.to_owned(),
+        calls_function,
     });
     cache.insert(source.to_owned(), Arc::clone(&compiled));
     Ok(compiled)

@@ -1,39 +1,24 @@
 <template>
-  <row class="now-playing" hidden={not is_playing}>
+  <row class="now-playing" hidden={not isPlaying()}>
     <icon class="np-icon" name="media-playback-start" size="12" />
-    <text class="np-text">{track_name}</text>
+    <text class="np-text">{trackName()}</text>
   </row>
 </template>
 
 <script lang="luau">
-is_playing = false
-track_name = ""
-
 local media = require("mesh.media")
 
-function render(self)
-    if not media.available then
-        is_playing = false
-        track_name = ""
-        return
-    end
+local function isPlaying()
+    return media.available and media.state == "playing" and (media.title or "") ~= ""
+end
 
+local function trackName()
+    if not media.available then return "" end
     local title = media.title or ""
+    if title == "" then return "" end
     local artist = media.artist or ""
-    local state_val = media.state or "paused"
-    local playing = (state_val == "playing")
-
-    is_playing = playing and (title ~= "" or artist ~= "")
-
-    if artist ~= "" and title ~= "" then
-        local full = artist .. " — " .. title
-        track_name = #full > 38 and (string.sub(full, 1, 36) .. "…") or full
-    elseif title ~= "" then
-        track_name = #title > 38 and (string.sub(title, 1, 36) .. "…") or title
-    else
-        track_name = ""
-        is_playing = false
-    end
+    local full = artist ~= "" and (artist .. " — " .. title) or title
+    return #full > 38 and (string.sub(full, 1, 36) .. "…") or full
 end
 </script>
 

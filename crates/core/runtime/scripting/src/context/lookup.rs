@@ -51,6 +51,20 @@ pub(super) fn record_lookup_diagnostic(
     });
 }
 
+/// Whether a missing provider leaves the consumer running against the
+/// unavailable proxy. Per 01 §5, a required service with no provider
+/// installed reads as unavailable; installed providers that cannot serve the
+/// request, or a missing typed contract, still block the consumer.
+pub(super) fn degrades_to_unavailable(
+    catalog: &ResolvedServiceCatalog,
+    resolution: &InterfaceResolution,
+) -> bool {
+    resolution.provider.is_none()
+        && resolution.contract.is_some()
+        && resolution.feature_negotiation.missing_required.is_empty()
+        && catalog.providers_for(&resolution.requested).is_empty()
+}
+
 pub(super) fn lookup_failure_reason(
     catalog: &ResolvedServiceCatalog,
     resolution: &InterfaceResolution,

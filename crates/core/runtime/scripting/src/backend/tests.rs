@@ -1083,7 +1083,7 @@ end
     assert_eq!(initial.get("level").and_then(|v| v.as_f64()), Some(50.0));
 
     let outcome = ctx
-        .run_command_with_result("increase", &serde_json::json!({ "amount": 5 }))
+        .run_command_finished("increase", &serde_json::json!({ "amount": 5 }))
         .unwrap();
     assert_eq!(
         outcome.result,
@@ -1135,7 +1135,7 @@ end
         .unwrap();
 
     let outcome = ctx
-        .run_command_with_result("focus-workspace", &serde_json::json!({ "id": 2 }))
+        .run_command_finished("focus-workspace", &serde_json::json!({ "id": 2 }))
         .unwrap();
 
     assert_eq!(
@@ -1451,7 +1451,7 @@ end
 
     ctx.call_init().unwrap();
     let outcome = ctx
-        .run_command_with_result("set-volume", &serde_json::json!({ "percent": 72 }))
+        .run_command_finished("set-volume", &serde_json::json!({ "percent": 72 }))
         .unwrap();
     assert_eq!(outcome.result["ok"], serde_json::json!(true));
 
@@ -1500,7 +1500,7 @@ end
 
     ctx.call_init().unwrap();
     let outcome = ctx
-        .run_command_with_result("set-volume", &serde_json::json!({ "percent": 72 }))
+        .run_command_finished("set-volume", &serde_json::json!({ "percent": 72 }))
         .unwrap();
     assert_eq!(outcome.result["ok"], serde_json::json!(true));
 
@@ -1533,7 +1533,7 @@ fn emit_json_accepts_explicit_string() {
         "function start()\nend\nfunction on_poll()\nlocal r = mesh.exec(\"printf\", {\"{\\\"available\\\":true,\\\"percent\\\":65}\"})\nmesh.service.emit_json(r.stdout)\nend",
     )
     .unwrap();
-    let payload = ctx.run_poll().unwrap().unwrap();
+    let payload = settled_poll(&mut ctx);
     assert_eq!(
         payload.get("available").and_then(|v| v.as_bool()),
         Some(true)
@@ -1667,7 +1667,7 @@ fn command_registry_validates_arguments_and_blocks_implicit_helpers() {
     .unwrap();
 
     let invalid = ctx
-        .run_command_with_result("set-volume", &serde_json::json!({ "percent": "loud" }))
+        .run_command_finished("set-volume", &serde_json::json!({ "percent": "loud" }))
         .unwrap();
     assert_eq!(
         invalid
@@ -1677,7 +1677,7 @@ fn command_registry_validates_arguments_and_blocks_implicit_helpers() {
         Some("invalid_arguments")
     );
     assert!(
-        ctx.run_command_with_result("set-volume", &serde_json::json!({ "percent": 20 }))
+        ctx.run_command_finished("set-volume", &serde_json::json!({ "percent": 20 }))
             .unwrap()
             .result
             .get("ok")
@@ -1701,7 +1701,7 @@ fn backend_command_handler_return_table_becomes_result() {
     .unwrap();
 
     let outcome = ctx
-        .run_command_with_result("set-volume", &serde_json::json!({ "percent": 67 }))
+        .run_command_finished("set-volume", &serde_json::json!({ "percent": 67 }))
         .unwrap();
 
     assert_eq!(
@@ -1730,7 +1730,7 @@ fn backend_command_handler_nil_defaults_to_ok_result() {
         .unwrap();
 
     let outcome = ctx
-        .run_command_with_result("ping", &serde_json::json!({}))
+        .run_command_finished("ping", &serde_json::json!({}))
         .unwrap();
 
     assert_eq!(outcome.result, serde_json::json!({ "ok": true }));
@@ -1747,7 +1747,7 @@ fn backend_command_handler_error_becomes_failed_result() {
     .unwrap();
 
     let outcome = ctx
-        .run_command_with_result("fail", &serde_json::json!({}))
+        .run_command_finished("fail", &serde_json::json!({}))
         .unwrap();
 
     assert_eq!(
@@ -1795,7 +1795,7 @@ fn exec_returns_structured_result() {
         "function start()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"printf\", {\"hello\"})\nmesh.service.emit({ ok = result.success, stdout = result.stdout })\nend",
     )
     .unwrap();
-    let payload = ctx.run_poll().unwrap().unwrap();
+    let payload = settled_poll(&mut ctx);
     assert_eq!(payload.get("ok").and_then(|v| v.as_bool()), Some(true));
     assert_eq!(
         payload.get("stdout").and_then(|v| v.as_str()),
@@ -1823,7 +1823,7 @@ fn exec_locale_option_needs_its_capability() {
         ],
     );
     granted.load_script(script).unwrap();
-    let payload = granted.run_poll().unwrap().unwrap();
+    let payload = settled_poll(&mut granted);
     assert_eq!(payload.get("ok").and_then(|v| v.as_bool()), Some(true));
     assert_eq!(
         payload.get("stdout").and_then(|v| v.as_str()),
@@ -1841,7 +1841,7 @@ fn exec_accepts_program_and_args() {
         "function start()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"printf\", {\"hello\"})\nmesh.service.emit({ success = result.success, stdout = result.stdout, code = result.code })\nend",
     )
     .unwrap();
-    let payload = ctx.run_poll().unwrap().unwrap();
+    let payload = settled_poll(&mut ctx);
     assert_eq!(payload.get("success").and_then(|v| v.as_bool()), Some(true));
     assert_eq!(
         payload.get("stdout").and_then(|v| v.as_str()),
@@ -1875,7 +1875,7 @@ fn exec_missing_program_returns_failure_table() {
         "function start()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"__mesh_missing_command_for_test__\", {})\nmesh.service.emit({ success = result.success, stdout = result.stdout, stderr = result.stderr, code = result.code })\nend",
     )
     .unwrap();
-    let payload = ctx.run_poll().unwrap().unwrap();
+    let payload = settled_poll(&mut ctx);
     assert_eq!(
         payload.get("success").and_then(|v| v.as_bool()),
         Some(false)
@@ -1900,7 +1900,7 @@ fn exec_nonzero_exit_returns_failure_table() {
         "function start()\nend\nfunction on_poll()\nlocal result = mesh.exec(\"sh\", {\"-c\", \"printf err >&2; exit 7\"})\nmesh.service.emit({ success = result.success, stdout = result.stdout, stderr = result.stderr, code = result.code })\nend",
     )
     .unwrap();
-    let payload = ctx.run_poll().unwrap().unwrap();
+    let payload = settled_poll(&mut ctx);
     assert_eq!(
         payload.get("success").and_then(|v| v.as_bool()),
         Some(false)
@@ -2131,7 +2131,7 @@ fn backend_command_result_conversion_failure_is_reported() {
     .unwrap();
     ctx.call_init().unwrap();
     let err = ctx
-        .run_command_with_result("bad-result", &serde_json::json!({}))
+        .run_command_finished("bad-result", &serde_json::json!({}))
         .unwrap_err();
     assert!(
         matches!(
@@ -2165,7 +2165,7 @@ fn backend_command_runtime_error_becomes_failed_result() {
     .unwrap();
     ctx.call_init().unwrap();
     let outcome = ctx
-        .run_command_with_result("fail", &serde_json::json!({}))
+        .run_command_finished("fail", &serde_json::json!({}))
         .unwrap();
     assert_eq!(
         outcome.result.get("ok").and_then(|v| v.as_bool()),
@@ -2248,7 +2248,7 @@ fn reference_media_provider_command_updates_state() {
 
     // Issue play command — state should transition to playing
     let outcome = ctx
-        .run_command_with_result("play", &serde_json::json!({ "player_id": "default" }))
+        .run_command_finished("play", &serde_json::json!({ "player_id": "default" }))
         .unwrap();
     assert_eq!(
         outcome.result.get("ok").and_then(|v| v.as_bool()),
@@ -2268,7 +2268,7 @@ fn reference_media_provider_command_updates_state() {
 
     // Issue next command — track index should advance
     let next_outcome = ctx
-        .run_command_with_result("next", &serde_json::json!({ "player_id": "default" }))
+        .run_command_finished("next", &serde_json::json!({ "player_id": "default" }))
         .unwrap();
     assert_eq!(
         next_outcome.result.get("ok").and_then(|v| v.as_bool()),
@@ -2445,4 +2445,472 @@ async fn typed_stream_events_expose_handle_identity_and_exit_status() {
     }
     assert!(exited, "typed stream exit event should arrive");
     ctx.shutdown_streams().await;
+}
+
+#[test]
+fn backend_tasks_resume_without_poll_and_isolate_failures() {
+    let mut ctx = BackendScriptContext::new("@test/backend-tasks");
+    ctx.load_script(
+        r#"
+state = { value = 0 }
+function start(self)
+    task.spawn(function()
+        task.sleep(0)
+        state.value = 7
+    end)
+    task.delay(0, function() error("independent task failure") end)
+    task.delay(0, function() state.ready = true end)
+end
+"#,
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+    assert_eq!(ctx.pending_task_count(), 3);
+    let BackendTaskRun {
+        state: payload,
+        errors,
+        ..
+    } = ctx.run_due_tasks(std::time::Instant::now());
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].to_string().contains("independent task failure"));
+    assert_eq!(
+        payload.unwrap(),
+        serde_json::json!({"value": 7, "ready": true})
+    );
+    assert_eq!(ctx.pending_task_count(), 0);
+    assert!(ctx.next_task_deadline().is_none());
+}
+
+#[test]
+fn backend_task_handles_cancel_and_stop_clears_pending_work() {
+    let mut ctx = BackendScriptContext::new("@test/backend-task-lifetime");
+    ctx.load_script(
+        r#"
+state = { value = 0 }
+function start(self)
+    local handle = task.delay(0, function() state.value = 1 end)
+    state.cancelled = handle:cancel()
+    task.spawn(function() task.sleep(10000); state.value = 2 end)
+end
+"#,
+    )
+    .unwrap();
+    let state = ctx.call_init().unwrap().unwrap();
+    assert_eq!(state["cancelled"], true);
+    assert_eq!(ctx.pending_task_count(), 1);
+    ctx.call_stop().unwrap();
+    assert_eq!(ctx.pending_task_count(), 0);
+    assert!(ctx.next_task_deadline().is_none());
+}
+
+#[test]
+fn backend_task_registration_requires_startup() {
+    for source in [
+        "task.spawn(function() end); function start(self) end",
+        "task.delay(0, function() end); function start(self) end",
+    ] {
+        let mut ctx = BackendScriptContext::new("@test/backend-task-staging");
+        assert!(
+            ctx.load_script(source)
+                .unwrap_err()
+                .to_string()
+                .contains("before start(self)")
+        );
+        assert_eq!(ctx.pending_task_count(), 0);
+    }
+}
+
+#[tokio::test]
+async fn backend_exec_task_yields_while_independent_tasks_run() {
+    let root = temp_storage_root("async-exec");
+    std::fs::create_dir_all(&root).unwrap();
+    let release = root.join("release");
+    let mut ctx = BackendScriptContext::new_with_settings_and_capabilities(
+        "@test/async-exec",
+        serde_json::json!({"release": release}),
+        mesh_core_capability::CapabilitySet::from_ids(["exec.command"]),
+    );
+    ctx.load_script(r#"
+state = { done = false }
+function start(self)
+    task.spawn(function()
+        local result = mesh.exec("sh", {"-c", 'while [ ! -e "$1" ]; do sleep 0.01; done; printf done', "mesh-test", mesh.config().release})
+        state.done = result.success
+        state.output = result.stdout
+        state.error = result.stderr
+    end)
+    task.delay(0, function() state.independent = true end)
+end
+"#).unwrap();
+    ctx.call_init().unwrap();
+    assert_eq!(ctx.pending_task_count(), 2);
+    let BackendTaskRun { state, errors, .. } = ctx.run_due_tasks(std::time::Instant::now());
+    assert!(errors.is_empty(), "{errors:?}");
+    let state = state.unwrap();
+    assert_eq!(state["independent"], true);
+    assert_eq!(state["done"], false);
+    std::fs::write(&release, "ready").unwrap();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        ctx.task_wakeup().notified(),
+    )
+    .await
+    .unwrap();
+    let BackendTaskRun { state, errors, .. } = ctx.run_due_tasks(std::time::Instant::now());
+    assert!(errors.is_empty(), "{errors:?}");
+    let state = state.unwrap();
+    assert_eq!(state["done"], true, "{state}");
+    assert_eq!(state["output"], "done");
+    assert_eq!(ctx.pending_task_count(), 0);
+    drop(ctx);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn backend_socket_task_yields_until_the_peer_replies() {
+    use std::io::{Read, Write};
+    let root = temp_storage_root("async-socket");
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("service.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+    let (release, released) = std::sync::mpsc::channel();
+    let peer = std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        let mut request = String::new();
+        socket.read_to_string(&mut request).unwrap();
+        assert_eq!(request, "request");
+        released.recv().unwrap();
+        socket.write_all(b"reply").unwrap();
+    });
+    let mut ctx = BackendScriptContext::new_with_settings_and_capabilities(
+        "@test/async-socket",
+        serde_json::json!({"socket": path}),
+        mesh_core_capability::CapabilitySet::from_ids(["net.socket"]),
+    );
+    ctx.load_script(
+        r#"
+state = { done = false }
+function start(self)
+    task.spawn(function()
+        local reply = mesh.socket_request(mesh.config().socket, "request")
+        state.done = reply.success
+        state.response = reply.response
+    end)
+    task.delay(0, function() state.independent = true end)
+end
+"#,
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+    assert_eq!(ctx.pending_task_count(), 2);
+    let BackendTaskRun { state, errors, .. } = ctx.run_due_tasks(std::time::Instant::now());
+    assert!(errors.is_empty(), "{errors:?}");
+    let state = state.unwrap();
+    assert_eq!(state["independent"], true);
+    assert_eq!(state["done"], false);
+    release.send(()).unwrap();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        ctx.task_wakeup().notified(),
+    )
+    .await
+    .unwrap();
+    let BackendTaskRun { state, errors, .. } = ctx.run_due_tasks(std::time::Instant::now());
+    assert!(errors.is_empty(), "{errors:?}");
+    let state = state.unwrap();
+    assert_eq!(state["done"], true, "{state}");
+    assert_eq!(state["response"], "reply");
+    peer.join().unwrap();
+    drop(ctx);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn backend_file_task_reads_regular_files_with_an_explicit_grant() {
+    let root = temp_storage_root("async-file");
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("contents");
+    std::fs::write(&path, "hello from a file").unwrap();
+    let mut ctx = BackendScriptContext::new_with_settings_and_capabilities(
+        "@test/async-file",
+        serde_json::json!({"path": path}),
+        mesh_core_capability::CapabilitySet::from_ids(["fs.read"]),
+    );
+    ctx.load_script(
+        r#"
+state = {}
+function start(self)
+    task.spawn(function()
+        local reply = mesh.read_file(mesh.config().path)
+        state.done = reply.success
+        state.contents = reply.contents
+    end)
+end
+"#,
+    )
+    .unwrap();
+    let state = ctx.call_init().unwrap().unwrap();
+    if state["done"] != true {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            ctx.task_wakeup().notified(),
+        )
+        .await
+        .unwrap();
+    }
+    let BackendTaskRun { state, errors, .. } = ctx.run_due_tasks(std::time::Instant::now());
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_eq!(state.unwrap()["contents"], "hello from a file");
+    drop(ctx);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn backend_file_reads_require_a_grant_and_an_absolute_regular_path() {
+    let mut denied = BackendScriptContext::new("@test/denied-file");
+    denied
+        .load_script("function start(self) mesh.read_file('/etc/passwd') end")
+        .unwrap();
+    assert!(
+        denied
+            .call_init()
+            .unwrap_err()
+            .to_string()
+            .contains("fs.read")
+    );
+    let mut granted =
+        BackendScriptContext::new_with_capabilities("@test/file-path", ["fs.read".into()]);
+    granted
+        .load_script("function start(self) mesh.read_file('relative') end")
+        .unwrap();
+    assert!(
+        granted
+            .call_init()
+            .unwrap_err()
+            .to_string()
+            .contains("absolute path")
+    );
+}
+
+#[test]
+fn denied_exec_inside_a_task_preserves_the_reply_contract() {
+    let mut ctx = BackendScriptContext::new("@test/denied-async-exec");
+    ctx.load_script(
+        r#"
+state = {}
+function start(self)
+    task.spawn(function()
+        local result = mesh.exec("sh", {"-c", "printf forbidden"})
+        state.success = result.success
+        state.no_code = result.code == nil
+        state.error = result.stderr
+    end)
+end
+"#,
+    )
+    .unwrap();
+    let state = ctx.call_init().unwrap().unwrap();
+    assert_eq!(state["success"], false);
+    assert_eq!(state["no_code"], true);
+    assert!(
+        state["error"]
+            .as_str()
+            .unwrap()
+            .contains("denied mesh.exec")
+    );
+    assert_eq!(ctx.pending_task_count(), 0);
+}
+
+trait FinishedCommand {
+    fn run_command_finished(
+        &mut self,
+        command: &str,
+        payload: &serde_json::Value,
+    ) -> Result<BackendCommandOutcome, BackendScriptError>;
+}
+
+impl FinishedCommand for BackendScriptContext {
+    fn run_command_finished(
+        &mut self,
+        command: &str,
+        payload: &serde_json::Value,
+    ) -> Result<BackendCommandOutcome, BackendScriptError> {
+        match self.run_command_with_result(command, payload)? {
+            BackendCommandRun::Finished(outcome) => Ok(outcome),
+            BackendCommandRun::Suspended { task, .. } => {
+                panic!("command {command} suspended as task {task}")
+            }
+        }
+    }
+}
+
+const ASYNC_CALLBACKS: &str = r#"
+state = { started = false, polls = 0 }
+local function wait_for(path)
+    return mesh.exec("sh", {"-c", 'while [ ! -e "$1" ]; do sleep 0.01; done; printf ok', "mesh-test", path})
+end
+function start(self)
+    state.started = wait_for(mesh.config().start).stdout == "ok"
+end
+function on_poll(self)
+    state.polls += 1
+    state.polled = wait_for(mesh.config().poll).stdout
+end
+function on_command_fetch(self)
+    local amount = mesh.service.payload().amount
+    local result = wait_for(mesh.config().command)
+    return { ok = result.success, amount = amount }
+end
+function on_command_fail(self)
+    wait_for(mesh.config().command)
+    error("failed after suspending")
+end
+"#;
+
+fn async_callbacks_context(root: &std::path::Path) -> BackendScriptContext {
+    std::fs::create_dir_all(root).unwrap();
+    let mut ctx = BackendScriptContext::new_with_settings_and_capabilities(
+        "@test/async-callbacks",
+        serde_json::json!({
+            "start": root.join("start"),
+            "poll": root.join("poll"),
+            "command": root.join("command"),
+        }),
+        mesh_core_capability::CapabilitySet::from_ids(["exec.command"]),
+    );
+    ctx.load_script(ASYNC_CALLBACKS).unwrap();
+    ctx
+}
+
+async fn settle(ctx: &mut BackendScriptContext) -> BackendTaskRun {
+    tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        ctx.task_wakeup().notified(),
+    )
+    .await
+    .expect("host operation should complete");
+    ctx.run_due_tasks(std::time::Instant::now())
+}
+
+#[tokio::test]
+async fn suspended_start_finishes_before_the_session_runs() {
+    let root = temp_storage_root("async-start");
+    let mut ctx = async_callbacks_context(&root);
+    ctx.call_init().unwrap();
+    assert!(ctx.start_pending());
+    assert_ne!(
+        ctx.session().lifecycle().state(),
+        RuntimeLifecycleState::Running
+    );
+    std::fs::write(root.join("start"), "").unwrap();
+    let run = settle(&mut ctx).await;
+    assert!(matches!(run.start, Some(Ok(()))), "{run:?}");
+    assert!(!ctx.start_pending());
+    assert_eq!(
+        ctx.session().lifecycle().state(),
+        RuntimeLifecycleState::Running
+    );
+    assert_eq!(run.state.unwrap()["started"], true);
+    drop(ctx);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn suspended_poll_stays_in_flight_until_its_host_call_returns() {
+    let root = temp_storage_root("async-poll");
+    let mut ctx = async_callbacks_context(&root);
+    std::fs::write(root.join("start"), "").unwrap();
+    ctx.call_init().unwrap();
+    let _ = settle(&mut ctx).await;
+    let state = ctx.run_poll().unwrap().unwrap();
+    assert!(ctx.poll_in_flight());
+    assert_eq!(state["polls"], 1);
+    std::fs::write(root.join("poll"), "").unwrap();
+    let run = settle(&mut ctx).await;
+    assert_eq!(run.polls.len(), 1);
+    assert!(run.polls[0].is_ok());
+    assert!(!ctx.poll_in_flight());
+    assert_eq!(run.state.unwrap()["polled"], "ok");
+    drop(ctx);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn suspended_command_settles_with_its_own_payload_and_result() {
+    let root = temp_storage_root("async-command");
+    let mut ctx = async_callbacks_context(&root);
+    std::fs::write(root.join("start"), "").unwrap();
+    ctx.call_init().unwrap();
+    let _ = settle(&mut ctx).await;
+    let BackendCommandRun::Suspended { task: fetch, .. } = ctx
+        .run_command_with_result("fetch", &serde_json::json!({ "amount": 3 }))
+        .unwrap()
+    else {
+        panic!("fetch should suspend on mesh.exec");
+    };
+    let BackendCommandRun::Suspended { task: fail, .. } = ctx
+        .run_command_with_result("fail", &serde_json::json!({}))
+        .unwrap()
+    else {
+        panic!("fail should suspend on mesh.exec");
+    };
+    std::fs::write(root.join("command"), "").unwrap();
+    let mut settled = HashMap::new();
+    while settled.len() < 2 {
+        for (task, outcome) in settle(&mut ctx).await.commands {
+            settled.insert(task, outcome.unwrap());
+        }
+    }
+    assert_eq!(
+        settled[&fetch].result,
+        serde_json::json!({ "ok": true, "amount": 3 })
+    );
+    assert!(
+        settled[&fail]
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("failed after suspending"))
+    );
+    assert_eq!(settled[&fail].result["ok"], false);
+    drop(ctx);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn cancelling_a_suspended_command_drops_its_task() {
+    let root = temp_storage_root("async-cancel");
+    let mut ctx = async_callbacks_context(&root);
+    std::fs::write(root.join("start"), "").unwrap();
+    ctx.call_init().unwrap();
+    let _ = settle(&mut ctx).await;
+    let BackendCommandRun::Suspended { task, .. } = ctx
+        .run_command_with_result("fetch", &serde_json::json!({ "amount": 1 }))
+        .unwrap()
+    else {
+        panic!("fetch should suspend on mesh.exec");
+    };
+    assert!(ctx.cancel_task(task));
+    assert_eq!(ctx.pending_task_count(), 0);
+    std::fs::write(root.join("command"), "").unwrap();
+    let run = settle(&mut ctx).await;
+    assert!(run.commands.is_empty());
+    drop(ctx);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// Run `on_poll` and, when it suspends on a host operation, wait for it to
+/// finish. Returns the state snapshot after the poll.
+fn settled_poll(ctx: &mut BackendScriptContext) -> serde_json::Value {
+    let mut state = ctx.run_poll().unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while ctx.poll_in_flight() {
+        assert!(std::time::Instant::now() < deadline, "poll did not settle");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let run = ctx.run_due_tasks(std::time::Instant::now());
+        for poll in run.polls {
+            poll.unwrap();
+        }
+        state = run.state.or(state);
+    }
+    state.unwrap()
 }

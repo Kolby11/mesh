@@ -102,7 +102,7 @@ local function sync_lang(is_sk)
     locale_is_sk = is_sk
 end
 
-function render(self)
+effect(function(self)
     if audio and audio.available then
         local p = math.max(0, math.min(100, math.floor(tonumber(audio.percent) or 0)))
         sync_volume(p, audio.muted or false)
@@ -126,7 +126,7 @@ function render(self)
     local locale = mesh.locale.current()
     local is_sk  = locale == "sk" or string.find(locale or "", "sk-", 1, true) == 1
     sync_lang(is_sk)
-end
+end)
 
 function onVolumeChange(event)
     local val = math.max(0, math.min(100, math.floor(tonumber(event.value) or 0)))

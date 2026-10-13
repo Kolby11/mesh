@@ -260,11 +260,6 @@ impl SurfaceEffect {
 
 #[derive(Debug, Clone)]
 pub enum ServiceEffect {
-    Command {
-        interface: String,
-        command: String,
-        payload: Value,
-    },
     Call {
         interface: String,
         command: String,
@@ -282,15 +277,12 @@ pub enum ServiceEffect {
 impl ServiceEffect {
     fn interface(&self) -> &str {
         match self {
-            Self::Command { interface, .. }
-            | Self::Call { interface, .. }
-            | Self::Cancel { interface, .. } => interface,
+            Self::Call { interface, .. } | Self::Cancel { interface, .. } => interface,
         }
     }
 
     fn kind(&self) -> &'static str {
         match self {
-            Self::Command { .. } => "service-command",
             Self::Call { .. } => "service-call",
             Self::Cancel { .. } => "service-cancel",
         }
@@ -379,10 +371,12 @@ mod tests {
                 EffectSource::new("@mesh/panel", None),
                 CapabilitySet::default(),
             ),
-            FrontendEffect::Service(ServiceEffect::Command {
+            FrontendEffect::Service(ServiceEffect::Call {
                 interface: "mesh.audio".into(),
                 command: "set_volume".into(),
                 payload: serde_json::json!({ "percent": 50 }),
+                call_id: 1,
+                instance_id: "panel".into(),
             }),
         );
 
@@ -390,7 +384,7 @@ mod tests {
             effect.authorize(),
             Err(EffectRejection::MissingCapability {
                 module_id: "@mesh/panel".into(),
-                effect: "service-command".into(),
+                effect: "service-call".into(),
                 required: vec!["service.audio.control".into()],
             })
         );

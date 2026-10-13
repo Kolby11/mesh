@@ -4,6 +4,25 @@
 the implementation and measurements are in the performance log. This note
 describes remaining raster work, not another backlog.
 
+## D6 scope revision — 2026-10-13
+
+Production wiring is deferred until the immutable scene commit and render-thread
+prototype establishes the cost of GPU layer translation. The byte-copy cache
+below remains a software fallback experiment, not a prerequisite for threaded
+rendering and not the default scroll architecture.
+
+The scene must represent scroll content, the viewport clip, and anchored
+scrollbars separately. A scroll-only commit changes the content transform and
+damage without rebuilding commands or moving a baked rounded mask. Raster
+resources belong to the render thread; snapshots carry immutable handles and
+resource generations, never a mutable UI tree or borrowed painter state.
+
+Keep the byte oracle, pixel parity cases, budgets, and existing scroll workload
+as acceptance tests for either renderer. Only wire this software cache after
+repeated measurements show a material benefit for the supported CPU fallback
+workload, including fractional momentum hit rate and memory cost. GPU texture
+residency must use the renderer's resource budget rather than a second cache.
+
 ## Admission and ownership
 
 Cache a rectangular, transparent content raster per eligible scroll scope,
@@ -58,5 +77,5 @@ update/paint timing, repainted pixels, cache bytes and process memory. Keep the
 one-pass/no-restyle and command-retention gates. Fractional momentum may remain
 uncached: measure hit rate rather than claiming every frame benefits.
 
-Wave 5 follows independently, starting with its partial-repaint blur pixel
-regression before a detailed in-surface blur spec/cache contract.
+Blur correctness tests proceed independently. Cache ownership and production
+wiring follow the D6 scene/render-thread boundary in the companion blur plan.

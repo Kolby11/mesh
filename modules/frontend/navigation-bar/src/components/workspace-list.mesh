@@ -61,7 +61,7 @@ local function sync_classes()
     sync_indicator()
 end
 
-function render(self)
+effect(function(self)
     local active = get_wm_state()
     if active then
         local n = tonumber(active) or 1
@@ -70,7 +70,7 @@ function render(self)
             sync_classes()
         end
     end
-end
+end)
 
 local function switch_to(n)
     ws_active = n
