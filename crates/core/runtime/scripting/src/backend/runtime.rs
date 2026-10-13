@@ -913,44 +913,6 @@ impl BackendScriptContext {
         self.take_service_state_snapshot()
     }
 
-    /// Call `on_command_<name>()` for the given command. Returns any exported service state.
-    pub fn run_command(
-        &mut self,
-        command: &str,
-        payload: &JsonValue,
-    ) -> Result<Option<JsonValue>, BackendScriptError> {
-        let _budget = self.policy.begin_callback();
-        self.host_side_effects_enabled
-            .store(true, Ordering::Release);
-        self.reset_for_call(payload.clone());
-        if let Some(registry) = &self.command_registry {
-            if registry.validate_payload(command, payload).is_err() {
-                return Ok(None);
-            }
-        }
-        let normalized = command.replace('-', "_");
-
-        let globals = self.script_environment()?;
-        let handler_name = format!("on_command_{normalized}");
-        let handler = match globals.get::<Function>(handler_name.as_str()) {
-            Ok(handler) => handler,
-            Err(_) => return Ok(None),
-        };
-        let current_self =
-            self.current_self_table()
-                .map_err(|err| BackendScriptError::Runtime {
-                    module_id: self.module_id.clone(),
-                    message: err.to_string(),
-                })?;
-        handler
-            .call::<()>(current_self)
-            .map_err(|err| BackendScriptError::Runtime {
-                module_id: self.module_id.clone(),
-                message: err.to_string(),
-            })?;
-        self.take_service_state_snapshot()
-    }
-
     /// Run `on_command_<name>(self)` as a coroutine. A handler that suspends
     /// on a host operation is reported as [`BackendCommandRun::Suspended`]
     /// and settles from [`Self::run_due_tasks`]; only a handler that fails

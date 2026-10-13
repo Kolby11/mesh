@@ -255,7 +255,7 @@ pub(crate) fn service_member_markdown(
             .iter()
             .find(|field| field.name == member)
         {
-            let ty = contract_type_to_luau(&field.field_type);
+            let ty = mesh_core_service::luau_type_of(&field.field_type);
             return Some(format!(
                 "**`{var_name}.{member}`**: `{ty}`{}",
                 field
@@ -292,7 +292,7 @@ fn contract_state_item(
     interface: &str,
     field: &mesh_core_service::ContractStateField,
 ) -> CompletionItem {
-    let ty = contract_type_to_luau(&field.field_type);
+    let ty = mesh_core_service::luau_type_of(&field.field_type);
     CompletionItem {
         label: field.name.clone(),
         kind: Some(CompletionItemKind::FIELD),
@@ -342,16 +342,10 @@ fn contract_event_item(
     interface: &str,
     event: &mesh_core_service::InterfaceEvent,
 ) -> CompletionItem {
-    let payload = event
-        .payload
-        .iter()
-        .map(|field| format!("{}: {}", field.name, contract_type_to_luau(&field.arg_type)))
-        .collect::<Vec<_>>()
-        .join(", ");
     CompletionItem {
         label: event.name.clone(),
         kind: Some(CompletionItemKind::EVENT),
-        detail: Some(format!("EventChannel<{{ {payload} }}>")),
+        detail: Some(contract_event_channel(event)),
         documentation: Some(Documentation::MarkupContent(MarkupContent {
             kind: MarkupKind::Markdown,
             value: format!("Typed event channel declared by `{interface}`."),
@@ -360,45 +354,47 @@ fn contract_event_item(
     }
 }
 
+/// An event channel's type as the generated `.d.luau` declares it.
+fn contract_event_channel(event: &mesh_core_service::InterfaceEvent) -> String {
+    if event.payload.is_empty() {
+        return "Channel<()>".to_string();
+    }
+    let payload = event
+        .payload
+        .iter()
+        .map(|field| {
+            format!(
+                "{}: {}",
+                field.name,
+                mesh_core_service::luau_type_of(&field.arg_type)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("Channel<{{ {payload} }}>")
+}
+
+/// A method's call signature; the proxy returns a ticket, as the generated
+/// `.d.luau` declares.
 fn contract_method_signature(method: &mesh_core_service::InterfaceMethod) -> String {
     let args = method
         .args
         .iter()
-        .map(|arg| format!("{}: {}", arg.name, contract_type_to_luau(&arg.arg_type)))
+        .map(|arg| {
+            format!(
+                "{}: {}",
+                arg.name,
+                mesh_core_service::luau_type_of(&arg.arg_type)
+            )
+        })
         .collect::<Vec<_>>()
         .join(", ");
     let returns = method
         .returns
         .as_deref()
-        .map(contract_type_to_luau)
+        .map(mesh_core_service::luau_type_of)
         .unwrap_or_else(|| "nil".to_string());
-    format!("{}({args}): {returns}", method.name)
-}
-
-fn contract_type_to_luau(contract_type: &str) -> String {
-    let Ok(parsed) = mesh_core_service::TypeExpr::parse(contract_type) else {
-        return contract_type.to_string();
-    };
-    let base = match parsed.base {
-        mesh_core_service::BaseType::String => "string".to_string(),
-        mesh_core_service::BaseType::Int | mesh_core_service::BaseType::Float => {
-            "number".to_string()
-        }
-        mesh_core_service::BaseType::Boolean => "boolean".to_string(),
-        mesh_core_service::BaseType::Object => "{ [string]: any }".to_string(),
-        mesh_core_service::BaseType::Any => "any".to_string(),
-        mesh_core_service::BaseType::Named(name) => name,
-    };
-    let array = if parsed.array {
-        format!("{{{base}}}")
-    } else {
-        base
-    };
-    if parsed.optional {
-        format!("{array}?")
-    } else {
-        array
-    }
+    format!("{}({args}): Ticket<{returns}>", method.name)
 }
 
 fn complete_props(prefix: &str, doc: &Document) -> Vec<CompletionItem> {
@@ -665,7 +661,7 @@ fn complete_import_member(
             if let Some(item) = member_item(
                 &field.name,
                 prefix,
-                &contract_type_to_luau(&field.field_type),
+                &mesh_core_service::luau_type_of(&field.field_type),
                 CompletionItemKind::FIELD,
             ) {
                 items.push(item);
@@ -682,16 +678,10 @@ fn complete_import_member(
             }
         }
         for event in &contract.events {
-            let payload = event
-                .payload
-                .iter()
-                .map(|field| format!("{}: {}", field.name, contract_type_to_luau(&field.arg_type)))
-                .collect::<Vec<_>>()
-                .join(", ");
             if let Some(item) = member_item(
                 &event.name,
                 prefix,
-                &format!("EventChannel<{{ {payload} }}>"),
+                &contract_event_channel(event),
                 CompletionItemKind::EVENT,
             ) {
                 items.push(item);

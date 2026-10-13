@@ -2123,6 +2123,8 @@ impl Shell {
         )
     }
 
+    /// Every service call passes here, from proxies and from core callers
+    /// alike, so this check is the one authorization no caller can skip.
     fn dispatch_service_command_with_call_id(
         &mut self,
         interface: &str,

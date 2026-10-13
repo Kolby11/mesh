@@ -332,7 +332,9 @@ An interface is a named, versioned declaration of:
   compiled contract may declare `capabilities.read`, per-event
   `capabilities.events`, and per-method `capabilities.methods` requirements;
   these policies are authoritative for custom interface names and are checked
-  at activation, proxy creation, delivery, subscription, and dispatch.
+  at activation, proxy creation, delivery, subscription, and dispatch. A proxy
+  decides its method grants when acquired; dispatch checks again because it
+  also serves callers without a proxy, such as core-triggered calls.
 - **Shared props** — user preferences that survive provider swaps
   ([08 §4](08-settings.md)).
 

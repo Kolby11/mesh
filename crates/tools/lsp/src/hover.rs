@@ -261,7 +261,10 @@ audio.set_volume()
 
         let command = hover_at(&doc, source.find("set_volume").unwrap(), &registry);
         assert!(command.contains("audio.set_volume"));
-        assert!(command.contains("set_volume(percent: number): Result"));
+        assert!(
+            command
+                .contains("set_volume(percent: number): Ticket<{ ok: boolean, error: string? }>")
+        );
         assert!(command.contains("Typed command declared by `mesh.audio`."));
     }
 

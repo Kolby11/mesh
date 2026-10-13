@@ -2722,6 +2722,13 @@ end
 }
 
 trait FinishedCommand {
+    /// The state a finished command left, or its handler error.
+    fn run_command(
+        &mut self,
+        command: &str,
+        payload: &serde_json::Value,
+    ) -> Result<Option<serde_json::Value>, BackendScriptError>;
+
     fn run_command_finished(
         &mut self,
         command: &str,
@@ -2730,6 +2737,21 @@ trait FinishedCommand {
 }
 
 impl FinishedCommand for BackendScriptContext {
+    fn run_command(
+        &mut self,
+        command: &str,
+        payload: &serde_json::Value,
+    ) -> Result<Option<serde_json::Value>, BackendScriptError> {
+        let outcome = self.run_command_finished(command, payload)?;
+        match outcome.error {
+            Some(message) => Err(BackendScriptError::Runtime {
+                module_id: "@test/backend".to_string(),
+                message,
+            }),
+            None => Ok(outcome.state),
+        }
+    }
+
     fn run_command_finished(
         &mut self,
         command: &str,

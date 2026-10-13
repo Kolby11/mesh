@@ -10,7 +10,7 @@ fn contains_text(node: &WidgetNode, content: &str) -> bool {
             .any(|child| contains_text(child, content))
 }
 
-/// `navigation_bar_catalog` has no `mesh.wm` provider, so the bar's start
+/// `navigation_bar_catalog_without_wm` has no `mesh.wm` provider, so the bar's start
 /// slot components cannot create a runtime. That cannot change while the
 /// component keeps its catalog; each frame used to rebuild and discard a whole
 /// Luau context per instance before showing the same placeholder.
@@ -18,7 +18,7 @@ fn contains_text(node: &WidgetNode, content: &str) -> bool {
 fn unavailable_interface_runtime_failure_is_not_retried_every_frame() {
     let theme = default_theme();
     let mut navigation =
-        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+        real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog_without_wm());
     navigation.visible = true;
     let mut buffer = PixelBuffer::new(960, 80);
     navigation

@@ -46,7 +46,7 @@ pub use contract::{
 };
 pub use generator::{
     GeneratedContractArtifacts, generate_contract_artifacts, generate_contract_documentation,
-    generate_luau_consumer_types, generate_luau_mock, generate_luau_provider_stub,
+    generate_luau_consumer_types, generate_luau_mock, generate_luau_provider_stub, luau_type_of,
 };
 pub use interface::{
     InterfaceCatalog, InterfaceCatalogBuilder, InterfaceProvider, InterfaceResolution,

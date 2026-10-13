@@ -347,6 +347,24 @@ pub(super) fn audio_network_power_catalog() -> InterfaceCatalog {
 /// resolve their interface and render wide error text, overflowing the bar so
 /// the right-cluster buttons land off-surface and become un-hit-testable.
 pub(super) fn navigation_bar_catalog() -> InterfaceCatalog {
+    let mut catalog = navigation_bar_catalog_without_wm();
+    catalog
+        .try_register_contract(shipped_wm_contract())
+        .expect("shipped mesh.wm contract should register");
+    catalog.register_provider(InterfaceProvider {
+        interface: "mesh.wm".into(),
+        version: Some("1.0".into()),
+        base_module: Some("@mesh/hyprland-wm".into()),
+        provider_module: "@mesh/hyprland-wm".into(),
+        backend_name: "Hyprland".into(),
+        priority: 100,
+    });
+    catalog
+}
+
+/// The navigation services with no window manager, so the start slot's
+/// `mesh.wm` components cannot be created.
+pub(super) fn navigation_bar_catalog_without_wm() -> InterfaceCatalog {
     let mut catalog = audio_network_power_catalog();
     for (interface, base_module, provider_module, backend_name) in [
         (
@@ -439,6 +457,25 @@ pub(super) fn navigation_bar_catalog() -> InterfaceCatalog {
         });
     }
     catalog
+}
+
+/// The `mesh.wm` contract as `@mesh/hyprland-wm` ships it, so navigation
+/// fixtures and benches render the real workspace list.
+fn shipped_wm_contract() -> InterfaceContract {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../modules/backend/hyprland-wm/module.json");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let declaration = manifest["mesh"]["interfaces"]
+        .as_array()
+        .and_then(|interfaces| interfaces.iter().find(|entry| entry["name"] == "mesh.wm"))
+        .expect("hyprland-wm declares mesh.wm");
+    mesh_core_service::parse_interface_contract(
+        "mesh.wm",
+        declaration["version"].as_str().unwrap(),
+        &declaration["contract"],
+    )
+    .expect("shipped mesh.wm contract should parse")
 }
 
 pub(super) fn debug_catalog() -> InterfaceCatalog {

@@ -358,6 +358,14 @@ fn stub_parameters(method: &CompiledMethodSchema) -> String {
     }
 }
 
+/// The Luau type the generated `.d.luau` declares for a contract type
+/// string. Tooling shows the same spelling the declarations use. A string
+/// that does not parse is returned unchanged.
+pub fn luau_type_of(contract_type: &str) -> String {
+    TypeExpr::parse(contract_type)
+        .map_or_else(|_| contract_type.to_string(), |expr| luau_type(&expr))
+}
+
 fn luau_type(expr: &TypeExpr) -> String {
     let base = match &expr.base {
         BaseType::String => "string".to_string(),

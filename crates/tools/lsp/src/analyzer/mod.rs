@@ -509,7 +509,9 @@ audio.$0
             .expect("method completion");
         assert_eq!(
             method.detail.as_deref(),
-            Some("set_volume(device_id: string, percent: number): Result")
+            Some(
+                "set_volume(device_id: string, percent: number): Ticket<{ ok: boolean, error: string? }>"
+            )
         );
         assert_eq!(method.insert_text.as_deref(), Some("set_volume($1, $2)"));
 
@@ -519,7 +521,7 @@ audio.$0
             .expect("event completion");
         assert_eq!(
             event.detail.as_deref(),
-            Some("EventChannel<{ percent: number }>")
+            Some("Channel<{ percent: number }>")
         );
         assert!(!items.iter().any(|item| item.label == "on_change"));
     }

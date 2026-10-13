@@ -160,12 +160,9 @@ Each needs a design and a measured prototype before it is adopted.
 - [ ] **D2:** Backend stream hooks and `stop(self)` still block on host calls;
       move stream delivery onto D8's event-driven APIs, then measure host-worker
       pool pressure (64 process-wide) under a real provider set.
-- [ ] **D3:** The shell still re-authorizes each proxy call at dispatch
-      (`can_call_contract_method`). The proxy is now the only service call
-      path; decide whether that check stays as defense in depth.
 - [ ] **D4:** Providers send typed field patches instead of whole snapshots, and
       no JSON on the frame path. Validation, ranges/defaults and `.d.luau`
-      generation have shipped; the LSP does not read the `.d.luau` yet.
+      generation have shipped, and LSP proxy types use the same mapping.
 - [ ] **D5:** Headless interaction primitives in core (popover, menu, tooltip,
       hover intent, focus scope, dismissal) that modules compose.
 - [ ] **D6:** Immutable scene snapshot committed to a render thread with GPU
@@ -375,9 +372,6 @@ of payoff.
 - [ ] Narrow script frames run full-tree `normalize_accessibility` (~20% of a
       navigation audio poll): memo-reused subtrees are stored pre-finalization,
       so `normalize_accessibility_dirty` has no normalized data to keep for them.
-- [ ] `navigation_bar_catalog` has no `mesh.wm` provider, so every navigation
-      test and `navigation_frame_cost_profile` render the start slot as error
-      placeholders. Add one so the bench measures the real workspace list.
 - [ ] Establish one canonical render-frame snapshot and transform/clip model;
       unify invalidation, display-list reuse, damage, blur regions, and hit
       testing around cumulative affine transforms. [Section 12 audit](../.planning/log/sections/12-rendering-and-paint/improvements.md).
