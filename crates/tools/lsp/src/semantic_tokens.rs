@@ -516,7 +516,7 @@ mod tests {
 </template>
 
 <script lang="luau">
-import StatusPill from "./status-pill.mesh"
+local StatusPill = require("./status-pill.mesh")
 </script>
 "#;
         let doc = Document::new(

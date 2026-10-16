@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-13
+**Updated:** 2026-10-16
 
 What is in flight right now. One page, overwritten as work moves. History and
 measurements are in [`log/`](log/README.md). Open work is in

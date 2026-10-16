@@ -44,7 +44,10 @@ Component rules (shipped):
 
 - Keep files small; extract list items and distinct UI blocks into components
   under `components/`, imported with
-  `local ItemRow = require("./components/item-row.mesh")`.
+  `local ItemRow = require("./components/item-row.mesh")`. Imports are derived
+  from the Luau AST; script source is preserved unchanged. Legacy
+  `import ItemRow from "…"` statements are unsupported and must migrate to
+  `local ItemRow = require("…")`.
 - Bare non-local script assignments are public reactive members; templates
   bind `{name}`. `local` is private. Hooks receive `self` (`self.meta`,
   `self.storage`).

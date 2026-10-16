@@ -2026,7 +2026,7 @@ mesh.service.on("audio", "sync_audio_state")
   <BatteryWidget percent="{percent}"/>
 </template>
 <script lang="luau">
-import BatteryWidget from "./components/battery-widget.mesh"
+local BatteryWidget = require("./components/battery-widget.mesh")
 </script>
 "#;
         let file = parse_component(source).unwrap();
@@ -2054,16 +2054,16 @@ import BatteryWidget from "./components/battery-widget.mesh"
     }
 
     #[test]
-    fn parses_and_strips_explicit_imports() {
+    fn preserves_require_import_spans_and_source() {
         let source = r#"
 <template>
   <BatteryWidget />
   <VolumeBar />
 </template>
 <script lang="luau">
-import BatteryWidget from "./components/battery-widget.mesh"
-import VolumeBar from "@mesh/volume-bar"
-import audio from "mesh.audio@>=1.0"
+local BatteryWidget = require("./components/battery-widget.mesh")
+local VolumeBar = require("@mesh/volume-bar")
+local audio = require("mesh.audio@>=1.0")
 mesh.state.set("ready", true)
 </script>
 "#;
@@ -2082,7 +2082,9 @@ mesh.state.set("ready", true)
             ComponentImportTarget::InterfaceApi { .. }
         ));
         let first_import = &file.imports[0];
-        let first_start = source.find("import BatteryWidget").expect("first import");
+        let first_start = source
+            .find("local BatteryWidget = require")
+            .expect("first import");
         let first_end = source[first_start..]
             .find('\n')
             .map(|offset| first_start + offset)
@@ -2096,8 +2098,9 @@ mesh.state.set("ready", true)
             "BatteryWidget"
         );
         let script = file.script.unwrap();
-        assert!(!script.source.contains("import BatteryWidget"));
+        assert!(script.source.contains("local BatteryWidget = require"));
         assert_eq!(script.source.lines().count(), 5);
+        assert_eq!(&source[script.span.start..script.span.end], script.source);
     }
 
     #[test]
@@ -2136,16 +2139,38 @@ local audio = require("mesh.audio@>=1.0")
     }
 
     #[test]
+    fn legacy_import_syntax_is_preserved_without_registering_an_import() {
+        let source = r#"<template><box /></template>
+<script lang="luau">
+import Legacy from "./legacy.mesh"
+</script>"#;
+        let component = parse_component(source).unwrap();
+        assert!(component.imports.is_empty());
+        let script = component.script.unwrap();
+        assert_eq!(&source[script.span.start..script.span.end], script.source);
+        assert!(script.source.contains("import Legacy from"));
+    }
+
+    #[test]
+    fn legacy_import_does_not_authorize_a_component_tag() {
+        let source = r#"<template><Legacy /></template>
+<script lang="luau">
+import Legacy from "./legacy.mesh"
+</script>"#;
+        let error = parse_component(source).unwrap_err();
+        assert!(error.to_string().contains("local Legacy = require"));
+    }
+
+    #[test]
     fn derives_script_metadata_from_luau_ast() {
         let source = r#"
 <template><box /></template>
 <script lang="luau">
 -- function Fake() end
 local docs = [=[import Fake from "./fake.mesh" mesh.state.set("fake", true) function Fake() end]=]
-import
-  BatteryWidget
-from
+local BatteryWidget = require(
   "./battery.mesh"
+)
 local audio = require(
   "mesh.audio@>=1.0"
 )
@@ -2179,7 +2204,7 @@ end
             Some(&"mesh.audio".to_string())
         );
         assert!(script.metadata.interface_event_subscriptions.is_empty());
-        assert!(!script.source.contains("\nimport\n"));
+        assert_eq!(&source[script.span.start..script.span.end], script.source);
     }
 
     #[test]
@@ -2302,7 +2327,7 @@ local AudioSlider = require("./audio-slider.mesh")
   <Audio />
 </template>
 <script lang="luau">
-import Audio from "mesh.audio"
+local Audio = require("mesh.audio")
 </script>
 "#;
         let err = parse_component(source).unwrap_err();
@@ -2318,8 +2343,8 @@ import Audio from "mesh.audio"
         let source = r#"
 <template><box /></template>
 <script lang="luau">
-import Thing from "./components/one.mesh"
-import Thing from "./components/two.mesh"
+local Thing = require("./components/one.mesh")
+local Thing = require("./components/two.mesh")
 </script>
 "#;
         let err = parse_component(source).unwrap_err();
@@ -2334,41 +2359,7 @@ import Thing from "./components/two.mesh"
         let source = r#"
 <template><box /></template>
 <script lang="luau">
-import Thing from "./components/thing.mesh"
-import Thing from "@mesh/thing"
-</script>
-"#;
-        let err = parse_component(source).expect_err("cross-kind alias collision accepted");
-        assert!(
-            err.to_string()
-                .contains("collides between local component and module component targets"),
-            "unexpected error: {err}"
-        );
-        assert_eq!(err.category(), ParseDiagnosticCategory::Import);
-    }
-
-    #[test]
-    fn rejects_duplicate_alias_between_import_and_require() {
-        let source = r#"
-<template><box /></template>
-<script lang="luau">
-import Thing from "./components/one.mesh"
-local Thing = require("./components/two.mesh")
-</script>
-"#;
-        let err = parse_component(source).unwrap_err();
-        assert!(
-            err.to_string().contains("duplicate import alias `Thing`"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn rejects_local_and_module_alias_collision_between_import_and_require() {
-        let source = r#"
-<template><box /></template>
-<script lang="luau">
-import Thing from "./components/thing.mesh"
+local Thing = require("./components/thing.mesh")
 local Thing = require("@mesh/thing")
 </script>
 "#;

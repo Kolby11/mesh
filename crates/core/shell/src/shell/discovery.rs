@@ -1428,7 +1428,7 @@ fn builtin_contract(
                 returns: Some("Result".to_string()),
                 // These land in the shell synchronously; there is no backend
                 // queue to coalesce against and no optimistic state to bind.
-                coalesce: false,
+                coalesce: false.into(),
                 state_binding: None,
             })
             .collect(),

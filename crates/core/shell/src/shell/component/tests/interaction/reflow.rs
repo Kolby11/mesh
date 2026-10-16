@@ -1187,7 +1187,7 @@ fn component_with_edge_popover(popover_src: &str) -> FrontendSurfaceComponent {
     </row>
 </template>
 <script lang="luau">
-import EdgePopover from "@mesh/test-popover"
+local EdgePopover = require("@mesh/test-popover")
 </script>
 <style>
 .bar { width: 200px; height: 30px; }

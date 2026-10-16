@@ -76,7 +76,7 @@ fn component_handler_calls_preserve_authored_prop_identity() {
      onprimary={onShared("primary")} onsecondary={onShared("secondary")} />
 </template>
 <script lang="luau">
-import Child from "./child.mesh"
+local Child = require("./child.mesh")
 </script>
 "#,
     )

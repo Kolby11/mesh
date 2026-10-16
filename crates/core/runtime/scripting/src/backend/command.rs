@@ -13,7 +13,7 @@ pub struct BackendCommandSpec {
     pub name: String,
     pub arguments: Vec<BackendCommandArgument>,
     pub returns: Option<String>,
-    pub coalesce: bool,
+    pub coalesce: mesh_core_service::CommandCoalescing,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,7 +60,7 @@ impl BackendCommandRegistry {
                             })
                             .collect(),
                         returns: method.returns.clone(),
-                        coalesce: method.coalesce,
+                        coalesce: method.coalesce.clone(),
                     },
                 )
             })
@@ -73,7 +73,8 @@ impl BackendCommandRegistry {
     }
 
     pub fn coalesces(&self, name: &str) -> bool {
-        self.command(name).is_some_and(|command| command.coalesce)
+        self.command(name)
+            .is_some_and(|command| command.coalesce.enabled())
     }
 
     pub fn validate_payload(&self, command: &str, payload: &JsonValue) -> Result<(), String> {

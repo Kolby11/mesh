@@ -1020,7 +1020,7 @@ fn build_template_node(
             None => {
                 return Err(ParseError::InvalidTemplate {
                     message: format!(
-                        "component <{tag}> is not imported; add `import {tag} from \"...\"` to the script block"
+                        "component <{tag}> is not imported; add `local {tag} = require(\"...\")` to the script block"
                     ),
                     span: node_span,
                 });

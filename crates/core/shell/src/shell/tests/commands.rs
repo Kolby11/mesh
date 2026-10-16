@@ -476,7 +476,7 @@ fn coalescable_service_commands_use_a_backend_cost_budget() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();
     let mut contract = test_contract("mesh.audio");
-    contract.methods[0].coalesce = true;
+    contract.methods[0].coalesce = true.into();
     shell.interfaces.register_contract(contract);
     register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
     let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
@@ -517,6 +517,47 @@ fn coalescable_service_commands_use_a_backend_cost_budget() {
         second["call_id"].as_u64().expect("second call id")
     );
     assert_ne!(first_command.call_id, second_command.call_id);
+}
+
+#[test]
+fn command_throttle_uses_contract_keys_for_arbitrary_targets() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    let mut contract = test_contract("mesh.audio");
+    contract.methods[0].args = vec![mesh_core_service::InterfaceArgument {
+        name: "channel".into(),
+        arg_type: "string".into(),
+    }];
+    contract.methods[0].coalesce = mesh_core_service::CommandCoalescing::Latest {
+        key: vec!["channel".into()],
+    };
+    shell.interfaces.register_contract(contract);
+    register_test_provider(&shell.interfaces, "mesh.audio", "@mesh/pipewire-audio");
+    let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".into(), slot);
+    let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.audio.control"]);
+    for channel in ["a", "b"] {
+        let response = shell.dispatch_service_command(
+            "mesh.audio",
+            "set_volume",
+            &serde_json::json!({"channel":channel}),
+            "@mesh/navigation-bar",
+            &capabilities,
+        );
+        assert_eq!(response["ok"], true);
+        assert_ne!(response["throttled"], true);
+        assert_eq!(rx.try_recv().unwrap().payload["channel"], channel);
+    }
+    let response = shell.dispatch_service_command(
+        "mesh.audio",
+        "set_volume",
+        &serde_json::json!({"channel":"a"}),
+        "@mesh/navigation-bar",
+        &capabilities,
+    );
+    assert_eq!(response["throttled"], true);
+    assert!(rx.try_recv().is_err());
+    assert_eq!(shell.command_throttle.len(), 2);
 }
 
 /// The capability is the whole gate. No module id is consulted, so a

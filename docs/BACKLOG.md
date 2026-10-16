@@ -34,12 +34,10 @@ unless an item says otherwise. IDs point into the
       contract, with LSP/doctor warnings for tokens outside it.
 - [ ] **A5:** Merge `frontend`/`component` into one UI kind with optional default
       placement; evaluate one mixed resource-pack kind.
-- [ ] **RT-09:** Contract-declared coalescing keys instead of guessing targets
-      from field names like `device` and `sink`.
 - [ ] **CMP-02 / CMP-08:** Handlers and callbacks as Luau function values, parsed
       with full_moon, replacing global-name strings and the hand-written splitter.
-- [ ] **CMP-07 / CMP-06:** `<props>` as a statically parsed Luau table shared with
-      future backend props; remove the legacy `import X from` scanner.
+- [ ] **CMP-07:** `<props>` as a statically parsed Luau table shared with
+      future backend props.
 - [ ] **RES-06 / RES-12:** One default theme with dark/light modes and quick
       settings using `set_mode`; remove core's hard-coded inspector tab enum.
 
@@ -136,7 +134,7 @@ tracking, validation and scheduling.
 - [ ] Narrow compound public inputs and captured template-helper dependencies;
       tables and function calls still use conservative invalidation.
 - [ ] Optimistic pending values on proxy methods, reconciled with emitted state
-      through contract coalescing keys (RT-09), replacing the hand-written
+      through contract coalescing keys, replacing the hand-written
       set-then-reconcile pattern in sliders.
 - [ ] A top-level `local x = require("mesh.*")` becomes a static interface
       import bound for the whole surface, so a service update invalidates every

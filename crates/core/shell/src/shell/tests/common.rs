@@ -304,7 +304,7 @@ pub(super) fn test_contract(interface: &str) -> InterfaceContract {
                 name: "set_volume".to_string(),
                 args: Vec::new(),
                 returns: Some("Result".to_string()),
-                coalesce: false,
+                coalesce: false.into(),
                 state_binding: None,
             },
             InterfaceMethod {
@@ -320,7 +320,7 @@ pub(super) fn test_contract(interface: &str) -> InterfaceContract {
                     },
                 ],
                 returns: Some("Result".to_string()),
-                coalesce: false,
+                coalesce: false.into(),
                 state_binding: Some(mesh_core_service::StateBinding {
                     field: "muted".to_string(),
                     from_arg: Some("muted".to_string()),

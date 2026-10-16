@@ -219,8 +219,7 @@ Container and collection elements preserve shell-native source semantics. Use
 ```
 
 Custom component tags must be PascalCase and must be imported in the script
-block before they can be used. New author-facing code uses Luau
-`require(...)`:
+block before they can be used, using Luau `require(...)`:
 
 ```luau
 local BatteryWidget = require("./components/battery-widget.mesh")
@@ -229,9 +228,10 @@ local VolumeBar = require("@mesh/volume-bar")
 
 Local component imports resolve relative to the importing file, `@src/...`
 resolves from the module's `src/` directory, module component imports resolve
-through declared module dependencies. The older
-`import Alias from "..."` component syntax is compatibility-era syntax and
-should not be used in new examples.
+through declared module dependencies. Script source is preserved unchanged.
+The legacy `import Alias from "..."` syntax is unsupported: replace it with
+`local Alias = require("...")`. It does not register an import and is invalid
+Luau when executed.
 
 Imported components are definitions, not mounted instances. Markup creates the
 instance:

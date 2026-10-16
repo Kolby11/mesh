@@ -365,7 +365,7 @@ the contract inline:
               { "name": "percent", "type": "float" }
             ],
             "returns": "Result",
-            "coalesce": true,
+            "coalesce": { "key": ["device_id"] },
             "stateBinding": { "field": "percent", "fromArg": "percent" }
           },
           {
@@ -375,7 +375,7 @@ the contract inline:
               { "name": "muted", "type": "boolean" }
             ],
             "returns": "Result",
-            "coalesce": true,
+            "coalesce": { "key": ["device_id"] },
             "stateBinding": { "field": "muted", "fromArg": "muted" }
           }
         ],
@@ -402,6 +402,22 @@ the contract inline:
   }
 }
 ```
+
+**Shipped — command coalescing.** A method may declare
+`"coalesce": { "key": ["device_id"] }` to replace queued invocations only when
+all named top-level arguments match. Key names must be unique declared method
+arguments; unknown or repeated names reject the contract. Values retain their
+JSON types and compound structure. A missing key argument disables coalescing
+for that invocation; an explicit `null` is a value. Core never infers identity
+from domain-specific argument names.
+
+Omitted/`false` disables coalescing. `true` is supported as shorthand for
+`{ "key": [] }`, one key for the whole method. Use coalescing only for idempotent
+setters, never relative or accumulating commands. The shell throttle and backend
+queue use the same declared keys; backend queues additionally separate backend
+identities. Replaced calls settle as `superseded`. Changing a method's key is a
+breaking behavioral contract change, reflected in compiled metadata, behavior
+fingerprints, compatibility diagnostics and generated documentation.
 
 The external form keeps `module.json` canonical:
 

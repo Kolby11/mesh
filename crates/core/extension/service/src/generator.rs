@@ -440,7 +440,7 @@ mod tests {
                     arg_type: "float".into(),
                 }],
                 returns: Some("Result".into()),
-                coalesce: true,
+                coalesce: true.into(),
                 state_binding: None,
             }],
             events: vec![],

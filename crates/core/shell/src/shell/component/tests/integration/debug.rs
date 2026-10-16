@@ -513,7 +513,7 @@ pub(in crate::shell) fn settings_catalog() -> InterfaceCatalog {
                     },
                 ],
                 returns: None,
-                coalesce: true,
+                coalesce: true.into(),
                 state_binding: Some(mesh_core_service::StateBinding {
                     field: "percent".into(),
                     from_arg: Some("percent".into()),
@@ -533,7 +533,7 @@ pub(in crate::shell) fn settings_catalog() -> InterfaceCatalog {
                     },
                 ],
                 returns: None,
-                coalesce: true,
+                coalesce: true.into(),
                 state_binding: None,
             },
         ],

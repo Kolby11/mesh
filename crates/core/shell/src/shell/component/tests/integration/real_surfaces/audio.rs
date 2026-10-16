@@ -172,8 +172,8 @@ end
 </template>
 
 <script lang="luau">
-import AudioPopover from "@mesh/audio-popover"
-import VolumeButton from "./components/volume-button.mesh"
+local AudioPopover = require("@mesh/audio-popover")
+local VolumeButton = require("./components/volume-button.mesh")
 
 audio_surface_id = "@mesh/audio-popover"
 audio_surface_hidden = true

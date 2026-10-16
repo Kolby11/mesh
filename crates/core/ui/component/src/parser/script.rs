@@ -34,12 +34,7 @@ fn parse_script_impl(
     source: &str,
     recover: bool,
 ) -> Result<(Vec<ComponentImport>, ScriptBlock), ParseError> {
-    let (explicit_imports, masked_source) = match scan_explicit_imports(source) {
-        Ok(result) => result,
-        Err(_error) if recover => (Vec::new(), source.to_string()),
-        Err(error) => return Err(error),
-    };
-    let ast = parse_ast(&masked_source);
+    let ast = parse_ast(source);
     let mut visitor = ScriptVisitor::default();
     visitor.visit_ast(&ast);
     if let Some(span) = visitor.invalid_require_span
@@ -64,7 +59,7 @@ fn parse_script_impl(
     // The lexer is the explicit recovery fallback: it still understands
     // comments, strings, and identifier boundaries, so it cannot resurrect
     // text that merely looks like a member path in trivia.
-    for access in member_accesses_from_tokens(&masked_source) {
+    for access in member_accesses_from_tokens(source) {
         if !metadata
             .member_accesses
             .iter()
@@ -83,11 +78,8 @@ fn parse_script_impl(
     }
     let require_imports = visitor.require_imports;
 
-    let mut imports = explicit_imports;
-    let mut aliases = imports
-        .iter()
-        .map(|import| (import.alias.clone(), import.target.clone()))
-        .collect::<HashMap<_, _>>();
+    let mut imports = Vec::new();
+    let mut aliases = HashMap::new();
     for candidate in require_imports {
         if let Err(error) = check_import_alias(
             &mut aliases,
@@ -107,7 +99,7 @@ fn parse_script_impl(
         imports,
         ScriptBlock {
             lang: ScriptLang::Luau,
-            source: masked_source,
+            source: source.to_string(),
             metadata,
             span: SourceSpan::new(0, source.len()),
         },
@@ -129,68 +121,6 @@ pub fn referenced_identifiers(expr: &str) -> Vec<String> {
         visitor.visit_ast(&ast);
         visitor.identifiers
     })
-}
-
-fn scan_explicit_imports(source: &str) -> Result<(Vec<ComponentImport>, String), ParseError> {
-    let Some(tokens) = significant_tokens(source) else {
-        return Ok((Vec::new(), source.to_string()));
-    };
-
-    let mut imports = Vec::new();
-    let mut aliases = HashMap::new();
-    let mut masked_ranges = Vec::new();
-
-    for window in tokens.windows(4) {
-        let [import, alias, from, source_token] = window else {
-            continue;
-        };
-        if identifier(import) != Some("import")
-            || identifier(alias).is_none()
-            || identifier(from) != Some("from")
-            || !is_string_literal(source_token)
-        {
-            continue;
-        }
-
-        let alias_name = identifier(alias).unwrap().to_string();
-        let source_name = string_literal(source_token).unwrap_or_default();
-        let target =
-            classify_import_target(&source_name).ok_or_else(|| ParseError::InvalidImport {
-                message: format!("unsupported import source `{source_name}`"),
-                span: token_span(import),
-            })?;
-
-        check_import_alias(&mut aliases, &alias_name, &target, token_span(alias))?;
-
-        imports.push(ComponentImport {
-            alias: alias_name,
-            target,
-            span: SourceSpan::new(
-                import.start_position().bytes(),
-                source_token.end_position().bytes(),
-            ),
-            alias_span: token_span(alias),
-            target_span: token_span(source_token),
-        });
-        masked_ranges.push((
-            import.start_position().bytes(),
-            source_token.end_position().bytes(),
-        ));
-    }
-
-    let mut masked = source.as_bytes().to_vec();
-    for (start, end) in masked_ranges {
-        for byte in masked.get_mut(start..end).into_iter().flatten() {
-            if !matches!(*byte, b'\n' | b'\r') {
-                *byte = b' ';
-            }
-        }
-    }
-
-    Ok((
-        imports,
-        String::from_utf8(masked).expect("masking source preserves UTF-8 boundaries"),
-    ))
 }
 
 fn check_import_alias(
@@ -604,10 +534,6 @@ fn string_literal(token: &TokenReference) -> Option<String> {
         TokenType::StringLiteral { literal, .. } => Some(literal.to_string()),
         _ => None,
     }
-}
-
-fn is_string_literal(token: &TokenReference) -> bool {
-    matches!(token.token_type(), TokenType::StringLiteral { .. })
 }
 
 fn identifier(token: &TokenReference) -> Option<&str> {

@@ -1655,7 +1655,7 @@ fn command_registry_validates_arguments_and_blocks_implicit_helpers() {
                 type_expr: "int".to_string(),
             }],
             returns: None,
-            coalesce: true,
+            coalesce: true.into(),
         }],
         std::collections::HashMap::new(),
     );

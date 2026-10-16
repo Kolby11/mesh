@@ -1276,7 +1276,7 @@ box:value { opacity: 0.3; }
   <Child />
 </template>
 <script lang="luau">
-import Child from "./child.mesh"
+local Child = require("./child.mesh")
 theme_icon = "weather-clear"
 </script>
 "#,
@@ -1313,7 +1313,7 @@ theme_icon = "weather-clear"
   <Child />
 </template>
 <script lang="luau">
-import Child from "./child.mesh"
+local Child = require("./child.mesh")
 function onThemeToggle()
 end
 </script>
@@ -1346,7 +1346,7 @@ end
   <Child theme_icon="{theme_icon}" />
 </template>
 <script lang="luau">
-import Child from "./child.mesh"
+local Child = require("./child.mesh")
 theme_icon = "weather-clear"
 </script>
 "#,
@@ -1379,7 +1379,7 @@ theme_icon: { type: "icon" }
   <Child mode="wrong" />
 </template>
 <script lang="luau">
-import Child from "./child.mesh"
+local Child = require("./child.mesh")
 </script>
 "#,
         );
@@ -1411,7 +1411,7 @@ mode: { type: "enum", options: ["compact", "cozy"] }
   <Child secret="value" />
 </template>
 <script lang="luau">
-import Child from "./child.mesh"
+local Child = require("./child.mesh")
 </script>
 "#,
         );
@@ -1438,7 +1438,7 @@ secret: { type: "string", expose: false }
   <Child missing="value" />
 </template>
 <script lang="luau">
-import Child from "./child.mesh"
+local Child = require("./child.mesh")
 </script>
 "#,
         );
@@ -1461,7 +1461,7 @@ import Child from "./child.mesh"
   <Child title="From parent" />
 </template>
 <script lang="luau">
-import Child from "./child.mesh"
+local Child = require("./child.mesh")
 </script>
 "#,
         );
@@ -1559,7 +1559,7 @@ items = {}
             r#"
 <template><Child /></template>
 <script lang="luau">
-import Child from "./child.mesh"
+local Child = require("./child.mesh")
 </script>
 "#,
         );
@@ -1598,7 +1598,7 @@ items = {}
   <Child />
 </template>
 <script lang="luau">
-import Child from "./child.mesh"
+local Child = require("./child.mesh")
 </script>
 "#,
         );
@@ -1691,7 +1691,7 @@ import Child from "./child.mesh"
             std::fs::write(
                 &owner_path,
                 format!(
-                    "<template><Item /></template><script lang=\"luau\">import Item from \"{source}\"</script>"
+                    "<template><Item /></template><script lang=\"luau\">local Item = require(\"{source}\")</script>"
                 ),
             )
             .unwrap();
@@ -1768,8 +1768,8 @@ end
             r#"
 <template><BranchA /><BranchB /></template>
 <script lang="luau">
-import BranchA from "./branch-a.mesh"
-import BranchB from "./branch-b.mesh"
+local BranchA = require("./branch-a.mesh")
+local BranchB = require("./branch-b.mesh")
 </script>
 "#,
         )
@@ -1778,7 +1778,7 @@ import BranchB from "./branch-b.mesh"
             &branch_a,
             r#"
 <template><Item /></template>
-<script lang="luau">import Item from "./item-a.mesh"</script>
+<script lang="luau">local Item = require("./item-a.mesh")</script>
 "#,
         )
         .unwrap();
@@ -1786,7 +1786,7 @@ import BranchB from "./branch-b.mesh"
             &branch_b,
             r#"
 <template><Item /></template>
-<script lang="luau">import Item from "./item-b.mesh"</script>
+<script lang="luau">local Item = require("./item-b.mesh")</script>
 "#,
         )
         .unwrap();
@@ -1846,17 +1846,17 @@ import BranchB from "./branch-b.mesh"
         let second_path = directory.path().join("second.mesh");
         std::fs::write(
             &root_path,
-            "<template><First /></template><script lang=\"luau\">import First from \"./first.mesh\"</script>",
+            "<template><First /></template><script lang=\"luau\">local First = require(\"./first.mesh\")</script>",
         )
         .unwrap();
         std::fs::write(
             &first_path,
-            "<template><Second /></template><script lang=\"luau\">import Second from \"./second.mesh\"</script>",
+            "<template><Second /></template><script lang=\"luau\">local Second = require(\"./second.mesh\")</script>",
         )
         .unwrap();
         std::fs::write(
             &second_path,
-            "<template><First /></template><script lang=\"luau\">import First from \"./first.mesh\"</script>",
+            "<template><First /></template><script lang=\"luau\">local First = require(\"./first.mesh\")</script>",
         )
         .unwrap();
 

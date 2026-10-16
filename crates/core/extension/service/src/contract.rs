@@ -67,7 +67,7 @@ pub struct CompiledMethodSchema {
     pub name: String,
     pub args: Arc<[CompiledField]>,
     pub returns: Option<TypeExpr>,
-    pub coalesce: bool,
+    pub coalesce: CommandCoalescing,
     pub state_binding: Option<StateBinding>,
 }
 
@@ -111,7 +111,7 @@ pub struct CompiledFeatureGroup {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledMethodBehavior {
-    pub coalesce: bool,
+    pub coalesce: CommandCoalescing,
     pub state_binding: Option<StateBinding>,
 }
 
@@ -163,6 +163,7 @@ impl CompiledContract {
             });
         }
         validate_unique_symbols(&contract)?;
+        validate_coalescing_keys(&contract)?;
 
         let schemas = compile_schemas(&contract)?;
         let operation_policy = compile_operation_policy(&contract.capabilities);
@@ -176,7 +177,7 @@ impl CompiledContract {
                         (
                             method.name.clone(),
                             CompiledMethodBehavior {
-                                coalesce: method.coalesce,
+                                coalesce: method.coalesce.clone(),
                                 state_binding: method.state_binding.clone(),
                             },
                         )
@@ -433,17 +434,87 @@ pub struct ContractStateField {
 /// State fields the shell writes itself; providers never have to emit them.
 pub const RUNTIME_METADATA_STATE_FIELDS: &[&str] = &["source_module"];
 
+/// Queue replacement policy. Keys name top-level method arguments; an empty
+/// key coalesces all invocations of a method within one backend identity.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(from = "CommandCoalescingJson")]
+pub enum CommandCoalescing {
+    #[default]
+    Disabled,
+    Latest {
+        key: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum CommandCoalescingJson {
+    Enabled(bool),
+    Key(CoalescingKeyJson),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CoalescingKeyJson {
+    key: Vec<String>,
+}
+
+impl From<CommandCoalescingJson> for CommandCoalescing {
+    fn from(value: CommandCoalescingJson) -> Self {
+        match value {
+            CommandCoalescingJson::Enabled(enabled) => enabled.into(),
+            CommandCoalescingJson::Key(value) => Self::Latest { key: value.key },
+        }
+    }
+}
+
+impl From<bool> for CommandCoalescing {
+    fn from(enabled: bool) -> Self {
+        if enabled {
+            Self::Latest { key: Vec::new() }
+        } else {
+            Self::Disabled
+        }
+    }
+}
+
+impl CommandCoalescing {
+    pub fn enabled(&self) -> bool {
+        matches!(self, Self::Latest { .. })
+    }
+
+    /// Returns a collision-free identity for valid declared arguments.
+    /// Missing key arguments disable replacement for this invocation.
+    pub fn payload_key(&self, payload: &JsonValue) -> Option<String> {
+        let Self::Latest { key } = self else {
+            return None;
+        };
+        let object = payload.as_object()?;
+        let values = key
+            .iter()
+            .map(|name| object.get(name))
+            .collect::<Option<Vec<_>>>()?;
+        serde_json::to_string(&values).ok()
+    }
+}
+
+impl std::fmt::Display for CommandCoalescing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Disabled => f.write_str("false"),
+            Self::Latest { key } => write!(f, "{}", serde_json::json!({ "key": key })),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterfaceMethod {
     pub name: String,
     pub args: Vec<InterfaceArgument>,
     pub returns: Option<String>,
-    /// When true, repeated invocations of this method on a backend's command
-    /// queue are coalesced — only the most recent payload is executed and
-    /// older queued instances are dropped. Right for idempotent setters
-    /// (set_volume, set_muted) where intermediate values are stale; wrong for
-    /// relative/accumulating commands (volume_up, increment).
-    pub coalesce: bool,
+    /// Only the newest queued invocation with the same declared argument key
+    /// executes. Use for idempotent setters, never accumulating commands.
+    pub coalesce: CommandCoalescing,
     /// Optional reactive state binding. When the command is accepted, the
     /// shell writes the command value into the service's shared state and
     /// publishes it to every observer before the provider confirms it.
@@ -802,6 +873,26 @@ fn arc_slice<T>(values: Vec<T>) -> Arc<[T]> {
     values.into()
 }
 
+fn validate_coalescing_keys(contract: &InterfaceContract) -> Result<(), ContractError> {
+    for method in &contract.methods {
+        if let CommandCoalescing::Latest { key } = &method.coalesce {
+            let mut seen = HashSet::new();
+            for name in key {
+                if !seen.insert(name) || !method.args.iter().any(|arg| arg.name == *name) {
+                    return Err(ContractError::InvalidDeclaration {
+                        interface: contract.interface.clone(),
+                        message: format!(
+                            "method '{}' coalesce key '{}' must name a unique declared argument",
+                            method.name, name
+                        ),
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_unique_symbols(contract: &InterfaceContract) -> Result<(), ContractError> {
     let duplicate = |kind: &str, name: &str| ContractError::InvalidDeclaration {
         interface: contract.interface.clone(),
@@ -951,7 +1042,7 @@ fn compile_schemas(contract: &InterfaceContract) -> Result<CompiledSchemas, Cont
                 name: method.name.clone(),
                 args: arc_slice(args),
                 returns,
-                coalesce: method.coalesce,
+                coalesce: method.coalesce.clone(),
                 state_binding: method.state_binding.clone(),
             })
         })
@@ -1197,7 +1288,7 @@ fn fingerprint_behavior(behavioral: &CompiledBehavioralMetadata) -> u64 {
     let mut builder = FingerprintBuilder::default();
     for (name, behavior) in behavioral.methods.iter() {
         builder.string(name);
-        builder.bool(behavior.coalesce);
+        builder.string(&behavior.coalesce.to_string());
         if let Some(binding) = &behavior.state_binding {
             builder.bool(true);
             builder.string(&binding.field);
@@ -1312,7 +1403,7 @@ pub fn parse_interface_contract(
                     .map(ContractFieldJson::into_argument)
                     .collect(),
                 returns: method.returns,
-                coalesce: method.coalesce,
+                coalesce: method.coalesce.clone(),
                 state_binding: method.state_binding.map(|value| StateBinding {
                     field: value.field,
                     from_arg: value.from_arg,
@@ -1367,6 +1458,8 @@ pub fn parse_interface_contract(
             permissions: parsed.capabilities.permissions,
         },
     };
+
+    validate_coalescing_keys(&contract)?;
 
     if let Some(message) = contract_type_errors(&contract).into_iter().next() {
         return Err(ContractError::InvalidType {
@@ -1741,7 +1834,7 @@ struct ContractMethodJson {
     #[serde(default)]
     returns: Option<String>,
     #[serde(default)]
-    coalesce: bool,
+    coalesce: CommandCoalescing,
     #[serde(default, rename = "stateBinding")]
     state_binding: Option<ContractStateBindingJson>,
 }
@@ -1821,6 +1914,77 @@ mod tests {
     use super::*;
 
     #[test]
+    fn coalescing_keys_are_validated_and_preserved_in_compiled_metadata() {
+        let declaration = serde_json::json!({"methods":[{
+            "name":"set", "args":[{"name":"channel","type":"string"}],
+            "coalesce":{"key":["channel"]}
+        }]});
+        let compiled = parse_compiled_contract("test.channels", "1.0", &declaration).unwrap();
+        let policy = &compiled.methods[0].coalesce;
+        assert_eq!(policy, &compiled.schemas.methods[0].coalesce);
+        assert_eq!(policy, &compiled.behavioral.methods["set"].coalesce);
+        assert_eq!(
+            policy,
+            &compiled.to_interface_contract().methods[0].coalesce
+        );
+        for key in [
+            serde_json::json!(["missing"]),
+            serde_json::json!(["channel", "channel"]),
+        ] {
+            let mut invalid = declaration.clone();
+            invalid["methods"][0]["coalesce"]["key"] = key;
+            assert!(parse_interface_contract("test.channels", "1.0", &invalid).is_err());
+            assert!(parse_compiled_contract("test.channels", "1.0", &invalid).is_err());
+        }
+        let mut unkeyed = declaration;
+        unkeyed["methods"][0]["coalesce"] = serde_json::json!(true);
+        let unkeyed = parse_compiled_contract("test.channels", "1.0", &unkeyed).unwrap();
+        assert_eq!(compiled.schema_fingerprint, unkeyed.schema_fingerprint);
+        assert_ne!(compiled.behavior_fingerprint, unkeyed.behavior_fingerprint);
+        let diff = crate::diff_contracts(
+            &unkeyed.to_interface_contract(),
+            &compiled.to_interface_contract(),
+        );
+        assert!(
+            diff.changes
+                .iter()
+                .any(|change| change.path == "methods.set.coalesce")
+        );
+    }
+
+    #[test]
+    fn coalescing_payload_keys_use_only_declared_arguments() {
+        let policy = CommandCoalescing::Latest {
+            key: vec!["channel".into(), "scope".into()],
+        };
+        let first = serde_json::json!({"channel":"a:b", "scope":"c", "device_id":"old"});
+        let changed_value = serde_json::json!({"channel":"a:b", "scope":"c", "device_id":"new"});
+        let other_target = serde_json::json!({"channel":"a", "scope":"b:c", "device_id":"old"});
+        assert_eq!(
+            policy.payload_key(&first),
+            policy.payload_key(&changed_value)
+        );
+        assert_ne!(
+            policy.payload_key(&first),
+            policy.payload_key(&other_target)
+        );
+        assert!(
+            policy
+                .payload_key(&serde_json::json!({"channel":"a"}))
+                .is_none()
+        );
+        assert_ne!(
+            policy.payload_key(&serde_json::json!({"channel":null,"scope":"c"})),
+            None
+        );
+        assert_eq!(
+            CommandCoalescing::from(true).payload_key(&first),
+            CommandCoalescing::from(true).payload_key(&other_target)
+        );
+        assert!(CommandCoalescing::Disabled.payload_key(&first).is_none());
+    }
+
+    #[test]
     fn parses_short_semver_contract_version() {
         let version = parse_contract_version("1.0").unwrap();
         assert_eq!(version.to_string(), "1.0.0");
@@ -1871,7 +2035,11 @@ mod tests {
             compiled.operation_policy.read.as_ref().unwrap().as_ref(),
             &["service.audio.read".to_string()][..]
         );
-        assert!(compiled.behavioral.methods["set_percent"].coalesce);
+        assert!(
+            compiled.behavioral.methods["set_percent"]
+                .coalesce
+                .enabled()
+        );
         assert_eq!(compiled.provenance.module.as_deref(), Some("@mesh/audio"));
         assert_ne!(compiled.schema_fingerprint, 0);
         assert_ne!(compiled.policy_fingerprint, 0);
@@ -2116,7 +2284,7 @@ mod tests {
             Some("Whether the service is reachable")
         );
         let set_muted = &contract.methods[0];
-        assert!(set_muted.coalesce);
+        assert!(set_muted.coalesce.enabled());
         let binding = set_muted.state_binding.as_ref().unwrap();
         assert_eq!(binding.field, "muted");
         assert_eq!(binding.from_arg.as_deref(), Some("muted"));

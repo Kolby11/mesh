@@ -98,7 +98,7 @@ fn shipped_workspace_button_publishes_focus_workspace_request() {
                 arg_type: "int".into(),
             }],
             returns: Some("Result".into()),
-            coalesce: false,
+            coalesce: false.into(),
             state_binding: None,
         }],
         events: Vec::new(),

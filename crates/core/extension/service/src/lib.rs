@@ -34,7 +34,7 @@ pub use compatibility::{
     ContractDiff, diff_contracts, diff_contracts_bidirectional,
 };
 pub use contract::{
-    BaseType, CompiledBehavioralMetadata, CompiledContract, CompiledEventSchema,
+    BaseType, CommandCoalescing, CompiledBehavioralMetadata, CompiledContract, CompiledEventSchema,
     CompiledFeatureGroup, CompiledField, CompiledMethodBehavior, CompiledMethodSchema,
     CompiledOperationPolicy, CompiledSchemas, CompiledStateField, CompiledTypeSchema,
     ContractCapabilities, ContractError, ContractFeatureGroup, ContractStateField,

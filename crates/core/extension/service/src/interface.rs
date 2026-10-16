@@ -588,7 +588,7 @@ mod tests {
                     name: format!("method_{index}"),
                     args: Vec::new(),
                     returns: None,
-                    coalesce: false,
+                    coalesce: false.into(),
                     state_binding: None,
                 })
                 .collect(),
@@ -642,7 +642,7 @@ mod tests {
                 name: "volume_up".into(),
                 args: Vec::new(),
                 returns: None,
-                coalesce: false,
+                coalesce: false.into(),
                 state_binding: None,
             }],
             events: vec![InterfaceEvent {

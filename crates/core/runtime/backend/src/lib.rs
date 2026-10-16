@@ -227,28 +227,24 @@ pub fn validate_command_payload(payload: &serde_json::Value) -> Result<(), Strin
     .map(|_| ())
 }
 
-fn coalescing_key(msg: &BackendServiceCommand) -> String {
-    let identity = msg.payload.as_object().map(|object| {
-        object
-            .iter()
-            .filter(|(name, _)| {
-                name == &"id"
-                    || name.ends_with("_id")
-                    || name.contains("target")
-                    || name.contains("device")
-                    || name.contains("player")
-                    || name.contains("output")
-                    || name.contains("sink")
-            })
-            .map(|(name, value)| (name.clone(), value.clone()))
-            .collect::<std::collections::BTreeMap<_, _>>()
-    });
-    format!(
+fn coalescing_key(
+    msg: &BackendServiceCommand,
+    registry: Option<&mesh_core_scripting::BackendCommandRegistry>,
+) -> Option<String> {
+    if !msg.coalesce {
+        return None;
+    }
+    let policy = registry
+        .and_then(|registry| registry.command(&msg.command))
+        .map(|spec| spec.coalesce.clone())
+        .unwrap_or_else(|| true.into());
+    let key = policy.payload_key(&msg.payload)?;
+    Some(format!(
         "{}:{:?}:{}",
         msg.command,
         call_identity(msg.call_id, mesh_core_runtime::BackendIdentity::default()),
-        serde_json::to_string(&identity.unwrap_or_default()).unwrap_or_default()
-    )
+        key,
+    ))
 }
 
 /// Drain pending commands from the queue, then drop earlier instances of any
@@ -259,14 +255,15 @@ fn coalescing_key(msg: &BackendServiceCommand) -> String {
 fn coalesce_command_batch(
     batch: Vec<BackendServiceCommand>,
     latest_index: &mut HashMap<String, usize>,
+    registry: Option<&mesh_core_scripting::BackendCommandRegistry>,
 ) -> Vec<BackendServiceCommand> {
     if batch.len() < 2 {
         return batch;
     }
     latest_index.clear();
     for (index, msg) in batch.iter().enumerate() {
-        if msg.coalesce {
-            latest_index.insert(coalescing_key(msg), index);
+        if let Some(key) = coalescing_key(msg, registry) {
+            latest_index.insert(key, index);
         }
     }
     if latest_index.is_empty() {
@@ -276,7 +273,8 @@ fn coalesce_command_batch(
         .into_iter()
         .enumerate()
         .filter(|(index, msg)| {
-            !msg.coalesce || latest_index.get(&coalescing_key(msg)).copied() == Some(*index)
+            coalescing_key(msg, registry)
+                .is_none_or(|key| latest_index.get(&key).copied() == Some(*index))
         })
         .map(|(_, msg)| msg)
         .collect()
@@ -958,7 +956,7 @@ async fn run_backend_service(
                     }
                 }
                 let original_batch = batch.clone();
-                let batch = coalesce_command_batch(batch, &mut coalesced_command_index);
+                let batch = coalesce_command_batch(batch, &mut coalesced_command_index, ctx.command_registry());
                 for superseded in original_batch.into_iter().filter(|candidate| {
                     candidate.coalesce
                         && !batch
@@ -1674,7 +1672,7 @@ mod tests {
 
     fn coalesce_for_test(batch: Vec<BackendServiceCommand>) -> Vec<BackendServiceCommand> {
         let mut latest_index = HashMap::new();
-        coalesce_command_batch(batch, &mut latest_index)
+        coalesce_command_batch(batch, &mut latest_index, None)
     }
 
     #[test]
@@ -1744,10 +1742,61 @@ mod tests {
                 coalesce: true,
             },
         ];
-        let out = coalesce_for_test(batch);
+        let registry = mesh_core_scripting::BackendCommandRegistry::from_specs(
+            [mesh_core_scripting::BackendCommandSpec {
+                name: "set_volume".into(),
+                arguments: vec![],
+                returns: None,
+                coalesce: serde_json::from_value(serde_json::json!({"key":["device_id"]})).unwrap(),
+            }],
+            HashMap::new(),
+        );
+        let out = coalesce_command_batch(batch, &mut HashMap::new(), Some(&registry));
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].payload["device_id"], "b");
         assert_eq!(out[1].payload["value"], 30);
+    }
+
+    #[test]
+    fn coalesce_does_not_guess_identity_from_domain_field_names() {
+        let mut first = cmd("set", 1, true);
+        first.payload = serde_json::json!({"device_id":"a"});
+        let mut second = cmd("set", 2, true);
+        second.payload = serde_json::json!({"device_id":"b"});
+        let out = coalesce_for_test(vec![first, second]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].payload["device_id"], "b");
+    }
+
+    #[test]
+    fn coalesce_preserves_missing_declared_keys_and_arbitrary_targets() {
+        let registry = mesh_core_scripting::BackendCommandRegistry::from_specs(
+            [mesh_core_scripting::BackendCommandSpec {
+                name: "set".into(),
+                arguments: vec![],
+                returns: None,
+                coalesce: serde_json::from_value(serde_json::json!({"key":["channel"]})).unwrap(),
+            }],
+            HashMap::new(),
+        );
+        let mut batch = Vec::new();
+        for payload in [
+            serde_json::json!({"channel":"a", "device_id":"old"}),
+            serde_json::json!({"channel":"b"}),
+            serde_json::json!({"value":3}),
+            serde_json::json!({"channel":"a", "device_id":"new"}),
+            serde_json::json!({"value":5}),
+        ] {
+            let mut command = cmd("set", 0, true);
+            command.payload = payload;
+            batch.push(command);
+        }
+        let out = coalesce_command_batch(batch, &mut HashMap::new(), Some(&registry));
+        assert_eq!(out.len(), 4);
+        assert_eq!(out[0].payload["channel"], "b");
+        assert_eq!(out[1].payload["value"], 3);
+        assert_eq!(out[2].payload["device_id"], "new");
+        assert_eq!(out[3].payload["value"], 5);
     }
 
     #[test]

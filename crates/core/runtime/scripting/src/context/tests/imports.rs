@@ -7,6 +7,21 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 #[test]
+fn component_legacy_import_reaches_luau_as_a_syntax_error() {
+    let source = r#"<template><box /></template>
+<script lang="luau">
+import Legacy from "./legacy.mesh"
+</script>"#;
+    let component = mesh_core_component::parse_component(source).unwrap();
+    assert!(component.imports.is_empty());
+    let mut context = ScriptContext::new("@test/legacy-import", CapabilitySet::default()).unwrap();
+    let error = context
+        .load_script(&component.script.unwrap().source)
+        .unwrap_err();
+    assert!(matches!(error, ScriptError::LuaError(_)), "{error}");
+}
+
+#[test]
 fn require_import_installs_proxy() {
     let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@mesh/test", caps).unwrap();

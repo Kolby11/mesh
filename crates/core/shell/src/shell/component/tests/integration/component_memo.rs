@@ -850,7 +850,7 @@ fn memoized_popover_wrapper_replays_promotion_flag() {
     </box>
 </template>
 <script lang="luau">
-import MenuPopover from "@mesh/menu-popover"
+local MenuPopover = require("@mesh/menu-popover")
 </script>
 "#,
         )

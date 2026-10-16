@@ -525,29 +525,6 @@ fn service_queue_full_response() -> serde_json::Value {
     })
 }
 
-fn command_coalescing_key(command: &str, payload: &serde_json::Value) -> String {
-    let identity = payload.as_object().map(|object| {
-        object
-            .iter()
-            .filter(|(name, _)| {
-                *name == "id"
-                    || name.ends_with("_id")
-                    || name.contains("target")
-                    || name.contains("device")
-                    || name.contains("player")
-                    || name.contains("output")
-                    || name.contains("sink")
-            })
-            .map(|(name, value)| (name.clone(), value.clone()))
-            .collect::<std::collections::BTreeMap<_, _>>()
-    });
-    format!(
-        "{}:{}",
-        command,
-        serde_json::to_string(&identity.unwrap_or_default()).unwrap_or_default()
-    )
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ServiceCommandSendError {
     Closed,
@@ -2327,9 +2304,9 @@ impl Shell {
                 }
             }
         } else if self.service_handlers.contains_key(interface) {
-            let coalesce = self.service_command_is_coalescable(interface, command);
-            if coalesce {
-                let coalesce_key = command_coalescing_key(command, payload);
+            let coalescing_key = self.service_command_coalescing_key(interface, command, payload);
+            let coalesce = coalescing_key.is_some();
+            if let Some(coalesce_key) = coalescing_key {
                 let key = (
                     interface.to_string(),
                     command.to_string(),
@@ -2843,13 +2820,23 @@ impl Shell {
         }
     }
 
-    fn service_command_is_coalescable(&self, interface: &str, command: &str) -> bool {
+    fn service_command_coalescing_key(
+        &self,
+        interface: &str,
+        command: &str,
+        payload: &serde_json::Value,
+    ) -> Option<String> {
         let resolution = self.interfaces.resolve(interface, None);
         resolution
             .contract
             .as_ref()
-            .and_then(|contract| contract.methods.iter().find(|m| m.name == command))
-            .is_some_and(|method| method.coalesce)
+            .and_then(|contract| {
+                contract
+                    .methods
+                    .iter()
+                    .find(|method| method.name == command)
+            })
+            .and_then(|method| method.coalesce.payload_key(payload))
     }
 
     /// Move a live surface between shell chrome and a window.
