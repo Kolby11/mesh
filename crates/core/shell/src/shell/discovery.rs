@@ -746,7 +746,7 @@ impl Shell {
         let mut frontends = Vec::new();
         let mut font_frontends = Vec::new();
         for module in graph.enabled_modules() {
-            if !matches!(module.kind, ModuleKind::Frontend | ModuleKind::Component) {
+            if module.kind != ModuleKind::Ui {
                 continue;
             }
             let overrides =
@@ -1984,7 +1984,6 @@ impl Shell {
                     ("open_source", &[("path", "string"), ("line", "int?")]),
                     ("toggle_profiling", &[]),
                     ("run_benchmark", &[("scenario_id", "string")]),
-                    ("cycle_tab", &[]),
                 ],
             ),
         );

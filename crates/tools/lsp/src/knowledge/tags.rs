@@ -761,6 +761,11 @@ static POPOVER_ATTRS: &[AttrDef] = &[
         values: &["hover", "click"],
     },
     AttrDef {
+        name: "open-on",
+        description: "Core disclosure behavior: hover (hover intent) or click (press toggles, outside press closes); manual leaves `open` to scripts",
+        values: &["manual", "hover", "click"],
+    },
+    AttrDef {
         name: "constrain",
         description: "Space/comma separated constraint-adjustment tokens: flip | flip-x | flip-y | slide | slide-x | slide-y | resize | resize-x | resize-y | none",
         values: &[

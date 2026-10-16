@@ -664,7 +664,6 @@ pub enum CoreRequest {
     RunDebugBenchmark {
         scenario_id: String,
     },
-    CycleDebugTab,
     Shutdown,
 }
 

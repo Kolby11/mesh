@@ -67,6 +67,11 @@ pub struct ScriptContext {
     /// Immutable policy and resource broker for the backing Luau realm.
     pub(super) realm_policy: RuntimePolicy,
     pub(super) env_table: Option<Table>,
+    pub(super) callback_scope: Arc<()>,
+    pub(super) callbacks: Mutex<super::callbacks::CallbackCache>,
+    pub(super) callback_props: HashMap<String, (u64, mlua::Value)>,
+    pub(super) initial_callback_props:
+        std::collections::BTreeMap<mesh_core_elements::AttrKey, mesh_core_elements::HandlerTarget>,
     /// Scalar reactive globals, removed from the raw `_ENV` so every assignment
     /// passes through `__newindex`. Handler sync then consumes the write log
     /// instead of re-reading every unchanged scalar.
@@ -330,6 +335,10 @@ impl ScriptContext {
             vm: None,
             shared_vm: None,
             env_table: None,
+            callback_scope: Arc::new(()),
+            callbacks: Mutex::new(super::callbacks::CallbackCache::default()),
+            callback_props: HashMap::new(),
+            initial_callback_props: Default::default(),
             reactive_scalar_globals: None,
             interface_catalog: Arc::new(ResolvedServiceCatalog::default()),
             interface_bindings: HashMap::new(),
@@ -504,6 +513,10 @@ impl ScriptContext {
     /// Tear down this context's `_ENV` graph. ScriptContext methods must not be
     /// called afterward without a subsequent `ensure_initialized()`.
     pub fn uninit(&mut self) {
+        self.callback_scope = Arc::new(());
+        *self.callbacks.get_mut().unwrap() = super::callbacks::CallbackCache::default();
+        self.callback_props.clear();
+        self.initial_callback_props.clear();
         self.clear_reactive_effects();
         self.live_binding_generations.borrow_mut().clear();
         self.tasks.lock().unwrap().clear();
@@ -640,6 +653,10 @@ impl ScriptContext {
         imports: &[ScriptInterfaceImport],
     ) -> Result<(), ScriptError> {
         self.ensure_initialized()?;
+        self.set_callback_props(&std::collections::BTreeMap::new())?;
+        self.callback_scope = Arc::new(());
+        *self.callbacks.get_mut().unwrap() = super::callbacks::CallbackCache::default();
+
         self.restore_proxied_scalars_to_env().map_err(lua_err)?;
         self.clear_reactive_effects();
         self.live_binding_generations.borrow_mut().clear();
@@ -669,6 +686,8 @@ impl ScriptContext {
         self.clear_subscribed_interface_events();
         self.clear_tracked_storage_keys();
         self.install_interface_imports(imports)?;
+        let callbacks = self.initial_callback_props.clone();
+        self.set_callback_props(&callbacks)?;
         let _budget = self.realm_policy.begin_callback();
         self.lua()
             .load(source)
@@ -676,6 +695,7 @@ impl ScriptContext {
             .set_environment(self.env().clone())
             .exec()
             .map_err(map_lua_error)?;
+        self.set_callback_props(&callbacks)?;
         self.sync_state_from_lua();
         if self.env().raw_get::<mlua::Function>("render").is_ok()
             && self

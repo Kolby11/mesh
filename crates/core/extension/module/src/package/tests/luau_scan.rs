@@ -88,8 +88,10 @@ fn extract_t_keys_from_mesh_source_finds_static_keys() {
 fn extract_t_keys_from_mesh_source_includes_localized_props() {
     let src = r#"
 <props>
-  volume: { type: "int", label: t("settings.volume.label"), description: t("settings.volume.description") }
-  hidden: { type: "bool", label: t("settings.hidden.label"), expose: false }
+{
+    volume = { type = "int", label = t("settings.volume.label"), description = t("settings.volume.description") },
+    hidden = { type = "bool", label = t("settings.hidden.label"), expose = false },
+}
 </props>
 <template><text>{t("template.title")}</text></template>
 "#;

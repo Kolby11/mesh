@@ -131,15 +131,10 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
     let width = 1280;
     let height = 80;
 
-    for (handler, expected_size, expected_core_class, expected_text) in [
+    for (trigger, expected_size, expected_core_class, expected_text) in [
+        ("themeButton", (132, 60), "bubble-option-core-default", None),
         (
-            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-2::onThemeToggle",
-            (132, 60),
-            "bubble-option-core-dark",
-            None,
-        ),
-        (
-            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageToggle",
+            "languageButton",
             (132, 60),
             "bubble-option-core-language",
             Some("\u{1f1ec}\u{1f1e7}"),
@@ -200,7 +195,7 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
                 )
             })
             .collect();
-        let button = first_node_with_click_handler(tree, handler).expect("hover trigger button");
+        let button = first_node_with_ref(tree, trigger).expect("hover trigger button");
         let button_key = button.mesh_key().expect("button mesh key").to_owned();
         let (left, top, right, bottom) =
             find_node_bounds_by_key(tree, &button_key, 0.0, 0.0).expect("button bounds");
@@ -229,8 +224,8 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
             .last_tree
             .as_ref()
             .expect("rendered navigation bar after hover");
-        let hovered_trigger = first_node_with_click_handler(tree, handler)
-            .expect("hovered theme or language trigger");
+        let hovered_trigger =
+            first_node_with_ref(tree, trigger).expect("hovered theme or language trigger");
         let nav_after = first_node_by_class(tree, "nav-shell")
             .expect("navigation shell after hover")
             .layout;
@@ -240,7 +235,7 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
         assert_eq!(
             (nav_after.x, nav_after.y, nav_after.width, nav_after.height),
             nav_bounds_before,
-            "{handler} must not move or resize the navigation shell"
+            "{trigger} must not move or resize the navigation shell"
         );
         assert_eq!(
             (
@@ -250,7 +245,7 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
                 cluster_after.height
             ),
             cluster_bounds_before,
-            "{handler} must not move or resize the navigation controls"
+            "{trigger} must not move or resize the navigation controls"
         );
         assert_eq!(
             cluster_after_node
@@ -266,28 +261,28 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
                 })
                 .collect::<Vec<_>>(),
             controls_before,
-            "{handler} must not move or resize individual navigation controls"
+            "{trigger} must not move or resize individual navigation controls"
         );
         assert_eq!(
             hovered_trigger.computed_style.transform.translate_y, 0.0,
-            "{handler} must not inherit another navigation control's hover lift"
+            "{trigger} must not inherit another navigation control's hover lift"
         );
         assert_eq!(
             hovered_trigger.computed_style.transform.scale_x, 1.0,
-            "{handler} must not inherit another navigation control's hover scale"
+            "{trigger} must not inherit another navigation control's hover scale"
         );
 
         let requests = component.child_surface_requests();
         assert_eq!(
             requests.len(),
             1,
-            "{handler} should promote one child popup after real pointer hover: {requests:?}"
+            "{trigger} should promote one child popup after real pointer hover: {requests:?}"
         );
         assert_eq!(requests[0].content_size, expected_size);
         assert_eq!(
             requests[0].anchor_rect,
             i32_rect((left, top, right, bottom)),
-            "{handler} popup should anchor to the hovered trigger"
+            "{trigger} popup should anchor to the hovered trigger"
         );
 
         let mut child_buffer =
@@ -296,7 +291,7 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
             component
                 .paint_child_surface(&requests[0].node_key, &mut child_buffer, 1.0, (0, 0), false,)
                 .unwrap(),
-            "{handler} child popup should paint successfully"
+            "{trigger} child popup should paint successfully"
         );
         let child_tree = component
             .child_surface_debug_tree(&requests[0].node_key, (0.0, 0.0))
@@ -307,18 +302,18 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
             .expect("child popup should contain a bubble hit target");
         assert_eq!(
             option.computed_style.background_color.a, 0,
-            "{handler} stationary bubble hit targets must not paint circles at their final positions"
+            "{trigger} stationary bubble hit targets must not paint circles at their final positions"
         );
         assert!(
             first_node_with_class_token(&child_tree, expected_core_class).is_some(),
-            "{handler} child popup should render option body class {expected_core_class}, got {classes:?}"
+            "{trigger} child popup should render option body class {expected_core_class}, got {classes:?}"
         );
         if let Some(expected_text) = expected_text {
             let mut labels = Vec::new();
             collect_text_content(&child_tree, &mut labels);
             assert!(
                 labels.iter().any(|label| label == expected_text),
-                "{handler} child popup should render option text {expected_text}, got {labels:?}"
+                "{trigger} child popup should render option text {expected_text}, got {labels:?}"
             );
         }
         let painted = opaque_pixels_in_bounds(
@@ -330,7 +325,7 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
         );
         assert!(
             painted > 0,
-            "{handler} promoted popup should paint visible option pixels"
+            "{trigger} promoted popup should paint visible option pixels"
         );
 
         component
@@ -366,7 +361,7 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
                 })
                 .collect::<Vec<_>>(),
             controls_before,
-            "{handler} must not move controls while crossing into its popover"
+            "{trigger} must not move controls while crossing into its popover"
         );
 
         let (popup_width, popup_height) = requests[0].content_size;
@@ -379,7 +374,7 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
             assert_eq!(
                 child_buffer.get_pixel(x, y).a,
                 0,
-                "{handler} popup corner ({x}, {y}) must stay transparent instead of painting a bounding box"
+                "{trigger} popup corner ({x}, {y}) must stay transparent instead of painting a bounding box"
             );
         }
     }

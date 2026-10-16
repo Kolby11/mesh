@@ -105,6 +105,15 @@ become core element behaviors that modules compose (the Radix / React Aria
 model), subject to the element admission test in 00 §4. This subsumes the
 hover-intent backlog item and the per-module bridges.
 
+**Shipped D5 implementation (2026-10-13):** popover disclosure.
+`<popover open-on="hover|click">` gets hover intent, capture hold, trigger
+keyboard toggling, Escape with focus return, outside-press and focus-leave
+dismissal from core. The controller proposes changes through a simple
+`open={variable}` write-back plus `openchange`, and triggers get `:expanded`,
+derived accessible `expanded` and tooltip suppression. Shipped popovers no
+longer forward events to their triggers. Dialog focus scope and dismissal and
+menu typeahead/nesting remain open.
+
 ## D6. Threaded scene commit and GPU raster
 
 - The UI thread produces an immutable scene/layer snapshot per frame and
@@ -154,3 +163,55 @@ hover-intent backlog item and the per-module bridges.
 5. **D6 / D7** on the existing GPU and style lanes. Re-scope the scroll
    raster cache and blur plans first.
 6. **D8** as providers are touched. **D9** from now on.
+
+## D6 scene handoff contract
+
+`mesh-core-render::scene_thread` provides the preparatory commit boundary.
+`SceneSnapshot` pins an immutable `FramePaintPlan`, a matching typed resource
+snapshot, scale, and surface incarnation. A renderer is constructed, used, and
+destroyed on one worker thread and may own a GPU context that is not `Send`.
+Only owned snapshots and transferable presentation outputs cross the boundary.
+Output destruction must be safe on the UI thread and after renderer shutdown.
+
+The queue admits a configured number of surfaces and holds at most one pending
+scene and one completed output per surface, with one render active on the worker.
+New commits coalesce pending work. Superseded and removed surface outputs cannot
+become current. Removed incarnations retain their admission slot until the
+renderer retires their resources. Worker sleep uses a condition variable, not
+polling. Shutdown discards unpublished work and joins the renderer owner.
+
+Presentation acknowledgment is explicit. A first frame, unacknowledged earlier
+commit, changed scale/extent/resource revision, or skipped intermediate frame
+requires full topology and surface replay. A partial-damage plan cannot be used
+as if the skipped frame had been presented. Resource and output leases retire
+outside the queue lock so cleanup can re-enter resource ownership mechanisms.
+
+This is an unwired preparation seam, not a shipped GPU painter. Frozen font/icon
+resource adapters, GPU raster and presentation, buffer-age damage, and the
+production component adapter remain D6 work. The existing painter stays the
+reference. CI exercises queue bounds with a 1,000-commit burst, supersession,
+removal, presentation acknowledgment, failed-frame recovery, resource pinning,
+thread ownership, and teardown; no rendering speedup is claimed.
+
+### D7 token lowering contract
+
+Reference-bearing theme tokens cache their resolved scalar values on the
+immutable snapshot. Clones share the cache; every style-bearing mutable accessor
+detaches it. Root-specific errors and CSS fallbacks retain existing semantics.
+Missing arbitrary names are not retained. The UI additionally shares parsed
+color/number projections in per-thread caches bounded to 16 theme revisions and
+512 token references per revision. Local variables and component props bypass
+those projections when they override the token. Remaining property-specific
+lowering and selector dependency work stay under D7; token microbenchmarks do
+not establish an end-to-end theme-switch improvement.
+
+### D6 frozen font resource adapter
+
+`FrozenFontDatabase` supplies owned byte sources for the scene handoff. It
+preserves face metadata and provides explicit ID remapping; layout and painting
+must consume the same prepared database. Source reservations stay attached to
+cloned databases, including worker-thread clones. Cancellation or byte-budget
+failure drops the entire candidate. Production integration must select a host
+font-catalog residency policy rather than assuming every installed font fits
+within one resource budget. Icon/resource snapshots and GPU presentation remain
+open.

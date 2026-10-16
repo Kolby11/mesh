@@ -2936,3 +2936,82 @@ fn settled_poll(ctx: &mut BackendScriptContext) -> serde_json::Value {
     }
     state.unwrap()
 }
+
+#[test]
+fn hyprland_focuses_named_workspaces_by_name_with_lua_quoting() {
+    let script = bundled_backend_script("../../../../modules/backend/hyprland-wm/src/main.luau");
+    let mut context = BackendScriptContext::new("@mesh/hyprland-wm");
+    context.load_script(&script).unwrap();
+    context
+        .ensure_lua()
+        .unwrap()
+        .load(
+            r#"
+state.workspaces = { { id = -1337, name = 'notes "quoted"' } }
+exec_calls = {}
+mesh.exec = function(program, args)
+    exec_calls[#exec_calls + 1] = args
+    return { success = true, stdout = "", stderr = "" }
+end
+"#,
+        )
+        .exec()
+        .unwrap();
+    context
+        .run_command_finished("focus_workspace", &serde_json::json!({"id":-1337}))
+        .unwrap();
+    let lua = context.ensure_lua().unwrap();
+    let calls: Table = lua.globals().get("exec_calls").unwrap();
+    assert_eq!(calls.raw_len(), 1);
+    let args: Table = calls.get(1).unwrap();
+    let dispatcher: String = args.get(2).unwrap();
+    let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let captured_clone = captured.clone();
+    let focus = lua
+        .create_function(move |_, args: Table| {
+            *captured_clone.lock().unwrap() = args.get::<String>("workspace")?;
+            Ok(())
+        })
+        .unwrap();
+    let dsp = lua.create_table().unwrap();
+    dsp.set("focus", focus).unwrap();
+    let hl = lua.create_table().unwrap();
+    hl.set("dsp", dsp).unwrap();
+    let env = lua.create_table().unwrap();
+    env.set("hl", hl).unwrap();
+    lua.load(&dispatcher).set_environment(env).exec().unwrap();
+    assert_eq!(*captured.lock().unwrap(), "name:notes \"quoted\"");
+}
+
+#[test]
+fn hyprland_workspace_snapshot_preserves_named_ids_and_output_metadata() {
+    let script = bundled_backend_script("../../../../modules/backend/hyprland-wm/src/main.luau");
+    let mut context = BackendScriptContext::new("@mesh/hyprland-wm");
+    context.load_script(&script).unwrap();
+    context.ensure_lua().unwrap().load(r#"
+mesh.exec = function(program, args)
+    if program == "sh" then return { success = false } end
+    if args[1] == "activeworkspace" then return { success = true, stdout = '{"id":-1337}' } end
+    if args[1] == "activewindow" then return { success = true, stdout = '{}' } end
+    if args[1] == "workspaces" then return { success = true, stdout = [=[[{"id":-1337,"name":"code \"quoted\" {pane}","windows":1,"lastwindow":{"title":"{nested}"},"monitor":"DP-1"},{"id":2,"name":"2","windows":0,"monitor":"DP-2"},{"id":-99,"name":"special:chat","windows":1}]]=] } end
+    return { success = false }
+end
+"#).exec().unwrap();
+    let state = settled_poll(&mut context);
+    assert_eq!(state["active_workspace"], serde_json::json!(-1337));
+    let workspaces = state["workspaces"].as_array().unwrap();
+    assert_eq!(workspaces.len(), 2);
+    assert_eq!(
+        workspaces[0]["name"],
+        serde_json::json!("code \"quoted\" {pane}")
+    );
+    assert_eq!(workspaces[0]["output"], serde_json::json!("DP-1"));
+    assert_eq!(workspaces[0]["focused"], serde_json::json!(true));
+    assert!(
+        workspaces[0]
+            .get("index")
+            .is_none_or(serde_json::Value::is_null)
+    );
+    assert_eq!(workspaces[1]["index"], serde_json::json!(2));
+    assert_eq!(workspaces[1]["focused"], serde_json::json!(false));
+}

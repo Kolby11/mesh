@@ -749,7 +749,7 @@ mod tests {
         fs::create_dir_all(root.join("src")).unwrap();
         fs::write(
             root.join("module.json"),
-            r#"{"name":"@me/example","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"component","entry":"src/main.mesh"}}"#,
+            r#"{"name":"@me/example","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"src/main.mesh"}}"#,
         )
         .unwrap();
         fs::write(root.join("src/main.mesh"), body).unwrap();

@@ -3,7 +3,9 @@
 //! Themes define design tokens across standard groups — colors, typography,
 //! spacing, radius, elevation, borders, motion, shadows — which components
 //! inherit from the active theme.
+mod contract;
 pub mod css;
+pub use contract::*;
 
 use serde::de::{MapAccess, Visitor};
 use serde::ser::SerializeMap;
@@ -12,8 +14,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
 
 #[cfg(unix)]
 use std::ffi::CString;
@@ -986,6 +988,10 @@ pub struct Theme {
     /// advances it, so an in-place edit cannot reuse stale lowered values.
     #[serde(skip, default = "next_theme_revision")]
     revision: u64,
+    // Only existing reference-bearing tokens are retained. Snapshot clones
+    // share resolutions; mutation detaches the cache before exposing data.
+    #[serde(skip)]
+    resolved_tokens: Arc<RwLock<HashMap<String, Result<TokenValue, ThemeTokenError>>>>,
 }
 
 impl Theme {
@@ -1002,7 +1008,13 @@ impl Theme {
             provenance: BTreeMap::new(),
             user_override_diagnostics: Vec::new(),
             revision: next_theme_revision(),
+            resolved_tokens: Arc::default(),
         }
+    }
+
+    fn invalidate_style_snapshot(&mut self) {
+        self.revision = next_theme_revision();
+        self.resolved_tokens = Arc::default();
     }
 
     pub fn revision(&self) -> u64 {
@@ -1022,7 +1034,7 @@ impl Theme {
         let metadata = ThemeMetadata::new(mode, color_scheme, contrast);
         if self.metadata != metadata {
             self.metadata = metadata;
-            self.revision = next_theme_revision();
+            self.invalidate_style_snapshot();
         }
     }
 
@@ -1044,7 +1056,7 @@ impl Theme {
     }
 
     pub fn tokens_mut(&mut self) -> &mut HashMap<String, TokenValue> {
-        self.revision = next_theme_revision();
+        self.invalidate_style_snapshot();
         &mut self.tokens
     }
 
@@ -1057,7 +1069,7 @@ impl Theme {
         let name = name.into();
         self.tokens.insert(name.clone(), value);
         self.provenance.insert(name, provenance);
-        self.revision = next_theme_revision();
+        self.invalidate_style_snapshot();
     }
 
     /// Remove generated tokens owned by a runtime resource binding.
@@ -1079,7 +1091,7 @@ impl Theme {
             self.tokens.remove(&name);
             self.provenance.remove(&name);
         }
-        self.revision = next_theme_revision();
+        self.invalidate_style_snapshot();
         true
     }
 
@@ -1088,7 +1100,7 @@ impl Theme {
     }
 
     pub fn defaults_mut(&mut self) -> &mut ThemeDefaults {
-        self.revision = next_theme_revision();
+        self.invalidate_style_snapshot();
         &mut self.defaults
     }
 
@@ -1097,7 +1109,7 @@ impl Theme {
     }
 
     pub fn modules_mut(&mut self) -> &mut HashMap<String, ThemeModule> {
-        self.revision = next_theme_revision();
+        self.invalidate_style_snapshot();
         &mut self.modules
     }
 
@@ -1208,7 +1220,7 @@ impl Theme {
                 composed.user_override_diagnostics.push(error.to_string());
             }
         }
-        composed.revision = next_theme_revision();
+        composed.invalidate_style_snapshot();
         Ok(composed)
     }
 
@@ -1243,11 +1255,21 @@ impl Theme {
     /// consumer.
     pub fn resolve_token_value(&self, name: &str) -> Result<Option<TokenValue>, ThemeTokenError> {
         let name = canonical_token_name(name);
-        if self.token(&name).is_none() {
+        let Some(value) = self.token(&name) else {
             return Ok(None);
+        };
+        if !matches!(value, TokenValue::String(raw) if raw.contains("var(")) {
+            return Ok(Some(value.clone()));
         }
-        let mut stack = Vec::new();
-        self.resolve_named_token(&name, &mut stack).map(Some)
+        if let Some(resolved) = self.resolved_tokens.read().unwrap().get(&name) {
+            return resolved.clone().map(Some);
+        }
+        // Resolve outside the lock: recursive aliases and fallback diagnostics
+        // retain their root-specific paths, and concurrent readers never block
+        // on a token graph traversal.
+        let resolved = self.resolve_named_token(&name, &mut Vec::new());
+        let mut cache = self.resolved_tokens.write().unwrap();
+        cache.entry(name).or_insert(resolved).clone().map(Some)
     }
 
     /// Resolve all `var(--...)` references embedded in a raw theme value.
@@ -1379,7 +1401,8 @@ pub enum ThemeTokenError {
     Malformed(String),
 }
 
-fn canonical_token_name(name: &str) -> String {
+/// Normalize a CSS custom-property name or an existing dotted token name.
+pub fn canonical_token_name(name: &str) -> String {
     let name = name.trim();
     name.strip_prefix("--")
         .map(css_custom_property_to_token_name)
@@ -1448,6 +1471,7 @@ impl From<RawTheme> for Theme {
             provenance: BTreeMap::new(),
             user_override_diagnostics: Vec::new(),
             revision: next_theme_revision(),
+            resolved_tokens: Arc::default(),
         };
         normalize_legacy_default_shell_animations(
             &mut theme,
@@ -1803,6 +1827,7 @@ fn parse_theme_css(id: &str, name: &str, content: &str) -> Result<Theme, String>
         provenance: BTreeMap::new(),
         user_override_diagnostics: Vec::new(),
         revision: next_theme_revision(),
+        resolved_tokens: Arc::default(),
     };
 
     let stylesheet = css::parse_stylesheet(content, 0)
@@ -2630,6 +2655,169 @@ mod tests {
         assert_eq!(
             button.get("background").map(String::as_str),
             Some("#24283b")
+        );
+    }
+
+    #[test]
+    fn resolved_aliases_share_snapshot_storage_and_detach_on_mutation() {
+        let mut theme = Theme::new("aliases", "Aliases");
+        theme.tokens_mut().extend([
+            ("base".into(), TokenValue::Number(12.0)),
+            ("alias".into(), TokenValue::String("var(--base)".into())),
+        ]);
+        assert_eq!(
+            theme.resolve_token_value("alias"),
+            Ok(Some(TokenValue::Number(12.0)))
+        );
+        let old = theme.clone();
+        assert!(Arc::ptr_eq(&theme.resolved_tokens, &old.resolved_tokens));
+        theme
+            .tokens_mut()
+            .insert("base".into(), TokenValue::Bool(true));
+        assert!(!Arc::ptr_eq(&theme.resolved_tokens, &old.resolved_tokens));
+        assert_eq!(
+            theme.resolve_token_value("alias"),
+            Ok(Some(TokenValue::Bool(true)))
+        );
+        assert_eq!(
+            old.resolve_token_value("alias"),
+            Ok(Some(TokenValue::Number(12.0)))
+        );
+        let serialized = serde_json::to_string(&theme).unwrap();
+        assert!(!serialized.contains("resolved_tokens"));
+        let restored: Theme = serde_json::from_str(&serialized).unwrap();
+        assert!(restored.resolved_tokens.read().unwrap().is_empty());
+        assert_eq!(
+            restored.resolve_token_value("alias"),
+            theme.resolve_token_value("alias")
+        );
+    }
+
+    #[test]
+    fn resolved_alias_cache_preserves_root_diagnostics_and_bounds_missing_names() {
+        let mut theme = theme_with_tokens(&[
+            ("a", "var(--b)"),
+            ("b", "var(--a)"),
+            ("fallback", "var(--missing, 8)"),
+            ("missing-alias", "var(--missing)"),
+            ("malformed", "var("),
+        ]);
+        for name in ["a", "b", "fallback", "missing-alias", "malformed"] {
+            let expected = theme.resolve_named_token(name, &mut Vec::new()).map(Some);
+            assert_eq!(theme.resolve_token_value(name), expected);
+            assert_eq!(theme.resolve_token_value(name), expected);
+        }
+        for index in 0..1000 {
+            assert_eq!(
+                theme.resolve_token_value(&format!("absent.{index}")),
+                Ok(None)
+            );
+        }
+        assert_eq!(theme.resolved_tokens.read().unwrap().len(), 5);
+        theme
+            .tokens_mut()
+            .insert("b".into(), TokenValue::Number(4.0));
+        assert_eq!(
+            theme.resolve_token_value("a"),
+            Ok(Some(TokenValue::Number(4.0)))
+        );
+    }
+
+    #[test]
+    fn generated_token_removal_and_replacement_invalidate_aliases() {
+        let mut theme = theme_with_tokens(&[("alias", "var(--generated.size)")]);
+        theme.set_token(
+            "generated.size",
+            TokenValue::Number(8.0),
+            ThemeProvenance::BaseRecovery,
+        );
+        assert_eq!(
+            theme.resolve_token_value("alias"),
+            Ok(Some(TokenValue::Number(8.0)))
+        );
+        assert!(theme.remove_tokens_with_prefix("generated."));
+        assert!(matches!(
+            theme.resolve_token_value("alias"),
+            Err(ThemeTokenError::Missing(_))
+        ));
+        theme.set_token(
+            "generated.size",
+            TokenValue::Number(16.0),
+            ThemeProvenance::BaseRecovery,
+        );
+        assert_eq!(
+            theme.resolve_token_value("alias"),
+            Ok(Some(TokenValue::Number(16.0)))
+        );
+    }
+
+    #[test]
+    fn resolved_module_aliases_invalidate_with_module_mutation() {
+        let mut theme = theme_with_tokens(&[("alias", "var(--@mesh/example.size)")]);
+        theme
+            .modules_mut()
+            .entry("@mesh/example".into())
+            .or_default()
+            .tokens
+            .insert("size".into(), TokenValue::Number(8.0));
+        assert_eq!(
+            theme.resolve_token_value("alias"),
+            Ok(Some(TokenValue::Number(8.0)))
+        );
+        theme
+            .modules_mut()
+            .get_mut("@mesh/example")
+            .unwrap()
+            .tokens
+            .insert("size".into(), TokenValue::Number(16.0));
+        assert_eq!(
+            theme.resolve_token_value("alias"),
+            Ok(Some(TokenValue::Number(16.0)))
+        );
+    }
+
+    #[test]
+    #[ignore = "release performance gate"]
+    fn shared_theme_alias_resolution_beats_repeated_graph_walks() {
+        use std::hint::black_box;
+        use std::time::Instant;
+        let mut theme = Theme::new("alias-workload", "Alias workload");
+        theme
+            .tokens_mut()
+            .insert("chain.0".into(), TokenValue::Number(12.0));
+        for index in 1..32 {
+            theme.tokens_mut().insert(
+                format!("chain.{index}"),
+                TokenValue::String(format!("var(--chain-{})", index - 1)),
+            );
+        }
+        assert_eq!(
+            theme.resolve_token_value("chain.31"),
+            Ok(Some(TokenValue::Number(12.0)))
+        );
+        let iterations = 20_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            black_box(
+                theme
+                    .resolve_named_token(black_box("chain.31"), &mut Vec::new())
+                    .unwrap(),
+            );
+        }
+        let uncached = start.elapsed();
+        let start = Instant::now();
+        for _ in 0..iterations {
+            black_box(theme.resolve_token_value(black_box("chain.31")).unwrap());
+        }
+        let cached = start.elapsed();
+        let speedup = uncached.as_secs_f64() / cached.as_secs_f64();
+        println!(
+            "theme aliases: 32-token chain, {iterations} reads: uncached={uncached:?} cached={cached:?}"
+        );
+        println!("MESH_PERF metric=shared_theme_alias_resolution_speedup value={speedup:.3}");
+        assert!(
+            speedup >= 2.0,
+            "alias resolution speedup {speedup:.3} below 2x"
         );
     }
 

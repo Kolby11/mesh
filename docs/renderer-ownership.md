@@ -18,6 +18,23 @@ research and migration gates are retained in
 | Presentation | `crates/core/presentation/` | Owns presented buffers and normalized surface input |
 | Wayland | `crates/core/platform/wayland/` and presentation Wayland modules | Owns compositor protocol integration and surface commits |
 
+## Scene handoff preparation
+
+`render::scene_thread` owns immutable `FramePaintPlan` submissions, resource
+leases and a bounded render-thread queue. The worker creates and destroys its
+backend on the same thread. Superseded outputs cannot be presented; skipped or
+unacknowledged commits force complete replay. This interface is preparatory:
+the shell still uses the current raster painter and presentation path.
+
+`resources::FrozenFontDatabase` prepares owned font sources for that handoff.
+It copies file, mapped and binary inputs into immutable byte buffers, preserves
+face metadata and generic families, and exposes an original-to-frozen face ID
+mapping. Collection faces share one byte reservation, which remains live through
+cloned font databases. Preparation uses the shared resource byte budget and
+cancellation token. Layout and painting must receive the same prepared database.
+Production integration still needs a policy for large installed font catalogs,
+icon snapshots, GPU ownership and presentation.
+
 ## Adapter boundaries
 
 `library_adapters.rs`, `parley_adapter.rs`, `accesskit_adapter.rs`,

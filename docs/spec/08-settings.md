@@ -203,7 +203,7 @@ brings them back.
 
 ## 5. Generated settings UI
 
-**Status: partially shipped.** Exposed props from a frontend module's primary
+**Status: partially shipped.** Exposed props from a `ui` module's primary
 component produce typed global and per-instance controls, effective values, and
 per-row reset actions. Writes are validated and persisted as sparse
 active-profile overrides. Surface/resource editing controls remain target work;

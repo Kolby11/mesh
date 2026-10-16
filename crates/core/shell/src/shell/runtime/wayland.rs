@@ -252,9 +252,7 @@ impl Shell {
                 });
 
             if let RoutedWindowEvent::KeyPressed { key, mods } = &event {
-                if let Some(request) =
-                    shell_global_shortcut_request(key, mods.ctrl, mods.shift, self.debug.enabled)
-                {
+                if let Some(request) = shell_global_shortcut_request(key, mods.ctrl, mods.shift) {
                     self.enqueue_effects(std::iter::once(request));
                     continue;
                 }

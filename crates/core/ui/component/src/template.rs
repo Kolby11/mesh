@@ -379,6 +379,12 @@ pub enum AttributeValue {
     InstanceBinding(String),
     /// Event handler: `onclick="onTap"` — calls a script function.
     EventHandler(String),
+    /// A validated expression producing a function in its owning lexical scope.
+    EventHandlerExpression {
+        source: String,
+        expression: crate::SharedCompiledExpression,
+        call_binding: bool,
+    },
     /// Event handler with pre-bound arguments: `onclick={selectLocale(locale)}`.
     EventHandlerCall { handler: String, args: Vec<String> },
 }

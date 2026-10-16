@@ -4,7 +4,7 @@
   "description": "Compact audio controls popover embedded in the navigation bar.",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "component",
+    "kind": "ui",
     "uses": {
       "interfaces": {
         "mesh.audio": ">=1.0"

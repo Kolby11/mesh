@@ -1,233 +1,127 @@
-//! Parser for the `<props>` block — a component's typed, defaulted, localized
-//! configuration. See `docs/spec/03-components.md`.
-//!
-//! Syntax (one entry per `name: { ...fields... }`, commas/newlines separate):
-//!
-//! ```text
-//! <props>
-//!   width:   { type: "size", default: "fit-content", label: t("var.width") }
-//!   density: { type: "enum", options: ["compact", "cozy"], default: "cozy" }
-//!   anim_ms: { type: "duration", default: 120, min: 0, max: 1000 }
-//! </props>
-//! ```
+//! Static Luau table declarations for component props.
 
+use super::{ParseError, luau_literal, script::on_parser_stack};
 use crate::{
     LocalizedLabel, PropDef, PropType, PropValue, PropsBlock, SourceSpan, normalize_prop_value,
     validate_prop_definition,
 };
+use full_moon::{
+    ast::{
+        Call, Expression, Field, FunctionArgs, LastStmt, Prefix, Suffix, TableConstructor, UnOp,
+    },
+    node::Node,
+    tokenizer::{Symbol, TokenType},
+};
 
-use super::ParseError;
+const EXPRESSION_PREFIX: &str = "return ";
 
-/// Names the runtime `props` table answers as helpers (`props.source(name)`,
-/// `props.at(name, scope)`); a declared prop would shadow them.
+/// Names reserved for runtime layer introspection.
 pub const RESERVED_PROP_NAMES: [&str; 2] = ["source", "at"];
 
-/// A raw, untyped value scanned from the block, before mapping onto typed fields.
 #[derive(Debug, Clone)]
 enum RawValue {
     Str(String),
     Num(f64),
     Bool(bool),
     Array(Vec<RawValue>),
-    /// A function call such as `t("var.width")` — used for localized labels.
-    Call {
-        name: String,
-        args: Vec<RawValue>,
-    },
+    Call { name: String, args: Vec<RawValue> },
 }
 
-struct Scanner<'a> {
-    chars: std::iter::Peekable<std::str::Chars<'a>>,
-    offset: usize,
+struct DeclarationSource {
     base: usize,
     len: usize,
 }
 
-impl<'a> Scanner<'a> {
-    fn new(source: &'a str, base: usize) -> Self {
-        Self {
-            chars: source.chars().peekable(),
-            offset: 0,
-            base,
-            len: source.len(),
-        }
+impl DeclarationSource {
+    fn span(&self, node: &impl Node) -> SourceSpan {
+        let (start, end) = node
+            .range()
+            .map(|(start, end)| (start.bytes(), end.bytes()))
+            .unwrap_or((EXPRESSION_PREFIX.len(), EXPRESSION_PREFIX.len()));
+        self.range(start, end)
     }
 
-    fn peek(&mut self) -> Option<char> {
-        self.chars.peek().copied()
+    fn range(&self, start: usize, end: usize) -> SourceSpan {
+        SourceSpan::new(
+            self.base + start.saturating_sub(EXPRESSION_PREFIX.len()).min(self.len),
+            self.base + end.saturating_sub(EXPRESSION_PREFIX.len()).min(self.len),
+        )
     }
 
-    fn next(&mut self) -> Option<char> {
-        let ch = self.chars.next()?;
-        self.offset += ch.len_utf8();
-        Some(ch)
-    }
-
-    fn invalid(&self, message: impl Into<String>) -> ParseError {
+    fn error(&self, node: &impl Node, message: impl Into<String>) -> ParseError {
         ParseError::InvalidProps {
             message: message.into(),
-            span: SourceSpan::new(
-                self.base + self.offset,
-                self.base + (self.offset + 1).min(self.len),
-            ),
+            span: self.span(node),
         }
     }
 
-    /// Skip whitespace and entry/field separators (commas).
-    fn skip_trivia(&mut self) {
-        while let Some(c) = self.peek() {
-            if c.is_whitespace() || c == ',' {
-                self.next();
-            } else {
-                break;
-            }
-        }
-    }
-
-    fn skip_ws(&mut self) {
-        while let Some(c) = self.peek() {
-            if c.is_whitespace() {
-                self.next();
-            } else {
-                break;
-            }
-        }
-    }
-
-    fn read_ident(&mut self) -> String {
-        let mut out = String::new();
-        while let Some(c) = self.peek() {
-            if c.is_alphanumeric() || c == '_' || c == '-' || c == '.' {
-                out.push(c);
-                self.next();
-            } else {
-                break;
-            }
-        }
-        out
-    }
-
-    fn read_string(&mut self) -> Result<String, ParseError> {
-        // Opening quote already confirmed by the caller.
-        let quote = self.next().expect("opening quote");
-        let mut out = String::new();
-        while let Some(c) = self.next() {
-            match c {
-                '\\' => {
-                    if let Some(escaped) = self.next() {
-                        out.push(escaped);
-                    }
-                }
-                c if c == quote => return Ok(out),
-                c => out.push(c),
-            }
-        }
-        Err(self.invalid("unterminated string literal"))
-    }
-
-    fn read_number(&mut self) -> Result<f64, ParseError> {
-        let mut raw = String::new();
-        while let Some(c) = self.peek() {
-            if c.is_ascii_digit() || c == '.' || c == '-' || c == '+' || c == 'e' || c == 'E' {
-                raw.push(c);
-                self.next();
-            } else {
-                break;
-            }
-        }
-        raw.parse::<f64>()
-            .map_err(|_| self.invalid(format!("invalid number `{raw}`")))
-    }
-
-    fn read_value(&mut self) -> Result<RawValue, ParseError> {
-        self.skip_ws();
-        match self.peek() {
-            Some('"') | Some('\'') => Ok(RawValue::Str(self.read_string()?)),
-            Some('[') => self.read_array(),
-            Some(c) if c.is_ascii_digit() || c == '-' || c == '+' || c == '.' => {
-                Ok(RawValue::Num(self.read_number()?))
-            }
-            Some(c) if c.is_alphabetic() => {
-                let ident = self.read_ident();
-                match ident.as_str() {
-                    "true" => Ok(RawValue::Bool(true)),
-                    "false" => Ok(RawValue::Bool(false)),
+    fn named_fields<'a>(
+        &self,
+        table: &'a TableConstructor,
+    ) -> Result<Vec<(String, &'a Expression, SourceSpan)>, ParseError> {
+        table
+            .fields()
+            .iter()
+            .map(|field| {
+                let (key, value) = match field {
+                    Field::NameKey { key, value, .. } => (key.token().to_string(), value),
+                    Field::ExpressionKey {
+                        key: Expression::String(key),
+                        value,
+                        ..
+                    } => (
+                        luau_literal::string(key).map_err(|message| self.error(key, message))?,
+                        value,
+                    ),
                     _ => {
-                        self.skip_ws();
-                        if self.peek() == Some('(') {
-                            let args = self.read_call_args()?;
-                            Ok(RawValue::Call { name: ident, args })
-                        } else {
-                            // A bare identifier (e.g. an unquoted keyword) is treated
-                            // as a string so `default: fit-content` is tolerated.
-                            Ok(RawValue::Str(ident))
-                        }
+                        return Err(self.error(
+                            field,
+                            "prop tables require named fields or literal string keys",
+                        ));
                     }
-                }
-            }
-            other => Err(self.invalid(format!("expected a value, found {}", describe(other)))),
-        }
+                };
+                Ok((key, value, self.span(field)))
+            })
+            .collect()
     }
 
-    fn read_array(&mut self) -> Result<RawValue, ParseError> {
-        self.next(); // consume '['
-        let mut items = Vec::new();
-        loop {
-            self.skip_trivia();
-            match self.peek() {
-                Some(']') => {
-                    self.next();
-                    return Ok(RawValue::Array(items));
-                }
-                None => return Err(self.invalid("unterminated array")),
-                _ => items.push(self.read_value()?),
-            }
+    fn value(&self, expression: &Expression, depth: usize) -> Result<RawValue, ParseError> {
+        if depth > 64 {
+            return Err(self.error(expression, "prop declaration nesting exceeds 64 levels"));
         }
-    }
-
-    fn read_call_args(&mut self) -> Result<Vec<RawValue>, ParseError> {
-        self.next(); // consume '('
-        let mut args = Vec::new();
-        loop {
-            self.skip_trivia();
-            match self.peek() {
-                Some(')') => {
-                    self.next();
-                    return Ok(args);
+        match expression {
+            Expression::String(token) => luau_literal::string(token).map(RawValue::Str).map_err(|message| self.error(token, message)),
+            Expression::Number(token) => luau_literal::number(token).map(RawValue::Num).map_err(|message| self.error(token, message)),
+            Expression::Symbol(token) => match token.token_type() {
+                TokenType::Symbol { symbol: Symbol::True } => Ok(RawValue::Bool(true)),
+                TokenType::Symbol { symbol: Symbol::False } => Ok(RawValue::Bool(false)),
+                _ => Err(self.error(expression, "props accept only static strings, numbers, booleans, arrays and translation labels")),
+            },
+            Expression::Parentheses { expression, .. } => self.value(expression, depth + 1),
+            Expression::UnaryOperator { unop: UnOp::Minus(_), expression: value } => match self.value(value, depth + 1)? {
+                RawValue::Num(value) => Ok(RawValue::Num(-value)),
+                _ => Err(self.error(expression, "unary minus requires a numeric literal")),
+            },
+            Expression::TableConstructor(table) => {
+                let mut values = Vec::new();
+                for field in table.fields().iter() {
+                    let Field::NoKey(value) = field else { return Err(self.error(field, "array values must use sequential Luau table entries")); };
+                    values.push(self.value(value, depth + 1)?);
                 }
-                None => return Err(self.invalid("unterminated call")),
-                _ => args.push(self.read_value()?),
+                Ok(RawValue::Array(values))
             }
-        }
-    }
-
-    /// Read a `{ key: value, ... }` object into its field list.
-    fn read_object(&mut self) -> Result<Vec<(String, RawValue)>, ParseError> {
-        self.skip_ws();
-        if self.next() != Some('{') {
-            return Err(self.invalid("expected `{` to open a prop definition"));
-        }
-        let mut fields = Vec::new();
-        loop {
-            self.skip_trivia();
-            match self.peek() {
-                Some('}') => {
-                    self.next();
-                    return Ok(fields);
-                }
-                None => return Err(self.invalid("unterminated prop definition (missing `}`)")),
-                _ => {}
+            Expression::FunctionCall(call) => {
+                let Prefix::Name(name) = call.prefix() else { return Err(self.error(expression, "only literal t(...) translation labels are supported")); };
+                let suffixes = call.suffixes().collect::<Vec<_>>();
+                if name.token().to_string() != "t" || suffixes.len() != 1 { return Err(self.error(expression, "only literal t(...) translation labels are supported")); }
+                let args = match suffixes[0] {
+                    Suffix::Call(Call::AnonymousCall(FunctionArgs::Parentheses { arguments, .. })) => arguments.iter().map(|arg| self.value(arg, depth + 1)).collect::<Result<Vec<_>, _>>()?,
+                    Suffix::Call(Call::AnonymousCall(FunctionArgs::String(token))) => vec![RawValue::Str(luau_literal::string(token).map_err(|message| self.error(token, message))?)],
+                    _ => return Err(self.error(expression, "translation labels require literal string arguments")),
+                };
+                Ok(RawValue::Call { name: "t".into(), args })
             }
-            let key = self.read_ident();
-            if key.is_empty() {
-                return Err(self.invalid("expected a field name inside a prop definition"));
-            }
-            self.skip_ws();
-            if self.next() != Some(':') {
-                return Err(self.invalid(format!("expected `:` after field `{key}`")));
-            }
-            let value = self.read_value()?;
-            fields.push((key, value));
+            _ => Err(self.error(expression, "prop declarations must be static Luau literals; expressions and identifiers are not evaluated")),
         }
     }
 }
@@ -238,40 +132,63 @@ pub(super) fn parse_props(source: &str) -> Result<PropsBlock, ParseError> {
 }
 
 pub(super) fn parse_props_at(source: &str, source_base: usize) -> Result<PropsBlock, ParseError> {
-    let mut scanner = Scanner::new(source, source_base);
+    let context = DeclarationSource {
+        base: source_base,
+        len: source.len(),
+    };
+    if source.trim().is_empty() {
+        return Ok(PropsBlock {
+            props: Vec::new(),
+            span: SourceSpan::new(source_base, source_base + source.len()),
+        });
+    }
+    let wrapped = format!("{EXPRESSION_PREFIX}{source}");
+    let ast = on_parser_stack(|| full_moon::parse(&wrapped)).map_err(|errors| {
+        let error = &errors[0];
+        let (start, end) = error.range();
+        ParseError::InvalidProps {
+            message: format!(
+                "expected a static Luau table (use `name = {{ type = \"size\" }}`): {}",
+                error.error_message()
+            ),
+            span: context.range(start.bytes(), end.bytes()),
+        }
+    })?;
+    let Some(LastStmt::Return(statement)) = ast.nodes().last_stmt() else {
+        return Err(invalid("expected a single Luau table literal"));
+    };
+    if ast.nodes().stmts().next().is_some() || statement.returns().len() != 1 {
+        return Err(context.error(statement, "expected a single Luau table literal"));
+    }
+    let Expression::TableConstructor(table) = statement.returns().iter().next().unwrap() else {
+        return Err(context.error(
+            statement,
+            "expected a Luau table literal enclosed in `{ ... }`",
+        ));
+    };
     let mut props: Vec<PropDef> = Vec::new();
-
-    loop {
-        scanner.skip_trivia();
-        if scanner.peek().is_none() {
-            break;
-        }
-        let prop_start = scanner.offset;
-        let name = scanner.read_ident();
-        if name.is_empty() {
-            let next = scanner.peek();
-            return Err(scanner.invalid(format!("expected a prop name, found {}", describe(next))));
-        }
-        scanner.skip_ws();
-        if scanner.next() != Some(':') {
-            return Err(scanner.invalid(format!("expected `:` after prop `{name}`")));
-        }
-        let fields = scanner.read_object()?;
-        let prop_end = scanner.offset;
-        if props.iter().any(|p| p.name == name) {
-            return Err(scanner.invalid(format!("duplicate prop `{name}`")));
+    for (name, expression, span) in context.named_fields(table)? {
+        if props.iter().any(|prop| prop.name == name) {
+            return Err(with_span(invalid(format!("duplicate prop `{name}`")), span));
         }
         if RESERVED_PROP_NAMES.contains(&name.as_str()) {
-            return Err(scanner.invalid(format!(
-                "prop name `{name}` is reserved for `props.{name}(...)` layer introspection"
-            )));
+            return Err(with_span(
+                invalid(format!(
+                    "prop name `{name}` is reserved for `props.{name}(...)` layer introspection"
+                )),
+                span,
+            ));
         }
-        let prop_span = SourceSpan::new(source_base + prop_start, source_base + prop_end);
-        props.push(
-            build_prop(name, fields, prop_span).map_err(|error| with_span(error, prop_span))?,
-        );
+        let Expression::TableConstructor(fields) = expression else {
+            return Err(context.error(expression, "prop definitions must be Luau table literals"));
+        };
+        let fields = context
+            .named_fields(fields)?
+            .into_iter()
+            .map(|(name, value, _)| Ok((name, context.value(value, 0)?)))
+            .collect::<Result<Vec<_>, ParseError>>()?;
+        props.push(build_prop(name, fields, span).map_err(|error| with_span(error, span))?);
     }
-
     Ok(PropsBlock {
         props,
         span: SourceSpan::new(source_base, source_base + source.len()),
@@ -418,6 +335,11 @@ fn to_label(field: &str, prop: &str, value: RawValue) -> Result<LocalizedLabel, 
     match value {
         RawValue::Str(s) => Ok(LocalizedLabel::Literal(s)),
         RawValue::Call { name, args } if name == "t" => {
+            if !(1..=2).contains(&args.len()) {
+                return Err(invalid(format!(
+                    "prop `{prop}` field `{field}`: t(...) needs one string key and an optional string fallback"
+                )));
+            }
             let mut it = args.into_iter();
             let key = match it.next() {
                 Some(RawValue::Str(s)) => s,
@@ -484,13 +406,6 @@ fn field_type_error(field: &str, prop: &str, expected: &str) -> ParseError {
     invalid(format!("prop `{prop}` field `{field}` must be {expected}"))
 }
 
-fn describe(c: Option<char>) -> String {
-    match c {
-        Some(c) => format!("`{c}`"),
-        None => "end of block".to_string(),
-    }
-}
-
 fn invalid(message: impl Into<String>) -> ParseError {
     ParseError::InvalidProps {
         message: message.into(),
@@ -510,14 +425,68 @@ mod tests {
     use super::*;
 
     #[test]
+    fn luau_tables_support_comments_string_keys_and_numeric_literals() {
+        let block = parse_props(
+            r#"{
+            -- Literal keys share the same namespace as identifier keys.
+            ["width"] = { type = "number"; default = -0x1f; min = -40 },
+            density = { type = "enum", options = { 'compact'; 'cozy' }, default = 'cozy' },
+            count = { type = "int", default = 0b1010 },
+        }"#,
+        )
+        .unwrap();
+        assert_eq!(block.props[0].default, Some(PropValue::Number(-31.0)));
+        assert_eq!(block.props[1].options, ["compact", "cozy"]);
+        assert_eq!(block.props[2].default, Some(PropValue::Number(10.0)));
+    }
+
+    #[test]
+    fn rejects_dynamic_expressions_and_legacy_props_syntax() {
+        for source in [
+            r#"x: { type: "bool", default: true }"#,
+            r#"{ x = create_prop() }"#,
+            r#"{ x = { type = "number", default = os.time() } }"#,
+            r#"{ x = { type = "number", default = 1 + 2 } }"#,
+            r#"{ x = { type = "bool", default = if true then false else true } }"#,
+            r#"{ x = { type = "string", default = `interpolated` } }"#,
+            r#"{ x = { type = "string", default = nil } }"#,
+            r#"{ x = { type = "string", label = t("one", "two", "three") } }"#,
+            r#"{ x = { type = "enum", options = {[1] = "a"} } }"#,
+            r#"{}; execute()"#,
+        ] {
+            assert!(parse_props(source).is_err(), "accepted {source}");
+        }
+    }
+
+    #[test]
+    fn escaped_duplicate_keys_and_value_errors_keep_source_spans() {
+        let source = r#"{ x = { type = "bool" }, ["\120"] = { type = "bool" } }"#;
+        assert!(
+            parse_props(source)
+                .unwrap_err()
+                .to_string()
+                .contains("duplicate prop `x`")
+        );
+        let source = r#"{ ["é"] = { type = "number", default = unknown } }"#;
+        let error = parse_props_at(source, 123).unwrap_err();
+        let span = error.span();
+        assert_eq!(&source[span.start - 123..span.end - 123], "unknown");
+        let syntax = r#"{ ["é"] = { type: "number" } }"#;
+        let error = parse_props_at(syntax, 123).unwrap_err();
+        assert!(error.to_string().contains("static Luau table"));
+        assert!(syntax.is_char_boundary(error.span().start - 123));
+        assert!(syntax.is_char_boundary(error.span().end - 123));
+    }
+
+    #[test]
     fn parses_basic_props() {
         let block = parse_props(
-            r#"
-            width:   { type: "size", default: "fit-content", label: t("var.width") }
-            density: { type: "enum", options: ["compact", "cozy"], default: "cozy" }
-            show:    { type: "bool", default: true }
-            anim_ms: { type: "duration", default: 120, min: 0, max: 1000 }
-            "#,
+            r#"{
+            width = { type = "size", default = "fit-content", label = t("var.width") },
+            density = { type = "enum", options = {"compact", "cozy"}, default = "cozy" },
+            show = { type = "bool", default = true },
+            anim_ms = { type = "duration", default = 120, min = 0, max = 1000 },
+            }"#,
         )
         .unwrap();
 
@@ -551,21 +520,19 @@ mod tests {
     }
 
     #[test]
-    fn accepts_bare_keyword_default() {
-        let block = parse_props(r#"width: { type: "size", default: fit-content }"#).unwrap();
-        assert_eq!(
-            block.props[0].default,
-            Some(PropValue::String("fit-content".into()))
-        );
+    fn rejects_bare_keyword_default() {
+        let error =
+            parse_props(r#"{ width = { type = "size", default = fit_content } }"#).unwrap_err();
+        assert!(error.to_string().contains("static Luau literals"));
     }
 
     #[test]
     fn label_literal_and_fallback() {
         let block = parse_props(
-            r#"
-            a: { type: "string", label: "Plain" }
-            b: { type: "string", label: t("k.b", "Fallback") }
-            "#,
+            r#"{
+            a = { type = "string", label = "Plain" },
+            b = { type = "string", label = t("k.b", "Fallback") },
+            }"#,
         )
         .unwrap();
         assert_eq!(
@@ -583,7 +550,7 @@ mod tests {
 
     #[test]
     fn expose_false_is_honored() {
-        let block = parse_props(r#"x: { type: "size", expose: false }"#).unwrap();
+        let block = parse_props(r#"{x = { type = "size", expose = false },}"#).unwrap();
         assert!(!block.props[0].expose);
     }
 
@@ -595,13 +562,15 @@ mod tests {
 
     #[test]
     fn rejects_missing_type() {
-        let err = parse_props(r#"x: { default: 1 }"#).unwrap_err().to_string();
+        let err = parse_props(r#"{x = { default = 1 },}"#)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("missing required `type`"), "{err}");
     }
 
     #[test]
     fn rejects_unknown_type() {
-        let err = parse_props(r#"x: { type: "widget" }"#)
+        let err = parse_props(r#"{x = { type = "widget" },}"#)
             .unwrap_err()
             .to_string();
         assert!(err.contains("unknown type `widget`"), "{err}");
@@ -609,7 +578,7 @@ mod tests {
 
     #[test]
     fn rejects_enum_without_options() {
-        let err = parse_props(r#"x: { type: "enum" }"#)
+        let err = parse_props(r#"{x = { type = "enum" },}"#)
             .unwrap_err()
             .to_string();
         assert!(err.contains("requires a non-empty `options`"), "{err}");
@@ -618,7 +587,7 @@ mod tests {
     #[test]
     fn rejects_reserved_introspection_names() {
         for name in RESERVED_PROP_NAMES {
-            let err = parse_props(&format!(r#"{name}: {{ type: "bool" }}"#))
+            let err = parse_props(&format!(r#"{{ {name} = {{ type = "bool" }} }}"#))
                 .unwrap_err()
                 .to_string();
             assert!(err.contains("is reserved"), "{err}");
@@ -628,10 +597,10 @@ mod tests {
     #[test]
     fn rejects_duplicate_prop() {
         let err = parse_props(
-            r#"
-            x: { type: "size" }
-            x: { type: "bool" }
-            "#,
+            r#"{
+            x = { type = "size" },
+            x = { type = "bool" },
+            }"#,
         )
         .unwrap_err()
         .to_string();
@@ -640,7 +609,7 @@ mod tests {
 
     #[test]
     fn rejects_unknown_field() {
-        let err = parse_props(r#"x: { type: "size", widht: 1 }"#)
+        let err = parse_props(r#"{x = { type = "size", widht = 1 },}"#)
             .unwrap_err()
             .to_string();
         assert!(err.contains("unknown field `widht`"), "{err}");
@@ -648,30 +617,30 @@ mod tests {
 
     #[test]
     fn validates_typed_defaults() {
-        let err = parse_props(r#"x: { type: "bool", default: "yes" }"#)
+        let err = parse_props(r#"{x = { type = "bool", default = "yes" },}"#)
             .unwrap_err()
             .to_string();
         assert!(err.contains("default is invalid"), "{err}");
 
-        let err = parse_props(r#"x: { type: "enum", options: ["a"], default: "b" }"#)
+        let err = parse_props(r#"{x = { type = "enum", options = {"a"}, default = "b" },}"#)
             .unwrap_err()
             .to_string();
         assert!(err.contains("not one of"), "{err}");
 
         parse_props(
-            r##"
-            color: { type: "color", default: "#ff00aa" }
-            token: { type: "token", default: "color-primary" }
-            icon: { type: "icon", default: "audio-volume-high" }
-            duration: { type: "duration", default: "120ms" }
-            "##,
+            r##"{
+            color = { type = "color", default = "#ff00aa" },
+            token = { type = "token", default = "color-primary" },
+            icon = { type = "icon", default = "audio-volume-high" },
+            duration = { type = "duration", default = "120ms" },
+            }"##,
         )
         .unwrap();
     }
 
     #[test]
     fn rejects_duplicate_fields() {
-        let err = parse_props(r#"x: { type: "size", type: "number" }"#)
+        let err = parse_props(r#"{x = { type = "size", type = "number" },}"#)
             .unwrap_err()
             .to_string();
         assert!(err.contains("duplicate field `type`"), "{err}");
@@ -681,15 +650,15 @@ mod tests {
     fn rejects_type_inapplicable_metadata() {
         for (source, expected) in [
             (
-                r#"x: { type: "bool", options: [] }"#,
+                r#"{x = { type = "bool", options = {} },}"#,
                 "`options` is only valid for enum props",
             ),
             (
-                r#"x: { type: "string", min: 0 }"#,
+                r#"{x = { type = "string", min = 0 },}"#,
                 "only valid for size, number, int, or duration props",
             ),
             (
-                r#"x: { type: "color", unit: "px" }"#,
+                r#"{x = { type = "color", unit = "px" },}"#,
                 "unit `px` is not valid for `color` props",
             ),
         ] {
@@ -700,7 +669,7 @@ mod tests {
 
     #[test]
     fn rejects_invalid_constraints() {
-        let err = parse_props(r#"x: { type: "number", min: 10, max: 1 }"#)
+        let err = parse_props(r#"{x = { type = "number", min = 10, max = 1 },}"#)
             .unwrap_err()
             .to_string();
         assert!(
@@ -708,7 +677,7 @@ mod tests {
             "{err}"
         );
 
-        let err = parse_props(r#"x: { type: "number", step: 0 }"#)
+        let err = parse_props(r#"{x = { type = "number", step = 0 },}"#)
             .unwrap_err()
             .to_string();
         assert!(
@@ -716,7 +685,7 @@ mod tests {
             "{err}"
         );
 
-        let err = parse_props(r#"x: { type: "int", step: 0.5 }"#)
+        let err = parse_props(r#"{x = { type = "int", step = 0.5 },}"#)
             .unwrap_err()
             .to_string();
         assert!(
@@ -727,7 +696,7 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_enum_options() {
-        let err = parse_props(r#"x: { type: "enum", options: ["compact", "compact"] }"#)
+        let err = parse_props(r#"{x = { type = "enum", options = {"compact", "compact"} },}"#)
             .unwrap_err()
             .to_string();
         assert!(err.contains("enum option `compact` is duplicated"), "{err}");
@@ -735,37 +704,38 @@ mod tests {
 
     #[test]
     fn validates_css_domain_values_with_the_css_parser() {
-        let err = parse_props(r##"x: { type: "token", default: "" }"##)
+        let err = parse_props(r##"{x = { type = "token", default = "" },}"##)
             .unwrap_err()
             .to_string();
         assert!(err.contains("default is invalid"), "{err}");
 
-        let err = parse_props(r#"x: { type: "color", default: "rgb(255, 0)" }"#)
+        let err = parse_props(r#"{x = { type = "color", default = "rgb(255, 0)" },}"#)
             .unwrap_err()
             .to_string();
         assert!(err.contains("default is invalid"), "{err}");
 
-        let err = parse_props(r#"x: { type: "size", default: "12watts" }"#)
+        let err = parse_props(r#"{x = { type = "size", default = "12watts" },}"#)
             .unwrap_err()
             .to_string();
         assert!(err.contains("default is invalid"), "{err}");
 
         parse_props(
-            r##"
-            size: { type: "size", default: "1cm" }
-            color: { type: "color", default: "rebeccapurple" }
-            token: { type: "token", default: "module.surface" }
-            "##,
+            r##"{
+            size = { type = "size", default = "1cm" },
+            color = { type = "color", default = "rebeccapurple" },
+            token = { type = "token", default = "module.surface" },
+            }"##,
         )
         .unwrap();
     }
 
     #[test]
     fn normalizes_and_validates_units() {
-        let block = parse_props(r#"x: { type: "number", unit: " PX ", default: 2 }"#).unwrap();
+        let block =
+            parse_props(r#"{x = { type = "number", unit = " PX ", default = 2 },}"#).unwrap();
         assert_eq!(block.props[0].unit.as_deref(), Some("px"));
 
-        let err = parse_props(r#"x: { type: "size", unit: "watts" }"#)
+        let err = parse_props(r#"{x = { type = "size", unit = "watts" },}"#)
             .unwrap_err()
             .to_string();
         assert!(
@@ -773,7 +743,7 @@ mod tests {
             "{err}"
         );
 
-        let err = parse_props(r#"x: { type: "duration", unit: "ms" }"#)
+        let err = parse_props(r#"{x = { type = "duration", unit = "ms" },}"#)
             .unwrap_err()
             .to_string();
         assert!(
@@ -785,10 +755,10 @@ mod tests {
     #[test]
     fn public_prop_schema_is_normalized_and_excludes_private_declarations() {
         let block = parse_props(
-            r#"
-            visible: { type: "number", unit: " PX ", min: 1, default: 2 }
-            internal: { type: "string", expose: false }
-            "#,
+            r#"{
+            visible = { type = "number", unit = " PX ", min = 1, default = 2 },
+            internal = { type = "string", expose = false },
+            }"#,
         )
         .unwrap();
 

@@ -174,7 +174,7 @@ fn locale_manifest_identities_are_canonical_and_deterministic() {
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "i18n": { "defaultLocale": "EN-us", "supportedLocales": ["en-US"] }
   }
 }
@@ -204,7 +204,7 @@ fn compact_surface_block_normalizes_into_surface_layout() {
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "entry": "src/main.mesh",
     "surface": {
       "anchor": "bottom",
@@ -239,7 +239,7 @@ fn surface_manifest_rejects_legacy_geometry_fields() {
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "surface": {
       "anchor": "top",
       "exclusive_zone": 40,
@@ -271,7 +271,7 @@ fn module_manifest_rejects_legacy_surface_layout_with_migration_diagnostic() {
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "surfaceLayout": { "anchor": "top" }
   }
 }
@@ -299,7 +299,7 @@ fn module_manifest_rejects_duplicate_contribution_identities() {
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "provides": {
       "extensionPoints": {
         "mesh.settings.page": [{"id":"shared","entry":"src/one.mesh"}],
@@ -376,7 +376,7 @@ fn module_manifest_rejects_required_and_optional_interface_overlap() {
   "version": "1.0.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "uses": {
       "interfaces": {"mesh.example": ">=1.0"},
       "optionalInterfaces": {"mesh.example": ">=1.0"}
@@ -516,7 +516,7 @@ fn module_package_manifest_parses_frontend_theme_contributions() {
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "theme": {
       "tokens": {
         "weather.color.sunny": "#f6b73c"
@@ -590,7 +590,7 @@ fn module_package_manifest_rejects_non_icon_pack_icon_pack_contribution() {
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "icon_pack": {
       "id": "bad",
       "mappings": {
@@ -612,7 +612,7 @@ fn module_package_manifest_rejects_resource_pack_contributions_from_wrong_kind()
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "provides": {
       "icons": [{ "id": "bad", "path": "icons" }]
     }
@@ -625,7 +625,7 @@ fn module_package_manifest_rejects_resource_pack_contributions_from_wrong_kind()
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "provides": {
       "fonts": [{ "id": "bad", "path": "fonts" }]
     }
@@ -638,7 +638,7 @@ fn module_package_manifest_rejects_resource_pack_contributions_from_wrong_kind()
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "provides": {
       "themes": [{
         "id": "bad",
@@ -678,7 +678,7 @@ fn module_package_manifest_rejects_dependency_capability_bucket_mismatches() {
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "uses": {
       "capabilities": ["mesh.audio"]
     }
@@ -691,7 +691,7 @@ fn module_package_manifest_rejects_dependency_capability_bucket_mismatches() {
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "uses": {
       "modules": {
         "service.audio.read": "*"
@@ -706,7 +706,7 @@ fn module_package_manifest_rejects_dependency_capability_bucket_mismatches() {
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "uses": {
       "interfaces": {
         "@mesh/audio-interface": ">=1.0"
@@ -741,7 +741,7 @@ fn module_manifest_loader_rejects_ambiguous_module_and_package_json() {
     let dir = temp_dir("module-ambiguity");
     fs::write(
         dir.join("package.json"),
-        r#"{"name":"@mesh/package","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend"}}"#,
+        r#"{"name":"@mesh/package","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui"}}"#,
     )
     .unwrap();
     fs::write(
@@ -770,7 +770,7 @@ fn module_manifest_loader_accepts_canonical_module_json() {
     let dir = temp_dir("canonical-module");
     fs::write(
         dir.join("module.json"),
-        r#"{"name":"@mesh/module","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend"}}"#,
+        r#"{"name":"@mesh/module","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui"}}"#,
     )
     .unwrap();
     let loaded = load_module_manifest(&dir).unwrap();
@@ -784,7 +784,7 @@ fn module_manifest_loader_warns_for_raw_dotted_keybind_label() {
     let dir = temp_dir("canonical-module-raw-keybind-label");
     fs::write(
         dir.join("module.json"),
-        r#"{"name":"@mesh/module","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","contributes":{"keybinds":{"mute":{"label":"keybind.mute.label","trigger":{"kind":"shortcut","key":"m"}}}}}}"#,
+        r#"{"name":"@mesh/module","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","contributes":{"keybinds":{"mute":{"label":"keybind.mute.label","trigger":{"kind":"shortcut","key":"m"}}}}}}"#,
     )
     .unwrap();
 
@@ -819,7 +819,7 @@ fn module_manifest_loader_does_not_warn_for_literal_keybind_label() {
     let dir = temp_dir("canonical-module-literal-keybind-label");
     fs::write(
         dir.join("module.json"),
-        r#"{"name":"@mesh/module","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","contributes":{"keybinds":{"mute":{"label":"Mute","trigger":{"kind":"shortcut","key":"m"}}}}}}"#,
+        r#"{"name":"@mesh/module","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","contributes":{"keybinds":{"mute":{"label":"Mute","trigger":{"kind":"shortcut","key":"m"}}}}}}"#,
     )
     .unwrap();
 
@@ -865,7 +865,7 @@ fn module_manifest_loader_warns_for_raw_dotted_layout_label() {
     let dir = temp_dir("canonical-module-raw-layout-label");
     fs::write(
         dir.join("module.json"),
-        r#"{"name":"@mesh/module","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","provides":{"layout":[{"id":"main","entrypoint":"src/main.mesh","label":"layout.main.label"}]}}}"#,
+        r#"{"name":"@mesh/module","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","provides":{"layout":[{"id":"main","entrypoint":"src/main.mesh","label":"layout.main.label"}]}}}"#,
     )
     .unwrap();
 
@@ -900,7 +900,7 @@ fn module_manifest_loader_accepts_localized_layout_label_object() {
     let dir = temp_dir("canonical-module-localized-layout-label");
     fs::write(
         dir.join("module.json"),
-        r#"{"name":"@mesh/module","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","provides":{"layout":[{"id":"main","entrypoint":"src/main.mesh","label":{"t":"layout.main.label","fallback":"Main"}}]}}}"#,
+        r#"{"name":"@mesh/module","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","provides":{"layout":[{"id":"main","entrypoint":"src/main.mesh","label":{"t":"layout.main.label","fallback":"Main"}}]}}}"#,
     )
     .unwrap();
 
@@ -922,7 +922,7 @@ fn module_manifest_loader_rejects_legacy_package_json() {
     let dir = temp_dir("legacy-package");
     fs::write(
         dir.join("package.json"),
-        r#"{"name":"@mesh/package","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend"}}"#,
+        r#"{"name":"@mesh/package","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui"}}"#,
     )
     .unwrap();
     let err = load_module_manifest(&dir).unwrap_err();
@@ -979,7 +979,7 @@ fn module_manifest_loader_rejects_mixed_legacy_and_canonical_module_json() {
     let dir = temp_dir("mixed-legacy-canonical-module");
     fs::write(
         dir.join("module.json"),
-        r#"{"name":"@mesh/module","id":"@mesh/old-module","version":"1.0.0","type":"surface","mesh":{"apiVersion":"0.1","kind":"frontend"}}"#,
+        r#"{"name":"@mesh/module","id":"@mesh/old-module","version":"1.0.0","type":"surface","mesh":{"apiVersion":"0.1","kind":"ui"}}"#,
     )
     .unwrap();
 

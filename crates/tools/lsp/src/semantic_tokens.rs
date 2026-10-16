@@ -49,6 +49,7 @@ pub fn full(doc: &Document) -> SemanticTokensResult {
     let mut builder = TokenBuilder::new(&doc.source);
     tokenize_top_level_block_tags(&doc.source, &mut builder);
     tokenize_template(doc, &mut builder);
+    tokenize_props(doc, &mut builder);
 
     SemanticTokens {
         result_id: None,
@@ -58,7 +59,7 @@ pub fn full(doc: &Document) -> SemanticTokensResult {
 }
 
 fn tokenize_top_level_block_tags(source: &str, builder: &mut TokenBuilder<'_>) {
-    for block in ["template", "script", "style"] {
+    for block in ["template", "script", "style", "props"] {
         let mut search_start = 0;
         while let Some(rel) = source[search_start..].find(block) {
             let start = search_start + rel;
@@ -70,6 +71,60 @@ fn tokenize_top_level_block_tags(source: &str, builder: &mut TokenBuilder<'_>) {
                 }
             }
             search_start = start + block.len();
+        }
+    }
+}
+
+fn tokenize_props(doc: &Document, builder: &mut TokenBuilder<'_>) {
+    use full_moon::{
+        LuaVersion,
+        tokenizer::{Lexer, LexerResult, TokenType},
+    };
+    let Some((start, end)) = block_content_range(&doc.source, "props") else {
+        return;
+    };
+    let source = &doc.source[start..end];
+    let mut lexer = Lexer::new(source, LuaVersion::new());
+    while let Some(result) = lexer.consume() {
+        let token = match result {
+            LexerResult::Ok(token) | LexerResult::Recovered(token, _) => token,
+            LexerResult::Fatal(_) => break,
+        };
+        let offset = token.start_position().bytes();
+        let end = token.end_position().bytes();
+        let kind = match token.token_type() {
+            TokenType::Identifier { .. } => {
+                let next = source[end..].trim_start();
+                if next.starts_with('=') {
+                    TOKEN_PROPERTY
+                } else if next.starts_with('(') {
+                    TOKEN_FUNCTION
+                } else {
+                    TOKEN_VARIABLE
+                }
+            }
+            TokenType::Number { .. } => TOKEN_NUMBER,
+            TokenType::StringLiteral { .. } => TOKEN_STRING,
+            TokenType::Symbol { .. } => {
+                if token
+                    .token()
+                    .to_string()
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| ch.is_ascii_alphabetic())
+                {
+                    TOKEN_KEYWORD
+                } else {
+                    TOKEN_OPERATOR
+                }
+            }
+            _ => continue,
+        };
+        let mut position = offset;
+        for line in source[offset..end].split_inclusive('\n') {
+            let content = line.trim_end_matches(['\r', '\n']);
+            builder.push(start + position, content.len(), kind, 0);
+            position += line.len();
         }
     }
 }
@@ -506,6 +561,39 @@ mod tests {
     use tower_lsp::lsp_types::SemanticTokensResult;
 
     use super::*;
+
+    #[test]
+    fn props_semantic_tokens_use_luau_tokens_and_skip_comments() {
+        let source = r#"<props>
+{ -- ignored_name = fake()
+    width = { type = "size", default = "10px", label = t("width") },
+}
+</props>
+<template><box /></template>"#;
+        let doc = Document::new(
+            tower_lsp::lsp_types::Url::parse("file:///props.mesh").unwrap(),
+            source.into(),
+        );
+        let SemanticTokensResult::Tokens(tokens) = full(&doc) else {
+            panic!("expected tokens")
+        };
+        let absolute = absolute_tokens(&tokens.data);
+        assert_token(source, &absolute, "props", TOKEN_KEYWORD, 0);
+        assert_token(source, &absolute, "width", TOKEN_PROPERTY, 0);
+        let function =
+            crate::util::offset_to_position(source, source.find("t(\"width\")").unwrap());
+        assert!(absolute.iter().any(|token| token.line == function.line
+            && token.start == function.character
+            && token.length == 1
+            && token.token_type == TOKEN_FUNCTION));
+        let ignored = source.find("ignored_name").unwrap();
+        let position = crate::util::offset_to_position(source, ignored);
+        assert!(
+            !absolute
+                .iter()
+                .any(|token| token.line == position.line && token.start == position.character)
+        );
+    }
 
     #[test]
     fn template_semantic_tokens_distinguish_elements_and_lua_insertions() {

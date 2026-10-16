@@ -25,6 +25,8 @@ thread_local! {
     pub(super) static MATCHED_RULE_SCRATCH: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
     pub(super) static INLINE_STYLE_CACHE: RefCell<LruCache<Arc<str>, CachedInlineStyle>> =
         RefCell::new(LruCache::new(MAX_INLINE_STYLE_CACHE_ENTRIES));
+    pub(super) static SHARED_THEME_VALUE_CACHE: RefCell<LruCache<u64, LruCache<Arc<str>, CachedThemeTokenValue>>> =
+        RefCell::new(LruCache::new(MAX_SHARED_THEME_REVISIONS));
     pub(super) static SHARED_THEME_DEFAULT_CACHE: RefCell<LruCache<u64, SharedThemeDefaultCache>> =
         RefCell::new(LruCache::new(MAX_SHARED_THEME_REVISIONS));
     pub(super) static THEME_DEFAULT_DECLARATION_CACHE: RefCell<LruCache<(u64, usize), CachedThemeDefaultDeclarations>> =
@@ -33,6 +35,7 @@ thread_local! {
 
 pub(super) const MAX_INLINE_STYLE_CACHE_ENTRIES: usize = 256;
 pub(super) const MAX_SHARED_THEME_REVISIONS: usize = 16;
+pub(super) const MAX_SHARED_THEME_VALUES: usize = 512;
 pub(super) const MAX_SHARED_THEME_DEFAULTS_PER_REVISION: usize = 256;
 pub(super) const MAX_THEME_DEFAULT_DECLARATION_CACHE_ENTRIES: usize = 512;
 
@@ -212,10 +215,31 @@ pub(super) type ThemeDefaultDiagnosticPrototype = (
 );
 
 #[derive(Debug, Clone)]
+pub(super) struct CachedThemeString {
+    raw: Arc<str>,
+    pub(super) color: Color,
+    pub(super) number: f32,
+}
+
+impl std::ops::Deref for CachedThemeString {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.raw
+    }
+}
+
+impl AsRef<str> for CachedThemeString {
+    fn as_ref(&self) -> &str {
+        &self.raw
+    }
+}
+
+#[derive(Debug, Clone)]
 pub(super) enum CachedThemeTokenValue {
     Missing,
     Error(Arc<str>),
-    String(Arc<str>),
+    String(CachedThemeString),
     Number(f64),
     Bool(bool),
 }
@@ -223,7 +247,11 @@ pub(super) enum CachedThemeTokenValue {
 impl CachedThemeTokenValue {
     pub(super) fn from_resolution(value: Result<Option<TokenValue>, ThemeTokenError>) -> Self {
         match value {
-            Ok(Some(TokenValue::String(value))) => Self::String(Arc::from(value)),
+            Ok(Some(TokenValue::String(value))) => Self::String(CachedThemeString {
+                color: Color::from_css(&value).unwrap_or(Color::TRANSPARENT),
+                number: crate::style::parse::parse_px(&value),
+                raw: Arc::from(value),
+            }),
             Ok(Some(TokenValue::Number(value))) => Self::Number(value),
             Ok(Some(TokenValue::Bool(value))) => Self::Bool(value),
             Ok(None) => Self::Missing,

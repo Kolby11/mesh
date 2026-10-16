@@ -190,10 +190,10 @@ fn collect_class_token_nodes<'a>(node: &'a WidgetNode, token: &str, out: &mut Ve
     }
 }
 
-/// Open a bubble popover from its navigation-bar trigger and click the bubble
+/// Hover a bubble popover's navigation-bar trigger open and click the bubble
 /// at `option_index`, returning the promoted child key, its content offset, and
 /// which bubble was marked active before and after the click.
-fn pick_bubble_option(enter_handler: &str, option_index: usize) -> (Option<usize>, Option<usize>) {
+fn pick_bubble_option(trigger: &str, option_index: usize) -> (Option<usize>, Option<usize>) {
     let theme = default_theme();
     let width = 1280;
     let height = 80;
@@ -216,9 +216,7 @@ fn pick_bubble_option(enter_handler: &str, option_index: usize) -> (Option<usize
             1.0,
         )
         .unwrap();
-    component
-        .call_namespaced_handler(enter_handler, &[])
-        .unwrap();
+    hover_ref(&mut component, &theme, width, height, trigger);
     component
         .paint(
             &theme,

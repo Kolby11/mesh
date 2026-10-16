@@ -5,7 +5,9 @@ use crate::style::{
 use crate::tags::lower_source_tag;
 use crate::{FrontendCompositionResolver, LayeredStore};
 
-use mesh_core_component::template::{AttributeValue, ElementNode, ForNode, TemplateNode};
+use mesh_core_component::template::{
+    Attribute, AttributeValue, ElementNode, ForNode, TemplateNode,
+};
 use mesh_core_elements::style::StylePropertyMask;
 use mesh_core_elements::{
     ComputedStyle, NodeId, StyleContext, StyleResolver, VariableStore, WidgetNode,
@@ -823,6 +825,37 @@ where
     children
 }
 
+/// Record which script variable a popover's `open={variable}` reads, so the
+/// core disclosure controller can write its open/close decisions back to the
+/// owning instance. Only a bare identifier is writable; any other expression
+/// leaves `openchange` as the only channel.
+fn record_open_binding(
+    source: &[Attribute],
+    owner_instance: Option<&str>,
+    attributes: &mut mesh_core_elements::AttributeMap,
+) {
+    let Some(variable) = source.iter().find_map(|attribute| match &attribute.value {
+        AttributeValue::Binding(binding) | AttributeValue::TwoWayBinding(binding)
+            if attribute.name == "open" =>
+        {
+            let binding = binding.trim();
+            let identifier = !binding.is_empty()
+                && !binding.starts_with(|ch: char| ch.is_ascii_digit())
+                && binding
+                    .chars()
+                    .all(|ch| ch == '_' || ch.is_ascii_alphanumeric());
+            identifier.then_some(binding)
+        }
+        _ => None,
+    }) else {
+        return;
+    };
+    attributes.insert("_mesh_open_binding".into(), variable.to_string());
+    if let Some(owner) = owner_instance {
+        attributes.insert("_mesh_open_owner".into(), owner.to_string());
+    }
+}
+
 fn build_element_node(
     element: &ElementNode,
     manifest: &Manifest,
@@ -862,6 +895,13 @@ fn build_element_node(
         }
     }) {
         attributes.insert("_mesh_bind_this".into(), binding.to_string());
+    }
+    if source_tag == "popover" {
+        record_open_binding(
+            &element.attributes,
+            build_style.namespace_handlers.then_some(instance_key),
+            &mut attributes,
+        );
     }
     attributes
         .entry("data-mesh-element".into())

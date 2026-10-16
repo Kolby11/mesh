@@ -17,6 +17,7 @@ pub mod backend;
 /// `mesh.service.bind` and `mesh.service.on`.
 pub mod context;
 pub mod host_api;
+mod json;
 pub mod operation;
 pub(crate) mod policy;
 pub mod pool;
@@ -25,10 +26,10 @@ pub mod storage;
 mod util;
 
 pub use backend::{
-    BackendCommandArgument, BackendCommandRegistry, BackendCommandRun, BackendTaskRun, BackendCommandSpec, BackendEventRegistry,
-    BackendEventSpec, BackendScriptContext, BackendScriptError, BackendScriptEvent, StreamEvent,
-    StreamEventKind, StreamExitStatus, StreamHandle, StreamId, StreamLine, StreamState,
-    StreamStatus,
+    BackendCommandArgument, BackendCommandRegistry, BackendCommandRun, BackendCommandSpec,
+    BackendEventRegistry, BackendEventSpec, BackendScriptContext, BackendScriptError,
+    BackendScriptEvent, BackendTaskRun, StreamEvent, StreamEventKind, StreamExitStatus,
+    StreamHandle, StreamId, StreamLine, StreamState, StreamStatus,
 };
 pub use context::{
     ElementAction, LocaleBoundState, PublishedEvent, ScriptContext, ScriptDiagnostic,

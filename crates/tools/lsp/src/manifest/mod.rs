@@ -280,7 +280,8 @@ mod tests {
     #[test]
     fn completes_kind_enum() {
         let labels = complete_at(r#"{ "mesh": { "kind": "|" } }"#);
-        assert!(labels.contains(&"frontend".to_string()));
+        assert!(labels.contains(&"ui".to_string()));
+        assert!(!labels.contains(&"frontend".to_string()));
         assert!(labels.contains(&"backend".to_string()));
     }
 
@@ -298,7 +299,7 @@ mod tests {
 
     #[test]
     fn flags_unknown_property() {
-        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "frontend", "wat": 1 } }"#;
+        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "ui", "wat": 1 } }"#;
         let d = diagnostics(&doc(src));
         assert!(
             d.iter()
@@ -307,8 +308,19 @@ mod tests {
     }
 
     #[test]
+    fn retired_ui_kinds_report_the_migration() {
+        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "frontend" } }"#;
+        let d = diagnostics(&doc(src));
+        assert!(
+            d.iter().any(|d| d.message.contains("merged into \"ui\"")
+                && d.message.contains("suggested action")),
+            "{d:#?}"
+        );
+    }
+
+    #[test]
     fn accepts_unicode_escaped_known_manifest_keys() {
-        let src = r#"{ "\u006eame": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "frontend" } }"#;
+        let src = r#"{ "\u006eame": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "ui" } }"#;
         let d = diagnostics(&doc(src));
         assert!(
             !d.iter()
@@ -338,7 +350,7 @@ mod tests {
 
     #[test]
     fn flags_missing_required() {
-        let src = r#"{ "name": "@x/y", "mesh": { "kind": "frontend" } }"#;
+        let src = r#"{ "name": "@x/y", "mesh": { "kind": "ui" } }"#;
         let d = diagnostics(&doc(src));
         assert!(
             d.iter()
@@ -352,14 +364,14 @@ mod tests {
 
     #[test]
     fn accepts_valid_manifest() {
-        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "frontend", "entry": "src/main.mesh" } }"#;
+        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "ui", "entry": "src/main.mesh" } }"#;
         let d = diagnostics(&doc(src));
         assert!(d.is_empty(), "expected no diagnostics, got {d:?}");
     }
 
     #[test]
     fn reports_canonical_runtime_validation_for_module_manifests() {
-        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "frontend", "entry": "../outside.mesh" } }"#;
+        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "ui", "entry": "../outside.mesh" } }"#;
         let d = diagnostics(&doc(src));
         let runtime = d
             .iter()
@@ -374,7 +386,7 @@ mod tests {
 
     #[test]
     fn reports_canonical_runtime_shape_errors() {
-        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "frontend", "entry": 7 } }"#;
+        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "ui", "entry": 7 } }"#;
         let d = diagnostics(&doc(src));
         let runtime = d
             .iter()
@@ -405,7 +417,7 @@ mod tests {
 
     #[test]
     fn preserves_runtime_migration_diagnostic_field_spans() {
-        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "frontend", "surfaceLayout": { "anchor": "top" } } }"#;
+        let src = r#"{ "name": "@x/y", "version": "1.0.0", "mesh": { "apiVersion": "0.1", "kind": "ui", "surfaceLayout": { "anchor": "top" } } }"#;
         let d = diagnostics(&doc(src));
         let runtime = d
             .iter()
@@ -442,7 +454,7 @@ mod tests {
 
     #[test]
     fn hovers_a_known_key() {
-        let src = r#"{ "mesh": { "kind": "frontend" } }"#;
+        let src = r#"{ "mesh": { "kind": "ui" } }"#;
         let position = {
             let offset = src.find("\"kind\"").unwrap() + 2;
             json::offset_to_position(src, offset)

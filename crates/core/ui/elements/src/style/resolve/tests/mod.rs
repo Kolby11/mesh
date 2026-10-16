@@ -3,4 +3,5 @@ mod caching;
 mod common;
 mod indexing;
 mod theme_defaults;
+mod typed_operations;
 mod value_resolution;

@@ -6,8 +6,7 @@
     anchor-ref="settingsButton"
     anchor="bottom"
     gravity="bottom"
-    onpointerenter={onPopoverEnter}
-    onpointerleave={onPopoverLeave}
+    open-on="hover"
   >
     <column class="qs-panel">
 
@@ -46,8 +45,8 @@
       <row class="qs-section-row">
         <text class="qs-section-label">{t('qs.theme')}</text>
         <row class="qs-chip-row">
-          <button class="qs-chip" class:qs-chip-active={theme_is_dark} onclick={onThemeDark}><text class="qs-chip-text">{t('qs.theme.dark')}</text></button>
-          <button class="qs-chip" class:qs-chip-active={not theme_is_dark} onclick={onThemeLight}><text class="qs-chip-text">{t('qs.theme.light')}</text></button>
+          <button class="qs-chip" class:qs-chip-active={theme_is_dark} onclick={onThemeDark} disabled={dark_mode == nil}><text class="qs-chip-text">{t('qs.theme.dark')}</text></button>
+          <button class="qs-chip" class:qs-chip-active={not theme_is_dark} onclick={onThemeLight} disabled={light_mode == nil}><text class="qs-chip-text">{t('qs.theme.light')}</text></button>
         </row>
       </row>
 
@@ -74,6 +73,9 @@ brightness_level = 100
 brightness_label = "100%"
 
 theme_is_dark = true
+-- The active theme's mode for each color scheme; nil when it has none.
+dark_mode = nil
+light_mode = nil
 locale_is_sk = false
 
 local audio      = require("mesh.audio")
@@ -98,6 +100,15 @@ local function sync_theme(is_dark)
     theme_is_dark = is_dark
 end
 
+local function mode_with_scheme(modes, scheme)
+    for _, mode in modes or {} do
+        if mode.color_scheme == scheme then
+            return mode.name
+        end
+    end
+    return nil
+end
+
 local function sync_lang(is_sk)
     locale_is_sk = is_sk
 end
@@ -114,13 +125,9 @@ effect(function(self)
     end
 
     if theme then
-        local is_dark = true
-        if theme.is_dark ~= nil then
-            is_dark = theme.is_dark == true
-        elseif theme.current then
-            is_dark = string.find(theme.current, "dark", 1, true) ~= nil
-        end
-        sync_theme(is_dark)
+        sync_theme(theme.is_dark ~= false)
+        dark_mode = mode_with_scheme(theme.modes, "dark")
+        light_mode = mode_with_scheme(theme.modes, "light")
     end
 
     local locale = mesh.locale.current()
@@ -148,14 +155,17 @@ function onBrightnessChange(event)
     brightness.set(val)
 end
 
+-- Dark/Light switch the active theme's mode; they never change the theme.
 function onThemeDark()
+    if dark_mode == nil then return end
     sync_theme(true)
-    theme.set_theme("mesh-default-dark")
+    theme.set_mode(dark_mode)
 end
 
 function onThemeLight()
+    if light_mode == nil then return end
     sync_theme(false)
-    theme.set_theme("mesh-default-light")
+    theme.set_mode(light_mode)
 end
 
 function onLangEn()
@@ -166,14 +176,6 @@ end
 function onLangSk()
     sync_lang(true)
     mesh.locale.set("sk")
-end
-
-function onPopoverEnter(event)
-    self.PopoverEnter:fire(event)
-end
-
-function onPopoverLeave(event)
-    self.PopoverLeave:fire(event)
 end
 </script>
 
@@ -310,6 +312,10 @@ exit accelerates so it stays visible instead of vanishing in its first frame. */
 .qs-chip-active {
     background: var(--color-primary);
     color: var(--color-on-primary);
+}
+
+.qs-chip:disabled {
+    opacity: 0.38;
 }
 
 .qs-chip-text {

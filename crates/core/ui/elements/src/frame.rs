@@ -551,6 +551,9 @@ struct FrameSnapshotData {
     id_index: Arc<HashMap<NodeId, usize>>,
     paths: Arc<Vec<Box<[usize]>>>,
     dependents: Arc<HashMap<usize, Vec<usize>>>,
+    /// Trigger index to the popovers anchored to it; see
+    /// `apply_frame_popover_expansion`.
+    popover_triggers: Arc<HashMap<usize, Vec<usize>>>,
     semantic_diff: SemanticDiff,
 }
 
@@ -633,6 +636,17 @@ impl FrameSnapshot {
                 }
             }
         }
+        let mut popover_triggers: HashMap<usize, Vec<usize>> = HashMap::new();
+        for (popover, node) in nodes.iter().enumerate() {
+            if let Some(trigger) = node
+                .semantic()
+                .and_then(|semantic| semantic.relationships.popover_trigger.as_ref())
+            {
+                let trigger = index[trigger];
+                dependents.entry(popover).or_default().push(trigger);
+                popover_triggers.entry(trigger).or_default().push(popover);
+            }
+        }
         let mut snapshot = Self(Arc::new(FrameSnapshotData {
             revision,
             phases,
@@ -641,6 +655,7 @@ impl FrameSnapshot {
             id_index: Arc::new(node_index),
             paths: Arc::new(paths),
             dependents: Arc::new(dependents),
+            popover_triggers: Arc::new(popover_triggers),
             semantic_diff: SemanticDiff::default(),
         }));
         let semantic_diff = SemanticDiff::between(previous, &snapshot);
@@ -755,6 +770,12 @@ impl FrameSnapshot {
                 semantic.info = (*node.local_info).clone();
                 semantic.bounds = node.layout;
                 apply_frame_reference_text(&mut semantic, &nodes, &previous.0.index);
+                apply_frame_popover_expansion(
+                    &mut semantic,
+                    index,
+                    &nodes,
+                    &previous.0.popover_triggers,
+                );
                 semantic
             });
             if let Some(semantic) = &semantic {
@@ -779,6 +800,7 @@ impl FrameSnapshot {
             id_index: previous.0.id_index.clone(),
             paths: previous.0.paths.clone(),
             dependents: previous.0.dependents.clone(),
+            popover_triggers: previous.0.popover_triggers.clone(),
             semantic_diff: SemanticDiff {
                 changes: changes.into_boxed_slice(),
             },
@@ -1010,6 +1032,25 @@ fn apply_frame_reference_text(
             Some(existing) if !existing.trim().is_empty() => format!("{existing} {descriptions}"),
             _ => descriptions,
         });
+    }
+}
+
+/// Mirrors `project_popover_expansion` in the full projection.
+fn apply_frame_popover_expansion(
+    semantic: &mut FrameSemanticNode,
+    index: usize,
+    nodes: &FrameRecords,
+    popover_triggers: &HashMap<usize, Vec<usize>>,
+) {
+    if let Some(popovers) = popover_triggers.get(&index) {
+        semantic.info.state.expanded = Some(popovers.iter().any(|&popover| {
+            nodes
+                .get(popover)
+                .local_info
+                .state
+                .expanded
+                .unwrap_or(false)
+        }));
     }
 }
 

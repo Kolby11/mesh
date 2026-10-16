@@ -28,7 +28,6 @@ fn debug_inspector_backend_services_view_separates_runtime_health_and_timing_sta
                 "overlay_enabled": true,
                 "profiling_enabled": true,
                 "profiling_session_id": 7,
-                "active_view": "overview",
                 "modules": [],
                 "interfaces": [],
                 "backend_runtimes": [
@@ -170,7 +169,6 @@ fn debug_inspector_surfaces_view_renders_retained_paint_filtering_counters() {
                 "overlay_enabled": true,
                 "profiling_enabled": true,
                 "profiling_session_id": 29,
-                "active_view": "surfaces",
                 "modules": [{ "id": "@mesh/debug-inspector" }],
                 "interfaces": [],
                 "backend_runtimes": [],
@@ -274,12 +272,11 @@ fn debug_inspector_modules_view_renders_uses_provides_graph() {
                 "overlay_enabled": true,
                 "profiling_enabled": false,
                 "profiling_session_id": 31,
-                "active_view": "modules",
                 "modules": [{ "id": "@mesh/navigation-bar" }],
                 "module_graph": [
                     {
                         "module_id": "@mesh/navigation-bar",
-                        "kind": "frontend",
+                        "kind": "ui",
                         "enabled": true,
                         "root_layout": true,
                         "path": "modules/frontend/navigation-bar/module.json",
@@ -570,12 +567,11 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
                 "overlay_enabled": false,
                 "profiling_enabled": false,
                 "profiling_session_id": 0,
-                "active_view": "overview",
                 "modules": [],
                 "module_graph": [
                     {
                         "module_id": "@mesh/navigation-bar",
-                        "kind": "frontend",
+                        "kind": "ui",
                         "enabled": true,
                         "path": "modules/frontend/navigation-bar/module.json",
                         "uses": {
@@ -1126,7 +1122,6 @@ fn debug_inspector_benchmark_view_renders_canonical_rows_when_profiling_off() {
                 "overlay_enabled": true,
                 "profiling_enabled": false,
                 "profiling_session_id": 11,
-                "active_view": "benchmark",
                 "modules": [{ "id": "@mesh/debug-inspector" }],
                 "interfaces": [],
                 "backend_runtimes": [],
@@ -1206,7 +1201,6 @@ fn debug_inspector_benchmark_view_renders_waiting_rows_when_profiling_live_witho
                 "overlay_enabled": true,
                 "profiling_enabled": true,
                 "profiling_session_id": 12,
-                "active_view": "benchmark",
                 "modules": [],
                 "interfaces": [],
                 "backend_runtimes": [],
@@ -1284,7 +1278,6 @@ fn debug_inspector_renders_allocator_mode_and_per_surface_counts() {
                 "allocation_profiling_available": true,
                 "profiling_enabled": true,
                 "profiling_session_id": 14,
-                "active_view": "overview",
                 "modules": [],
                 "module_graph": [],
                 "interfaces": [],
@@ -1364,7 +1357,6 @@ fn debug_inspector_benchmark_view_renders_populated_benchmark_result_rows() {
                 "overlay_enabled": true,
                 "profiling_enabled": true,
                 "profiling_session_id": 13,
-                "active_view": "benchmark",
                 "modules": [],
                 "interfaces": [],
                 "backend_runtimes": [{

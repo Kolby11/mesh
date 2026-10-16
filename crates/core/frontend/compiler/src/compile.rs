@@ -1083,6 +1083,20 @@ fn validate_attributes(
             }
             // bind:this targets a local variable by design — skip public-symbol validation.
             AttributeValue::InstanceBinding(_) => {}
+            AttributeValue::EventHandlerExpression { expression, .. } => {
+                for identifier in expression.referenced_identifiers() {
+                    if is_handler_builtin(identifier) {
+                        continue;
+                    }
+                    validate_identifier(
+                        identifier,
+                        path,
+                        allowed_symbols,
+                        loop_locals,
+                        attr.span.unwrap_or_default(),
+                    )?;
+                }
+            }
             AttributeValue::EventHandler(handler) => {
                 validate_identifier(
                     handler,
@@ -1154,6 +1168,43 @@ fn validate_identifier(
     })
 }
 
+fn is_handler_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "mesh"
+            | "self"
+            | "module"
+            | "require"
+            | "import"
+            | "task"
+            | "effect"
+            | "computed"
+            | "math"
+            | "string"
+            | "table"
+            | "utf8"
+            | "bit32"
+            | "buffer"
+            | "coroutine"
+            | "os"
+            | "assert"
+            | "error"
+            | "pcall"
+            | "xpcall"
+            | "type"
+            | "typeof"
+            | "tostring"
+            | "tonumber"
+            | "pairs"
+            | "ipairs"
+            | "next"
+            | "select"
+            | "unpack"
+            | "print"
+            | "warn"
+    )
+}
+
 fn component_allowed_symbols(
     component: &ComponentFile,
     explicit_props: &HashSet<String>,
@@ -1176,6 +1227,7 @@ fn component_allowed_symbols(
 
     if let Some(script) = &component.script {
         allowed.extend(script.metadata.state_vars.iter().cloned());
+        allowed.extend(script.metadata.lexical_bindings.iter().cloned());
         allowed.extend(
             script
                 .metadata
@@ -1354,7 +1406,9 @@ theme_icon = "weather-clear"
         let child = component(
             r#"
 <props>
-theme_icon: { type: "icon" }
+{
+    theme_icon = { type = "icon" },
+}
 </props>
 <template>
   <icon name="{theme_icon}" />
@@ -1386,7 +1440,9 @@ local Child = require("./child.mesh")
         let child = component(
             r#"
 <props>
-mode: { type: "enum", options: ["compact", "cozy"] }
+{
+    mode = { type = "enum", options = {"compact", "cozy"} },
+}
 </props>
 <template><box /></template>
 "#,
@@ -1418,7 +1474,9 @@ local Child = require("./child.mesh")
         let child = component(
             r#"
 <props>
-secret: { type: "string", expose: false }
+{
+    secret = { type = "string", expose = false },
+}
 </props>
 <template><box /></template>
 "#,
@@ -1532,7 +1590,9 @@ local function label() return "Private helper" end
         let root = component(
             r#"
 <props>
-title: { type: "string", default: "Items" }
+{
+    title = { type = "string", default = "Items" },
+}
 </props>
 <template>
   <text>{props.title}</text>

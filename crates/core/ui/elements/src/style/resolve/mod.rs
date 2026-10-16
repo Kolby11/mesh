@@ -10,6 +10,7 @@ mod attrs;
 mod cache;
 mod declaration;
 mod index;
+mod literal;
 mod matching;
 mod node;
 mod state;

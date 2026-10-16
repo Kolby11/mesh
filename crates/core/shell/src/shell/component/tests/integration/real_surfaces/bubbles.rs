@@ -5,10 +5,7 @@ use super::*;
 // highlighting the theme the user just moved away from.
 #[test]
 fn shipped_theme_selector_marks_the_picked_bubble_active_immediately() {
-    let (before, after) = pick_bubble_option(
-        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-2::onThemeEnter",
-        2,
-    );
+    let (before, after) = pick_bubble_option("themeButton", 2);
     assert_eq!(
         before,
         Some(1),
@@ -23,10 +20,7 @@ fn shipped_theme_selector_marks_the_picked_bubble_active_immediately() {
 
 #[test]
 fn shipped_language_popover_marks_the_picked_bubble_active_immediately() {
-    let (before, after) = pick_bubble_option(
-        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageEnter",
-        2,
-    );
+    let (before, after) = pick_bubble_option("languageButton", 2);
     assert_eq!(
         before,
         Some(1),
@@ -73,12 +67,7 @@ fn shipped_language_trigger_flag_follows_the_picked_locale() {
         "the trigger starts on the active locale's flag"
     );
 
-    component
-        .call_namespaced_handler(
-            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageEnter",
-            &[],
-        )
-        .unwrap();
+    hover_ref(&mut component, &theme, width, height, "languageButton");
     component
         .paint(
             &theme,
@@ -200,12 +189,7 @@ fn shipped_theme_selector_scroll_reveals_themes_outside_the_window() {
             1.0,
         )
         .unwrap();
-    component
-        .call_namespaced_handler(
-            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-2::onThemeEnter",
-            &[],
-        )
-        .unwrap();
+    hover_ref(&mut component, &theme, width, height, "themeButton");
     component
         .paint(
             &theme,
@@ -286,7 +270,7 @@ fn shipped_theme_selector_scroll_reveals_themes_outside_the_window() {
 
     assert_eq!(
         seen.len(),
-        7,
+        6,
         "four scroll steps should have brought every installed theme into view: {seen:?}"
     );
 }

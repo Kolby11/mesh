@@ -7,7 +7,6 @@ mod style;
 mod tags;
 
 use mesh_core_component::ComponentFile;
-#[cfg(test)]
 use mesh_core_elements::HandlerTarget;
 use mesh_core_elements::{
     AccessibilityInfo, ComponentCompositionProps, EventHandlerCall, LayoutEngine, NodeId,
@@ -98,6 +97,17 @@ pub enum FrontendRenderMode {
 }
 
 pub trait FrontendCompositionResolver {
+    fn bind_handler_expression(
+        &self,
+        _instance_key: &str,
+        _expression: &mesh_core_expression::CompiledExpression,
+        _locals: &serde_json::Map<String, serde_json::Value>,
+        _source: &str,
+        _call_binding: bool,
+    ) -> Option<HandlerTarget> {
+        None
+    }
+
     fn evaluate_template_expression(
         &self,
         instance_key: &str,
@@ -155,6 +165,9 @@ pub fn collect_unpatchable_template_expressions(component: &ComponentFile) -> Ha
                     if all || attribute.name.starts_with("on") =>
                 {
                     out.insert(source.trim().to_owned());
+                }
+                AttributeValue::EventHandlerExpression { expression, .. } => {
+                    out.insert(expression.source().to_owned());
                 }
                 AttributeValue::EventHandlerCall { args, .. } => {
                     out.extend(args.iter().map(|source| source.trim().to_owned()));

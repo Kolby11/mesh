@@ -224,6 +224,7 @@ pub(super) fn component_props_fingerprint(
         key.hash(&mut hasher);
         value.hash(&mut hasher);
     }
+    props.callbacks.hash(&mut hasher);
     props.bind_this.hash(&mut hasher);
     prop_handler_calls.len().hash(&mut hasher);
     for (name, call) in prop_handler_calls {

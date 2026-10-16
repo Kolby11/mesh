@@ -37,27 +37,36 @@ Only `<template>` is required. All other blocks are optional.
 
 ## `<props>`
 
-One entry per configurable value. Each entry auto-projects to three places at
+One static Luau table with one entry per configurable value. Each entry auto-projects to three places at
 once: a typed `prop(name)` reference usable anywhere in `<style>`, a reactive
 `props.name` field in `<script>`, and a generated settings-UI row.
 
 ```xml
 <props>
-  width:    { type: "size",  default: "fit-content", label: t("var.width") }
-  density:  { type: "enum",  options: ["compact", "cozy"], default: "cozy" }
-  show_pct: { type: "bool",  default: true, label: t("var.show_percent") }
-  accent:   { type: "token", default: "color-primary" }
-  icon:     { type: "icon",  default: "audio-volume-high" }
-  anim_ms:  { type: "duration", default: 120, min: 0, max: 1000 }
+{
+    width = { type = "size",  default = "fit-content", label = t("var.width") },
+    density = { type = "enum",  options = {"compact", "cozy"}, default = "cozy" },
+    show_pct = { type = "bool",  default = true, label = t("var.show_percent") },
+    accent = { type = "token", default = "color-primary" },
+    icon = { type = "icon",  default = "audio-volume-high" },
+    anim_ms = { type = "duration", default = 120, min = 0, max = 1000 },
+}
 </props>
 ```
+
+Use ordinary Luau table syntax (`=`, comma/semicolon separators, `{ ... }`
+arrays and `--` comments). Values are static literals; `t("key", "fallback")`
+is translation metadata and is never executed. Computed expressions and calls
+are rejected. The legacy colon declarations and square-bracket arrays must be
+migrated to the table form above.
 
 `type` is required; `default`, `label`/`description` (localized), `options`
 (enum), `min`/`max`/`step`/`unit`, and `expose` (default `true`; `false` keeps
 the prop CSS/script-only, with no settings row) are optional. Supported
 types: `size`, `number`/`int`, `bool`, `enum`, `string`, `color`, `token`,
 `icon`, `duration` — see [component spec §3](../spec/03-components.md#3-the-props-block)
-for the full type table and CSS/Lua/control mapping per type.
+for the full type table and CSS/Lua/control mapping per type. A `token` value
+such as `color-primary` or `color.primary` projects to `var(--color-primary)`.
 
 `prop()` is not `var(--…)`: prop names are component-scoped (two components
 can both declare `width` with no collision), and it is a typed reference
@@ -436,6 +445,16 @@ lifecycle hooks (`init`, `render`, `mount`, `unmount`) stay private to the child
 Cross-*surface* references (e.g. panel ↔ launcher) are a separate trust boundary
 and remain a marshalled event bus — `bind:this` liveness is within one surface.
 
+### JSON input
+
+`mesh.json.decode(source)` is available in component and backend scripts without
+host capability grants. It accepts at most 1 MiB of JSON text, returns ordinary
+Luau values, and raises an error on malformed input or excessive nesting.
+JSON null is the `mesh.json.null` sentinel, preserving object fields and array
+positions. Use `pcall` when malformed external input should degrade locally.
+The decoder performs no I/O; domain providers normalize decoded records into
+their declared service contract.
+
 ### Event handlers
 
 Use `on...` event attribute names with a Luau function reference in `{}`:
@@ -445,6 +464,30 @@ Use `on...` event attribute names with a Luau function reference in `{}`:
 <input type="text" oninput={onSearch} />
 <box onmouseenter={onHover} onmouseleave={onBlur}>...</box>
 ```
+
+Handler expressions resolve actual Luau functions in the component's lexical
+scope. Private functions, table members and inline closures work directly:
+
+```xml
+<button onclick={function(event) select({ id = item.id }, event) end}>Pick</button>
+<button onclick={actions:select({ id = item.id })}>Pick</button>
+<Child onChoose={select} />
+```
+
+An outer call such as `actions:select({ id = item.id })` is event-time sugar:
+its arguments are evaluated when the event fires, then event arguments are
+appended. Method calls preserve `self`. Inline closures capture the rendered
+loop iteration; component state stays live. A handler expression must produce
+a function or `nil` to disable an optional handler. Other values, malformed
+expressions and runtime failures report local errors.
+
+Callback attributes on imported components become real function-valued public
+inputs. The child may invoke them directly from Luau or forward them to another
+component. They retain the defining component's environment and host grants;
+they are separate from JSON props and persisted preferences. Removing a callback
+input restores the child's authored binding. Reloading or unmounting its owner
+expires existing callbacks. Each instance admits at most 4096 live bound
+callbacks; inactive cache entries are reclaimed at the limit.
 
 Handlers receive an event object. For click handlers, that includes trigger
 geometry under `event.current_target`, so a callback can position a surface
@@ -863,27 +906,11 @@ completion makes it due. One call can be awaited by one task at a time.
 
 ### Hover intent
 
-A hover popover closes a moment after the pointer leaves, so crossing the gap
-to the popup, or coming back to the trigger, does not close it under the
-cursor. `mesh.ui.hover_intent(on_close, options?)` is that behaviour, built on
-`task.delay`. It returns an intent with `enter()`, `leave()`, `cancel()` and
-`pending()`. `leave()` schedules `on_close` after the platform delay (400 ms,
-the same delay the shell gives surface popovers; `options.delay` overrides it),
-and `enter()` or `cancel()` drops it. Give the trigger one intent and forward
-the popup's enter and leave to it, so the popup runs no timer of its own:
-
-```lua
-local hover = mesh.ui.hover_intent(function()
-    popover.open = false
-end)
-
-function onTriggerEnter() hover.enter(); popover.open = true end
-function onTriggerLeave() hover.leave() end
-
--- in an effect, once `bind:this` has resolved the popover:
-popover.PopoverEnter:on(hover.enter)
-popover.PopoverLeave:on(hover.leave)
-```
+Hover-opened popovers do not need a timer in script. Give the `<popover>`
+`open-on="hover"` and the core disclosure controller opens it when the pointer
+enters its `anchor-ref` trigger and closes it 400 ms after the pointer has left
+both trigger and popup. See
+[Popover disclosure](elements.md#popover-disclosure).
 
 ---
 

@@ -289,8 +289,10 @@ item_row.$0
         let (source, position) = fixture_with_cursor(
             r#"<template></template>
 <props>
-  track_width: { type: "size", default: "20px" }
-  anim_ms: { type: "duration", default: 120 }
+{
+    track_width = { type = "size", default = "20px" },
+    anim_ms = { type = "duration", default = 120 },
+}
 </props>
 <script lang="luau">
 props.$0
@@ -311,7 +313,9 @@ props.$0
         let (source, position) = fixture_with_cursor(
             r#"<template></template>
 <props>
-  track_width: { type: "size", default: "20px" }
+{
+    track_width = { type = "size", default = "20px" },
+}
 </props>
 <style>
 .slider { width: prop(track_$0); }

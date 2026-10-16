@@ -541,3 +541,114 @@ fn single_bucket_candidate_fast_path_beats_sort_dedup() {
     assert_eq!(copied_checksum, direct_checksum);
     assert!(direct < copied);
 }
+
+#[test]
+fn compound_state_dependencies_do_not_widen_candidate_buckets() {
+    let rules = vec![
+        StyleRule {
+            selector: Selector::Compound(vec![
+                Selector::Class("target".into()),
+                Selector::State("*".into(), "hover".into()),
+            ]),
+            declarations: vec![],
+            container_query: None,
+        },
+        StyleRule {
+            selector: Selector::Compound(vec![
+                Selector::Id("other".into()),
+                Selector::State("*".into(), "hover".into()),
+                Selector::State("*".into(), "focus".into()),
+                Selector::State("*".into(), "hover".into()),
+            ]),
+            declarations: vec![],
+            container_query: None,
+        },
+        rule_with_state("hover"),
+    ];
+    let index = StyleRuleIndex::new(&rules);
+    assert_eq!(index.rules_for_state_bit(STATE_HOVERED), &[0, 1, 2]);
+    assert_eq!(index.rules_for_state_bit(STATE_FOCUSED), &[1]);
+    for hovered in [false, true] {
+        for classes in [vec![], vec!["target".to_string()]] {
+            let state = ElementState {
+                hovered,
+                ..ElementState::default()
+            };
+            let attrs = StyleNodeAttrs::new("box", &classes, None, state);
+            let mut candidates = vec![];
+            index.for_each_candidate_rule_index(&attrs, |id| candidates.push(id));
+            assert!(!candidates.contains(&1));
+            let actual: Vec<_> = candidates
+                .into_iter()
+                .filter(|id| selector_matches_attrs(&rules[*id].selector, &attrs))
+                .collect();
+            let expected: Vec<_> = rules
+                .iter()
+                .enumerate()
+                .filter(|(_, rule)| selector_matches_attrs(&rule.selector, &attrs))
+                .map(|(id, _)| id)
+                .collect();
+            assert_eq!(actual, expected);
+        }
+    }
+}
+
+#[test]
+#[ignore = "release performance gate"]
+fn structural_selector_buckets_beat_global_state_spill() {
+    use std::hint::black_box;
+    use std::time::Instant;
+    let rules: Vec<_> = (0..1000)
+        .map(|index| StyleRule {
+            selector: Selector::Compound(vec![
+                Selector::Class(format!("row-{index}")),
+                Selector::State("*".into(), "hover".into()),
+            ]),
+            declarations: vec![],
+            container_query: None,
+        })
+        .collect();
+    let narrow = StyleRuleIndex::new(&rules);
+    let mut control = narrow.clone();
+    for index in 0..rules.len() {
+        control.index_state_selector(index, "hover");
+    }
+    let classes = vec!["row-0".to_string()];
+    let attrs = StyleNodeAttrs::new(
+        "box",
+        &classes,
+        None,
+        ElementState {
+            hovered: true,
+            ..ElementState::default()
+        },
+    );
+    let iterations = 10_000;
+    let run = |index: &StyleRuleIndex| {
+        let start = Instant::now();
+        let mut matched = 0;
+        index.for_each_candidate_rule_index(&attrs, |_| {});
+        for _ in 0..iterations {
+            index.for_each_candidate_rule_index(black_box(&attrs), |id| {
+                matched += usize::from(selector_matches_attrs(
+                    black_box(&rules[id].selector),
+                    black_box(&attrs),
+                ));
+            });
+        }
+        (start.elapsed(), matched)
+    };
+    let (spill, control_matches) = run(&control);
+    let (structural, narrow_matches) = run(&narrow);
+    assert_eq!(control_matches, iterations);
+    assert_eq!(narrow_matches, iterations);
+    let speedup = spill.as_secs_f64() / structural.as_secs_f64();
+    println!(
+        "selector candidates: 1000 compound class/hover rules x {iterations}: spill={spill:?} structural={structural:?}"
+    );
+    println!("MESH_PERF metric=structural_selector_bucket_speedup value={speedup:.3}");
+    assert!(
+        speedup >= 4.0,
+        "selector bucket speedup {speedup:.3} below 4x"
+    );
+}

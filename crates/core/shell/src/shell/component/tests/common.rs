@@ -218,6 +218,7 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
             ("current", "string"),
             ("theme_id", "string"),
             ("mode", "string?"),
+            ("modes", "object[]"),
             ("color_scheme", "string?"),
             ("contrast", "string?"),
             ("tokens", "object?"),
@@ -241,6 +242,16 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
                 name: "set_theme".into(),
                 args: vec![InterfaceArgument {
                     name: "theme_id".into(),
+                    arg_type: "string".into(),
+                }],
+                returns: Some("Result".into()),
+                coalesce: false.into(),
+                state_binding: None,
+            },
+            InterfaceMethod {
+                name: "set_mode".into(),
+                args: vec![InterfaceArgument {
+                    name: "mode".into(),
                     arg_type: "string".into(),
                 }],
                 returns: Some("Result".into()),
@@ -353,8 +364,8 @@ pub(super) fn navigation_bar_catalog() -> InterfaceCatalog {
         .expect("shipped mesh.wm contract should register");
     catalog.register_provider(InterfaceProvider {
         interface: "mesh.wm".into(),
-        version: Some("1.0".into()),
-        base_module: Some("@mesh/hyprland-wm".into()),
+        version: Some("1.1".into()),
+        base_module: Some("@mesh/wm-interface".into()),
         provider_module: "@mesh/hyprland-wm".into(),
         backend_name: "Hyprland".into(),
         priority: 100,
@@ -459,17 +470,13 @@ pub(super) fn navigation_bar_catalog_without_wm() -> InterfaceCatalog {
     catalog
 }
 
-/// The `mesh.wm` contract as `@mesh/hyprland-wm` ships it, so navigation
-/// fixtures and benches render the real workspace list.
+/// The standard `mesh.wm` contract, independent of its provider module.
 fn shipped_wm_contract() -> InterfaceContract {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../modules/backend/hyprland-wm/module.json");
+        .join("../../../modules/interfaces/wm/module.json");
     let manifest: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    let declaration = manifest["mesh"]["interfaces"]
-        .as_array()
-        .and_then(|interfaces| interfaces.iter().find(|entry| entry["name"] == "mesh.wm"))
-        .expect("hyprland-wm declares mesh.wm");
+    let declaration = &manifest["mesh"]["interface"];
     mesh_core_service::parse_interface_contract(
         "mesh.wm",
         declaration["version"].as_str().unwrap(),
@@ -505,12 +512,6 @@ pub(super) fn debug_catalog() -> InterfaceCatalog {
             ContractStateField {
                 name: "profiling_session_id".into(),
                 field_type: "int".into(),
-                description: None,
-                ..Default::default()
-            },
-            ContractStateField {
-                name: "active_view".into(),
-                field_type: "string".into(),
                 description: None,
                 ..Default::default()
             },
@@ -564,7 +565,6 @@ pub(super) fn debug_catalog() -> InterfaceCatalog {
             ("open_source", vec![("path", "string"), ("line", "int?")]),
             ("toggle_profiling", Vec::new()),
             ("run_benchmark", vec![("scenario_id", "string")]),
-            ("cycle_tab", Vec::new()),
         ]
         .into_iter()
         .map(|(name, args)| InterfaceMethod {
@@ -793,15 +793,15 @@ pub(super) fn themed_primary(id: &str, primary_hex: &str) -> Theme {
     theme
 }
 
-pub(super) fn test_theme(id: &str) -> Theme {
+/// A mode of the shipped `mesh-default` theme, loaded from its stylesheet.
+pub(super) fn shipped_default_theme_mode(mode: &str) -> Theme {
     let theme_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
-        .join("modules/themes")
-        .join(id);
-    let source = mesh_core_theme::ThemeSourceHandle::new(theme_root, "theme.css")
-        .unwrap_or_else(|err| panic!("failed to describe test theme {id}: {err}"));
-    mesh_core_theme::load_theme_from_source(&source, id, id)
-        .unwrap_or_else(|err| panic!("failed to load test theme {id}: {err}"))
+        .join("modules/themes/mesh-default");
+    let source = mesh_core_theme::ThemeSourceHandle::new(theme_root, format!("{mode}.css"))
+        .unwrap_or_else(|err| panic!("failed to describe default theme mode {mode}: {err}"));
+    mesh_core_theme::load_theme_from_source(&source, "mesh-default", "MESH Default")
+        .unwrap_or_else(|err| panic!("failed to load default theme mode {mode}: {err}"))
 }
 
 pub(super) fn test_frontend_component_with_required_icons(
@@ -1488,16 +1488,56 @@ pub(super) fn first_node_by_class<'a>(node: &'a WidgetNode, class: &str) -> Opti
         .find_map(|child| first_node_by_class(child, class))
 }
 
+pub(super) fn first_node_with_ref<'a>(node: &'a WidgetNode, name: &str) -> Option<&'a WidgetNode> {
+    if node
+        .attributes
+        .get("ref")
+        .is_some_and(|value| value == name)
+    {
+        return Some(node);
+    }
+    node.children
+        .iter()
+        .find_map(|child| first_node_with_ref(child, name))
+}
+
+/// Move the pointer to the center of the element with `ref="{name}"`, the way
+/// a user reaches a popover trigger.
+pub(super) fn hover_ref(
+    component: &mut FrontendSurfaceComponent,
+    theme: &Theme,
+    width: u32,
+    height: u32,
+    name: &str,
+) -> Vec<CoreRequest> {
+    let tree = component.last_tree.as_ref().expect("rendered tree");
+    let key = first_node_with_ref(tree, name)
+        .and_then(WidgetNode::mesh_key)
+        .unwrap_or_else(|| panic!("element with ref={name}"));
+    let (left, top, right, bottom) =
+        find_node_bounds_by_key(tree, key, 0.0, 0.0).expect("trigger bounds");
+    component
+        .handle_input(
+            theme,
+            width,
+            height,
+            ComponentInput::PointerMove {
+                x: (left + right) / 2.0,
+                y: (top + bottom) / 2.0,
+            },
+        )
+        .unwrap()
+}
+
 pub(super) fn first_node_with_click_handler<'a>(
     node: &'a WidgetNode,
     handler: &str,
 ) -> Option<&'a WidgetNode> {
     let expected = HandlerTarget::from_legacy_serialized(handler);
-    if node
-        .event_handlers
-        .get("click")
-        .is_some_and(|candidate| candidate == &expected)
-    {
+    if node.event_handlers.get("click").is_some_and(|candidate| {
+        candidate.handler() == expected.handler()
+            && candidate.instance_key() == expected.instance_key()
+    }) {
         return Some(node);
     }
     node.children

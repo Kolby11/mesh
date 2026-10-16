@@ -25,6 +25,7 @@ mod animation;
 mod catalog;
 mod composition;
 mod diagnostics;
+mod disclosure;
 mod input;
 mod interaction_state;
 mod memo;
@@ -37,6 +38,9 @@ mod tooltip;
 
 pub(in crate::shell) use catalog::{
     FrontendCatalog, FrontendCatalogHandle, FrontendCatalogState, SharedCompiledFrontendModule,
+};
+use disclosure::{
+    DisclosureRegistry, node_matches_reference, popover_anchor_reference, popover_is_open,
 };
 #[cfg(test)]
 pub(crate) use input::KeybindResolutionSource;
@@ -831,6 +835,8 @@ pub(super) struct FrontendSurfaceComponent {
     embedded_popover_return_focus: Option<String>,
     /// Set by Escape and consumed after the close state reaches the next tree.
     pending_embedded_popover_focus_restore: bool,
+    /// Triggers and hover/deadline state of this surface's `<popover>`s.
+    disclosures: DisclosureRegistry,
     /// Set when focus is transferred INTO this surface from another via Tab.
     /// `(surface_id, key)` of the trigger element to return to when Tab/
     /// Shift+Tab leaves this surface's chain. None for top-level surfaces
@@ -856,6 +862,9 @@ pub(super) struct FrontendSurfaceComponent {
     slider_values: HashMap<NodeId, f32>,
     slider_script_values: HashMap<NodeId, f32>,
     checked_values: HashMap<NodeId, bool>,
+    /// Triggers whose disclosure popover is open: `:expanded` without a
+    /// script-maintained `aria-expanded`. Owned by the disclosure controller.
+    expanded_triggers: HashSet<NodeId>,
     reactive_effects_pending: bool,
     /// Whether the render hooks run for the frame currently being painted
     /// wrote script state that a template expression actually reads. A render
@@ -893,6 +902,7 @@ pub(super) struct FrontendSurfaceComponent {
     /// interaction restyle complete for every supported dynamic pseudo-state.
     previous_active_key: Option<NodeId>,
     previous_checked_values: HashMap<NodeId, bool>,
+    previous_expanded_triggers: HashSet<NodeId>,
     /// Previous slider positions. Unlike the states above these drive no
     /// pseudo-class — they change the node's *painted content*. A drag that
     /// moves only the knob leaves every pseudo-state untouched, so without
@@ -1033,6 +1043,9 @@ pub(super) struct FrontendSurfaceComponent {
     /// child is re-synced so values its parent mutated through the live proxy
     /// re-render. Refreshed every render by `bind_child_instance`.
     bound_children: RefCell<HashMap<Arc<str>, Vec<(String, Arc<str>)>>>,
+    component_callbacks: RefCell<
+        HashMap<Arc<str>, std::collections::BTreeMap<mesh_core_elements::AttrKey, HandlerTarget>>,
+    >,
     /// `refs.<name>` -> live widget node key, rebuilt every paint by
     /// `publish_element_metrics`. Lets imperative element actions
     /// (`refs.<name>:focus()`) resolve a script-facing ref name back to the
@@ -1316,6 +1329,7 @@ impl FrontendSurfaceComponent {
             pending_embedded_popover_focus: false,
             embedded_popover_return_focus: None,
             pending_embedded_popover_focus_restore: false,
+            disclosures: DisclosureRegistry::default(),
             return_focus: None,
             close_on_focus_leave: false,
             triggered_popovers: HashMap::new(),
@@ -1326,6 +1340,7 @@ impl FrontendSurfaceComponent {
             slider_values: HashMap::new(),
             slider_script_values: HashMap::new(),
             checked_values: HashMap::new(),
+            expanded_triggers: HashSet::new(),
             reactive_effects_pending: true,
             effects_changed_templates: false,
             scroll_offsets: HashMap::new(),
@@ -1341,6 +1356,7 @@ impl FrontendSurfaceComponent {
             previous_focus_visible_key: None,
             previous_active_key: None,
             previous_checked_values: HashMap::new(),
+            previous_expanded_triggers: HashSet::new(),
             previous_slider_values: HashMap::new(),
             interaction_snapshot_valid: false,
             hovered_pos: (0.0, 0.0),
@@ -1409,6 +1425,7 @@ impl FrontendSurfaceComponent {
             last_surface_states: HashMap::new(),
             portal_hidden_bindings: RefCell::new(HashMap::new()),
             bound_children: RefCell::new(HashMap::new()),
+            component_callbacks: RefCell::new(HashMap::new()),
             ref_node_keys: RefCell::new(HashMap::new()),
             transitions: TransitionAnimator::new(),
             keyframe_animations: HashMap::new(),
@@ -1978,6 +1995,9 @@ fn attribute_value_element_metric_usage(value: &AttributeValue) -> ElementMetric
         | AttributeValue::TwoWayBinding(value)
         | AttributeValue::InstanceBinding(value)
         | AttributeValue::EventHandler(value) => string_element_metric_usage(value),
+        AttributeValue::EventHandlerExpression { source, .. } => {
+            string_element_metric_usage(source)
+        }
         AttributeValue::EventHandlerCall { handler, args } => {
             let mut usage = string_element_metric_usage(handler);
             for arg in args {

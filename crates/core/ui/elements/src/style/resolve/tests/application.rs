@@ -764,3 +764,150 @@ fn custom_properties_inherit_through_initial_style_resolution() {
     );
     assert_eq!(child.color, Color::from_css("#123456").unwrap());
 }
+
+#[test]
+fn typed_theme_values_are_shared_across_resolvers_and_detach_after_mutation() {
+    let mut theme = Theme::new("typed-values", "Typed values");
+    theme.tokens_mut().extend([
+        ("color.primary".into(), TokenValue::String("#123456".into())),
+        ("spacing.base".into(), TokenValue::String("12px".into())),
+    ]);
+    let first = StyleResolver::new(&theme);
+    let CachedThemeTokenValue::String(first_value) =
+        first.cached_theme_token_value("--color-primary")
+    else {
+        panic!("expected string");
+    };
+    let second = StyleResolver::new(&theme);
+    let CachedThemeTokenValue::String(second_value) =
+        second.cached_theme_token_value("--color-primary")
+    else {
+        panic!("expected string");
+    };
+    assert_eq!(first_value.as_ptr(), second_value.as_ptr());
+    assert_eq!(second_value.color, Color::from_css("#123456").unwrap());
+    assert_eq!(
+        second.resolve_number_with_variables(
+            &StyleValue::Var("--spacing-base".into()),
+            &HashMap::new()
+        ),
+        12.0
+    );
+    drop(first);
+    drop(second);
+    theme
+        .tokens_mut()
+        .insert("color.primary".into(), TokenValue::String("#abcdef".into()));
+    let next = StyleResolver::new(&theme);
+    assert_eq!(
+        next.resolve_color_with_variables(
+            &StyleValue::Var("--color-primary".into()),
+            &HashMap::new()
+        ),
+        Color::from_css("#abcdef").unwrap()
+    );
+    let variables = HashMap::from([
+        (
+            "--color-primary".into(),
+            StyleValue::Literal("#fedcba".into()),
+        ),
+        ("--spacing-base".into(), StyleValue::Literal("24px".into())),
+    ]);
+    assert_eq!(
+        next.resolve_color_with_variables(&StyleValue::Var("--color-primary".into()), &variables),
+        Color::from_css("#fedcba").unwrap()
+    );
+    assert_eq!(
+        next.resolve_number_with_variables(&StyleValue::Var("--spacing-base".into()), &variables),
+        24.0
+    );
+}
+
+#[test]
+fn shared_typed_theme_value_cache_is_bounded() {
+    let theme = Theme::new("bounded-values", "Bounded values");
+    let resolver = StyleResolver::new(&theme);
+    for index in 0..MAX_SHARED_THEME_VALUES + 100 {
+        assert!(
+            resolver
+                .cached_theme_token_value(&format!("--missing-{index}"))
+                .is_missing()
+        );
+    }
+    SHARED_THEME_VALUE_CACHE.with(|cache| {
+        assert_eq!(
+            cache.borrow_mut().get(&theme.revision()).unwrap().len(),
+            MAX_SHARED_THEME_VALUES
+        );
+    });
+    for index in 0..MAX_SHARED_THEME_REVISIONS + 5 {
+        let theme = Theme::new(format!("revision-{index}"), "Revision");
+        StyleResolver::new(&theme).cached_theme_token_value("--absent");
+    }
+    SHARED_THEME_VALUE_CACHE
+        .with(|cache| assert_eq!(cache.borrow().len(), MAX_SHARED_THEME_REVISIONS));
+    assert!(
+        StyleResolver::new(&theme)
+            .cached_theme_token_value("--absent")
+            .is_missing()
+    );
+}
+
+#[test]
+#[ignore = "release performance gate"]
+fn typed_theme_scalar_reads_beat_repeated_parsing() {
+    use std::hint::black_box;
+    use std::time::Instant;
+    let mut theme = Theme::new("typed-workload", "Typed workload");
+    theme.tokens_mut().extend([
+        (
+            "color.primary".into(),
+            TokenValue::String("rgba(42, 88, 144, 0.75)".into()),
+        ),
+        ("spacing.base".into(), TokenValue::String("12.5px".into())),
+    ]);
+    let resolver = StyleResolver::new(&theme);
+    let iterations = 200_000;
+    let start = Instant::now();
+    for _ in 0..iterations {
+        let CachedThemeTokenValue::String(color) =
+            resolver.cached_theme_token_value(black_box("--color-primary"))
+        else {
+            panic!("expected string");
+        };
+        let CachedThemeTokenValue::String(number) =
+            resolver.cached_theme_token_value(black_box("--spacing-base"))
+        else {
+            panic!("expected string");
+        };
+        black_box((
+            Color::from_css(black_box(&color)).unwrap_or(Color::TRANSPARENT),
+            crate::style::parse::parse_px(black_box(&number)),
+        ));
+    }
+    let parsing = start.elapsed();
+    let start = Instant::now();
+    for _ in 0..iterations {
+        let CachedThemeTokenValue::String(color) =
+            resolver.cached_theme_token_value(black_box("--color-primary"))
+        else {
+            panic!("expected string");
+        };
+        let CachedThemeTokenValue::String(number) =
+            resolver.cached_theme_token_value(black_box("--spacing-base"))
+        else {
+            panic!("expected string");
+        };
+        black_box((color.color, number.number));
+    }
+    let typed = start.elapsed();
+    let speedup = parsing.as_secs_f64() / typed.as_secs_f64();
+    println!(
+        "theme scalar reads: {iterations} color/number pairs: parsing={parsing:?} typed={typed:?}"
+    );
+    println!("MESH_PERF metric=typed_theme_scalar_reads_speedup value={speedup:.3}");
+    assert!(
+        speedup >= 1.2,
+        "typed scalar speedup {speedup:.3} below 1.2x"
+    );
+}

@@ -25,6 +25,7 @@ impl ModuleManifest {
         reject_legacy_top_level_fields(input, &path)?;
         reject_legacy_surface_layout(input, &path)?;
         reject_legacy_surface_geometry(input, &path)?;
+        reject_legacy_module_kind(input, &path)?;
         let mut parsed: Self = serde_json::from_str(input)
             .map_err(|source| ModuleManifestError::Json { path, source })?;
         parsed.normalize();
@@ -41,6 +42,7 @@ impl ModuleManifest {
         reject_legacy_top_level_fields(&content, path)?;
         reject_legacy_surface_layout(&content, path)?;
         reject_legacy_surface_geometry(&content, path)?;
+        reject_legacy_module_kind(&content, path)?;
         let mut parsed: Self =
             serde_json::from_str(&content).map_err(|source| ModuleManifestError::Json {
                 path: path.to_path_buf(),
@@ -157,7 +159,7 @@ impl ModuleManifest {
                 id: self.name,
                 name: None,
                 version: self.version,
-                module_type: ModuleType::from(mesh.kind),
+                module_type: mesh.module_type(),
                 api_version: mesh.api_version,
                 license: self.license,
                 description: self.description,
@@ -335,6 +337,34 @@ fn reject_legacy_surface_layout(input: &str, path: &Path) -> Result<(), ModuleMa
     })
 }
 
+fn reject_legacy_module_kind(input: &str, path: &Path) -> Result<(), ModuleManifestError> {
+    let document: serde_json::Value =
+        serde_json::from_str(input).map_err(|source| ModuleManifestError::Json {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let Some(kind @ ("frontend" | "component")) = document
+        .get("mesh")
+        .and_then(|mesh| mesh.get("kind"))
+        .and_then(serde_json::Value::as_str)
+    else {
+        return Ok(());
+    };
+    let module_id = document
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    Err(ModuleManifestError::Diagnostic {
+        diagnostic: ModuleManifestDiagnostic::error(
+            path,
+            module_id,
+            Some("mesh.kind".into()),
+            format!("mesh.kind \"{kind}\" was merged into \"ui\" and is not supported"),
+            "set \"kind\": \"ui\"; keep mesh.surface as the default placement if the module has one",
+        ),
+    })
+}
+
 fn reject_legacy_surface_geometry(input: &str, path: &Path) -> Result<(), ModuleManifestError> {
     let document: serde_json::Value =
         serde_json::from_str(input).map_err(|source| ModuleManifestError::Json {
@@ -378,9 +408,10 @@ impl MeshModuleSection {
         {
             self.entrypoints.main = Some(entry.clone());
         }
-        // Frontends that set `entry` and omit `provides.layout` get the default
-        // layout contribution, so a simple module declares the path only once.
-        if self.kind == ModuleKind::Frontend
+        // UI modules with default placement that set `entry` and omit
+        // `provides.layout` get the default layout contribution, so a simple
+        // module declares the path only once.
+        if self.has_default_placement()
             && self.contributes.layout.is_empty()
             && self.provides.layout.is_empty()
             && let Some(entry) = &self.entry
@@ -596,9 +627,9 @@ impl MeshModuleSection {
             ));
         }
         if let Some(theme) = &self.theme {
-            if self.kind != ModuleKind::Frontend {
+            if self.kind != ModuleKind::Ui {
                 return Err(ModuleManifestError::Validation(
-                    "mesh.theme is only supported for frontend modules".into(),
+                    "mesh.theme is only supported for ui modules".into(),
                 ));
             }
             theme.validate().map_err(ModuleManifestError::Validation)?;
@@ -608,11 +639,9 @@ impl MeshModuleSection {
                 "mesh.contributes.icons is only supported for icon-pack modules".into(),
             ));
         }
-        if self.fonts.is_some()
-            && !matches!(self.kind, ModuleKind::Frontend | ModuleKind::Component)
-        {
+        if self.fonts.is_some() && self.kind != ModuleKind::Ui {
             return Err(ModuleManifestError::Validation(
-                "mesh.fonts is only supported for frontend or component modules".into(),
+                "mesh.fonts is only supported for ui modules".into(),
             ));
         }
         if self.font_pack.is_some() && self.kind != ModuleKind::FontPack {
@@ -911,7 +940,9 @@ fn validate_locale(field: &str, locale: &str) -> Result<String, ModuleManifestEr
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ModuleKind {
-    Frontend,
+    /// A `.mesh` component module. Optional `mesh.surface` is its default
+    /// placement; without it the module is embedded or mounted by a profile.
+    Ui,
     Backend,
     Theme,
     IconPack,
@@ -923,24 +954,19 @@ pub enum ModuleKind {
     /// providers are bound, which resources apply, and how extension points are
     /// arranged. It *binds*, it never *owns* — see `package::composition`.
     Composition,
-    /// Embeddable component module — has an entry `.mesh` file consumed by other
-    /// modules via `require("@scope/name")` but owns no shell surface of its own.
-    /// No `mesh.surface` block is required or allowed.
-    Component,
 }
 
 impl ModuleKind {
-    /// Kinds a profile may mount as a root instance. A frontend supplies its
-    /// default placement; a component root takes placement from the profile.
+    /// Kinds a profile may mount as a root instance.
     pub fn is_mountable_root(self) -> bool {
-        matches!(self, Self::Frontend | Self::Component)
+        self == Self::Ui
     }
 }
 
 impl From<ModuleType> for ModuleKind {
     fn from(module_type: ModuleType) -> Self {
         match module_type {
-            ModuleType::Surface | ModuleType::Widget => Self::Frontend,
+            ModuleType::Surface | ModuleType::Widget | ModuleType::Component => Self::Ui,
             ModuleType::Backend => Self::Backend,
             ModuleType::Theme => Self::Theme,
             ModuleType::IconPack => Self::IconPack,
@@ -948,25 +974,32 @@ impl From<ModuleType> for ModuleKind {
             ModuleType::LanguagePack => Self::LanguagePack,
             ModuleType::Interface => Self::Interface,
             ModuleType::Library => Self::Library,
-            ModuleType::Component => Self::Component,
             ModuleType::Composition => Self::Composition,
         }
     }
 }
 
-impl From<ModuleKind> for ModuleType {
-    fn from(kind: ModuleKind) -> Self {
-        match kind {
-            ModuleKind::Frontend => Self::Surface,
-            ModuleKind::Backend => Self::Backend,
-            ModuleKind::Theme => Self::Theme,
-            ModuleKind::IconPack => Self::IconPack,
-            ModuleKind::FontPack => Self::FontPack,
-            ModuleKind::LanguagePack => Self::LanguagePack,
-            ModuleKind::Interface => Self::Interface,
-            ModuleKind::Library => Self::Library,
-            ModuleKind::Component => Self::Component,
-            ModuleKind::Composition => Self::Composition,
+impl MeshModuleSection {
+    /// A `ui` module with `mesh.surface` default placement. Direct install and
+    /// the legacy root graph mount only these modules as surfaces.
+    pub fn has_default_placement(&self) -> bool {
+        self.kind == ModuleKind::Ui && (self.surface_layout.is_some() || self.surface.is_some())
+    }
+
+    /// The compiler manifest's module type: a surface when the module declares
+    /// default placement, otherwise an embeddable component.
+    pub fn module_type(&self) -> ModuleType {
+        match self.kind {
+            ModuleKind::Ui if self.has_default_placement() => ModuleType::Surface,
+            ModuleKind::Ui => ModuleType::Component,
+            ModuleKind::Backend => ModuleType::Backend,
+            ModuleKind::Theme => ModuleType::Theme,
+            ModuleKind::IconPack => ModuleType::IconPack,
+            ModuleKind::FontPack => ModuleType::FontPack,
+            ModuleKind::LanguagePack => ModuleType::LanguagePack,
+            ModuleKind::Interface => ModuleType::Interface,
+            ModuleKind::Library => ModuleType::Library,
+            ModuleKind::Composition => ModuleType::Composition,
         }
     }
 }
@@ -1902,6 +1935,12 @@ pub struct SettingsContribution {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ThemeContribution {
     pub id: String,
+    #[serde(
+        default,
+        rename = "tokenContract",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub token_contract: Option<String>,
     #[serde(default)]
     pub label: Option<manifest::LocalizedText>,
     #[serde(default)]

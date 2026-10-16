@@ -200,6 +200,7 @@ impl AccessibilityTree {
         apply_reference_text(&mut root, &index, &reference_text);
         let mut nodes = Vec::new();
         flatten_snapshot_node(&root, None, &index, &mut nodes);
+        project_popover_expansion(&mut nodes);
         Self { nodes }
     }
 
@@ -771,6 +772,25 @@ fn flatten_snapshot_node(
     }
 }
 
+/// A popover trigger is expanded exactly while a popover anchored to it is
+/// open, so triggers never restate (or desynchronize) `aria-expanded`.
+fn project_popover_expansion(nodes: &mut [AccessibilityTreeNode]) {
+    let mut expanded = std::collections::HashMap::<NodeId, bool>::new();
+    for node in nodes.iter() {
+        if let Some(trigger) = node.relationships.popover_trigger {
+            *expanded.entry(trigger).or_default() |= node.info.state.expanded.unwrap_or(false);
+        }
+    }
+    if expanded.is_empty() {
+        return;
+    }
+    for node in nodes.iter_mut() {
+        if let Some(open) = expanded.get(&node.id) {
+            node.info.state.expanded = Some(*open);
+        }
+    }
+}
+
 fn resolve_relationships(
     raw: &RawRelationships,
     index: &std::collections::HashMap<String, NodeId>,
@@ -1057,12 +1077,35 @@ mod tests {
             .find(|node| node.id == popover_id)
             .expect("popover in snapshot");
         assert_eq!(popover.relationships.popover_trigger, Some(trigger_id));
+        assert_eq!(trigger.info.state.expanded, Some(false));
         let tooltip = snapshot
             .nodes
             .iter()
             .find(|node| node.id == tooltip_id)
             .expect("tooltip in snapshot");
         assert_eq!(tooltip.relationships.tooltip_for, Some(trigger_id));
+    }
+
+    #[test]
+    fn open_popover_expands_its_trigger() {
+        let mut root = WidgetNode::new("box");
+        let mut trigger = WidgetNode::new("button");
+        attr(&mut trigger, "ref", "trigger");
+        attr(&mut trigger, "aria-expanded", "false");
+        let mut popover = WidgetNode::new("popover");
+        attr(&mut popover, "anchor-ref", "trigger");
+        attr(&mut popover, "open", "true");
+        let trigger_id = trigger.id;
+        root.children.push(trigger);
+        root.children.push(popover);
+
+        let snapshot = AccessibilityTree::publish(&root);
+        let trigger = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.id == trigger_id)
+            .expect("trigger in snapshot");
+        assert_eq!(trigger.info.state.expanded, Some(true));
     }
 
     #[test]

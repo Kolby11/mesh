@@ -11,7 +11,8 @@ mod task_io;
 pub const MIN_POLL_INTERVAL_MS: u64 = 50;
 
 pub use command::{
-    BackendCommandArgument, BackendCommandOutcome, BackendCommandRun, BackendCommandRegistry, BackendCommandSpec,
+    BackendCommandArgument, BackendCommandOutcome, BackendCommandRegistry, BackendCommandRun,
+    BackendCommandSpec,
 };
 pub use errors::BackendScriptError;
 pub use event::{BackendEventRegistry, BackendEventSpec};

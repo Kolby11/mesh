@@ -5,6 +5,10 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range
 use crate::document::{Document, ElementRefAliasTarget, ScriptMemberAccess};
 
 pub fn from_document(doc: &Document) -> Vec<Diagnostic> {
+    from_document_with_local_tokens(doc, &[])
+}
+
+pub fn from_document_with_local_tokens(doc: &Document, local_tokens: &[String]) -> Vec<Diagnostic> {
     let mut diagnostics = doc
         .parse_error
         .as_ref()
@@ -12,6 +16,16 @@ pub fn from_document(doc: &Document) -> Vec<Diagnostic> {
         .unwrap_or_default();
     diagnostics.extend(diagnostics_from_script_refs(doc));
     diagnostics.extend(diagnostics_from_quoted_expression_attrs(doc));
+    if let Some(component) = &doc.parsed {
+        diagnostics.extend(mesh_core_component::unknown_theme_token_reads(component, &doc.source, local_tokens).into_iter().map(|read| Diagnostic {
+            range: byte_range_to_lsp_range(&doc.source, read.span.start, read.span.end),
+            severity: Some(DiagnosticSeverity::WARNING),
+            message: format!("Token '{}' is outside semantic token contract {}. Declare a local custom property or use an explicitly namespaced private token.", read.name, mesh_core_theme::SEMANTIC_TOKEN_CONTRACT_VERSION),
+            source: Some("mesh-tools-lsp".into()),
+            code: Some(NumberOrString::String("mesh.theme.unknown_semantic_token".into())),
+            ..Default::default()
+        }));
+    }
     diagnostics
 }
 
@@ -248,6 +262,46 @@ mod tests {
     use super::*;
     use tower_lsp::lsp_types::Position;
     use tower_lsp::lsp_types::Url;
+
+    #[test]
+    fn semantic_token_warnings_share_css_and_script_contracts() {
+        let source = r#"<template><box/></template>
+<style>.box { --local: 2px; width: var(--local); color: var(--color-typo); padding: var(--spacing-md); }</style>
+<script lang="luau">
+local theme = require("mesh.theme")
+local value = theme.token("color.script-typo")
+local private = theme.token("@alice/widget.color.custom")
+local text = 'mesh.theme.token("color.fake")'
+</script>"#;
+        let doc = Document::new(
+            Url::parse("file:///tmp/tokens.mesh").unwrap(),
+            source.into(),
+        );
+        let diagnostics = from_document(&doc);
+        let warnings = diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.code
+                    == Some(NumberOrString::String(
+                        "mesh.theme.unknown_semantic_token".into(),
+                    ))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(warnings.len(), 2, "{diagnostics:#?}");
+        assert!(
+            warnings
+                .iter()
+                .all(|diagnostic| diagnostic.severity == Some(DiagnosticSeverity::WARNING))
+        );
+        let scoped = from_document_with_local_tokens(
+            &doc,
+            &["color.typo".into(), "color.script-typo".into()],
+        );
+        assert!(!scoped.iter().any(|diagnostic| diagnostic.code
+            == Some(NumberOrString::String(
+                "mesh.theme.unknown_semantic_token".into()
+            ))));
+    }
 
     #[test]
     fn warns_for_unknown_refs_and_invalid_element_fields() {

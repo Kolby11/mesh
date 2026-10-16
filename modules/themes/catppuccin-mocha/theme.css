@@ -1,4 +1,7 @@
 :root {
+  --icon-size-sm: 16px;
+  --icon-size-md: 20px;
+  --icon-size-lg: 24px;
   --animation-curves-bezier-emphasized: cubic-bezier(0.2, 0, 0, 1);
   --animation-curves-bezier-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
   --animation-curves-bezier-standard: cubic-bezier(0.2, 0, 0, 1);

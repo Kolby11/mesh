@@ -1137,8 +1137,8 @@ mod tests {
             r#"{{"name":"{name}","version":"{version}","mesh":{{"apiVersion":"0.1",
                "kind":"backend","entry":"main.luau",
                "uses":{{"capabilities":[{capabilities}]}},
-               "implements":[{{"interface":"mesh.audio","version":"1.0"}}],
-               "interfaces":[{{"name":"mesh.audio","version":"1.0","contract":{contract}}}]}}}}"#
+               "implements":[{{"interface":"me.audio","version":"1.0"}}],
+               "interfaces":[{{"name":"me.audio","version":"1.0","contract":{contract}}}]}}}}"#
         ))
         .unwrap()
     }
@@ -1373,8 +1373,8 @@ mod tests {
                 format!(
                     r#"{{"name":"@me/audio","version":"{version}","mesh":{{"apiVersion":"0.1",
                        "kind":"backend","entry":"main.luau",
-                       "implements":[{{"interface":"mesh.audio","version":"1.0"}}],
-                       "interfaces":[{{"name":"mesh.audio","version":"1.0",
+                       "implements":[{{"interface":"me.audio","version":"1.0"}}],
+                       "interfaces":[{{"name":"me.audio","version":"1.0",
                          "contract":{contract}}}]}}}}"#
                 ),
             )
@@ -1415,8 +1415,8 @@ mod tests {
                     r#"{{"name":"@me/audio","version":"{version}","mesh":{{"apiVersion":"0.1",
                        "kind":"backend","entry":"main.luau",
                        "uses":{{"capabilities":["service.audio.read"]}},
-                       "implements":[{{"interface":"mesh.audio","version":"1.0"}}],
-                       "interfaces":[{{"name":"mesh.audio","version":"1.0",
+                       "implements":[{{"interface":"me.audio","version":"1.0"}}],
+                       "interfaces":[{{"name":"me.audio","version":"1.0",
                          "contract":"contracts/audio.json"}}]}}}}"#
                 ),
             )

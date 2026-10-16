@@ -4,7 +4,7 @@
   "description": "Replaceable visual editor for author-declared component slots.",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "entry": "src/main.mesh",
     "uses": {
       "interfaces": {

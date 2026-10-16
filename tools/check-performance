@@ -25,6 +25,8 @@ run_benchmark() {
 }
 
 cd "$ROOT"
+cargo test -p mesh-core-render --release --lib scene_thread
+cargo test -p mesh-core-resources --release --lib frozen_font
 cargo test -p mesh-core-scripting --release --lib context::tests::effects
 cargo test -p mesh-core-shell --release --lib legacy_render_is_not_automatically_scheduled
 cargo test -p mesh-core-shell --release --lib template_patching
@@ -82,6 +84,10 @@ run_benchmark mesh-core-elements interned_attribute_map_beats_owned_btreemap
 run_benchmark mesh-core-elements style_function_scan_beats_contains_pair
 run_benchmark mesh-core-elements borrowed_style_props_beat_per_resolver_clone
 run_benchmark mesh-core-elements shared_theme_defaults_beat_hashed_deep_clone
+run_benchmark mesh-core-theme shared_theme_alias_resolution_beats_repeated_graph_walks
+run_benchmark mesh-core-elements typed_theme_scalar_reads_beat_repeated_parsing
+run_benchmark mesh-core-elements typed_literal_operations_beat_property_name_dispatch
+run_benchmark mesh-core-elements structural_selector_buckets_beat_global_state_spill
 run_benchmark mesh-core-elements shared_theme_revision_cache_beats_per_resolver_lowering
 run_benchmark mesh-core-elements bounded_style_cache_p95_beats_flush_all
 run_benchmark mesh-core-shell runtime_style_diagnostic_generation_gate_beats_full_tree_fingerprint

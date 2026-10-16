@@ -15,7 +15,7 @@ fn load_installed_module_graph_auto_discovers_modules() {
 
     fs::write(
         modules_dir.join("frontend/panel/module.json"),
-        r#"{ "name": "@me/panel", "version": "0.1.0", "mesh": { "apiVersion": "0.1", "kind": "frontend", "entry": "src/main.mesh", "surface": { "anchor": "top" }, "accessibility": { "role": "toolbar" } } }"#,
+        r#"{ "name": "@me/panel", "version": "0.1.0", "mesh": { "apiVersion": "0.1", "kind": "ui", "entry": "src/main.mesh", "surface": { "anchor": "top" }, "accessibility": { "role": "toolbar" } } }"#,
     )
     .unwrap();
     fs::write(
@@ -103,7 +103,7 @@ fn load_installed_module_graph_loads_explicit_inventory() {
         fs::write(
             module_dir.join("module.json"),
             format!(
-                r#"{{ "name": "{id}", "version": "0.1.0", "mesh": {{ "apiVersion": "0.1", "kind": "frontend", "entry": "src/main.mesh" }} }}"#
+                r#"{{ "name": "{id}", "version": "0.1.0", "mesh": {{ "apiVersion": "0.1", "kind": "ui", "entry": "src/main.mesh" }} }}"#
             ),
         )
         .unwrap();
@@ -118,8 +118,8 @@ fn load_installed_module_graph_loads_explicit_inventory() {
     "schemaVersion": 1,
     "modulesDir": "../modules",
     "modules": {
-      "@me/panel": { "kind": "frontend", "path": "panel", "enabled": true },
-      "@me/settings": { "kind": "frontend", "path": "settings", "enabled": false }
+      "@me/panel": { "kind": "ui", "path": "panel", "enabled": true },
+      "@me/settings": { "kind": "ui", "path": "settings", "enabled": false }
     }
   }
 }"#,
@@ -149,7 +149,7 @@ fn parallel_discovered_manifest_loading_preserves_directory_order() {
   "version": "0.1.0",
   "mesh": {{
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "entry": "src/main.mesh"
   }}
 }}"#
@@ -207,7 +207,7 @@ fn parallel_discovered_manifest_loading_beats_serial_benchmark() {
   "version": "0.1.0",
   "mesh": {{
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "entry": "src/main.mesh",
     "capabilities": {{
       "required": ["shell.surface"],
@@ -383,7 +383,7 @@ fn write_frontend(modules_dir: &std::path::Path, dir: &str, id: &str) {
         module_dir.join("module.json"),
         format!(
             r#"{{"name":"{id}","version":"0.1.0",
-                "mesh":{{"apiVersion":"0.1","kind":"frontend","entry":"src/main.mesh"}}}}"#
+                "mesh":{{"apiVersion":"0.1","kind":"ui","entry":"src/main.mesh"}}}}"#
         ),
     )
     .unwrap();
@@ -509,7 +509,7 @@ fn an_explicit_module_mid_edit_keeps_its_last_valid_manifest_and_decisions() {
         root.join("module.json"),
         r#"{"name":"@me/config","version":"0.1.0","mesh":{"schemaVersion":1,
             "modulesDir":"modules",
-            "modules":{"@me/alpha":{"kind":"frontend","path":"alpha","enabled":true}}}}"#,
+            "modules":{"@me/alpha":{"kind":"ui","path":"alpha","enabled":true}}}}"#,
     )
     .unwrap();
     let graph_path = root.join("module.json");
@@ -543,7 +543,7 @@ fn an_invalid_explicit_module_drops_only_itself_and_decisions_naming_it() {
         r#"{"name":"@me/config","version":"0.1.0","mesh":{"schemaVersion":1,
             "modulesDir":"modules",
             "modules":{
-              "@me/alpha":{"kind":"frontend","path":"alpha","enabled":true},
+              "@me/alpha":{"kind":"ui","path":"alpha","enabled":true},
               "@me/broken":{"kind":"backend","path":"broken","enabled":true}},
             "providers":{"mesh.audio":"@me/broken"}}}"#,
     )

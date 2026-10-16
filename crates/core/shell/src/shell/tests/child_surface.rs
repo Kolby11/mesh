@@ -187,6 +187,7 @@ fn overflow_child_surface_uses_geometry_placement_without_popover_ownership() {
             offset_y: 19,
             constraint_adjustment: Default::default(),
             grab: mesh_core_elements::PopoverGrab::Click,
+            open_on: mesh_core_elements::PopoverOpenOn::Click,
         },
         ..PopoverHarnessState::default()
     }));

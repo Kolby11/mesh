@@ -51,6 +51,9 @@ Rules:
   label) from the semantic tree.
 - State attributes (`aria-pressed`, `checked`, `selected`, `expanded`) bind
   reactively like any attribute.
+- A `<popover>` trigger (its `anchor-ref` target) is `expanded` exactly while
+  a popover anchored to it is open; this overrides an authored
+  `aria-expanded`, so triggers do not restate it.
 - All author-facing text is localizable ([07](07-i18n.md)) — accessible
   names go through the same catalogs as visible strings.
 - Surface roots declare `mesh.accessibility: { role, label }` in the

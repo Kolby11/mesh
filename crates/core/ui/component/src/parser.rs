@@ -2,6 +2,8 @@
 ///
 /// Parses the source into validated top-level blocks (`<template>`, `<script>`, `<style>`,
 mod brace;
+mod handler;
+mod luau_literal;
 mod markup;
 mod props;
 mod script;
@@ -15,6 +17,7 @@ use crate::{
 use props::parse_props_at;
 use script::parse_script;
 pub use script::referenced_identifiers;
+pub(crate) use script::string_calls_in_expression;
 use std::collections::{HashMap, HashSet};
 use styles::parse_style;
 
@@ -346,6 +349,11 @@ fn compile_template_expressions(
                         expressions,
                     )?;
                 }
+                AttributeValue::EventHandlerExpression { expression, .. } => {
+                    if seen.insert(expression.source().to_owned()) {
+                        expressions.push(expression.clone());
+                    }
+                }
                 AttributeValue::EventHandlerCall { args, .. } => {
                     for expression in args {
                         compile(
@@ -426,6 +434,12 @@ fn compile_template_expressions(
         nodes(&template.root, &mut seen, &mut expressions)?;
     }
     Ok(expressions)
+}
+
+/// Parse a static Luau table of typed prop declarations without executing code.
+/// Returns declaration and value errors with byte spans relative to `source`.
+pub fn parse_prop_declarations(source: &str) -> Result<crate::PropsBlock, ParseError> {
+    props::parse_props_at(source, 0)
 }
 
 /// Parse a standalone Luau script block for editor tooling.
@@ -1059,18 +1073,18 @@ mod tests {
 
     #[test]
     fn component_ast_nodes_retain_absolute_source_spans() {
-        let source = "\n<props>\nwidth: { type: \"size\", default: \"10px\" }\n</props>\n<template>\n  <box><text>Hello</text></box>\n</template>\n<script lang=\"luau\">\nlocal count = 1\n</script>\n<style>\nbox { opacity: 1; }\n</style>\n";
+        let source = "\n<props>\n{width = { type = \"size\", default = \"10px\" }}\n</props>\n<template>\n  <box><text>Hello</text></box>\n</template>\n<script lang=\"luau\">\nlocal count = 1\n</script>\n<style>\nbox { opacity: 1; }\n</style>\n";
         let file = parse_component(source).expect("component parses");
 
         let props = file.props.as_ref().expect("props block");
         assert_eq!(
             &source[props.span.start..props.span.end],
-            "\nwidth: { type: \"size\", default: \"10px\" }\n"
+            "\n{width = { type = \"size\", default = \"10px\" }}\n"
         );
         let prop = &props.props[0];
         assert_eq!(
             &source[prop.span.start..prop.span.end],
-            "width: { type: \"size\", default: \"10px\" }"
+            "width = { type = \"size\", default = \"10px\" }"
         );
 
         let template = file.template.as_ref().expect("template block");
@@ -1224,8 +1238,10 @@ mod tests {
         use crate::{PropType, PropValue};
         let source = r#"
 <props>
-  track_width: { type: "size", default: "20px", label: t("var.track_width") }
-  anim_ms:     { type: "duration", default: 120, min: 0, max: 600 }
+{
+    track_width = { type = "size", default = "20px", label = t("var.track_width") },
+    anim_ms = { type = "duration", default = 120, min = 0, max = 600 },
+}
 </props>
 
 <template>
@@ -1471,8 +1487,10 @@ button {
     fn classifies_standalone_prop_reference() {
         let source = r#"
 <props>
-track_width: { type: "size", default: "20px" }
-gap: { type: "size", default: "4px" }
+{
+    track_width = { type = "size", default = "20px" },
+    gap = { type = "size", default = "4px" },
+}
 </props>
 <template><box /></template>
 <style>
@@ -1512,7 +1530,9 @@ gap: { type: "size", default: "4px" }
     fn rejects_prop_type_when_css_domain_does_not_match() {
         let source = r##"
 <props>
-accent: { type: "color", default: "#fff" }
+{
+    accent = { type = "color", default = "#fff" },
+}
 </props>
 <template><box /></template>
 <style>
@@ -1528,8 +1548,10 @@ accent: { type: "color", default: "#fff" }
     fn accepts_embedded_props_that_match_css_domains() {
         let source = r#"
 <props>
-gap: { type: "size", default: "4px" }
-anim_ms: { type: "duration", default: 120 }
+{
+    gap = { type = "size", default = "4px" },
+    anim_ms = { type = "duration", default = 120 },
+}
 </props>
 <template><box /></template>
 <style>
@@ -1860,7 +1882,7 @@ box {
                     matches!(&el.attributes[0].value, AttributeValue::Binding(v) if v == "volume")
                 );
                 assert!(
-                    matches!(&el.attributes[1].value, AttributeValue::EventHandler(v) if v == "onVolumeChange")
+                    matches!(&el.attributes[1].value, AttributeValue::EventHandlerExpression { source, .. } if source == "onVolumeChange")
                 );
             }
             _ => panic!("expected element"),
@@ -1879,7 +1901,7 @@ box {
         match &tmpl.root[0] {
             TemplateNode::Element(el) => {
                 assert!(
-                    matches!(&el.attributes[0].value, AttributeValue::EventHandler(v) if v == "onTap")
+                    matches!(&el.attributes[0].value, AttributeValue::EventHandlerExpression { source, .. } if source == "onTap")
                 );
             }
             _ => panic!("expected element"),

@@ -4,7 +4,7 @@
   "description": "Quick settings panel with volume, brightness, theme and language controls.",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "component",
+    "kind": "ui",
     "uses": {
       "modules": {
         "@mesh/settings": ">=0.1.0"

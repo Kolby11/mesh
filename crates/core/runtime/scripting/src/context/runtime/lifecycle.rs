@@ -197,6 +197,10 @@ impl ScriptContext {
             Ok(())
         })();
         if name == "unmount" {
+            self.callback_scope = std::sync::Arc::new(());
+            *self.callbacks.get_mut().unwrap() = super::callbacks::CallbackCache::default();
+            self.state.invalidate_function_binding();
+            self.changed_public_members.clear();
             self.clear_reactive_effects();
             // Storage must be durable even when authored teardown fails part
             // way through. The outer shell also invokes this explicitly so
@@ -204,6 +208,18 @@ impl ScriptContext {
             self.flush_storage();
         }
         result
+    }
+
+    /// Assign a public member as the script itself would: through `_ENV`, then
+    /// synchronized like a handler's writes, so template patches and effects
+    /// that read it observe the change.
+    pub fn assign_global(&mut self, name: &str, value: &Value) -> Result<(), ScriptError> {
+        self.ensure_initialized()?;
+        let lua_value = self.lua().to_value(value).map_err(lua_err)?;
+        self.env().set(name, lua_value).map_err(map_lua_error)?;
+        self.sync_state_from_lua();
+        self.sync_side_channels();
+        Ok(())
     }
 
     /// Call the canonical `render(self)` lifecycle handler if present.

@@ -1,17 +1,17 @@
 {
-  "revision": 150,
+  "revision": 172,
   "schemaVersion": 1,
   "shell": {
     "fonts": {
-      "ui_family": "CaskaydiaCove NF"
+      "ui_family": "JetBrainsMono NF"
     },
     "i18n": {
       "fallback_locale": "en",
-      "locale": "sk",
+      "locale": "en",
       "policy": "manual"
     },
     "icons": {
-      "default_pack": "default"
+      "default_pack": "Breeze_Light"
     },
     "render": {
       "blur": {
@@ -20,7 +20,7 @@
       }
     },
     "theme": {
-      "active": "mesh-default-dark"
+      "active": "@mesh/tokyo-night:tokyo-night"
     }
   }
 }

@@ -4,7 +4,7 @@
   "description": "Opacity control surface without compositor blur.",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "uses": {
       "capabilities": [
         "shell.surface",

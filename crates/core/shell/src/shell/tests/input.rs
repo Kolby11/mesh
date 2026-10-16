@@ -39,15 +39,12 @@ fn selection_input_contract_key_released_preserves_modifiers() {
 #[test]
 fn selection_input_contract_debug_shortcuts_remain_global() {
     assert!(matches!(
-        shell_global_shortcut_request("d", true, true, false),
+        shell_global_shortcut_request("d", true, true),
         Some(CoreRequest::ToggleDebugOverlay)
     ));
+    assert!(shell_global_shortcut_request("Tab", true, false).is_none());
     assert!(matches!(
-        shell_global_shortcut_request("Tab", true, false, true),
-        Some(CoreRequest::CycleDebugTab)
-    ));
-    assert!(matches!(
-        shell_global_shortcut_request("c", true, true, false),
+        shell_global_shortcut_request("c", true, true),
         Some(CoreRequest::ToggleDebugElementPicker)
     ));
 }
@@ -55,26 +52,20 @@ fn selection_input_contract_debug_shortcuts_remain_global() {
 #[test]
 fn keyboard_shortcuts_shell_global_shortcuts_still_win() {
     assert!(matches!(
-        shell_global_shortcut_request("d", true, true, false),
+        shell_global_shortcut_request("d", true, true),
         Some(CoreRequest::ToggleDebugOverlay)
     ));
-    assert!(matches!(
-        shell_global_shortcut_request("Tab", true, false, true),
-        Some(CoreRequest::CycleDebugTab)
-    ));
+    assert!(shell_global_shortcut_request("Tab", true, false).is_none());
 }
 
 #[test]
 fn keyboard_regression_shell_global_shortcut_precedence_stays_global() {
     assert!(matches!(
-        shell_global_shortcut_request("d", true, true, false),
+        shell_global_shortcut_request("d", true, true),
         Some(CoreRequest::ToggleDebugOverlay)
     ));
-    assert!(matches!(
-        shell_global_shortcut_request("Tab", true, false, true),
-        Some(CoreRequest::CycleDebugTab)
-    ));
-    assert!(shell_global_shortcut_request("m", false, false, false).is_none());
+    assert!(shell_global_shortcut_request("Tab", true, false).is_none());
+    assert!(shell_global_shortcut_request("m", false, false).is_none());
 }
 
 #[test]

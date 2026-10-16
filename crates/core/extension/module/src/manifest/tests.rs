@@ -511,7 +511,7 @@ fn canonical_module_json_keybinds_round_trip_to_runtime_manifest() {
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "keybinds": {
       "mute": {
         "trigger": { "kind": "shortcut", "key": "m" },
@@ -538,7 +538,7 @@ fn invalid_keybind_declaration_is_rejected() {
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "keybinds": {
       "mute": {
         "trigger": { "kind": "shortcut", "key": " " }
@@ -665,7 +665,7 @@ fn canonical_runtime_loader_routes_legacy_inputs_to_migration_diagnostics() {
     let cases = [
         (
             "package.json",
-            r#"{"name":"@mesh/legacy","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend"}}"#,
+            r#"{"name":"@mesh/legacy","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui"}}"#,
             "rename package.json to module.json",
         ),
         (

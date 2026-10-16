@@ -1012,8 +1012,8 @@ fn real_navigation_bar_repaints_when_theme_changes() {
 fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_back_to_dark() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
-    let dark = test_theme("mesh-default-dark");
-    let light = test_theme("mesh-default-light");
+    let dark = shipped_default_theme_mode("dark");
+    let light = shipped_default_theme_mode("light");
     let width = 960;
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
@@ -1033,8 +1033,9 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
             service: "mesh.theme".into(),
             source_module: "@mesh/shell".into(),
             payload: serde_json::json!({
-                "current": "mesh-default-light",
-                "theme_id": "mesh-default-light",
+                "current": "mesh-default",
+                "theme_id": "mesh-default",
+                "mode": "light",
                 "is_dark": false
             }),
         })
@@ -1057,11 +1058,7 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
         .last_tree
         .as_ref()
         .expect("rendered navigation tree");
-    let theme_button = first_node_with_click_handler(
-        tree,
-        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-2::onThemeToggle",
-    )
-    .expect("rendered theme button");
+    let theme_button = first_node_with_ref(tree, "themeButton").expect("rendered theme button");
     let button_center_x = theme_button.layout.x + theme_button.layout.width * 0.5;
     let button_center_y = theme_button.layout.y + theme_button.layout.height * 0.5;
 
@@ -1106,9 +1103,9 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
     // contributes no opaque pixel to sample. Its palette still has to follow
     // the theme, which the resolved colour shows without depending on where a
     // transition happens to be mid-flight.
-    let light_button_color = first_node_with_click_handler(
+    let light_button_color = first_node_with_ref(
         component.last_tree.as_ref().expect("tree after press"),
-        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-2::onThemeToggle",
+        "themeButton",
     )
     .expect("theme button after press")
     .computed_style
@@ -1120,8 +1117,9 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
             service: "mesh.theme".into(),
             source_module: "@mesh/shell".into(),
             payload: serde_json::json!({
-                "current": "mesh-default-dark",
-                "theme_id": "mesh-default-dark",
+                "current": "mesh-default",
+                "theme_id": "mesh-default",
+                "mode": "dark",
                 "is_dark": true
             }),
         })
@@ -1143,12 +1141,12 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
         [5, 4, 4, 92],
         "already-painted navigation shell should repaint to dark surface immediately"
     );
-    let dark_button_color = first_node_with_click_handler(
+    let dark_button_color = first_node_with_ref(
         component
             .last_tree
             .as_ref()
             .expect("tree after dark repaint"),
-        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-2::onThemeToggle",
+        "themeButton",
     )
     .expect("theme button after dark repaint")
     .computed_style
@@ -1162,6 +1160,33 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
 /// A parent surface whose trigger cell embeds `@mesh/test-popover` (rendered from
 /// `popover_src`) near the surface's right edge.
 fn component_with_edge_popover(popover_src: &str) -> FrontendSurfaceComponent {
+    component_with_embedded_popover(
+        r#"
+<template>
+    <row class="bar">
+        <box class="spacer" />
+        <box class="cell" ref="cell"><EdgePopover /></box>
+    </row>
+</template>
+<script lang="luau">
+local EdgePopover = require("@mesh/test-popover")
+</script>
+<style>
+.bar { width: 200px; height: 30px; }
+.spacer { flex-grow: 1; }
+.cell { width: 24px; height: 24px; flex-shrink: 0; align-items: center; justify-content: center; }
+</style>
+"#,
+        popover_src,
+    )
+}
+
+/// A 200x30 `@test/popover-host` surface rendered from `parent_src`, which
+/// imports `@mesh/test-popover` (rendered from `popover_src`) as `EdgePopover`.
+pub(super) fn component_with_embedded_popover(
+    parent_src: &str,
+    popover_src: &str,
+) -> FrontendSurfaceComponent {
     use crate::shell::ComponentContext;
     use crate::shell::component::catalog::{FrontendCatalog, FrontendCatalogEntry};
     use mesh_core_component::parse_component;
@@ -1178,25 +1203,7 @@ fn component_with_edge_popover(popover_src: &str) -> FrontendSurfaceComponent {
     let parent = CompiledFrontendModule {
         manifest: parent_manifest,
         source_path: PathBuf::from("src/main.mesh"),
-        component: parse_component(
-            r#"
-<template>
-    <row class="bar">
-        <box class="spacer" />
-        <box class="cell" ref="cell"><EdgePopover /></box>
-    </row>
-</template>
-<script lang="luau">
-local EdgePopover = require("@mesh/test-popover")
-</script>
-<style>
-.bar { width: 200px; height: 30px; }
-.spacer { flex-grow: 1; }
-.cell { width: 24px; height: 24px; flex-shrink: 0; align-items: center; justify-content: center; }
-</style>
-"#,
-        )
-        .unwrap(),
+        component: parse_component(parent_src).unwrap(),
         public_props: Default::default(),
         local_components: HashMap::new(),
         module_component_imports: HashMap::from([(

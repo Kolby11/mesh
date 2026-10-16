@@ -56,11 +56,7 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
         .last_tree
         .as_ref()
         .expect("rendered navigation tree");
-    let theme_button = first_node_with_click_handler(
-        tree,
-        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-2::onThemeToggle",
-    )
-    .expect("rendered theme button");
+    let theme_button = first_node_with_ref(tree, "themeButton").expect("rendered theme button");
     let theme_key = theme_button
         .mesh_key()
         .expect("theme button mesh key")
@@ -207,11 +203,8 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
         .last_tree
         .as_ref()
         .expect("rendered navigation tree");
-    let language_button = first_node_with_click_handler(
-        tree,
-        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageToggle",
-    )
-    .expect("language menu button");
+    let language_button =
+        first_node_with_ref(tree, "languageButton").expect("language menu button");
     let language_key = language_button
         .mesh_key()
         .expect("language menu button mesh key")
@@ -346,20 +339,7 @@ fn navigation_hover_popovers_close_when_trigger_hover_leaves() {
     let width = 960;
     let height = 80;
 
-    for (enter_handler, leave_handler) in [
-        (
-            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-2::onThemeEnter",
-            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-2::onThemeLeave",
-        ),
-        (
-            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageEnter",
-            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageLeave",
-        ),
-        (
-            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onSettingsEnter",
-            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onSettingsLeave",
-        ),
-    ] {
+    for trigger in ["themeButton", "languageButton", "settingsButton"] {
         let mut component =
             real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
         let mut buffer = PixelBuffer::new(width, height);
@@ -379,9 +359,7 @@ fn navigation_hover_popovers_close_when_trigger_hover_leaves() {
             )
             .unwrap();
 
-        component
-            .call_namespaced_handler(enter_handler, &[])
-            .unwrap();
+        hover_ref(&mut component, &theme, width, height, trigger);
         component
             .paint(
                 &theme,
@@ -393,11 +371,11 @@ fn navigation_hover_popovers_close_when_trigger_hover_leaves() {
         assert_eq!(
             component.child_surface_requests().len(),
             1,
-            "{enter_handler} should open one embedded popover"
+            "{trigger} should open one embedded popover"
         );
 
         component
-            .call_namespaced_handler(leave_handler, &[])
+            .handle_input(&theme, width, height, ComponentInput::PointerLeave)
             .unwrap();
         component
             .paint(
@@ -410,7 +388,7 @@ fn navigation_hover_popovers_close_when_trigger_hover_leaves() {
         assert_eq!(
             component.child_surface_requests().len(),
             1,
-            "{leave_handler} should keep its embedded popover open during the hover bridge"
+            "{trigger} should keep its embedded popover open during the hover bridge"
         );
 
         std::thread::sleep(Duration::from_millis(220));
@@ -426,7 +404,7 @@ fn navigation_hover_popovers_close_when_trigger_hover_leaves() {
         assert_eq!(
             component.child_surface_requests().len(),
             1,
-            "{leave_handler} should retain its popover across a deliberate pointer trip"
+            "{trigger} should retain its popover across a deliberate pointer trip"
         );
 
         std::thread::sleep(Duration::from_millis(220));
@@ -441,7 +419,7 @@ fn navigation_hover_popovers_close_when_trigger_hover_leaves() {
             .unwrap();
         assert!(
             component.child_surface_requests().is_empty(),
-            "{leave_handler} should close its embedded popover after the hover bridge expires"
+            "{trigger} should close its embedded popover after the hover bridge expires"
         );
     }
 }
@@ -474,11 +452,8 @@ fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
         .last_tree
         .as_ref()
         .expect("rendered navigation tree");
-    let language_button = first_node_with_click_handler(
-        tree,
-        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageToggle",
-    )
-    .expect("language menu button");
+    let language_button =
+        first_node_with_ref(tree, "languageButton").expect("language menu button");
     let language_key = language_button
         .mesh_key()
         .expect("language menu button mesh key")
@@ -612,11 +587,8 @@ fn navigation_language_option_cancels_hover_close_and_accepts_mouse_click() {
         )
         .unwrap();
 
-    let enter_handler = "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageEnter";
-    let leave_handler = "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageLeave";
-    component
-        .call_namespaced_handler(enter_handler, &[])
-        .unwrap();
+    let trigger = "languageButton";
+    hover_ref(&mut component, &theme, width, height, trigger);
     component
         .paint(
             &theme,
@@ -651,7 +623,7 @@ fn navigation_language_option_cancels_hover_close_and_accepts_mouse_click() {
     // the trigger starts the bridge timer, and entering the actual button must
     // cancel it (not merely entering the promoted surface root).
     component
-        .call_namespaced_handler(leave_handler, &[])
+        .handle_input(&theme, width, height, ComponentInput::PointerLeave)
         .unwrap();
     component
         .handle_child_surface_input(
@@ -875,16 +847,8 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
         "the resting settings trigger should carry a tooltip"
     );
 
-    let enter_handler = "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onSettingsEnter";
-    component
-        .call_namespaced_handler(
-            enter_handler,
-            &[serde_json::json!({
-                "current_target": { "position": { "margin_left": 0 } },
-                "trigger": { "type": "pointer" }
-            })],
-        )
-        .unwrap();
+    let trigger = "settingsButton";
+    hover_ref(&mut component, &theme, width, height, trigger);
     component
         .paint(
             &theme,
@@ -901,33 +865,28 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
     let settings_button =
         find_node_by_key(tree, &settings_key).expect("settings button after hover");
     // The promoted quick-settings popup covers the tooltip's placement, leaving
-    // only a sliver of it visible below the bar. The trigger must drop the
-    // tooltip while the popup is open.
+    // only a sliver of it visible below the bar. Core drops the trigger's
+    // tooltip while its popover is open.
     assert_eq!(
-        settings_button.attributes.get("title").map(String::as_str),
-        Some(""),
-        "hovering should clear the settings tooltip text; diagnostics={:?}",
+        component.hovered_tooltip,
+        None,
+        "hovering should suppress the settings tooltip; diagnostics={:?}",
         component
             .diagnostics
             .as_ref()
             .map(|diagnostics| diagnostics.health())
     );
-    assert_eq!(
-        settings_button
-            .attributes
-            .get("data-tooltip-disabled")
-            .map(String::as_str),
-        Some("true"),
-        "hovering should disable the settings tooltip"
+    assert!(
+        settings_button.state.expanded,
+        "the open popover expands its trigger"
     );
     assert_eq!(
         component.child_surface_requests().len(),
         1,
         "hovering the trigger should author one Quick Settings child"
     );
-    let leave_handler = "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onSettingsLeave";
     component
-        .call_namespaced_handler(leave_handler, &[])
+        .handle_input(&theme, width, height, ComponentInput::PointerLeave)
         .unwrap();
     component
         .paint(
@@ -942,10 +901,20 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
         1,
         "trigger leave must preserve the Quick Settings child during the bridge"
     );
-    let popup_enter_handler =
-        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onQuickSettingsEnter";
+    let popup = component.child_surface_requests()[0].clone();
+    let (pad_left, pad_top, ..) = popup.content_padding;
     component
-        .call_namespaced_handler(popup_enter_handler, &[])
+        .handle_child_surface_input(
+            &popup.node_key,
+            &theme,
+            width,
+            height,
+            (pad_left as f32, pad_top as f32),
+            ComponentInput::PointerMove {
+                x: pad_left as f32 + popup.content_size.0 as f32 / 2.0,
+                y: pad_top as f32 + popup.content_size.1 as f32 / 2.0,
+            },
+        )
         .unwrap();
     std::thread::sleep(Duration::from_millis(420));
     component.tick().unwrap();
@@ -960,7 +929,7 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
     assert_eq!(
         component.child_surface_requests().len(),
         1,
-        "entering Quick Settings must cancel the authored close timer and preserve the child"
+        "entering Quick Settings must cancel the hover-intent close and preserve the child"
     );
 }
 
@@ -1114,9 +1083,8 @@ fn navigation_settings_trigger_does_not_reopen_quick_settings_after_opening_sett
     let width = 960;
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
-    let enter_handler = "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onSettingsEnter";
+    let trigger = "settingsButton";
     let open_handler = "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onOpenSettings";
-    let leave_handler = "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onSettingsLeave";
 
     component
         .paint(
@@ -1126,9 +1094,7 @@ fn navigation_settings_trigger_does_not_reopen_quick_settings_after_opening_sett
             1.0,
         )
         .unwrap();
-    component
-        .call_namespaced_handler(enter_handler, &[])
-        .unwrap();
+    hover_ref(&mut component, &theme, width, height, trigger);
     component
         .paint(
             &theme,
@@ -1165,9 +1131,7 @@ fn navigation_settings_trigger_does_not_reopen_quick_settings_after_opening_sett
 
     // The pointer can still be over the launcher after the full surface is
     // shown. A second enter in that state must not create another popup.
-    component
-        .call_namespaced_handler(enter_handler, &[])
-        .unwrap();
+    hover_ref(&mut component, &theme, width, height, trigger);
     component
         .paint(
             &theme,
@@ -1184,11 +1148,9 @@ fn navigation_settings_trigger_does_not_reopen_quick_settings_after_opening_sett
     // Leaving the launcher releases the guard; the next hover can use Quick
     // Settings again after Settings has been closed.
     component
-        .call_namespaced_handler(leave_handler, &[])
+        .handle_input(&theme, width, height, ComponentInput::PointerLeave)
         .unwrap();
-    component
-        .call_namespaced_handler(enter_handler, &[])
-        .unwrap();
+    hover_ref(&mut component, &theme, width, height, trigger);
     component
         .paint(
             &theme,
@@ -1798,12 +1760,7 @@ fn navigation_quick_settings_popup_paints_content_laid_out_beyond_the_bar() {
             1.0,
         )
         .unwrap();
-    component
-        .call_namespaced_handler(
-            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onSettingsEnter",
-            &[serde_json::json!({ "trigger": { "type": "pointer" } })],
-        )
-        .unwrap();
+    hover_ref(&mut component, &theme, width, height, "settingsButton");
     component
         .paint(
             &theme,
@@ -1871,12 +1828,7 @@ fn navigation_quick_settings_popup_animates_open_and_close() {
     let extent = SurfaceExtent::unpadded(width, height);
     let mut buffer = PixelBuffer::new(width, height);
     component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
-    component
-        .call_namespaced_handler(
-            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onSettingsEnter",
-            &[serde_json::json!({ "trigger": { "type": "pointer" } })],
-        )
-        .unwrap();
+    hover_ref(&mut component, &theme, width, height, "settingsButton");
     component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
     let key = component.child_surface_requests()[0].node_key.clone();
 
@@ -1908,10 +1860,7 @@ fn navigation_quick_settings_popup_animates_open_and_close() {
 
     // Leaving the trigger closes the popup once its hover bridge runs out.
     component
-        .call_namespaced_handler(
-            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onSettingsLeave",
-            &[],
-        )
+        .handle_input(&theme, width, height, ComponentInput::PointerLeave)
         .unwrap();
     std::thread::sleep(Duration::from_millis(420));
     component.tick().unwrap();

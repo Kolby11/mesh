@@ -30,7 +30,7 @@ pub enum ManifestFlavor {
 
 /// The valid `mesh.kind` values, matching `ModuleKind` (serde kebab-case).
 pub const MODULE_KINDS: &[&str] = &[
-    "frontend",
+    "ui",
     "backend",
     "interface",
     "theme",
@@ -38,7 +38,6 @@ pub const MODULE_KINDS: &[&str] = &[
     "font-pack",
     "language-pack",
     "library",
-    "component",
     "composition",
 ];
 
@@ -938,6 +937,14 @@ fn mesh_contributes(doc: &'static str) -> Node {
                         vec![
                             field("id", true, scalar("Theme id.", "string")),
                             field("label", false, localized_text("Display label.")),
+                            field(
+                                "tokenContract",
+                                false,
+                                scalar(
+                                    "Semantic token contract version every mode implements, e.g. `1.0`.",
+                                    "string",
+                                ),
+                            ),
                             field("default_mode", false, scalar("Default mode id.", "string")),
                             field("modes", false, dependency_map("Mode id → token-set path.")),
                             field(

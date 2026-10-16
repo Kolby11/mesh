@@ -7,6 +7,66 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 #[test]
+fn static_prop_literals_match_real_luau_values() {
+    use mesh_core_component::{PropValue, parse_prop_declarations};
+    let lua = mlua::Lua::new();
+    for literal in [
+        r#""line\nnext\t\x41\065\u{1f600}""#,
+        "[=[\nlong\r\nline]=]",
+        "[=[\r\n\rline\n\r\nnext]=]",
+        r#"'a\z  \n b'"#,
+        r#""\195\169""#,
+        r#""\q\e""#,
+        "\"a\\\r\nnext\"",
+        "\"a\\\nnext\"",
+    ] {
+        let source = format!("{{ value = {{ type = \"string\", default = {literal} }} }}");
+        let declaration = parse_prop_declarations(&source).unwrap();
+        let expected = lua
+            .load(format!("return {literal}"))
+            .eval::<mlua::String>()
+            .unwrap_or_else(|error| panic!("{literal:?}: {error}"))
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            declaration.props[0].default,
+            Some(PropValue::String(expected)),
+            "{literal}"
+        );
+    }
+    let invalid = "\"a\\\n\rnext\"";
+    assert!(
+        lua.load(format!("return {invalid}"))
+            .eval::<mlua::String>()
+            .is_err()
+    );
+    assert!(
+        parse_prop_declarations(&format!(
+            "{{ value = {{ type = \"string\", default = {invalid} }} }}"
+        ))
+        .is_err()
+    );
+    for literal in [
+        "-0x1f",
+        "0b1010",
+        "1_000.5",
+        ".5",
+        "1e-3",
+        "0xffffffffffffffff",
+    ] {
+        let source = format!("{{ value = {{ type = \"number\", default = {literal} }} }}");
+        let declaration = parse_prop_declarations(&source).unwrap();
+        let expected = lua.load(format!("return {literal}")).eval::<f64>().unwrap();
+        assert_eq!(
+            declaration.props[0].default,
+            Some(PropValue::Number(expected)),
+            "{literal}"
+        );
+    }
+}
+
+#[test]
 fn component_legacy_import_reaches_luau_as_a_syntax_error() {
     let source = r#"<template><box /></template>
 <script lang="luau">
@@ -863,4 +923,23 @@ end
 
     assert_eq!(ctx.state.get("before"), Some(Value::Bool(false)));
     assert_eq!(ctx.state.get("after"), None);
+}
+
+#[test]
+fn json_decoding_is_available_without_host_grants() {
+    let mut context = ScriptContext::new("@test/json", CapabilitySet::default()).unwrap();
+    context
+        .load_script(
+            r#"
+local decoded = mesh.json.decode('{"label":"workspace","value":null}')
+label = decoded.label
+is_null = decoded.value == mesh.json.null
+"#,
+        )
+        .unwrap();
+    assert_eq!(
+        context.state.get("label"),
+        Some(serde_json::json!("workspace"))
+    );
+    assert_eq!(context.state.get("is_null"), Some(serde_json::json!(true)));
 }

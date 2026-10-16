@@ -300,7 +300,9 @@ fn css_prop_resolution_prefers_borrowed_props_table() {
     let component = mesh_core_component::parse_component(
         r#"
 <props>
-  width: { type: "size", default: "10px" }
+{
+    width = { type = "size", default = "10px" },
+}
 </props>
 <template><box/></template>
 "#,
@@ -333,7 +335,9 @@ fn borrowed_css_props_table_beats_deep_clone() {
     let component = mesh_core_component::parse_component(
         r#"
 <props>
-  width: { type: "size", default: "10px" }
+{
+    width = { type = "size", default = "10px" },
+}
 </props>
 <template><box/></template>
 "#,

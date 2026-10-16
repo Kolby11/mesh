@@ -4,6 +4,7 @@ mod graph;
 mod health;
 mod load;
 mod scan;
+mod token_diagnostics;
 
 pub use contributions::*;
 pub use graph::*;

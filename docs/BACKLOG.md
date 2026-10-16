@@ -23,23 +23,8 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 Ordered by implementation priority: finish a tier before starting the next
 unless an item says otherwise. IDs point into the
 [block review](../.planning/codebase/audits/2026-09-30-block-review/REPORT.md)
-(evidence and tests); `A1`–`A8` point into the
+(evidence and tests); `A2`–`A8` point into the
 [module architecture direction](../.planning/todos/pending/2026-09-30-module-architecture-direction.md).
-
-### Priority 4 — Contracts and syntax to settle before third-party modules
-
-- [ ] **A1:** Extract `mesh.wm`, `mesh.power`, `mesh.brightness` into interface
-      modules; reserve `mesh.*` by provenance; review `mesh.wm` against niri/Sway.
-- [ ] **A7:** Publish the semantic design-token vocabulary as a versioned
-      contract, with LSP/doctor warnings for tokens outside it.
-- [ ] **A5:** Merge `frontend`/`component` into one UI kind with optional default
-      placement; evaluate one mixed resource-pack kind.
-- [ ] **CMP-02 / CMP-08:** Handlers and callbacks as Luau function values, parsed
-      with full_moon, replacing global-name strings and the hand-written splitter.
-- [ ] **CMP-07:** `<props>` as a statically parsed Luau table shared with
-      future backend props.
-- [ ] **RES-06 / RES-12:** One default theme with dark/light modes and quick
-      settings using `set_mode`; remove core's hard-coded inspector tab enum.
 
 ### Priority 5 — Control-plane consolidation
 
@@ -161,10 +146,15 @@ Each needs a design and a measured prototype before it is adopted.
 - [ ] **D4:** Providers send typed field patches instead of whole snapshots, and
       no JSON on the frame path. Validation, ranges/defaults and `.d.luau`
       generation have shipped, and LSP proxy types use the same mapping.
-- [ ] **D5:** Headless interaction primitives in core (popover, menu, tooltip,
-      hover intent, focus scope, dismissal) that modules compose.
-- [ ] **D6:** Immutable scene snapshot committed to a render thread with GPU
-      raster; re-scope the scroll raster cache and in-surface blur plans first.
+- [ ] **D5:** Remaining interaction primitives: a focus scope with modal trap,
+      Escape and outside dismissal for `dialog`/`sheet`, and menu typeahead and
+      nested menus. Popover disclosure (`open-on`) has shipped.
+- [ ] `bind:attr` two-way bindings never write back: the compiler lowers them
+      as one-way bindings although the syntax guide documents write-back.
+      Implement it for value elements, or remove the syntax and the docs.
+- [ ] **D6:** Connect the immutable scene/render-thread handoff to frozen font/icon
+      resources, GPU raster and presentation. The bounded handoff prototype is
+      implemented; scroll-raster and blur plans are re-scoped around renderer ownership.
 - [ ] **D7:** Styles compiled to typed form with dependency-indexed incremental
       selector matching; class/state changes restyle only matching nodes.
 - [ ] **D8:** Event-driven backend host APIs (D-Bus signals, PipeWire, netlink,
@@ -321,8 +311,8 @@ of payoff.
 - [ ] Typed style declarations end-to-end: resolve theme tokens to typed values
       once per theme load; `apply_declaration` consumes typed values, strings
       only for diagnostics (E). Static literals now pre-lower; typed property
-      values and one-time token lowering remain. _(detail: "P2 — typing &
-      interning")_
+      values remain; theme aliases and color/number token projections now cache
+      by immutable revision. _(detail: "P2 — typing & interning")_
 - [ ] Interaction frames still re-apply string style declarations per node —
       folds into typed declarations and narrower invalidation.
       _(detail: "P2 — architecture")_

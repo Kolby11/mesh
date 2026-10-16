@@ -4,7 +4,7 @@
   "description": "Shell-shipped debug inspector surface for profiling and live shell diagnostics.",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "uses": {
       "interfaces": {
         "mesh.debug": ">=1.0"
@@ -27,6 +27,22 @@
       "role": "dialog",
       "label": "Debug inspector",
       "description": "Debug-only profiling and shell inspection panel"
+    },
+    "contributes": {
+      "keybinds": {
+        "next-view": {
+          "label": "Next inspector view",
+          "description": "Show the next debug inspector view",
+          "category": "Developer tools",
+          "trigger": {
+            "kind": "shortcut",
+            "key": "Tab",
+            "modifiers": [
+              "ctrl"
+            ]
+          }
+        }
+      }
     }
   }
 }

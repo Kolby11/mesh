@@ -30,7 +30,7 @@ pub use accessibility::{
     try_normalize_accessibility,
 };
 pub use attributes::{AttrKey, AttributeMap};
-pub use composition::{ComponentCompositionProps, HandlerTarget};
+pub use composition::{CallbackHandle, ComponentCompositionProps, HandlerTarget};
 pub use element::{
     BASE_ELEMENT_FIELDS, ELEMENT_CONTRACT_DEFS, ELEMENT_TYPE_DEFS, ElementAttributeDef,
     ElementAttributeType, ElementContractDef, ElementDiagnostic, ElementDiagnosticKind,
@@ -60,8 +60,9 @@ pub use layout::{
     TextMeasureRevisions, TextMeasurer,
 };
 pub use popover::{
-    PopoverAnchor, PopoverConstraintAdjustment, PopoverGrab, PopoverGravity, PopoverPlacement,
-    PopoverPlacementDiagnostic, PopoverPlacementDiagnosticKind, PopoverPlacementField,
+    PopoverAnchor, PopoverConstraintAdjustment, PopoverGrab, PopoverGravity, PopoverOpenOn,
+    PopoverPlacement, PopoverPlacementDiagnostic, PopoverPlacementDiagnosticKind,
+    PopoverPlacementField,
 };
 pub use pseudo_state::{
     PSEUDO_STATE_TABLE, PseudoState, PseudoStateKind, PseudoStateSpec, authored_element_state,

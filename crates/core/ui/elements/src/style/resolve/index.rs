@@ -1,9 +1,9 @@
 use super::attrs::*;
 use super::cache::*;
 use super::declaration::*;
+use super::literal::*;
 use super::matching::*;
 use super::state::*;
-use crate::style::parse::*;
 use crate::style::*;
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
 use std::collections::HashMap;
@@ -215,14 +215,13 @@ impl StyleRuleIndex {
     }
 
     pub(super) fn index_selector(&mut self, idx: usize, selector: &Selector) {
-        // Index state bits from compound selector parts so that
-        // compound rules like `button:hover` also populate state_to_rules.
-        if let Selector::Compound(parts) = selector {
-            for part in parts {
-                if let Selector::State(_, state) = part {
-                    self.index_state_selector(idx, state);
-                }
-            }
+        // State dependencies drive invalidation; a structural class/id bucket
+        // still supplies the candidate filter for a compound selector.
+        let mut dependencies = selector_state_dependencies(selector);
+        while dependencies != 0 {
+            let bit = 1 << dependencies.trailing_zeros();
+            self.state_to_rules.entry(bit).or_default().push(idx);
+            dependencies &= !bit;
         }
         match selector_index_key(selector) {
             Some(SelectorIndexKey::Tag(tag)) => {
@@ -250,8 +249,6 @@ impl StyleRuleIndex {
         } else {
             self.state.push((state_bit, vec![idx]));
         }
-        // Populate reverse index: map the individual state bit to this rule.
-        self.state_to_rules.entry(state_bit).or_default().push(idx);
     }
 
     /// Returns the indices of all rules that depend on the given state bit.
@@ -270,20 +267,17 @@ impl StyleRuleIndex {
 pub(super) struct IndexedDeclaration {
     pub(super) property: IndexedProperty,
     pub(super) value: StyleValue,
-    pub(super) literal: Option<TypedLiteralValue>,
+    pub(super) literal: LiteralCache,
 }
 
-/// A static declaration value parsed once when a stylesheet or theme default
-/// is indexed. Values containing `var()` or `prop()` stay on the dynamic
-/// resolver path; these variants are therefore safe to copy directly into a
-/// node's computed style.
-#[derive(Debug, Clone, Copy)]
-pub(super) enum TypedLiteralValue {
-    Color(Color),
-    Number(f32),
-    Edges(Edges),
-    Corners(Corners),
-    Dimension(Dimension),
+fn selector_state_dependencies(selector: &Selector) -> u32 {
+    match selector {
+        Selector::State(_, name) => state_name_bit(name).unwrap_or(0),
+        Selector::Compound(parts) => parts
+            .iter()
+            .fold(0, |mask, part| mask | selector_state_dependencies(part)),
+        _ => 0,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -293,6 +287,7 @@ pub(super) enum IndexedProperty {
         name: String,
         strict_animation: bool,
         background_image: bool,
+        literal_property: Option<LiteralProperty>,
     },
     StaticDiagnostic {
         property: String,
@@ -364,106 +359,9 @@ impl IndexedDeclaration {
         Self {
             property: IndexedProperty::from_property(&decl.property, &decl.value),
             value: decl.value.clone(),
-            literal: typed_literal_value(&decl.property, &decl.value),
+            literal: LiteralCache::new(typed_literal_value(&decl.property, &decl.value)),
         }
     }
-}
-
-pub(super) fn typed_literal_value(property: &str, value: &StyleValue) -> Option<TypedLiteralValue> {
-    let StyleValue::Literal(value) = value else {
-        return None;
-    };
-    if references_style_function(value) {
-        return None;
-    }
-
-    match property {
-        "background" | "background-color" | "color" => {
-            Color::from_css(value).map(TypedLiteralValue::Color)
-        }
-        "font-size"
-        | "font-weight"
-        | "letter-spacing"
-        | "line-height"
-        | "gap"
-        | "column-gap"
-        | "row-gap"
-        | "gap-x"
-        | "opacity"
-        | "padding-top"
-        | "padding-right"
-        | "padding-bottom"
-        | "padding-left"
-        | "margin-top"
-        | "margin-right"
-        | "margin-bottom"
-        | "margin-left"
-        | "border-top-width"
-        | "border-right-width"
-        | "border-bottom-width"
-        | "border-left-width" => Some(TypedLiteralValue::Number(parse_px(value))),
-        "padding" | "margin" | "border-width" => {
-            Some(TypedLiteralValue::Edges(parse_edges_shorthand(value)))
-        }
-        "border-radius" => Some(TypedLiteralValue::Corners(parse_corners_shorthand(value))),
-        "width" | "height" | "flex-basis" => {
-            Some(TypedLiteralValue::Dimension(parse_dimension(value)))
-        }
-        "min-width" | "max-width" | "min-height" | "max-height" => {
-            Some(TypedLiteralValue::Dimension(parse_size_constraint(value)))
-        }
-        _ => None,
-    }
-}
-
-pub(super) fn apply_typed_literal(
-    style: &mut ComputedStyle,
-    property: &str,
-    value: TypedLiteralValue,
-) -> bool {
-    match (property, value) {
-        ("background" | "background-color", TypedLiteralValue::Color(value)) => {
-            style.background_color = value
-        }
-        ("color", TypedLiteralValue::Color(value)) => style.color = value,
-        ("font-size", TypedLiteralValue::Number(value)) => style.font_size = value,
-        ("font-weight", TypedLiteralValue::Number(value)) => style.font_weight = value as u16,
-        ("letter-spacing", TypedLiteralValue::Number(value)) => style.letter_spacing = value,
-        ("line-height", TypedLiteralValue::Number(value)) => style.line_height = value,
-        ("gap" | "column-gap" | "row-gap" | "gap-x", TypedLiteralValue::Number(value)) => {
-            style.gap = value
-        }
-        ("opacity", TypedLiteralValue::Number(value)) => style.opacity = value,
-        ("padding-top", TypedLiteralValue::Number(value)) => style.padding.top = value,
-        ("padding-right", TypedLiteralValue::Number(value)) => style.padding.right = value,
-        ("padding-bottom", TypedLiteralValue::Number(value)) => style.padding.bottom = value,
-        ("padding-left", TypedLiteralValue::Number(value)) => style.padding.left = value,
-        ("margin-top", TypedLiteralValue::Number(value)) => style.margin.top = value,
-        ("margin-right", TypedLiteralValue::Number(value)) => style.margin.right = value,
-        ("margin-bottom", TypedLiteralValue::Number(value)) => style.margin.bottom = value,
-        ("margin-left", TypedLiteralValue::Number(value)) => style.margin.left = value,
-        ("border-top-width", TypedLiteralValue::Number(value)) => style.border_width.top = value,
-        ("border-right-width", TypedLiteralValue::Number(value)) => {
-            style.border_width.right = value
-        }
-        ("border-bottom-width", TypedLiteralValue::Number(value)) => {
-            style.border_width.bottom = value
-        }
-        ("border-left-width", TypedLiteralValue::Number(value)) => style.border_width.left = value,
-        ("padding", TypedLiteralValue::Edges(value)) => style.padding = value,
-        ("margin", TypedLiteralValue::Edges(value)) => style.margin = value,
-        ("border-width", TypedLiteralValue::Edges(value)) => style.border_width = value,
-        ("border-radius", TypedLiteralValue::Corners(value)) => style.border_radius = value,
-        ("width", TypedLiteralValue::Dimension(value)) => style.width = value,
-        ("height", TypedLiteralValue::Dimension(value)) => style.height = value,
-        ("flex-basis", TypedLiteralValue::Dimension(value)) => style.flex_basis = value,
-        ("min-width", TypedLiteralValue::Dimension(value)) => style.min_width = value,
-        ("max-width", TypedLiteralValue::Dimension(value)) => style.max_width = value,
-        ("min-height", TypedLiteralValue::Dimension(value)) => style.min_height = value,
-        ("max-height", TypedLiteralValue::Dimension(value)) => style.max_height = value,
-        _ => return false,
-    }
-    true
 }
 
 /// Lower theme defaults once per immutable theme revision. Theme defaults are
@@ -492,7 +390,7 @@ pub(super) fn indexed_theme_defaults(
                 let value = classify_theme_style_value(value);
                 IndexedDeclaration {
                     property: IndexedProperty::from_property(property, &value),
-                    literal: typed_literal_value(property, &value),
+                    literal: LiteralCache::new(typed_literal_value(property, &value)),
                     value,
                 }
             })
@@ -562,6 +460,7 @@ impl IndexedProperty {
             name: property.to_owned(),
             strict_animation: is_strict_animation_property(property),
             background_image: property == "background-image",
+            literal_property: LiteralProperty::from_name(property),
         }
     }
 }

@@ -67,28 +67,6 @@ pub struct DebugKeybindEntry {
     pub accessibility_shortcut: String,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum DebugInspectorView {
-    #[default]
-    Overview,
-    Modules,
-    Surfaces,
-    BackendServices,
-    Benchmark,
-}
-
-impl DebugInspectorView {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Overview => "overview",
-            Self::Modules => "modules",
-            Self::Surfaces => "surfaces",
-            Self::BackendServices => "backend_services",
-            Self::Benchmark => "benchmark",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct DebugBenchmarkSnapshot {
     pub scenarios: Vec<BenchmarkScenarioSnapshot>,
@@ -660,7 +638,6 @@ pub struct DebugOverlayState {
     pub element_picker_enabled: bool,
     /// Last node under the picker cursor, retained after click selection.
     pub inspected_element: Option<serde_json::Value>,
-    pub active_view: DebugInspectorView,
     pub profiling_enabled: bool,
     pub profiling_session_id: u64,
     pub latest_benchmark_run: Option<DebugBenchmarkRunState>,
@@ -683,42 +660,11 @@ impl DebugOverlayState {
         }
     }
 
-    pub fn cycle_tab(&mut self) {
-        self.active_view = match self.active_view {
-            DebugInspectorView::Overview => DebugInspectorView::Modules,
-            DebugInspectorView::Modules => DebugInspectorView::Surfaces,
-            DebugInspectorView::Surfaces => DebugInspectorView::BackendServices,
-            DebugInspectorView::BackendServices => DebugInspectorView::Benchmark,
-            DebugInspectorView::Benchmark => DebugInspectorView::Overview,
-        };
-    }
-
     pub fn toggle_profiling(&mut self) -> bool {
         self.profiling_enabled = !self.profiling_enabled;
         if self.profiling_enabled {
             self.profiling_session_id = self.profiling_session_id.saturating_add(1);
         }
         self.profiling_enabled
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cycle_tab_reaches_benchmark_view() {
-        let mut state = DebugOverlayState::default();
-
-        state.cycle_tab();
-        assert_eq!(state.active_view, DebugInspectorView::Modules);
-        state.cycle_tab();
-        assert_eq!(state.active_view, DebugInspectorView::Surfaces);
-        state.cycle_tab();
-        assert_eq!(state.active_view, DebugInspectorView::BackendServices);
-        state.cycle_tab();
-        assert_eq!(state.active_view, DebugInspectorView::Benchmark);
-        state.cycle_tab();
-        assert_eq!(state.active_view, DebugInspectorView::Overview);
     }
 }

@@ -40,16 +40,30 @@ local function trim(s)
     return (s or ""):match("^%s*(.-)%s*$")
 end
 
+local function decode_record(source)
+    local ok, value = pcall(mesh.json.decode, source)
+    if ok and type(value) == "table" then
+        return value
+    end
+    return nil
+end
+
 local function parse_active_workspace(stdout)
-    local id = stdout:match('"id"%s*:%s*(%d+)')
-    return tonumber(id)
+    local workspace = decode_record(stdout)
+    local id = workspace and workspace.id
+    if type(id) == "number" and id ~= 0 and id % 1 == 0 then
+        return id
+    end
+    return nil
 end
 
 local function parse_active_window(stdout)
-    local class = stdout:match('"class"%s*:%s*"(.-[^\\])"') or ""
-    local title = stdout:match('"title"%s*:%s*"(.-[^\\])"') or ""
-    title = title:gsub('\\"', '"'):gsub("\\\\", "\\"):gsub("\\n", " ")
-    class = class:gsub('\\"', '"'):gsub("\\\\", "\\")
+    local window = decode_record(stdout)
+    if window == nil then
+        return nil
+    end
+    local class = type(window.class) == "string" and window.class or ""
+    local title = type(window.title) == "string" and window.title:gsub("[\r\n]", " ") or ""
     if class == "" and title == "" then
         return nil
     end
@@ -57,13 +71,21 @@ local function parse_active_window(stdout)
 end
 
 local function parse_workspaces(stdout)
+    local records = decode_record(stdout)
     local list = {}
-    for entry in stdout:gmatch("{([^}]+)}") do
-        local id = tonumber(entry:match('"id"%s*:%s*(%d+)'))
-        local name = entry:match('"name"%s*:%s*"([^"]*)"') or ""
-        local windows = tonumber(entry:match('"windows"%s*:%s*(%d+)')) or 0
-        if id then
-            list[#list + 1] = { id = id, name = name, windows = windows }
+    for _, entry in records or {} do
+        if type(entry) ~= "table" then
+            continue
+        end
+        local id = entry.id
+        local name = type(entry.name) == "string" and entry.name or tostring(id)
+        local windows = type(entry.windows) == "number" and entry.windows or 0
+        if type(id) == "number" and id ~= 0 and id % 1 == 0 and name ~= "special" and not name:match("^special:") then
+            list[#list + 1] = {
+                id = id, name = name, windows = math.max(0, math.floor(windows)),
+                index = id > 0 and id or nil,
+                output = type(entry.monitor) == "string" and entry.monitor or nil,
+            }
         end
     end
     table.sort(list, function(a, b) return a.id < b.id end)
@@ -128,7 +150,7 @@ local function workspaces_equal(a, b)
     for index = 1, #a do
         local left = a[index]
         local right = b[index]
-        if left.id ~= right.id or left.name ~= right.name or left.windows ~= right.windows then
+        if left.id ~= right.id or left.name ~= right.name or left.windows ~= right.windows or left.index ~= right.index or left.output ~= right.output or left.focused ~= right.focused then
             return false
         end
     end
@@ -136,6 +158,15 @@ local function workspaces_equal(a, b)
 end
 
 local function commit_state(self, next_state)
+    local workspaces = {}
+    for _, workspace in next_state.workspaces do
+        workspaces[#workspaces + 1] = {
+            id = workspace.id, name = workspace.name, windows = workspace.windows,
+            index = workspace.index, output = workspace.output,
+            focused = workspace.id == next_state.active_workspace,
+        }
+    end
+    next_state.workspaces = workspaces
     local previous = state
     local availability_changed = previous.available ~= next_state.available
     local workspace_changed = previous.active_workspace ~= next_state.active_workspace
@@ -436,7 +467,19 @@ function on_command_focus_workspace(self)
     end
     log_info("focus_workspace(" .. tostring(id) .. ")")
     local workspace = tostring(id)
-    local dispatcher = 'hl.dsp.focus({ workspace = "' .. workspace .. '" })'
+    if id <= 0 then
+        workspace = nil
+        for _, entry in state.workspaces do
+            if entry.id == id then
+                workspace = "name:" .. entry.name
+                break
+            end
+        end
+        if workspace == nil then
+            return { ok = false, error = "unknown named workspace id" }
+        end
+    end
+    local dispatcher = 'hl.dsp.focus({ workspace = ' .. string.format("%q", workspace) .. ' })'
     local result = mesh.exec("hyprctl", { "dispatch", dispatcher })
 
     -- Hyprland 0.55 replaced the legacy dispatcher arguments with Lua

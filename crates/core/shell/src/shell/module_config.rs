@@ -233,7 +233,7 @@ pub(super) fn write_composed_module_enabled(
     let expected_revision = profile.revision;
 
     match kind {
-        ModuleKind::Frontend => {
+        ModuleKind::Ui => {
             let mut found = false;
             for instance in profile
                 .roots
@@ -434,7 +434,7 @@ mod tests {
   "mesh": {
     "schemaVersion": 1,
     "modules": {
-      "@mesh/panel": {"kind": "frontend", "path": "panel", "enabled": true}
+      "@mesh/panel": {"kind": "ui", "path": "panel", "enabled": true}
     }
   }
 }"#,
@@ -471,7 +471,7 @@ mod tests {
         paths.set_active("desktop").unwrap();
 
         let rollback =
-            write_composed_module_enabled(&root_path, "@mesh/panel", ModuleKind::Frontend, false)
+            write_composed_module_enabled(&root_path, "@mesh/panel", ModuleKind::Ui, false)
                 .unwrap();
         assert!(!paths.load("desktop").unwrap().roots["@mesh/panel#default"].is_active());
         assert_eq!(fs::read_to_string(&root_path).unwrap(), root);

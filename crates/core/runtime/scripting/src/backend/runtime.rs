@@ -1137,6 +1137,7 @@ impl BackendScriptContext {
         globals.set("self", self.current_self_table()?)?;
         let mesh = self.lua_ref()?.create_table()?;
         self.install_service_api(&mesh)?;
+        mesh.set("json", crate::json::create_json_library(self.lua_ref()?)?)?;
         self.install_exec_api(&mesh)?;
         self.install_file_api(&mesh)?;
         self.install_config_api(&mesh)?;

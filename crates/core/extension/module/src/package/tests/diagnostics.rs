@@ -5,10 +5,10 @@ use std::fs;
 
 #[test]
 fn graph_diagnostics_report_required_icon_without_enabled_icon_pack() {
-    let root = root_with_modules(&[("@mesh/example-widget", ModuleKind::Frontend)], &[], None);
+    let root = root_with_modules(&[("@mesh/example-widget", ModuleKind::Ui)], &[], None);
     let mut frontend = loaded_module(
         "@mesh/example-widget",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes::default(),
@@ -31,7 +31,7 @@ fn graph_diagnostics_report_required_icon_without_enabled_icon_pack() {
 fn graph_diagnostics_report_optional_icon_missing_mapping() {
     let root = root_with_modules(
         &[
-            ("@mesh/example-widget", ModuleKind::Frontend),
+            ("@mesh/example-widget", ModuleKind::Ui),
             ("@mesh/icons-material", ModuleKind::IconPack),
         ],
         &[],
@@ -39,7 +39,7 @@ fn graph_diagnostics_report_optional_icon_missing_mapping() {
     );
     let mut frontend = loaded_module(
         "@mesh/example-widget",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes::default(),
@@ -155,15 +155,15 @@ fn graph_diagnostics_skip_optional_missing_binary() {
 fn graph_diagnostics_report_duplicate_keybind_trigger() {
     let root = root_with_modules(
         &[
-            ("@mesh/mod-a", ModuleKind::Frontend),
-            ("@mesh/mod-b", ModuleKind::Frontend),
+            ("@mesh/mod-a", ModuleKind::Ui),
+            ("@mesh/mod-b", ModuleKind::Ui),
         ],
         &[],
         None,
     );
     let mut mod_a = loaded_module(
         "@mesh/mod-a",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes::default(),
@@ -182,7 +182,7 @@ fn graph_diagnostics_report_duplicate_keybind_trigger() {
     );
     let mut mod_b = loaded_module(
         "@mesh/mod-b",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes::default(),
@@ -229,10 +229,10 @@ fn graph_diagnostics_report_undeclared_i18n_key() {
     // Write catalog with only one of those keys.
     fs::write(catalog_dir.join("en.json"), r#"{"nav.volume": "Volume"}"#).unwrap();
 
-    let root = root_with_modules(&[("@mesh/test-frontend", ModuleKind::Frontend)], &[], None);
+    let root = root_with_modules(&[("@mesh/test-frontend", ModuleKind::Ui)], &[], None);
     let mut module = loaded_module(
         "@mesh/test-frontend",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes {
@@ -289,10 +289,10 @@ mesh.events.publish("shell.not-declared", {})
     )
     .unwrap();
 
-    let root = root_with_modules(&[("@mesh/test-frontend", ModuleKind::Frontend)], &[], None);
+    let root = root_with_modules(&[("@mesh/test-frontend", ModuleKind::Ui)], &[], None);
     let mut module = loaded_module(
         "@mesh/test-frontend",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes::default(),
@@ -330,10 +330,10 @@ fn graph_diagnostics_report_keybind_subscription_contract_gaps() {
     )
     .unwrap();
 
-    let root = root_with_modules(&[("@mesh/test-frontend", ModuleKind::Frontend)], &[], None);
+    let root = root_with_modules(&[("@mesh/test-frontend", ModuleKind::Ui)], &[], None);
     let mut module = loaded_module(
         "@mesh/test-frontend",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes::default(),
@@ -381,10 +381,10 @@ fn graph_diagnostics_no_undeclared_i18n_key_when_all_present() {
     .unwrap();
     fs::write(catalog_dir.join("en.json"), r#"{"nav.volume": "Volume"}"#).unwrap();
 
-    let root = root_with_modules(&[("@mesh/test-frontend", ModuleKind::Frontend)], &[], None);
+    let root = root_with_modules(&[("@mesh/test-frontend", ModuleKind::Ui)], &[], None);
     let mut module = loaded_module(
         "@mesh/test-frontend",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes {
@@ -414,15 +414,15 @@ fn graph_diagnostics_no_undeclared_i18n_key_when_all_present() {
 fn graph_diagnostics_no_duplicate_keybind_for_unique_triggers() {
     let root = root_with_modules(
         &[
-            ("@mesh/mod-a", ModuleKind::Frontend),
-            ("@mesh/mod-b", ModuleKind::Frontend),
+            ("@mesh/mod-a", ModuleKind::Ui),
+            ("@mesh/mod-b", ModuleKind::Ui),
         ],
         &[],
         None,
     );
     let mut mod_a = loaded_module(
         "@mesh/mod-a",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes::default(),
@@ -441,7 +441,7 @@ fn graph_diagnostics_no_duplicate_keybind_for_unique_triggers() {
     );
     let mut mod_b = loaded_module(
         "@mesh/mod-b",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes::default(),

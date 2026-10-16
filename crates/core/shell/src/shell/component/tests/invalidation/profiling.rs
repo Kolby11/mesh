@@ -130,11 +130,8 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
         .last_tree
         .as_ref()
         .expect("rendered navigation tree");
-    let hover_target = first_node_with_click_handler(
-        hover_tree,
-        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-2::onThemeToggle",
-    )
-    .expect("rendered theme button");
+    let hover_target =
+        first_node_with_ref(hover_tree, "themeButton").expect("rendered theme button");
     let hover_key = hover_target
         .mesh_key()
         .expect("theme button mesh key")

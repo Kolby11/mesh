@@ -306,6 +306,20 @@ impl ModuleRegistry {
         self.manifests.insert(module_id, manifest);
     }
 
+    pub fn local_theme_tokens(&self, path: &Path) -> Vec<String> {
+        let owner = self
+            .module_dirs
+            .iter()
+            .filter(|(_, root)| path.starts_with(root))
+            .max_by_key(|(_, root)| root.components().count())
+            .map(|(id, _)| id);
+        owner
+            .and_then(|id| self.manifests.get(id))
+            .and_then(|manifest| manifest.theme.as_ref())
+            .map(|theme| theme.tokens.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
     /// All discovered interface/service names (e.g. "mesh.audio").
     pub fn service_names(&self) -> Vec<&str> {
         self.interface_fields.keys().map(String::as_str).collect()
@@ -503,11 +517,7 @@ fn discover_resources(
     }
 
     for module in graph.enabled_modules() {
-        if !matches!(
-            module.kind,
-            mesh_core_module::package::ModuleKind::Frontend
-                | mesh_core_module::package::ModuleKind::Component
-        ) {
+        if module.kind != mesh_core_module::package::ModuleKind::Ui {
             continue;
         }
         snapshot

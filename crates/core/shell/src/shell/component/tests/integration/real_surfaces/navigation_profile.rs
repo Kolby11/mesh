@@ -391,9 +391,7 @@ fn navigation_frame_cost_profile() {
 }
 
 fn collect_popover_triggers<'a>(node: &'a WidgetNode, out: &mut Vec<&'a WidgetNode>) {
-    if node.attributes.get("aria-haspopup").map(String::as_str) == Some("true")
-        && node.event_handlers.contains_key("pointerenter")
-    {
+    if node.attributes.get("aria-haspopup").map(String::as_str) == Some("true") {
         out.push(node);
     }
     for child in &node.children {

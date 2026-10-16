@@ -40,7 +40,7 @@ nix develop -c cargo run -p mesh-tools-cli --bin mesh-shell -- services
 
 ## Edit a shipped component
 
-Frontend modules live under `modules/frontend/`. Each contains a `module.json`
+UI modules (`"kind": "ui"`) live under `modules/frontend/`. Each contains a `module.json`
 and a `.mesh` entrypoint. For example, the navigation bar entry is
 `modules/frontend/navigation-bar/src/main.mesh`.
 

@@ -61,7 +61,7 @@ pub(super) fn prepare_theme_for_graph(
     )?;
     let base = default_theme();
     let module_layers = graph
-        .modules_by_kind(ModuleKind::Frontend)
+        .modules_by_kind(ModuleKind::Ui)
         .into_iter()
         .filter_map(|module| {
             let section = module.manifest.mesh.theme.as_ref()?;

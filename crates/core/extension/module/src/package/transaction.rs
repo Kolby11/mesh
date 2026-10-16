@@ -1414,7 +1414,7 @@ mod tests {
         fs::create_dir_all(&source).unwrap();
         fs::write(
             source.join("module.json"),
-            r#"{"name":"@mesh/example","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"component","entry":"main.mesh"}}"#,
+            r#"{"name":"@mesh/example","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh"}}"#,
         )
         .unwrap();
         fs::write(source.join("main.mesh"), "<template><box/></template>").unwrap();

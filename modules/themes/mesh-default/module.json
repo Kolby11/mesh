@@ -1,0 +1,33 @@
+{
+  "name": "@mesh/mesh-default",
+  "version": "0.1.0",
+  "description": "MESH Default theme with dark and light modes.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "theme",
+    "contributes": {
+      "themes": [
+        {
+          "id": "mesh-default",
+          "label": "MESH Default",
+          "modes": {
+            "dark": "dark.css",
+            "light": "light.css"
+          },
+          "default_mode": "dark",
+          "mode_metadata": {
+            "dark": {
+              "color_scheme": "dark",
+              "contrast": "normal"
+            },
+            "light": {
+              "color_scheme": "light",
+              "contrast": "normal"
+            }
+          },
+          "tokenContract": "1.0"
+        }
+      ]
+    }
+  }
+}

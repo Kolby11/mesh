@@ -9,3 +9,5 @@ mod luau_scan;
 mod manifest;
 mod shipped;
 mod surfaces;
+
+mod token_contracts;

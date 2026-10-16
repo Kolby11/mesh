@@ -1717,10 +1717,12 @@ mod tests {
         mesh_core_component::parse_component(
             r#"
 <props>
-  density: { type: "enum", options: ["compact", "cozy"], default: "cozy" }
-  track_width: { type: "size", default: "20px" }
-  anim_ms: { type: "duration", default: 120, min: 0, max: 600 }
-  internal: { type: "bool", default: true, expose: false }
+{
+    density = { type = "enum", options = {"compact", "cozy"}, default = "cozy" },
+    track_width = { type = "size", default = "20px" },
+    anim_ms = { type = "duration", default = 120, min = 0, max = 600 },
+    internal = { type = "bool", default = true, expose = false },
+}
 </props>
 <template><box /></template>
 "#,

@@ -522,9 +522,7 @@ impl<'a> StyleResolver<'a> {
                     return result;
                 }
                 match self.cached_theme_token_value(name) {
-                    CachedThemeTokenValue::String(value) => {
-                        Some(Color::from_css(&value).unwrap_or(Color::TRANSPARENT))
-                    }
+                    CachedThemeTokenValue::String(value) => Some(value.color),
                     CachedThemeTokenValue::Number(_) | CachedThemeTokenValue::Bool(_) => {
                         Some(Color::TRANSPARENT)
                     }
@@ -616,7 +614,7 @@ impl<'a> StyleResolver<'a> {
                 }
                 match self.cached_theme_token_value(name) {
                     CachedThemeTokenValue::Number(value) => Some(value as f32),
-                    CachedThemeTokenValue::String(value) => Some(parse_px(&value)),
+                    CachedThemeTokenValue::String(value) => Some(value.number),
                     CachedThemeTokenValue::Bool(_) => Some(0.0),
                     CachedThemeTokenValue::Error(_) => None,
                     CachedThemeTokenValue::Missing => None,
@@ -664,9 +662,31 @@ impl<'a> StyleResolver<'a> {
         if let Some(value) = self.theme_value_cache.borrow().get(reference) {
             return value.clone();
         }
-        let token_name = self.cached_theme_token_name(reference);
-        let value =
-            CachedThemeTokenValue::from_resolution(self.theme.resolve_token_value(&token_name));
+        let value = SHARED_THEME_VALUE_CACHE.with(|cache| {
+            if let Some(value) = cache
+                .borrow_mut()
+                .get_mut(&self.theme.revision())
+                .and_then(|values| values.get(reference))
+                .cloned()
+            {
+                return value;
+            }
+            let token_name = self.cached_theme_token_name(reference);
+            let value =
+                CachedThemeTokenValue::from_resolution(self.theme.resolve_token_value(&token_name));
+            let mut cache = cache.borrow_mut();
+            if cache.get(&self.theme.revision()).is_none() {
+                cache.insert(
+                    self.theme.revision(),
+                    crate::lru::LruCache::new(MAX_SHARED_THEME_VALUES),
+                );
+            }
+            cache
+                .get_mut(&self.theme.revision())
+                .unwrap()
+                .insert(Arc::from(reference), value.clone());
+            value
+        });
         self.theme_value_cache
             .borrow_mut()
             .insert(reference.to_owned(), value.clone());

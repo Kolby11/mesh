@@ -3,14 +3,8 @@
         <button
             ref="languageButton"
             class="language-trigger"
-            class:language-trigger-open={not language_surface_hidden}
-            onclick={onLanguageToggle}
-            onpointerenter={onLanguageEnter}
-            onpointerleave={onLanguageLeave}
             aria-haspopup="true"
-            aria-expanded={language_aria_expanded}
-            data-tooltip-disabled={language_tooltip_disabled}
-            title={language_tooltip}
+            title={t('nav.language_menu')}
             aria-label={t('nav.language_menu')}
         >
             <label class="language-label">{current_locale_label}</label>
@@ -24,19 +18,9 @@ local t = import("mesh.i18n", "t")
 local LanguagePopover = require("@mesh/language-popover")
 
 current_locale_label = "🇬🇧"
-language_surface_hidden = true
-language_aria_expanded = "false"
-language_tooltip = ""
-language_tooltip_disabled = "false"
 
 lang_popover = nil
 local lang_popover_connected = false
-local do_close
--- One close timer for the trigger and its popover: leaving either schedules
--- it, entering either cancels it.
-local hover = mesh.ui.hover_intent(function()
-    do_close()
-end)
 
 -- The flag shown on the trigger comes from the popover, which owns the locale
 -- table. Keeping a second copy here is what left the button reading "EN" for
@@ -52,18 +36,9 @@ local function popover_flag()
     return flag
 end
 
-local function sync_trigger_state()
-    language_aria_expanded = language_surface_hidden and "false" or "true"
-    if language_surface_hidden then
-        language_tooltip = t("nav.language_menu")
-        language_tooltip_disabled = "false"
-    else
-        language_tooltip = ""
-        language_tooltip_disabled = "true"
-    end
-end
-
-local function connect_popover()
+effect(function(self)
+    -- `bind:this` becomes available after the initial template evaluation.
+    -- State updates then flow through the child event instead of being polled.
     if lang_popover == nil or lang_popover_connected then
         return
     end
@@ -77,63 +52,7 @@ local function connect_popover()
             current_locale_label = popover_flag() or current_locale_label
         end
     end)
-    lang_popover.PopoverEnter:on(hover.enter)
-    lang_popover.PopoverLeave:on(hover.leave)
-    lang_popover.KeyboardDismissRequested:on(function()
-        do_close()
-    end)
-end
-
-local function do_open()
-    if lang_popover and language_surface_hidden then
-        connect_popover()
-        hover.cancel()
-        lang_popover.open = true
-        language_surface_hidden = false
-        sync_trigger_state()
-    end
-end
-
-do_close = function()
-    hover.cancel()
-    if lang_popover and not language_surface_hidden then
-        lang_popover.open = false
-        language_surface_hidden = true
-        sync_trigger_state()
-    end
-end
-
-effect(function(self)
-    -- `bind:this` becomes available after the initial template evaluation.
-    -- State updates then flow through the child event instead of being polled.
-    connect_popover()
 end)
-
-sync_trigger_state()
-
--- Keyboard-only toggle; hover opens/closes.
-function onLanguageToggle(event)
-    local keyboard = event ~= nil and event.trigger ~= nil and event.trigger.type == "keyboard"
-    if not keyboard then
-        return
-    end
-    if language_surface_hidden then
-        do_open()
-    else
-        do_close()
-    end
-end
-
-function onLanguageEnter(event)
-    hover.enter()
-    do_open()
-end
-
-function onLanguageLeave()
-    if not language_surface_hidden then
-        hover.leave()
-    end
-end
 </script>
 
 <style>
@@ -184,9 +103,9 @@ end
         transform: scale(0.9);
     }
 
-    .language-trigger-open,
-    .language-trigger-open:hover,
-    .language-trigger-open:focus-visible {
+    .language-trigger:expanded,
+    .language-trigger:expanded:hover,
+    .language-trigger:expanded:focus-visible {
         color: var(--color-primary);
     }
 

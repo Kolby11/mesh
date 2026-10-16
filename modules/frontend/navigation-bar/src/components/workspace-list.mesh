@@ -1,99 +1,67 @@
 <template>
   <row class="workspace-list" onpointerleave={onWorkspaceLeave}>
-    <box class="ws-active-trail" style:transform={"translateX(" .. active_offset .. "px)"} aria-hidden="true" />
+    <box class="ws-active-trail" hidden={not active_visible} style:transform={"translateX(" .. active_offset .. "px)"} aria-hidden="true" />
     <box class="ws-hover" class:ws-hover-visible={hover_visible} style:transform={"translateX(" .. hover_offset .. "px)"} aria-hidden="true" />
-    <box class="ws-active-indicator" style:transform={"translateX(" .. active_offset .. "px)"} aria-hidden="true" />
-    <button class="ws-btn" class:ws-btn-active={ws_active == 1} onclick={onSwitch1} onpointerenter={onWorkspaceEnter1} title="Workspace 1" aria-label="Workspace 1">
-      <text class="ws-num">1</text>
-    </button>
-    <button class="ws-btn" class:ws-btn-active={ws_active == 2} onclick={onSwitch2} onpointerenter={onWorkspaceEnter2} title="Workspace 2" aria-label="Workspace 2">
-      <text class="ws-num">2</text>
-    </button>
-    <button class="ws-btn" class:ws-btn-active={ws_active == 3} onclick={onSwitch3} onpointerenter={onWorkspaceEnter3} title="Workspace 3" aria-label="Workspace 3">
-      <text class="ws-num">3</text>
-    </button>
-    <button class="ws-btn" class:ws-btn-active={ws_active == 4} onclick={onSwitch4} onpointerenter={onWorkspaceEnter4} title="Workspace 4" aria-label="Workspace 4">
-      <text class="ws-num">4</text>
-    </button>
-    <button class="ws-btn" class:ws-btn-active={ws_active == 5} onclick={onSwitch5} onpointerenter={onWorkspaceEnter5} title="Workspace 5" aria-label="Workspace 5">
-      <text class="ws-num">5</text>
-    </button>
+    <box class="ws-active-indicator" hidden={not active_visible} style:transform={"translateX(" .. active_offset .. "px)"} aria-hidden="true" />
+    {#for workspace in workspace_items key={workspace.id}}
+      <button class="ws-btn" class:ws-btn-active={ws_active == workspace.id} onclick={onSwitch(workspace.id)} onpointerenter={onWorkspaceEnter(workspace.slot)} title={workspace.label} aria-label={workspace.label}>
+        <text class="ws-num">{workspace.label}</text>
+      </button>
+    {/for}
   </row>
 </template>
 
 <script lang="luau">
-ws_active = 1
--- Offsets of the active and hovered pills, in px along the row.
+local wm = require("mesh.wm")
+workspace_items = {}
+ws_active = nil
+active_visible = false
 active_offset = 0
 hover_offset = 0
 hover_visible = false
 
-local wm = require("mesh.wm")
-
-local function get_wm_state()
-    if wm then
-        return wm.active_workspace
-    end
-    return nil
-end
-
--- Pill width plus the row gap, kept in step with `.ws-btn` / `.workspace-list`.
 local WS_SLOT_STRIDE = 26
 
-local function sync_indicator()
-    local slot = math.max(1, math.min(5, ws_active))
-    active_offset = (slot - 1) * WS_SLOT_STRIDE
+local function select_indicator(id)
+    ws_active = id
+    active_visible = false
+    for _, workspace in workspace_items do
+        if workspace.id == id then
+            active_visible = true
+            active_offset = (workspace.slot - 1) * WS_SLOT_STRIDE
+            break
+        end
+    end
 end
 
--- The hover pill stays mounted and only moves, so travelling between
--- workspaces slides one shape across the row instead of fading two.
-local function sync_hover(slot)
-    if slot == nil then
-        hover_visible = false
-        return
+effect(function()
+    local items = {}
+    if wm.available then
+        for _, workspace in wm.workspaces do
+            items[#items + 1] = {
+                id = workspace.id,
+                label = workspace.name ~= "" and workspace.name or tostring(workspace.id),
+                slot = #items + 1,
+            }
+        end
     end
-    local clamped = math.max(1, math.min(5, slot))
-    hover_offset = (clamped - 1) * WS_SLOT_STRIDE
+    workspace_items = items
+    select_indicator(wm.active_workspace)
+end)
+
+function onWorkspaceEnter(slot)
+    hover_offset = (slot - 1) * WS_SLOT_STRIDE
     hover_visible = true
 end
 
-local function sync_classes()
-    sync_indicator()
+function onWorkspaceLeave()
+    hover_visible = false
 end
 
-effect(function(self)
-    local active = get_wm_state()
-    if active then
-        local n = tonumber(active) or 1
-        if n ~= ws_active then
-            ws_active = n
-            sync_classes()
-        end
-    end
-end)
-
-local function switch_to(n)
-    ws_active = n
-    sync_classes()
-    if wm and type(wm.focus_workspace) == "function" then
-        wm.focus_workspace(n)
-    else
-        mesh.log.warn("[workspace-list] mesh.wm focus_workspace method is unavailable")
-    end
+function onSwitch(id)
+    select_indicator(id)
+    wm.focus_workspace(id)
 end
-
-function onWorkspaceEnter1() sync_hover(1) end
-function onWorkspaceEnter2() sync_hover(2) end
-function onWorkspaceEnter3() sync_hover(3) end
-function onWorkspaceEnter4() sync_hover(4) end
-function onWorkspaceEnter5() sync_hover(5) end
-function onWorkspaceLeave() sync_hover(nil) end
-
-function onSwitch1() switch_to(1) end
-function onSwitch2() switch_to(2) end
-function onSwitch3() switch_to(3) end
-function onSwitch4() switch_to(4) end
-function onSwitch5() switch_to(5) end
 </script>
 
 <style>

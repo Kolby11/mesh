@@ -6,8 +6,10 @@ use super::*;
 
 const PROP_SOURCE: &str = r#"
 <props>
-  track_width: { type: "size", default: "20px" }
-  visible: { type: "bool", default: true }
+{
+    track_width = { type = "size", default = "20px" },
+    visible = { type = "bool", default = true },
+}
 </props>
 <template>
   <box>
@@ -66,8 +68,10 @@ fn component_runtime_does_not_inject_raw_settings_global() {
 
 const SETTINGS_PROP_SOURCE: &str = r#"
 <props>
-  track_width: { type: "size", default: "20px" }
-  anim_ms: { type: "duration", default: 120, min: 0, max: 600 }
+{
+    track_width = { type = "size", default = "20px" },
+    anim_ms = { type = "duration", default = 120, min = 0, max = 600 },
+}
 </props>
 <template>
   <box class="panel">
@@ -137,7 +141,9 @@ fn duration_prop_projects_to_css_milliseconds() {
 
 const PROP_WRITE_SOURCE: &str = r#"
 <props>
-  track_width: { type: "size", default: "20px" }
+{
+    track_width = { type = "size", default = "20px" },
+}
 </props>
 <template>
   <box>
@@ -186,7 +192,9 @@ fn script_write_to_props_reprojects_into_css() {
 
 const INVALID_PROP_WRITE_SOURCE: &str = r#"
 <props>
-  track_width: { type: "size", default: "20px" }
+{
+    track_width = { type = "size", default = "20px" },
+}
 </props>
 <template>
   <slider class="slider"/>

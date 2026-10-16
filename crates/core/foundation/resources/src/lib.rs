@@ -5,6 +5,9 @@
 
 mod coverage;
 mod font;
+mod frozen_font;
+
+pub use frozen_font::{FrozenFontDatabase, FrozenFontError};
 
 pub use coverage::{
     ResourceChainSuggestion, ResourceCoverageAdvice, ResourceCoverageAdvisor, ResourceCoverageKind,

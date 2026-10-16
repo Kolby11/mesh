@@ -387,6 +387,11 @@ impl ScriptState {
         self.dirty = false;
     }
 
+    pub(in crate::context) fn invalidate_function_binding(&mut self) {
+        self.dirty = true;
+        self.mutation_generation = self.mutation_generation.wrapping_add(1);
+    }
+
     /// Register or replace a proxy for a variable name.
     pub fn register_proxy(
         &mut self,

@@ -7,10 +7,9 @@
 A **component** is a user-authored reusable `.mesh` unit composed from core
 elements and other components. A component module exports one primary public
 component and may contain private internal components and explicitly declared
-public contributions. Frontend and component module kinds use the same UI
-model. **Target:** a shell profile may mount either kind as a root; the current
-root activation path requires `frontend`. A `component` module has no default
-`mesh.surface` declaration. See [01 §3.2](01-module-system.md#32-module-kinds).
+public contributions. Component modules have module kind `ui`; optional
+`mesh.surface` gives one default placement, and a shell profile may mount any
+`ui` module as a root. See [01 §3.2](01-module-system.md#32-module-kinds).
 Configuration belongs to the component's source as a typed `<props>` public
 API; packaging stays in the manifest.
 
@@ -71,7 +70,7 @@ Keyed loop bodies capture iteration locals for binding patches; collection and
 key changes still reconcile the template. Template function calls can patch
 element properties, with conservative invalidation for captured public state.
 Readers in structural conditions, loop sources or keys, unkeyed loop bodies,
-component props, or pre-bound handler arguments use template evaluation and
+component props, or handler bindings use template evaluation and
 retained diffing instead. Service updates and reactive-effect writes patch together;
 failed expressions retain the last good tree and use normal failure reporting.
 The script body runs once as setup. Templates and lexical helpers derive
@@ -82,13 +81,29 @@ on reload or unmount; the returned handle supports idempotent `cancel()`.
 `render(self)` is no longer scheduled and compiled components receive a
 migration diagnostic. Finer structural reconciliation remains a **target**.
 
+**Shipped event functions:** event attributes are full Luau expressions resolving
+function values, including private locals, table members and inline closures.
+An outer call is deferred event-call sugar: authored arguments evaluate at
+invocation, followed by event arguments; method calls retain normal `self`.
+A `nil` value disables an optional handler; other non-function values are
+diagnosed. Loop locals are captured per rendered iteration. Component callback attributes
+are actual Luau functions, callable and forwardable by the child without JSON
+serialization. They preserve the defining environment and grants; removal
+restores the child's authored binding. Opaque runtime leases expire on owner
+reload or unmount, use normal execution budgets and local diagnostics, and
+admit at most 4096 live bindings per component. Stable function references and
+equivalent deferred calls reuse their leases. Reassigning a referenced function
+invalidates its template binding even when JSON state did not change.
+Backend and interface props remain targets (§2); this function transport is
+for component callbacks.
+
 ### 1.1 Popovers and escape-bounds UI
 
 **Status: shipped.** Surfaces are containers, not authoring units. An in-tree
 `<popover open>` is authored inline and *deterministically* promoted to a
 compositor `xdg_popup` child surface when shown (content-driven size,
 compositor anchoring, grab/hover-bridge dismiss owned by the core). Small
-menus are embeddable `component`-kind modules with no surface geometry; only
+menus are embeddable `ui` modules with no surface geometry; only
 true top-level surfaces own `mesh.surface` placement.
 
 ## 2. Sizing — CSS is the engine
@@ -126,7 +141,7 @@ styles, and surface policy remain source-level authoring.
 
 Coders change fixed structure and precise behavior in component source. Visual
 editors arrange only compatible public components inside the regions the author
-chose to expose. An editor is a replaceable frontend module consuming the
+chose to expose. An editor is a replaceable `ui` module consuming the
 generic mesh.composition interface.
 
 ## 3. The `<props>` block
@@ -135,17 +150,33 @@ generic mesh.composition interface.
 remain target work (§5).
 
 One declaration per configurable value; everything else derives from it.
+The block contains one ordinary Luau table literal, parsed statically with
+`full_moon`. It never executes code. Use `=` fields, `{ ... }` sequential arrays,
+commas or semicolons, quoted strings and normal Luau comments/escapes. Literal
+string keys (`["name"] = ...`) share the identifier-key namespace. Values may be
+string/finite-number/boolean literals, literal arrays, or `t("key", "fallback")`
+label metadata (one string key and an optional string fallback). Unary numeric
+minus and scalar parentheses are supported; globals, arbitrary calls, computed
+keys, functions, interpolation and other expressions are rejected with source
+spans. Defaults keep their existing type, range and CSS-domain validation.
+
+The former `name: { type: ... }` notation and square-bracket arrays are rejected;
+migrate them to `{ name = { type = ... } }` and `{ ... }` arrays. The same static
+parser is exposed as `parse_prop_declarations` for future declaration consumers;
+backend/interface props remain targets, without an alternate grammar.
 
 ```html
 <props>
-  width:    { type: "size",  default: "fit-content", label: t("var.width") }
-  density:  { type: "enum",  options: ["compact", "cozy"], default: "cozy",
-              label: t("var.density") }
-  show_pct: { type: "bool",  default: true, label: t("var.show_percent") }
-  gap:      { type: "size",  default: "var(--spacing-xs)" }
-  accent:   { type: "token", default: "color-primary" }
-  icon:     { type: "icon",  default: "audio-volume-high" }
-  anim_ms:  { type: "duration", default: 120, min: 0, max: 1000 }
+{
+    width = { type = "size",  default = "fit-content", label = t("var.width") },
+    density = { type = "enum",  options = {"compact", "cozy"}, default = "cozy",
+                label = t("var.density") },
+    show_pct = { type = "bool",  default = true, label = t("var.show_percent") },
+    gap = { type = "size",  default = "var(--spacing-xs)" },
+    accent = { type = "token", default = "color-primary" },
+    icon = { type = "icon",  default = "audio-volume-high" },
+    anim_ms = { type = "duration", default = 120, min = 0, max = 1000 },
+}
 </props>
 ```
 
@@ -183,6 +214,15 @@ its sub-property's domain.
 | `token` | resolved theme token | string | theme-aware token picker |
 | `duration` | `<n>ms` | number (ms) | numeric |
 | `icon` | logical icon name | string | pack-aware icon picker |
+
+A `token` value names a theme token in CSS (`color-primary`, `--color-primary`)
+or canonical dotted (`color.primary`) form, or is a `var(--…)` reference.
+Names project as `var(--color-primary)`, so `prop(accent)` resolves through the
+active theme like a direct `var()` read; `var()` values, including fallbacks,
+project unchanged. Hex colors and other literals are rejected; use `color` for
+those. Token defaults count as static reads for the semantic-contract warnings
+in [04 §2.1](04-styling.md#21-semantic-token-contract), as do `var()` defaults of
+`color` and `size` props.
 
 `token` binds config into theming ([04](04-styling.md)); `icon` binds into
 icon packs ([05](05-icons.md)): defaults and overrides must resolve against
@@ -262,9 +302,11 @@ This replaces the `mesh.provides.settings` schema boilerplate everywhere.
 
 ```html
 <props>
-  track_width:  { type: "size", default: "20px",  label: t("var.track_width") }
-  track_height: { type: "size", default: "100px", label: t("var.track_height") }
-  anim_ms:      { type: "duration", default: 120, min: 0, max: 600 }
+{
+    track_width = { type = "size", default = "20px",  label = t("var.track_width") },
+    track_height = { type = "size", default = "100px", label = t("var.track_height") },
+    anim_ms = { type = "duration", default = 120, min = 0, max = 600 },
+}
 </props>
 
 <template>

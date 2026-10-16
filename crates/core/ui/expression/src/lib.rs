@@ -9,7 +9,7 @@
 
 use mlua::{Lua, LuaSerdeExt, Value as LuaValue};
 use serde_json::{Map, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 
@@ -44,6 +44,8 @@ pub enum ExpressionEvaluationError {
 pub struct CompiledExpression {
     source: String,
     calls_function: bool,
+    references: Vec<String>,
+    is_reference: bool,
 }
 
 pub type SharedCompiledExpression = Arc<CompiledExpression>;
@@ -56,15 +58,130 @@ impl CompiledExpression {
     pub fn calls_function(&self) -> bool {
         self.calls_function
     }
+
+    pub fn referenced_identifiers(&self) -> &[String] {
+        &self.references
+    }
+    pub fn is_reference(&self) -> bool {
+        self.is_reference
+    }
 }
 
 #[derive(Default)]
-struct FunctionCalls(bool);
-
-impl full_moon::visitors::Visitor for FunctionCalls {
-    fn visit_function_call(&mut self, _: &full_moon::ast::FunctionCall) {
-        self.0 = true;
+struct ExpressionMetadata {
+    calls_function: bool,
+    references: HashSet<String>,
+    scopes: Vec<HashSet<String>>,
+    block_bindings: HashMap<usize, HashSet<String>>,
+    repeat_blocks: HashSet<usize>,
+}
+impl ExpressionMetadata {
+    fn reference(&mut self, name: String) {
+        if !self.scopes.iter().rev().any(|scope| scope.contains(&name)) {
+            self.references.insert(name);
+        }
     }
+}
+impl full_moon::visitors::Visitor for ExpressionMetadata {
+    fn visit_function_call(&mut self, _: &full_moon::ast::FunctionCall) {
+        self.calls_function = true;
+    }
+    fn visit_var(&mut self, var: &full_moon::ast::Var) {
+        if let full_moon::ast::Var::Name(name) = var {
+            self.reference(name.token().to_string());
+        }
+    }
+    fn visit_prefix(&mut self, prefix: &full_moon::ast::Prefix) {
+        if let full_moon::ast::Prefix::Name(name) = prefix {
+            self.reference(name.token().to_string());
+        }
+    }
+    fn visit_block(&mut self, block: &full_moon::ast::Block) {
+        self.scopes.push(
+            self.block_bindings
+                .remove(&(block as *const _ as usize))
+                .unwrap_or_default(),
+        );
+    }
+    fn visit_block_end(&mut self, block: &full_moon::ast::Block) {
+        if !self.repeat_blocks.contains(&(block as *const _ as usize)) {
+            self.scopes.pop();
+        }
+    }
+    fn visit_function_body(&mut self, body: &full_moon::ast::FunctionBody) {
+        let scope = self
+            .block_bindings
+            .entry(body.block() as *const _ as usize)
+            .or_default();
+        for parameter in body.parameters().iter() {
+            if let full_moon::ast::Parameter::Name(name) = parameter {
+                scope.insert(name.token().to_string());
+            }
+        }
+    }
+    fn visit_function_declaration(&mut self, function: &full_moon::ast::FunctionDeclaration) {
+        if function.name().names().len() > 1 || function.name().method_name().is_some() {
+            if let Some(name) = function.name().names().iter().next() {
+                self.reference(name.token().to_string());
+            }
+        }
+        if function.name().method_name().is_some() {
+            self.block_bindings
+                .entry(function.body().block() as *const _ as usize)
+                .or_default()
+                .insert("self".into());
+        }
+    }
+    fn visit_local_assignment_end(&mut self, assignment: &full_moon::ast::LocalAssignment) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.extend(
+                assignment
+                    .names()
+                    .iter()
+                    .map(|name| name.token().to_string()),
+            );
+        }
+    }
+    fn visit_local_function(&mut self, function: &full_moon::ast::LocalFunction) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(function.name().token().to_string());
+        }
+    }
+    fn visit_numeric_for(&mut self, statement: &full_moon::ast::NumericFor) {
+        self.block_bindings
+            .entry(statement.block() as *const _ as usize)
+            .or_default()
+            .insert(statement.index_variable().token().to_string());
+    }
+    fn visit_generic_for(&mut self, statement: &full_moon::ast::GenericFor) {
+        self.block_bindings
+            .entry(statement.block() as *const _ as usize)
+            .or_default()
+            .extend(
+                statement
+                    .names()
+                    .iter()
+                    .map(|name| name.token().to_string()),
+            );
+    }
+    fn visit_repeat(&mut self, statement: &full_moon::ast::Repeat) {
+        self.repeat_blocks
+            .insert(statement.block() as *const _ as usize);
+    }
+    fn visit_repeat_end(&mut self, statement: &full_moon::ast::Repeat) {
+        self.repeat_blocks
+            .remove(&(statement.block() as *const _ as usize));
+        self.scopes.pop();
+    }
+}
+fn is_reference_expression(mut expression: &full_moon::ast::Expression) -> bool {
+    while let full_moon::ast::Expression::Parentheses {
+        expression: inner, ..
+    } = expression
+    {
+        expression = inner;
+    }
+    matches!(expression, full_moon::ast::Expression::Var(_))
 }
 
 static EXPRESSION_CACHE: OnceLock<Mutex<HashMap<String, SharedCompiledExpression>>> =
@@ -94,9 +211,12 @@ pub fn compile_expression(
             use full_moon::visitors::Visitor;
             full_moon::parse(&candidate)
                 .map(|ast| {
-                    let mut calls = FunctionCalls::default();
-                    calls.visit_ast(&ast);
-                    calls.0
+                    let mut metadata = ExpressionMetadata::default();
+                    metadata.visit_ast(&ast);
+                    let reference = matches!(ast.nodes().last_stmt(), Some(full_moon::ast::LastStmt::Return(statement)) if statement.returns().iter().next().is_some_and(is_reference_expression)) && !metadata.calls_function;
+                    let mut references = metadata.references.into_iter().collect::<Vec<_>>();
+                    references.sort();
+                    (metadata.calls_function, references, reference)
                 })
                 .ok()
         })
@@ -111,7 +231,7 @@ pub fn compile_expression(
                 },
             )
         })?;
-    let Some(calls_function) = parsed else {
+    let Some((calls_function, references, is_reference)) = parsed else {
         return Err(non_ascii.map_or(
             ExpressionCompileError::Malformed,
             |(byte_offset, character)| ExpressionCompileError::NonAscii {
@@ -124,6 +244,8 @@ pub fn compile_expression(
     let compiled = Arc::new(CompiledExpression {
         source: source.to_owned(),
         calls_function,
+        references,
+        is_reference,
     });
     cache.insert(source.to_owned(), Arc::clone(&compiled));
     Ok(compiled)
@@ -220,6 +342,38 @@ fn json_to_lua(lua: &Lua, value: &Value) -> mlua::Result<LuaValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn callback_references_respect_lexical_scopes_and_initializers() {
+        let expression = compile_expression(
+            r#"function(event)
+            local item = item
+            local function recurse(n) if n > 0 then return recurse(n - 1) end end
+            for i = 1, limit do consume(i, event) end
+            for key, value in pairs(items) do consume(key, value) end
+            repeat local done = check(item) until done
+            return outside(event, item)
+        end"#,
+        )
+        .unwrap();
+        assert_eq!(
+            expression.referenced_identifiers(),
+            [
+                "check", "consume", "item", "items", "limit", "outside", "pairs"
+            ]
+        );
+    }
+
+    #[test]
+    fn callback_method_declarations_bind_self_and_parameters() {
+        let expression = compile_expression(
+            "function() function actions:pick(value) return self.base + value + external end end",
+        )
+        .unwrap();
+        assert_eq!(expression.referenced_identifiers(), ["actions", "external"]);
+        assert!(compile_expression("(actions.pick)").unwrap().is_reference());
+        assert!(!expression.is_reference());
+    }
 
     #[test]
     fn compiles_once_and_preserves_luau_semantics() {

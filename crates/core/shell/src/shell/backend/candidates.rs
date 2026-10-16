@@ -306,7 +306,7 @@ fn backend_requirement_statuses<T: ServiceCatalogView + ?Sized>(
         core_service_providers.is_provider(&provider.interface, &provider.provider_module)
     };
     let mut statuses = Vec::new();
-    for frontend in graph.frontend_modules() {
+    for frontend in graph.modules_by_kind(ModuleKind::Ui) {
         let Some(requirements) = graph.requirements_for_frontend(&frontend.id) else {
             continue;
         };

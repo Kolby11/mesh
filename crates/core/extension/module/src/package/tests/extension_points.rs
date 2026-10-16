@@ -62,7 +62,7 @@ fn duplicate_extension_point_declarations_are_rejected_deterministically() {
 fn host(module_id: &str, version_req: Option<&str>) -> LoadedModuleManifest {
     let mut module = loaded_module(
         module_id,
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes::default(),
@@ -91,7 +91,7 @@ fn contributor_with_props(
 ) -> LoadedModuleManifest {
     loaded_module(
         module_id,
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes {
@@ -337,7 +337,7 @@ fn a_composition_replaces_suppresses_and_orders_contributed_pages() {
 #[test]
 fn only_interface_modules_may_declare_extension_points() {
     let manifest = ModuleManifest::from_json_str(
-        r#"{"name":"@me/panel","version":"1","mesh":{"apiVersion":"0.1","kind":"frontend",
+        r#"{"name":"@me/panel","version":"1","mesh":{"apiVersion":"0.1","kind":"ui",
             "entry":"main.mesh","extensionPoints":{"mesh.x.y":{"version":"1.0"}}}}"#,
     );
     assert!(manifest.is_err());

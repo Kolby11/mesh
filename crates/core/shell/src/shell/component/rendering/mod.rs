@@ -613,6 +613,7 @@ impl FrontendSurfaceComponent {
             .with_retained_tree(scoped_finalize)
             .with_window_state(self.window_states)
             .with_promoted_windows(&self.promoted_window_keys)
+            .with_expanded_triggers(&self.expanded_triggers)
             .with_shortcuts(
                 shortcut_cache
                     .as_ref()
@@ -962,6 +963,8 @@ impl FrontendSurfaceComponent {
         } else {
             self.previous_checked_values.clear();
         }
+        self.previous_expanded_triggers
+            .clone_from(&self.expanded_triggers);
         // Not gated on a selector dependency the way `checked` is: a slider
         // value is painted content, so it matters whether or not any rule
         // selects on it.
@@ -1054,6 +1057,7 @@ impl FrontendSurfaceComponent {
             input_values: self.input_values.clone(),
             input_preedits: self.input_preedits.clone(),
             checked_values: self.checked_values.clone(),
+            expanded_triggers: self.expanded_triggers.clone(),
             slider_values: self.slider_values.clone(),
             slider_script_values: self.slider_script_values.clone(),
             shortcuts_generation: self.shortcuts_generation(),
@@ -1073,6 +1077,7 @@ impl FrontendSurfaceComponent {
             && inputs.input_values == self.input_values
             && inputs.input_preedits == self.input_preedits
             && inputs.checked_values == self.checked_values
+            && inputs.expanded_triggers == self.expanded_triggers
             && inputs.slider_values == self.slider_values
             && inputs.slider_script_values == self.slider_script_values
             && inputs.shortcuts_generation == self.shortcuts_generation()
@@ -1150,6 +1155,14 @@ impl FrontendSurfaceComponent {
                     changed_ids.insert(*node_id);
                 }
             }
+        }
+
+        if dependencies.contains(mesh_core_elements::PseudoState::Expanded) {
+            changed_ids.extend(
+                self.previous_expanded_triggers
+                    .symmetric_difference(&self.expanded_triggers)
+                    .copied(),
+            );
         }
 
         // A moved slider knob repaints even when no pseudo-state changed, so

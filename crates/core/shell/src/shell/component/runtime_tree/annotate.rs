@@ -124,6 +124,7 @@ pub(in crate::shell::component) struct RuntimeAnnotationContext<'a> {
     pub(super) slider_values: &'a mut HashMap<NodeId, f32>,
     pub(super) slider_script_values: &'a mut HashMap<NodeId, f32>,
     pub(super) checked_values: &'a HashMap<NodeId, bool>,
+    pub(super) expanded_triggers: Option<&'a HashSet<NodeId>>,
     pub(super) scroll_offsets: &'a mut HashMap<NodeId, ScrollOffsetState>,
     pub(super) window: WindowSurfaceState,
     pub(super) promoted_windows: Option<&'a HashSet<String>>,
@@ -157,6 +158,7 @@ impl<'a> RuntimeAnnotationContext<'a> {
             slider_values,
             slider_script_values,
             checked_values,
+            expanded_triggers: None,
             scroll_offsets,
             window: WindowSurfaceState::default(),
             shortcuts: None,
@@ -174,6 +176,14 @@ impl<'a> RuntimeAnnotationContext<'a> {
         keys: &'a HashSet<String>,
     ) -> Self {
         self.promoted_windows = Some(keys);
+        self
+    }
+
+    pub(in crate::shell::component) fn with_expanded_triggers(
+        mut self,
+        ids: &'a HashSet<NodeId>,
+    ) -> Self {
+        self.expanded_triggers = Some(ids);
         self
     }
 
@@ -287,6 +297,10 @@ pub(super) fn annotate_runtime_tree_inner(
         || node.state.window != context.window
         || matches!(node.tag.as_str(), "input" | "slider")
         || context.checked_values.contains_key(&node_id)
+        || (node.state.expanded
+            || context
+                .expanded_triggers
+                .is_some_and(|ids| ids.contains(&node_id)))
         || context.input_values.contains_key(&node_id)
         || node.attributes.contains_key("keybind")
         || context
@@ -351,6 +365,12 @@ pub(super) fn annotate_runtime_tree_inner(
         };
         // Runtime widget state is authoritative over the authored fallback.
         mesh_core_elements::PseudoState::Checked.set_value(&mut node.state, checked);
+        if context
+            .expanded_triggers
+            .is_some_and(|ids| ids.contains(&node_id))
+        {
+            node.state.expanded = true;
+        }
         if node.state.hovered {
             tracing::trace!(
                 "[hover] annotate: key={key} tag={} set hovered=true",
@@ -571,6 +591,7 @@ pub(in crate::shell::component) struct RuntimeAnnotationInputs {
     pub(in crate::shell::component) input_values: HashMap<NodeId, String>,
     pub(in crate::shell::component) input_preedits: HashMap<NodeId, TextPreeditState>,
     pub(in crate::shell::component) checked_values: HashMap<NodeId, bool>,
+    pub(in crate::shell::component) expanded_triggers: HashSet<NodeId>,
     pub(in crate::shell::component) slider_values: HashMap<NodeId, f32>,
     pub(in crate::shell::component) slider_script_values: HashMap<NodeId, f32>,
     pub(in crate::shell::component) shortcuts_generation: Option<u64>,

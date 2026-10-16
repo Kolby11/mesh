@@ -237,7 +237,8 @@ fn shipped_theme_selector_buttons_accept_first_entering_frame_clicks() {
             .is_some_and(|class| class.contains("mesh-surface-entering")),
         "test must click during the controlled entering frame"
     );
-    let dark = first_node_with_attr(tree, "aria-label", "Default Dark").expect("dark theme button");
+    let dark =
+        first_node_with_attr(tree, "aria-label", "MESH Default").expect("default theme button");
     let click_x = dark.layout.x + dark.layout.width * 0.5;
     let click_y = dark.layout.y + dark.layout.height * 0.5;
 
@@ -275,7 +276,7 @@ fn shipped_theme_selector_buttons_accept_first_entering_frame_clicks() {
                 if interface == "mesh.theme"
                     && command == "set_theme"
                     && payload.get("theme_id")
-                        == Some(&serde_json::json!("mesh-default-dark"))
+                        == Some(&serde_json::json!("mesh-default"))
         )),
         "first entering-frame click should reach the theme handler: {requests:?}"
     );
@@ -316,12 +317,7 @@ fn shipped_language_popover_cycles_three_bubble_options_on_scroll() {
         )
         .unwrap();
 
-    component
-        .call_namespaced_handler(
-            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageEnter",
-            &[],
-        )
-        .unwrap();
+    hover_ref(&mut component, &theme, width, height, "languageButton");
     component
         .paint(
             &theme,
@@ -484,12 +480,7 @@ fn shipped_language_popover_rotates_on_two_finger_trackpad_scroll() {
             1.0,
         )
         .unwrap();
-    component
-        .call_namespaced_handler(
-            "__mesh_embed__::@mesh/navigation-bar/slot:end/default-3::onLanguageEnter",
-            &[],
-        )
-        .unwrap();
+    hover_ref(&mut component, &theme, width, height, "languageButton");
     component
         .paint(
             &theme,

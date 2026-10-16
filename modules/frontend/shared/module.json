@@ -4,7 +4,7 @@
   "description": "Reusable bubble option picker component.",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "component",
+    "kind": "ui",
     "uses": {
       "resources": {
         "icons": [

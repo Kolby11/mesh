@@ -2,11 +2,11 @@ use super::super::*;
 use super::common::*;
 
 #[test]
-fn graph_diagnostics_report_frontend_surface_contract_gaps() {
-    let root = root_with_modules(&[("@mesh/surface", ModuleKind::Frontend)], &[], None);
+fn graph_diagnostics_report_surface_accessibility_gaps() {
+    let root = root_with_modules(&[("@mesh/surface", ModuleKind::Ui)], &[], None);
     let mut frontend = loaded_module(
         "@mesh/surface",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes::default(),
@@ -15,11 +15,6 @@ fn graph_diagnostics_report_frontend_surface_contract_gaps() {
 
     let graph = InstalledModuleGraph::from_parts(root, vec![frontend]).unwrap();
 
-    assert!(graph.diagnostics().iter().any(|diagnostic| {
-        diagnostic.module_id == "@mesh/surface"
-            && diagnostic.status == "missing_frontend_surface_layout"
-            && diagnostic.message.contains("mesh.surface")
-    }));
     assert!(graph.diagnostics().iter().any(|diagnostic| {
         diagnostic.module_id == "@mesh/surface"
             && diagnostic.status == "missing_frontend_accessibility"
@@ -31,10 +26,10 @@ fn graph_diagnostics_report_frontend_surface_contract_gaps() {
 fn graph_diagnostics_reject_layer_placement_on_a_window_surface() {
     // A window is placed by the compositor, so layer-only fields on one are a
     // contradiction in the manifest, not fields to quietly drop.
-    let root = root_with_modules(&[("@mesh/window", ModuleKind::Frontend)], &[], None);
+    let root = root_with_modules(&[("@mesh/window", ModuleKind::Ui)], &[], None);
     let mut frontend = loaded_module(
         "@mesh/window",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes::default(),
@@ -64,10 +59,10 @@ fn graph_diagnostics_reject_layer_placement_on_a_window_surface() {
 
 #[test]
 fn graph_diagnostics_reject_window_fields_on_a_layer_surface() {
-    let root = root_with_modules(&[("@mesh/panel", ModuleKind::Frontend)], &[], None);
+    let root = root_with_modules(&[("@mesh/panel", ModuleKind::Ui)], &[], None);
     let mut frontend = loaded_module(
         "@mesh/panel",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes::default(),
@@ -97,10 +92,10 @@ fn graph_diagnostics_reject_window_fields_on_a_layer_surface() {
 
 #[test]
 fn graph_diagnostics_accept_a_well_formed_window_surface() {
-    let root = root_with_modules(&[("@mesh/window", ModuleKind::Frontend)], &[], None);
+    let root = root_with_modules(&[("@mesh/window", ModuleKind::Ui)], &[], None);
     let mut frontend = loaded_module(
         "@mesh/window",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes::default(),
@@ -131,10 +126,10 @@ fn graph_diagnostics_accept_both_roles_fields_on_a_promotable_surface() {
     // points in its life, so declaring both sets is the only way to describe it.
     // This is the one exemption from the role-mismatch rule, and it is explicit:
     // without `promotable`, the same manifest is still a contradiction.
-    let root = root_with_modules(&[("@mesh/settings", ModuleKind::Frontend)], &[], None);
+    let root = root_with_modules(&[("@mesh/settings", ModuleKind::Ui)], &[], None);
     let mut frontend = loaded_module(
         "@mesh/settings",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes::default(),
@@ -164,7 +159,7 @@ fn graph_diagnostics_accept_both_roles_fields_on_a_promotable_surface() {
     );
 
     // The exemption is the flag, not the field combination.
-    let root = root_with_modules(&[("@mesh/settings", ModuleKind::Frontend)], &[], None);
+    let root = root_with_modules(&[("@mesh/settings", ModuleKind::Ui)], &[], None);
     frontend.manifest.mesh.surface_layout = Some(crate::manifest::SurfaceLayoutSection {
         promotable: None,
         ..both_roles
@@ -221,10 +216,10 @@ fn graph_diagnostics_validate_each_surface_enum_with_canonical_values() {
     ];
 
     for (field, layout) in cases {
-        let root = root_with_modules(&[("@mesh/surface", ModuleKind::Frontend)], &[], None);
+        let root = root_with_modules(&[("@mesh/surface", ModuleKind::Ui)], &[], None);
         let mut frontend = loaded_module(
             "@mesh/surface",
-            ModuleKind::Frontend,
+            ModuleKind::Ui,
             MeshDependencies::default(),
             vec![],
             MeshContributes::default(),
@@ -250,10 +245,10 @@ fn graph_diagnostics_validate_each_surface_enum_with_canonical_values() {
 
 #[test]
 fn graph_diagnostics_use_the_canonical_role_parser_for_aliases() {
-    let root = root_with_modules(&[("@mesh/window", ModuleKind::Frontend)], &[], None);
+    let root = root_with_modules(&[("@mesh/window", ModuleKind::Ui)], &[], None);
     let mut frontend = loaded_module(
         "@mesh/window",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes::default(),

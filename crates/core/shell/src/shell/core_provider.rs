@@ -141,7 +141,7 @@ impl CoreServiceRegistry {
     }
 }
 
-const DEBUG_COMMANDS: [CoreServiceCommand; 7] = [
+const DEBUG_COMMANDS: [CoreServiceCommand; 6] = [
     CoreServiceCommand {
         name: "toggle_overlay",
         translate: |_| Some(CoreRequest::ToggleDebugOverlay),
@@ -165,10 +165,6 @@ const DEBUG_COMMANDS: [CoreServiceCommand; 7] = [
     CoreServiceCommand {
         name: "run_benchmark",
         translate: translate_run_debug_benchmark,
-    },
-    CoreServiceCommand {
-        name: "cycle_tab",
-        translate: |_| Some(CoreRequest::CycleDebugTab),
     },
 ];
 

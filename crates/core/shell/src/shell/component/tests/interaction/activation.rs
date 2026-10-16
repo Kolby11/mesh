@@ -903,3 +903,50 @@ end
     assert!(component.focus_visible_key.is_none());
     assert_eq!(runtime_number(&component, "keydown_count"), 0.0);
 }
+
+#[test]
+fn pointer_dispatch_runs_private_inline_function_with_real_event() {
+    let mut component = test_frontend_component(
+        r#"
+<template><button class="callback" onclick={function(event) choose({ value = 7 }, event) end}>Pick</button></template>
+<style>.callback { width: 80px; height: 28px; }</style>
+<script lang="luau">
+selected = 0
+button = 0
+local function choose(value, event) selected = value.value; button = event.pointer.button end
+</script>"#,
+    );
+    let theme = default_theme();
+    let mut buffer = mesh_core_render::PixelBuffer::new(160, 80);
+    component
+        .paint(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+        .unwrap();
+    let node = first_node_by_class(component.last_tree.as_ref().unwrap(), "callback").unwrap();
+    let x = node.layout.x + node.layout.width / 2.0;
+    let y = node.layout.y + node.layout.height / 2.0;
+    for pressed in [true, false] {
+        component
+            .handle_input(
+                &theme,
+                160,
+                80,
+                ComponentInput::PointerButton {
+                    x,
+                    y,
+                    button: mesh_core_presentation::PRIMARY_POINTER_BUTTON,
+                    pressed,
+                },
+            )
+            .unwrap();
+    }
+    assert_eq!(
+        runtime_value(&component, "selected"),
+        Some(serde_json::json!(7))
+    );
+    assert_eq!(
+        runtime_value(&component, "button"),
+        Some(serde_json::json!(
+            mesh_core_presentation::PRIMARY_POINTER_BUTTON
+        ))
+    );
+}

@@ -19,7 +19,8 @@
               "color_scheme": "dark",
               "contrast": "normal"
             }
-          }
+          },
+          "tokenContract": "1.0"
         }
       ]
     }

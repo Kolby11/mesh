@@ -315,62 +315,6 @@ pub(crate) fn realm_await_function(lua: &mlua::Lua) -> mlua::Result<Function> {
     Ok(await_fn)
 }
 
-const HOVER_INTENT_FACTORY_KEY: &str = "__mesh_hover_intent_factory";
-
-/// `mesh.ui.hover_intent(on_close, options?)`: one close timer shared by a
-/// trigger and the popup it opens. `leave()` schedules `on_close` after the
-/// platform hover delay (or `options.delay` ms); `enter()` cancels it. A
-/// trigger forwards its popup's enter/leave to the same intent, so returning
-/// to either side keeps the popover open and no popup runs a timer of its
-/// own. Built over the instance's own `task.delay`, so the timer belongs to
-/// that instance's scheduler and budget. Compiled once per realm.
-fn realm_hover_intent_factory(lua: &mlua::Lua) -> mlua::Result<Function> {
-    if let Some(factory) = lua.named_registry_value::<Option<Function>>(HOVER_INTENT_FACTORY_KEY)? {
-        return Ok(factory);
-    }
-    let factory = lua
-        .load(
-            r#"
-            return function(delay_task, default_delay)
-                return function(on_close, options)
-                    if type(on_close) ~= "function" then
-                        error("mesh.ui.hover_intent expects a close function", 2)
-                    end
-                    local delay = default_delay
-                    if options ~= nil and options.delay ~= nil then
-                        delay = options.delay
-                    end
-                    local pending = nil
-                    local intent = {}
-                    local function cancel()
-                        if pending ~= nil then
-                            pending:cancel()
-                            pending = nil
-                        end
-                    end
-                    intent.enter = cancel
-                    intent.cancel = cancel
-                    function intent.leave()
-                        cancel()
-                        pending = delay_task(delay, function()
-                            pending = nil
-                            on_close()
-                        end)
-                    end
-                    function intent.pending()
-                        return pending ~= nil
-                    end
-                    return intent
-                end
-            end
-            "#,
-        )
-        .set_name("=mesh.ui.hover_intent")
-        .call::<Function>(())?;
-    lua.set_named_registry_value(HOVER_INTENT_FACTORY_KEY, &factory)?;
-    Ok(factory)
-}
-
 pub(crate) fn create_task_library(
     lua: &mlua::Lua,
     shared_queue: &SharedTaskQueue,
@@ -427,25 +371,9 @@ pub(crate) fn create_task_library(
 }
 
 impl ScriptContext {
-    pub(super) fn install_task_api(
-        &mut self,
-        globals: &Table,
-        mesh_ui: &Table,
-    ) -> Result<(), ScriptError> {
+    pub(super) fn install_task_api(&mut self, globals: &Table) -> Result<(), ScriptError> {
         let lua = self.lua().clone();
         let task = create_task_library(&lua, &self.tasks).map_err(lua_err)?;
-
-        let delay: Function = task.get("delay").map_err(lua_err)?;
-        let hover_intent = realm_hover_intent_factory(&lua)
-            .and_then(|factory| {
-                factory.call::<Function>((
-                    delay,
-                    mesh_core_elements::HOVER_INTENT_CLOSE_DELAY.as_millis() as u64,
-                ))
-            })
-            .map_err(lua_err)?;
-        mesh_ui.set("hover_intent", hover_intent).map_err(lua_err)?;
-
         globals.set("task", task).map_err(lua_err)
     }
 

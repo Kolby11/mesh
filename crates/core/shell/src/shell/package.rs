@@ -577,7 +577,7 @@ impl Shell {
                     Ok(VecDeque::new())
                 }
             }
-            ModuleKind::Frontend => {
+            ModuleKind::Ui if manifest.mesh.has_default_placement() => {
                 let Some(profile_id) = selected_profile else {
                     let graph = package_try!(
                         self.load_installed_module_graph_cached()

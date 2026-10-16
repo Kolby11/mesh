@@ -98,7 +98,17 @@ pub(super) fn build_component_ref(
     };
     let mut prop_handler_calls = BTreeMap::new();
     for attr in &component.props {
-        if let AttributeValue::EventHandler(handler) = &attr.value {
+        if let AttributeValue::EventHandlerExpression { .. } = &attr.value {
+            if let Some(call) = parsed_handler_calls.get(&normalize_event_handler_name(&attr.name))
+            {
+                let mut call = call.clone();
+                call.handler.namespace(host_instance_key);
+                composition_props
+                    .callbacks
+                    .insert(AttrKey::new(&attr.name), call.handler.clone());
+                prop_handler_calls.insert(attr.name.clone(), call);
+            }
+        } else if let AttributeValue::EventHandler(handler) = &attr.value {
             let mut target =
                 HandlerTarget::from_legacy_serialized(resolve_event_handler_value(state, handler));
             target.namespace(host_instance_key);
@@ -323,6 +333,41 @@ pub(super) fn parse_attributes_runtime(
                 resolved.insert_value(AttrKey::new(&attr.name), value);
             }
             AttributeValue::InstanceBinding(_) => {}
+            AttributeValue::EventHandlerExpression {
+                source,
+                expression,
+                call_binding,
+            } => {
+                let mut locals = state
+                    .map(VariableStore::template_locals)
+                    .unwrap_or_default();
+                locals.retain(|name, _| expression.referenced_identifiers().contains(name));
+                let target = if let Some(composition) = composition {
+                    composition.bind_handler_expression(
+                        instance_key,
+                        expression,
+                        &locals,
+                        source,
+                        *call_binding,
+                    )
+                } else {
+                    Some(HandlerTarget::root(source))
+                };
+                if let Some(mut target) = target {
+                    if namespace_handlers {
+                        target.namespace(instance_key);
+                    }
+                    let name = normalize_event_handler_name(&attr.name);
+                    event_handlers.insert(name.clone(), target.clone());
+                    event_handler_calls.insert(
+                        name,
+                        EventHandlerCall {
+                            handler: target,
+                            args: Vec::new(),
+                        },
+                    );
+                }
+            }
             AttributeValue::EventHandler(handler) => {
                 let resolved_handler = resolve_event_handler_value(state, handler);
                 event_handlers.insert(

@@ -330,3 +330,47 @@ end
         "the child's fire ran the parent's closure, so the parent's reactive state must resync"
     );
 }
+
+#[test]
+fn function_callback_props_are_callable_by_child_and_resync_parent() {
+    let mut component = bind_live_surface(
+        r#"<template><Child onChoose={choose} /></template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+selected = ""
+local function choose(value) selected = value.id; return value.id end
+</script>"#,
+        r#"<template><button onclick={function() result = onChoose({ id = "chosen" }) end} /></template>
+<script lang="luau">result = ""</script>"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 40);
+    component
+        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
+    fn handler(node: &WidgetNode) -> Option<mesh_core_elements::HandlerTarget> {
+        node.event_handlers
+            .get("click")
+            .cloned()
+            .or_else(|| node.children.iter().find_map(handler))
+    }
+    let callback = handler(component.last_tree.as_ref().unwrap()).unwrap();
+    assert!(matches!(
+        callback,
+        mesh_core_elements::HandlerTarget::Function { .. }
+    ));
+    component.call_handler_target(&callback, &[]).unwrap();
+    assert_eq!(
+        runtime_value(&component, "selected"),
+        Some(serde_json::json!("chosen"))
+    );
+    assert_eq!(
+        child_runtime_value(&component, "result"),
+        Some(serde_json::json!("chosen"))
+    );
+    let callbacks = component.component_callbacks.borrow();
+    assert_eq!(
+        callbacks.values().map(|values| values.len()).sum::<usize>(),
+        1
+    );
+}

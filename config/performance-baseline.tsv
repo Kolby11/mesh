@@ -63,3 +63,7 @@ runtime_style_diagnostic_generation_speedup lower      1.20      5
 affected_template_eval_speedup           lower      6.00      25
 retained_single_fingerprint_speedup      lower      1.05      0
 unchanged_effect_inputs_speedup          lower      2.00      0
+shared_theme_alias_resolution_speedup     lower      2.00      0
+typed_theme_scalar_reads_speedup          lower      1.20      0
+typed_literal_operation_dispatch_speedup lower      1.05      0
+structural_selector_bucket_speedup       lower      4.00      0

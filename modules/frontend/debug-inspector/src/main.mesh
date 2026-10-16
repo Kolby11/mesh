@@ -1,6 +1,6 @@
 <template>
     <dialog class="inspector-shell" aria-label="Debug Inspector">
-        <column class="inspector-root">
+        <column class="inspector-root" keybind="next-view" onkeybind={showNextView}>
             <row class="inspector-header">
                 <button
                     class="inspect-trigger"
@@ -127,7 +127,7 @@ local ViewTabs = require("./components/view-tabs.mesh")
 local debug_service = require("mesh.debug")
 
 active_view = "overview"
-last_service_active_view = ""
+local VIEW_ORDER = { "overview", "elements", "modules", "surfaces", "backend_services", "benchmark" }
 session_status = "Debug overlay connected"
 profiling_badge = "Idle"
 profiling_copy = "Profiling stays off until you explicitly start it."
@@ -195,28 +195,6 @@ local function count_list(value)
 end
 
 local function sync_view_state()
-end
-
-local function service_view_id(value)
-    local view = tostring(value or "")
-    if
-        view == "overview"
-        or view == "modules"
-        or view == "surfaces"
-        or view == "backend_services"
-        or view == "benchmark"
-    then
-        return view
-    end
-    return nil
-end
-
-local function sync_service_active_view()
-    local service_view = service_view_id(debug_service and debug_service.active_view)
-    if service_view ~= nil and service_view ~= last_service_active_view then
-        active_view = service_view
-        last_service_active_view = service_view
-    end
 end
 
 local function sync_overview_state_flags()
@@ -785,6 +763,18 @@ function showBenchmark()
     sync_view_state()
 end
 
+function showNextView()
+    local next_index = 1
+    for index, view in VIEW_ORDER do
+        if view == active_view then
+            next_index = index % #VIEW_ORDER + 1
+            break
+        end
+    end
+    active_view = VIEW_ORDER[next_index]
+    sync_view_state()
+end
+
 function onCloseInspector()
     debug_service.toggle_overlay()
 end
@@ -957,7 +947,6 @@ effect(function()
     local profiling = debug_service.profiling
     local surface_samples = nil
     local backend_samples = nil
-    sync_service_active_view()
     if debug_service.element_picker_enabled then
         active_view = "elements"
     end

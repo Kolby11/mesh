@@ -195,16 +195,6 @@ fn bounds_escape_container(bounds: (f32, f32, f32, f32), container: (f32, f32, f
         || bounds.3 > container.3
 }
 
-pub(super) fn popover_anchor_reference(popover: &WidgetNode) -> Option<&str> {
-    for name in ["anchor-ref", "anchor-target", "anchor-element", "target"] {
-        if let Some(value) = non_empty_attr(popover, name) {
-            return Some(value);
-        }
-    }
-
-    None
-}
-
 fn popover_anchor_attribute_value(popover: &WidgetNode) -> Option<&str> {
     for name in ["anchor-ref", "anchor-target", "anchor-element", "target"] {
         if let Some(value) = popover.attributes.get(name) {
@@ -233,20 +223,7 @@ pub(super) fn find_node_bounds_by_reference(
     // far off-screen. Transient CSS transforms (a trigger's hover/focus translate
     // bounce) are intentionally ignored so a promoted popup anchors to the trigger's
     // stable layout box and does not jitter with the 1px decorative offset.
-    if node.mesh_key().is_some_and(|key| key == reference)
-        || node
-            .attributes
-            .get("ref")
-            .is_some_and(|value| value == reference)
-        || node
-            .attributes
-            .get("id")
-            .is_some_and(|value| value == reference)
-        || node
-            .attributes
-            .get("bind:this")
-            .is_some_and(|value| value == reference)
-    {
+    if node_matches_reference(node, reference) {
         return Some((
             node.layout.x + offset_x,
             node.layout.y + offset_y,
@@ -268,13 +245,6 @@ pub(super) fn find_node_bounds_by_reference(
         }
     }
     None
-}
-
-pub(super) fn popover_is_open(node: &WidgetNode) -> bool {
-    node.attributes.get("open").is_some_and(|value| {
-        let value = value.trim().to_ascii_lowercase();
-        !matches!(value.as_str(), "" | "false" | "0" | "none")
-    })
 }
 
 pub(super) fn bounds_to_i32_rect(bounds: (f32, f32, f32, f32)) -> (i32, i32, i32, i32) {

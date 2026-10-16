@@ -97,6 +97,12 @@ popover (`options.focus`), the shell records return focus as
 `(trigger_surface, trigger_key)`, closes on focus leave, and restores focus
 on dismiss. Modules never maintain durable focus state themselves.
 
+A `<popover open-on="hover|click">` trigger opens its popup with `ArrowDown`,
+and with the button activation keys when the trigger has no `onclick` of its
+own; focus then moves into the popup. `Escape` on the trigger or inside the
+popup closes it and returns focus to the trigger, and `Tab` out of both closes
+it ([elements guide](../frontend/elements.md#popover-disclosure)).
+
 ## 4. Settings shapes
 
 All keyboard user configuration lives in the settings store

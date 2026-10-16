@@ -187,7 +187,102 @@ impl FrontendSurfaceComponent {
         result
     }
 
+    /// Run the popover disclosure controller around ordinary input dispatch:
+    /// presses and keys it consumes or observes first, hover-path changes
+    /// after the path has been updated.
     fn handle_component_input_with_tree(
+        &mut self,
+        tree: &WidgetNode,
+        input: ComponentInput,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        if !self.disclosures.has_entries() {
+            return self.dispatch_component_input_with_tree(tree, input);
+        }
+        let primary = mesh_core_presentation::PRIMARY_POINTER_BUTTON;
+        let mut requests = Vec::new();
+        let mut moved_focus = false;
+        match &input {
+            ComponentInput::PointerButton {
+                button,
+                pressed: true,
+                ..
+            } if *button == primary => {
+                requests.extend(self.disclosure_pointer_pressed(tree)?);
+            }
+            ComponentInput::KeyPressed { key, modifiers } if !modifiers.ctrl && !modifiers.alt => {
+                if key == "Escape" {
+                    if let Some(escape) = self.disclosure_escape(tree)? {
+                        self.clear_selection();
+                        self.invalidate_interaction_restyle();
+                        return Ok(escape);
+                    }
+                } else if key == "Tab" {
+                    moved_focus = true;
+                } else if let Some(focused_key) = self.normalized_focused_key(tree) {
+                    let activation = Self::key_matches_any_binding(
+                        key,
+                        &self.current_keyboard_settings().button_activation_keys,
+                    );
+                    if let Some(toggled) =
+                        self.disclosure_trigger_key(tree, &focused_key, key, activation)?
+                    {
+                        if activation {
+                            self.disclosures.record_key_press(&focused_key, key);
+                        }
+                        self.invalidate_interaction_restyle();
+                        return Ok(toggled);
+                    }
+                }
+            }
+            ComponentInput::KeyReleased { key, modifiers }
+                if !modifiers.ctrl
+                    && !modifiers.alt
+                    && Self::key_matches_any_binding(
+                        key,
+                        &self.current_keyboard_settings().button_activation_keys,
+                    ) =>
+            {
+                // Like buttons, a trigger activates on release only when its
+                // press was not already handled.
+                if let Some(focused_key) = self.normalized_focused_key(tree) {
+                    if self.disclosures.take_key_press(&focused_key, key) {
+                        return Ok(Vec::new());
+                    }
+                    if let Some(toggled) =
+                        self.disclosure_trigger_key(tree, &focused_key, key, true)?
+                    {
+                        self.invalidate_interaction_restyle();
+                        return Ok(toggled);
+                    }
+                }
+            }
+            _ => {}
+        }
+        let hover_input = matches!(
+            input,
+            ComponentInput::PointerMove { .. } | ComponentInput::PointerLeave
+        );
+        let released = matches!(
+            input,
+            ComponentInput::PointerButton { button, pressed: false, .. } if button == primary
+        );
+        let previous_path = hover_input.then(|| self.hovered_event_path.clone());
+        requests.extend(self.dispatch_component_input_with_tree(tree, input)?);
+        if released {
+            self.disclosure_pointer_released();
+        }
+        if let Some(previous_path) = previous_path
+            && previous_path != self.hovered_event_path
+        {
+            requests.extend(self.update_disclosure_hover(tree, &previous_path)?);
+        }
+        if moved_focus {
+            requests.extend(self.disclosure_focus_moved(tree)?);
+        }
+        Ok(requests)
+    }
+
+    fn dispatch_component_input_with_tree(
         &mut self,
         tree: &WidgetNode,
         input: ComponentInput,
@@ -532,7 +627,10 @@ impl FrontendSurfaceComponent {
                 );
                 if new_key != self.hovered_key || new_path != self.hovered_path {
                     let previous_tooltip = self.hovered_tooltip.clone();
-                    let next_tooltip = pointer_hit.as_ref().and_then(|hit| hit.tooltip.clone());
+                    let next_tooltip = pointer_hit
+                        .as_ref()
+                        .and_then(|hit| hit.tooltip.clone())
+                        .filter(|(owner, _)| !self.disclosures.suppresses_tooltip(owner));
                     let tooltip_may_change = previous_tooltip.is_some()
                         || next_tooltip.is_some()
                         || self.tooltip_visible

@@ -1,5 +1,9 @@
 use super::attrs::StyleNodeAttrs;
+use super::cache::CachedThemeTokenValue;
 use super::index::*;
+use super::literal::{
+    CachedLiteral, LiteralCache, LiteralProperty, TypedLiteralOperation, apply_typed_literal,
+};
 use super::matching::*;
 use super::value::split_reference;
 use super::{ResolutionContext, StyleResolver};
@@ -354,6 +358,46 @@ impl<'a> StyleResolver<'a> {
         self.apply_indexed_declaration_with_mask(style, decl, diagnostics, variables, None);
     }
 
+    fn indexed_literal(
+        &self,
+        decl: &IndexedDeclaration,
+        property: Option<LiteralProperty>,
+        variables: &HashMap<String, StyleValue>,
+    ) -> Option<TypedLiteralOperation> {
+        if let LiteralCache::Static(operation) = &decl.literal {
+            return Some(*operation);
+        }
+        let property = property?;
+        let StyleValue::Var(reference) = &decl.value else {
+            return None;
+        };
+        let (reference, fallback) = split_reference(reference);
+        let reference = reference.trim();
+        // Node/prop overrides must be ruled out before reusing a theme assignment.
+        if fallback.is_some() || self.lookup_variable(variables, reference).is_some() {
+            return None;
+        }
+        let revision = self.theme.revision();
+        if let Some(CachedLiteral::Theme {
+            revision: cached_revision,
+            operation,
+        }) = decl.literal.get()
+            && cached_revision == revision
+        {
+            return Some(operation);
+        }
+        let operation = match self.cached_theme_token_value(reference) {
+            CachedThemeTokenValue::String(value) => property.lower(&value),
+            CachedThemeTokenValue::Number(value) => property.lower_number(value),
+            CachedThemeTokenValue::Bool(value) => {
+                property.lower(if value { "true" } else { "false" })
+            }
+            CachedThemeTokenValue::Missing | CachedThemeTokenValue::Error(_) => None,
+        }?;
+        decl.literal.cache_theme(revision, operation);
+        Some(operation)
+    }
+
     pub(super) fn apply_indexed_declaration_with_mask(
         &self,
         style: &mut ComputedStyle,
@@ -373,11 +417,11 @@ impl<'a> StyleResolver<'a> {
                 name,
                 strict_animation,
                 background_image,
+                literal_property,
             } => {
                 let mut context = ResolutionContext::default();
-                if let Some(literal) = decl.literal
-                    && apply_typed_literal(style, name, literal)
-                {
+                if let Some(literal) = self.indexed_literal(decl, *literal_property, variables) {
+                    apply_typed_literal(style, literal);
                     style.explicit_properties.mark_property(name);
                     if let Some(explicit_properties) = explicit_properties.as_deref_mut() {
                         explicit_properties.mark_property(name);

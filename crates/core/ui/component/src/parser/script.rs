@@ -170,7 +170,7 @@ fn parse_ast(source: &str) -> full_moon::ast::Ast {
     on_parser_stack(|| full_moon::parse_fallible(source, LuaVersion::new()).into_ast())
 }
 
-fn on_parser_stack<T: Send>(work: impl FnOnce() -> T + Send) -> T {
+pub(super) fn on_parser_stack<T: Send>(work: impl FnOnce() -> T + Send) -> T {
     std::thread::scope(|scope| {
         std::thread::Builder::new()
             .stack_size(PARSER_STACK_BYTES)
@@ -188,6 +188,7 @@ struct RequireImport {
 
 #[derive(Default)]
 struct ScriptVisitor {
+    block_depth: usize,
     metadata: ScriptMetadata,
     require_imports: Vec<RequireImport>,
     invalid_require_span: Option<SourceSpan>,
@@ -195,6 +196,12 @@ struct ScriptVisitor {
 }
 
 impl Visitor for ScriptVisitor {
+    fn visit_block(&mut self, _: &full_moon::ast::Block) {
+        self.block_depth += 1;
+    }
+    fn visit_block_end(&mut self, _: &full_moon::ast::Block) {
+        self.block_depth -= 1;
+    }
     fn visit_assignment(&mut self, assignment: &Assignment) {
         if assignment.variables().len() == 1 {
             if let Some(Var::Name(name)) = assignment.variables().iter().next() {
@@ -208,6 +215,11 @@ impl Visitor for ScriptVisitor {
     }
 
     fn visit_local_assignment(&mut self, assignment: &LocalAssignment) {
+        if self.block_depth == 1 {
+            for name in assignment.names().iter().filter_map(identifier) {
+                push_unique(&mut self.metadata.lexical_bindings, name.to_string());
+            }
+        }
         self.visit_alias_assignment(assignment.names(), assignment.expressions());
 
         let Some(name) = assignment.names().iter().next() else {
@@ -299,6 +311,11 @@ impl Visitor for ScriptVisitor {
     }
 
     fn visit_local_function(&mut self, function: &LocalFunction) {
+        if self.block_depth == 1
+            && let Some(name) = identifier(function.name())
+        {
+            push_unique(&mut self.metadata.lexical_bindings, name.to_string());
+        }
         let Some(name_text) = identifier(function.name()) else {
             return;
         };
@@ -313,6 +330,15 @@ impl Visitor for ScriptVisitor {
         let Some((callee, arguments)) = call_info(call) else {
             return;
         };
+        if let Some(token) = first_string_argument_token(arguments)
+            && let Ok(argument) = super::luau_literal::string(token)
+        {
+            self.metadata.string_calls.push(crate::ScriptStringCall {
+                callee: callee.clone(),
+                argument,
+                span: token_span(token),
+            });
+        }
         if let Some(subscription) = interface_event_subscription(&callee) {
             push_unique_pair(&mut self.interface_event_subscriptions, subscription);
         }
@@ -498,6 +524,39 @@ fn call_info(call: &FunctionCall) -> Option<(String, &FunctionArgs)> {
     }
 
     None
+}
+
+pub(crate) fn string_calls_in_expression(source: &str) -> Vec<crate::ScriptStringCall> {
+    const PREFIX: &str = "return ";
+    let mut calls = parse_script_for_tooling(&format!("{PREFIX}{source}"))
+        .metadata
+        .string_calls;
+    for call in &mut calls {
+        call.span.start = call.span.start.saturating_sub(PREFIX.len());
+        call.span.end = call.span.end.saturating_sub(PREFIX.len());
+    }
+    calls
+}
+
+fn first_string_argument_token(arguments: &FunctionArgs) -> Option<&TokenReference> {
+    match arguments {
+        FunctionArgs::String(token) => Some(token),
+        FunctionArgs::Parentheses { arguments, .. } => {
+            let mut expression = arguments.iter().next()?;
+            while let Expression::Parentheses {
+                expression: inner, ..
+            } = expression
+            {
+                expression = inner;
+            }
+            if let Expression::String(token) = expression {
+                Some(token)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
 }
 
 fn string_arguments(arguments: &FunctionArgs) -> impl Iterator<Item = String> + '_ {

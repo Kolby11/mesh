@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 #[test]
 fn trust_policy_blocks_untrusted_modules_before_activation() {
-    let mut root = root_with_modules(&[("@me/local", ModuleKind::Frontend)], &[], None);
+    let mut root = root_with_modules(&[("@me/local", ModuleKind::Ui)], &[], None);
     root.trust_policy = TrustPolicy {
         minimum: TrustTier::Verified,
         ..Default::default()
@@ -14,7 +14,7 @@ fn trust_policy_blocks_untrusted_modules_before_activation() {
         root,
         vec![loaded_module(
             "@me/local",
-            ModuleKind::Frontend,
+            ModuleKind::Ui,
             MeshDependencies::default(),
             vec![],
             MeshContributes::default(),
@@ -32,7 +32,7 @@ fn trust_policy_blocks_untrusted_modules_before_activation() {
 fn graph_diff_reports_inventory_activation_and_provider_changes() {
     let before_root = root_with_modules(
         &[
-            ("@mesh/front", ModuleKind::Frontend),
+            ("@mesh/front", ModuleKind::Ui),
             ("@mesh/back", ModuleKind::Backend),
         ],
         &[("mesh.audio", "@mesh/back")],
@@ -41,7 +41,7 @@ fn graph_diff_reports_inventory_activation_and_provider_changes() {
     let before_modules = vec![
         loaded_module(
             "@mesh/front",
-            ModuleKind::Frontend,
+            ModuleKind::Ui,
             MeshDependencies::default(),
             vec![],
             MeshContributes::default(),
@@ -65,7 +65,7 @@ fn graph_diff_reports_inventory_activation_and_provider_changes() {
 
     let mut after_root = root_with_modules(
         &[
-            ("@mesh/front", ModuleKind::Frontend),
+            ("@mesh/front", ModuleKind::Ui),
             ("@mesh/back", ModuleKind::Backend),
             ("@mesh/extra", ModuleKind::Backend),
         ],
@@ -76,7 +76,7 @@ fn graph_diff_reports_inventory_activation_and_provider_changes() {
     let after_modules = vec![
         loaded_module(
             "@mesh/front",
-            ModuleKind::Frontend,
+            ModuleKind::Ui,
             MeshDependencies::default(),
             vec![],
             MeshContributes::default(),
@@ -129,7 +129,7 @@ fn graph_diff_reports_inventory_activation_and_provider_changes() {
 fn installed_module_graph_exposes_kind_views_from_single_modules_map() {
     let root = root_with_modules(
         &[
-            ("@mesh/front", ModuleKind::Frontend),
+            ("@mesh/front", ModuleKind::Ui),
             ("@mesh/back", ModuleKind::Backend),
             ("@mesh/theme", ModuleKind::Theme),
             ("@mesh/icons", ModuleKind::IconPack),
@@ -143,7 +143,7 @@ fn installed_module_graph_exposes_kind_views_from_single_modules_map() {
     let modules = vec![
         loaded_module(
             "@mesh/front",
-            ModuleKind::Frontend,
+            ModuleKind::Ui,
             MeshDependencies::default(),
             vec![],
             MeshContributes::default(),
@@ -203,18 +203,52 @@ fn installed_module_graph_exposes_kind_views_from_single_modules_map() {
 }
 
 #[test]
-fn module_kind_to_legacy_module_type_keeps_specific_resource_kinds() {
-    assert_eq!(ModuleType::from(ModuleKind::FontPack), ModuleType::FontPack);
-    assert_eq!(ModuleType::from(ModuleKind::Library), ModuleType::Library);
-    assert_eq!(
-        ModuleType::from(ModuleKind::Component),
-        ModuleType::Component
-    );
+fn ui_module_type_follows_default_placement() {
+    let manifest = |mesh: &str| {
+        ModuleManifest::from_json_str(&format!(
+            r#"{{"name":"@me/widget","version":"1.0.0","mesh":{{"apiVersion":"0.1",{mesh}}}}}"#
+        ))
+        .unwrap()
+    };
+    let embedded = manifest(r#""kind":"ui","entry":"main.mesh""#);
+    assert!(!embedded.mesh.has_default_placement());
+    assert_eq!(embedded.mesh.module_type(), ModuleType::Component);
+    assert!(embedded.mesh.provides.layout.is_empty());
+    assert!(embedded.mesh.kind.is_mountable_root());
+
+    let surface = manifest(r#""kind":"ui","entry":"main.mesh","surface":{"anchor":"top"}"#);
+    assert!(surface.mesh.has_default_placement());
+    assert_eq!(surface.mesh.module_type(), ModuleType::Surface);
+    assert_eq!(surface.mesh.provides.layout[0].entrypoint, "main.mesh");
+
+    let fonts = manifest(r#""kind":"font-pack""#);
+    assert_eq!(fonts.mesh.module_type(), ModuleType::FontPack);
+    assert!(!fonts.mesh.has_default_placement());
+}
+
+#[test]
+fn retired_frontend_and_component_kinds_reject_with_a_migration_diagnostic() {
+    for kind in ["frontend", "component"] {
+        let error = ModuleManifest::from_json_str(&format!(
+            r#"{{"name":"@me/widget","version":"1.0.0","mesh":{{"apiVersion":"0.1","kind":"{kind}","entry":"main.mesh"}}}}"#
+        ))
+        .unwrap_err();
+        let ModuleManifestError::Diagnostic { diagnostic } = error else {
+            panic!("expected a migration diagnostic for {kind}: {error}");
+        };
+        assert_eq!(diagnostic.field_path.as_deref(), Some("mesh.kind"));
+        assert!(diagnostic.message.contains(kind), "{}", diagnostic.message);
+        assert!(
+            diagnostic.suggested_action.contains("\"kind\": \"ui\""),
+            "{}",
+            diagnostic.suggested_action
+        );
+    }
 }
 
 #[test]
 fn installed_module_graph_rejects_root_module_without_loaded_package() {
-    let root = root_with_modules(&[("@mesh/missing", ModuleKind::Frontend)], &[], None);
+    let root = root_with_modules(&[("@mesh/missing", ModuleKind::Ui)], &[], None);
     assert!(InstalledModuleGraph::from_parts(root, vec![]).is_err());
 }
 
@@ -227,12 +261,12 @@ fn installed_module_graph_blocks_a_frontend_with_a_missing_required_module() {
     );
     let frontend = loaded_module(
         "@mesh/frontend",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         dependencies,
         vec![],
         MeshContributes::default(),
     );
-    let root = root_with_modules(&[("@mesh/frontend", ModuleKind::Frontend)], &[], None);
+    let root = root_with_modules(&[("@mesh/frontend", ModuleKind::Ui)], &[], None);
 
     let graph = InstalledModuleGraph::from_parts(root, vec![frontend]).unwrap();
 
@@ -255,12 +289,12 @@ fn installed_module_graph_keeps_an_optional_module_dependency_degraded() {
     );
     let frontend = loaded_module(
         "@mesh/frontend",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         dependencies,
         vec![],
         MeshContributes::default(),
     );
-    let root = root_with_modules(&[("@mesh/frontend", ModuleKind::Frontend)], &[], None);
+    let root = root_with_modules(&[("@mesh/frontend", ModuleKind::Ui)], &[], None);
 
     let graph = InstalledModuleGraph::from_parts(root, vec![frontend]).unwrap();
 
@@ -279,7 +313,7 @@ fn installed_module_graph_blocks_required_consumers_from_incompatible_provider_v
         .insert("mesh.example".into(), ">=2.0.0".into());
     let frontend = loaded_module(
         "@mesh/frontend",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         frontend_dependencies,
         vec![],
         MeshContributes::default(),
@@ -307,7 +341,7 @@ fn installed_module_graph_blocks_required_consumers_from_incompatible_provider_v
     );
     let root = root_with_modules(
         &[
-            ("@mesh/frontend", ModuleKind::Frontend),
+            ("@mesh/frontend", ModuleKind::Ui),
             ("@mesh/example-interface", ModuleKind::Interface),
             ("@mesh/backend", ModuleKind::Backend),
         ],
@@ -333,7 +367,7 @@ fn installed_module_graph_rejects_provider_versions_that_do_not_match_the_contra
         .insert("mesh.example".into(), ">=1.0.0".into());
     let frontend = loaded_module(
         "@mesh/frontend",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         frontend_dependencies,
         vec![],
         MeshContributes::default(),
@@ -361,7 +395,7 @@ fn installed_module_graph_rejects_provider_versions_that_do_not_match_the_contra
     );
     let root = root_with_modules(
         &[
-            ("@mesh/frontend", ModuleKind::Frontend),
+            ("@mesh/frontend", ModuleKind::Ui),
             ("@mesh/example-interface", ModuleKind::Interface),
             ("@mesh/backend", ModuleKind::Backend),
         ],
@@ -388,14 +422,14 @@ fn installed_module_graph_exposes_frontend_backend_requirements() {
     let mut modules = audio_modules();
     modules.push(loaded_module(
         "@mesh/quick-settings",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         deps,
         vec![],
         MeshContributes::default(),
     ));
     let root = root_with_modules(
         &[
-            ("@mesh/quick-settings", ModuleKind::Frontend),
+            ("@mesh/quick-settings", ModuleKind::Ui),
             ("@mesh/pipewire-audio", ModuleKind::Backend),
             ("@mesh/pulseaudio-audio", ModuleKind::Backend),
         ],
@@ -440,7 +474,7 @@ fn installed_module_graph_keeps_provider_interface_and_frontend_requirements_sep
     let modules = vec![
         loaded_module(
             "@mesh/example-widget",
-            ModuleKind::Frontend,
+            ModuleKind::Ui,
             deps,
             vec![],
             MeshContributes::default(),
@@ -465,7 +499,7 @@ fn installed_module_graph_keeps_provider_interface_and_frontend_requirements_sep
     ];
     let root = root_with_modules(
         &[
-            ("@mesh/example-widget", ModuleKind::Frontend),
+            ("@mesh/example-widget", ModuleKind::Ui),
             ("@mesh/example-backend", ModuleKind::Backend),
             ("@mesh/example-interface", ModuleKind::Interface),
         ],
@@ -502,7 +536,7 @@ fn provider_capability_metadata_comes_only_from_backend_manifest() {
 
     let frontend = loaded_module(
         "@mesh/example-widget",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         deps,
         vec![],
         MeshContributes::default(),
@@ -528,7 +562,7 @@ fn provider_capability_metadata_comes_only_from_backend_manifest() {
 
     let root = root_with_modules(
         &[
-            ("@mesh/example-widget", ModuleKind::Frontend),
+            ("@mesh/example-widget", ModuleKind::Ui),
             ("@mesh/example-backend", ModuleKind::Backend),
         ],
         &[("mesh.example", "@mesh/example-backend")],
@@ -825,7 +859,7 @@ fn installed_module_graph_resolves_layout_entrypoint() {
         ..MeshContributes::default()
     };
     let root = root_with_modules(
-        &[("@mesh/panel", ModuleKind::Frontend)],
+        &[("@mesh/panel", ModuleKind::Ui)],
         &[],
         Some("@mesh/panel:main"),
     );
@@ -833,7 +867,7 @@ fn installed_module_graph_resolves_layout_entrypoint() {
         root,
         vec![loaded_module(
             "@mesh/panel",
-            ModuleKind::Frontend,
+            ModuleKind::Ui,
             MeshDependencies::default(),
             vec![],
             contributes,
@@ -852,6 +886,7 @@ fn installed_module_graph_indexes_theme_icon_font_i18n_contributions() {
     modes.insert("dark".into(), "themes/dark/theme.css".into());
     let theme_contributes = MeshContributes {
         themes: vec![ThemeContribution {
+            token_contract: Some("1.0".into()),
             id: "mesh-default".into(),
             label: Some(crate::manifest::LocalizedText::Literal(
                 "MESH Default".to_string(),

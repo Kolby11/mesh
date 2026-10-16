@@ -1,7 +1,9 @@
 <props>
-blur_enabled:    { type: "bool", default: true, label: "Backdrop blur" }
-blur_radius:     { type: "size", default: "var(--effect-backdrop-blur-popup-radius)", label: "Blur radius" }
-blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-background)", label: "Frosted background" }
+{
+    blur_enabled = { type = "bool", default = true, label = "Backdrop blur" },
+    blur_radius = { type = "size", default = "var(--effect-backdrop-blur-popup-radius)", label = "Blur radius" },
+    blur_background = { type = "color", default = "var(--effect-backdrop-blur-popup-background)", label = "Frosted background" },
+}
 </props>
 
 <template>
@@ -12,8 +14,7 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
         anchor-ref="themeButton"
         anchor="bottom"
         gravity="bottom"
-        onpointerenter={onPopoverEnter}
-        onpointerleave={onPopoverLeave}
+        open-on="hover"
     >
         <BubbleOptions
             label="Select theme"
@@ -21,10 +22,6 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
             rotation={rotation}
             onselect={onSelectTheme}
             onscroll={onThemeScroll}
-            onoptionpointerenter={onOptionPointerEnter}
-            onoptionfocus={onOptionFocus}
-            onoptionblur={onOptionBlur}
-            onoptionkeydown={onOptionKeyDown}
         />
     </popover>
 </template>
@@ -33,9 +30,10 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
 local theme = require("mesh.theme")
 local BubbleOptions = require("@mesh/bubble-options")
 
+-- Written by the core disclosure controller (`open-on="hover"`).
 open = false
--- Whether the last render saw the popover open, so closing it (which the
--- trigger does through its hover intent) re-centres the ring once.
+-- Whether the last render saw the popover open, so closing it re-centres the
+-- ring once.
 local was_open = false
 
 -- One descriptor per visible slot; BubbleOptions owns its structural classes.
@@ -50,31 +48,27 @@ local rotation_tick = 0
 local VISIBLE_SLOTS = 3
 local window_start = 1
 local window_centred = false
--- Whether the pointer is currently over the popover, so focus loss can tell a
--- keyboard dismissal apart from a click that merely moved focus between bubbles.
-local pointer_inside = false
 -- Optimistic selection: the theme this popover asked for, and the theme the
 -- service was reporting when it asked. See `active_theme`.
 local pending_theme = nil
 local pending_theme_replaced = nil
 local theme_changed = nil
 
-local THEME_DARK = "mesh-default-dark"
-local THEME_LIGHT = "mesh-default-light"
+-- Dark and light are modes of the default theme; quick settings switches them.
+local THEME_DEFAULT = "mesh-default"
 local THEME_GRUVBOX = "gruvbox-dark"
 local THEME_NORD = "nord"
 local THEME_MOCHA = "catppuccin-mocha"
 local THEME_TOKYO = "tokyo-night"
 local THEME_SOLARIZED = "solarized-dark"
 
-current_theme = THEME_DARK
+current_theme = THEME_DEFAULT
 
 -- Every installed theme, in ring order. Three of them fit on screen at once and
 -- scrolling turns the rest through; each `core` class carries that theme's own
 -- swatch colours so a bubble previews the palette it applies.
 local THEME_OPTIONS = {
-    { id = THEME_DARK, core = "bubble-option-core-dark", icon = "weather-clear-night" },
-    { id = THEME_LIGHT, core = "bubble-option-core-light", icon = "weather-clear" },
+    { id = THEME_DEFAULT, core = "bubble-option-core-default", icon = "weather-clear-night" },
     { id = THEME_GRUVBOX, core = "bubble-option-core-gruvbox", icon = "palette" },
     { id = THEME_NORD, core = "bubble-option-core-nord", icon = "weather-snow" },
     { id = THEME_MOCHA, core = "bubble-option-core-mocha", icon = "palette" },
@@ -83,8 +77,7 @@ local THEME_OPTIONS = {
 }
 
 local THEME_LABELS = {
-    [THEME_DARK] = "Default Dark",
-    [THEME_LIGHT] = "Default Light",
+    [THEME_DEFAULT] = "MESH Default",
     [THEME_GRUVBOX] = "Gruvbox",
     [THEME_NORD] = "Nord",
     [THEME_MOCHA] = "Catppuccin Mocha",
@@ -170,9 +163,9 @@ end
 
 local function service_theme()
     if not theme then
-        return THEME_DARK
+        return THEME_DEFAULT
     end
-    return theme.current or theme.theme_id or THEME_DARK
+    return theme.current or theme.theme_id or THEME_DEFAULT
 end
 
 -- Which theme the ring marks as active. Applying a theme is a round trip
@@ -216,7 +209,6 @@ effect(function(self)
     end
     if was_open and not open then
         -- Closed: the next open starts from the active theme again.
-        pointer_inside = false
         centre_window_on(current)
     end
     was_open = open
@@ -224,8 +216,7 @@ effect(function(self)
 end)
 
 -- Selecting a theme does not close the popover: it stays open so the user can
--- keep choosing. It closes on pointer leave (onPopoverLeave) or, for keyboard
--- activation, on focus leave.
+-- keep choosing until the pointer or keyboard focus leaves it.
 function onSelectTheme(theme_id)
     pending_theme_replaced = service_theme()
     pending_theme = theme_id
@@ -234,10 +225,8 @@ function onSelectTheme(theme_id)
     theme.set_theme(theme_id)
 end
 
--- Scrolling turns the ring one theme at a time, and keeps the popover alive:
--- browsing the bubbles is a way of choosing, not of leaving.
+-- Scrolling turns the ring one theme at a time.
 function onThemeScroll(event)
-    self.PopoverEnter:fire(event)
     local step = scroll_step(event)
     if step == 0 then
         return
@@ -251,44 +240,6 @@ function onThemeScroll(event)
         rotation = "prev-" .. rotation_tick
     end
     sync_options(active_theme())
-end
-
--- The trigger owns the hover intent: entering and leaving are only reported,
--- and the trigger's single close timer decides when the popover closes.
-function onPopoverEnter(event)
-    pointer_inside = true
-    self.PopoverEnter:fire(event)
-end
-
-function onPopoverLeave()
-    pointer_inside = false
-    self.PopoverLeave:fire()
-end
-
-function onOptionFocus(event)
-    self.PopoverEnter:fire(event)
-end
-
-function onOptionPointerEnter(event)
-    pointer_inside = true
-    self.PopoverEnter:fire(event)
-end
-
--- Focus leaving an option is only a dismissal for keyboard users. Clicking a
--- second bubble also blurs the first one, and closing on that would shut the
--- popover 400ms after the very click meant to keep browsing.
-function onOptionBlur(_event)
-    if pointer_inside then
-        return
-    end
-    self.PopoverLeave:fire()
-end
-
-function onOptionKeyDown(event)
-    if event and event.key == "Escape" then
-        open = false
-        self.KeyboardDismissRequested:fire()
-    end
 end
 
 </script>

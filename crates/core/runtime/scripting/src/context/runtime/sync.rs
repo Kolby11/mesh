@@ -164,6 +164,7 @@ impl ScriptContext {
             }
         }
 
+        self.synchronize_callback_references();
         if self.pending_redraw.swap(false, Ordering::AcqRel) {
             self.invalidate_reactive_effects();
             self.state.dirty = true;

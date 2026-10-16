@@ -4,7 +4,7 @@
   "description": "Backend-aware desktop settings for connectivity, audio, appearance, device details, and modules.",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "uses": {
       "interfaces": {
         "mesh.debug": ">=1.0",

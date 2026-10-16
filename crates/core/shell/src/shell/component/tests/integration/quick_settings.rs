@@ -311,8 +311,11 @@ end
         .expect("click handler")
         .clone();
 
-    assert_eq!(handler.handler(), "onToggleAudioSurface");
-    assert_eq!(handler.instance_key(), Some("@mesh/navigation-bar"));
+    assert_eq!(handler.handler(), "onActivate");
+    assert_eq!(
+        handler.instance_key(),
+        Some("@mesh/navigation-bar/local:VolumeButton")
+    );
 
     let requests = component
         .call_handler_target(

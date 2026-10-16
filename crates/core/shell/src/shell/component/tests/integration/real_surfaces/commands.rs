@@ -123,7 +123,13 @@ fn shipped_workspace_button_publishes_focus_workspace_request() {
     ))))
     .unwrap();
 
-    ctx.call_handler("onSwitch2", &[]).unwrap();
+    ctx.apply_service_payload("wm", &serde_json::json!({
+        "available": true, "active_workspace": 99,
+        "workspaces": [{"id":99,"name":"first","windows":1}, {"id":42,"name":"second","windows":1}]
+    }));
+    assert!(ctx.run_reactive_effects().is_empty());
+    ctx.call_handler("onSwitch", &[serde_json::json!(42)])
+        .unwrap();
     assert_eq!(
         ctx.state().get("active_offset"),
         Some(serde_json::json!(26))
@@ -141,7 +147,7 @@ fn shipped_workspace_button_publishes_focus_workspace_request() {
         ] => {
             assert_eq!(interface, "mesh.wm");
             assert_eq!(command, "focus_workspace");
-            assert_eq!(payload, &serde_json::json!({ "id": 2 }));
+            assert_eq!(payload, &serde_json::json!({ "id": 42 }));
         }
         other => panic!("expected one mesh.wm focus_workspace command, got {other:?}"),
     }
@@ -176,4 +182,90 @@ fn real_core_surfaces_reject_legacy_service_callback_api_in_shipped_surfaces() {
     for (name, source) in sources {
         assert_no_legacy_service_callbacks(name, source);
     }
+}
+
+#[test]
+fn real_quick_settings_theme_chips_switch_the_active_theme_mode() {
+    let caps = CapabilitySet::from_ids([
+        "service.audio.read",
+        "service.audio.control",
+        "service.brightness.read",
+        "service.brightness.control",
+        "theme.read",
+        "locale.read",
+        "service.theme.control",
+    ]);
+    let mut ctx = mesh_core_scripting::ScriptContext::new("@mesh/quick-settings", caps).unwrap();
+    let mut catalog = audio_network_catalog();
+    catalog.register_contract(mesh_core_service::InterfaceContract {
+        interface: "mesh.brightness".into(),
+        version: mesh_core_service::parse_contract_version("1.0").unwrap(),
+        state_fields: Vec::new(),
+        methods: Vec::new(),
+        events: Vec::new(),
+        types: Default::default(),
+        capabilities: Default::default(),
+    });
+    catalog.register_provider(mesh_core_service::InterfaceProvider {
+        interface: "mesh.brightness".into(),
+        version: Some("1.0".into()),
+        base_module: None,
+        provider_module: "@mesh/backlight-brightness".into(),
+        backend_name: "Backlight".into(),
+        priority: 100,
+    });
+    ctx.set_interface_catalog(catalog);
+    ctx.load_script(&shipped_component_script(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../modules/frontend/quick-settings/src/main.mesh"
+    ))))
+    .unwrap();
+
+    ctx.apply_service_payload(
+        "theme",
+        &serde_json::json!({
+            "current": "mesh-default", "theme_id": "mesh-default", "mode": "dark", "is_dark": true,
+            "modes": [
+                { "name": "dark", "color_scheme": "dark", "contrast": "normal" },
+                { "name": "light", "color_scheme": "light", "contrast": "normal" }
+            ]
+        }),
+    );
+    ctx.run_reactive_effects();
+    assert_eq!(
+        ctx.state().get("light_mode"),
+        Some(serde_json::json!("light"))
+    );
+    ctx.call_handler("onThemeLight", &[]).unwrap();
+    let requests = crate::shell::service::script_events_to_requests(ctx.drain_published_events());
+    match requests.as_slice() {
+        [
+            CoreRequest::ServiceCall {
+                interface,
+                command,
+                payload,
+                ..
+            },
+        ] => {
+            assert_eq!(interface, "mesh.theme");
+            assert_eq!(command, "set_mode");
+            assert_eq!(payload, &serde_json::json!({ "mode": "light" }));
+        }
+        other => panic!("expected one mesh.theme set_mode command, got {other:?}"),
+    }
+
+    // A dark-only theme keeps its identity: Light is unavailable, not a theme switch.
+    ctx.apply_service_payload(
+        "theme",
+        &serde_json::json!({
+            "current": "nord", "theme_id": "nord", "mode": "dark", "is_dark": true,
+            "modes": [{ "name": "dark", "color_scheme": "dark", "contrast": "normal" }]
+        }),
+    );
+    ctx.run_reactive_effects();
+    assert_eq!(ctx.state().get("light_mode"), None);
+    ctx.call_handler("onThemeLight", &[]).unwrap();
+    assert!(
+        crate::shell::service::script_events_to_requests(ctx.drain_published_events()).is_empty()
+    );
 }

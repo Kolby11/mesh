@@ -74,6 +74,7 @@ pub(super) fn build_authoring_diagnostics(
 ) -> Vec<ModuleGraphDiagnostic> {
     let mut diagnostics = Vec::new();
     diagnose_frontend_source_contracts(modules, &mut diagnostics);
+    super::token_diagnostics::diagnose(modules, &mut diagnostics);
     sort_diagnostics(&mut diagnostics);
     diagnostics
 }
@@ -403,17 +404,6 @@ fn diagnose_frontend_surfaces(
     diagnostics: &mut Vec<ModuleGraphDiagnostic>,
 ) {
     for surface in &contributions.frontend_surfaces {
-        if surface.surface_layout.is_none() {
-            diagnostics.push(ModuleGraphDiagnostic {
-                module_id: surface.module_id.clone(),
-                contribution_id: Some(surface.source.scoped_id.clone()),
-                status: "missing_frontend_surface_layout".into(),
-                message: format!(
-                    "frontend module {} has a main entrypoint but does not declare mesh.surface",
-                    surface.module_id
-                ),
-            });
-        }
         // Placement fields that belong to the other role are rejected, not
         // ignored: a `mesh.surface` block that names both an anchor and
         // `role: "window"` has two incompatible intents in it, and silently
@@ -565,7 +555,7 @@ fn diagnose_frontend_source_contracts(
 ) {
     for module in modules
         .values()
-        .filter(|m| m.enabled && m.kind == ModuleKind::Frontend)
+        .filter(|m| m.enabled && m.kind.is_mountable_root())
     {
         let module_dir = module.manifest_path.parent().unwrap_or(Path::new("."));
         let declared_keybinds = module
@@ -692,6 +682,30 @@ fn diagnose_frontend_source_contracts(
 
         for ((path, _content), scan) in mesh_files.iter().zip(&mesh_source_scans) {
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+            let local_tokens = module
+                .manifest
+                .mesh
+                .theme
+                .as_ref()
+                .map(|theme| {
+                    theme
+                        .tokens
+                        .keys()
+                        .cloned()
+                        .collect::<std::collections::HashSet<_>>()
+                })
+                .unwrap_or_default();
+            for read in &scan.token_reads {
+                if local_tokens.contains(&mesh_core_theme::canonical_token_name(&read.name)) {
+                    continue;
+                }
+                diagnostics.push(ModuleGraphDiagnostic {
+                    module_id: module.id.clone(),
+                    contribution_id: Some(format!("{}:theme_token:{}:{}", module.id, file_name, read.span.start)),
+                    status: "unknown_semantic_token".into(),
+                    message: format!("module {} reads token '{}' outside semantic token contract {} in {} at bytes {}..{}; declare a local custom property or an explicitly namespaced private token", module.id, read.name, mesh_core_theme::SEMANTIC_TOKEN_CONTRACT_VERSION, path.display(), read.span.start, read.span.end),
+                });
+            }
             for icon_name in &scan.icon_names {
                 if !all_declared_icons.contains(icon_name.as_str()) {
                     diagnostics.push(ModuleGraphDiagnostic {

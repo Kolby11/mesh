@@ -14,7 +14,7 @@ plus the settings store replace it.
 ## 1. Three layers
 
 ```
-System asset             Icon-pack module            Frontend module
+System asset             Icon-pack module            UI module
 (user/distro installs)   (mapping only, no assets)   (logical names only)
 
 Material Symbols font  → @mesh/icons-material      → <icon name="audio-volume-high"/>

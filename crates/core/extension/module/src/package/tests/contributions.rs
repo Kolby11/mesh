@@ -104,7 +104,7 @@ fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_r
     });
     let mut frontend = loaded_module(
         "@mesh/example-widget",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         frontend_contributes,
@@ -193,7 +193,7 @@ fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_r
     );
     let root = root_with_modules(
         &[
-            ("@mesh/example-widget", ModuleKind::Frontend),
+            ("@mesh/example-widget", ModuleKind::Ui),
             ("@mesh/icons-material", ModuleKind::IconPack),
             ("@mesh/example-backend", ModuleKind::Backend),
             ("@mesh/example-interface", ModuleKind::Interface),
@@ -259,7 +259,7 @@ fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_r
 fn contribution_index_preserves_keybind_localized_text() {
     let mut frontend = loaded_module(
         "@mesh/example-widget",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes::default(),
@@ -287,7 +287,7 @@ fn contribution_index_preserves_keybind_localized_text() {
             ..crate::manifest::KeybindAction::default()
         },
     );
-    let root = root_with_modules(&[("@mesh/example-widget", ModuleKind::Frontend)], &[], None);
+    let root = root_with_modules(&[("@mesh/example-widget", ModuleKind::Ui)], &[], None);
 
     let graph = InstalledModuleGraph::from_parts(root, vec![frontend]).unwrap();
     let keybind = &graph.keybind_actions()[0];
@@ -331,13 +331,13 @@ fn contribution_index_preserves_layout_localized_text() {
     });
     let frontend = loaded_module(
         "@mesh/example-widget",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         contributes,
     );
     let root = root_with_modules(
-        &[("@mesh/example-widget", ModuleKind::Frontend)],
+        &[("@mesh/example-widget", ModuleKind::Ui)],
         &[],
         Some("@mesh/example-widget:main"),
     );
@@ -368,7 +368,7 @@ fn contribution_index_preserves_layout_localized_text() {
           "version": "0.1.0",
           "mesh": {
             "apiVersion": "0.1",
-            "kind": "frontend",
+            "kind": "ui",
             "provides": {
               "layout": [
                 {
@@ -411,12 +411,12 @@ fn contribution_index_preserves_settings_schema_localized_descriptions() {
     });
     let frontend = loaded_module(
         "@mesh/example-widget",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         contributes,
     );
-    let root = root_with_modules(&[("@mesh/example-widget", ModuleKind::Frontend)], &[], None);
+    let root = root_with_modules(&[("@mesh/example-widget", ModuleKind::Ui)], &[], None);
 
     let graph = InstalledModuleGraph::from_parts(root, vec![frontend]).unwrap();
     let description = &graph.settings_schemas()[0].schema["properties"]["mode"]["description"];
@@ -443,7 +443,7 @@ fn contribution_index_reports_resource_and_settings_compatibility_diagnostics() 
     };
     let mut frontend = loaded_module(
         "@mesh/example-widget",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         deps,
         vec![],
         MeshContributes {
@@ -454,7 +454,7 @@ fn contribution_index_reports_resource_and_settings_compatibility_diagnostics() 
     frontend.manifest.mesh.icon_requirements.required = vec!["missing-semantic-icon".into()];
     let other_settings = loaded_module(
         "@mesh/other-widget",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes {
@@ -484,8 +484,8 @@ fn contribution_index_reports_resource_and_settings_compatibility_diagnostics() 
         }));
     let root = root_with_modules(
         &[
-            ("@mesh/example-widget", ModuleKind::Frontend),
-            ("@mesh/other-widget", ModuleKind::Frontend),
+            ("@mesh/example-widget", ModuleKind::Ui),
+            ("@mesh/other-widget", ModuleKind::Ui),
             ("@mesh/icons-material", ModuleKind::IconPack),
         ],
         &[],
@@ -532,7 +532,7 @@ fn disabled_modules_remain_catalog_nodes_but_not_runtime_contributions() {
     deps.backend.insert("mesh.example".into(), ">=1.0.0".into());
     let frontend = loaded_module(
         "@mesh/disabled-widget",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         deps,
         vec![],
         MeshContributes {
@@ -571,7 +571,7 @@ fn disabled_modules_remain_catalog_nodes_but_not_runtime_contributions() {
         capability_approvals: Default::default(),
         trust_policy: Default::default(),
         modules: [
-            ("@mesh/disabled-widget", ModuleKind::Frontend),
+            ("@mesh/disabled-widget", ModuleKind::Ui),
             ("@mesh/disabled-backend", ModuleKind::Backend),
             ("@mesh/disabled-interface", ModuleKind::Interface),
         ]
@@ -628,7 +628,7 @@ fn manifest_driven_extension_graph_indexes_provider_library_resource_and_fronten
     deps.themes.insert("mesh-default".into(), "*".into());
     let mut frontend = loaded_module(
         "@mesh/example-widget",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         deps,
         vec![],
         MeshContributes::default(),
@@ -734,6 +734,7 @@ fn manifest_driven_extension_graph_indexes_provider_library_resource_and_fronten
         vec![],
         MeshContributes {
             themes: vec![ThemeContribution {
+                token_contract: Some("1.0".into()),
                 id: "mesh-default".into(),
                 label: Some(crate::manifest::LocalizedText::Literal(
                     "Default".to_string(),
@@ -747,7 +748,7 @@ fn manifest_driven_extension_graph_indexes_provider_library_resource_and_fronten
     );
     let root = root_with_modules(
         &[
-            ("@mesh/example-widget", ModuleKind::Frontend),
+            ("@mesh/example-widget", ModuleKind::Ui),
             ("@mesh/example-interface", ModuleKind::Interface),
             ("@mesh/example-backend", ModuleKind::Backend),
             ("@mesh/example-lib", ModuleKind::Library),
@@ -815,15 +816,16 @@ fn manifest_driven_extension_graph_indexes_provider_library_resource_and_fronten
 }
 
 #[test]
-fn entry_auto_generates_default_layout_contribution_for_frontend() {
+fn entry_auto_generates_default_layout_contribution_for_surface_ui() {
     let content = r#"
 {
   "name": "@mesh/simple-frontend",
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "entry": "src/main.mesh",
+    "surface": { "anchor": "top" },
     "uses": { "capabilities": ["shell.surface"] }
   }
 }
@@ -843,7 +845,7 @@ fn explicit_provides_layout_is_not_overridden_by_entry() {
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "entry": "src/main.mesh",
     "provides": {
       "layout": [
@@ -900,7 +902,7 @@ fn uses_icon_requirements_normalized_into_mesh_icon_requirements() {
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "uses": {
       "iconRequirements": {
         "required": ["audio-volume-high"],
@@ -937,7 +939,7 @@ fn uses_icon_requirements_merges_with_top_level_icon_requirements() {
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "uses": {
       "iconRequirements": { "required": ["audio-volume-high"] }
     },

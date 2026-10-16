@@ -1,11 +1,11 @@
 //! Structural formatter for `.mesh` single-file components.
 //!
-//! `.mesh` files contain up to four top-level blocks — `<template>`,
-//! `<script lang="luau">` and `<style>` — each authored in a
-//! different sub-language. The formatter is block-aware:
+//! `.mesh` files contain `<props>`, `<template>`, `<script lang="luau">`,
+//! `<style>` and optional catalog blocks. The formatter is block-aware:
 //!
 //! - **template** (XHTML-like): re-indented from element/`{#block}` nesting.
 //! - **style** (CSS-like): re-indented from brace nesting.
+//! - **props** (static Luau table): formatted as a Luau return expression.
 //! - **script** (Luau): formatted with stylua, the standard Luau formatter.
 //!   If stylua cannot parse the block (e.g. a mid-edit syntax error), it falls
 //!   back to rebasing the block flush-left while preserving the author's
@@ -75,6 +75,7 @@ enum State {
 enum BlockKind {
     Template,
     Script,
+    Props,
     Style,
     Other,
 }
@@ -92,6 +93,7 @@ fn block_open_kind(trimmed_start: &str) -> Option<BlockKind> {
     match name.as_str() {
         "template" => Some(BlockKind::Template),
         "script" => Some(BlockKind::Script),
+        "props" => Some(BlockKind::Props),
         "style" => Some(BlockKind::Style),
         "i18n" => Some(BlockKind::Other),
         _ => None,
@@ -102,6 +104,7 @@ fn is_block_close(trimmed_start: &str, kind: BlockKind) -> bool {
     let name = match kind {
         BlockKind::Template => "template",
         BlockKind::Script => "script",
+        BlockKind::Props => "props",
         BlockKind::Style => "style",
         BlockKind::Other => "i18n",
     };
@@ -136,6 +139,7 @@ impl BlockState {
             BlockKind::Template => format_template(&lines, indent_unit),
             BlockKind::Style => format_style(&lines, indent_unit),
             BlockKind::Script => format_script(&lines, indent_unit),
+            BlockKind::Props => format_props(&lines, indent_unit),
             BlockKind::Other => format_preserve(&lines),
         };
         for line in rendered {
@@ -468,6 +472,16 @@ fn count_braces(t: &str) -> (i32, i32) {
 // Script (Luau)
 // ---------------------------------------------------------------------------
 
+fn format_props(lines: &[String], unit: &str) -> Vec<String> {
+    let source = lines.join("\n");
+    if let Some(formatted) = stylua_format(&format!("return {source}"), unit)
+        && let Some(table) = formatted.strip_prefix("return")
+    {
+        return table.trim_start().lines().map(str::to_string).collect();
+    }
+    format_preserve(lines)
+}
+
 fn format_script(lines: &[String], unit: &str) -> Vec<String> {
     let source = lines.join("\n");
 
@@ -563,6 +577,24 @@ mod tests {
 
     fn fmt(src: &str) -> String {
         format_document(src, UNIT)
+    }
+
+    #[test]
+    fn formats_static_prop_tables_with_the_luau_formatter() {
+        let source = "<props>\n{ width={type=\"size\",default=\"10px\"}, visible={type=\"bool\", default=true} }\n</props>\n<template>\n<box />\n</template>\n";
+        let formatted = fmt(source);
+        let before = mesh_core_component::parse_component(source)
+            .unwrap()
+            .props
+            .unwrap();
+        let after = mesh_core_component::parse_component(&formatted)
+            .unwrap()
+            .props
+            .unwrap();
+        assert!(formatted.contains("width = { type = \"size\", default = \"10px\" }"));
+        assert_eq!(crate::format::format_document(&formatted, UNIT), formatted);
+        assert_eq!(before.props[0].default, after.props[0].default);
+        assert_eq!(before.props[1].default, after.props[1].default);
     }
 
     #[test]

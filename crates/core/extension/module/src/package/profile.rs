@@ -350,7 +350,7 @@ impl ShellProfile {
     pub fn add_root(&mut self, manifest: &ModuleManifest) -> Result<String, ModuleManifestError> {
         if !manifest.mesh.kind.is_mountable_root() {
             return Err(ModuleManifestError::Validation(format!(
-                "{} is {:?}; only frontend and component modules create profile root instances",
+                "{} is {:?}; only ui modules create profile root instances",
                 manifest.name, manifest.mesh.kind
             )));
         }
@@ -1163,7 +1163,7 @@ mod tests {
     #[test]
     fn frontend_install_adds_active_instance_without_copying_surface_defaults() {
         let module = manifest(
-            r#"{"name":"@me/weather","version":"1","mesh":{"apiVersion":"0.1","kind":"frontend","entry":"src/main.mesh","surface":{"anchor":"top"}}}"#,
+            r#"{"name":"@me/weather","version":"1","mesh":{"apiVersion":"0.1","kind":"ui","entry":"src/main.mesh","surface":{"anchor":"top"}}}"#,
         );
         let mut profile = ShellProfile::new();
         let instance_id = profile.add_root(&module).unwrap();
@@ -1241,7 +1241,7 @@ mod tests {
     #[test]
     fn component_modules_mount_as_roots_and_other_kinds_do_not() {
         let component = manifest(
-            r#"{"name":"@me/clock","version":"1","mesh":{"apiVersion":"0.1","kind":"component","entry":"main.mesh"}}"#,
+            r#"{"name":"@me/clock","version":"1","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh"}}"#,
         );
         let backend = manifest(
             r#"{"name":"@me/audio","version":"1","mesh":{"apiVersion":"0.1","kind":"backend","entry":"main.luau"}}"#,
@@ -1257,19 +1257,16 @@ mod tests {
         assert_eq!(active, HashSet::from(["@me/clock".to_string()]));
 
         let error = profile.add_root(&backend).unwrap_err().to_string();
-        assert!(
-            error.contains("only frontend and component modules"),
-            "{error}"
-        );
+        assert!(error.contains("only ui modules"), "{error}");
     }
 
     #[test]
     fn activation_infers_declared_dependencies_and_sole_provider() {
         let frontend = manifest(
-            r#"{"name":"@me/panel","version":"1","mesh":{"apiVersion":"0.1","kind":"frontend","entry":"main.mesh","uses":{"modules":{"@me/component":"1"},"interfaces":{"mesh.audio":">=1"}}}}"#,
+            r#"{"name":"@me/panel","version":"1","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh","uses":{"modules":{"@me/component":"1"},"interfaces":{"mesh.audio":">=1"}}}}"#,
         );
         let component = manifest(
-            r#"{"name":"@me/component","version":"1","mesh":{"apiVersion":"0.1","kind":"component","entry":"main.mesh"}}"#,
+            r#"{"name":"@me/component","version":"1","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh"}}"#,
         );
         let backend = manifest(
             r#"{"name":"@me/audio","version":"1","mesh":{"apiVersion":"0.1","kind":"backend","entry":"main.luau","implements":[{"interface":"mesh.audio","version":"1"}]}}"#,
@@ -1294,8 +1291,8 @@ mod tests {
             capability_approvals: Default::default(),
             trust_policy: Default::default(),
             modules: [
-                ("@me/panel", ModuleKind::Frontend),
-                ("@me/component", ModuleKind::Component),
+                ("@me/panel", ModuleKind::Ui),
+                ("@me/component", ModuleKind::Ui),
                 ("@me/audio", ModuleKind::Backend),
                 ("@me/unrelated", ModuleKind::Library),
             ]
@@ -1335,7 +1332,7 @@ mod tests {
     #[test]
     fn activation_rejects_a_required_module_version_mismatch() {
         let frontend = manifest(
-            r#"{"name":"@me/panel","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","entry":"main.mesh","uses":{"modules":{"@me/helpers":"^2.0.0"}}}}"#,
+            r#"{"name":"@me/panel","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh","uses":{"modules":{"@me/helpers":"^2.0.0"}}}}"#,
         );
         let helpers = manifest(
             r#"{"name":"@me/helpers","version":"1.5.0","mesh":{"apiVersion":"0.1","kind":"library"}}"#,
@@ -1354,7 +1351,7 @@ mod tests {
     #[test]
     fn activation_keeps_an_optional_module_version_mismatch_degraded() {
         let frontend = manifest(
-            r#"{"name":"@me/panel","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","entry":"main.mesh","uses":{"modules":{"@me/helpers":{"version":"^2.0.0","optional":true}}}}}"#,
+            r#"{"name":"@me/panel","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh","uses":{"modules":{"@me/helpers":{"version":"^2.0.0","optional":true}}}}}"#,
         );
         let helpers = manifest(
             r#"{"name":"@me/helpers","version":"1.5.0","mesh":{"apiVersion":"0.1","kind":"library"}}"#,
@@ -1369,7 +1366,7 @@ mod tests {
     #[test]
     fn activation_rejects_an_incompatible_required_interface_provider() {
         let frontend = manifest(
-            r#"{"name":"@me/panel","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","entry":"main.mesh","uses":{"interfaces":{"mesh.audio":">=2.0.0"}}}}"#,
+            r#"{"name":"@me/panel","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh","uses":{"interfaces":{"mesh.audio":">=2.0.0"}}}}"#,
         );
         let interface = manifest(
             r#"{"name":"@me/audio-interface","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"interface","interface":{"name":"mesh.audio","version":"1.0.0","contract":{}}}}"#,
@@ -1397,7 +1394,7 @@ mod tests {
             r#"{"name":"@me/derived","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"composition","extends":"@me/base","compose":{"roots":{"@me/panel#top":{"module":"@me/panel"}}}}}"#,
         );
         let panel = manifest(
-            r#"{"name":"@me/panel","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","entry":"main.mesh"}}"#,
+            r#"{"name":"@me/panel","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh"}}"#,
         );
         let profile = ShellProfile::from_json_str(
             r#"{"schemaVersion":3,"from":{"module":"@me/derived","version":"1.0.0"}}"#,
@@ -1456,7 +1453,7 @@ mod tests {
             r#"{"name":"@me/desk","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"composition","uses":{"modules":{"@me/helpers":"^1.0.0"}},"compose":{"roots":{"@me/panel#top":{"module":"@me/panel"}}}}}"#,
         );
         let panel = manifest(
-            r#"{"name":"@me/panel","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","entry":"main.mesh"}}"#,
+            r#"{"name":"@me/panel","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh"}}"#,
         );
         let helpers = manifest(
             r#"{"name":"@me/helpers","version":"1.2.0","mesh":{"apiVersion":"0.1","kind":"library"}}"#,
@@ -1479,10 +1476,10 @@ mod tests {
             r#"{"name":"@me/desk","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"composition","compose":{"roots":{"@me/panel#top":{"module":"@me/panel"}},"nodeSlots":{"@me/panel#top":{"start":{"nodes":[{"id":"clock","use":"@me/items:clock"}]}}}}}}"#,
         );
         let panel = manifest(
-            r#"{"name":"@me/panel","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","entry":"main.mesh"}}"#,
+            r#"{"name":"@me/panel","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh"}}"#,
         );
         let items = manifest(
-            r#"{"name":"@me/items","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"component","entry":"main.mesh"}}"#,
+            r#"{"name":"@me/items","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh"}}"#,
         );
         let profile = ShellProfile::from_json_str(
             r#"{"schemaVersion":3,"from":{"module":"@me/desk","version":"1.0.0"},"roots":{"@me/panel#top":{"active":false},"@me/gone#default":{"active":true}}}"#,
@@ -1582,7 +1579,7 @@ mod tests {
         )
         .unwrap();
         let frontend = manifest(
-            r#"{"name":"@me/not-a-pack","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend"}}"#,
+            r#"{"name":"@me/not-a-pack","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui"}}"#,
         );
         let error = profile
             .active_module_ids([&frontend])

@@ -124,6 +124,7 @@ impl FrontendSurfaceComponent {
         Option<ComponentError>,
     ) {
         self.failed_runtime_creations.get_mut().clear();
+        self.component_callbacks.get_mut().clear();
         let runtimes = std::mem::take(&mut *self.runtimes.lock().unwrap());
         let mut runtimes = runtimes.into_iter().collect::<Vec<_>>();
         // Embedded children are torn down before their parents, while the
@@ -732,6 +733,13 @@ impl FrontendSurfaceComponent {
             }
         }
 
+        let callbacks = self
+            .component_callbacks
+            .borrow()
+            .get(instance_key)
+            .cloned()
+            .unwrap_or_default();
+        script_ctx.set_initial_callback_props(callbacks);
         let template_expressions = mesh_core_frontend::collect_template_expressions(component);
         if component.script.is_some() || !template_expressions.is_empty() {
             let interface_imports = component
@@ -851,6 +859,19 @@ impl FrontendSurfaceComponent {
                     component_id: runtime.module_id.clone(),
                     source,
                 })?;
+                let callbacks = self
+                    .component_callbacks
+                    .borrow()
+                    .get(instance_key)
+                    .cloned()
+                    .unwrap_or_default();
+                runtime
+                    .script_ctx
+                    .set_callback_props(&callbacks)
+                    .map_err(|source| ComponentError::Script {
+                        component_id: runtime.module_id.clone(),
+                        source,
+                    })?;
                 Some(runtime.script_ctx.state().mutation_generation())
             } else {
                 None
@@ -936,6 +957,19 @@ impl FrontendSurfaceComponent {
                     component_id: runtime.module_id.clone(),
                     source,
                 })?;
+                let callbacks = self
+                    .component_callbacks
+                    .borrow()
+                    .get(instance_key)
+                    .cloned()
+                    .unwrap_or_default();
+                runtime
+                    .script_ctx
+                    .set_callback_props(&callbacks)
+                    .map_err(|source| ComponentError::Script {
+                        component_id: runtime.module_id.clone(),
+                        source,
+                    })?;
                 Some(runtime.script_ctx.state().mutation_generation())
             } else {
                 None
@@ -1181,6 +1215,11 @@ impl FrontendSurfaceComponent {
             instance_key = target.instance_key(),
         )
         .entered();
+        if let HandlerTarget::Function { callback, .. } = target {
+            return self.run_script_call(target.instance_key(), target.handler(), |context| {
+                context.call_callback(callback, args).map(|()| Vec::new())
+            });
+        }
         let (handler_name, merged_args) = unpack_handler_args(target.handler(), args);
         self.run_script_call(target.instance_key(), handler_name.as_ref(), |script_ctx| {
             script_ctx
@@ -1235,7 +1274,7 @@ impl FrontendSurfaceComponent {
     /// effects are dropped. `Ok` carries errors from independent callbacks
     /// that failed while the rest of the call completed; each is reported and
     /// the call's effects are applied.
-    fn run_script_call(
+    pub(super) fn run_script_call(
         &mut self,
         instance_key: Option<&str>,
         label: &str,
@@ -1379,21 +1418,51 @@ impl FrontendSurfaceComponent {
         }
     }
 
+    fn script_binding_neighbors(&self, instance_key: &str) -> Vec<Arc<str>> {
+        let mut edges = Vec::new();
+        for (parent, children) in self.bound_children.borrow().iter() {
+            edges.extend(
+                children
+                    .iter()
+                    .map(|(_, child)| (parent.clone(), child.clone())),
+            );
+        }
+        for (child, callbacks) in self.component_callbacks.borrow().iter() {
+            for target in callbacks.values() {
+                let owner = target
+                    .instance_key()
+                    .unwrap_or_else(|| self.root_instance_key());
+                if owner != child.as_ref() {
+                    edges.push((Arc::from(owner), child.clone()));
+                }
+            }
+        }
+        let mut visited = HashSet::from([Arc::<str>::from(instance_key)]);
+        let mut pending = vec![Arc::<str>::from(instance_key)];
+        while let Some(current) = pending.pop() {
+            for (parent, child) in &edges {
+                let neighbor = if parent == &current {
+                    child
+                } else if child == &current {
+                    parent
+                } else {
+                    continue;
+                };
+                if visited.insert(neighbor.clone()) {
+                    pending.push(neighbor.clone());
+                }
+            }
+        }
+        visited.remove(instance_key);
+        visited.into_iter().collect()
+    }
+
     fn has_binding_neighbors(&self, instance_key: &str) -> bool {
-        let bound_children = self.bound_children.borrow();
-        bound_children
-            .get(instance_key)
-            .is_some_and(|links| !links.is_empty())
-            || bound_children.iter().any(|(parent_key, links)| {
-                parent_key.as_ref() != instance_key
-                    && links
-                        .iter()
-                        .any(|(_, child)| child.as_ref() == instance_key)
-            })
+        !self.script_binding_neighbors(instance_key).is_empty()
     }
 
     /// Re-sync every instance linked to `instance_key` by a live `bind:this`
-    /// reference, in either direction: children this instance binds (it may have
+    /// reference or callback, in either direction: children this instance binds (it may have
     /// called their functions) and parents that bind this instance (it may have
     /// fired `self.<Event>` to them). A live cross-call mutates the neighbor's
     /// `_ENV` in the shared VM without going through the shell's normal
@@ -1406,25 +1475,7 @@ impl FrontendSurfaceComponent {
     /// firing a `self.<Event>` channel into a parent's subscription flags the
     /// parent. Neighbours nothing touched are skipped.
     fn resync_binding_neighbors(&mut self, instance_key: &str) -> (bool, Vec<CoreRequest>) {
-        let neighbor_keys: Vec<Arc<str>> = {
-            let bound_children = self.bound_children.borrow();
-            let mut keys: Vec<Arc<str>> = bound_children
-                .get(instance_key)
-                .map(|links| links.iter().map(|(_, key)| Arc::clone(key)).collect())
-                .unwrap_or_default();
-            for (parent_key, links) in bound_children.iter() {
-                if parent_key.as_ref() != instance_key
-                    && links
-                        .iter()
-                        .any(|(_, child)| child.as_ref() == instance_key)
-                {
-                    keys.push(Arc::clone(parent_key));
-                }
-            }
-            keys.sort();
-            keys.dedup();
-            keys
-        };
+        let neighbor_keys = self.script_binding_neighbors(instance_key);
         if neighbor_keys.is_empty() {
             return (false, Vec::new());
         }
@@ -2163,7 +2214,9 @@ mod prop_resolution_tests {
         mesh_core_component::parse_component(
             r#"
 <props>
-  width: { type: "size", default: "20px" }
+{
+    width = { type = "size", default = "20px" },
+}
 </props>
 <template><box /></template>
 "#,
@@ -2292,7 +2345,9 @@ end
         let component = mesh_core_component::parse_component(
             r#"
 <props>
-  delay: { type: "duration", default: "120ms", min: 0, max: 600 }
+{
+    delay = { type = "duration", default = "120ms", min = 0, max = 600 },
+}
 </props>
 <template><box /></template>
 "#,

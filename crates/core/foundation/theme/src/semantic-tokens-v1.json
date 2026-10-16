@@ -1,0 +1,1060 @@
+{
+  "version": "1.0",
+  "tokens": [
+    {
+      "css": "--animation-curves-bezier-emphasized",
+      "kind": "curve",
+      "source": "theme"
+    },
+    {
+      "css": "--animation-curves-bezier-emphasized-decelerate",
+      "kind": "curve",
+      "source": "theme"
+    },
+    {
+      "css": "--animation-curves-bezier-standard",
+      "kind": "curve",
+      "source": "theme"
+    },
+    {
+      "css": "--animation-curves-bezier-standard-accelerate",
+      "kind": "curve",
+      "source": "theme"
+    },
+    {
+      "css": "--animation-curves-bezier-standard-decelerate",
+      "kind": "curve",
+      "source": "theme"
+    },
+    {
+      "css": "--animation-duration-extra-long",
+      "kind": "duration",
+      "source": "theme"
+    },
+    {
+      "css": "--animation-duration-fast",
+      "kind": "duration",
+      "source": "theme"
+    },
+    {
+      "css": "--animation-duration-instant",
+      "kind": "duration",
+      "source": "theme"
+    },
+    {
+      "css": "--animation-duration-long",
+      "kind": "duration",
+      "source": "theme"
+    },
+    {
+      "css": "--animation-duration-medium",
+      "kind": "duration",
+      "source": "theme"
+    },
+    {
+      "css": "--animation-duration-short",
+      "kind": "duration",
+      "source": "theme"
+    },
+    {
+      "css": "--animation-opacity-disabled",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--animation-scale-hover",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--animation-scale-press",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--border-style-default",
+      "kind": "border-style",
+      "source": "theme"
+    },
+    {
+      "css": "--border-width-hairline",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--border-width-medium",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--border-width-none",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--border-width-thick",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--border-width-thin",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--color-background",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-border",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-border-muted",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-disabled",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-error",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-error-container",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-info",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-info-container",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-inverse-on-surface",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-inverse-primary",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-inverse-surface",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-link",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-background",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-disabled",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-error",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-error-container",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-info",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-info-container",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-link",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-primary",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-primary-container",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-primary-fixed",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-primary-fixed-variant",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-secondary",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-secondary-container",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-secondary-fixed",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-secondary-fixed-variant",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-success",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-success-container",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-surface",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-surface-variant",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-tertiary",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-tertiary-container",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-tertiary-fixed",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-tertiary-fixed-variant",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-warning",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-on-warning-container",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-outline",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-outline-variant",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-primary",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-primary-container",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-primary-fixed",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-primary-fixed-dim",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-scrim",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-secondary",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-secondary-container",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-secondary-fixed",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-secondary-fixed-dim",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-selection-background",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-selection-foreground",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-shadow",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-success",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-success-container",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-surface",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-surface-bright",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-surface-container",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-surface-container-high",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-surface-container-highest",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-surface-container-low",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-surface-container-lowest",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-surface-dim",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-surface-tint",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-surface-variant",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-tertiary",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-tertiary-container",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-tertiary-fixed",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-tertiary-fixed-dim",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-warning",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--color-warning-container",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--effect-backdrop-blur-popup-background",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--effect-backdrop-blur-popup-radius",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--effect-backdrop-blur-surface-background",
+      "kind": "color",
+      "source": "theme"
+    },
+    {
+      "css": "--effect-backdrop-blur-surface-radius",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--elevation-2xl",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--elevation-lg",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--elevation-md",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--elevation-none",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--elevation-sm",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--elevation-xl",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--font-body",
+      "kind": "font-family",
+      "source": "resources"
+    },
+    {
+      "css": "--font-caption",
+      "kind": "font-family",
+      "source": "resources"
+    },
+    {
+      "css": "--font-display",
+      "kind": "font-family",
+      "source": "resources"
+    },
+    {
+      "css": "--font-headline",
+      "kind": "font-family",
+      "source": "resources"
+    },
+    {
+      "css": "--font-label",
+      "kind": "font-family",
+      "source": "resources"
+    },
+    {
+      "css": "--font-mono",
+      "kind": "font-family",
+      "source": "resources"
+    },
+    {
+      "css": "--font-title",
+      "kind": "font-family",
+      "source": "resources"
+    },
+    {
+      "css": "--icon-fill",
+      "kind": "number",
+      "source": "resources"
+    },
+    {
+      "css": "--icon-grade",
+      "kind": "number",
+      "source": "resources"
+    },
+    {
+      "css": "--icon-optical-size",
+      "kind": "number",
+      "source": "resources"
+    },
+    {
+      "css": "--icon-size-lg",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--icon-size-md",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--icon-size-sm",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--icon-weight",
+      "kind": "number",
+      "source": "resources"
+    },
+    {
+      "css": "--radius-2xl",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--radius-full",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--radius-lg",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--radius-md",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--radius-none",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--radius-sm",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--radius-xl",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--shadow-colored-primary",
+      "kind": "shadow",
+      "source": "theme"
+    },
+    {
+      "css": "--shadow-umbra-lg",
+      "kind": "shadow",
+      "source": "theme"
+    },
+    {
+      "css": "--shadow-umbra-md",
+      "kind": "shadow",
+      "source": "theme"
+    },
+    {
+      "css": "--shadow-umbra-sm",
+      "kind": "shadow",
+      "source": "theme"
+    },
+    {
+      "css": "--shape-corner-extra-large",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--shape-corner-extra-small",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--shape-corner-full",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--shape-corner-large",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--shape-corner-medium",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--shape-corner-small",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--spacing-2xl",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--spacing-3xl",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--spacing-4xl",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--spacing-inset-comfortable",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--spacing-inset-compact",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--spacing-inset-loose",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--spacing-lg",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--spacing-md",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--spacing-sm",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--spacing-xl",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--spacing-xs",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--state-dragged-opacity",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--state-focus-opacity",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--state-hover-opacity",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--state-pressed-opacity",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-family",
+      "kind": "font-family",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-family-brand",
+      "kind": "font-family",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-family-plain",
+      "kind": "font-family",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-line-height-normal",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-line-height-relaxed",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-line-height-tight",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-body-large-line-height",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-body-large-size",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-body-large-weight",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-body-medium-line-height",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-body-medium-size",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-body-medium-weight",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-body-small-line-height",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-body-small-size",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-body-small-weight",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-display-large-line-height",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-display-large-size",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-display-large-weight",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-display-medium-line-height",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-display-medium-size",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-display-medium-weight",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-display-small-line-height",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-display-small-size",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-display-small-weight",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-headline-large-line-height",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-headline-large-size",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-headline-large-weight",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-headline-medium-line-height",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-headline-medium-size",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-headline-medium-weight",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-headline-small-line-height",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-headline-small-size",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-headline-small-weight",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-label-large-line-height",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-label-large-size",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-label-large-weight",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-label-medium-line-height",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-label-medium-size",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-label-medium-weight",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-label-small-line-height",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-label-small-size",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-label-small-weight",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-title-large-line-height",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-title-large-size",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-title-large-weight",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-title-medium-line-height",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-title-medium-size",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-title-medium-weight",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-title-small-line-height",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-title-small-size",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-scale-title-small-weight",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-size-2xl",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-size-3xl",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-size-lg",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-size-md",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-size-sm",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-size-xl",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-size-xs",
+      "kind": "length",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-tracking-normal",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-tracking-tight",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-tracking-wide",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-weight-bold",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-weight-light",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-weight-medium",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-weight-regular",
+      "kind": "number",
+      "source": "theme"
+    },
+    {
+      "css": "--typography-weight-semibold",
+      "kind": "number",
+      "source": "theme"
+    }
+  ]
+}

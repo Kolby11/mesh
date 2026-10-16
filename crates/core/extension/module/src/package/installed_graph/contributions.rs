@@ -1,6 +1,6 @@
 use super::super::{
-    IconContribution, ModuleKind, ModuleManifest, ModuleManifestError, PathContribution,
-    ThemeModeMetadata, contained_path, dependency_spec_to_string, validate_relative_path,
+    IconContribution, ModuleManifest, ModuleManifestError, PathContribution, ThemeModeMetadata,
+    contained_path, dependency_spec_to_string, validate_relative_path,
 };
 use super::*;
 use crate::manifest;
@@ -83,7 +83,8 @@ impl ModuleContributionIndex {
     ) -> Result<(), ModuleManifestError> {
         let module_id = module.id.as_str();
         let manifest = &module.manifest;
-        let derived_props_schema = if module.kind == ModuleKind::Frontend {
+        let surface_module = manifest.mesh.has_default_placement();
+        let derived_props_schema = if surface_module {
             manifest
                 .mesh
                 .entrypoints
@@ -103,7 +104,7 @@ impl ModuleContributionIndex {
         } else {
             None
         };
-        if module.kind == ModuleKind::Frontend {
+        if surface_module {
             if let Some(path) = &manifest.mesh.entrypoints.main {
                 validate_relative_path("frontend main entrypoint", path)?;
                 let settings_namespace = manifest

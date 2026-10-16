@@ -7,7 +7,7 @@
   ],
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "component",
+    "kind": "ui",
     "uses": {
       "modules": {
         "@mesh/bubble-options": ">=0.1.0"

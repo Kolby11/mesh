@@ -43,6 +43,7 @@ pub(super) fn annotate_runtime_tree(
 mod activation;
 mod animation;
 mod diagnostics;
+mod disclosure;
 mod gestures;
 mod keybinds;
 mod navigation;

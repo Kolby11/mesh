@@ -5056,3 +5056,111 @@ Same release workload described above, three samples: unchanged flushes
 45.657–51.291x. Gate `unchanged_effect_inputs_speedup` requires 2x and all
 samples pass. The full release scripting suite includes 306 passes, zero
 failures, and 27 ignored benchmarks.
+
+## 2026-10-13 — D5: core popover disclosure on `navigation_hover_profile`
+
+Release, `navigation_hover_profile` (25 cycles × 4 triggers, 400 steps,
+100 popover opens), five interleaved runs each, `f0ef694c` in a worktree
+against the D5 tree. The profile now finds triggers by `aria-haspopup`
+because they no longer carry `pointerenter` handlers; the input sequence is
+unchanged.
+
+| Metric | `f0ef694c` (script hover intent) | Core disclosure |
+| --- | --- | --- |
+| Step p50 | 2.131–2.283 ms | 1.855–1.889 ms |
+| Step p90 | 4.341–4.620 ms | 2.803–2.936 ms |
+| Dispatch p50 | 0.238–0.248 ms | 0.038–0.039 ms |
+| Popovers open at the end | 0 | 0 |
+
+Trigger and popup enter/leave no longer run Luau handlers; the controller
+updates a deadline in Rust and calls into script only to open or close.
+
+`navigation_frame_cost_profile`, same five interleaved runs, pointer move:
+1.405–1.727 ms per frame before, 1.320–1.706 ms after. The machine slowed
+partway through (paint only rose from about 0.27 to 0.6 ms in both trees), so
+this only rules out a large regression.
+
+
+### 2026-10-13 — D7 shared theme aliases and typed scalar projections
+
+Reviewed the rejected full-restyle `StyleShareCache` experiment before changing
+resolution. This change retains token values rather than computed node styles.
+Theme snapshots lazily share reference-bearing token resolutions across clones;
+mutable accessors detach the cache. Missing names do not enter that cache.
+Style resolvers share typed color/number projections across frames in thread-local
+LRUs bounded to 16 revisions and 512 values per revision. Per-node custom values
+and component props retain precedence. Other property lowering remains open.
+
+Release profile, three repeated paired microbenchmark runs:
+
+| Workload | Control | Cached/typed | Ratio | Gate |
+| --- | --- | --- | --- | --- |
+| 32-token scalar alias chain, 20,000 reads | 120.271–126.262 ms recursive graph resolution | 1.057–1.095 ms snapshot reuse | 113.817–116.862x | `shared_theme_alias_resolution_speedup` >= 2.0 |
+| One rgba color and one px number, 200,000 pairs, warmed token lookup in both paths | 38.043–77.055 ms repeated parsing | 13.658–30.539 ms typed reads | 2.523–3.048x | `typed_theme_scalar_reads_speedup` >= 1.2 |
+
+These are token-resolution/parsing measurements, not end-to-end theme-switch
+speedups. Validation: theme debug and release suites 33 passed / 1 ignored;
+style resolver debug and release suites 50 passed / 38 ignored. Tests cover
+snapshot sharing, clone detachment, serialization, module/set/remove invalidation,
+root-specific cycle/missing/malformed diagnostics, fallback behavior, override
+precedence, and cache bounds. Both gates are wired into `tools/check-performance`.
+
+### 2026-10-13 — D7 indexed literal operations
+
+Indexed literals now carry property-specific typed operations, so applying them
+switches on the operation rather than matching a property name against a generic
+value kind. Dynamic declarations keep their validated resolver path. This also
+fixes numeric inherited text literals bypassing the `inherit` guard and marking
+font-size/weight/line-height explicit.
+
+Release profile, 8 numeric declarations x 200,000 applications; three paired
+runs compare an eight-property string dispatch with pre-indexed operations:
+3.372–4.841 ms control versus 2.221–2.492 ms operations, 1.518–1.942x.
+Gate: `typed_literal_operation_dispatch_speedup` >= 1.05, wired into
+`tools/check-performance`. This measures dispatch only, not whole restyles.
+Style resolver debug/release suites: 52 passed / 39 ignored. A parity test
+compares supported indexed operations with string resolution across zero,
+numeric, edge, percent, size-keyword and color values; an inheritance regression
+test checks explicit masks. The preceding full serial elements run had
+276 passed / the same 10 known fixture failures / 59 ignored.
+
+### 2026-10-13 — D7 separate selector dependencies from candidates
+
+Compound selectors now register state dependencies separately from their forward
+candidate bucket. A class/id/tag compound no longer enters the global state
+bucket merely because it depends on hover/focus. Reverse dependencies are
+collected recursively and deduplicated per rule, preserving invalidation for
+multi-state and nested selectors.
+
+Release profile, 1,000 distinct `.row-N:hover` rules, one matching hovered row,
+10,000 indexed candidate/match passes, three paired runs: 78.860–80.115 ms with
+the former global state spill versus 0.287–0.297 ms with structural buckets;
+265.676–278.827x. Gate `structural_selector_bucket_speedup` >= 4.0 is wired into
+`tools/check-performance`. This is a selector candidate workload, not a complete
+hover-frame speedup. Scoped debug tests: 53 passed / 40 ignored. Full serial
+release elements: 279 passed / the same 10 known fixture failures / 61 ignored.
+The regression test compares indexed matching with a full selector scan for
+state/class changes and verifies deduplicated reverse dependencies.
+
+### 2026-10-13 — D7 expanded literal dispatch regression (rejected ordinary inlining)
+
+Expanding the typed literal operation table to keyword and layout longhands
+preserved semantic parity but failed `typed_literal_operation_dispatch_speedup`.
+Release profile, 8 numeric declarations x 200,000 applications: the first
+unannotated run measured 3.656 ms string control versus 4.236 ms typed dispatch
+(0.863x). Three runs with an ordinary `#[inline]` hint measured
+2.764–3.397 ms control versus 4.584–5.237 ms dispatch (0.528–0.741x).
+The release binary still emitted an out-of-line `apply_typed_literal` function.
+The ordinary-hint version is rejected; forced inlining is being checked before
+accepting or reverting the expansion. The existing 1.05x gate remains unchanged.
+
+### 2026-10-13 — D7 longhand expansion reverted after forced-inline gate failure
+
+Follow-up to the preceding expanded-dispatch experiment: forced inlining removed
+the emitted assignment function, but the same release eight-operation workload
+measured 3.200 ms control versus 3.119 ms typed dispatch (1.026x), below the
+unchanged 1.05x gate. The keyword/layout-longhand expansion and inline annotations
+were reverted. The smaller property-specific operation table remains, with
+expanded parity inputs and separate ownership in `resolve/literal.rs`. Broader
+lowering needs a representation that preserves scalar dispatch costs; do not
+retry one larger flat operation enum without checking this measurement.

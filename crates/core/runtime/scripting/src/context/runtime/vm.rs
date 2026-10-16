@@ -54,15 +54,18 @@ pub(super) fn component_source_with_compiled_template_expressions(
 /// expressions need `getfenv`/`setfenv`. Each expression's environment
 /// resolves call locals first, then records the component member it read.
 const TEMPLATE_EXPRESSION_FACTORY: &str = r#"
-local component_env, setmetatable = ...
+local component_env, setmetatable, pcall, error, pack, unpack = ...
 local no_locals = {}
 return function(member_reads)
   local current = no_locals
+  local recording = true
   local env = setmetatable({}, { __index = function(_, name)
     local value = current[name]
     if value ~= nil then return value end
-    if member_reads[name] == nil then member_reads[name] = true end
+    if recording and member_reads[name] == nil then member_reads[name] = true end
     return component_env[name]
+  end, __newindex = function(_, name, value)
+    if current[name] ~= nil then current[name] = value else component_env[name] = value end
   end })
   return env, function(expression)
     return function(locals)
@@ -71,6 +74,18 @@ return function(member_reads)
       local value = expression()
       current = previous
       return value
+    end
+  end, function(callback, locals)
+    return function(...)
+      local previous = current
+      current = locals or no_locals
+      local previous_recording = recording
+      recording = false
+      local returned = pack(pcall(callback, ...))
+      current = previous
+      recording = previous_recording
+      if not returned[1] then error(returned[2], 0) end
+      return unpack(returned, 2, returned.n)
     end
   end
 end
@@ -85,6 +100,8 @@ pub(super) fn install_template_expressions(
     expressions: &[mesh_core_expression::SharedCompiledExpression],
 ) -> mlua::Result<()> {
     let all_member_reads = lua.create_table()?;
+    let callback_binders = lua.create_table()?;
+    env.raw_set("__mesh_template_callback_binders", callback_binders.clone())?;
     env.raw_set(
         "__mesh_template_expression_member_reads",
         all_member_reads.clone(),
@@ -97,12 +114,25 @@ pub(super) fn install_template_expressions(
         .load(TEMPLATE_EXPRESSION_FACTORY)
         .set_name("=mesh:template-expression")
         .set_environment(lua.create_table()?)
-        .call((env.clone(), lua.globals().get::<Function>("setmetatable")?))?;
+        .call((
+            env.clone(),
+            lua.globals().get::<Function>("setmetatable")?,
+            lua.globals().get::<Function>("pcall")?,
+            lua.globals().get::<Function>("error")?,
+            lua.globals()
+                .get::<Table>("table")?
+                .get::<Function>("pack")?,
+            lua.globals()
+                .get::<Table>("table")?
+                .get::<Function>("unpack")?,
+        ))?;
     for expression in expressions {
         let source = expression.source();
         let closure: Function = closures.raw_get(source)?;
         let member_reads = lua.create_table()?;
-        let (expression_env, bind): (Table, Function) = factory.call(member_reads.clone())?;
+        let (expression_env, bind, bind_callback): (Table, Function, Function) =
+            factory.call(member_reads.clone())?;
+        callback_binders.raw_set(source, bind_callback)?;
         closure.set_environment(expression_env)?;
         closures.raw_set(source, bind.call::<Function>(closure)?)?;
         all_member_reads.raw_set(source, member_reads)?;

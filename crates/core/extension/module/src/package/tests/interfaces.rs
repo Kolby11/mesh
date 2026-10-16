@@ -105,7 +105,7 @@ fn inline_backend_interface_declaration_registers_contract() {
 }
 
 #[test]
-fn duplicate_interface_declaration_prefers_interface_module() {
+fn duplicate_interface_declaration_rejects_inline_copy() {
     let root = root_with_modules(
         &[
             ("@mesh/example-interface", ModuleKind::Interface),
@@ -160,21 +160,11 @@ fn duplicate_interface_declaration_prefers_interface_module() {
             reason: None,
         }];
 
-    let graph = InstalledModuleGraph::from_parts(root, vec![interface, backend]).unwrap();
-
-    let contract = graph.interface_contract("mesh.example").unwrap();
-    assert_eq!(
-        contract.methods[0].name, "from_interface_module",
-        "standalone interface module contract must win over inline duplicates"
-    );
+    let error = InstalledModuleGraph::from_parts(root, vec![interface, backend]).unwrap_err();
     assert!(
-        graph
-            .diagnostics()
-            .iter()
-            .any(|d| d.status == "duplicate_interface_declaration"
-                && d.module_id == "@mesh/example-backend"),
-        "losing inline declaration should be a diagnostic; got: {:?}",
-        graph.diagnostics()
+        error
+            .to_string()
+            .contains("duplicate active interface declaration 'mesh.example'")
     );
 }
 
@@ -208,66 +198,29 @@ fn inline_example_backend(module_id: &str, priority: u32, method: &str) -> Loade
 
 #[test]
 fn provider_priority_cannot_replace_an_inline_interface_contract() {
-    let root = root_with_modules(
-        &[
-            ("@mesh/example-backend", ModuleKind::Backend),
-            ("@other/example-backend", ModuleKind::Backend),
-        ],
-        &[("mesh.example", "@mesh/example-backend")],
-        None,
-    );
-    let graph = InstalledModuleGraph::from_parts(
-        root,
-        vec![
-            inline_example_backend("@mesh/example-backend", 100, "focus"),
-            inline_example_backend("@other/example-backend", 101, "rewritten"),
-        ],
-    )
-    .unwrap();
-
-    assert!(graph.declared_interface("mesh.example").is_none());
-    for module_id in ["@mesh/example-backend", "@other/example-backend"] {
+    for method in ["focus", "rewritten"] {
+        let root = root_with_modules(
+            &[
+                ("@mesh/example-backend", ModuleKind::Backend),
+                ("@mesh/other-backend", ModuleKind::Backend),
+            ],
+            &[("mesh.example", "@mesh/example-backend")],
+            None,
+        );
+        let error = InstalledModuleGraph::from_parts(
+            root,
+            vec![
+                inline_example_backend("@mesh/example-backend", 100, "focus"),
+                inline_example_backend("@mesh/other-backend", 101, method),
+            ],
+        )
+        .unwrap_err();
         assert!(
-            graph.diagnostics().iter().any(
-                |d| d.status == "conflicting_interface_declaration" && d.module_id == module_id
-            ),
-            "every declarer should get a conflict diagnostic; got: {:?}",
-            graph.diagnostics()
+            error
+                .to_string()
+                .contains("duplicate active interface declaration 'mesh.example'")
         );
     }
-}
-
-#[test]
-fn identical_inline_interface_copies_share_one_declaration() {
-    let root = root_with_modules(
-        &[
-            ("@mesh/example-backend", ModuleKind::Backend),
-            ("@other/example-backend", ModuleKind::Backend),
-        ],
-        &[("mesh.example", "@mesh/example-backend")],
-        None,
-    );
-    let graph = InstalledModuleGraph::from_parts(
-        root,
-        vec![
-            inline_example_backend("@mesh/example-backend", 100, "focus"),
-            inline_example_backend("@other/example-backend", 101, "focus"),
-        ],
-    )
-    .unwrap();
-
-    assert_eq!(
-        graph.interface_contract("mesh.example").unwrap().methods[0].name,
-        "focus"
-    );
-    assert!(
-        !graph
-            .diagnostics()
-            .iter()
-            .any(|d| d.status.contains("interface_declaration")),
-        "identical copies are not a conflict; got: {:?}",
-        graph.diagnostics()
-    );
 }
 
 #[test]
@@ -395,10 +348,10 @@ mesh.events.publish("mesh.hyprland.switch_workspace", { id = 1 })
     )
     .unwrap();
 
-    let root = root_with_modules(&[("@mesh/test-frontend", ModuleKind::Frontend)], &[], None);
+    let root = root_with_modules(&[("@mesh/test-frontend", ModuleKind::Ui)], &[], None);
     let mut module = loaded_module(
         "@mesh/test-frontend",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes::default(),
@@ -517,7 +470,7 @@ example.MissingChanged:on(function(_event) end)
     let root = root_with_modules(
         &[
             ("@mesh/example-interface", ModuleKind::Interface),
-            ("@mesh/example-frontend", ModuleKind::Frontend),
+            ("@mesh/example-frontend", ModuleKind::Ui),
         ],
         &[],
         None,
@@ -543,7 +496,7 @@ example.MissingChanged:on(function(_event) end)
     });
     let mut frontend = loaded_module(
         "@mesh/example-frontend",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies {
             backend: HashMap::from([("mesh.example".into(), ">=1.0".into())]),
             ..MeshDependencies::default()
@@ -614,7 +567,7 @@ fn graph_health_marks_active_provider_unavailable_when_required_binary_is_missin
 fn graph_health_marks_frontend_required_interface_unavailable_when_active_provider_is_unhealthy() {
     let root = root_with_modules(
         &[
-            ("@mesh/frontend", ModuleKind::Frontend),
+            ("@mesh/frontend", ModuleKind::Ui),
             ("@mesh/backend", ModuleKind::Backend),
         ],
         &[("mesh.example", "@mesh/backend")],
@@ -626,7 +579,7 @@ fn graph_health_marks_frontend_required_interface_unavailable_when_active_provid
     };
     let frontend = loaded_module(
         "@mesh/frontend",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         frontend_dependencies,
         vec![],
         MeshContributes::default(),
@@ -757,7 +710,7 @@ fn graph_diagnostics_report_frontend_missing_interface_required_capability() {
         &[
             ("@mesh/example-interface", ModuleKind::Interface),
             ("@mesh/example-backend", ModuleKind::Backend),
-            ("@mesh/example-frontend", ModuleKind::Frontend),
+            ("@mesh/example-frontend", ModuleKind::Ui),
         ],
         &[("mesh.example", "@mesh/example-backend")],
         None,
@@ -798,7 +751,7 @@ fn graph_diagnostics_report_frontend_missing_interface_required_capability() {
     backend.manifest.mesh.capabilities.required = vec!["service.example.read".into()];
     let frontend = loaded_module(
         "@mesh/example-frontend",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies {
             backend: HashMap::from([("mesh.example".into(), ">=1.0".into())]),
             ..MeshDependencies::default()
@@ -888,7 +841,7 @@ fn graph_diagnostics_accept_backend_provider_declared_base_module_dependency() {
 fn interface_contracts_declare_owned_service_permissions() {
     let root = root_with_modules(
         &[("@acme/weather", ModuleKind::Backend)],
-        &[("mesh.weather", "@acme/weather")],
+        &[("acme.weather", "@acme/weather")],
         None,
     );
     let mut backend = with_inline_contracts(loaded_module(
@@ -896,7 +849,7 @@ fn interface_contracts_declare_owned_service_permissions() {
         ModuleKind::Backend,
         MeshDependencies::default(),
         vec![MeshProvidesDeclaration {
-            interface: "mesh.weather".into(),
+            interface: "acme.weather".into(),
             version: Some("1.0".into()),
             base_module: None,
             provider: Some("openmeteo".into()),
@@ -905,15 +858,16 @@ fn interface_contracts_declare_owned_service_permissions() {
         }],
         MeshContributes::default(),
     ));
+    backend.manifest.mesh.interfaces[0].domain = Some("weather".into());
     backend.manifest.mesh.interfaces[0].contract = Some(serde_json::json!({
         "state": [{ "name": "temperature", "type": "float" }],
         "capabilities": {
-            "read": ["service.weather.read"],
+            "read": ["service.acme.weather.read"],
             "permissions": {
-                "service.weather.read": "standard",
-                "service.weather.refresh": "elevated",
+                "service.acme.weather.read": "standard",
+                "service.acme.weather.refresh": "elevated",
                 "service.audio.control": "standard",
-                "service.weather.everything": "root"
+                "service.acme.weather.everything": "root"
             }
         }
     }));
@@ -921,14 +875,14 @@ fn interface_contracts_declare_owned_service_permissions() {
     let graph = InstalledModuleGraph::from_parts(root, vec![backend]).unwrap();
     let catalog = graph.capability_catalog();
     assert_eq!(
-        catalog.validate("service.weather.read"),
+        catalog.validate("service.acme.weather.read"),
         Ok(mesh_core_capability::PrivilegeLevel::Standard)
     );
     assert_eq!(
-        catalog.validate("service.weather.refresh"),
+        catalog.validate("service.acme.weather.refresh"),
         Ok(mesh_core_capability::PrivilegeLevel::Elevated)
     );
-    assert!(catalog.validate("service.weather.everything").is_err());
+    assert!(catalog.validate("service.acme.weather.everything").is_err());
     let refused = graph
         .diagnostics()
         .iter()
@@ -961,9 +915,9 @@ fn interface_contracts_declare_owned_service_permissions() {
 fn a_missing_required_provider_degrades_while_an_unusable_one_blocks() {
     let root = root_with_modules(
         &[
-            ("@me/waits", ModuleKind::Frontend),
-            ("@me/blocked", ModuleKind::Frontend),
-            ("@me/unrelated", ModuleKind::Frontend),
+            ("@me/waits", ModuleKind::Ui),
+            ("@me/blocked", ModuleKind::Ui),
+            ("@me/unrelated", ModuleKind::Ui),
             ("@me/old-provider", ModuleKind::Backend),
             ("@me/missing-interface", ModuleKind::Interface),
         ],
@@ -973,7 +927,7 @@ fn a_missing_required_provider_degrades_while_an_unusable_one_blocks() {
     let requiring = |id: &str, interface: &str, range: &str| {
         loaded_module(
             id,
-            ModuleKind::Frontend,
+            ModuleKind::Ui,
             MeshDependencies {
                 backend: HashMap::from([(interface.into(), range.into())]),
                 ..MeshDependencies::default()
@@ -984,7 +938,7 @@ fn a_missing_required_provider_degrades_while_an_unusable_one_blocks() {
     };
     let unrelated = loaded_module(
         "@me/unrelated",
-        ModuleKind::Frontend,
+        ModuleKind::Ui,
         MeshDependencies::default(),
         vec![],
         MeshContributes::default(),
@@ -992,7 +946,7 @@ fn a_missing_required_provider_degrades_while_an_unusable_one_blocks() {
     // Declared (and typed) but nothing implements it.
     let mut declared_only = interface_module(
         "@me/missing-interface",
-        "mesh.missing",
+        "me.missing",
         "missing",
         InterfaceRelationship::Base,
         None,
@@ -1010,7 +964,7 @@ fn a_missing_required_provider_degrades_while_an_unusable_one_blocks() {
         ModuleKind::Backend,
         MeshDependencies::default(),
         vec![MeshProvidesDeclaration {
-            interface: "mesh.versioned".into(),
+            interface: "me.versioned".into(),
             version: Some("1.0".into()),
             base_module: None,
             provider: Some("old".into()),
@@ -1023,8 +977,8 @@ fn a_missing_required_provider_degrades_while_an_unusable_one_blocks() {
     let graph = InstalledModuleGraph::from_parts(
         root,
         vec![
-            requiring("@me/waits", "mesh.missing", ">=1.0"),
-            requiring("@me/blocked", "mesh.versioned", ">=2.0"),
+            requiring("@me/waits", "me.missing", ">=1.0"),
+            requiring("@me/blocked", "me.versioned", ">=2.0"),
             unrelated,
             old_provider,
             declared_only,
@@ -1034,7 +988,7 @@ fn a_missing_required_provider_degrades_while_an_unusable_one_blocks() {
 
     assert!(graph.module("@me/waits").unwrap().enabled);
     assert!(graph.health().iter().any(|record| {
-        record.interface.as_deref() == Some("mesh.missing") && record.status.contains("unavailable")
+        record.interface.as_deref() == Some("me.missing") && record.status.contains("unavailable")
     }));
     assert!(!graph.module("@me/blocked").unwrap().enabled);
     assert!(graph.diagnostics().iter().any(|diagnostic| {
@@ -1042,4 +996,156 @@ fn a_missing_required_provider_degrades_while_an_unusable_one_blocks() {
     }));
     assert!(graph.module("@me/unrelated").unwrap().enabled);
     assert!(graph.module("@me/old-provider").unwrap().enabled);
+}
+
+#[test]
+fn standard_namespace_checks_provenance_including_spoofed_mesh_ids() {
+    for (id, trust) in [
+        ("@alice/wm-interface", TrustTier::Verified),
+        ("@mesh/wm-interface", TrustTier::Local),
+        ("@mesh/wm-interface", TrustTier::Community),
+    ] {
+        let module = interface_module(id, "mesh.wm", "wm", InterfaceRelationship::Base, None);
+        let root = root_with_modules(&[(id, ModuleKind::Interface)], &[], None);
+        let error = InstalledModuleGraph::from_parts_with_trust(
+            root,
+            vec![module],
+            Default::default(),
+            std::collections::BTreeMap::from([(id.into(), trust)]),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("core provenance"), "{error}");
+    }
+}
+
+#[test]
+fn community_interfaces_use_their_publishers_namespace() {
+    let module = interface_module(
+        "@alice/weather-interface",
+        "alice.weather",
+        "weather",
+        InterfaceRelationship::Base,
+        None,
+    );
+    let root = root_with_modules(
+        &[("@alice/weather-interface", ModuleKind::Interface)],
+        &[],
+        None,
+    );
+    let graph = InstalledModuleGraph::from_parts(root.clone(), vec![module.clone()]).unwrap();
+    assert!(graph.interface_contract("alice.weather").is_some());
+    let mut invalid = module;
+    invalid.manifest.mesh.interface.as_mut().unwrap().name = "bob.weather".into();
+    assert!(
+        InstalledModuleGraph::from_parts(root, vec![invalid])
+            .unwrap_err()
+            .to_string()
+            .contains("publisher namespace 'alice.'")
+    );
+}
+
+#[test]
+fn standard_extension_point_names_also_require_core_provenance() {
+    let mut module = interface_module(
+        "@alice/weather-interface",
+        "alice.weather",
+        "weather",
+        InterfaceRelationship::Base,
+        None,
+    );
+    module.manifest.mesh.extension_points.insert(
+        "mesh.weather.item".into(),
+        serde_json::from_value(serde_json::json!({"version":"1.0"})).unwrap(),
+    );
+    let root = root_with_modules(
+        &[("@alice/weather-interface", ModuleKind::Interface)],
+        &[],
+        None,
+    );
+    assert!(
+        InstalledModuleGraph::from_parts(root, vec![module])
+            .unwrap_err()
+            .to_string()
+            .contains("core provenance")
+    );
+}
+
+#[test]
+fn standard_domain_contracts_load_without_any_provider() {
+    let repository = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let domains = ["wm", "power", "brightness"];
+    let modules = domains
+        .iter()
+        .map(|domain| {
+            load_module_manifest(&repository.join("modules/interfaces").join(domain)).unwrap()
+        })
+        .collect::<Vec<_>>();
+    let ids = domains
+        .iter()
+        .map(|domain| format!("@mesh/{domain}-interface"))
+        .collect::<Vec<_>>();
+    let entries = ids
+        .iter()
+        .map(|id| (id.as_str(), ModuleKind::Interface))
+        .collect::<Vec<_>>();
+    let graph =
+        InstalledModuleGraph::from_parts(root_with_modules(&entries, &[], None), modules).unwrap();
+    for domain in domains {
+        assert!(
+            graph
+                .interface_contract(&format!("mesh.{domain}"))
+                .is_some(),
+            "{:#?}",
+            graph.diagnostics()
+        );
+        let provider = match domain {
+            "wm" => "hyprland-wm",
+            "power" => "upower-power",
+            _ => "backlight-brightness",
+        };
+        let backend =
+            load_module_manifest(&repository.join("modules/backend").join(provider)).unwrap();
+        assert!(backend.manifest.mesh.interfaces.is_empty());
+        assert!(
+            backend
+                .manifest
+                .mesh
+                .dependencies
+                .modules
+                .contains_key(&format!("@mesh/{domain}-interface"))
+        );
+    }
+}
+
+#[test]
+fn wm_contract_separates_workspace_identity_position_and_output_focus() {
+    let repository = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let module = load_module_manifest(&repository.join("modules/interfaces/wm")).unwrap();
+    let graph = InstalledModuleGraph::from_parts(
+        root_with_modules(&[("@mesh/wm-interface", ModuleKind::Interface)], &[], None),
+        vec![module],
+    )
+    .unwrap();
+    let contract = graph
+        .interface_contract("mesh.wm")
+        .unwrap()
+        .compile(mesh_core_service::DeclarationProvenance::unknown())
+        .unwrap();
+    for workspaces in [
+        serde_json::json!([
+            {"id":42,"name":"code","windows":2,"index":1,"output":"DP-1","visible":true,"focused":true},
+            {"id":99,"name":"chat","windows":1,"index":1,"output":"DP-2","visible":true,"focused":false}
+        ]),
+        serde_json::json!([
+            {"id":42,"name":"mail","windows":1,"index":null,"output":"eDP-1","visible":true,"focused":true,"urgent":true},
+            {"id":-1337,"name":"notes","windows":0,"output":null}
+        ]),
+    ] {
+        let state = serde_json::json!({"available":true,"active_workspace":42,"active_window":{"title":"Editor","app_id":"org.editor"},"workspaces":workspaces,"source_module":"@test/provider"});
+        assert!(
+            contract.state_warnings(&state).is_empty(),
+            "{:?}",
+            contract.state_warnings(&state)
+        );
+    }
 }

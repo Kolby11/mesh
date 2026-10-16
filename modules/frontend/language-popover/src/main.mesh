@@ -1,7 +1,9 @@
 <props>
-blur_enabled:    { type: "bool", default: true, label: "Backdrop blur" }
-blur_radius:     { type: "size", default: "var(--effect-backdrop-blur-popup-radius)", label: "Blur radius" }
-blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-background)", label: "Frosted background" }
+{
+    blur_enabled = { type = "bool", default = true, label = "Backdrop blur" },
+    blur_radius = { type = "size", default = "var(--effect-backdrop-blur-popup-radius)", label = "Blur radius" },
+    blur_background = { type = "color", default = "var(--effect-backdrop-blur-popup-background)", label = "Frosted background" },
+}
 </props>
 
 <template>
@@ -12,8 +14,7 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
         anchor-ref="languageButton"
         anchor="bottom"
         gravity="bottom"
-        onpointerenter={onPopoverEnter}
-        onpointerleave={onPopoverLeave}
+        open-on="hover"
     >
         <BubbleOptions
             label={t('language.choose')}
@@ -21,10 +22,6 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
             rotation={rotation}
             onselect={onSelectOption}
             onscroll={onOptionScroll}
-            onoptionpointerenter={onOptionPointerEnter}
-            onoptionfocus={onOptionFocus}
-            onoptionblur={onOptionBlur}
-            onoptionkeydown={onOptionKeyDown}
         />
     </popover>
 </template>
@@ -69,9 +66,10 @@ end
 current_flag = FLAGS["en"]
 local locale_changed = nil
 
+-- Written by the core disclosure controller (`open-on="hover"`).
 open = false
--- Whether the last render saw the popover open, so closing it (which the
--- trigger does through its hover intent) re-centres the ring once.
+-- Whether the last render saw the popover open, so closing it re-centres the
+-- ring once.
 local was_open = false
 
 selected_locale = "en"
@@ -79,9 +77,6 @@ window_start = 1
 -- Ring rotation token handed to BubbleOptions; see its `rotation` prop.
 rotation = ""
 local rotation_tick = 0
--- Whether the pointer is currently over the popover, so focus loss can tell a
--- keyboard dismissal apart from a click that merely moved focus between bubbles.
-local pointer_inside = false
 -- Optimistic selection: the locale this popover asked for, and the locale it
 -- replaced. See `select_locale` and `render`.
 local pending_locale = nil
@@ -196,8 +191,7 @@ local function sync_options()
 end
 
 -- Selecting a locale does not close the popover: it stays open so the user can
--- keep choosing. It closes on pointer leave (onPopoverLeave) or, for keyboard
--- activation, on focus leave.
+-- keep choosing until the pointer or keyboard focus leaves it.
 -- The ring deliberately stays where the user scrolled it: re-centring on the
 -- picked locale would slide the bubbles out from under the cursor mid-choice.
 -- The mark moves to the picked bubble immediately and `pending_locale` holds it
@@ -244,7 +238,6 @@ effect(function(self)
     end
     if was_open and not open then
         -- Closed: the next open starts from the selected locale again.
-        pointer_inside = false
         recenter_ring()
     end
     was_open = open
@@ -256,9 +249,6 @@ function onSelectOption(locale)
 end
 
 function onOptionScroll(event)
-    -- Scrolling over the bubbles keeps the popover alive: it is a way of
-    -- browsing the set, not of leaving it.
-    self.PopoverEnter:fire(event)
     local step = scroll_step(event)
     if step == 0 then
         return
@@ -272,46 +262,6 @@ function onOptionScroll(event)
         rotation = "prev-" .. rotation_tick
     end
     sync_options()
-end
-
--- The trigger owns the hover intent: entering and leaving are only reported,
--- and the trigger's single close timer decides when the popover closes.
-function onPopoverEnter(event)
-    pointer_inside = true
-    self.PopoverEnter:fire(event)
-end
-
-function onPopoverLeave()
-    pointer_inside = false
-    self.PopoverLeave:fire()
-end
-
-function onOptionFocus(event)
-    self.PopoverEnter:fire(event)
-end
-
-function onOptionPointerEnter(event)
-    pointer_inside = true
-    self.PopoverEnter:fire(event)
-end
-
--- Focus leaving an option is only a dismissal for keyboard users. Clicking a
--- second bubble also blurs the first one, and closing on that would shut the
--- popover 400ms after the very click meant to keep browsing.
-function onOptionBlur(_event)
-    if pointer_inside then
-        return
-    end
-    self.PopoverLeave:fire()
-end
-
-function onOptionKeyDown(event)
-    if event and event.key == "Escape" then
-        open = false
-        recenter_ring()
-        sync_options()
-        self.KeyboardDismissRequested:fire()
-    end
 end
 
 </script>

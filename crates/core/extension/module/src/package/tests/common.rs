@@ -144,7 +144,7 @@ pub(super) fn loaded_module(
                 icon_requirements: crate::manifest::IconRequirementsSection::default(),
                 accessibility: None,
                 surface: None,
-                surface_layout: None,
+                surface_layout: (kind == ModuleKind::Ui).then(Default::default),
                 theme: None,
                 experimental: serde_json::Value::Null,
             },

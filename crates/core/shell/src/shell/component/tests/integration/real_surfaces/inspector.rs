@@ -11,7 +11,6 @@ fn debug_inspector_overview_renders_profiling_off_state_on_real_surface() {
                 "overlay_enabled": true,
                 "profiling_enabled": false,
                 "profiling_session_id": 3,
-                "active_view": "overview",
                 "modules": [{ "id": "@mesh/debug-inspector" }],
                 "interfaces": [],
                 "backend_runtimes": [],
@@ -55,7 +54,6 @@ fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_su
                 "overlay_enabled": true,
                 "profiling_enabled": true,
                 "profiling_session_id": 9,
-                "active_view": "overview",
                 "modules": [{ "id": "@mesh/debug-inspector" }],
                 "interfaces": [],
                 "backend_runtimes": [],
@@ -158,7 +156,6 @@ fn debug_inspector_hidden_views_do_not_participate_in_layout() {
                 "overlay_enabled": true,
                 "profiling_enabled": false,
                 "profiling_session_id": 11,
-                "active_view": "overview",
                 "modules": [{ "id": "@mesh/debug-inspector" }],
                 "interfaces": [],
                 "backend_runtimes": [],
@@ -205,7 +202,6 @@ fn debug_inspector_surfaces_view_renders_empty_and_live_rows_on_real_surface() {
                 "overlay_enabled": true,
                 "profiling_enabled": true,
                 "profiling_session_id": 4,
-                "active_view": "overview",
                 "modules": [],
                 "interfaces": [],
                 "backend_runtimes": [],
@@ -249,7 +245,6 @@ fn debug_inspector_surfaces_view_renders_empty_and_live_rows_on_real_surface() {
                 "overlay_enabled": true,
                 "profiling_enabled": true,
                 "profiling_session_id": 4,
-                "active_view": "overview",
                 "modules": [],
                 "interfaces": [],
                 "backend_runtimes": [],
@@ -300,5 +295,41 @@ fn debug_inspector_surfaces_view_renders_empty_and_live_rows_on_real_surface() {
         live_text
             .iter()
             .any(|line| line.contains("Total render 128us"))
+    );
+}
+
+#[test]
+fn debug_inspector_next_view_keybind_cycles_module_owned_views() {
+    let manifest = mesh_core_module::package::ModuleManifest::from_path(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../modules/frontend/debug-inspector/module.json"),
+    )
+    .unwrap();
+    let next_view = &manifest.mesh.contributes.keybinds.actions["next-view"];
+    assert_eq!(next_view.trigger.key.as_deref(), Some("Tab"));
+    assert_eq!(next_view.trigger.modifiers, ["ctrl"]);
+
+    let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
+    let mut views = Vec::new();
+    for _ in 0..6 {
+        component
+            .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showNextView", &[])
+            .unwrap();
+        views.push(
+            runtime_value(&component, "active_view")
+                .and_then(|value| value.as_str().map(str::to_string))
+                .unwrap(),
+        );
+    }
+    assert_eq!(
+        views,
+        [
+            "elements",
+            "modules",
+            "surfaces",
+            "backend_services",
+            "benchmark",
+            "overview"
+        ]
     );
 }

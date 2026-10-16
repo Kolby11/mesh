@@ -105,8 +105,9 @@ fn shipped_module_graph_loads_repo_module_fixture() {
             .any(|module| module.id == "@mesh/composition-editor")
     );
     let component_ids: std::collections::HashSet<_> = graph
-        .modules_by_kind(ModuleKind::Component)
+        .modules_by_kind(ModuleKind::Ui)
         .into_iter()
+        .filter(|module| !module.manifest.mesh.has_default_placement())
         .map(|module| module.id.as_str())
         .collect();
     assert_eq!(component_ids.len(), 5);
@@ -314,7 +315,7 @@ fn shipped_module_diagnostics_report_missing_navigation_icon() {
     let icons = load_module_manifest(&workspace_root.join("modules/icon-packs/default")).unwrap();
     let root = root_with_modules(
         &[
-            ("@mesh/navigation-bar", ModuleKind::Frontend),
+            ("@mesh/navigation-bar", ModuleKind::Ui),
             ("@mesh/icons-default", ModuleKind::IconPack),
         ],
         &[],

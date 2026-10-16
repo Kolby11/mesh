@@ -4,7 +4,7 @@
   "description": "Top-edge navigation bar surface with declarative keybind metadata for localized shortcut labels.",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "uses": {
       "modules": {
         "@mesh/language-popover": ">=0.1.0",

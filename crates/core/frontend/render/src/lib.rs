@@ -5,6 +5,7 @@ pub mod display_list;
 mod fractional_scale;
 pub mod library_adapters;
 mod paint_input;
+pub mod scene_thread;
 
 #[cfg(feature = "renderer-parley")]
 mod parley_adapter;

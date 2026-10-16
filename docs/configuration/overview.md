@@ -104,7 +104,7 @@ under `config/profiles/`. The profile model and live switching are shipped.
 
 ## Frontend visual-effect settings
 
-Frontend modules declare editable visual knobs in their root `<props>` block.
+UI modules declare editable visual knobs in their root `<props>` block.
 Author defaults may reference theme tokens; user overrides are stored in that
 module's namespace under `props.global`, or under `props.instances` for one
 component instance. Shared overrides live in `config/settings.json`; generated
@@ -155,7 +155,7 @@ Every installable module uses `module.json`:
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "entry": "src/main.mesh"
   }
 }

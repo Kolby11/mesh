@@ -162,7 +162,7 @@ pub(super) fn write_shell_discovery_manifest(module_dir: &Path, id: &str, payloa
   "version": "0.1.0",
   "mesh": {{
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "entry": "src/main.mesh",
     "capabilities": {{
       "required": ["shell.surface"],

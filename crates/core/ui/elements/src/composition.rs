@@ -7,9 +7,52 @@
 use crate::AttributeMap;
 use std::ops::Deref;
 
+/// Opaque, lifetime-owned function value supplied by a script runtime.
+#[derive(Clone)]
+pub struct CallbackHandle {
+    id: u64,
+    value: std::sync::Arc<dyn std::any::Any + Send + Sync>,
+}
+
+impl CallbackHandle {
+    pub fn new<T: std::any::Any + Send + Sync>(id: u64, value: std::sync::Arc<T>) -> Self {
+        Self { id, value }
+    }
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+    pub fn downcast_ref<T: std::any::Any>(&self) -> Option<&T> {
+        self.value.downcast_ref()
+    }
+}
+impl std::fmt::Debug for CallbackHandle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_tuple("CallbackHandle")
+            .field(&self.id)
+            .finish()
+    }
+}
+impl PartialEq for CallbackHandle {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+impl Eq for CallbackHandle {}
+impl std::hash::Hash for CallbackHandle {
+    fn hash<H: std::hash::Hasher>(&self, hasher: &mut H) {
+        std::hash::Hash::hash(&self.id, hasher);
+    }
+}
+
 /// A script handler and the component runtime that owns it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum HandlerTarget {
+    Function {
+        instance_key: Option<String>,
+        source: String,
+        callback: CallbackHandle,
+    },
     Root(String),
     Embedded {
         instance_key: String,
@@ -31,15 +74,20 @@ impl HandlerTarget {
 
     /// Assign an owner to a root handler. Repeated composition is idempotent.
     pub fn namespace(&mut self, instance_key: &str) {
-        let Self::Root(handler) = self else {
-            return;
-        };
-        *self = Self::embedded(instance_key, std::mem::take(handler));
+        match self {
+            Self::Root(handler) => *self = Self::embedded(instance_key, std::mem::take(handler)),
+            Self::Function {
+                instance_key: owner,
+                ..
+            } if owner.is_none() => *owner = Some(instance_key.into()),
+            _ => {}
+        }
     }
 
     pub fn handler(&self) -> &str {
         match self {
             Self::Root(handler) | Self::Embedded { handler, .. } => handler,
+            Self::Function { source, .. } => source,
         }
     }
 
@@ -50,6 +98,7 @@ impl HandlerTarget {
     pub fn instance_key(&self) -> Option<&str> {
         match self {
             Self::Root(_) => None,
+            Self::Function { instance_key, .. } => instance_key.as_deref(),
             Self::Embedded { instance_key, .. } => Some(instance_key),
         }
     }
@@ -57,6 +106,11 @@ impl HandlerTarget {
     pub fn dynamic_heap_bytes(&self) -> usize {
         match self {
             Self::Root(handler) => handler.capacity(),
+            Self::Function {
+                instance_key,
+                source,
+                ..
+            } => instance_key.as_ref().map_or(0, String::capacity) + source.capacity(),
             Self::Embedded {
                 instance_key,
                 handler,
@@ -123,6 +177,8 @@ impl PartialEq<&str> for HandlerTarget {
 pub struct ComponentCompositionProps {
     /// Public values supplied to the embedded component.
     pub values: AttributeMap,
+    /// Function-valued inputs, excluded from JSON configuration and attributes.
+    pub callbacks: std::collections::BTreeMap<crate::AttrKey, HandlerTarget>,
     /// Parent-state bindings keyed by public prop name.
     pub bindings: AttributeMap,
     /// Optional parent field receiving the child component instance.

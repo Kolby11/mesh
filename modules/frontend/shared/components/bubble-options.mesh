@@ -1,7 +1,9 @@
 <props>
-blur_enabled:    { type: "bool", default: true, label: "Backdrop blur" }
-blur_radius:     { type: "size", default: "var(--effect-backdrop-blur-popup-radius)", label: "Blur radius" }
-blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-background)", label: "Frosted background" }
+{
+    blur_enabled = { type = "bool", default = true, label = "Backdrop blur" },
+    blur_radius = { type = "size", default = "var(--effect-backdrop-blur-popup-radius)", label = "Blur radius" },
+    blur_background = { type = "color", default = "var(--effect-backdrop-blur-popup-background)", label = "Frosted background" },
+}
 </props>
 
 <template>
@@ -359,7 +361,7 @@ end
         border-color: var(--color-secondary);
     }
 
-    .bubble-option-core-dark {
+    .bubble-option-core-default {
         background-color: #1d1b20;
         color: #6750a4;
         border-color: #49454f;
@@ -367,28 +369,12 @@ end
         animation-delay: 360ms;
     }
 
-    .bubble-option-core-dark-active {
+    .bubble-option-core-default-active {
         border-color: #6750a4;
     }
 
-    .bubble-option-core-dark:hover {
+    .bubble-option-core-default:hover {
         border-color: #ccc2dc;
-    }
-
-    .bubble-option-core-light {
-        background-color: #f7f2fa;
-        color: #6750a4;
-        border-color: #cac4d0;
-        animation-name: bubble-option-float-center;
-        animation-delay: 430ms;
-    }
-
-    .bubble-option-core-light-active {
-        border-color: #6750a4;
-    }
-
-    .bubble-option-core-light:hover {
-        border-color: #625b71;
     }
 
     .bubble-option-core-gruvbox {

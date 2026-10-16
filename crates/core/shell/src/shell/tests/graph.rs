@@ -125,7 +125,7 @@ fn graph_settings_reject_the_same_surface_enum_values_as_surface_config() {
             "modulesDir": "modules",
             "modules": {
                 "@test/frontend": {
-                    "kind": "frontend",
+                    "kind": "ui",
                     "path": "frontend",
                     "enabled": true
                 }
@@ -137,7 +137,7 @@ fn graph_settings_reject_the_same_surface_enum_values_as_surface_config() {
                 "version": "0.1.0",
                 "mesh": {
                     "apiVersion": "0.1",
-                    "kind": "frontend",
+                    "kind": "ui",
                     "entry": "src/main.mesh"
                 }
             }"#,
@@ -192,7 +192,7 @@ fn graph_interface_catalog_replaces_stale_providers_and_excludes_disabled_candid
                     "enabled": true
                 }
             },
-            "providers": { "mesh.example": "@test/old-backend" }
+            "providers": { "test.example": "@test/old-backend" }
         }"#,
         vec![
             r#"{
@@ -202,7 +202,7 @@ fn graph_interface_catalog_replaces_stale_providers_and_excludes_disabled_candid
                     "apiVersion": "0.1",
                     "kind": "interface",
                     "interface": {
-                        "name": "mesh.example",
+                        "name": "test.example",
                         "version": "1.0",
                         "domain": "example",
                         "contract": { "methods": [{ "name": "read", "returns": "boolean" }] }
@@ -217,7 +217,7 @@ fn graph_interface_catalog_replaces_stale_providers_and_excludes_disabled_candid
                     "kind": "backend",
                     "entrypoints": { "main": "src/main.luau" },
                     "implements": [{
-                        "interface": "mesh.example",
+                        "interface": "test.example",
                         "version": "1.0",
                         "provider": "old",
                         "priority": 10
@@ -241,7 +241,7 @@ fn graph_interface_catalog_replaces_stale_providers_and_excludes_disabled_candid
                     "enabled": false
                 }
             },
-            "providers": { "mesh.example": "@test/old-backend" }
+            "providers": { "test.example": "@test/old-backend" }
         }"#,
         vec![
             r#"{
@@ -251,7 +251,7 @@ fn graph_interface_catalog_replaces_stale_providers_and_excludes_disabled_candid
                     "apiVersion": "0.1",
                     "kind": "interface",
                     "interface": {
-                        "name": "mesh.example",
+                        "name": "test.example",
                         "version": "1.0",
                         "domain": "example",
                         "contract": { "methods": [{ "name": "read", "returns": "boolean" }] }
@@ -266,7 +266,7 @@ fn graph_interface_catalog_replaces_stale_providers_and_excludes_disabled_candid
                     "kind": "backend",
                     "entrypoints": { "main": "src/main.luau" },
                     "implements": [{
-                        "interface": "mesh.example",
+                        "interface": "test.example",
                         "version": "1.0",
                         "provider": "old",
                         "priority": 10
@@ -281,7 +281,7 @@ fn graph_interface_catalog_replaces_stale_providers_and_excludes_disabled_candid
     assert_eq!(
         shell
             .interfaces
-            .providers_for("mesh.example")
+            .providers_for("test.example")
             .iter()
             .map(|provider| provider.provider_module.as_str())
             .collect::<Vec<_>>(),
@@ -290,7 +290,7 @@ fn graph_interface_catalog_replaces_stale_providers_and_excludes_disabled_candid
 
     shell.commit_installed_module_graph(second).unwrap();
     assert!(
-        shell.interfaces.providers_for("mesh.example").is_empty(),
+        shell.interfaces.providers_for("test.example").is_empty(),
         "a disabled provider from the replacement graph must not inherit the previous registry entry"
     );
     assert!(
@@ -403,7 +403,7 @@ fn invalid_live_graph_keeps_last_known_good_composition_active() {
             "modulesDir": "modules",
             "modules": {
                 "@test/old": {
-                    "kind": "frontend",
+                    "kind": "ui",
                     "path": "old",
                     "enabled": true
                 }
@@ -413,7 +413,7 @@ fn invalid_live_graph_keeps_last_known_good_composition_active() {
             r#"{
                 "name": "@test/old",
                 "version": "0.1.0",
-                "mesh": { "apiVersion": "0.1", "kind": "frontend" }
+                "mesh": { "apiVersion": "0.1", "kind": "ui" }
             }"#,
         ],
     );
@@ -439,7 +439,7 @@ fn invalid_graph_reload_keeps_the_last_known_good_graph() {
             "modulesDir": "modules",
             "modules": {
                 "@test/old": {
-                    "kind": "frontend",
+                    "kind": "ui",
                     "path": "old",
                     "enabled": true
                 }
@@ -449,7 +449,7 @@ fn invalid_graph_reload_keeps_the_last_known_good_graph() {
             r#"{
                 "name": "@test/old",
                 "version": "0.1.0",
-                "mesh": { "apiVersion": "0.1", "kind": "frontend" }
+                "mesh": { "apiVersion": "0.1", "kind": "ui" }
             }"#,
         ],
     );
@@ -738,7 +738,7 @@ fn live_reload_keeps_a_module_whose_manifest_is_mid_edit() {
     fs::write(
         &manifest,
         r#"{"name":"@test/widget","version":"0.1.0",
-            "mesh":{"apiVersion":"0.1","kind":"frontend","entry":"src/main.mesh"}}"#,
+            "mesh":{"apiVersion":"0.1","kind":"ui","entry":"src/main.mesh"}}"#,
     )
     .unwrap();
     let graph_path = root.path().join("module.json");

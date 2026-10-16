@@ -90,7 +90,7 @@ impl ScriptContext {
         )?;
         self.install_log_api(&mesh_log)?;
         self.install_popover_api(&mesh_popover)?;
-        self.install_task_api(globals, &mesh_ui_api)?;
+        self.install_task_api(globals)?;
         self.install_effect_api(globals)?;
         self.install_shell_api(&mesh)?;
 
@@ -100,6 +100,11 @@ impl ScriptContext {
         mesh.set("log", mesh_log).map_err(lua_err)?;
         mesh.set("popover", mesh_popover).map_err(lua_err)?;
         mesh.set("locale", mesh_locale).map_err(lua_err)?;
+        mesh.set(
+            "json",
+            crate::json::create_json_library(self.lua()).map_err(lua_err)?,
+        )
+        .map_err(lua_err)?;
         let mesh_for_require = mesh.clone();
         globals.set("mesh", mesh).map_err(lua_err)?;
 

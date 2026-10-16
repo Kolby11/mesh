@@ -21,7 +21,7 @@ replacement debt, never public synonyms.
 | Term | Definition |
 | ---- | ---------- |
 | module | Installable, configurable MESH unit (`module.json` at its root). |
-| module kind | The module's primary role: `frontend`, `backend`, `interface`, `component`, `composition`, `library`, `theme`, `icon-pack`, `font-pack`, `language-pack`. |
+| module kind | The module's primary role: `ui`, `backend`, `interface`, `composition`, `library`, `theme`, `icon-pack`, `font-pack`, `language-pack`. |
 | element | Base UI primitive exposed by MESH core (`box`, `button`, `icon`, …). |
 | component | User-authored reusable `.mesh` unit composed from elements/components. |
 | interface | Named, versioned contract: state fields, methods, events, types, consumer capabilities. Data, not code. |
@@ -63,7 +63,7 @@ identity and release metadata (`name`, `version`, `description`, `license`,
   "version": "0.1.0",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "entry": "src/main.mesh",
     "uses": {
       "modules": { "@alice/volume-popover": ">=0.1.0" },
@@ -132,10 +132,9 @@ generations in `model.rs`) are deleted outright.
 
 | Kind | Purpose | Kind-scoped sections |
 | ---- | ------- | -------------------- |
-| `frontend` | `.mesh` UI surfaces/widgets for a shell feature | `mesh.surface` (placement), `mesh.accessibility`, `mesh.contributes.keybinds`, `mesh.theme` |
+| `ui` | `.mesh` component: a shell surface, a widget or an embeddable component | optional `mesh.surface` (default placement), `mesh.accessibility`, `mesh.contributes.keybinds`, `mesh.theme`, `mesh.fonts` |
 | `backend` | Provider implementing interfaces (Luau `main.luau`) | `mesh.implements`, `mesh.uses.binaries`, in-script `props {}` |
 | `interface` | Data-only contract package | `mesh.interface` |
-| `component` | Embeddable `.mesh` component; **no** `mesh.surface`; consumed via `require("@scope/name")` | — |
 | `composition` | An installable shell composition: roots, provider bindings, resources, extension point arrangement | `mesh.compose`, `mesh.extends` |
 | `library` | Importable Luau helpers; grants no capabilities | `mesh.provides.libraries` |
 | `theme` | Theme tokens + component defaults (CSS) | `mesh.contributes.themes` — see [04](04-styling.md) |
@@ -143,15 +142,28 @@ generations in `model.rs`) are deleted outright.
 | `font-pack` | Font role → installed family mappings | `mesh.font_pack` — see [06](06-fonts.md) |
 | `language-pack` | Translation catalogs for other modules | `mesh.contributes.i18n` — see [07](07-i18n.md) |
 
-Frontend and component modules share one UI component model and one primary
-public component; extra public entries are explicit contributions (§4.3).
-`frontend` supplies default surface placement and direct-install activation;
-`component` has no default surface declaration and is made available on install.
-**Shipped:** profiles may explicitly mount either kind as a root instance
-(`mesh-shell profile add <profile> <module>`). A component root takes its
-placement from core defaults plus the instance's sparse `surface` override and
-runs with its existing capability grants; its required interfaces gate
-activation exactly as a frontend's do.
+**Shipped:** a `ui` module has one primary public component; extra public
+entries are explicit contributions (§4.3). Other modules consume it with
+`require("@scope/name")`. `mesh.surface` is optional default placement: a `ui`
+module that declares it is mounted as a root on direct install and in the legacy
+root graph, and contributes its default layout entry. Without it, install only
+makes the component available. Profiles may explicitly mount any `ui` module as
+a root instance (`mesh-shell profile add <profile> <module>`). A root without
+declared placement takes core defaults plus the instance's sparse `surface`
+override and runs with its existing capability grants. Required interfaces gate
+activation either way.
+
+The former `frontend` and `component` kinds are rejected with a migration
+diagnostic: replace either with `"kind": "ui"`. A frontend's `mesh.surface`
+stays as its default placement.
+
+Theme, icon-pack, font-pack and language-pack remain separate kinds. A mixed
+resource-pack kind was evaluated and not adopted: each resource has its own
+selection rule (one theme, ordered icon and font pack chains, language packs
+scoped to a target module), so a mixed pack would still need per-resource
+profile selection and validation. Distributing a matching set is a packaging
+concern: separate modules can be installed together and selected by a
+composition (§5.2).
 
 ### 3.3 Surface placement (`mesh.surface`)
 
@@ -460,16 +472,18 @@ contract-less binding.
   expressions or references to undeclared types produce
   `invalid_interface_contract` diagnostics, and the interface's providers
   cannot be activated.
-- **Inline declaration for single-provider domains.** A backend module may
-  declare its interface contract itself under `mesh.interfaces[]` (same
-  shape as `mesh.interface`) — no separate interface module needed. A
-  standalone interface module owns its name and wins over inline copies, each
-  of which emits `duplicate_interface_declaration`. Identical inline copies
-  share one declaration. Differing inline copies are a conflict: provider
-  priority selects a provider, never a contract, so the interface has no
-  declaration and every declarer gets `conflicting_interface_declaration`.
-  Promote an inline contract to a
-  standalone interface module once a second provider exists.
+- **One owning declaration.** Shared domains are published as independent
+  `interface` modules. Providers implement them and depend on the owning module.
+  A backend may declare a private interface under `mesh.interfaces[]` in its
+  publisher namespace (`@alice/weather` may declare `alice.weather`). Each name
+  has exactly one enabled declaring module. Duplicate standalone, inline, or
+  mixed declarations are graph errors, including identical copies; provider
+  priority never selects a contract.
+- **Namespace provenance.** Service and extension-point declarations in
+  `mesh.*` require assessed `core` distribution provenance. A module name alone
+  does not grant this right; local/community/verified sources cannot claim the
+  standard namespace even with an `@mesh/` id. Other declarations use the
+  publisher's dotted namespace. These publication rules grant no host powers.
 - **No untyped fallback.** A backend that implements an interface nothing
   declares, or whose declaration has no contract, is not a provider. Interface
   modules without a contract report `missing_interface_contract`, as does each
@@ -493,6 +507,38 @@ contract-less binding.
   and releases the pending binding when the provider confirms the value.
 - Do not put provider identity (`source_module`) in contract state — that is
   runtime metadata.
+
+**Shipped standard domains.** `@mesh/wm-interface`, `@mesh/power-interface`
+and `@mesh/brightness-interface` own `mesh.wm`, `mesh.power` and
+`mesh.brightness`; their contracts remain available with no provider enabled.
+The Hyprland, UPower and backlight providers depend on these modules and do not
+redeclare them.
+
+`mesh.wm` 1.1 treats workspace `id` as an opaque provider-local integer, stable
+for that workspace's lifetime, rather than a position or a numeric name.
+Providers normalize native IDs into exact Luau/JSON integers when necessary.
+`active_workspace` and `focus_workspace(id)` use that same identity. Workspace
+`name` is a display label and may be non-numeric; `windows` is the count.
+Optional `index` is a numeric label/display position and may change independently
+of ID; `output` names an output or is nil when unassigned. Optional `visible`
+means active on its own output, while `focused` means globally focused by the
+default seat; several outputs can have visible workspaces at once. Optional
+`urgent` carries attention state. Omitted metadata means unknown, not false.
+Consumers render the provided records and pass their IDs, rather than inventing
+1-based IDs. The shipped bar follows this rule and the Hyprland adapter preserves
+named workspace IDs, output and focus metadata, using names for native dispatch.
+Its normal workspace list excludes compositor-specific special workspaces.
+It consumes structured data through the bounded `mesh.json.decode` host API;
+the parser performs no I/O and service normalization stays in Luau.
+
+This distinction follows [niri's workspace model](https://docs.rs/niri-ipc/latest/niri_ipc/struct.Workspace.html)
+(stable ID versus output-local index and active/focused flags) and
+[Sway's IPC contract](https://github.com/swaywm/sway/blob/master/sway/sway-ipc.7.scd)
+(named workspaces, output, visible/focused flags and tree node IDs). These are
+contract compatibility checks; niri and Sway provider modules remain unshipped.
+Hyprland's [workspace selectors](https://wiki.hypr.land/Configuring/Basics/Dispatchers/)
+require named workspaces to be addressed by name rather than their negative
+internal IDs.
 
 ### 4.1 Versioning
 
@@ -696,7 +742,7 @@ and kind); the root file holds only what is genuinely the user's choice:
   **settings store** ([08](08-settings.md)), not the root graph. The root
   graph owns module-graph decisions; settings own look-and-feel values.
 
-### 5.1 Multiple instances of a frontend module
+### 5.1 Multiple instances of a UI module
 
 **Status: target.**
 
@@ -920,7 +966,7 @@ contribution palette. Its apply_node_slot and reset_node_slot methods require
 service.composition.control. Writes replace or reset one complete ordered list
 and include the observed generation; stale writes fail with
 node_edit_generation_conflict. It exposes no profile paths or editor-specific
-canvas model, so a visual editor remains an ordinary frontend module.
+canvas model, so a visual editor remains an ordinary `ui` module.
 
 The capability is the whole gate. **No module id is consulted**, so a
 third-party settings frontend that declares `service.packages.control` has the
@@ -1096,7 +1142,7 @@ Discovered → Resolved → Loaded → Initialized → Running ⇄ Suspended →
   **Errored**: error logged with context, UI replaced by a bounded placeholder
   (a broken module must not expand or blank its host surface), dependents
   notified; repeated crashing disables the module until re-enabled.
-- Frontend modules are compiled at startup; dev hot-reload watches sources and
+- UI modules are compiled at startup; dev hot-reload watches sources and
   settings.
 - **Execution boundary:** modules run within the shell process, with private
   environments and explicit public communication. Current same-thread Luau

@@ -216,7 +216,7 @@ fn debug_snapshot_resolves_module_graph_layout_label_with_active_locale() {
               "schemaVersion": 1,
               "modulesDir": "modules",
               "modules": {
-                "@mesh/panel": { "kind": "frontend", "path": "@mesh/panel", "enabled": true }
+                "@mesh/panel": { "kind": "ui", "path": "@mesh/panel", "enabled": true }
               },
               "layout": { "entrypoint": "@mesh/panel:main" }
             }"#,
@@ -226,7 +226,7 @@ fn debug_snapshot_resolves_module_graph_layout_label_with_active_locale() {
                   "version": "0.1.0",
                   "mesh": {
                     "apiVersion": "0.1",
-                    "kind": "frontend",
+                    "kind": "ui",
                     "entry": "src/main.mesh",
                     "provides": {
                       "layout": [
@@ -304,7 +304,7 @@ fn debug_snapshot_resolves_generated_settings_with_the_declaring_module_owner() 
               "schemaVersion": 1,
               "modulesDir": "modules",
               "modules": {
-                "@mesh/owner": { "kind": "frontend", "path": "@mesh/owner", "enabled": true }
+                "@mesh/owner": { "kind": "ui", "path": "@mesh/owner", "enabled": true }
               },
               "layout": { "entrypoint": "@mesh/owner:main" }
             }"#,
@@ -314,8 +314,9 @@ fn debug_snapshot_resolves_generated_settings_with_the_declaring_module_owner() 
                   "version": "0.1.0",
                   "mesh": {
                     "apiVersion": "0.1",
-                    "kind": "frontend",
+                    "kind": "ui",
                     "entry": "src/main.mesh",
+                    "surface": {},
                     "provides": {
                       "settings": {
                         "namespace": "@mesh/owner",
@@ -394,7 +395,10 @@ fn debug_snapshot_backfills_mesh_debug_service_state() {
     );
     assert_eq!(latest.state["profiling_enabled"], serde_json::json!(false));
     assert_eq!(latest.state["profiling_session_id"], serde_json::json!(0));
-    assert_eq!(latest.state["active_view"], serde_json::json!("overview"));
+    assert!(
+        latest.state.get("active_view").is_none(),
+        "inspector views are module-owned"
+    );
     assert_eq!(
         latest.state["active_surfaces"],
         serde_json::json!(snapshot.active_surfaces)

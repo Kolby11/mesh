@@ -9,6 +9,7 @@
 //! `mesh-core-presentation` is a direct enum mapping with no policy of its own.
 //! Placement is parsed from attributes:
 //! `<popover anchor="bottom" gravity="bottom" offset-y="4" grab="hover">`.
+//! `open-on` selects the core disclosure behavior that opens and dismisses it.
 
 use crate::tree::WidgetNode;
 
@@ -21,6 +22,7 @@ pub enum PopoverPlacementField {
     OffsetY,
     Grab,
     Constraint,
+    OpenOn,
 }
 
 impl std::fmt::Display for PopoverPlacementField {
@@ -32,6 +34,7 @@ impl std::fmt::Display for PopoverPlacementField {
             Self::OffsetY => "offset-y",
             Self::Grab => "grab",
             Self::Constraint => "constrain",
+            Self::OpenOn => "open-on",
         })
     }
 }
@@ -156,6 +159,37 @@ pub enum PopoverGrab {
     Click,
 }
 
+/// Which interaction opens a `<popover>` and how it is dismissed.
+///
+/// [`PopoverOpenOn::Manual`] leaves `open` entirely to scripts. The other modes
+/// hand open/close policy to the core disclosure controller: hover intent with
+/// the shared [`crate::HOVER_INTENT_CLOSE_DELAY`], trigger toggling, Escape,
+/// and outside presses. The controller proposes each change through the
+/// popover's `openchange` event and a simple `open={variable}` binding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PopoverOpenOn {
+    #[default]
+    Manual,
+    /// Pointer entry on the trigger opens; leaving trigger and popup closes
+    /// after the hover-intent delay.
+    Hover,
+    /// A press on the trigger toggles; an outside press closes.
+    Click,
+}
+
+impl PopoverOpenOn {
+    /// Missing `open-on` is [`PopoverOpenOn::Manual`].
+    pub fn from_node(node: &WidgetNode) -> Result<Self, PopoverPlacementDiagnostic> {
+        node.attributes
+            .get("open-on")
+            .map_or(Ok(Self::Manual), |value| parse_open_on(value))
+    }
+
+    pub fn is_managed(self) -> bool {
+        self != Self::Manual
+    }
+}
+
 /// Fully resolved placement for a promoted `<popover>`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PopoverPlacement {
@@ -166,6 +200,7 @@ pub struct PopoverPlacement {
     pub offset_y: i32,
     pub constraint_adjustment: PopoverConstraintAdjustment,
     pub grab: PopoverGrab,
+    pub open_on: PopoverOpenOn,
 }
 
 impl PopoverPlacement {
@@ -219,6 +254,12 @@ impl PopoverPlacement {
         if let Some(value) = attrs.get("constrain") {
             match parse_constraint(value) {
                 Ok(adjustment) => placement.constraint_adjustment = adjustment,
+                Err(diagnostic) => diagnostics.push(diagnostic),
+            }
+        }
+        if let Some(value) = attrs.get("open-on") {
+            match parse_open_on(value) {
+                Ok(open_on) => placement.open_on = open_on,
                 Err(diagnostic) => diagnostics.push(diagnostic),
             }
         }
@@ -292,6 +333,15 @@ fn parse_grab(value: &str) -> Result<PopoverGrab, PopoverPlacementDiagnostic> {
         "hover" | "none" => PopoverGrab::Hover,
         "click" | "grab" => PopoverGrab::Click,
         _ => return Err(invalid_token(PopoverPlacementField::Grab, value)),
+    })
+}
+
+fn parse_open_on(value: &str) -> Result<PopoverOpenOn, PopoverPlacementDiagnostic> {
+    Ok(match value.trim().to_ascii_lowercase().as_str() {
+        "manual" | "none" => PopoverOpenOn::Manual,
+        "hover" => PopoverOpenOn::Hover,
+        "click" => PopoverOpenOn::Click,
+        _ => return Err(invalid_token(PopoverPlacementField::OpenOn, value)),
     })
 }
 
@@ -407,6 +457,29 @@ mod tests {
         assert!(placement.constraint_adjustment.slide_x);
         assert_eq!(placement.offset_x, 0);
         assert_eq!(placement.offset_y, 0);
+        assert_eq!(placement.open_on, PopoverOpenOn::Manual);
+    }
+
+    #[test]
+    fn open_on_parses_modes_and_rejects_unknown_tokens() {
+        assert_eq!(
+            PopoverOpenOn::from_node(&node_with(&[("open-on", "hover")])),
+            Ok(PopoverOpenOn::Hover)
+        );
+        assert_eq!(
+            PopoverOpenOn::from_node(&node_with(&[("open-on", " Click ")])),
+            Ok(PopoverOpenOn::Click)
+        );
+        assert_eq!(
+            PopoverOpenOn::from_node(&node_with(&[])),
+            Ok(PopoverOpenOn::Manual)
+        );
+        let diagnostic = PopoverOpenOn::from_node(&node_with(&[("open-on", "focus")])).unwrap_err();
+        assert_eq!(diagnostic.field, PopoverPlacementField::OpenOn);
+        assert_eq!(
+            diagnostic.kind,
+            PopoverPlacementDiagnosticKind::UnknownToken
+        );
     }
 
     #[test]

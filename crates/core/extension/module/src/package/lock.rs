@@ -809,7 +809,7 @@ mod tests {
     #[test]
     fn requested_by_is_rebuilt_from_the_installed_dependency_closure() {
         let requester = ModuleManifest::from_json_str(
-            r#"{"name":"@me/desk","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","entry":"main.mesh","dependencies":{"modules":{"@me/shared":"^1.0.0"}}}}"#,
+            r#"{"name":"@me/desk","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh","dependencies":{"modules":{"@me/shared":"^1.0.0"}}}}"#,
         )
         .unwrap();
         let shared = ModuleManifest::from_json_str(
@@ -839,7 +839,7 @@ mod tests {
     fn upsert_includes_the_new_module_when_inventory_is_pre_install() {
         let dir = temp_dir("upsert-inventory");
         let installed = dir.join("desk");
-        let module_json = r#"{"name":"@me/desk","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","entry":"main.mesh","dependencies":{"modules":{"@me/shared":"^1.0.0"}}}}"#;
+        let module_json = r#"{"name":"@me/desk","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh","dependencies":{"modules":{"@me/shared":"^1.0.0"}}}}"#;
         write(&installed, "module.json", module_json);
         write(&installed, "main.mesh", "<template><box/></template>");
         let manifest = ModuleManifest::from_json_str(module_json).unwrap();

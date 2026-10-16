@@ -1,5 +1,7 @@
 pub mod parser;
 pub mod style;
+mod token_usage;
+pub use token_usage::{ThemeTokenRead, unknown_theme_token_reads};
 /// Single-file component parser for `.mesh` files.
 ///
 /// A `.mesh` file contains these blocks:
@@ -16,7 +18,8 @@ pub mod style;
 pub mod template;
 
 pub use parser::{
-    ParseError, parse_component, parse_inline_style, parse_luau_script, referenced_identifiers,
+    ParseError, parse_component, parse_inline_style, parse_luau_script, parse_prop_declarations,
+    referenced_identifiers,
 };
 pub use style::*;
 pub use template::*;
@@ -172,7 +175,7 @@ pub struct PropsBlock {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PropDef {
     pub name: String,
-    /// The complete `name: { ... }` declaration.
+    /// The complete `name = { ... }` declaration.
     pub span: SourceSpan,
     pub ty: PropType,
     pub default: Option<PropValue>,
@@ -490,6 +493,9 @@ pub fn prop_value_to_css(def: &PropDef, value: &PropValue) -> Result<String, Pro
             format!("{}ms", format_prop_number(*value))
         }
         (PropType::Int, PropValue::Number(value)) => format!("{}", *value as i64),
+        (PropType::Token, PropValue::String(value)) if !is_css_var_reference(value.trim()) => {
+            format!("var({})", token_prop_css_name(value))
+        }
         (_, PropValue::String(value)) => value.clone(),
         (_, PropValue::Number(value)) => {
             let unit = def.unit.as_deref().unwrap_or("");
@@ -797,9 +803,17 @@ fn is_token_value(value: &str) -> bool {
     if is_css_var_reference(trimmed) {
         return true;
     }
-    trimmed
-        .split('.')
-        .all(|part| !part.is_empty() && CustomIdent::parse_string(part).is_ok())
+    trimmed.split('.').all(|part| !part.is_empty())
+        && DashedIdent::parse_string(&token_prop_css_name(trimmed)).is_ok()
+}
+
+fn token_prop_css_name(value: &str) -> String {
+    let value = value.trim();
+    if value.starts_with("--") {
+        value.to_owned()
+    } else {
+        format!("--{}", value.replace('.', "-"))
+    }
 }
 
 fn is_css_var_reference(value: &str) -> bool {
@@ -868,6 +882,9 @@ pub struct ScriptBlock {
 /// editing an incomplete statement.
 #[derive(Debug, Clone, Default)]
 pub struct ScriptMetadata {
+    pub string_calls: Vec<ScriptStringCall>,
+    /// Lexical bindings visible where template closures are appended to the chunk.
+    pub lexical_bindings: Vec<String>,
     pub state_vars: Vec<String>,
     pub service_bindings: Vec<(String, String)>,
     pub functions: Vec<String>,
@@ -888,6 +905,14 @@ pub struct ScriptMetadata {
     /// identifier. Editor consumers use these spans for syntax-aware
     /// diagnostics without rescanning comments or string literals.
     pub member_accesses: Vec<ScriptMemberAccess>,
+}
+
+/// A direct Luau call's static first string argument, relative to its script.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptStringCall {
+    pub callee: String,
+    pub argument: String,
+    pub span: SourceSpan,
 }
 
 /// A dotted Luau member path and the source span of each path component.
@@ -978,7 +1003,9 @@ mod prop_value_conversion_tests {
         let component = parse_component(
             r#"
 <props>
-  delay: { type: "duration", default: "120ms", min: 0, max: 500 }
+{
+    delay = { type = "duration", default = "120ms", min = 0, max = 500 },
+}
 </props>
 <template><box /></template>
 "#,
@@ -1000,5 +1027,45 @@ mod prop_value_conversion_tests {
             normalize_prop_value(definition, PropValue::String("300ms".into())),
             Ok(PropValue::Number(300.0))
         );
+    }
+
+    #[test]
+    fn token_props_project_dashed_dotted_and_var_forms_to_css_references() {
+        let component = parse_component(
+            r#"
+<props>
+{
+    accent = { type = "token", default = "color-primary" },
+}
+</props>
+<template><box /></template>
+"#,
+        )
+        .expect("component with token prop");
+        let definition = &component.props.expect("props block").props[0];
+
+        for (authored, css) in [
+            ("color-primary", "var(--color-primary)"),
+            ("color.on-surface", "var(--color-on-surface)"),
+            (" --spacing-md ", "var(--spacing-md)"),
+            ("var(--color-primary, red)", "var(--color-primary, red)"),
+        ] {
+            assert_eq!(
+                prop_value_to_css(definition, &PropValue::String(authored.into())),
+                Ok(css.to_owned()),
+                "{authored}"
+            );
+        }
+        for invalid in [
+            "",
+            "color..primary",
+            "#123456",
+            "@alice/widget.color.accent",
+        ] {
+            assert!(
+                parse_prop_literal(definition, invalid).is_err(),
+                "{invalid}"
+            );
+        }
     }
 }

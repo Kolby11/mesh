@@ -561,10 +561,9 @@ fn cmd_locale_set_with_policy(requested: Option<String>, policy: mesh_core_confi
 fn cmd_debug(args: &[String]) {
     match args.first().map(String::as_str) {
         Some("profiling") => send_ipc_command("shell:debug_profiling"),
-        Some("tab") => send_ipc_command("shell:debug_cycle_tab"),
         Some(other) => {
             eprintln!("unknown debug command: {other}");
-            eprintln!("usage: mesh-shell debug [profiling|tab]");
+            eprintln!("usage: mesh-shell debug [profiling]");
             std::process::exit(1);
         }
         None => send_ipc_command("shell:debug_overlay"),
@@ -1199,7 +1198,7 @@ fn cmd_install(args: &[String]) {
         }
 
         if args.iter().any(|arg| arg == "--available-only")
-            || manifest.mesh.kind != ModuleKind::Frontend
+            || !manifest.mesh.has_default_placement()
         {
             transaction
                 .record_module_lock(
@@ -2136,7 +2135,7 @@ mod tests {
         std::fs::create_dir_all(&installed).unwrap();
         std::fs::write(
             installed.join("module.json"),
-            r#"{"name":"@example/widget","version":"1.2.3","mesh":{"apiVersion":"0.1","kind":"component","entry":"main.mesh"}}"#,
+            r#"{"name":"@example/widget","version":"1.2.3","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh"}}"#,
         )
         .unwrap();
         std::fs::write(installed.join("main.mesh"), "<template><box/></template>").unwrap();

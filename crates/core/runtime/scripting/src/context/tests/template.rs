@@ -320,3 +320,77 @@ fn template_expression_cache_accumulates_changes_until_template_evaluation() {
         serde_json::json!("d")
     );
 }
+
+#[test]
+fn workspace_component_uses_provider_ids_and_display_order() {
+    let repository = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let source = std::fs::read_to_string(
+        repository.join("modules/frontend/navigation-bar/src/components/workspace-list.mesh"),
+    )
+    .unwrap();
+    let component = mesh_core_component::parse_component(&source).unwrap();
+    let manifest: Value = serde_json::from_str(
+        &std::fs::read_to_string(repository.join("modules/interfaces/wm/module.json")).unwrap(),
+    )
+    .unwrap();
+    let mut catalog = mesh_core_service::InterfaceCatalog::default();
+    catalog.register_contract(
+        mesh_core_service::parse_interface_contract(
+            "mesh.wm",
+            "1.1",
+            &manifest["mesh"]["interface"]["contract"],
+        )
+        .unwrap(),
+    );
+    catalog.register_provider(mesh_core_service::InterfaceProvider {
+        interface: "mesh.wm".into(),
+        version: Some("1.1".into()),
+        base_module: Some("@mesh/wm-interface".into()),
+        provider_module: "@test/wm".into(),
+        backend_name: "Test compositor".into(),
+        priority: 1,
+    });
+    let mut context = ScriptContext::new(
+        "@test/workspaces",
+        CapabilitySet::from_ids(["service.wm.read", "service.wm.control"]),
+    )
+    .unwrap();
+    context.set_interface_catalog(catalog);
+    context
+        .compile_and_execute_component_with_compiled(
+            &component.script.unwrap().source,
+            &[],
+            &component.template_expressions,
+        )
+        .unwrap();
+    context.apply_service_payload(
+        "wm",
+        &serde_json::json!({"available":true,"active_workspace":99,"workspaces":[
+            {"id":42,"name":"code","windows":2,"index":1,"output":"DP-1"},
+            {"id":99,"name":"mail","windows":1,"index":1,"output":"DP-2"},
+            {"id":-1337,"name":"notes","windows":1}
+        ]}),
+    );
+    assert!(context.run_reactive_effects().is_empty());
+    let items = context.state.get("workspace_items").unwrap();
+    assert_eq!(items[0]["id"], serde_json::json!(42));
+    assert_eq!(items[1]["label"], serde_json::json!("mail"));
+    assert_eq!(
+        context.state.get("active_offset"),
+        Some(serde_json::json!(26))
+    );
+    context
+        .call_handler("onSwitch", &[serde_json::json!(-1337)])
+        .unwrap();
+    assert_eq!(
+        context.state.get("ws_active"),
+        Some(serde_json::json!(-1337))
+    );
+    assert_eq!(
+        context.state.get("active_offset"),
+        Some(serde_json::json!(52))
+    );
+    let events = context.drain_published_events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].payload["id"], serde_json::json!(-1337));
+}

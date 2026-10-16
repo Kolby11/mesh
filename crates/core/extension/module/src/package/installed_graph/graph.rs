@@ -17,21 +17,59 @@ use std::collections::HashSet;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
+fn validate_declaration_namespace(
+    module: &InstalledModuleNode,
+    name: &str,
+) -> Result<(), ModuleManifestError> {
+    if name.starts_with("mesh.") {
+        if module.trust != TrustTier::Core {
+            return Err(ModuleManifestError::Validation(format!(
+                "module {} cannot declare '{name}': mesh.* is reserved for distribution contracts with core provenance (found {:?})",
+                module.id, module.trust
+            )));
+        }
+        return Ok(());
+    }
+    let publisher = module
+        .id
+        .strip_prefix('@')
+        .and_then(|id| id.split_once('/'))
+        .map(|(scope, _)| scope)
+        .unwrap_or(&module.id);
+    if !name.starts_with(&format!("{publisher}.")) {
+        return Err(ModuleManifestError::Validation(format!(
+            "module {} cannot declare '{name}': declarations must use its publisher namespace '{publisher}.'",
+            module.id
+        )));
+    }
+    Ok(())
+}
+
 fn validate_unique_graph_identities(
     modules: &HashMap<String, InstalledModuleNode>,
 ) -> Result<(), ModuleManifestError> {
-    let mut interfaces = modules
+    let mut ordered_modules = modules
         .values()
-        .filter(|module| module.enabled && module.kind == ModuleKind::Interface)
-        .filter_map(|module| {
-            module.manifest.mesh.interface.as_ref().map(|interface| {
-                (
-                    mesh_core_service::canonical_interface_name(&interface.name),
-                    module.id.clone(),
-                )
-            })
-        })
+        .filter(|module| module.enabled)
         .collect::<Vec<_>>();
+    ordered_modules.sort_by(|left, right| left.id.cmp(&right.id));
+    let mut interfaces = Vec::new();
+    for module in &ordered_modules {
+        for declaration in module
+            .manifest
+            .mesh
+            .interface
+            .iter()
+            .chain(&module.manifest.mesh.interfaces)
+        {
+            let name = mesh_core_service::canonical_interface_name(&declaration.name);
+            validate_declaration_namespace(module, &name)?;
+            interfaces.push((name, module.id.clone()));
+        }
+        for name in module.manifest.mesh.extension_points.keys() {
+            validate_declaration_namespace(module, name)?;
+        }
+    }
     interfaces.sort();
     for pair in interfaces.windows(2) {
         if pair[0].0 == pair[1].0 {
@@ -682,81 +720,26 @@ impl InstalledModuleGraph {
             });
         }
 
-        // Collect inline interface declarations from backend modules
-        // (`mesh.interfaces`). A standalone interface module owns its name and
-        // wins over inline copies. Inline copies must agree: provider priority
-        // chooses a provider, never a contract, so differing inline
-        // declarations make the interface unavailable instead of letting one
-        // provider rewrite its methods and permission levels.
-        let mut backend_ids: Vec<String> = graph_modules
-            .values()
-            .filter(|node| node.enabled && node.kind == ModuleKind::Backend)
-            .map(|node| node.id.clone())
-            .collect();
-        backend_ids.sort();
-        let mut conflicting_interfaces: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-        for module_id in backend_ids {
-            let Some(node) = graph_modules.get(&module_id) else {
-                continue;
-            };
+        for node in graph_modules.values().filter(|node| node.enabled) {
             for interface in &node.manifest.mesh.interfaces {
                 let name = mesh_core_service::canonical_interface_name(&interface.name);
-                let candidate = InterfaceDeclarationNode {
-                    source: ContributionSource::new(node, &name),
-                    module_id: module_id.clone(),
-                    name: name.clone(),
-                    version: interface.version.clone(),
-                    contract: interface.contract.clone(),
-                    domain: interface.domain.clone(),
-                    extends: interface
-                        .extends
-                        .as_deref()
-                        .map(mesh_core_service::canonical_interface_name),
-                    relationship: interface.effective_relationship(),
-                    reason: interface.reason.clone(),
-                };
-                if let Some(declarers) = conflicting_interfaces.get_mut(&name) {
-                    declarers.insert(module_id.clone());
-                    continue;
-                }
-                let Some(existing) = interface_declarations.get(&name) else {
-                    interface_declarations.insert(name.clone(), candidate);
-                    continue;
-                };
-                let existing_is_interface_module = graph_modules
-                    .get(&existing.module_id)
-                    .is_some_and(|node| node.kind == ModuleKind::Interface);
-                if existing_is_interface_module {
-                    manual_diagnostics.push(ModuleGraphDiagnostic {
-                        module_id: module_id.clone(),
-                        contribution_id: Some(format!("{module_id}:interface:{name}")),
-                        status: "duplicate_interface_declaration".into(),
-                        message: format!(
-                            "interface {name} is owned by interface module {}; the inline declaration in {module_id} is ignored",
-                            existing.module_id
-                        ),
-                    });
-                } else if !existing.declares_same_contract(&candidate) {
-                    let existing_id = existing.module_id.clone();
-                    interface_declarations.remove(&name);
-                    conflicting_interfaces.insert(
-                        name.clone(),
-                        BTreeSet::from([existing_id, module_id.clone()]),
-                    );
-                }
-            }
-        }
-        for (name, declarers) in &conflicting_interfaces {
-            let listed = declarers.iter().cloned().collect::<Vec<_>>().join(", ");
-            for module_id in declarers {
-                manual_diagnostics.push(ModuleGraphDiagnostic {
-                    module_id: module_id.clone(),
-                    contribution_id: Some(format!("{module_id}:interface:{name}")),
-                    status: "conflicting_interface_declaration".into(),
-                    message: format!(
-                        "interface {name} is declared differently by {listed}; no declaration is used until one owner remains or an interface module declares it"
-                    ),
-                });
+                interface_declarations.insert(
+                    name.clone(),
+                    InterfaceDeclarationNode {
+                        source: ContributionSource::new(node, &name),
+                        module_id: node.id.clone(),
+                        name,
+                        version: interface.version.clone(),
+                        contract: interface.contract.clone(),
+                        domain: interface.domain.clone(),
+                        extends: interface
+                            .extends
+                            .as_deref()
+                            .map(mesh_core_service::canonical_interface_name),
+                        relationship: interface.effective_relationship(),
+                        reason: interface.reason.clone(),
+                    },
+                );
             }
         }
 
@@ -1005,9 +988,9 @@ impl InstalledModuleGraph {
                         "layout entrypoint module {module_id} is not installed"
                     ))
                 })?;
-                if node.kind != ModuleKind::Frontend {
+                if !node.manifest.mesh.has_default_placement() {
                     return Err(ModuleManifestError::Validation(format!(
-                        "layout entrypoint module {module_id} must be a frontend module"
+                        "layout entrypoint module {module_id} must be a ui module with mesh.surface placement"
                     )));
                 }
                 if !node.enabled {
@@ -1295,8 +1278,12 @@ impl InstalledModuleGraph {
             .collect()
     }
 
+    /// Enabled `ui` modules that declare default surface placement.
     pub fn frontend_modules(&self) -> Vec<&InstalledModuleNode> {
-        self.modules_by_kind(ModuleKind::Frontend)
+        self.modules
+            .values()
+            .filter(|module| module.enabled && module.manifest.mesh.has_default_placement())
+            .collect()
     }
 
     pub fn backend_modules(&self) -> Vec<&InstalledModuleNode> {
@@ -1914,19 +1901,6 @@ pub struct InterfaceDeclarationNode {
     pub extends: Option<String>,
     pub relationship: InterfaceRelationship,
     pub reason: Option<String>,
-}
-
-impl InterfaceDeclarationNode {
-    /// Whether two declarations describe the same contract, ignoring who
-    /// declared it and the free-form reason.
-    pub fn declares_same_contract(&self, other: &Self) -> bool {
-        self.name == other.name
-            && self.version == other.version
-            && self.contract == other.contract
-            && self.domain == other.domain
-            && self.extends == other.extends
-            && self.relationship == other.relationship
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

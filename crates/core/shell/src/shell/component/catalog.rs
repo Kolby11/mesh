@@ -1832,8 +1832,10 @@ mod performance_tests {
         let (_temp, catalog) = catalog_with_navigation_contribution_source(
             r#"
 <props>
-namespace: { type: "string" }
-title: { type: "string" }
+{
+    namespace = { type = "string" },
+    title = { type = "string" },
+}
 </props>
 <template><Settings invalid="true" /></template>
 <script lang="luau">
@@ -1963,8 +1965,10 @@ local audio = require("mesh.audio@>=2.0")
         let (temp, catalog) = catalog_with_navigation_contribution_source(
             r#"
 <props>
-namespace: { type: "string" }
-title: { type: "string" }
+{
+    namespace = { type = "string" },
+    title = { type = "string" },
+}
 </props>
 <template><text /></template>
 "#,
@@ -1994,8 +1998,10 @@ title: { type: "string" }
             temp.path().join("src/settings.mesh"),
             r#"
 <props>
-namespace: { type: "string" }
-title: { type: "string" }
+{
+    namespace = { type = "string" },
+    title = { type = "string" },
+}
 </props>
 <template><text /></template>
 <script lang="luau">

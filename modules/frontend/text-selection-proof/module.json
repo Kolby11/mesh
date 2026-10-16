@@ -4,7 +4,7 @@
   "description": "Passive proof surface for selectable text and clipboard copy.",
   "mesh": {
     "apiVersion": "0.1",
-    "kind": "frontend",
+    "kind": "ui",
     "uses": {
       "capabilities": [
         "shell.surface",

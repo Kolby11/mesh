@@ -152,7 +152,50 @@ Containers include `popover`, `dialog`, `tabs`, `tab`, `accordion`, and `details
 
 Inline `<popover>` nodes are promoted to compositor popups when open, which lets a short parent surface such as a panel host content that paints outside its own buffer. Author placement with `anchor-ref`, `anchor`, `gravity`, `offset-x`, `offset-y`, and `constrain`; avoid manifest surface geometry for embeddable popovers.
 
-Use `grab="hover"` or omit `grab` for hover-open menus. Hover popovers do not take a compositor grab because an `xdg_popup` grab requires a recent click serial; the shell hover bridge handles dismissal while the pointer crosses from trigger to popup. Use `grab="click"` only for click-open popovers that should use compositor outside-click dismissal and keyboard focus ownership.
+### Popover disclosure
+
+`open-on` hands a popover's open/close policy to core, so a trigger and a
+popover in different components need no forwarded events:
+
+```xml
+<!-- trigger component -->
+<button ref="themeButton" aria-haspopup="true" title={t('nav.select_theme')}>…</button>
+<ThemeSelector />
+
+<!-- ThemeSelector -->
+<popover open={open} anchor-ref="themeButton" open-on="hover" onopenchange={onOpenChange}>…</popover>
+```
+
+| `open-on` | Opens | Closes |
+| --- | --- | --- |
+| `manual` (default) | script writes `open` | script writes `open` |
+| `hover` | pointer enters the trigger | 400 ms after the pointer leaves trigger and popup; re-entering either cancels |
+| `click` | press on the trigger | press on the trigger again |
+
+Both managed modes also:
+
+- hold the popover open while a press that started inside it (a slider drag)
+  is captured, and resume hover intent on release;
+- open on ArrowDown from the trigger, and toggle on Enter/Space when the trigger
+  has no `onclick` of its own, then move focus into the popup;
+- close on Escape while focus is on the trigger or inside the popup, returning
+  focus to the trigger;
+- close on a press outside trigger and popup, and when Tab moves focus out of
+  both while the pointer is not over them.
+
+The controller never keeps its own copy of `open`. It writes a bare
+`open={variable}` binding in the owning component, then dispatches
+`openchange` with `{ open, reason }`, where `reason` is one of `hover`, `leave`,
+`trigger`, `keyboard`, `escape`, `outside` or `focus`. Any other `open`
+expression is left alone, so `onopenchange` is then the only channel. Scripts
+may still write `open` directly; the controller picks the change up on the next
+frame.
+
+While any popover anchored to it is open, a trigger matches `:expanded`, its
+accessible `expanded` state is true, and its tooltip is suppressed. Triggers do
+not maintain `aria-expanded` or `data-tooltip-disabled` themselves.
+
+Use `grab="hover"` or omit `grab` for hover-open menus. Hover popovers do not take a compositor grab because an `xdg_popup` grab requires a recent click serial; `open-on="hover"` handles dismissal while the pointer crosses from trigger to popup. Use `grab="click"` only for click-open popovers that should use compositor outside-click dismissal and keyboard focus ownership.
 
 Popover promotion depends on the compositor protocols MESH already targets: `wlr-layer-shell-v1` plus `xdg_popup` support via layer-shell `get_popup`. This is expected on wlroots-family compositors, KDE, and Hyprland. GNOME does not expose layer-shell as a stable target, so GNOME support remains outside the current shell compatibility boundary rather than a separate popover fallback requirement.
 

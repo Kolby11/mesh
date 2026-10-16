@@ -19,6 +19,7 @@
 /// mesh.locale.format_percent(value)           (requires locale.read)
 /// mesh.locale.format_duration(seconds)        (requires locale.read)
 /// mesh.locale.set(locale)     → publishes locale change request (requires locale.write)
+/// mesh.json.decode(source)    → value          (JSON null is mesh.json.null; 1 MiB input limit)
 /// mesh.config()               → table          (backend helper; full module settings)
 /// mesh.exec(program, args)    → table          (backend helper)
 /// mesh.service.set_poll_interval(ms)           (backend helper)

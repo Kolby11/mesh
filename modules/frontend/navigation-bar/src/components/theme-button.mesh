@@ -3,14 +3,8 @@
         <button
             ref="themeButton"
             class="theme-trigger"
-            class:theme-trigger-open={not theme_surface_hidden}
-            onclick={onThemeToggle}
-            onpointerenter={onThemeEnter}
-            onpointerleave={onThemeLeave}
             aria-haspopup="true"
-            aria-expanded={theme_aria_expanded}
-            data-tooltip-disabled={theme_tooltip_disabled}
-            title={theme_tooltip}
+            title={t(theme_tooltip_key)}
             aria-label={t(theme_tooltip_key)}
         >
             <icon class="theme-trigger-glyph" name={theme_icon} size="18" />
@@ -25,38 +19,18 @@ local ThemeSelector = require("@mesh/theme-selector")
 
 theme_icon = "weather-clear-night"
 theme_tooltip_key = "nav.select_theme"
-theme_tooltip = ""
-theme_tooltip_disabled = "false"
-theme_is_dark = true
-theme_surface_hidden = true
-theme_aria_expanded = "false"
 
 theme_popover = nil
 local theme_popover_connected = false
-local do_close
--- One close timer for the trigger and its popover: leaving either schedules
--- it, entering either cancels it.
-local hover = mesh.ui.hover_intent(function()
-    do_close()
-end)
-
-local function sync_trigger_state()
-    theme_aria_expanded = theme_surface_hidden and "false" or "true"
-    if theme_surface_hidden then
-        theme_tooltip = t(theme_tooltip_key)
-        theme_tooltip_disabled = "false"
-    else
-        theme_tooltip = ""
-        theme_tooltip_disabled = "true"
-    end
-end
 
 local function apply_theme(theme_id)
-    theme_is_dark = type(theme_id) == "string" and string.find(theme_id, "dark", 1, true) ~= nil
-    theme_icon = theme_is_dark and "weather-clear-night" or "weather-clear"
+    local is_dark = type(theme_id) == "string" and string.find(theme_id, "dark", 1, true) ~= nil
+    theme_icon = is_dark and "weather-clear-night" or "weather-clear"
 end
 
-local function connect_popover()
+effect(function(self)
+    -- `bind:this` becomes available after the initial template evaluation.
+    -- State updates then flow through the child event instead of being polled.
     if theme_popover == nil or theme_popover_connected then
         return
     end
@@ -65,63 +39,7 @@ local function connect_popover()
     theme_popover.ThemeChanged:on(function()
         apply_theme(theme_popover.current_theme)
     end)
-    theme_popover.PopoverEnter:on(hover.enter)
-    theme_popover.PopoverLeave:on(hover.leave)
-    theme_popover.KeyboardDismissRequested:on(function()
-        do_close()
-    end)
-end
-
-local function do_open()
-    if theme_popover and theme_surface_hidden then
-        connect_popover()
-        hover.cancel()
-        theme_popover.open = true
-        theme_surface_hidden = false
-        sync_trigger_state()
-    end
-end
-
-do_close = function()
-    hover.cancel()
-    if theme_popover and not theme_surface_hidden then
-        theme_popover.open = false
-        theme_surface_hidden = true
-        sync_trigger_state()
-    end
-end
-
-effect(function(self)
-    -- `bind:this` becomes available after the initial template evaluation.
-    -- State updates then flow through the child event instead of being polled.
-    connect_popover()
 end)
-
-sync_trigger_state()
-
--- Keyboard-only toggle; hover opens/closes.
-function onThemeToggle(event)
-    local keyboard = event ~= nil and event.trigger ~= nil and event.trigger.type == "keyboard"
-    if not keyboard then
-        return
-    end
-    if theme_surface_hidden then
-        do_open()
-    else
-        do_close()
-    end
-end
-
-function onThemeEnter(event)
-    hover.enter()
-    do_open()
-end
-
-function onThemeLeave()
-    if not theme_surface_hidden then
-        hover.leave()
-    end
-end
 </script>
 
 <style>
@@ -176,9 +94,9 @@ end
 
     /* Popover open reads through the glyph, not a ring: no border may appear
     from a pointer interaction. */
-    .theme-trigger-open,
-    .theme-trigger-open:hover,
-    .theme-trigger-open:focus-visible {
+    .theme-trigger:expanded,
+    .theme-trigger:expanded:hover,
+    .theme-trigger:expanded:focus-visible {
         color: var(--color-primary);
     }
 

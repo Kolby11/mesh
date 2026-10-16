@@ -24,7 +24,7 @@ pub(in crate::shell) const COMMAND_THROTTLE_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(100);
 const SERVICE_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
 const MAX_COALESCED_COMMAND_KEYS: usize = 256;
-/// Surface popovers and scripted `mesh.ui.hover_intent` bridges share one
+/// Surface popovers and `<popover open-on="hover">` disclosures share one
 /// delay, so every popover in the shell forgives the same pointer trip.
 const POPOVER_HOVER_BRIDGE_DELAY: std::time::Duration =
     mesh_core_elements::HOVER_INTENT_CLOSE_DELAY;
@@ -2061,10 +2061,6 @@ impl Shell {
             CoreRequest::RunDebugBenchmark { scenario_id } => {
                 self.apply_run_debug_benchmark(&scenario_id)
             }
-            CoreRequest::CycleDebugTab => {
-                self.debug.cycle_tab();
-                Ok(VecDeque::new())
-            }
             CoreRequest::Shutdown => {
                 self.begin_shutdown();
                 Ok(VecDeque::new())
@@ -3573,7 +3569,6 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::OpenDebugSource { .. } => "open_debug_source",
         CoreRequest::ToggleDebugProfiling => "toggle_debug_profiling",
         CoreRequest::RunDebugBenchmark { .. } => "run_debug_benchmark",
-        CoreRequest::CycleDebugTab => "cycle_debug_tab",
         CoreRequest::Shutdown => "shutdown",
     }
 }

@@ -177,10 +177,10 @@ fn available_css_variables(style_source: &str) -> Vec<String> {
 fn theme_css_variables() -> &'static Vec<String> {
     static VARIABLES: OnceLock<Vec<String>> = OnceLock::new();
     VARIABLES.get_or_init(|| {
-        let mut variables: Vec<String> = mesh_core_theme::default_theme()
-            .tokens()
-            .keys()
-            .map(|name| format!("--{}", name.replace('.', "-")))
+        let mut variables: Vec<String> = mesh_core_theme::semantic_token_contract()
+            .tokens
+            .iter()
+            .map(|token| token.css.clone())
             .collect();
         variables.sort();
         variables.dedup();
@@ -216,6 +216,14 @@ mod tests {
 
     fn labels(items: &[CompletionItem]) -> Vec<&str> {
         items.iter().map(|item| item.label.as_str()).collect()
+    }
+
+    #[test]
+    fn completions_publish_semantics_and_keep_palette_tokens_private() {
+        let items = complete_variables("", "");
+        assert!(labels(&items).contains(&"--font-body"));
+        assert!(labels(&items).contains(&"--icon-size-md"));
+        assert!(!labels(&items).contains(&"--base16-base00"));
     }
 
     #[test]

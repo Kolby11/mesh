@@ -35,6 +35,25 @@ fn component_handler_calls_preserve_authored_prop_identity() {
             None
         }
 
+        fn bind_handler_expression(
+            &self,
+            _instance_key: &str,
+            _expression: &mesh_core_expression::CompiledExpression,
+            _locals: &serde_json::Map<String, serde_json::Value>,
+            source: &str,
+            call_binding: bool,
+        ) -> Option<HandlerTarget> {
+            assert!(call_binding);
+            Some(HandlerTarget::Function {
+                instance_key: None,
+                source: source.into(),
+                callback: mesh_core_elements::CallbackHandle::new(
+                    if source.contains("primary") { 1 } else { 2 },
+                    std::sync::Arc::new(()),
+                ),
+            })
+        }
+
         fn render_import(
             &self,
             _host: &Manifest,
@@ -104,12 +123,9 @@ local Child = require("./child.mesh")
     );
 
     let props = composition.props.borrow();
-    assert!(props.values.contains_key("onprimary"));
-    assert!(props.values.contains_key("onsecondary"));
-    assert_ne!(
-        props.values.get("onprimary"),
-        props.values.get("onsecondary")
-    );
+    assert!(!props.values.contains_key("onprimary"));
+    assert!(!props.values.contains_key("onsecondary"));
+    assert_ne!(props.callbacks["onprimary"], props.callbacks["onsecondary"]);
     assert_eq!(
         props.bindings.get("hidden").map(String::as_str),
         Some("isHidden")
@@ -122,14 +138,10 @@ local Child = require("./child.mesh")
             .all(|key| !key.as_str().starts_with("__mesh_"))
     );
     let calls = composition.calls.borrow();
-    assert_eq!(calls["onprimary"].handler, "onShared");
+    assert_eq!(calls["onprimary"].handler, props.callbacks["onprimary"]);
     assert_eq!(calls["onprimary"].handler.instance_key(), Some("root"));
-    assert_eq!(calls["onsecondary"].handler, calls["onprimary"].handler);
-    assert_eq!(calls["onprimary"].args, vec![serde_json::json!("primary")]);
-    assert_eq!(
-        calls["onsecondary"].args,
-        vec![serde_json::json!("secondary")]
-    );
+    assert_eq!(calls["onsecondary"].handler, props.callbacks["onsecondary"]);
+    assert!(calls.values().all(|call| call.args.is_empty()));
 }
 
 fn find_tag<'a>(node: &'a WidgetNode, tag: &str) -> Option<&'a WidgetNode> {
@@ -300,7 +312,9 @@ fn prepared_component_style_rules_avoid_remerge_and_reindex() {
 
 const PROP_COMPONENT: &str = r#"
 <props>
-  track_width: { type: "size", default: "20px" }
+{
+    track_width = { type = "size", default = "20px" },
+}
 </props>
 <template>
   <box>
@@ -501,9 +515,11 @@ fn props_settings_schema_projects_typed_fields() {
     let component = mesh_core_component::parse_component(
         r#"
 <props>
-  width:   { type: "size", default: "fit-content", label: t("var.width") }
-  density: { type: "enum", options: ["compact", "cozy"], default: "cozy" }
-  hidden:  { type: "size", default: "10px", expose: false }
+{
+    width = { type = "size", default = "fit-content", label = t("var.width") },
+    density = { type = "enum", options = {"compact", "cozy"}, default = "cozy" },
+    hidden = { type = "size", default = "10px", expose = false },
+}
 </props>
 <template><box/></template>
 "#,
@@ -525,7 +541,9 @@ fn props_settings_schema_is_none_without_exposed_props() {
     let component = mesh_core_component::parse_component(
         r#"
 <props>
-  internal: { type: "size", default: "1px", expose: false }
+{
+    internal = { type = "size", default = "1px", expose = false },
+}
 </props>
 <template><box/></template>
 "#,
@@ -606,4 +624,57 @@ fn shared_value_change_handlers_are_normalized() {
         handlers.get("openchange").map(HandlerTarget::as_str),
         Some("onOpenChange")
     );
+}
+
+#[test]
+fn token_props_resolve_css_and_dotted_names_through_the_theme() {
+    for reference in [
+        "color-primary",
+        "color.primary",
+        "--color-primary",
+        "var(--color-primary)",
+    ] {
+        let source = format!(
+            r#"<props>{{ accent = {{ type = "token", default = "{reference}" }}, scale = {{ type = "token", default = "typography.size.2xl" }} }}</props>
+<template><text class="token-value">Value</text></template>
+<style>.token-value {{ color: prop(accent); font-size: prop(scale); }}</style>"#
+        );
+        let component = mesh_core_component::parse_component(&source).unwrap();
+        let mut theme = mesh_core_theme::default_theme();
+        theme.set_token(
+            "color.primary",
+            mesh_core_theme::TokenValue::String("#123456".into()),
+            mesh_core_theme::ThemeProvenance::UserOverride,
+        );
+        theme.set_token(
+            "typography.size.2xl",
+            mesh_core_theme::TokenValue::Number(32.0),
+            mesh_core_theme::ThemeProvenance::UserOverride,
+        );
+        let tree = build_widget_tree_from_component(
+            &component,
+            &test_manifest(),
+            &theme,
+            200.0,
+            80.0,
+            None,
+            "root",
+            None,
+            &[],
+        );
+        fn find_text(node: &WidgetNode) -> Option<&WidgetNode> {
+            if node.tag == "text" {
+                Some(node)
+            } else {
+                node.children.iter().find_map(find_text)
+            }
+        }
+        let text = find_text(&tree).unwrap();
+        assert_eq!(
+            text.computed_style.color,
+            mesh_core_elements::Color::from_hex("#123456").unwrap(),
+            "{reference}"
+        );
+        assert_eq!(text.computed_style.font_size, 32.0, "{reference}");
+    }
 }

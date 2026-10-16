@@ -116,7 +116,7 @@ local debug_ok, debug_service = pcall(require, "mesh.debug")
 if not debug_ok then debug_service = nil end
 local t = import("mesh.i18n", "t")
 
-theme_value = "mesh-default-dark"
+theme_value = "mesh-default"
 locale_value = "en"
 theme_rows = {}
 icon_theme_rows = {}
@@ -248,7 +248,7 @@ local function installed_themes()
 end
 
 local function sync_theme(theme_id)
-    theme_value = tostring(theme_id or "mesh-default-dark")
+    theme_value = tostring(theme_id or "mesh-default")
     local installed, seen = installed_themes()
 
     -- Keep the current theme selectable while the module graph is still being
@@ -321,7 +321,7 @@ local function sync_system_resources()
 end
 
 effect(function()
-    local current_theme = "mesh-default-dark"
+    local current_theme = "mesh-default"
     if theme then
         current_theme = theme.current or theme.theme_id or current_theme
         if theme.state then
@@ -339,12 +339,6 @@ function onThemeSelect(theme_id)
     sync_theme(selected)
     theme.set_theme(selected)
 end
-
--- Keep the former fixed-theme handlers available to callers compiled against
--- the previous settings component while all rendered options use the generic
--- ID-based handler above.
-function onThemeDark() onThemeSelect("mesh-default-dark") end
-function onThemeLight() onThemeSelect("mesh-default-light") end
 
 function onIconThemeSelect(theme_id)
     local selected = tostring(theme_id or "")

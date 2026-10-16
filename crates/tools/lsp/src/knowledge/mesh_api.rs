@@ -8,6 +8,18 @@ pub struct MeshApiEntry {
 }
 
 pub static MESH_API_ENTRIES: &[MeshApiEntry] = &[
+    MeshApiEntry {
+        path: "json.decode",
+        signature: "mesh.json.decode(source: string) -> any",
+        description: "Decode up to 1 MiB of JSON. JSON null is mesh.json.null; invalid or overly nested input raises an error.",
+        backend_only: false,
+    },
+    MeshApiEntry {
+        path: "json.null",
+        signature: "mesh.json.null",
+        description: "The JSON null sentinel, preserved in decoded objects and arrays.",
+        backend_only: false,
+    },
     // State
     MeshApiEntry {
         path: "state.set",

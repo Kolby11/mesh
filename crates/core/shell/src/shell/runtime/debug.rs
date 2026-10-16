@@ -575,10 +575,6 @@ fn debug_service_payload(
         "allocation_profiling_available".to_string(),
         serde_json::json!(mesh_core_debug::allocation::profiling_available()),
     );
-    object.insert(
-        "active_view".to_string(),
-        serde_json::json!(debug.active_view.label()),
-    );
     // Module graph entries intentionally keep their established nested wire
     // shape; the DTO owns the complete field set while this compatibility
     // adapter preserves the public `uses`/`provides`/`surface` grouping.

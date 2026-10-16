@@ -1,6 +1,8 @@
 <props>
-    namespace: { type: "string" }
-    title: { type: "string" }
+{
+    namespace = { type = "string" },
+    title = { type = "string" },
+}
 </props>
 
 <template>

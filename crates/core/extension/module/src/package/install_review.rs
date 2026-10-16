@@ -233,7 +233,7 @@ mod tests {
         )
     }
 
-    const CONSUMER: &str = r#"{"name":"@me/forecast","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"frontend","entry":"main.mesh",
+    const CONSUMER: &str = r#"{"name":"@me/forecast","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh",
         "capabilities":{"required":["service.weather.read"],"optional":["service.weather.refresh"]}}}"#;
 
     fn weather_catalog() -> CapabilityCatalog {

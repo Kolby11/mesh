@@ -70,6 +70,28 @@ impl FrontendSurfaceComponent {
 }
 
 impl FrontendCompositionResolver for FrontendSurfaceComponent {
+    fn bind_handler_expression(
+        &self,
+        instance_key: &str,
+        expression: &mesh_core_expression::CompiledExpression,
+        locals: &serde_json::Map<String, serde_json::Value>,
+        source: &str,
+        call_binding: bool,
+    ) -> Option<mesh_core_elements::HandlerTarget> {
+        let runtimes = self.runtimes.lock().ok()?;
+        let runtime = runtimes.get(instance_key)?;
+        match runtime
+            .script_ctx
+            .bind_event_expression(expression, locals, source, call_binding)
+        {
+            Ok(target) => target,
+            Err(error) => {
+                self.record_template_expression_failure(instance_key, source, error);
+                None
+            }
+        }
+    }
+
     fn evaluate_template_expression(
         &self,
         instance_key: &str,
@@ -157,6 +179,9 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 loop_ordinal,
                 loop_identity,
             );
+            self.component_callbacks
+                .borrow_mut()
+                .insert(instance_key.clone(), props.callbacks.clone());
             let props_fingerprint = memo::component_props_fingerprint(props, prop_handler_calls);
             if let Some(node) = self.lookup_component_memo(
                 &instance_key,
@@ -272,6 +297,9 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             loop_ordinal,
             loop_identity,
         );
+        self.component_callbacks
+            .borrow_mut()
+            .insert(instance_key.clone(), props.callbacks.clone());
         let props_fingerprint = memo::component_props_fingerprint(props, prop_handler_calls);
         if let Some(node) = self.lookup_component_memo(
             &instance_key,
@@ -598,7 +626,9 @@ fn apply_prop_handler_calls(
         };
         calls_by_token.insert(token.as_str(), call);
     }
-    apply_indexed_prop_handler_calls(node, &calls_by_token);
+    if !calls_by_token.is_empty() {
+        apply_indexed_prop_handler_calls(node, &calls_by_token);
+    }
 }
 
 fn apply_indexed_prop_handler_calls(
@@ -974,6 +1004,7 @@ mod tests {
             values: AttributeMap::from([("label".into(), "Volume".into())]),
             bindings: AttributeMap::from([("hidden".into(), "isHidden".into())]),
             bind_this: Some("child".into()),
+            callbacks: Default::default(),
         };
 
         let props_json = runtime_props_json(&props.values);
@@ -1032,9 +1063,11 @@ mod tests {
         let component = mesh_core_component::parse_component(
             r#"
 <props>
-  count: { type: "number" }
-  enabled: { type: "bool" }
-  delay: { type: "duration" }
+{
+    count = { type = "number" },
+    enabled = { type = "bool" },
+    delay = { type = "duration" },
+}
 </props>
 <template><box /></template>
 "#,

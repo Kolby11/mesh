@@ -1,10 +1,12 @@
 <props>
-track_width:  { type: "size", default: "32px", label: t("var.track_width") }
-track_height: { type: "size", default: "100px", label: t("var.track_height") }
-anim_ms:      { type: "duration", default: 120, min: 0, max: 600, label: t("var.anim_ms") }
-blur_enabled:    { type: "bool", default: true, label: "Backdrop blur" }
-blur_radius:     { type: "size", default: "var(--effect-backdrop-blur-surface-radius)", label: "Blur radius" }
-blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-background)", label: "Frosted background" }
+{
+    track_width = { type = "size", default = "32px", label = t("var.track_width") },
+    track_height = { type = "size", default = "100px", label = t("var.track_height") },
+    anim_ms = { type = "duration", default = 120, min = 0, max = 600, label = t("var.anim_ms") },
+    blur_enabled = { type = "bool", default = true, label = "Backdrop blur" },
+    blur_radius = { type = "size", default = "var(--effect-backdrop-blur-surface-radius)", label = "Blur radius" },
+    blur_background = { type = "color", default = "var(--effect-backdrop-blur-popup-background)", label = "Frosted background" },
+}
 </props>
 
 <template>
@@ -14,8 +16,7 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
         anchor-ref="volumeButton"
         anchor="bottom"
         gravity="bottom"
-        onpointerenter={onPopoverEnter}
-        onpointerleave={onPopoverLeave}
+        open-on="hover"
         aria-label="Audio controls"
     >
         <column class="audio-popover" class:audio-popover-blur={props.blur_enabled}>
@@ -26,8 +27,7 @@ blur_background: { type: "color", default: "var(--effect-backdrop-blur-popup-bac
                 value={slider_value}
                 orient="vertical"
                 onchange={onVolumeChange}
-                onrelease={onVolumeRelease
-                }
+                onrelease={onVolumeRelease}
             />
             <text class="audio-percent">{audio_percent_label}</text>
         </column>
@@ -108,9 +108,6 @@ end)
 
 function onVolumeChange(value)
     local pct = clamp_percent(value)
-    if not volume_dragging then
-        self.DragStart:fire()
-    end
     volume_dragging = true
     pending_slider_value = pct
     sync_audio_copy(pct)
@@ -126,19 +123,6 @@ function onVolumeRelease(value)
     volume_dragging = false
     pending_slider_value = clamp_percent(value)
     last_sent_slider_value = nil
-    self.DragEnd:fire()
-end
-
--- The owning trigger controls `open`; these events let it maintain the hover
--- bridge while the same VM keeps slider drag capture alive across the popup.
-function onPopoverEnter(event)
-    self.PopoverEnter:fire(event)
-end
-
-function onPopoverLeave(event)
-    if not volume_dragging then
-        self.PopoverLeave:fire(event)
-    end
 end
 </script>
 

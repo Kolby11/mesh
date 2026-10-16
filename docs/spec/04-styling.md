@@ -13,19 +13,25 @@ model the renderer uses.
 1. **CSS variables are the tokens.** Themes author `--color-primary`;
    components reference `var(--color-primary)`. Token groups are prefixes
    (`color`, `spacing`, `typography`, `radius`, `elevation`, `animation`,
-   `shadow`, `icon`, `font`); themes may introduce new groups freely — the
-   core reserves no names, and unknown-token reads return `nil`.
+   `shadow`, `icon`, `font`). The versioned semantic contract below fixes public
+   names and meanings; themes choose their values. Additional private tokens use
+   module namespaces, and local CSS custom properties remain available.
+   Unknown-token reads return `nil` and static reads outside the contract warn.
 2. **One theme active at a time** (winner-takes-all — mixed token sets
    produce incoherent UI). Modes (dark / light / high-contrast) live *inside*
    a theme and are user-switchable at runtime. This is the deliberate
    opposite of icon/font/language packs, which are ordered multi-active
-   chains.
+   chains. **Shipped:** `@mesh/mesh-default` is one theme with `dark` and
+   `light` modes. Quick settings switches the active theme's mode through
+   `mesh.theme.set_mode`, choosing the mode whose `color_scheme` matches. A
+   theme without such a mode leaves the control disabled rather than
+   switching themes.
 3. **Themes are modules** (`mesh.kind: "theme"`), hot-swappable, with no
    privileged default.
 4. **`node` is the inheritance root.** Every element starts from
    `ComputedStyle::default()`, inherits the theme's `node` rule, then its
    tag rule (`button`), then module-scoped defaults, then local styles.
-5. **Module theme contributions are scoped.** A frontend's tokens/defaults
+5. **Module theme contributions are scoped.** A UI module's tokens/defaults
    apply only inside its own rendered subtree.
 
 ## 2. Theme pack shape
@@ -42,7 +48,7 @@ model the renderer uses.
     "kind": "theme",
     "contributes": {
       "themes": [{
-        "id": "alice", "label": "Alice", "default_mode": "dark",
+        "id": "alice", "label": "Alice", "tokenContract": "1.0", "default_mode": "dark",
         "modes": { "dark": "themes/dark/theme.css", "light": "themes/light/theme.css" }
       }]
     }
@@ -69,9 +75,42 @@ button:hover { background: var(--color-primary-container); }
 
 Theme CSS supports a restricted selector surface: `:root`, `node`, semantic
 element selectors, and supported pseudo-states. Module-specific selectors
-belong in module scopes (§4), not global theme rules. Within `animation`,
-primitive tokens (durations, curves) and recipe tokens (full transition
-contracts composed via explicit `var(--…)`) stay separate.
+belong in module scopes (§4), not global theme rules. Components compose transitions from duration and curve tokens. Legacy
+`animation.default.*` shell recipes are retired and are outside the semantic
+contract.
+
+### 2.1 Semantic token contract
+
+**Status: shipped, version 1.0.** The authoritative machine-readable vocabulary
+is [semantic-tokens-v1.json](../../crates/core/foundation/theme/src/semantic-tokens-v1.json),
+owned by the platform and independent of any theme stylesheet. It lists CSS
+names, intended value kinds and whether the theme or resource composition
+supplies them. Script names use the existing canonical dotted form, for example
+`--color-on-surface` / `color.on-surface` and
+`--animation-duration-short` / `animation.duration.short`.
+
+The vocabulary covers semantic color roles (including selection), typography,
+spacing, shape/radius, borders, elevation/shadows, motion/state opacity, backdrop
+effects, icon sizes/axes and font roles. Theme modes provide every entry marked
+`theme`; font roles and gated variable-font axes are resource-backed entries.
+Base16 palette variables and retired shell recipes are outside the public
+vocabulary. A theme may declare local palette variables and use them internally.
+
+Each theme contribution declares `tokenContract: "1.0"`. Removing or changing
+a role's meaning requires a new major contract; additive vocabulary is versioned
+separately from theme colors and module versions. Only 1.0 is currently known.
+Doctor warns for missing/unknown version declarations, incomplete declared
+contracts and unknown token reads. These authoring warnings leave modules
+loadable. Missing tokens retain normal runtime resolution behavior.
+
+LSP completions use this contract and locally declared CSS variables. LSP and
+`config doctor` share CSS-token and Luau-AST analysis for static `var()` and
+`mesh.theme.token()` / imported theme-proxy reads, including template expressions
+and CSS-capable prop defaults. Comments, quoted CSS content and unrelated Lua
+strings do not count as reads. Dynamic names remain runtime lookups. Local CSS
+custom properties, module-declared scoped tokens and explicitly namespaced
+private references such as `@alice/widget.color.accent` are accepted without
+claiming a new public semantic role.
 
 ## 3. The load-time cascade
 
@@ -109,7 +148,7 @@ ComputedStyle::default()
 
 **Status: shipped shape; storage moves to the load-time cascade (§3).**
 
-Frontend modules may declare module-owned tokens and subtree-scoped component
+UI modules may declare module-owned tokens and subtree-scoped component
 defaults:
 
 ```json
@@ -155,6 +194,14 @@ token read still returns the theme value.
 
 ## 6. Consuming tokens
 
+**Shipped:** token aliases resolve within an immutable theme revision and retain
+scalar types. Unchanged snapshot clones share alias resolutions; mutation
+invalidates them. The style resolver shares parsed color and numeric token
+projections across frames in bounded revision caches. Node custom properties
+and component props still take precedence. Indexed static color, numeric, edge, corner and dimension declarations carry
+typed assignment operations; inherited text values preserve parent inheritance.
+Other property-specific token lowering remains a target.
+
 - **In `<style>`**: `var(--…)` — the only styling path components should use
   for design values.
 - **From script**: the `mesh.theme` interface —
@@ -167,6 +214,10 @@ token read still returns the theme value.
   (`--icon-*`, `--font-*`) — see [05 §7](05-icons.md), [06 §3](06-fonts.md).
 
 ## 6.1 Selector support & cascade order
+
+**Shipped:** compound selectors retain their tag/class/id candidate filter when
+pseudo-states change. Pseudo-state dependencies are indexed separately for
+invalidation, including all states in multi-state compounds.
 
 Component `<style>` blocks support a deliberate selector subset: tag, `.class`,
 `#id`, `*`, pseudo-states (`:hover`, `:focus`, `:focus-visible`, `:active`,

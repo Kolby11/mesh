@@ -636,6 +636,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         tooltip_delay_pending
             || tooltip_fade_pending
             || self.next_script_task_deadline().is_some()
+            || self.disclosures.next_deadline().is_some()
             || self
                 .touch_gestures
                 .values()
@@ -648,7 +649,14 @@ impl ShellComponent for FrontendSurfaceComponent {
             return Some(std::time::Instant::now());
         }
 
-        if let Some(deadline) = self.next_script_task_deadline() {
+        if let Some(deadline) = [
+            self.next_script_task_deadline(),
+            self.disclosures.next_deadline(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+        {
             return Some(deadline);
         }
 
@@ -685,6 +693,17 @@ impl ShellComponent for FrontendSurfaceComponent {
     fn tick(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
         let now = std::time::Instant::now();
         let mut requests = self.run_due_script_tasks(now)?;
+
+        if self
+            .disclosures
+            .next_deadline()
+            .is_some_and(|deadline| deadline <= now)
+            && let Some(tree) = self.last_tree.take()
+        {
+            let result = self.run_due_disclosures(&tree, now);
+            self.last_tree = Some(tree);
+            requests.extend(result?);
+        }
 
         let due_long_presses = self.due_long_presses(now);
         if !due_long_presses.is_empty()
@@ -995,6 +1014,9 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.prune_stale_interaction_targets(&tree);
         self.apply_pending_auto_focus(&tree);
         self.apply_pending_embedded_popover_focus(&tree);
+        if tree_was_rebuilt || bindings_patched {
+            self.refresh_disclosures(&tree);
+        }
         #[cfg(test)]
         {
             self.style_animation_passes += u64::from(run_style_animation_pass);
@@ -1765,6 +1787,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         // after a contribution or dependency changes.
         self.composition_occurrences.get_mut().clear();
         self.bound_children.get_mut().clear();
+        self.component_callbacks.get_mut().clear();
         self.portal_hidden_bindings.get_mut().clear();
         self.pending_surface_states.get_mut().clear();
         self.ref_node_keys.get_mut().clear();

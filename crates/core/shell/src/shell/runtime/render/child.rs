@@ -717,6 +717,7 @@ fn child_popup_placement(kind: ChildSurfaceKind, authored: PopoverPlacement) -> 
             // but do not allow menu-only click grabs or authored offsets.
             constraint_adjustment: authored.constraint_adjustment,
             grab: PopoverGrab::Hover,
+            open_on: authored.open_on,
         },
         ChildSurfaceKind::Window => authored,
     }
