@@ -8,6 +8,11 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Now
 
+- **Performance follow-through (2026-10-18):** Priority 9 hypotheses are all
+  measured and closed (RND-02/03/04, SH-05/06, UI-11, CMP-04/09/10, RES-15
+  landed; SH-13 measured and left). Next in this pass: D7 typed style
+  lowering, the scroll raster cache, and the in-surface blur engine.
+
 - **Performance batch implemented:** shared reload maintenance,
   blocking file-watch control, validated backend state/fingerprints, and direct
   unrefracted wallpaper paint. Release gates pass; experiments and ranges are in

@@ -78,11 +78,6 @@ unless an item says otherwise. IDs point into the
 - [ ] **RT-04:** Stop blocking tokio workers in `mesh.exec`; later an async exec
       host API.
 
-### Priority 9 — Performance hypotheses to measure
-
-Each needs its named workload from the report before any change lands.
-
-
 ## Glass shell core gaps (found 2026-10-17)
 
 - [ ] **Composition resolution at startup:** `load_frontend_components` and
