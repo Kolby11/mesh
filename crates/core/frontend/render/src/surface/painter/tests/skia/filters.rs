@@ -5,43 +5,80 @@ use crate::display_list::{
 };
 use mesh_core_elements::layout::LayoutRect;
 
+/// Per-element routing (04 §10): with a compositor blur protocol, the
+/// compositor blurs the desktop behind the surface, and MESH still blurs the
+/// in-surface content beneath a frosted element. A frosted root over an empty
+/// buffer — the navigation bar — leaves its pixels untouched.
 #[test]
-fn retained_backdrop_filter_delegates_to_compositor() {
+fn compositor_policy_blurs_only_in_surface_content() {
     let red = Color {
         r: 255,
         g: 0,
         b: 0,
         a: 255,
     };
-    let root = backdrop_blur_scene(red);
+    let full = DamageRect {
+        x: 0,
+        y: 0,
+        width: 32,
+        height: 32,
+    };
+    let engine = FrontendRenderEngine::new();
 
     let mut list = RetainedDisplayList::default();
-    list.update(&root, 32, 32, true, true);
+    list.update(&backdrop_blur_scene(red), 32, 32, true, true);
+    assert_eq!(list.backdrop_filter_regions().len(), 1);
+    let selected = list.select_paint_commands(Some(full), DisplayListRepaintPolicy::FullSurface);
+    let mut buffer = PixelBuffer::new(32, 32);
+    engine.render_selected_display_list_for_module(&selected, &mut buffer, 1.0, None, None, None);
+    let outside = pixel(&buffer, 4, 16);
+    assert!(
+        outside.r > 247 && outside.b < 8,
+        "pixels outside the frosted element stay unfiltered, got {outside:?}"
+    );
+    let inside = pixel(&buffer, 15, 16);
+    assert!(
+        inside.r > 0 && inside.b > 0 && inside.r < 255 && inside.b < 255,
+        "in-surface content beneath the element is blurred, got {inside:?}"
+    );
+
+    let root = frosted_root_bar(Color {
+        r: 40,
+        g: 40,
+        b: 40,
+        a: 255,
+    });
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 64, 24, true, true);
+    assert!(list.backdrop_filter_regions().is_empty());
     let selected = list.select_paint_commands(
         Some(DamageRect {
             x: 0,
             y: 0,
-            width: 32,
-            height: 32,
+            width: 64,
+            height: 24,
         }),
         DisplayListRepaintPolicy::FullSurface,
     );
-
-    let engine = FrontendRenderEngine::new();
-    let mut buffer = PixelBuffer::new(32, 32);
-    engine.render_selected_display_list_for_module(&selected, &mut buffer, 1.0, None, None, None);
-
-    // The SHM buffer stays flat. The compositor combines this client buffer
-    // with the desktop behind the surface using the exported blur region.
-    let left = pixel(&buffer, 15, 16);
-    assert!(
-        left.r > 247 && left.b < 8,
-        "client-side backdrop filtering must not rewrite surface pixels, got {left:?}"
+    let mut flat = PixelBuffer::new(64, 24);
+    engine.render_selected_display_list_for_module(&selected, &mut flat, 1.0, None, None, None);
+    let mut reference = RetainedDisplayList::default();
+    reference.set_backdrop_blur_policy(BackdropBlurPolicy::Rejected);
+    reference.update(&root, 64, 24, true, true);
+    let selected = reference.select_paint_commands(
+        Some(DamageRect {
+            x: 0,
+            y: 0,
+            width: 64,
+            height: 24,
+        }),
+        DisplayListRepaintPolicy::FullSurface,
     );
-    let right = pixel(&buffer, 16, 16);
+    let mut unblurred = PixelBuffer::new(64, 24);
+    engine.render_selected_display_list_for_module(&selected, &mut unblurred, 1.0, None, None, None);
     assert!(
-        right.b > 247 && right.r < 8,
-        "client-side backdrop filtering must preserve the adjacent color, got {right:?}"
+        flat.data() == unblurred.data(),
+        "a frosted root over an empty buffer paints exactly its unblurred pixels"
     );
 }
 
@@ -237,6 +274,7 @@ fn sparse_repaint_with_backdrop_damage_expansion_matches_full_repaint() {
     let engine = FrontendRenderEngine::new();
 
     let mut list = RetainedDisplayList::default();
+    list.set_backdrop_blur_policy(BackdropBlurPolicy::InSurfaceFilter);
     let first = backdrop_blur_scene(red);
     list.update(&first, 32, 32, true, true);
     let mut buffer = PixelBuffer::new(32, 32);
@@ -764,4 +802,210 @@ fn backdrop_blur_scene(left_color: Color) -> WidgetNode {
         child.id = id;
     }
     root
+}
+
+/// Blur engine phase 0: a hover change *inside* a frosted panel over a
+/// non-empty in-surface backdrop. The partial repaint must read the complete
+/// backdrop, so its pixels equal a full repaint's, including near the clip
+/// edge where a damage-clipped read would blur against transparency.
+#[test]
+fn hover_inside_in_surface_frosted_panel_matches_full_repaint() {
+    fn scene(chip: Color) -> WidgetNode {
+        let mut root = backdrop_blur_scene(Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        });
+        let mut inner = node(
+            "box",
+            LayoutRect {
+                x: 6.0,
+                y: 6.0,
+                width: 4.0,
+                height: 4.0,
+            },
+            chip,
+        );
+        inner.id = 10;
+        root.children[2].children.push(inner);
+        root
+    }
+    let idle = Color {
+        r: 40,
+        g: 40,
+        b: 40,
+        a: 255,
+    };
+    let hover = Color {
+        r: 200,
+        g: 200,
+        b: 40,
+        a: 255,
+    };
+    let engine = FrontendRenderEngine::new();
+    let surface = DamageRect {
+        x: 0,
+        y: 0,
+        width: 32,
+        height: 32,
+    };
+    let mut list = RetainedDisplayList::default();
+    list.set_backdrop_blur_policy(BackdropBlurPolicy::InSurfaceFilter);
+    list.update(&scene(idle), 32, 32, true, true);
+    let mut buffer = PixelBuffer::new(32, 32);
+    let selected = list.select_paint_commands(Some(surface), DisplayListRepaintPolicy::FullSurface);
+    engine.render_selected_display_list_for_module(&selected, &mut buffer, 1.0, None, None, None);
+
+    for (step, chip) in [hover, idle, hover].into_iter().enumerate() {
+        let root = scene(chip);
+        list.update(&root, 32, 32, false, true);
+        let mut damage = list.damage_rects().to_vec();
+        assert!(!damage.is_empty(), "step {step}: the chip change produces damage");
+        list.expand_damage_for_blur_regions(&mut damage);
+        let selected =
+            list.select_paint_commands_for_rects(&damage, DisplayListRepaintPolicy::MinimalDamage);
+        for rect in &damage {
+            buffer.clear_rect(rect.x, rect.y, rect.width, rect.height, Color::TRANSPARENT);
+            engine.render_selected_display_list_for_module(
+                &selected,
+                &mut buffer,
+                1.0,
+                Some((rect.x, rect.y, rect.width, rect.height)),
+                None,
+                None,
+            );
+        }
+        let mut full = PixelBuffer::new(32, 32);
+        let all = list.select_paint_commands(Some(surface), DisplayListRepaintPolicy::FullSurface);
+        engine.render_selected_display_list_for_module(&all, &mut full, 1.0, None, None, None);
+        let mismatched = buffer
+            .data()
+            .chunks(4)
+            .zip(full.data().chunks(4))
+            .filter(|(a, b)| a != b)
+            .count();
+        assert_eq!(
+            mismatched, 0,
+            "step {step}: partial repaint differs from full in {mismatched} pixels (damage {damage:?})"
+        );
+    }
+}
+
+// cargo test -p mesh-core-render --release --lib -- in_surface_backdrop_workload_profile --ignored --nocapture
+/// Blur engine phase 0 workloads on a 480×320 surface with real text beneath
+/// an in-surface frosted element: (a) a chip inside a frosted panel toggling
+/// on hover, (b) a text list scrolling beneath a frosted header.
+#[test]
+#[ignore = "release-only in-surface backdrop workload profile"]
+fn in_surface_backdrop_workload_profile() {
+    fn backdrop_text(root: &mut WidgetNode, next_id: &mut u64, rows: usize, offset: f32) {
+        for row in 0..rows {
+            let mut text = text_node(
+                &format!("backdrop row {row} with some text"),
+                8.0,
+                8.0 + row as f32 * 18.0 - offset,
+                300.0,
+                16.0,
+                Color::from_hex("#e0e8f0").unwrap(),
+            );
+            text.id = *next_id;
+            *next_id += 1;
+            root.children.push(text);
+        }
+    }
+    fn panel_scene(chip: Color) -> WidgetNode {
+        let mut root = node(
+            "box",
+            LayoutRect { x: 0.0, y: 0.0, width: 480.0, height: 320.0 },
+            Color::from_hex("#203040").unwrap(),
+        );
+        root.id = 1;
+        let mut next_id = 100;
+        backdrop_text(&mut root, &mut next_id, 17, 0.0);
+        let mut panel = node(
+            "box",
+            LayoutRect { x: 90.0, y: 60.0, width: 300.0, height: 200.0 },
+            Color { r: 255, g: 255, b: 255, a: 40 },
+        );
+        panel.id = 2;
+        panel.computed_style.backdrop_filter = VisualFilter::blur(8.0);
+        let mut chip_node = node(
+            "box",
+            LayoutRect { x: 20.0, y: 20.0, width: 60.0, height: 24.0 },
+            chip,
+        );
+        chip_node.id = 3;
+        panel.children.push(chip_node);
+        root.children.push(panel);
+        root
+    }
+    fn header_scene(offset: f32) -> WidgetNode {
+        let mut root = node(
+            "box",
+            LayoutRect { x: 0.0, y: 0.0, width: 480.0, height: 320.0 },
+            Color::from_hex("#203040").unwrap(),
+        );
+        root.id = 1;
+        let mut next_id = 100;
+        backdrop_text(&mut root, &mut next_id, 24, offset);
+        let mut header = node(
+            "box",
+            LayoutRect { x: 0.0, y: 0.0, width: 480.0, height: 48.0 },
+            Color { r: 255, g: 255, b: 255, a: 40 },
+        );
+        header.id = 2;
+        header.computed_style.backdrop_filter = VisualFilter::blur(8.0);
+        root.children.push(header);
+        root
+    }
+    fn run(label: &str, frames: u32, scene: impl Fn(u32) -> WidgetNode) {
+        let engine = FrontendRenderEngine::new();
+        let mut list = RetainedDisplayList::default();
+        list.set_backdrop_blur_policy(BackdropBlurPolicy::InSurfaceFilter);
+        let first = scene(0);
+        list.update(&first, 480, 320, true, true);
+        let mut buffer = PixelBuffer::new(480, 320);
+        let all = list.select_paint_commands(
+            Some(DamageRect { x: 0, y: 0, width: 480, height: 320 }),
+            DisplayListRepaintPolicy::FullSurface,
+        );
+        engine.render_selected_display_list_for_module(&all, &mut buffer, 1.0, None, None, None);
+        let mut painted = 0u64;
+        let started = std::time::Instant::now();
+        for frame in 1..=frames {
+            let root = scene(frame);
+            list.update(&root, 480, 320, false, true);
+            let mut damage = list.damage_rects().to_vec();
+            list.expand_damage_for_blur_regions(&mut damage);
+            let selected = list
+                .select_paint_commands_for_rects(&damage, DisplayListRepaintPolicy::MinimalDamage);
+            for rect in &damage {
+                painted += rect.area();
+                buffer.clear_rect(rect.x, rect.y, rect.width, rect.height, Color::TRANSPARENT);
+                engine.render_selected_display_list_for_module(
+                    &selected,
+                    &mut buffer,
+                    1.0,
+                    Some((rect.x, rect.y, rect.width, rect.height)),
+                    None,
+                    None,
+                );
+            }
+        }
+        let elapsed = started.elapsed();
+        eprintln!(
+            "{label}: {frames} frames {elapsed:?} ({:.1} us/frame), {:.0} px/frame",
+            elapsed.as_secs_f64() * 1e6 / f64::from(frames),
+            painted as f64 / f64::from(frames)
+        );
+    }
+    let idle = Color { r: 40, g: 40, b: 40, a: 255 };
+    let hover = Color { r: 200, g: 200, b: 40, a: 255 };
+    run("hover inside frosted panel", 200, |frame| {
+        panel_scene(if frame % 2 == 0 { idle } else { hover })
+    });
+    run("list scrolling beneath frosted header", 200, |frame| {
+        header_scene((frame % 60) as f32 * 2.0)
+    });
 }

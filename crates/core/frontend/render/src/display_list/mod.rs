@@ -1,4 +1,3 @@
-use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -934,15 +933,17 @@ impl RetainedDisplayList {
     /// and returns whether any rect grew. Runs to a fixpoint so overlapping
     /// regions cascade.
     ///
-    /// A `backdrop-filter` grows damage only by the blur kernel reach, clipped
-    /// to the region: the filter output at a pixel is a function of the
-    /// backdrop within the reach of it, so pixels further away than that are
-    /// unaffected by the change and keep their retained values. This is what
-    /// keeps a surface-spanning backdrop — the shipped navigation bar has one
-    /// on its root — from collapsing every partial repaint to the full surface.
+    /// Damage touching a `backdrop-filter` read region grows to the whole
+    /// region (04 §10): the buffer under the element holds last frame's
+    /// blurred output, not the raw backdrop, so only a complete repaint of the
+    /// region gives the blur its input. Read regions exist only for elements
+    /// with in-surface content beneath them, so a frosted root over an empty
+    /// buffer — the shipped navigation bar — keeps partial repaints partial.
+    /// Under [`BackdropBlurPolicy::Rejected`] nothing is blurred and damage is
+    /// unchanged.
     ///
-    /// A `filter: blur()` layer is different: the layer is rasterized as a unit
-    /// before compositing, so any damage inside it still takes the whole region.
+    /// A `filter: blur()` layer is rasterized as a unit before compositing, so
+    /// any damage inside it takes the whole layer region under every policy.
     pub fn expand_damage_for_blur_regions(&self, rects: &mut [DamageRect]) -> bool {
         if (self.frame_plan.effects.backdrop_regions.is_empty()
             && self.frame_plan.effects.filter_layer_regions.is_empty())
@@ -951,27 +952,24 @@ impl RetainedDisplayList {
             return false;
         }
         let mut expanded = self.expand_damage_for_filter_layers(rects);
-        // Each backdrop is applied once, against the damage as it stood before
-        // that backdrop — never against its own output. Re-inflating a rect
-        // this pass already grew would cascade one reach at a time until it
-        // filled the whole region, which is exactly the bound being avoided.
-        // Paint order is meaningful: a lower backdrop's changed output is an
-        // upper backdrop's changed input, so later regions do see earlier growth.
-        for backdrop in self.frame_plan.effects.backdrop_regions.iter() {
-            let before: SmallVec<[DamageRect; 8]> = SmallVec::from_slice(rects);
-            for (index, rect) in rects.iter_mut().enumerate() {
-                if !before[index].intersects(backdrop.region) {
-                    continue;
-                }
-                let Some(affected) =
-                    clip_rect(inflate_rect(before[index], backdrop.reach), backdrop.region)
-                else {
-                    continue;
-                };
-                let union = rect.union(affected);
-                if union != *rect {
-                    *rect = union;
-                    expanded = true;
+        // A read region exists only where in-surface content lies beneath a
+        // backdrop, and every policy but `Rejected` blurs that content in the
+        // surface. The blurred output overwrote the raw backdrop, and the blur
+        // near any clip edge samples beyond it, so a partial repaint is
+        // correct only if it repaints the whole read region. Regions run in
+        // paint order: a lower backdrop's changed output is an upper
+        // backdrop's changed input.
+        if self.frame_plan.inputs.backdrop_blur_policy != BackdropBlurPolicy::Rejected {
+            for backdrop in self.frame_plan.effects.backdrop_regions.iter() {
+                for rect in rects.iter_mut() {
+                    if !rect.intersects(backdrop.region) {
+                        continue;
+                    }
+                    let union = rect.union(backdrop.region);
+                    if union != *rect {
+                        *rect = union;
+                        expanded = true;
+                    }
                 }
             }
         }

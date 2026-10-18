@@ -318,22 +318,10 @@ pub(super) fn compute_backdrop_regions(
             regions.push(BackdropRegion {
                 node_id: command.node.id,
                 region,
-                reach: backdrop_kernel_reach(&command.node),
             });
         }
     }
     regions
-}
-
-/// The blur kernel reach in device pixels, matching the pad
-/// [`backdrop_read_region`] inflates by. Output at a pixel depends only on the
-/// backdrop within this distance of it.
-pub(super) fn backdrop_kernel_reach(node: &DisplayPaintNode) -> u32 {
-    let pad = node.style.backdrop_filter.blur_radius * 3.0;
-    if !pad.is_finite() || pad <= 0.0 {
-        return 0;
-    }
-    pad.ceil().min(f32::from(u16::MAX)) as u32
 }
 
 /// Half-open command range per layer. Ranges nest but never interleave, since

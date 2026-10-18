@@ -354,7 +354,8 @@ modal backdrop) over permanently blurred chrome, and see
 ## 10. Compositor background blur
 
 **Status: shipped (`ext-background-effect-v1`, `org_kde_kwin_blur`, namespace
-opt-in); in-surface fallback shipped, its contract is a target.**
+opt-in, per-element in-surface blur); backdrop root, edge clamping and the
+blurred-backdrop cache are targets.**
 
 Background ("frosted glass") blur behind a shell surface is a **compositor**
 effect: a Wayland client never sees the pixels behind its own surface. MESH
@@ -393,14 +394,35 @@ For the blur to be *visible*, the surface must be translucent where you want it
 opaque; a solid fill or an opaque `box-shadow` painted behind a translucent
 fill will hide it.
 
-**No protocol.** When the compositor supports neither protocol, MESH blurs
-in-surface: the element's backdrop is whatever MESH itself painted beneath it
-in the same surface. An element with nothing painted beneath it — typically a
-surface's root — is skipped rather than blurred, since blurring the cleared
-buffer changes no pixel. The desktop behind the surface is then only blurred by
-a namespace rule. The per-element choice between compositor and in-surface
-blur, and the in-surface engine's caching, are open work in the
-[backlog](../BACKLOG.md) and not yet part of this contract.
+**In-surface content.** *Shipped.* A compositor never sees MESH's own pixels,
+so whatever MESH painted beneath a frosted element in the same surface is
+blurred by MESH. The choice is made per element:
+
+| Beneath the element | Pixel work |
+| --- | --- |
+| Nothing painted in the surface (typically a surface root) | None. The desktop part goes through the compositor region. |
+| In-surface content, compositor protocol bound | MESH blurs the in-surface content; the compositor blurs the desktop through the exported region. |
+| In-surface content, no protocol | MESH blurs the in-surface content; the desktop part is blurred only by a namespace rule. |
+
+Blurring the two parts separately approximates one blur over both, since blur
+does not commute with alpha compositing. It is the best a client can do
+without reading the screen. When the painter cannot blur at all, the element
+paints flat and records a diagnostic.
+
+A partial repaint that touches an in-surface frosted element's read region (its
+box inflated by three times the radius) repaints that whole region. The buffer
+under the element holds the previous frame's blurred output rather than the raw
+backdrop, so a smaller repaint would blur against stale or missing pixels.
+Partial and full repaints therefore produce identical pixels, and a change inside
+a large frosted panel costs a repaint of the panel. Frosted roots over an empty
+buffer have no read region and keep small repaints small.
+
+*Target:* the backdrop is bounded by a backdrop root (the nearest ancestor that
+paints through an offscreen); edges clamp to that root instead of fading to
+transparency at the surface edge; and a cached blurred backdrop makes a change
+above an unchanged backdrop a blit instead of a region repaint. These follow the
+[in-surface blur engine](../../.planning/todos/pending/2026-09-30-in-surface-blur-engine.md)
+plan, phases 3–5.
 
 Popovers promoted to `xdg_popup` inherit their parent layer surface's blur on
 compositors that blur layer popups.

@@ -851,7 +851,6 @@ fn backdrop_regions_require_painted_content_beneath() {
                 width: 64,
                 height: 64,
             },
-            reach: 12,
         }],
         "active backdrop region should be the node rect plus 12px pad"
     );
@@ -922,7 +921,6 @@ fn transformed_backdrop_regions_follow_cumulative_geometry() {
                 width: 45,
                 height: 62,
             },
-            reach: 12,
         }]
     );
     assert_eq!(
@@ -1010,71 +1008,83 @@ fn expand_damage_for_blur_regions_grows_intersecting_rects() {
         }
     );
 
-    // Damage touching the read region grows by the kernel reach, clipped to
-    // the region — not to the whole region. Blurred output further than the
-    // reach from the change is unaffected and keeps its retained pixels.
-    let mut touching = [DamageRect {
+    // In-surface content lies beneath the frosted element, so MESH blurs it
+    // under every policy but `Rejected`. The blurred output overwrote the raw
+    // backdrop, so damage touching the read region repaints all of it.
+    let touching_rect = DamageRect {
         x: 0,
         y: 30,
         width: 10,
         height: 10,
-    }];
-    assert!(list.expand_damage_for_blur_regions(&mut touching));
+    };
+    let region = list.backdrop_filter_regions()[0].region;
     assert_eq!(
-        touching[0],
+        region,
         DamageRect {
-            x: 0,
-            y: 18,
-            width: 22,
-            height: 34,
-        },
-        "expanded damage must cover the change plus one kernel reach"
+            x: 8,
+            y: 8,
+            width: 64,
+            height: 64,
+        }
     );
-    assert!(
-        touching[0].area() * 6 < 72 * 64,
-        "the bounded expansion must stay well under the whole read region"
-    );
+    for policy in [
+        BackdropBlurPolicy::CompositorRegion,
+        BackdropBlurPolicy::InSurfaceFilter,
+    ] {
+        list.set_backdrop_blur_policy(policy);
+        list.update(&root, 100, 100, true, true);
+        let mut touching = [touching_rect];
+        assert!(list.expand_damage_for_blur_regions(&mut touching));
+        assert_eq!(touching[0], touching_rect.union(region), "{policy:?}");
+    }
+
+    // A rejected backdrop is painted flat; nothing reads it.
+    list.set_backdrop_blur_policy(BackdropBlurPolicy::Rejected);
+    list.update(&root, 100, 100, true, true);
+    let mut touching = [touching_rect];
+    assert!(!list.expand_damage_for_blur_regions(&mut touching));
+    assert_eq!(touching[0], touching_rect);
 }
 
 /// A `backdrop-filter` on the surface root — the shipped navigation bar has
-/// one — used to collapse every partial repaint to the full surface, because
-/// damage grew to the whole blurred region and that region is the surface.
+/// one. Over an empty buffer it has no read region, so partial repaints stay
+/// partial; over in-surface content the blur needs the whole read region.
 #[test]
-fn root_backdrop_filter_keeps_partial_damage_partial() {
-    let mut root = node(1, "box", 0.0, 0.0, 400.0, 60.0);
-    root.computed_style.background_color = Color::TRANSPARENT;
-    // Wallpaper beneath, then a surface-spanning frosted layer over it: the
-    // shape `.nav-shell` has, and the one whose region is the whole surface.
-    root.children.push(node(2, "box", 0.0, 0.0, 400.0, 60.0));
-    root.children.push(frosted_node(3, 0.0, 0.0, 400.0, 60.0));
-    let mut list = RetainedDisplayList::default();
-    list.update(&root, 400, 60, true, true);
-    assert_eq!(
-        list.backdrop_filter_regions().len(),
-        1,
-        "the root backdrop has painted content beneath it"
-    );
-
-    let surface_area = 400u64 * 60;
-    let mut damage = [DamageRect {
+fn root_backdrop_damage_depends_on_in_surface_content_beneath() {
+    let small = DamageRect {
         x: 180,
         y: 20,
         width: 20,
         height: 20,
-    }];
-    list.expand_damage_for_blur_regions(&mut damage);
-    assert!(
-        damage[0].area() * 4 < surface_area,
-        "a root backdrop must not collapse a small repaint to the whole surface, got {:?}",
-        damage[0]
-    );
+    };
+
+    let mut bar = node(1, "box", 0.0, 0.0, 400.0, 60.0);
+    bar.computed_style.background_color = Color::TRANSPARENT;
+    bar.computed_style.backdrop_filter = VisualFilter::blur(4.0);
+    bar.children.push(node(2, "box", 180.0, 20.0, 20.0, 20.0));
+    let mut list = RetainedDisplayList::default();
+    list.update(&bar, 400, 60, true, true);
+    assert!(list.backdrop_filter_regions().is_empty());
+    let mut damage = [small];
+    assert!(!list.expand_damage_for_blur_regions(&mut damage));
+    assert_eq!(damage[0], small);
+
+    let mut root = node(1, "box", 0.0, 0.0, 400.0, 60.0);
+    root.computed_style.background_color = Color::TRANSPARENT;
+    root.children.push(node(2, "box", 0.0, 0.0, 400.0, 60.0));
+    root.children.push(frosted_node(3, 0.0, 0.0, 400.0, 60.0));
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 400, 60, true, true);
+    assert_eq!(list.backdrop_filter_regions().len(), 1);
+    let mut damage = [small];
+    assert!(list.expand_damage_for_blur_regions(&mut damage));
     assert_eq!(
         damage[0],
         DamageRect {
-            x: 168,
-            y: 8,
-            width: 44,
-            height: 44,
+            x: 0,
+            y: 0,
+            width: 400,
+            height: 60,
         }
     );
 }

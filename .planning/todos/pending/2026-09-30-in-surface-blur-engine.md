@@ -6,6 +6,15 @@
 content inside a surface — a frosted panel over other widgets, a blurred card,
 a modal scrim — so components can use it freely instead of avoiding it.
 
+## Progress — 2026-10-18
+
+Phases 0–2 landed (performance log, 2026-10-18). The suspected partial-repaint
+defect was real: damage grown by one kernel reach left 58 of 1,024 pixels wrong
+in a hover-inside-panel test. Damage touching a read region now repaints the
+whole region. Per-element routing blurs in-surface content beneath a frosted
+element under the compositor policy too, and 04 §10 states that contract.
+Phases 3–5 below remain, still gated as the D6 revision describes.
+
 ## D6 scope revision — 2026-10-13
 
 Separate blur correctness from raster-cache investment. The partial-repaint

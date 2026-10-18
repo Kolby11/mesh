@@ -46,7 +46,6 @@ pub struct BackdropRegion {
     /// The `backdrop-filter` node whose read region this is.
     pub node_id: NodeId,
     pub region: DamageRect,
-    pub reach: u32,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

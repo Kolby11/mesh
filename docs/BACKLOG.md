@@ -28,6 +28,9 @@ unless an item says otherwise. IDs point into the
 
 ### Priority 6 — Dead code, duplication and small fixes
 
+- [ ] `scene_thread::tests::discarded_output_leases_retire_outside_the_queue_lock`
+      fails about one full render-suite run in three under parallel load and
+      passes alone; make its retirement ordering deterministic.
 - [ ] LSP manifest schema lacks the nested `permissions` map that the weather,
       apps and recorder interface manifests declare; `shipped_manifests_validate_cleanly`
       fails. Sync `mesh-tools-lsp` `manifest/schema.rs` with `mesh-core-module`.
@@ -295,9 +298,11 @@ of payoff.
       (`retained_tree.update`). Scroll momentum no longer takes this path; what
       remains (resize, theme, window state) also relayouts, so diffing only
       restyled nodes needs layout-changed nodes reported too.
-- [ ] In-component blur costs a full re-blur on every nearby repaint, and
-      in-surface `backdrop-filter` has only an outline contract (04 §10: the
-      no-protocol fallback). Plan: [in-surface blur engine](../.planning/todos/pending/2026-09-30-in-surface-blur-engine.md).
+- [ ] In-surface blur re-blurs and repaints a frosted element's whole read
+      region on any nearby change (a hover inside a frosted panel is ~7x a plain
+      repaint). Backdrop root, clamped edges and the blurred-backdrop/filter-layer
+      caches are phases 3–5 of the [in-surface blur engine](../.planning/todos/pending/2026-09-30-in-surface-blur-engine.md),
+      gated on the D6 renderer prototype.
 
 ### Style
 

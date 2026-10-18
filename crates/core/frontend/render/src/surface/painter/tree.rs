@@ -727,10 +727,31 @@ impl FrontendRenderEngine {
                 return;
             }
             DisplayPaintCommandKind::ApplyBackdropFilterCompositor => {
-                // The presentation backend owns the compositor region. No
-                // client-side command is emitted, so the SHM pixels remain
-                // unchanged and the selected policy is observable in the
-                // retained topology.
+                // The compositor blurs the desktop behind the surface through
+                // its exported region. In-surface content beneath the element
+                // is MESH's to blur (04 §10), so only an element with a
+                // recorded read region falls through to the in-surface pass;
+                // one with nothing beneath leaves the SHM pixels unchanged.
+                if !backdrop_regions
+                    .is_some_and(|regions| regions.iter().any(|r| r.node_id == command.node.id))
+                    || !self.paint_backend_supports_backdrop_blur()
+                {
+                    return;
+                }
+                let bounds = scaled_display_node_bounds(&command.node, scale);
+                let clip = intersect_clip(paint_clip, scaled_display_clip(command.clip, scale));
+                self.execute_painter_commands_in_session(
+                    session,
+                    &[PainterCommand::ApplyFilter {
+                        rect: bounds,
+                        radii: scale_corners(command.node.style.border_radius, scale),
+                        filter: PainterFilter::Backdrop(scaled_visual_filter(
+                            command.node.style.backdrop_filter,
+                            scale,
+                        )),
+                        clip,
+                    }],
+                );
                 return;
             }
             DisplayPaintCommandKind::ApplyBackdropFilterInSurface => {

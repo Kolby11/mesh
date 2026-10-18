@@ -5598,3 +5598,52 @@ locale 28 passed; frontend the two known failures; shell lib failure set
 unchanged (45). `mesh-tools-lsp` `shipped_manifests_validate_cleanly` fails on
 an unrelated manifest-schema drift (`permissions`), now a backlog item.
 
+
+## 2026-10-18 — in-surface blur engine phases 0–2: correctness, contract, routing
+
+AMD Ryzen 7 7840HS, workspace release profile. Phases 3–5 (caches) remain in
+the backlog, gated on the D6 renderer prototype.
+
+**Phase 0 — the suspected defect was real.**
+`hover_inside_in_surface_frosted_panel_matches_full_repaint`: a chip inside a
+blur(4) frosted panel over red/blue content, under `InSurfaceFilter`. The
+partial repaint differed from a full repaint in **58 pixels** on the first
+hover. `expand_damage_for_blur_regions` grew damage by one kernel reach,
+clipped to the read region. That kept the backdrop *source* fresh, but the
+painter re-blurred the whole expanded rect, and inside the panel the buffer
+holds last frame's blurred output rather than the raw backdrop. Damage
+touching a read region now unions the whole region. The existing
+`sparse_repaint_with_backdrop_damage_expansion_matches_full_repaint` had run
+under the compositor policy, where nothing is blurred in-surface; it now runs
+in-surface. `BackdropRegion::reach` and `backdrop_kernel_reach` were removed.
+
+**Phase 2 — per-element routing.** Under `CompositorRegion`, an element with
+in-surface content beneath it (it has a read region) now also blurs that
+content in the surface; one with nothing beneath (the navigation bar root)
+still does no pixel work. Damage expansion follows: every policy but
+`Rejected`. `compositor_policy_blurs_only_in_surface_content` checks both
+cases (a frosted root's pixels equal the `Rejected` reference exactly).
+
+**Phase 1 — contract.** 04 §10 states per-element routing and whole-region
+partial repaint as shipped; backdrop root, clamped edges, and the cache as
+targets.
+
+**Cost.** `in_surface_backdrop_workload_profile`, 480×320 surface with real
+text, blur(8), `InSurfaceFilter`, 200 frames, three runs each (the "before"
+column is the old bounded expansion restored temporarily):
+
+| Workload | Before | After |
+| --- | --- | --- |
+| (a) chip inside a 300×200 frosted panel toggling | 117.5–133.9 µs/frame, 4,032 px/frame (wrong pixels) | 926.8–952.8 µs/frame, 104,016 px/frame |
+| (b) text list scrolling beneath a 480×48 frosted header | 841.2–877.7 µs/frame, ~108.7k px/frame | 882.7–969.2 µs/frame, ~157–165k px/frame |
+
+(a) is the case the phase-3 blurred-backdrop cache turns into a blit; (b)
+misses any cache by nature, as the plan says. The navigation bar is unchanged
+under both policies: `navigation_frame_cost_profile` damage per volume change
+stays 1.7% of the surface (default and `MESH_BENCH_BACKDROP=in-surface`).
+
+**Verified.** Release render 288 passed / 41 ignored. In one of three full
+runs `scene_thread::tests::discarded_output_leases_retire_outside_the_queue_lock`
+failed under load; it passed in six isolated runs and is unrelated (backlog).
+Shell lib failure set unchanged (45).
+
