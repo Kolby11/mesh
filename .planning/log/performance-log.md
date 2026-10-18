@@ -1483,6 +1483,7 @@ section noted.
 | 2026-10-18 | Separate `Value::hash`/`RandomState` pass for validated backend state | runtime boundary | Unchanged 128-row, 12,626-byte snapshots, release, 2,000 iterations: 177.458–314.765 ms baseline vs 226.492–274.504 ms candidate over two attempted runs. Missed the 1.05x gate (1.15x then 0.78x); replaced by a fingerprint fused into validation's serialization pass |
 | 2026-10-18 | Early return for the flat interior of the liquid-glass SkSL lens | rendering | Release, three interleaved runs of ten rounded 180×40 pills: 9.269–9.338 ms baseline vs 10.524–10.660 ms candidate (0.87–0.89x). One 360×240 card probe reached only 1.08x, missing the 1.2x gate. Reverted; unrefracted wallpaper image-shader fast path retained |
 | 2026-10-18 | FNV-1a fingerprint fused into bounded JSON serialization | runtime boundary | Three controlled first-sample attempts on unchanged 128-row / 12,626-byte state, release, 2,000 iterations: 178.085–191.996 ms baseline vs 202.623–204.492 ms fused (0.87–0.95x); each failed the 1.05x gate. Reverted; fast keyed `ahash` over the typed value is the measured alternative |
+| 2026-10-18 | `Arc<[TransitionStyle]>` with a shared default instead of `Vec` in `ComputedStyle` | style | Appearance service frame restyle 2.673–2.723 ms vs 2.672–2.705 ms without it (three runs each, release): no measurable change. The one-entry default `Vec` clone is not a restyle cost driver. Reverted |
 
 ## 2026-07-30 — element `filter: blur()` subtree layers
 
@@ -5720,4 +5721,44 @@ pixels. The clip-dependent anti-aliasing is a backlog item.
 **Verified.** Release render 290 passed / 41 ignored (new: planner
 uniform/gradient cases, region shift). Shell lib failure set unchanged (45);
 the parity test passes with 3+ shifted frames.
+
+
+## 2026-10-18 — D7: keyword and layout properties lower to typed operations
+
+AMD Ryzen 7 7840HS, workspace release profile.
+
+**Measured first.** Counting declarations by path over an Appearance service
+update (tree rebuild) gave about 3,150 applied per frame: 71% typed, 29% on the
+string path. The string path was dominated by `flex-shrink`, `align-items`,
+`justify-content`, `text-align`, `border-color`, `padding-inline`,
+`flex-grow`, `padding-block`, `flex-direction`, `overflow*`, `display`,
+`align-self`, and `flex-wrap`.
+
+**Change.** Those properties are now `TypedLiteralOperation`s. The lowering
+macro takes a per-entry setter, so two-field properties (`padding-inline`,
+`padding-block`, the `overflow` shorthand) fit, and keyword parsing reuses the
+string path's exact matches. `indexed_literal_operations_preserve_string_resolution_semantics`
+covers every new property against an extended value matrix, including
+`inherit` and unknown keywords. The unread `CachedLiteral::Static` variant was
+removed, which also clears the long-standing `mesh-core-elements` dead-code
+warning.
+
+**Result.** After the change, 97.5% of declarations apply typed (string path
+5,582 vs 63,107 over 70 frames). Remaining: `font-family`, `color` and
+`background` with fallbacks, `transition`, and `exclusive-zone`.
+`typed_keyword_declaration_profile`, 1.1M keyword declarations, three runs:
+string path 128.5–136.8 ms vs typed 9.29–9.33 ms (13.8–14.7x). Gate
+`typed_keyword_declaration_speedup` (≥ 5x).
+
+The frame-level effect is small. `appearance_frame_cost_profile` style_restyle,
+three runs each: 2.743–2.766 ms before vs 2.672–2.705 ms after (~1.02–1.03x),
+because keyword matching on the string path was already cheap (~119 ns per
+declaration). A `perf` profile of the same workload puts the remaining
+restyle cost in node resolution, `ComputedStyle` clone/drop/eq (2.6/1.7/1.6%
+of samples), and the per-frame style-animation pass (3.2%). The frame itself
+(8.4–8.6 ms) is mostly the full tree rebuild an unrelated service update
+triggers (tree_build 5.8–6.0 ms), the existing memo-restyle backlog item.
+
+**Verified.** Release elements 277 passed / 10 failed: the same 10 names as the
+baseline, diffed.
 

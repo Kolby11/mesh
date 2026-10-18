@@ -2,7 +2,7 @@ use super::attrs::StyleNodeAttrs;
 use super::cache::CachedThemeTokenValue;
 use super::index::*;
 use super::literal::{
-    CachedLiteral, LiteralCache, LiteralProperty, TypedLiteralOperation, apply_typed_literal,
+    LiteralCache, LiteralProperty, TypedLiteralOperation, apply_typed_literal,
 };
 use super::matching::*;
 use super::value::split_reference;
@@ -378,10 +378,7 @@ impl<'a> StyleResolver<'a> {
             return None;
         }
         let revision = self.theme.revision();
-        if let Some(CachedLiteral::Theme {
-            revision: cached_revision,
-            operation,
-        }) = decl.literal.get()
+        if let Some((cached_revision, operation)) = decl.literal.theme_operation()
             && cached_revision == revision
         {
             return Some(operation);

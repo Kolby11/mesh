@@ -310,13 +310,11 @@ of payoff.
 
 ### Style
 
-- [ ] Typed style declarations end-to-end: resolve theme tokens to typed values
-      once per theme load; `apply_declaration` consumes typed values, strings
-      only for diagnostics (E). Static literals now pre-lower; typed property
-      values remain; theme aliases and color/number token projections now cache
-      by immutable revision. _(detail: "P2 — typing & interning")_
-- [ ] Interaction frames still re-apply string style declarations per node —
-      folds into typed declarations and narrower invalidation.
+- [ ] Typed style declarations: 97.5% of declarations in an Appearance rebuild
+      now apply typed. `font-family`, `color`/`background` with fallbacks, and
+      the per-node `transition` shorthand parse remain on the string path.
+      Restyle time is now mostly node resolution and `ComputedStyle` copying,
+      not declaration application. _(detail: "P2 — typing & interning")_
       _(detail: "P2 — architecture")_
 - [ ] A tree-rebuild frame restyles memo-reused subtrees too. Component memo
       entries are stored pre-restyle (position-independent by design), so a

@@ -8,10 +8,11 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Now
 
-- **Performance follow-through (2026-10-18):** Priority 9 hypotheses are all
-  measured and closed (RND-02/03/04, SH-05/06, UI-11, CMP-04/09/10, RES-15
-  landed; SH-13 measured and left). Next in this pass: D7 typed style
-  lowering, the scroll raster cache, and the in-surface blur engine.
+- **Performance follow-through (2026-10-18):** Priority 9 closed; in-surface
+  blur phases 0–2 (correctness fix, per-element routing, 04 §10 contract);
+  scroll frames keep retained pixels and whole-pixel scrolls shift in place;
+  D7 keyword lowering. Blur caches (phases 3–5) stay gated on D6; the
+  remaining scroll-raster cases and memo restyle are in the backlog.
 
 - **Performance batch implemented:** shared reload maintenance,
   blocking file-watch control, validated backend state/fingerprints, and direct
@@ -30,9 +31,10 @@ measurements are in [`log/`](log/README.md). Open work is in
 - **Priority 4 committed:** CMP-07, CMP-02/08, A1, A7, A5 and RES-06/RES-12
   landed in `934c4648`. Inspector Ctrl+Tab and niri/Sway providers are unchecked live.
 
-- **D7 in progress:** shared theme alias resolutions and bounded color/number
-  token projections, indexed literal operations, and narrow compound selector
-  buckets are validated. Remaining property lowering and incremental matching stay open.
+- **D7 in progress:** theme alias/token projections, indexed literal
+  operations, compound selector buckets, and (2026-10-18) keyword/layout
+  property lowering are validated; 97.5% of rebuild declarations apply typed.
+  Incremental selector matching for class changes stays open.
 
 - **D6 preparation:** immutable scene submissions and a bounded render-thread
   handoff and owned, budgeted font preparation are validated. Icon snapshots,

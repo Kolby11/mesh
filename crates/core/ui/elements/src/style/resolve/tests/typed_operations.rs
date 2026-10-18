@@ -38,6 +38,21 @@ fn indexed_literal_operations_preserve_string_resolution_semantics() {
             "ltr",
             "scroll hidden",
             "2px -4px",
+            "flex-end",
+            "end",
+            "start",
+            "flex-start",
+            "space-around",
+            "right",
+            "wrap",
+            "row",
+            "column-reverse",
+            "stretch",
+            "visible",
+            "auto hidden",
+            "1",
+            "rgba(255, 0, 0, 0.5)",
+            "#fff #000",
         ] {
             let value = StyleValue::Literal(raw.into());
             let declaration = Declaration {
@@ -45,7 +60,7 @@ fn indexed_literal_operations_preserve_string_resolution_semantics() {
                 value: value.clone(),
             };
             let indexed = IndexedDeclaration::from_declaration(&declaration);
-            if indexed.literal.get().is_none() {
+            if !indexed.literal.is_static() {
                 continue;
             }
             let mut control = ComputedStyle::default();
@@ -73,7 +88,7 @@ fn inherited_text_literals_do_not_mark_properties_explicit() {
             value: StyleValue::Literal("inherit".into()),
         };
         let indexed = IndexedDeclaration::from_declaration(&declaration);
-        assert!(indexed.literal.get().is_none());
+        assert!(!indexed.literal.is_static());
         resolver.apply_indexed_declaration(&mut style, &indexed, None, &mut HashMap::new());
     }
     assert_eq!(style, ComputedStyle::default());
@@ -162,7 +177,7 @@ fn indexed_theme_operations_respect_overrides_and_theme_revisions() {
     assert_eq!(style.font_size, 12.0);
     assert!(style.explicit_properties.font_size);
     assert!(
-        matches!(indexed.literal.get(), Some(CachedLiteral::Theme { revision, .. }) if revision == theme.revision())
+        matches!(indexed.literal.theme_operation(), Some((revision, _)) if revision == theme.revision())
     );
     let mut local = HashMap::from([(
         "--mesh-prop-size".into(),
@@ -190,7 +205,7 @@ fn indexed_theme_operations_respect_overrides_and_theme_revisions() {
     );
     assert_eq!(style.font_size, 48.0);
     assert!(
-        matches!(indexed.literal.get(), Some(CachedLiteral::Theme { revision, .. }) if revision == theme.revision())
+        matches!(indexed.literal.theme_operation(), Some((revision, _)) if revision == theme.revision())
     );
 }
 
@@ -374,4 +389,66 @@ fn shared_indexes_keep_theme_assignments_separate_from_node_overrides() {
             });
         }
     });
+}
+
+// cargo test -p mesh-core-elements --release --lib -- typed_keyword_declaration_profile --ignored --nocapture
+#[test]
+#[ignore = "release-only typed keyword declaration profile"]
+fn typed_keyword_declaration_profile() {
+    let theme = Theme::new("keyword-profile", "Keyword profile");
+    let resolver = StyleResolver::new(&theme);
+    let declarations = [
+        ("flex-shrink", "0"),
+        ("flex-grow", "1"),
+        ("align-items", "center"),
+        ("justify-content", "space-between"),
+        ("text-align", "center"),
+        ("border-color", "#334455"),
+        ("padding-inline", "12px"),
+        ("padding-block", "8px"),
+        ("flex-direction", "column"),
+        ("overflow-y", "auto"),
+        ("display", "flex"),
+    ]
+    .map(|(property, value)| Declaration {
+        property: property.into(),
+        value: StyleValue::Literal(value.into()),
+    });
+    let indexed = declarations
+        .iter()
+        .map(IndexedDeclaration::from_declaration)
+        .collect::<Vec<_>>();
+    assert!(indexed.iter().all(|decl| decl.literal.is_static()));
+    let rounds = 100_000;
+    let mut variables = HashMap::new();
+    let mut style = ComputedStyle::default();
+    let started = std::time::Instant::now();
+    for _ in 0..rounds {
+        for declaration in &declarations {
+            resolver.apply_property_value_no_diagnostics(
+                &mut style,
+                &declaration.property,
+                &declaration.value,
+                &mut variables,
+            );
+        }
+    }
+    let string_time = started.elapsed();
+    std::hint::black_box(&style);
+    let mut typed = ComputedStyle::default();
+    let started = std::time::Instant::now();
+    for _ in 0..rounds {
+        for declaration in &indexed {
+            resolver.apply_indexed_declaration(&mut typed, declaration, None, &mut variables);
+        }
+    }
+    let typed_time = started.elapsed();
+    std::hint::black_box(&typed);
+    let speedup = string_time.as_secs_f64() / typed_time.as_secs_f64();
+    eprintln!(
+        "{} keyword declarations: string path {string_time:?}; typed {typed_time:?}; ratio {speedup:.2}x",
+        rounds * declarations.len()
+    );
+    println!("MESH_PERF metric=typed_keyword_declaration_speedup value={speedup:.6}");
+    assert!(speedup >= 1.2, "typed keyword declarations should be at least 1.2x");
 }
