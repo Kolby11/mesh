@@ -5485,3 +5485,51 @@ safety net from the reload-maintenance entry above.
 **Verified.** Release render 287 passed / 40 ignored; shell lib failure set
 unchanged (45, diffed by name).
 
+
+## 2026-10-18 — UI-11: keyframe rules compile once per instance
+
+Area: shell keyframe animation. AMD Ryzen 7 7840HS, workspace release profile.
+Removed the UI-11 backlog item; this is also evidence for S09-PERF-002.
+
+Every animation frame, for every animated node, the shell cloned (or, for
+theme keyframes, re-resolved) the stops, hashed every declaration for the
+instance fingerprint, cloned the full `ComputedStyle` per stop to re-apply
+string declarations through the resolver, built a `KeyframeRegistry`, and
+cloned the rule and the active timeline back into their maps. Now:
+
+- `KeyframeSource` caches each animation name's stops (`Arc`), their
+  fingerprint, and declared properties per theme revision; the cache clears on
+  theme change and component recompile.
+- `CompiledKeyframeRule` keeps the resolved rule with its inputs (theme
+  revision, props fingerprint, tag, exact `ComputedStyle`) and is rebuilt only
+  when one differs. The keyframe base is restored to authored values before
+  sampling, so the input style is stable while an animation runs.
+- `ActiveKeyframeAnimation::current_with_rule` samples without a registry;
+  timelines update in place.
+
+**Measured.** `keyframe_animation_frame_profile`: N `<box>` nodes running a
+three-stop opacity + `translateX` keyframe animation, 512×8 surface, 300 frames
+after 4 warm-up frames, whole `paint()` per frame, three runs each:
+
+| Animated nodes | Before (µs/frame) | After (µs/frame) | Speedup |
+| --- | --- | --- | --- |
+| 1 | 46.4–53.2 | 43.4–52.6 | ~1.0x |
+| 10 | 153.7–179.0 | 116.5–148.5 | 1.2–1.3x |
+| 100 | 1,322.5–1,345.4 | 987.7–1,053.4 | 1.27–1.34x |
+
+With temporary probes around the keyframe apply step only (100 nodes, 300
+frames): 170.5–174.7 ms before vs 75.0–84.8 ms after. Each probe pair costs
+about 1.7 µs (see the clock note below), so net of probe overhead the apply
+step is ~2.5–2.9x faster. The rest of the frame is restyle, layout, and paint.
+Gate `keyframe_compilations_per_instance` (upper 1.0): 100 compilations over
+300 frames for 100 instances.
+
+**Clock note for this workstation.** The kernel clock source is `hpet`
+(`acpi_pm` the only alternative; no TSC), so `Instant::now()` costs about
+0.85 µs here. Per-node timing probes therefore inflate results heavily, and
+hot paths that read the clock per node or per text layout miss cost more on
+this machine than on a TSC system.
+
+**Verified.** Release: animation crate 44 passed; shell lib failure set
+unchanged (45, diffed by name), including the keyframe easing/lowering tests.
+

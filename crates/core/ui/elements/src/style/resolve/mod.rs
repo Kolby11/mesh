@@ -82,6 +82,12 @@ impl<'a> StyleResolver<'a> {
         self.props = Cow::Borrowed(props);
         self
     }
+
+    /// Fingerprint of the attached component props; equal fingerprints
+    /// resolve `prop()` references identically.
+    pub fn props_fingerprint(&self) -> u64 {
+        self.props_fingerprint
+    }
 }
 
 #[cfg(test)]

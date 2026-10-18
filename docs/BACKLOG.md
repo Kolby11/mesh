@@ -79,9 +79,6 @@ unless an item says otherwise. IDs point into the
 
 Each needs its named workload from the report before any change lands.
 
-- [ ] **UI-11:** Compile keyframe rules once per animation instance and theme
-      revision instead of re-resolving string declarations every frame
-      (evidence for S09-PERF-002).
 - [ ] **CMP-04 / CMP-09 / CMP-10 / RES-15:** Unbounded expression cache and
       per-parse thread spawns, per-call Lua allocations in template expressions,
       per-call ICU formatter construction.

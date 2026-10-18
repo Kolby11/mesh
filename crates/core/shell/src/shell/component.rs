@@ -1059,7 +1059,11 @@ pub(super) struct FrontendSurfaceComponent {
     transitions: TransitionAnimator,
     keyframe_animations:
         HashMap<AnimationInstanceId, mesh_core_animation::keyframes::ActiveKeyframeAnimation>,
-    keyframe_rules: HashMap<AnimationInstanceId, mesh_core_animation::keyframes::KeyframeRule>,
+    keyframe_rules: HashMap<AnimationInstanceId, animation::CompiledKeyframeRule>,
+    keyframe_sources: HashMap<String, Option<animation::KeyframeSource>>,
+    keyframe_sources_theme_revision: Option<u64>,
+    /// Keyframe rules resolved against their node since creation.
+    keyframe_rule_compilations: u64,
     /// The currently active instance in each node/list slot. Keeping the slot
     /// separate from the declaration fingerprint makes replacement and
     /// cancellation explicit when a rule changes or disappears.
@@ -1443,6 +1447,9 @@ impl FrontendSurfaceComponent {
             transitions: TransitionAnimator::new(),
             keyframe_animations: HashMap::new(),
             keyframe_rules: HashMap::new(),
+            keyframe_sources: HashMap::new(),
+            keyframe_sources_theme_revision: None,
+            keyframe_rule_compilations: 0,
             keyframe_animation_slots: HashMap::new(),
             keyframe_animation_lifecycles: HashMap::new(),
             keyframe_base_styles: HashMap::new(),

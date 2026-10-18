@@ -120,7 +120,17 @@ impl ActiveKeyframeAnimation {
         base: AnimatableStyle,
         now: Instant,
     ) -> Option<AnimatableStyle> {
-        let rule = registry.get(&self.rule_name)?;
+        self.current_with_rule(registry.get(&self.rule_name)?, base, now)
+    }
+
+    /// [`Self::current`] for a caller that already holds this animation's
+    /// rule, without a registry lookup by `rule_name`.
+    pub fn current_with_rule(
+        &self,
+        rule: &KeyframeRule,
+        base: AnimatableStyle,
+        now: Instant,
+    ) -> Option<AnimatableStyle> {
         if rule.stops.is_empty() {
             return None;
         }

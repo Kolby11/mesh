@@ -1,12 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::shell::component::{ComponentDirtyFlags, SurfaceCssProps};
 use mesh_core_animation::{
     AnimationInstanceId, AnimationLifecycle,
     keyframes::{
-        ActiveKeyframeAnimation, KeyframeRegistry, KeyframeRule as RenderKeyframeRule,
+        ActiveKeyframeAnimation, KeyframeRule as RenderKeyframeRule,
         KeyframeStop as RenderKeyframeStop,
     },
     transition::AnimatableStyle,
@@ -14,7 +15,7 @@ use mesh_core_animation::{
 use mesh_core_component::style as component_style;
 use mesh_core_elements::{
     NodeId, StyleResolver, TransitionProperties, TransitionStyle, WidgetNode,
-    style::{AnimationPlayState, AnimationPropertyBucket, AnimationStyle},
+    style::{AnimationPlayState, AnimationPropertyBucket, AnimationStyle, ComputedStyle},
 };
 use mesh_core_theme::{Theme, ThemeKeyframeStop};
 
@@ -69,7 +70,56 @@ struct NodeKeyframeAnimation {
     list_index: u32,
     style: AnimationStyle,
     name: String,
-    stops: Vec<component_style::KeyframeStop>,
+    source: KeyframeSource,
+}
+
+/// The stops an animation name resolves to, shared by every node using it
+/// until the theme or the compiled component changes.
+#[derive(Clone)]
+pub(super) struct KeyframeSource {
+    stops: Arc<[component_style::KeyframeStop]>,
+    fingerprint: u64,
+    properties: TransitionProperties,
+}
+
+impl KeyframeSource {
+    fn new(stops: Vec<component_style::KeyframeStop>) -> Self {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut properties = TransitionProperties::none();
+        for stop in &stops {
+            stop.offset.to_bits().hash(&mut hasher);
+            stop.easing.hash(&mut hasher);
+            for declaration in &stop.declarations {
+                declaration.property.hash(&mut hasher);
+                declaration.value.hash(&mut hasher);
+            }
+            properties = properties.union(declared_properties(&stop.declarations));
+        }
+        Self {
+            stops: stops.into(),
+            fingerprint: hasher.finish(),
+            properties,
+        }
+    }
+}
+
+/// One instance's stops resolved against its node, reused while every input
+/// of that resolution is unchanged.
+pub(super) struct CompiledKeyframeRule {
+    pub(super) rule: RenderKeyframeRule,
+    theme_revision: u64,
+    props_fingerprint: u64,
+    tag: String,
+    input_style: ComputedStyle,
+}
+
+impl CompiledKeyframeRule {
+    fn matches(&self, node: &WidgetNode, theme_revision: u64, props_fingerprint: u64) -> bool {
+        self.theme_revision == theme_revision
+            && self.props_fingerprint == props_fingerprint
+            && self.tag == node.tag
+            && self.input_style == node.computed_style
+    }
 }
 
 fn declared_properties(declarations: &[component_style::Declaration]) -> TransitionProperties {
@@ -250,9 +300,8 @@ impl FrontendSurfaceComponent {
             let keyframes = self.node_keyframe_animations(node, theme);
             let keyframe_properties = keyframes
                 .iter()
-                .flat_map(|animation| &animation.stops)
-                .fold(TransitionProperties::none(), |properties, stop| {
-                    properties.union(declared_properties(&stop.declarations))
+                .fold(TransitionProperties::none(), |properties, animation| {
+                    properties.union(animation.source.properties)
                 });
             if !keyframe_properties.is_empty() {
                 self.restore_keyframe_base(node, keyframe_properties);
@@ -289,6 +338,7 @@ impl FrontendSurfaceComponent {
                 node,
                 keyframes,
                 resolver,
+                theme.revision(),
                 now,
                 live_keyframe_keys,
                 has_active_keyframe_animation,
@@ -392,38 +442,60 @@ impl FrontendSurfaceComponent {
     /// The named animations declared on `node`, with their stops. An
     /// unresolved name is reported and skipped but keeps its list index.
     fn node_keyframe_animations(
-        &self,
+        &mut self,
         node: &WidgetNode,
         theme: &Theme,
     ) -> Vec<NodeKeyframeAnimation> {
-        if node.mesh_key().is_none() {
+        if node.mesh_key().is_none()
+            || node
+                .computed_style
+                .animations
+                .iter()
+                .all(|animation| animation.name.is_none())
+        {
             return Vec::new();
         }
-        node.computed_style
+        if self.keyframe_sources_theme_revision != Some(theme.revision()) {
+            self.keyframe_sources.clear();
+            self.keyframe_sources_theme_revision = Some(theme.revision());
+        }
+        let mut animations = Vec::new();
+        for (list_index, animation) in node
+            .computed_style
             .animations
             .iter()
             .filter(|animation| animation.name.is_some())
             .enumerate()
-            .filter_map(|(list_index, animation)| {
-                let name = animation.name.clone()?;
-                let stops = self
-                    .find_component_keyframe_rule(&name)
-                    .map(|rule| rule.stops.clone())
-                    .or_else(|| theme_keyframe_stops(theme, &name));
-                let Some(stops) = stops else {
-                    self.record_runtime_animation_diagnostic(format!(
-                        "unresolved animation '{name}'"
-                    ));
-                    return None;
-                };
-                Some(NodeKeyframeAnimation {
-                    list_index: u32::try_from(list_index).unwrap_or(u32::MAX),
-                    style: animation.clone(),
-                    name,
-                    stops,
-                })
-            })
-            .collect()
+        {
+            let Some(name) = animation.name.as_ref() else {
+                continue;
+            };
+            let source = match self.keyframe_sources.get(name) {
+                Some(source) => source.clone(),
+                None => {
+                    let source = self
+                        .find_component_keyframe_rule(name)
+                        .map(|rule| rule.stops.clone())
+                        .or_else(|| theme_keyframe_stops(theme, name))
+                        .map(KeyframeSource::new);
+                    self.keyframe_sources.insert(name.clone(), source.clone());
+                    source
+                }
+            };
+            let Some(source) = source else {
+                self.record_runtime_animation_diagnostic(format!(
+                    "unresolved animation '{name}'"
+                ));
+                continue;
+            };
+            animations.push(NodeKeyframeAnimation {
+                list_index: u32::try_from(list_index).unwrap_or(u32::MAX),
+                style: animation.clone(),
+                name: name.clone(),
+                source,
+            });
+        }
+        animations
     }
 
     /// Put the authored values of `properties` back on `node` before
@@ -461,26 +533,27 @@ impl FrontendSurfaceComponent {
         node: &mut WidgetNode,
         animations: Vec<NodeKeyframeAnimation>,
         resolver: &StyleResolver,
+        theme_revision: u64,
         now: Instant,
         live_keyframe_keys: &mut HashSet<AnimationInstanceId>,
         has_active_keyframe_animation: &mut bool,
         active_keyframe_bucket: &mut AnimationPropertyBucket,
     ) -> bool {
         let mut node_is_live = false;
+        let props_fingerprint = resolver.props_fingerprint();
 
         for NodeKeyframeAnimation {
             list_index,
             style: animation_style,
             name: animation_name,
-            stops,
+            source,
         } in animations
         {
             let declaration_generation =
-                Self::animation_declaration_generation(&animation_style, &stops);
+                Self::animation_declaration_generation(&animation_style, source.fingerprint);
             let instance_id = AnimationInstanceId::new(node.id, list_index, declaration_generation);
             live_keyframe_keys.insert(instance_id);
 
-            let animation_key = instance_id.registry_key(&animation_name);
             let slot = (node.id, list_index);
             let previous_id = self.keyframe_animation_slots.insert(slot, instance_id);
             let lifecycle = match previous_id {
@@ -497,32 +570,53 @@ impl FrontendSurfaceComponent {
             };
             self.keyframe_animation_lifecycles.insert(slot, lifecycle);
 
-            let render_rule =
-                self.build_render_keyframe_rule(&animation_key, &stops, node, resolver);
+            // Resolving stops clones the node's computed style per stop and
+            // parses every declaration, so it runs only when an input of that
+            // resolution changed, not on every animation frame.
+            if !self
+                .keyframe_rules
+                .get(&instance_id)
+                .is_some_and(|compiled| compiled.matches(node, theme_revision, props_fingerprint))
+            {
+                self.keyframe_rule_compilations = self.keyframe_rule_compilations.saturating_add(1);
+                let animation_key = instance_id.registry_key(&animation_name);
+                let rule =
+                    self.build_render_keyframe_rule(&animation_key, &source.stops, node, resolver);
+                self.keyframe_rules.insert(
+                    instance_id,
+                    CompiledKeyframeRule {
+                        rule,
+                        theme_revision,
+                        props_fingerprint,
+                        tag: node.tag.clone(),
+                        input_style: node.computed_style.clone(),
+                    },
+                );
+            }
+            let render_rule = &self.keyframe_rules[&instance_id].rule;
             // Earlier animations in the list are the underlying value of
             // later ones, so each samples from the node as it stands.
             let base = AnimatableStyle::from_node(node);
-            let keyframe_bucket = keyframe_rule_animation_bucket(&render_rule, &base);
-            self.keyframe_rules.insert(instance_id, render_rule.clone());
+            let keyframe_bucket = keyframe_rule_animation_bucket(render_rule, &base);
 
-            let existing = if lifecycle == AnimationLifecycle::Continued {
-                self.keyframe_animations.get(&instance_id).cloned()
-            } else {
-                None
-            };
-            let mut active = existing.unwrap_or(ActiveKeyframeAnimation {
-                rule_name: animation_key.clone(),
-                started_at: now,
-                duration: Duration::ZERO,
-                delay: Duration::ZERO,
-                easing: animation_style.easing.into(),
-                iteration_count: animation_style.iteration_count,
-                direction: animation_style.direction,
-                fill_mode: animation_style.fill_mode,
-                play_state: AnimationPlayState::Running,
-                paused_at: None,
-            });
-            active.rule_name = animation_key.clone();
+            if lifecycle != AnimationLifecycle::Continued {
+                self.keyframe_animations.remove(&instance_id);
+            }
+            let active = self
+                .keyframe_animations
+                .entry(instance_id)
+                .or_insert_with(|| ActiveKeyframeAnimation {
+                    rule_name: render_rule.name.clone(),
+                    started_at: now,
+                    duration: Duration::ZERO,
+                    delay: Duration::ZERO,
+                    easing: animation_style.easing.into(),
+                    iteration_count: animation_style.iteration_count,
+                    direction: animation_style.direction,
+                    fill_mode: animation_style.fill_mode,
+                    play_state: AnimationPlayState::Running,
+                    paused_at: None,
+                });
             active.duration = self.motion_policy.duration(
                 Duration::from_millis(u64::from(animation_style.duration_ms)),
                 false,
@@ -536,23 +630,19 @@ impl FrontendSurfaceComponent {
             active.direction = animation_style.direction;
             active.fill_mode = animation_style.fill_mode;
             active.set_play_state(animation_style.play_state, now);
-            self.keyframe_animations.insert(instance_id, active.clone());
 
-            let mut registry = KeyframeRegistry::new();
-            registry.insert(render_rule);
-            if let Some(current) = active.current(&registry, base, now) {
+            if let Some(current) = active.current_with_rule(render_rule, base, now) {
                 current.apply_to_node(node);
             }
 
-            if active.finished(now) {
+            let finished = active.finished(now);
+            let running = active.play_state == AnimationPlayState::Running;
+            if finished {
                 self.keyframe_animation_lifecycles
                     .insert(slot, AnimationLifecycle::Completed);
             }
 
-            if !self.motion_policy.reduced_motion
-                && active.play_state == AnimationPlayState::Running
-                && !active.finished(now)
-            {
+            if !self.motion_policy.reduced_motion && running && !finished {
                 *has_active_keyframe_animation = true;
                 node_is_live = true;
                 *active_keyframe_bucket =
@@ -565,7 +655,7 @@ impl FrontendSurfaceComponent {
 
     fn animation_declaration_generation(
         animation_style: &mesh_core_elements::style::AnimationStyle,
-        stops: &[component_style::KeyframeStop],
+        stops_fingerprint: u64,
     ) -> u64 {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         // Play state is a control operation on the same instance, not a new
@@ -579,14 +669,7 @@ impl FrontendSurfaceComponent {
         animation_style.iteration_count.hash(&mut hasher);
         animation_style.direction.hash(&mut hasher);
         animation_style.fill_mode.hash(&mut hasher);
-        for stop in stops {
-            stop.offset.to_bits().hash(&mut hasher);
-            stop.easing.hash(&mut hasher);
-            for declaration in &stop.declarations {
-                declaration.property.hash(&mut hasher);
-                declaration.value.hash(&mut hasher);
-            }
-        }
+        stops_fingerprint.hash(&mut hasher);
         hasher.finish()
     }
 

@@ -198,11 +198,12 @@ fn component_keyframe_easing_reaches_shell_animation_state() {
         .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
-    let rule = component
+    let rule = &component
         .keyframe_rules
         .values()
         .next()
-        .expect("lowered shell keyframe rule");
+        .expect("lowered shell keyframe rule")
+        .rule;
     assert!(matches!(
         rule.stops[0].easing,
         Some(mesh_core_animation::Easing::EaseIn)
@@ -1742,4 +1743,56 @@ apps = {{ {{ id = "a" }}, {{ id = "b" }}, {{ id = "c" }} }}
     );
     assert!(hovered_tile_scale(&fixed) > 1.0, "a static hovered button scales");
     assert!(hovered_tile_scale(&looped) > 1.0, "a for-loop hovered button scales");
+}
+
+// cargo test -p mesh-core-shell --release --lib -- keyframe_animation_frame_profile --ignored --nocapture
+#[test]
+#[ignore = "release-only keyframe animation frame profile"]
+fn keyframe_animation_frame_profile() {
+    for nodes in [1usize, 10, 100] {
+        let mut source = String::from("<template><row>");
+        for _ in 0..nodes {
+            source.push_str("<box class=\"spin\" />");
+        }
+        source.push_str(
+            r#"</row></template>
+<style>
+.spin { width: 4px; height: 4px; animation: spin 1000ms linear infinite; }
+@keyframes spin {
+  0% { opacity: 0.2; transform: translateX(0px); }
+  50% { opacity: 1; transform: translateX(2px); }
+  100% { opacity: 0.2; transform: translateX(0px); }
+}
+</style>"#,
+        );
+        let mut component = test_frontend_component(&source);
+        let theme = default_theme();
+        let mut buffer = PixelBuffer::new(512, 8);
+        for _ in 0..4 {
+            component
+                .paint(&theme, SurfaceExtent::unpadded(512, 8), &mut buffer, 1.0)
+                .unwrap();
+        }
+        let frames = 300u32;
+        let started = Instant::now();
+        for _ in 0..frames {
+            component
+                .paint(&theme, SurfaceExtent::unpadded(512, 8), &mut buffer, 1.0)
+                .unwrap();
+        }
+        let elapsed = started.elapsed();
+        let compiles = component.keyframe_rule_compilations;
+        eprintln!(
+            "{nodes} animated nodes: {frames} frames {elapsed:?} ({:.1} us/frame); {compiles} rule compilations",
+            elapsed.as_secs_f64() * 1e6 / f64::from(frames)
+        );
+        let per_instance = compiles as f64 / nodes as f64;
+        if nodes == 100 {
+            println!("MESH_PERF metric=keyframe_compilations_per_instance value={per_instance:.6}");
+        }
+        assert!(
+            per_instance <= 1.0,
+            "keyframe rules compile once per instance, not per frame"
+        );
+    }
 }

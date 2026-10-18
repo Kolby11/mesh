@@ -1494,6 +1494,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.transitions.clear();
         // Preserve keyframe timelines, but rebuild token-resolved rules.
         self.keyframe_rules.clear();
+        self.keyframe_sources.clear();
         self.reactive_effects_pending = true;
         self.surface_pixels_invalid = true;
         self.invalidate_script_state();
@@ -1726,6 +1727,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         }
 
         self.compiled = recompiled;
+        self.keyframe_sources.clear();
         self.selective_service_build_supported = self.compiled.supports_selective_service_build();
         self.element_metric_usage = element_metric_usage(&self.compiled);
         // Let the candidate runtime resolve embedded roots from the candidate
@@ -1738,6 +1740,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             Ok(runtime) => runtime,
             Err(error) => {
                 self.compiled = previous_compiled;
+                self.keyframe_sources.clear();
                 self.frontend_catalog = previous_frontend_catalog;
                 self.selective_service_build_supported = previous_selective_service_build_supported;
                 self.element_metric_usage = previous_element_metric_usage;
