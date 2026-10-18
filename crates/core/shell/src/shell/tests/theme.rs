@@ -278,6 +278,7 @@ fn manual_locale_change_commits_the_shared_settings_revision_before_broadcast() 
     )
     .unwrap();
     let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
+    let _graph_path = isolated_module_graph(dir.path());
     let mut shell = Shell::new();
 
     shell.apply_set_locale("sk-SK").unwrap();
@@ -945,6 +946,7 @@ fn malformed_theme_reload_retains_last_known_good_snapshot() {
     .unwrap();
     fs::write(dir.path().join("theme.css"), "node { color: #123456; }").unwrap();
     let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
+    let _graph_path = isolated_module_graph(dir.path());
     let mut shell = Shell::new();
     shell.installed_module_graph = Some(graph_with_theme_source(
         dir.path(),

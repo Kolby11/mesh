@@ -1132,7 +1132,13 @@ pub(super) struct FrontendSurfaceComponent {
     #[cfg(test)]
     pub(super) focused_proof_enabled: bool,
     last_present_damage_rects: Vec<DamageRect>,
-    last_visual_damage: HashMap<NodeId, DamageRect>,
+    /// The last painted command sequence and the content rect its visual
+    /// damage was clipped to; dirty nodes' previous bounds are read from it.
+    last_visual_commands: Option<(
+        Arc<mesh_core_render::display_list::PaintSequence<mesh_core_render::DisplayPaintCommand>>,
+        DamageRect,
+    )>,
+    visual_damage_lookup_scratch: (HashMap<NodeId, DamageRect>, HashMap<NodeId, DamageRect>),
     tooltip_damage_scratch: Vec<DamageRect>,
     dirty_node_visual_damage_scratch: Vec<DamageRect>,
     /// Current tooltip configuration from the effective shell settings.
@@ -1467,7 +1473,8 @@ impl FrontendSurfaceComponent {
             #[cfg(test)]
             focused_proof_enabled: cfg!(debug_assertions),
             last_present_damage_rects: Vec::new(),
-            last_visual_damage: HashMap::new(),
+            last_visual_commands: None,
+            visual_damage_lookup_scratch: (HashMap::new(), HashMap::new()),
             tooltip_damage_scratch: Vec::new(),
             dirty_node_visual_damage_scratch: Vec::new(),
             tooltip_settings,

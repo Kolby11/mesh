@@ -237,7 +237,7 @@ fn nested_scroll_inside_retained_content_matches_fresh_paint() {
     objects.update(&root);
     let mut list = RetainedDisplayList::default();
     list.update(&root, 100, 80, true, true);
-    assert_eq!(list.frame_paint_plan().scroll_scopes.len(), 1);
+    assert_eq!(list.frame_paint_plan().scroll_scopes().len(), 1);
     for (outer, inner) in [(20.0, 0.0), (20.0, 44.0), (12.25, 55.5), (0.0, 0.0)] {
         root.scroll_metrics.as_mut().unwrap().y = outer;
         root.children[0].scroll_metrics.as_mut().unwrap().y = inner;

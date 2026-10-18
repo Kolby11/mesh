@@ -67,3 +67,5 @@ shared_theme_alias_resolution_speedup     lower      2.00      0
 typed_theme_scalar_reads_speedup          lower      1.20      0
 typed_literal_operation_dispatch_speedup lower      1.05      0
 structural_selector_bucket_speedup       lower      4.00      0
+lazy_frame_plan_speedup                  lower      2.00      0
+filtered_visual_damage_speedup           lower      1.50      0

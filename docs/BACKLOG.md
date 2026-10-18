@@ -81,8 +81,6 @@ Each needs its named workload from the report before any change lands.
 
 - [ ] **RND-02:** Damage only scroll viewports whose own geometry or ancestry
       changed, not every viewport on any layout change.
-- [ ] **RND-03 / RND-04:** Stop rebuilding unread frame-plan data and the
-      whole-tree visual-damage map on every paint.
 - [ ] **SH-05 / SH-06 / SH-13:** Font-alias cache thrash between modules, double
       `Debug` formatting per effect, idle watch-set rebuilds.
 - [ ] **UI-11:** Compile keyframe rules once per animation instance and theme

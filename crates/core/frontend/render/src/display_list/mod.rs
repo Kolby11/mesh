@@ -817,60 +817,14 @@ impl RetainedDisplayList {
     /// transforms, retained scroll offsets, effect overflow and paint clips.
     pub fn visual_damage_rects(&self, surface: DamageRect) -> HashMap<NodeId, DamageRect> {
         let mut bounds = HashMap::new();
-        let mut scroll = None;
-        for command in self.paint_commands.iter() {
-            match command.kind {
-                DisplayPaintCommandKind::PushScrollContent => {
-                    scroll = Some((
-                        -command.node.scrollbars.scroll_x,
-                        -command.node.scrollbars.scroll_y,
-                        command.clip,
-                    ));
-                }
-                DisplayPaintCommandKind::PopScrollContent => {
-                    scroll = None;
-                }
-                _ => {}
-            }
-            if !command.kind.draws_content() {
-                continue;
-            }
-            let mut rect =
-                paint_node::intersect_display_clip(visual_clip_for(&command.node), command.clip);
-            if command.node.in_scroll_content {
-                if let Some((x, y, viewport)) = scroll {
-                    let left = (rect.x as f32 + x).floor();
-                    let top = (rect.y as f32 + y).floor();
-                    let right = (rect.x as f32 + rect.width as f32 + x).ceil();
-                    let bottom = (rect.y as f32 + rect.height as f32 + y).ceil();
-                    rect = paint_node::intersect_display_clip(
-                        DisplayListClip {
-                            x: left as i32,
-                            y: top as i32,
-                            width: (right - left).max(0.0) as i32,
-                            height: (bottom - top).max(0.0) as i32,
-                        },
-                        viewport,
-                    );
-                }
-            }
-            let rect = crate::FractionalScale::identity()
-                .device_layout_rect(mesh_core_elements::LayoutRect {
-                    x: rect.x as f32,
-                    y: rect.y as f32,
-                    width: rect.width as f32,
-                    height: rect.height as f32,
-                })
-                .to_nonnegative_damage_rect()
-                .and_then(|rect| clip_rect(rect, surface));
-            if let Some(rect) = rect {
-                bounds
-                    .entry(command.node.id)
-                    .and_modify(|old| *old = union_damage(Some(*old), rect).unwrap())
-                    .or_insert(rect);
-            }
-        }
+        visual_damage_rects_into(&self.paint_commands, surface, |_| true, &mut bounds);
         bounds
+    }
+
+    /// The current command sequence. It is immutable, so a caller may keep it
+    /// to query a previous frame's [`visual_damage_rects_into`] later.
+    pub fn paint_commands_snapshot(&self) -> Arc<PaintSequence<DisplayPaintCommand>> {
+        Arc::clone(&self.paint_commands)
     }
 
     pub fn last_metrics(&self) -> DisplayListMetrics {
@@ -885,42 +839,6 @@ impl RetainedDisplayList {
     }
 
     fn refresh_frame_plan(&mut self, surface: DamageRect) {
-        let mut nodes = Vec::new();
-        let mut transforms = Vec::new();
-        let mut seen_nodes = HashSet::new();
-        let mut scroll_scope = None;
-        let mut scroll_scopes = Vec::new();
-        for command in self.paint_commands.iter() {
-            if command.kind == DisplayPaintCommandKind::PushScrollContent {
-                scroll_scope = Some(command.node.id);
-                scroll_scopes.push(FrameScrollScope {
-                    owner: command.node.id,
-                    viewport: command.clip,
-                    translation: mesh_core_elements::AffineTransform::translation(
-                        -command.node.scrollbars.scroll_x,
-                        -command.node.scrollbars.scroll_y,
-                    ),
-                });
-            } else if command.kind == DisplayPaintCommandKind::PopScrollContent {
-                scroll_scope = None;
-            }
-            if !seen_nodes.insert(command.node.id) {
-                continue;
-            }
-            nodes.push(Arc::clone(&command.node));
-            transforms.push(FramePaintTransform {
-                node_id: command.node.id,
-                transform: command.node.transform,
-                local_layout: command.node.local_layout,
-                visual_bounds: command.node.layout,
-                ancestor_clips: Arc::clone(&command.node.ancestor_clips),
-                scroll_scope: command
-                    .node
-                    .in_scroll_content
-                    .then_some(scroll_scope)
-                    .flatten(),
-            });
-        }
         let spans = self
             .command_spans
             .iter()
@@ -952,15 +870,12 @@ impl RetainedDisplayList {
                     f32::from_bits(self.paint_origin.1),
                 ),
                 backdrop_blur_policy: self.built_backdrop_blur_policy,
-                nodes: nodes.into(),
             },
             FramePaintTopology {
                 generation: self.generation,
                 commands: Arc::clone(&self.paint_commands),
                 kinds: Arc::clone(&self.command_kinds),
             },
-            transforms.into(),
-            scroll_scopes.into(),
             FramePaintEffects {
                 backdrop_regions: self.backdrop_regions.clone().into(),
                 blur_regions: self.blur_regions.clone().into(),
@@ -1449,4 +1364,68 @@ pub fn widget_subtree_visual_bounds(node: &WidgetNode) -> Option<mesh_core_eleme
         width: bounds.right - bounds.left,
         height: bounds.bottom - bounds.top,
     })
+}
+
+/// Painted bounds of the nodes `include` accepts, in surface coordinates,
+/// merged into `bounds`. Ancestor transforms, retained scroll offsets, effect
+/// overflow and paint clips are applied as in the paint pass.
+pub fn visual_damage_rects_into(
+    commands: &PaintSequence<DisplayPaintCommand>,
+    surface: DamageRect,
+    include: impl Fn(NodeId) -> bool,
+    bounds: &mut HashMap<NodeId, DamageRect>,
+) {
+    let mut scroll = None;
+    for command in commands.iter() {
+        match command.kind {
+            DisplayPaintCommandKind::PushScrollContent => {
+                scroll = Some((
+                    -command.node.scrollbars.scroll_x,
+                    -command.node.scrollbars.scroll_y,
+                    command.clip,
+                ));
+            }
+            DisplayPaintCommandKind::PopScrollContent => {
+                scroll = None;
+            }
+            _ => {}
+        }
+        if !command.kind.draws_content() || !include(command.node.id) {
+            continue;
+        }
+        let mut rect =
+            paint_node::intersect_display_clip(visual_clip_for(&command.node), command.clip);
+        if command.node.in_scroll_content {
+            if let Some((x, y, viewport)) = scroll {
+                let left = (rect.x as f32 + x).floor();
+                let top = (rect.y as f32 + y).floor();
+                let right = (rect.x as f32 + rect.width as f32 + x).ceil();
+                let bottom = (rect.y as f32 + rect.height as f32 + y).ceil();
+                rect = paint_node::intersect_display_clip(
+                    DisplayListClip {
+                        x: left as i32,
+                        y: top as i32,
+                        width: (right - left).max(0.0) as i32,
+                        height: (bottom - top).max(0.0) as i32,
+                    },
+                    viewport,
+                );
+            }
+        }
+        let rect = crate::FractionalScale::identity()
+            .device_layout_rect(mesh_core_elements::LayoutRect {
+                x: rect.x as f32,
+                y: rect.y as f32,
+                width: rect.width as f32,
+                height: rect.height as f32,
+            })
+            .to_nonnegative_damage_rect()
+            .and_then(|rect| clip_rect(rect, surface));
+        if let Some(rect) = rect {
+            bounds
+                .entry(command.node.id)
+                .and_modify(|old| *old = union_damage(Some(*old), rect).unwrap())
+                .or_insert(rect);
+        }
+    }
 }

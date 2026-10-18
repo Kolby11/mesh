@@ -72,7 +72,7 @@ impl FrontendSurfaceComponent {
         {
             self.focused_proof_snapshot = None;
         }
-        self.last_visual_damage.clear();
+        self.last_visual_commands = None;
     }
 
     fn runtime_observes_service_event(
@@ -1163,25 +1163,49 @@ impl ShellComponent for FrontendSurfaceComponent {
             surface_damage,
             &mut tooltip_damage_rects,
         );
-        let current_visual_damage = self
-            .retained_display_list
-            .visual_damage_rects(content_damage);
+        let current_visual_commands = (
+            self.retained_display_list.paint_commands_snapshot(),
+            content_damage,
+        );
         let mut dirty_node_visual_damage_rects =
             std::mem::take(&mut self.dirty_node_visual_damage_scratch);
-        damage_rects_for_node_ids_into(
-            &current_visual_damage,
-            self.retained_tree.render_dirty_node_ids(),
-            &self.last_visual_damage,
-            content_damage,
-            &mut dirty_node_visual_damage_rects,
-        );
+        dirty_node_visual_damage_rects.clear();
         let mut visual_damage_rects = std::mem::take(&mut self.visual_damage_scratch);
         visual_damage_rects.clear();
+        // Only these dirty kinds move painted pixels without a display-entry
+        // change, so only they need the dirty nodes' previous and current
+        // painted bounds; other frames skip both command scans.
         if render_object_dirty.reordered > 0
             || render_object_dirty.transform > 0
             || render_object_dirty.opacity > 0
             || render_object_dirty.material > 0
         {
+            let dirty_ids = self.retained_tree.render_dirty_node_ids();
+            let (mut previous, mut current) = std::mem::take(&mut self.visual_damage_lookup_scratch);
+            previous.clear();
+            current.clear();
+            if let Some((commands, surface)) = &self.last_visual_commands {
+                mesh_core_render::display_list::visual_damage_rects_into(
+                    commands,
+                    *surface,
+                    |id| dirty_ids.contains(&id),
+                    &mut previous,
+                );
+            }
+            mesh_core_render::display_list::visual_damage_rects_into(
+                &current_visual_commands.0,
+                content_damage,
+                |id| dirty_ids.contains(&id),
+                &mut current,
+            );
+            damage_rects_for_node_ids_into(
+                &current,
+                dirty_ids,
+                &previous,
+                content_damage,
+                &mut dirty_node_visual_damage_rects,
+            );
+            self.visual_damage_lookup_scratch = (previous, current);
             merge_damage_rects(
                 &mut visual_damage_rects,
                 dirty_node_visual_damage_rects.iter().copied(),
@@ -1354,7 +1378,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         }
         // When effective_damage.rects is empty, leave last_present_damage_rects unchanged
         // (accumulates across immediate-rerender passes, matching old merge_optional_damage behaviour)
-        self.last_visual_damage = current_visual_damage;
+        self.last_visual_commands = Some(current_visual_commands);
         let traversal_micros = paint_metrics
             .traversal_micros
             .saturating_sub(paint_metrics.text.shaping_micros)

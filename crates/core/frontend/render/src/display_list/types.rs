@@ -169,20 +169,75 @@ impl DisplayListRepaintPolicy {
 pub struct FramePaintPlan {
     pub inputs: FramePaintInputs,
     pub topology: FramePaintTopology,
-    pub transforms: Arc<[FramePaintTransform]>,
-    /// Anchored viewport and content translation shared by descendant inputs.
-    pub scroll_scopes: Arc<[FrameScrollScope]>,
     pub effects: FramePaintEffects,
     pub replay: FramePaintReplay,
     pub damage: FramePaintDamage,
 }
 
 impl FramePaintPlan {
+    /// Immutable node payloads referenced by the command topology, in first
+    /// paint order. Derived on demand: no paint-path consumer reads them.
+    pub fn nodes(&self) -> Vec<Arc<DisplayPaintNode>> {
+        let mut seen = HashSet::new();
+        self.topology
+            .commands
+            .iter()
+            .filter(|command| seen.insert(command.node.id))
+            .map(|command| Arc::clone(&command.node))
+            .collect()
+    }
+
+    /// One transform record per node in [`Self::nodes`] order. A node inside
+    /// scroll content records its owner in `scroll_scope`.
+    pub fn transforms(&self) -> Vec<FramePaintTransform> {
+        let mut seen = HashSet::new();
+        let mut scroll_scope = None;
+        let mut transforms = Vec::new();
+        for command in self.topology.commands.iter() {
+            match command.kind {
+                DisplayPaintCommandKind::PushScrollContent => scroll_scope = Some(command.node.id),
+                DisplayPaintCommandKind::PopScrollContent => scroll_scope = None,
+                _ => {}
+            }
+            if !seen.insert(command.node.id) {
+                continue;
+            }
+            transforms.push(FramePaintTransform {
+                node_id: command.node.id,
+                transform: command.node.transform,
+                local_layout: command.node.local_layout,
+                visual_bounds: command.node.layout,
+                ancestor_clips: Arc::clone(&command.node.ancestor_clips),
+                scroll_scope: command
+                    .node
+                    .in_scroll_content
+                    .then_some(scroll_scope)
+                    .flatten(),
+            });
+        }
+        transforms
+    }
+
+    /// Anchored viewport and content translation shared by descendant inputs.
+    pub fn scroll_scopes(&self) -> Vec<FrameScrollScope> {
+        self.topology
+            .commands
+            .iter()
+            .filter(|command| command.kind == DisplayPaintCommandKind::PushScrollContent)
+            .map(|command| FrameScrollScope {
+                owner: command.node.id,
+                viewport: command.clip,
+                translation: AffineTransform::translation(
+                    -command.node.scrollbars.scroll_x,
+                    -command.node.scrollbars.scroll_y,
+                ),
+            })
+            .collect()
+    }
+
     pub(crate) fn new(
         inputs: FramePaintInputs,
         topology: FramePaintTopology,
-        transforms: Arc<[FramePaintTransform]>,
-        scroll_scopes: Arc<[FrameScrollScope]>,
         effects: FramePaintEffects,
         replay: FramePaintReplay,
         damage: FramePaintDamage,
@@ -190,8 +245,6 @@ impl FramePaintPlan {
         Self {
             inputs,
             topology,
-            transforms,
-            scroll_scopes,
             effects,
             replay,
             damage,
@@ -207,15 +260,12 @@ impl FramePaintPlan {
                 surface_size: None,
                 paint_origin: (0.0, 0.0),
                 backdrop_blur_policy: BackdropBlurPolicy::CompositorRegion,
-                nodes: Vec::new().into(),
             },
             FramePaintTopology {
                 generation: 0,
                 commands: Arc::new(PaintSequence::default()),
                 kinds: Arc::new(PaintSequence::default()),
             },
-            Vec::new().into(),
-            Vec::new().into(),
             FramePaintEffects {
                 backdrop_regions: Vec::new().into(),
                 blur_regions: Vec::new().into(),
@@ -244,8 +294,6 @@ pub struct FramePaintInputs {
     pub surface_size: Option<(u32, u32)>,
     pub paint_origin: (f32, f32),
     pub backdrop_blur_policy: BackdropBlurPolicy,
-    /// Immutable node payloads referenced by the command topology.
-    pub nodes: Arc<[Arc<DisplayPaintNode>]>,
 }
 
 #[derive(Debug, Clone)]

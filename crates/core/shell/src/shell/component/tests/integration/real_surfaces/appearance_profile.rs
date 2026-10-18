@@ -451,8 +451,7 @@ fn settings_scroll_frame_gate() {
         settings
             .retained_display_list
             .frame_paint_plan()
-            .inputs
-            .nodes
+            .nodes()
             .len()
     );
 

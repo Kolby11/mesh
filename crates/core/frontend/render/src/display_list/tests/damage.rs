@@ -19,13 +19,13 @@ fn frame_paint_plan_contains_immutable_inputs_topology_geometry_replay_and_damag
 
     assert_eq!(first.inputs.root_id, Some(root.id));
     assert_eq!(first.inputs.surface_size, Some((160, 40)));
-    assert_eq!(first.inputs.nodes.len(), 3);
+    assert_eq!(first.nodes().len(), 3);
     assert_eq!(first.topology.commands.len(), first.topology.kinds.len());
     assert_eq!(first.topology.commands.len(), list.paint_commands().len());
-    assert_eq!(first.transforms.len(), first.inputs.nodes.len());
+    assert_eq!(first.transforms().len(), first.nodes().len());
     assert!(
         first
-            .transforms
+            .transforms()
             .iter()
             .any(|transform| transform.node_id == 2 && transform.transform.tx > 8.0)
     );
@@ -1304,4 +1304,101 @@ fn spans_survive_a_wholesale_subtree_reuse() {
         !painted.contains(&7),
         "the untouched second button is outside the damage, got {painted:?}"
     );
+}
+
+// cargo test -p mesh-core-render --release -- frame_plan_derivation_and_visual_damage_profile --ignored --nocapture
+#[test]
+#[ignore = "release-only frame-plan and visual-damage benchmark"]
+fn frame_plan_derivation_and_visual_damage_profile() {
+    use std::collections::{HashMap, HashSet};
+    use std::time::{Duration, Instant};
+
+    let iterations = 2_000_u64;
+    let (width, height) = (240, 480);
+    let surface = DamageRect {
+        x: 0,
+        y: 0,
+        width,
+        height,
+    };
+    let mut eager_root = display_entry_benchmark_tree(60, 20);
+    let mut lazy_root = display_entry_benchmark_tree(60, 20);
+    let changed_id = eager_root.children[30].children[5].id;
+    let dirty_ids = HashSet::from([changed_id]);
+    let mut eager = RetainedDisplayList::default();
+    eager.update(&eager_root, width, height, false, true);
+    let mut lazy = RetainedDisplayList::default();
+    lazy.update(&lazy_root, width, height, false, true);
+    let summary = RenderObjectDirtySummary {
+        text: 1,
+        ..Default::default()
+    };
+
+    // Eager: the per-paint work this replaced — plan nodes, transforms and
+    // scroll scopes derived on every update, plus a whole-tree visual-damage
+    // map. Lazy: the update alone, as on a frame without visual dirty bits.
+    let mut eager_time = Duration::ZERO;
+    let mut lazy_time = Duration::ZERO;
+    let mut sink = 0usize;
+    for generation in 0..iterations {
+        let content = generation.to_string();
+        eager_root.children[30].children[5]
+            .attributes
+            .insert("content".into(), content.clone());
+        lazy_root.children[30].children[5]
+            .attributes
+            .insert("content".into(), content);
+        let started = Instant::now();
+        eager.update_with_dirty_nodes(&eager_root, summary, &dirty_ids, width, height, false, true);
+        let plan = eager.frame_paint_plan();
+        sink = sink.wrapping_add(std::hint::black_box(
+            plan.nodes().len() + plan.transforms().len() + plan.scroll_scopes().len(),
+        ));
+        sink = sink.wrapping_add(std::hint::black_box(eager.visual_damage_rects(surface).len()));
+        eager_time += started.elapsed();
+
+        let started = Instant::now();
+        lazy.update_with_dirty_nodes(&lazy_root, summary, &dirty_ids, width, height, false, true);
+        lazy_time += started.elapsed();
+    }
+
+    // A visual-dirty frame: the whole-tree map versus the dirty node's bounds
+    // looked up in the previous and current command snapshots.
+    let previous = lazy.paint_commands_snapshot();
+    let mut full_time = Duration::ZERO;
+    let mut filtered_time = Duration::ZERO;
+    let mut scratch = (HashMap::new(), HashMap::new());
+    for _ in 0..iterations {
+        let started = Instant::now();
+        let map = lazy.visual_damage_rects(surface);
+        sink = sink.wrapping_add(std::hint::black_box(map.get(&changed_id).is_some() as usize));
+        full_time += started.elapsed();
+
+        let started = Instant::now();
+        scratch.0.clear();
+        scratch.1.clear();
+        let current = lazy.paint_commands_snapshot();
+        visual_damage_rects_into(&previous, surface, |id| dirty_ids.contains(&id), &mut scratch.0);
+        visual_damage_rects_into(&current, surface, |id| dirty_ids.contains(&id), &mut scratch.1);
+        sink = sink.wrapping_add(std::hint::black_box(scratch.0.len() + scratch.1.len()));
+        filtered_time += started.elapsed();
+    }
+    assert_eq!(
+        scratch.1.get(&changed_id),
+        lazy.visual_damage_rects(surface).get(&changed_id)
+    );
+    std::hint::black_box(sink);
+
+    let frame_speedup = eager_time.as_secs_f64() / lazy_time.as_secs_f64();
+    let visual_speedup = full_time.as_secs_f64() / filtered_time.as_secs_f64();
+    eprintln!(
+        "{iterations} sparse text updates of a 1,261-node list: eager plan + visual map {eager_time:?}; lazy {lazy_time:?}; ratio {frame_speedup:.2}x"
+    );
+    eprintln!(
+        "{iterations} visual-dirty lookups: whole-tree map {full_time:?}; two filtered scans {filtered_time:?}; ratio {visual_speedup:.2}x"
+    );
+    println!("MESH_PERF metric=lazy_frame_plan_speedup value={frame_speedup:.6}");
+    println!("MESH_PERF metric=filtered_visual_damage_speedup value={visual_speedup:.6}");
+    assert!(frame_speedup >= 2.0, "lazy frame-plan derivation should be at least 2x");
+    assert!(visual_speedup >= 1.5, "filtered visual damage should be at least 1.5x");
 }

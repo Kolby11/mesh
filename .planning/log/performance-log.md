@@ -5353,3 +5353,42 @@ fixture/configuration failures are not claimed fixed by this performance batch.
 **Backdrop dimensions clarification.** The cached 1920×1080 source above
 refers to the regular-lens probes. Each wallpaper probe uses a prepared image
 matching its own output dimensions (1920×1080 or 3840×2160).
+
+
+## 2026-10-18 — RND-03 / RND-04: frame-plan derivations and visual damage on demand
+
+Area: retained display list and shell damage. AMD Ryzen 7 7840HS, workspace
+release profile (thin LTO, one codegen unit). Removed the RND-03 / RND-04
+backlog item.
+
+**RND-03.** `refresh_frame_plan` built per-node payload, transform, and
+scroll-scope arrays on every update; nothing on the paint, presentation, or
+scene-thread paths read them. `FramePaintPlan::nodes()`, `transforms()`, and
+`scroll_scopes()` now derive them from the plan's immutable command topology
+when asked. The plan keeps topology, effects, replay spans, and damage.
+
+**RND-04.** The shell built a whole-tree `NodeId -> DamageRect` map every
+painted frame and kept it for the next frame, though it only looked up dirty
+nodes, and only on frames with reorder/transform/opacity/material bits. It
+now keeps the previous immutable command snapshot plus its content clip. On
+those frames it scans the previous and current snapshots for the dirty ids;
+other frames do no visual-damage work.
+
+**Measured.** `frame_plan_derivation_and_visual_damage_profile`, a 1,261-node
+display list (60 rows × 20 text cells), a one-node text change per frame,
+2,000 iterations, three runs:
+
+| Workload | Before | After | Speedup |
+| --- | --- | --- | --- |
+| Sparse text update (eager plan + whole-tree map vs update only) | 794.4–809.2 ms | 177.9–181.9 ms | 4.45–4.52x |
+| Visual-dirty frame lookup (whole-tree map vs two filtered scans) | 269.1–270.4 ms | 130.1–134.0 ms | 2.02–2.07x |
+
+The first row is the display-list update path alone, not a whole frame. On the
+1920-wide navigation bar `retained_display_list_update` was 0.101 ms/frame
+before this change (`navigation_frame_cost_profile`, paint-only loop), so the
+bar-level win is a fraction of that. Gates `lazy_frame_plan_speedup` (2.0x)
+and `filtered_visual_damage_speedup` (1.5x) are in `tools/check-performance`.
+
+**Verified.** Release: render 285 passed / 38 ignored. Shell lib: same failure
+set (50) before and after, diffed by name against a stashed baseline.
+

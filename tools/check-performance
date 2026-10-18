@@ -41,6 +41,7 @@ run_benchmark mesh-core-shell coalesced_reload_wakeup_profile
 run_benchmark mesh-core-shell watcher_idle_wait_profile
 run_benchmark mesh-core-scripting validated_state_publication_profile
 run_benchmark mesh-core-render glass_raster_profile
+run_benchmark mesh-core-render frame_plan_derivation_and_visual_damage_profile
 run_benchmark mesh-core-shell unbound_handler_write_eliminates_render_pipeline_benchmark
 run_benchmark mesh-core-shell contract_validation_lookup_borrows_interface_name
 run_benchmark mesh-core-shell direct_retained_update_beats_snapshot_map

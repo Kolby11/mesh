@@ -211,11 +211,24 @@ pub(super) fn graph_from_json(root: &str, modules: Vec<&str>) -> InstalledModule
 ///
 /// The returned pair drops in order: the environment is restored first, then
 /// the lock is released.
-pub(super) fn isolated_settings_file(dir: &Path) -> (EnvGuard, std::sync::MutexGuard<'static, ()>) {
+pub(super) fn isolated_settings_file(
+    dir: &Path,
+) -> (EnvGuard, EnvGuard, std::sync::MutexGuard<'static, ()>) {
     let lock = settings_env_lock();
     let path = dir.join("settings.json");
     std::fs::write(&path, "{}").unwrap();
-    (EnvGuard::set("MESH_SETTINGS_PATH", &path), lock)
+    (
+        EnvGuard::set("MESH_SETTINGS_PATH", &path),
+        isolated_module_graph(dir),
+        lock,
+    )
+}
+
+/// Points the shell at an absent root graph under `dir`. Without it,
+/// `Shell::new` reads the repository's `config/active-profile`, and settings
+/// commits write into that real profile document.
+pub(super) fn isolated_module_graph(dir: &Path) -> EnvGuard {
+    EnvGuard::set("MESH_MODULE_GRAPH_PATH", &dir.join("module.json"))
 }
 
 pub(super) fn graph_with_theme_source(

@@ -54,12 +54,12 @@ fn scroll_scope_reuses_offscreen_content_commands_and_entries() {
         assert!(metrics.damage_area > 0);
         assert_eq!(metrics.full_fallback_count, 0);
         assert_eq!(
-            list.frame_paint_plan().scroll_scopes[0].translation,
+            list.frame_paint_plan().scroll_scopes()[0].translation,
             mesh_core_elements::AffineTransform::translation(0.0, -offset)
         );
         assert!(
             list.frame_paint_plan()
-                .transforms
+                .transforms()
                 .iter()
                 .filter(|transform| transform.node_id != root.id)
                 .all(|transform| transform.scroll_scope == Some(root.id))
@@ -67,7 +67,7 @@ fn scroll_scope_reuses_offscreen_content_commands_and_entries() {
     }
     assert!(list.generation() > generation);
     assert_eq!(
-        original_plan.scroll_scopes[0].translation,
+        original_plan.scroll_scopes()[0].translation,
         mesh_core_elements::AffineTransform::translation(0.0, 0.0)
     );
 }
