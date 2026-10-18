@@ -511,7 +511,7 @@ pub struct KeybindAction {
     pub category: Option<LocalizedText>,
     #[serde(default)]
     pub trigger: KeybindTrigger,
-    #[serde(default, alias = "localizedTriggers")]
+    #[serde(default, rename = "localizedTriggers")]
     pub localized_triggers: HashMap<String, KeybindTrigger>,
 }
 

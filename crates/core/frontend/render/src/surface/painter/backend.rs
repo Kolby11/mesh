@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Backend paint variants are retained for renderer compatibility.
-
 use super::*;
 use crate::surface::icon;
 use mesh_core_elements::style::{Color, Corners, Edges};
@@ -454,6 +452,7 @@ impl PainterPaint {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn with_blend_mode(mut self, blend_mode: PainterBlendMode) -> Self {
         self.blend_mode = blend_mode;
         self
@@ -1092,6 +1091,15 @@ impl SkiaPaintBackend {
             return;
         }
 
+        let shape = rounded::RoundedShape {
+            rect,
+            outer: normalize_corners(rect.width as f32, rect.height as f32, radii),
+            ring: None,
+        };
+        if rounded::draw(canvas, &shape, color, clip) {
+            return;
+        }
+
         let save_count = canvas.save();
         canvas.clip_rect(
             Rect::from_xywh(
@@ -1139,6 +1147,16 @@ impl SkiaPaintBackend {
         }
 
         let stroke_width = stroke_width as f32;
+        if rect.width as f32 <= stroke_width || rect.height as f32 <= stroke_width {
+            return;
+        }
+        // A centred stroke of the inset rect covers exactly the ring between
+        // the outer radii and radii one stroke width smaller.
+        if let Some(shape) = ring_shape(rect, radii, Edges::all(stroke_width))
+            && rounded::draw(canvas, &shape, color, clip)
+        {
+            return;
+        }
         let save_count = canvas.save();
         canvas.clip_rect(
             Rect::from_xywh(
@@ -1186,6 +1204,12 @@ impl SkiaPaintBackend {
             if ![widths.top, widths.right, widths.bottom, widths.left]
                 .into_iter()
                 .any(|width| width > 0.0)
+            {
+                return;
+            }
+
+            if let Some(shape) = ring_shape(rect, radii, widths)
+                && rounded::draw(canvas, &shape, paint.color, clip)
             {
                 return;
             }
@@ -1788,6 +1812,35 @@ impl SkiaPaintBackend {
             self.fill_rect_impl(canvas, rect, color, clip);
         }
     }
+}
+
+/// The rounded border ring of `rect`, with the inner radii the direct border
+/// draw uses; a ring with no hollow is the filled outer shape.
+fn ring_shape(rect: ClipRect, radii: Corners, widths: Edges) -> Option<rounded::RoundedShape> {
+    if rect.width <= 0 || rect.height <= 0 {
+        return None;
+    }
+    let (width, height) = (rect.width as f32, rect.height as f32);
+    let inner_width = width - widths.left - widths.right;
+    let inner_height = height - widths.top - widths.bottom;
+    let ring = (inner_width > 0.0 && inner_height > 0.0).then(|| rounded::Ring {
+        widths,
+        inner: normalize_corners(
+            inner_width,
+            inner_height,
+            Corners {
+                top_left: (radii.top_left - widths.top.max(widths.left)).max(0.0),
+                top_right: (radii.top_right - widths.top.max(widths.right)).max(0.0),
+                bottom_right: (radii.bottom_right - widths.bottom.max(widths.right)).max(0.0),
+                bottom_left: (radii.bottom_left - widths.bottom.max(widths.left)).max(0.0),
+            },
+        ),
+    });
+    Some(rounded::RoundedShape {
+        rect,
+        outer: normalize_corners(width, height, radii),
+        ring,
+    })
 }
 
 fn corners_have_radius(corners: Corners) -> bool {

@@ -410,7 +410,19 @@ fn discarded_output_leases_retire_outside_the_queue_lock() {
             .unwrap()
             .upgrade()
             .unwrap();
-        let unlocked = shared.state.try_lock().is_ok();
+        // The worker briefly holds the lock between frames, so a single
+        // `try_lock` cannot tell its hold from the retiring thread's own. A
+        // lock held by this thread never frees; the worker's always does.
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let unlocked = loop {
+            if shared.state.try_lock().is_ok() {
+                break true;
+            }
+            if std::time::Instant::now() >= deadline {
+                break false;
+            }
+            thread::yield_now();
+        };
         retired.send(unlocked).unwrap();
     });
     let (completed, ready) = mpsc::channel();

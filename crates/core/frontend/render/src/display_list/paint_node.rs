@@ -1,15 +1,13 @@
-#![allow(dead_code)] // Legacy paint-node helpers are retained for renderer tests.
-
 use std::sync::Arc;
 
 use mesh_core_elements::style::Color;
 use mesh_core_elements::{
-    AffineClipStack, AffineTransform, LayoutRect, WidgetNode, node_layout_bounds, node_transform,
-    root_transform,
+    AffineClipStack, AffineTransform, LayoutRect, WidgetNode, node_layout_bounds,
 };
 
 use super::types::*;
 
+#[cfg(test)]
 pub(super) fn build_paint_node(
     node: &WidgetNode,
     offset_x: f32,
@@ -18,27 +16,19 @@ pub(super) fn build_paint_node(
     build_paint_node_with_previous(node, offset_x, offset_y, None)
 }
 
+#[cfg(test)]
 pub(super) fn build_paint_node_with_previous(
     node: &WidgetNode,
     offset_x: f32,
     offset_y: f32,
     previous: Option<&DisplayPaintNode>,
 ) -> DisplayPaintNode {
-    build_paint_node_with_previous_transform(
-        node,
-        node_transform(root_transform(offset_x, offset_y), node),
-        previous,
-    )
-}
-
-pub(super) fn build_paint_node_with_previous_transform(
-    node: &WidgetNode,
-    world_transform: AffineTransform,
-    previous: Option<&DisplayPaintNode>,
-) -> DisplayPaintNode {
     build_paint_node_with_previous_transform_and_clips(
         node,
-        world_transform,
+        mesh_core_elements::node_transform(
+            mesh_core_elements::root_transform(offset_x, offset_y),
+            node,
+        ),
         previous,
         &AffineClipStack::default(),
     )
@@ -121,10 +111,6 @@ pub(super) fn build_paint_node_with_previous_transform_and_clips(
             }
         },
     }
-}
-
-pub(super) fn transformed_layout_at(node: &WidgetNode, offset_x: f32, offset_y: f32) -> LayoutRect {
-    mesh_core_elements::transformed_layout_at(node, offset_x, offset_y)
 }
 
 #[cfg(test)]

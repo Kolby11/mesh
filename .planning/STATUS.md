@@ -37,9 +37,12 @@ measurements are in [`log/`](log/README.md). Open work is in
   unrefracted wallpaper paint. Release gates pass; experiments and ranges are in
   the performance log. Included in the workspace checkpoint.
 
-- **Priority 6 in progress:** dead-code/compatibility removal first, followed by
-  shared validation/LSP metadata and the remaining correctness fixes. Current
-  changes are included in the workspace checkpoint.
+- **Priority 6 in progress:** SH-07, UI-10/RT-08/CMP-05/CMP-12, MOD-11, RES-11
+  and RT-07 are done (most landed in the checkpoint; confirmed and logged
+  2026-10-18). Rounded fills and borders now paint clip-invariantly; the LSP
+  manifest schema and the scene-thread test are fixed. Next: SH-09/RES-13
+  shared validators, RES-09/RES-10 LSP metadata, then UI-12, RND-05 and
+  RT-11/CMP-11/CMP-13.
 
 - **Priority 5 implemented:** MOD-05/06/07/08/09/10/12,
   SH-10 and RES-08. Shared core package engines, configuration paths/locks,
@@ -63,7 +66,7 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Next
 
-- Priority 6 dead code, duplication and small correctness fixes (starts with SH-07).
+- Priority 6: SH-09/RES-13 and RES-09/RES-10, then the remaining correctness fixes.
 - Remaining D5 (dialog focus scope, menu typeahead), D6 renderer integration
   and D9 workload gates.
 - Wave 5: the [in-surface blur engine](todos/pending/2026-09-30-in-surface-blur-engine.md).

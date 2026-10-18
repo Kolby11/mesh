@@ -1,5 +1,4 @@
 use super::super::attrs::*;
-use super::super::cache::*;
 use super::super::declaration::*;
 use super::super::index::*;
 use super::super::matching::*;

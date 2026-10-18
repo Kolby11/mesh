@@ -406,6 +406,7 @@ pub(super) enum DisplayBatchBarrier {
     Opacity,
     Clip,
     Translucency,
+    #[cfg(test)]
     MaterialChange,
 }
 
@@ -423,6 +424,7 @@ impl DisplayBatchBarrier {
             Self::Opacity => counts.opacity = counts.opacity.saturating_add(1),
             Self::Clip => counts.clip = counts.clip.saturating_add(1),
             Self::Translucency => counts.translucency = counts.translucency.saturating_add(1),
+            #[cfg(test)]
             Self::MaterialChange => {
                 counts.material_change = counts.material_change.saturating_add(1);
             }

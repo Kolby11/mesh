@@ -1457,6 +1457,50 @@ fn contract_node() -> Node {
                                 ))),
                             ),
                         ),
+                        field(
+                            "featureGroups",
+                            false,
+                            node(
+                                "Named groups of capabilities a consumer enables together.",
+                                "object<string, featureGroup>",
+                                Kind::Map(Box::new(obj(
+                                    "A named capability feature group.",
+                                    vec![
+                                        field(
+                                            "required",
+                                            false,
+                                            scalar(
+                                                "Whether consumers must enable this group.",
+                                                "boolean",
+                                            ),
+                                        ),
+                                        field(
+                                            "capabilities",
+                                            false,
+                                            string_array(
+                                                "Capabilities in this group.",
+                                                "Capability id.",
+                                            ),
+                                        ),
+                                    ],
+                                ))),
+                            ),
+                        ),
+                        field(
+                            "permissions",
+                            false,
+                            node(
+                                "Service-operation capabilities this interface declares, \
+                                 keyed by capability id, with the privilege level \
+                                 reviewed at install.",
+                                "object<string, privilege>",
+                                Kind::Map(Box::new(node(
+                                    "Privilege level of this service permission.",
+                                    "enum",
+                                    Kind::Enum(mesh_core_capability::PrivilegeLevel::NAMES),
+                                ))),
+                            ),
+                        ),
                     ],
                 ),
             ),

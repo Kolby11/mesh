@@ -28,31 +28,20 @@ unless an item says otherwise. IDs point into the
 
 ### Priority 6 — Dead code, duplication and small fixes
 
-- [ ] Skia's anti-aliasing of a rounded rect depends on whether the clip cuts
-      its arc, so partial repaints differ from a full paint on edge pixels (up to
-      ~55/255 on a few pixels at a window corner). Make rounded geometry
-      clip-invariant or keep damage edges off arcs; see the 2026-10-18 scroll log.
-- [ ] `scene_thread::tests::discarded_output_leases_retire_outside_the_queue_lock`
-      fails about one full render-suite run in three under parallel load and
-      passes alone; make its retirement ordering deterministic.
-- [ ] LSP manifest schema lacks the nested `permissions` map that the weather,
-      apps and recorder interface manifests declare; `shipped_manifests_validate_cleanly`
-      fails. Sync `mesh-tools-lsp` `manifest/schema.rs` with `mesh-core-module`.
-- [ ] **SH-07:** Remove the crate-level `allow(dead_code)` in the shell, delete
-      the 43 dead items, gate test wrappers, drop the default-identity wildcard.
-- [ ] **UI-10 / RT-08 / CMP-05 / CMP-12:** Delete legacy translation-only
-      hit-test paths and `EventDispatcher`, duplicate runtime supervision and
-      tier types, the test-only expression evaluators, and fold `frontend-host`.
-- [ ] **MOD-11:** Remove snake_case serde aliases, TOML `ShellConfig`, test-only
-      `mesh.toml` discovery and the dead `merge_root` branch.
+- [ ] Rounded clips (`overflow` with a radius), rounded gradients and images,
+      and box shadows still rasterize through Skia under the damage clip, so a
+      partial repaint can differ from a full paint at their arcs. Fills and
+      borders are clip-invariant (`painter/rounded.rs`); extend that to these.
+- [ ] `display_list::tests::entries::resource_revision_forces_retained_present_damage_without_tree_changes`
+      and `display_list_validates_caller_lineage_for_retained_generation` fail in
+      most parallel render-suite runs (also on `d2c8e294`) and pass alone.
+- [ ] `mesh-tools-lsp` `real_settings::discovers_the_shipped_themes` reads the
+      checked-in `config/active-profile` (`glass`), whose closure holds only
+      `violet-glass`; give the test its own profile root.
 - [ ] **SH-09 / RES-13:** One icon-pack validator and one contained file reader
       shared by shell, LSP, theme, locale and resources.
 - [ ] **RES-09 / RES-10:** Derive LSP manifest keys and capability completion
       from core; complete services from contracts only.
-- [ ] **RES-11:** Move manifest-less backend fixtures out of `modules/` and delete
-      the path-rewrite shim.
-- [ ] **RT-07:** Drop the per-command JSON `state` rollback; publish snapshots
-      only from successful callbacks ([design](../.planning/todos/pending/2026-10-17-backend-publication.md)).
 - [ ] **UI-12:** Resolve percent/`auto` lengths against layout before
       interpolating, and shorten reversed transitions by their progress.
 - [ ] **RND-05:** Take shell visual-damage rects from the display list's world

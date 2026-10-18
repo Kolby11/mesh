@@ -894,3 +894,115 @@ fn painter_command_contract_keeps_retained_structures_free_of_skia_types() {
         );
     }
 }
+
+#[test]
+fn rounded_shapes_repaint_identically_under_any_clip() {
+    let (width, height) = (96, 72);
+    let rect = ClipRect {
+        x: 6,
+        y: 5,
+        width: 80,
+        height: 60,
+    };
+    let pill = ClipRect {
+        x: 10,
+        y: 30,
+        width: 61,
+        height: 21,
+    };
+    let translucent = Color {
+        a: 170,
+        ..Color::from_hex("#3366cc").unwrap()
+    };
+    let shapes = |clip: ClipRect| {
+        vec![
+            PainterCommand::DrawRect {
+                rect: full_clip(width, height),
+                paint: PainterPaint::fill(Color::from_hex("#202020").unwrap()),
+                clip,
+            },
+            PainterCommand::DrawRoundedRect {
+                rect,
+                radii: Corners {
+                    top_left: 14.0,
+                    top_right: 6.5,
+                    bottom_right: 0.0,
+                    bottom_left: 20.25,
+                },
+                paint: PainterPaint::fill(translucent),
+                clip,
+            },
+            PainterCommand::DrawBorder {
+                rect,
+                radii: Corners::all(14.0),
+                widths: Edges {
+                    top: 1.5,
+                    right: 3.0,
+                    bottom: 2.25,
+                    left: 1.0,
+                },
+                paint: PainterPaint::fill(Color::from_hex("#e0e0e0").unwrap()),
+                clip,
+            },
+            PainterCommand::DrawRoundedRect {
+                rect: pill,
+                radii: Corners::all(10.5),
+                paint: PainterPaint::fill(translucent),
+                clip,
+            },
+            PainterCommand::DrawRoundedRect {
+                rect: pill,
+                radii: Corners::all(10.5),
+                paint: PainterPaint::stroke(Color::from_hex("#ffcc00").unwrap(), 2.0),
+                clip,
+            },
+        ]
+    };
+    let paint = |clip: ClipRect| {
+        let mut buffer = PixelBuffer::new(width as u32, height as u32);
+        let mut diagnostics = Vec::new();
+        SkiaPaintBackend.execute_commands(&mut buffer, &shapes(clip), &mut diagnostics);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        buffer
+    };
+    let full = paint(full_clip(width, height));
+    let edges = [0, 3, 6, 7, 9, 12, 15, 19, 22, 26, 31, 33, 40, 47, 52, 58, 62, 66, 71];
+    for &start in &edges {
+        for &end in &edges {
+            if end <= start {
+                continue;
+            }
+            for clip in [
+                ClipRect {
+                    x: start,
+                    y: 0,
+                    width: end - start,
+                    height,
+                },
+                ClipRect {
+                    x: 0,
+                    y: start,
+                    width,
+                    height: end - start,
+                },
+                ClipRect {
+                    x: start,
+                    y: start,
+                    width: end - start + 9,
+                    height: end - start,
+                },
+            ] {
+                let partial = paint(clip);
+                for y in clip.y..(clip.y + clip.height).min(height) {
+                    for x in clip.x..(clip.x + clip.width).min(width) {
+                        assert_eq!(
+                            pixel(&partial, x as u32, y as u32),
+                            pixel(&full, x as u32, y as u32),
+                            "pixel ({x}, {y}) under clip {clip:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}

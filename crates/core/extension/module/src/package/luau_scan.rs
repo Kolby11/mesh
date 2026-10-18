@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Scanner helpers are consumed by migration and test tooling.
-
 //! Static analysis of the Luau a module actually runs.
 //!
 //! Graph scanning cross-checks module scripts against module declarations:
@@ -69,17 +67,6 @@ pub(crate) fn static_call_string_arguments(
         }
         found
     })
-}
-
-/// Convenience for the single-chunk, single-callee case.
-pub(crate) fn static_call_string_arguments_in_chunk(chunk: &str, callee: &str) -> Vec<String> {
-    let sources = LuauSources {
-        chunks: vec![chunk],
-        expressions: Vec::new(),
-    };
-    static_call_string_arguments(&sources, &[callee])
-        .pop()
-        .unwrap_or_default()
 }
 
 /// Find statically named provider events published through the provider-owned
@@ -232,6 +219,16 @@ fn string_literal(token: &TokenReference) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn static_call_string_arguments_in_chunk(chunk: &str, callee: &str) -> Vec<String> {
+        let sources = LuauSources {
+            chunks: vec![chunk],
+            expressions: Vec::new(),
+        };
+        static_call_string_arguments(&sources, &[callee])
+            .pop()
+            .unwrap_or_default()
+    }
 
     fn keys(source: &str) -> Vec<String> {
         static_call_string_arguments_in_chunk(source, "t")

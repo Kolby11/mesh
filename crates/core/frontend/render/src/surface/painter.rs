@@ -1,7 +1,6 @@
-#![allow(dead_code)] // Compatibility painter entry points remain for alternate backends.
-
 mod backend;
 mod geometry;
+mod rounded;
 mod text;
 mod tree;
 mod widgets;
@@ -378,6 +377,7 @@ impl FrontendRenderEngine {
         );
     }
 
+    #[cfg(test)]
     pub(super) fn fill_rounded_rect_clipped(
         &self,
         buffer: &mut PixelBuffer,

@@ -493,14 +493,9 @@ fn settings_scroll_frame_gate() {
 /// Scrolling the shipped Settings page moves retained viewport pixels in
 /// place on whole-pixel frames. After every frame — shifted, fractional
 /// momentum, and the settle — the retained buffer must match a fresh full
-/// paint of the same display list.
-///
-/// Skia's anti-aliasing of a rounded edge depends on whether the clip cuts
-/// it, so a partial repaint whose clip crosses an arc — the window corner at
-/// the viewport edge, a scrollbar end split by disjoint damage — differs
-/// from a full paint on a few edge pixels (backlog). Measured: at most 71
-/// pixels, worst channel delta 55. The tolerance admits that; a misplaced
-/// shift moves whole rows of content and fails it by thousands of pixels.
+/// paint of the same display list exactly. Rounded fills and borders are
+/// clip-invariant, so a damage clip crossing the window corner or a
+/// scrollbar end changes no pixel.
 #[test]
 fn settings_scroll_shift_matches_full_paint() {
     let theme = default_theme();
@@ -559,7 +554,7 @@ fn settings_scroll_shift_matches_full_paint() {
             }
         }
         assert!(
-            differing <= 96 && worst <= 64,
+            differing == 0,
             "{label}: {differing} pixels differ, worst channel delta {worst}"
         );
     };

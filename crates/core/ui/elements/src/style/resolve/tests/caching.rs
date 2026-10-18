@@ -1,4 +1,3 @@
-use super::super::cache::*;
 use super::super::index::*;
 use super::super::*;
 use crate::lru::LruCache;

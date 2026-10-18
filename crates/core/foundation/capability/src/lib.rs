@@ -37,6 +37,9 @@ pub enum PrivilegeLevel {
 }
 
 impl PrivilegeLevel {
+    /// Lowercase names accepted by [`PrivilegeLevel::parse`], lowest first.
+    pub const NAMES: &'static [&'static str] = &["standard", "elevated", "high"];
+
     /// Parse the lowercase name used in manifests and contracts.
     pub fn parse(value: &str) -> Option<Self> {
         match value {

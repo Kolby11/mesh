@@ -2577,7 +2577,6 @@ dependencies = [
  "serde_json",
  "stylua",
  "tokio",
- "toml 0.8.23",
  "tower-lsp",
  "tracing",
  "tracing-subscriber",

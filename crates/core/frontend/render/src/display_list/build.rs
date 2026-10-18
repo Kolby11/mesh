@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Alternate display-list helpers remain during renderer migration.
-
 use std::collections::{HashMap, HashSet};
 use std::hash::Hasher;
 use std::sync::Arc;
@@ -151,6 +149,7 @@ impl FloatBounds {
     }
 }
 
+#[cfg(test)]
 pub(super) fn collect_display_entries(
     node: &WidgetNode,
     offset_x: f32,
@@ -836,6 +835,7 @@ pub(super) fn node_is_explicitly_hidden(node: &WidgetNode) -> bool {
     !node_eligibility(node).allows(InteractionTarget::Paint)
 }
 
+#[cfg(test)]
 pub(super) fn should_preclip_child_subtree(
     child: &WidgetNode,
     offset_x: f32,
@@ -957,19 +957,6 @@ fn node_visual_bounds_at_with_transform(
                 bottom: visual.y + visual.height,
             }
         })
-}
-
-pub(super) fn count_pruned_subtree(
-    node: &WidgetNode,
-    offset_x: f32,
-    offset_y: f32,
-    include_hidden_root: bool,
-) -> PrunedSubtreeCounts {
-    count_pruned_subtree_with_transform(
-        node,
-        root_transform(offset_x, offset_y),
-        include_hidden_root,
-    )
 }
 
 fn count_pruned_subtree_with_transform(

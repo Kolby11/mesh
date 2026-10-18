@@ -30,9 +30,11 @@ pub struct ScrollShift {
     /// and must be replayed after the shift, in addition to exposed strips.
     pub anchored: SmallVec<[DamageRect; 8]>,
     /// Logical surface rows (`[start, end)`) holding rounded-corner arcs of
-    /// content at the new offset. Skia's anti-aliasing of an arc depends on
-    /// whether the clip cuts it, so a replayed band should not end inside
-    /// one: its pixels would then differ from the moved ones.
+    /// content at the new offset. Rounded fills and borders paint the same
+    /// under any clip, but Skia's anti-aliasing of rounded gradients, images,
+    /// clips and transformed shapes depends on whether the clip cuts the arc,
+    /// so a replayed band should not end inside one: its pixels would then
+    /// differ from the moved ones.
     pub arc_rows: Vec<(f32, f32)>,
     /// Logical surface columns holding rounded-corner arcs; see `arc_rows`.
     pub arc_columns: Vec<(f32, f32)>,

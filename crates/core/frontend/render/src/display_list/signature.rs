@@ -1,8 +1,7 @@
-#![allow(dead_code)] // Signature compatibility helpers remain for retained-render tests.
-
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 
+#[cfg(test)]
 use mesh_core_elements::BoxShadow;
 use mesh_core_elements::style::{BackgroundPaint, Color};
 use mesh_core_elements::{AffineTransform, LayoutRect, WidgetNode};
@@ -13,6 +12,7 @@ use crate::paint_input::{PaintInput, PaintPrimitiveSlot};
 use super::build::*;
 use super::types::*;
 
+#[cfg(test)]
 pub(super) fn compute_batch_metrics(entries: &[DisplayBatchMaterial]) -> DisplayListMetrics {
     let mut batch_count = 0u64;
     let mut batched_primitives = 0u64;
@@ -103,20 +103,6 @@ pub(super) fn for_each_primitive_slot(
     }
 }
 
-pub(super) fn damage_rect_for_node_at(
-    node: &WidgetNode,
-    offset_x: f32,
-    offset_y: f32,
-) -> Option<DamageRect> {
-    damage_rect_for_node_with_transform(
-        node,
-        mesh_core_elements::node_transform(
-            mesh_core_elements::root_transform(offset_x, offset_y),
-            node,
-        ),
-    )
-}
-
 pub(super) fn damage_rect_for_node_with_transform(
     node: &WidgetNode,
     world_transform: AffineTransform,
@@ -154,6 +140,7 @@ pub(super) fn visual_bounds_for_node_with_transform(
     )
 }
 
+#[cfg(test)]
 pub(super) fn primitive_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
     let paint = PaintInput::for_node(node, None);
     primitive_signature_for_paint(&paint, slot)
@@ -170,6 +157,7 @@ pub(super) fn primitive_signature_for_paint(paint: &PaintInput, slot: DisplayPri
     paint.signature_for_slot(slot)
 }
 
+#[cfg(test)]
 pub(super) fn hash_paint_content_attributes(
     node: &WidgetNode,
     hasher: &mut DisplaySignatureHasher,
@@ -294,6 +282,7 @@ pub(super) fn hash_color(color: Color, hasher: &mut DisplaySignatureHasher) {
     color.a.hash(hasher);
 }
 
+#[cfg(test)]
 pub(super) fn hash_box_shadow(shadow: BoxShadow, hasher: &mut DisplaySignatureHasher) {
     shadow.offset_x.to_bits().hash(hasher);
     shadow.offset_y.to_bits().hash(hasher);
@@ -327,6 +316,7 @@ pub(super) fn hash_background_paint(paint: &BackgroundPaint, hasher: &mut Displa
     }
 }
 
+#[cfg(test)]
 pub(super) fn hash_attribute(node: &WidgetNode, key: &str, hasher: &mut DisplaySignatureHasher) {
     key.hash(hasher);
     node.attributes.get(key).hash(hasher);
@@ -401,29 +391,6 @@ pub(super) fn union_damage(current: Option<DamageRect>, next: DamageRect) -> Opt
         Some(current) => current.union(next),
         None => next,
     })
-}
-
-/// Grow a rect by `pad` device pixels on every side, saturating at the origin.
-pub(super) fn inflate_rect(rect: DamageRect, pad: u32) -> DamageRect {
-    if pad == 0 {
-        return rect;
-    }
-    let x = rect.x.saturating_sub(pad);
-    let y = rect.y.saturating_sub(pad);
-    DamageRect {
-        x,
-        y,
-        width: rect
-            .x
-            .saturating_add(rect.width)
-            .saturating_add(pad)
-            .saturating_sub(x),
-        height: rect
-            .y
-            .saturating_add(rect.height)
-            .saturating_add(pad)
-            .saturating_sub(y),
-    }
 }
 
 pub(super) fn clip_rect(rect: DamageRect, surface: DamageRect) -> Option<DamageRect> {

@@ -1482,6 +1482,7 @@ section noted.
 | 2026-09-30 | Full-restyle `StyleShareCache` reusing cloned `ComputedStyle`s by node inputs | E | 99.3% hit rate but no frame win: 15.51–15.91ms before vs 15.13–16.07ms after on `appearance_frame_cost_profile`; key hash/compare plus a full style clone costs as much as resolution. Archived on local branch `archive/style-share-cache` |
 | 2026-10-18 | Separate `Value::hash`/`RandomState` pass for validated backend state | runtime boundary | Unchanged 128-row, 12,626-byte snapshots, release, 2,000 iterations: 177.458–314.765 ms baseline vs 226.492–274.504 ms candidate over two attempted runs. Missed the 1.05x gate (1.15x then 0.78x); replaced by a fingerprint fused into validation's serialization pass |
 | 2026-10-18 | Early return for the flat interior of the liquid-glass SkSL lens | rendering | Release, three interleaved runs of ten rounded 180×40 pills: 9.269–9.338 ms baseline vs 10.524–10.660 ms candidate (0.87–0.89x). One 360×240 card probe reached only 1.08x, missing the 1.2x gate. Reverted; unrefracted wallpaper image-shader fast path retained |
+| 2026-10-18 | Clip-invariant rounded shapes: one tinted A8 image per corner, full runs in the body path, region under a canvas translate, device-space cached regions, region boundary path | rendering | Release microbenchmark, 300 translucent 80×26 radius-8 fills: 2.5 / — / 1.23 / 1.37 / 1.39 ms vs 1.23 ms for the shipped region + single `draw_atlas` (direct `draw_rrect` 0.79–0.84 ms). Body-path runs cost about 10% end to end on appearance paint. Per-corner images also left a 1/255 seam against solid fills |
 | 2026-10-18 | FNV-1a fingerprint fused into bounded JSON serialization | runtime boundary | Three controlled first-sample attempts on unchanged 128-row / 12,626-byte state, release, 2,000 iterations: 178.085–191.996 ms baseline vs 202.623–204.492 ms fused (0.87–0.95x); each failed the 1.05x gate. Reverted; fast keyed `ahash` over the typed value is the measured alternative |
 | 2026-10-18 | `Arc<[TransitionStyle]>` with a shared default instead of `Vec` in `ComputedStyle` | style | Appearance service frame restyle 2.673–2.723 ms vs 2.672–2.705 ms without it (three runs each, release): no measurable change. The one-entry default `Vec` clone is not a restyle cost driver. Reverted |
 | 2026-10-18 | Finalized memo styles while retaining compiler preliminary layout | component memo | Release, 550-node Appearance, three interleaved unpinned 60-update samples: 10.665–11.395 ms/frame baseline vs 25.345–26.575 ms/frame prototype; intrinsic shaping/font fallback returned in compiler layout. Final implementation defers that pass |
@@ -5934,3 +5935,73 @@ pass in all three release samples. Shell and LSP test targets type-check. Change
 Rust files pass scoped rustfmt checks; shell syntax, manifest JSON, diff whitespace
 and all nine pending-note backlog links pass. No whole-workspace suite was rerun;
 the known unrelated fixture failures remain outside this validation.
+
+
+## 2026-10-18 — clip-invariant rounded fills and borders
+
+AMD Ryzen 7 7840HS, workspace release profile · area: Skia painter
+
+**Defect.** Skia's anti-aliased rounded-rect coverage depends on the clip. A
+probe (200×160 surface, 180×140 rect, radius 14) measured up to 56/255 at arc
+pixels when the clip cuts the arc. A clip that contains the whole corner still
+differs by ±1, because cutting a straight edge elsewhere changes the result.
+`draw_rrect`, `draw_path`, stroke and `draw_drrect` all behave this way, and so
+do straight fractional inner border edges (±1–2).
+
+**Change.** `surface/painter/rounded.rs` computes each rounded fill or border
+ring once, without any clip, and caches the result per geometry. Rects are at
+integer device bounds.
+- Each corner is rasterized from a symmetric shape twice its region's size, so
+  no cut touches the arc. Pills and other shapes whose corners overlap are
+  rasterized whole, up to 256×256 pixels.
+- Fully covered pixels (body, integer border bands, corner interiors) form one
+  `Region` drawn as a solid fill.
+- Partially covered pixels go into one A8 atlas drawn with a single
+  `draw_atlas` at integer offsets.
+- A fractional border edge is one row or column of solid fill at scaled alpha.
+
+Full coverage stays out of the atlas: a tinted A8 blit rounds differently from
+a solid fill, and a first version that masked whole corner squares left a
+1/255 seam. That version failed
+`real_navigation_bar_repaints_existing_transition_state_when_theme_changes_back_to_dark`
+(`[6,4,4,92]` vs `[5,4,4,92]`).
+
+Canvas matrices other than an integer translation, and larger overlapping
+shapes, use the old direct draw. Strokes go through the same ring path. The
+cache is a thread-local `ByteLruCache` (512 entries, 4 MiB).
+
+**Correctness.** `rounded_shapes_repaint_identically_under_any_clip` (fill
+with mixed radii, fractional-width border, pill fill and stroke, translucent
+colours, about 500 clips) requires exact equality; it fails on the old path at
+the first clip. `settings_scroll_shift_matches_full_paint` is now exact
+(0 differing pixels, before up to 71 with delta 55), and its tolerance is
+removed. `ScrollShift::arc_rows`/`arc_columns` stay: rounded gradients,
+images, clips and transformed shapes still rasterize through Skia under the
+damage clip (backlog).
+
+**Cost.** Microbenchmark: 300 translucent 80×26 radius-8 fills on a 920×900
+raster, mean of 50 passes. Direct `draw_rrect` takes 0.79–0.84 ms; the final
+version takes 1.23–1.24 ms. Rejected variants, measured the same way:
+- one tinted A8 image per corner: 2.5 ms;
+- full runs as rects in the body path: about 10% slower on appearance paint
+  end to end;
+- region drawn under a canvas translate: 1.23 ms;
+- regions cached in device coordinates: 1.37 ms;
+- region boundary path: 1.39 ms.
+
+End to end, three alternating rounds against `d2c8e294`:
+
+| Workload | Before | After |
+| --- | --- | --- |
+| `appearance_frame_cost_profile` paint only | 1.429–1.534 ms/frame | 1.419–1.459 ms/frame |
+| `appearance_frame_cost_profile` resource-list scroll | 2.022–2.060 ms/frame | 2.010–2.201 ms/frame |
+| `settings_scroll_frame_gate` p50 / p90 | 2.650–3.091 / 4.622–4.896 ms | 2.762–2.924 / 4.612–4.693 ms |
+| `navigation_frame_cost_profile` paint only | 0.334–0.514 ms/frame | 0.496–0.505 ms/frame |
+
+All four are within noise. This is a correctness change, not a speedup.
+
+**Verified.** Release `mesh-core-shell`, `mesh-core-render` and
+`mesh-core-elements` (parallel, 4 threads): 1447 passed, 55 failed. The failure
+set matches `d2c8e294` exactly. A first full workspace run of the earlier
+version differed from the baseline in the seam test above, plus LSP
+`shipped_manifests_validate_cleanly`, which now passes.

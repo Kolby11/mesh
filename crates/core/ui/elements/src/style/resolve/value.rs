@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Compatibility wrappers remain for test and migration callers.
-
 use super::StyleResolver;
 use super::cache::*;
 use super::declaration::*;
@@ -295,6 +293,7 @@ impl<'a> StyleResolver<'a> {
             .unwrap_or(Err(error))
     }
 
+    #[cfg(test)]
     pub(super) fn with_resolved_str<R>(
         &self,
         value: &StyleValue,
@@ -324,6 +323,7 @@ impl<'a> StyleResolver<'a> {
         read(&resolved)
     }
 
+    #[cfg(test)]
     pub(super) fn resolve_simple_str_with_variables<'b>(
         &'b self,
         value: &'b StyleValue,
@@ -388,6 +388,7 @@ impl<'a> StyleResolver<'a> {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn resolve_embedded_references_cached(
         &self,
         value: &str,
@@ -457,6 +458,7 @@ impl<'a> StyleResolver<'a> {
             .map(|_| ())
     }
 
+    #[cfg(test)]
     pub(super) fn resolve_color_with_variables(
         &self,
         value: &StyleValue,
@@ -548,6 +550,7 @@ impl<'a> StyleResolver<'a> {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn resolve_number_with_variables(
         &self,
         value: &StyleValue,
