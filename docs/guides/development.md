@@ -9,8 +9,9 @@ nix develop
 cargo check --workspace
 ```
 
-The Nix shell provides Rust, `rustfmt`, Clippy, native Wayland/font libraries,
-and Linux profiling tools.
+The Nix shell provides Rust, `rustfmt`, Clippy, native Wayland/font/PipeWire
+libraries, Clang/libclang for PipeWire bindings, `dbus-daemon` for isolated
+subscription tests, and Linux profiling tools.
 
 ## Build and run commands
 

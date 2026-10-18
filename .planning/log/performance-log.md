@@ -5846,3 +5846,91 @@ restyles after the first and shifted finger-frame fraction 0.983333 (gate >= 0.9
 `cargo check -p mesh-core-shell --tests`, shell syntax and diff whitespace checks
 pass. Scope ends with these three backlog items; later performance items remain
 open. All nine pending design notes remain linked.
+
+
+## 2026-10-18 — D8: native backend events and coroutine stream lifecycle
+
+AMD Ryzen 7 7840HS, HPET clock source. Nix development shell, Rust 1.98.1,
+workspace release profile (thin LTO, one codegen unit). Removed D8, the remaining
+D2 stream/stop item, and the D-Bus subscription item from the backlog.
+
+**Implementation.** Capability-gated D-Bus signal filters, PipeWire Node/Metadata
+observation, route netlink groups and wlr foreign-toplevel events reuse the
+inotify/socket stream ownership, bounded queue and lifecycle. Scripts receive
+asynchronous readiness/failure and can cancel an individual generation-owned
+handle. PipeWire owns its native objects on a blocking executor thread, woken
+on cancellation; other subscriptions await Tokio readiness. PipeWire and Wayland
+object counts and record sizes are bounded. Inotify overflow now fails explicitly.
+No domain normalization or control policy moved into Rust.
+
+Stream hooks run through D2 coroutines. The service loop removes only the next
+callback's records and leaves later input budgeted until it settles, preserving
+line/lifecycle order while commands continue. Suspended callbacks retain private
+state publications and provider events; failure/cancellation releases them.
+Suspended snapshots share the queued-output byte budget. Consecutive suspended
+stream failures retain the three-failure terminal policy. Stop cancels earlier
+tasks and runs as a coroutine with a two-second suspended-hook deadline. Zero
+poll interval explicitly disables the poll branch.
+
+NetworkManager and UPower prefer D-Bus; audio prefers native PipeWire. Missing
+grants or asynchronous source failure retain monitor/poll fallbacks. NetworkManager
+filters protocol properties against the state it actually exposes; UPower retains
+its battery safety poll while reacting promptly to power-source/device changes.
+The author contract is in `docs/modules/backend-events.md`. The Nix shell supplies
+PipeWire headers, Clang/libclang and the isolated-test D-Bus daemon. D-Bus versions
+are locked to releases compatible with the declared Rust 1.85 minimum; validation
+here used 1.98.1, not an MSRV toolchain.
+
+**Live provider measurement.** `live_provider_event_profile`, three repetitions,
+UPower + NetworkManager + PipeWire providers in a live Wayland session. Each arm
+runs five seconds: two seconds of startup settling, then three seconds counted.
+The same binary forces native acquisition off for the monitor baseline and enables
+native grants for the other arm. Only provider startup/state reads run, without
+control commands. The harness services coroutine deadlines, stream batches and
+poll-interval changes; its own two-millisecond sampling loop is instrumentation,
+not the production scheduler.
+
+| Metric across three runs | Monitor fallback | Native sources |
+| --- | --- | --- |
+| Monitor process starts for the three providers | 3–3 | 0–0 |
+| State-read command invocations in the settled three-second window | 0–0 | 0–0 |
+| Sampled peak D2 host-worker occupancy during the five-second arm | 4–4 | 4–4 |
+
+This establishes removal of the three monitor subprocesses. It does not establish
+a CPU/latency speedup or lower recurring fork rate: both arms issued zero state
+queries in the short settled window, which does not include long safety polls.
+The sampled host-worker occupancy is below the process-wide limit of 64; native
+PipeWire's loop thread is separate from that pool.
+
+**Rejected broad signal handling.** Before property filtering, three repetitions
+of the same release workload produced four settled-window state queries in the
+native arm versus zero in the monitor arm. Signal attribution showed Wi-Fi
+Strength and Bitrate notifications. Filtering unexposed properties removed the
+unnecessary bitrate refresh while preserving Strength and invalidated-property
+updates; the final ranges above replace those exploratory results. The native
+provider can still read state for meaningful changes that `nmcli monitor` omits.
+
+**Structural gate.** `native_subscription_idle_profile`, three release runs,
+one route subscription to link/IPv4/IPv6 address groups, 250 ms with an otherwise
+idle network namespace. An idle `sleep` helper represents the subprocess resource
+baseline: 1–1 child versus 0–0 native children. Native queue records during the
+idle window: 0–0. Gates `native_subscription_helper_processes` and
+`native_subscription_idle_events` (both upper 0) are registered in
+`tools/check-performance` and `config/performance-baseline.tsv`. These count child
+processes and emitted records, not whole-shell kernel wakeups.
+
+**Verified.** Serial release: scripting 350 passed / 33 ignored; backend 48 passed;
+capability 9 passed / 1 ignored. All 407 active tests pass. Regressions cover an
+isolated real D-Bus daemon (filters, scalar/structured/empty bodies and invalidated
+properties), grant/startup denial, netlink admission/cancellation, generation-safe
+close, typed and legacy coroutine ordering, commands during suspension, delayed
+failures, publication isolation, bounded pending snapshots, cancellation cleanup,
+stop deadline, provider fallback and NetworkManager property relevance. The prior
+async file-read test now waits for actual completion rather than assuming one
+notification means completion.
+
+Live PipeWire startup/teardown and supported wlr foreign-toplevel startup/teardown
+pass in all three release samples. Shell and LSP test targets type-check. Changed
+Rust files pass scoped rustfmt checks; shell syntax, manifest JSON, diff whitespace
+and all nine pending-note backlog links pass. No whole-workspace suite was rerun;
+the known unrelated fixture failures remain outside this validation.

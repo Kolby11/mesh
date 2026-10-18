@@ -1407,7 +1407,7 @@ fn bundled_pipewire_backend_skips_successful_write_readback_when_streaming() {
             r#"
 exec_calls = {}
 mesh.exec_stream = function(program, _args)
-    return program == "pw-mon"
+    return program == "pw-mon" and { program = program } or false
 end
 mesh.exec = function(program, args)
     exec_calls[#exec_calls + 1] = { program = program, args = args }
@@ -2615,18 +2615,20 @@ end
 "#,
     )
     .unwrap();
-    let state = ctx.call_init().unwrap().unwrap();
-    if state["done"] != true {
-        tokio::time::timeout(
-            std::time::Duration::from_secs(3),
-            ctx.task_wakeup().notified(),
-        )
-        .await
-        .unwrap();
-    }
-    let BackendTaskRun { state, errors, .. } = ctx.run_due_tasks(std::time::Instant::now());
-    assert!(errors.is_empty(), "{errors:?}");
-    assert_eq!(state.unwrap()["contents"], "hello from a file");
+    ctx.call_init().unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            let BackendTaskRun { state, errors, .. } = ctx.run_due_tasks(std::time::Instant::now());
+            assert!(errors.is_empty(), "{errors:?}");
+            if let Some(state) = state {
+                assert_eq!(state["contents"], "hello from a file");
+                break;
+            }
+            ctx.task_wakeup().notified().await;
+        }
+    })
+    .await
+    .unwrap();
     drop(ctx);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -3068,4 +3070,528 @@ end
     assert!(run.state.is_none());
     assert_eq!(run.commands.len(), 1);
     assert!(run.commands[0].1.as_ref().unwrap().error.is_some());
+}
+
+#[test]
+fn native_event_sources_require_grants_and_startup() {
+    let calls = [
+        "mesh.dbus_subscribe('session', { sender = 'org.mesh.Test', path_namespace = '/org/mesh/Test' })",
+        "mesh.dbus_subscribe('system', { sender = 'org.mesh.Test', path_namespace = '/org/mesh/Test' })",
+        "mesh.pipewire_subscribe()",
+        "mesh.netlink_subscribe({'link'})",
+        "mesh.wayland_subscribe('foreign-toplevel')",
+    ];
+    for call in calls {
+        let mut ctx = BackendScriptContext::new("@test/native-denied");
+        ctx.load_script(&format!(
+            "state = {{}}; function start(self) state.denied = ({call}) == false end"
+        ))
+        .unwrap();
+        assert_eq!(ctx.call_init().unwrap().unwrap()["denied"], true);
+        assert_eq!(ctx.stream_state().active_stream_count(), 0);
+        let mut ctx = BackendScriptContext::new("@test/native-staging");
+        assert!(
+            ctx.load_script(&format!("{call}; function start(self) end"))
+                .unwrap_err()
+                .to_string()
+                .contains("before start(self)")
+        );
+    }
+}
+
+#[test]
+fn stream_callbacks_suspend_and_report_completion_and_failure() {
+    for hook in ["on_stream_batch", "on_stream_line"] {
+        let mut ctx = BackendScriptContext::new("@test/async-stream");
+        ctx.load_script(&format!(
+            r#"
+state = {{ count = 0 }}
+function start(self) mesh.service.set_poll_interval(0) end
+function {hook}(self, program, data)
+    task.sleep(0)
+    state.count += 1
+    if program == "fail" then error("stream failed") end
+end
+"#
+        ))
+        .unwrap();
+        ctx.call_init().unwrap();
+        assert_eq!(ctx.poll_interval_ms(), 0);
+        assert!(
+            ctx.run_stream_batch("test", &["a".into(), "b".into()])
+                .unwrap()
+                .is_none()
+        );
+        assert!(ctx.stream_in_flight());
+        let mut completed = 0;
+        for _ in 0..3 {
+            let run = ctx.run_due_tasks(std::time::Instant::now());
+            assert!(run.errors.is_empty());
+            completed += run.streams.len();
+        }
+        assert_eq!(completed, 1);
+        assert!(!ctx.stream_in_flight());
+        ctx.run_stream_batch("fail", &["a".into()]).unwrap();
+        let run = ctx.run_due_tasks(std::time::Instant::now());
+        assert!(run.state.is_none());
+        assert_eq!(run.streams.len(), 1);
+        assert!(
+            run.streams[0]
+                .as_ref()
+                .unwrap_err()
+                .to_string()
+                .contains("stream failed")
+        );
+    }
+}
+
+#[tokio::test]
+async fn stop_hook_suspends_cancels_old_tasks_and_runs_once() {
+    let mut ctx = BackendScriptContext::new("@test/async-stop");
+    ctx.load_script(
+        r#"
+state = { stopped = 0 }
+function start(self) task.delay(0, function() error("old task ran") end) end
+function stop(self)
+    task.sleep(0)
+    state.stopped += 1
+end
+"#,
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+    ctx.call_stop_async().await.unwrap();
+    ctx.call_stop_async().await.unwrap();
+    assert_eq!(ctx.pending_task_count(), 0);
+    assert_eq!(
+        ctx.take_service_state_snapshot().unwrap().unwrap()["stopped"],
+        1
+    );
+}
+
+#[tokio::test]
+async fn stop_hook_has_a_bounded_shutdown_deadline() {
+    let mut ctx = BackendScriptContext::new("@test/stop-deadline");
+    ctx.load_script("function start(self) end; function stop(self) task.sleep(10000) end")
+        .unwrap();
+    ctx.call_init().unwrap();
+    let error = ctx.call_stop_async().await.unwrap_err();
+    assert!(error.to_string().contains("shutdown deadline"));
+    assert_eq!(ctx.pending_task_count(), 0);
+}
+
+#[test]
+fn shipped_providers_prefer_native_sources_and_fall_back_when_the_source_closes() {
+    for (module, native, program) in [
+        (
+            "upower-power",
+            "dbus_subscribe",
+            "dbus:system:org.freedesktop.UPower",
+        ),
+        (
+            "networkmanager-network",
+            "dbus_subscribe",
+            "dbus:system:org.freedesktop.NetworkManager",
+        ),
+        ("pipewire-audio", "pipewire_subscribe", "pipewire"),
+    ] {
+        let mut ctx = BackendScriptContext::new(format!("@mesh/{module}"));
+        let source = bundled_backend_script(&format!(
+            "../../../../modules/backend/{module}/src/main.luau"
+        ));
+        ctx.load_script(&source).unwrap();
+        ctx.ensure_lua()
+            .unwrap()
+            .load(format!(
+                r#"
+monitor_count = 0
+native_count = 0
+mesh.{native} = function(...)
+    native_count += 1
+    return {{ program = "{program}" }}
+end
+mesh.service.can_exec = function(...) return true end
+mesh.exec_stream = function(program, args)
+    monitor_count += 1
+    return {{ program = program }}
+end
+mesh.exec = function(...) return {{ success = true, stdout = "", stderr = "" }} end
+"#
+            ))
+            .exec()
+            .unwrap();
+        ctx.call_init().unwrap();
+        let lua = ctx.ensure_lua().unwrap().clone();
+        assert_eq!(
+            lua.globals().get::<u32>("native_count").unwrap(),
+            1,
+            "{module}"
+        );
+        assert_eq!(
+            lua.globals().get::<u32>("monitor_count").unwrap(),
+            0,
+            "{module}"
+        );
+        lua.globals()
+            .get::<mlua::Function>("on_stream_closed")
+            .unwrap()
+            .call::<()>((mlua::Value::Nil, program, false))
+            .unwrap();
+        assert_eq!(
+            lua.globals().get::<u32>("monitor_count").unwrap(),
+            1,
+            "{module}"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires live UPower, NetworkManager and PipeWire; reads provider state only"]
+async fn live_provider_event_profile() {
+    use std::time::{Duration, Instant};
+    for native in [false, true] {
+        let mut contexts = Vec::new();
+        for module in ["upower-power", "networkmanager-network", "pipewire-audio"] {
+            let mut ctx = BackendScriptContext::new_with_capabilities(
+                format!("@mesh/{module}"),
+                ["exec.command", "dbus.system", "pipewire.observe"].map(str::to_owned),
+            );
+            ctx.load_script(&bundled_backend_script(&format!(
+                "../../../../modules/backend/{module}/src/main.luau"
+            )))
+            .unwrap();
+            ctx.ensure_lua()
+                .unwrap()
+                .load(
+                    r#"
+exec_count = 0
+monitor_count = 0
+local exec = mesh.exec
+mesh.exec = function(...)
+    exec_count += 1
+    return exec(...)
+end
+local stream = mesh.exec_stream
+mesh.exec_stream = function(...)
+    monitor_count += 1
+    return stream(...)
+end
+"#,
+                )
+                .exec()
+                .unwrap();
+            if native && module == "networkmanager-network" {
+                ctx.ensure_lua().unwrap().load(r#"
+signal_counts = {}
+local previous = on_stream_line
+function on_stream_line(self, program, line)
+    if program:sub(1, 5) == "dbus:" then
+        local signal = mesh.json.decode(line)
+        local keys = {}
+        local fields = signal.body or {}
+        local changed = fields[2] and fields[2].value
+        if type(changed) == "table" then
+            for key in pairs(changed) do keys[#keys + 1] = tostring(key) end
+            table.sort(keys)
+        end
+        local label = (signal.interface or "") .. ":" .. (signal.member or "") .. ":" .. table.concat(keys, ",")
+        signal_counts[label] = (signal_counts[label] or 0) + 1
+    end
+    return previous(self, program, line)
+end
+"#).exec().unwrap();
+            }
+            if !native {
+                ctx.ensure_lua().unwrap().load("mesh.dbus_subscribe = function(...) return false end; mesh.pipewire_subscribe = function(...) return false end").exec().unwrap();
+            }
+            ctx.call_init().unwrap();
+            contexts.push(ctx);
+        }
+        let mut next_poll = vec![Instant::now(); contexts.len()];
+        let mut poll_started = vec![false; contexts.len()];
+        let mut intervals = vec![0; contexts.len()];
+        let started = Instant::now();
+        let mut initial_execs = None;
+        let mut maximum_workers = 0;
+        while started.elapsed() < Duration::from_secs(5) {
+            for (index, ctx) in contexts.iter_mut().enumerate() {
+                let run = ctx.run_due_tasks(Instant::now());
+                assert!(run.errors.is_empty(), "{:?}", run.errors);
+                assert!(run.streams.iter().all(Result::is_ok), "{:?}", run.streams);
+                if !ctx.start_pending() && !ctx.stream_in_flight() {
+                    let events = ctx.stream_state().drain_dispatch_batch(false);
+                    let mut lines = Vec::new();
+                    let mut program = String::new();
+                    for event in events {
+                        match event.kind {
+                            StreamEventKind::Line(line) => {
+                                program = event.stream.program().into();
+                                lines.push(line);
+                            }
+                            StreamEventKind::Exited(status) => {
+                                ctx.run_stream_closed(&event.stream, status.success)
+                                    .unwrap();
+                            }
+                            StreamEventKind::Failed(message) => {
+                                panic!("live source failed: {message}")
+                            }
+                            _ => {}
+                        }
+                    }
+                    if !lines.is_empty() {
+                        ctx.run_stream_batch(&program, &lines).unwrap();
+                    }
+                }
+                if poll_started[index] && intervals[index] != ctx.poll_interval_ms() {
+                    intervals[index] = ctx.poll_interval_ms();
+                    next_poll[index] = Instant::now() + Duration::from_millis(intervals[index]);
+                }
+                if !ctx.start_pending()
+                    && !ctx.poll_in_flight()
+                    && Instant::now() >= next_poll[index]
+                {
+                    ctx.run_poll().unwrap();
+                    poll_started[index] = true;
+                    intervals[index] = ctx.poll_interval_ms();
+                    next_poll[index] = Instant::now() + Duration::from_millis(intervals[index]);
+                }
+            }
+            maximum_workers = maximum_workers.max(super::task_io::active_workers());
+            if started.elapsed() >= Duration::from_secs(2) && initial_execs.is_none() {
+                initial_execs = Some(
+                    contexts
+                        .iter_mut()
+                        .map(|ctx| {
+                            ctx.ensure_lua()
+                                .unwrap()
+                                .globals()
+                                .get::<u64>("exec_count")
+                                .unwrap()
+                        })
+                        .sum::<u64>(),
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        let execs = contexts
+            .iter_mut()
+            .map(|ctx| {
+                ctx.ensure_lua()
+                    .unwrap()
+                    .globals()
+                    .get::<u64>("exec_count")
+                    .unwrap()
+            })
+            .sum::<u64>();
+        let monitors = contexts
+            .iter_mut()
+            .map(|ctx| {
+                ctx.ensure_lua()
+                    .unwrap()
+                    .globals()
+                    .get::<u64>("monitor_count")
+                    .unwrap()
+            })
+            .sum::<u64>();
+        println!(
+            "live_provider_event_profile native={native} providers=3 seconds=5 settled_seconds=3 exec_calls={} monitor_starts={monitors} peak_host_workers={maximum_workers}",
+            execs - initial_execs.unwrap()
+        );
+        if native {
+            assert_eq!(monitors, 0);
+        }
+        if native {
+            let lua = contexts[1].ensure_lua().unwrap().clone();
+            let counts: std::collections::HashMap<String, u64> =
+                mlua::LuaSerdeExt::from_value(&lua, lua.globals().get("signal_counts").unwrap())
+                    .unwrap();
+            println!("NetworkManager signal counts: {counts:?}");
+        }
+        for ctx in &mut contexts {
+            ctx.call_stop_async().await.unwrap();
+            ctx.shutdown_exec();
+            ctx.shutdown_streams().await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn native_stream_handles_cancel_only_their_own_generation() {
+    let root = temp_storage_root("watch-close");
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("watched");
+    std::fs::write(&path, "initial").unwrap();
+    let mut ctx = BackendScriptContext::new_with_settings_and_capabilities(
+        "@test/watch-close",
+        serde_json::json!({ "path": path }),
+        mesh_core_capability::CapabilitySet::from_ids(["fs.watch"]),
+    );
+    ctx.load_script(
+        r#"
+state = {}
+function start(self)
+    local source = mesh.watch_path(mesh.config().path)
+    state.foreign = mesh.close_stream({ id = source.id, generation = source.generation + 1 })
+    state.closed = mesh.close_stream(source)
+    state.again = mesh.close_stream(source)
+end
+"#,
+    )
+    .unwrap();
+    let state = ctx.call_init().unwrap().unwrap();
+    assert_eq!(state["foreign"], false);
+    assert_eq!(state["closed"], true);
+    assert_eq!(state["again"], false);
+    ctx.shutdown_streams().await;
+    assert_eq!(ctx.stream_state().active_stream_count(), 0);
+    drop(ctx);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn suspended_stream_publications_are_private_until_success_and_discarded_on_failure() {
+    for fails in [false, true] {
+        let mut ctx = BackendScriptContext::new("@test/stream-publications");
+        ctx.load_script(&format!(
+            r#"
+function start(self) end
+function on_stream_batch(self, program, lines)
+    self.Changed:fire({{ source = "stream" }})
+    mesh.service.emit({{ source = "stream" }})
+    task.sleep(0)
+    if {fails} then error("stream failure") end
+end
+function on_command_ping(self)
+    self.Changed:fire({{ source = "command" }})
+    return {{ ok = true }}
+end
+"#
+        ))
+        .unwrap();
+        ctx.call_init().unwrap();
+        ctx.run_stream_batch("test", &["record".into()]).unwrap();
+        assert!(ctx.drain_events().is_empty());
+        let outcome = ctx
+            .run_command_finished("ping", &serde_json::json!({}))
+            .unwrap();
+        assert!(outcome.state.is_none());
+        let events = ctx.drain_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].payload["source"], "command");
+        let run = ctx.run_due_tasks(std::time::Instant::now());
+        assert_eq!(run.streams.len(), 1);
+        let events = ctx.drain_events();
+        if fails {
+            assert!(run.streams[0].is_err());
+            assert!(run.state.is_none());
+            assert!(events.is_empty());
+        } else {
+            assert!(run.streams[0].is_ok());
+            assert_eq!(run.state.unwrap()["source"], "stream");
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].payload["source"], "stream");
+        }
+    }
+}
+
+#[test]
+fn suspended_publication_bytes_are_bounded_and_cancelled_tasks_release_them() {
+    let mut ctx = BackendScriptContext::new("@test/suspended-output-budget");
+    ctx.load_script(
+        r#"
+local handles = {}
+local payload = string.rep("x", 32000)
+function start(self) end
+function on_command_fill(self)
+    for index = 1, 64 do
+        handles[index] = task.delay(0, function()
+            mesh.service.emit({ value = payload })
+            task.sleep(10000)
+        end)
+    end
+    return { ok = true }
+end
+function on_command_clear(self)
+    for _, handle in ipairs(handles) do handle:cancel() end
+    handles = {}
+    return { ok = true }
+end
+"#,
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+    for iteration in 0..2 {
+        ctx.run_command_finished("fill", &serde_json::json!({}))
+            .unwrap();
+        let run = ctx.run_due_tasks(std::time::Instant::now());
+        assert!(
+            !run.errors.is_empty(),
+            "suspended snapshots must share the byte budget: iteration={iteration}, pending={}",
+            ctx.pending_task_count()
+        );
+        assert!(ctx.pending_task_count() > 0);
+        ctx.run_command_finished("clear", &serde_json::json!({}))
+            .unwrap();
+        ctx.run_due_tasks(std::time::Instant::now());
+        assert_eq!(ctx.pending_task_count(), 0);
+    }
+}
+
+#[test]
+fn native_network_events_ignore_unexposed_properties_and_keep_state_changes() {
+    let mut ctx = BackendScriptContext::new("@test/network-signals");
+    ctx.load_script(&bundled_backend_script(
+        "../../../../modules/backend/networkmanager-network/src/main.luau",
+    ))
+    .unwrap();
+    ctx.ensure_lua()
+        .unwrap()
+        .load(
+            r#"
+mesh.dbus_subscribe = function(...) return { program = "dbus:network" } end
+mesh.exec = function(...) return { success = true, stdout = "", stderr = "" } end
+"#,
+        )
+        .exec()
+        .unwrap();
+    ctx.call_init().unwrap();
+    let signal = |fields: serde_json::Value, invalidated: serde_json::Value| {
+        serde_json::json!({
+            "member": "PropertiesChanged", "body": [
+                { "signature": "s", "value": "org.freedesktop.NetworkManager.AccessPoint" },
+                { "signature": "a{sv}", "value": fields },
+                { "signature": "as", "value": invalidated }
+            ]
+        })
+        .to_string()
+    };
+    ctx.run_stream_batch(
+        "dbus:network",
+        &[signal(
+            serde_json::json!({"Bitrate": 100, "LastSeen": 42}),
+            serde_json::json!([]),
+        )],
+    )
+    .unwrap();
+    assert_eq!(ctx.poll_interval_ms(), 60000);
+    ctx.run_stream_batch(
+        "dbus:network",
+        &[signal(
+            serde_json::json!({"Strength": 70}),
+            serde_json::json!([]),
+        )],
+    )
+    .unwrap();
+    assert_eq!(ctx.poll_interval_ms(), 400);
+    ctx.run_poll().unwrap();
+    assert_eq!(ctx.poll_interval_ms(), 60000);
+    ctx.run_stream_batch(
+        "dbus:network",
+        &[signal(
+            serde_json::json!({}),
+            serde_json::json!(["Connectivity"]),
+        )],
+    )
+    .unwrap();
+    assert_eq!(ctx.poll_interval_ms(), 400);
 }

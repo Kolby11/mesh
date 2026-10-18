@@ -79,12 +79,22 @@ pub struct BackendScriptContext {
     tasks: crate::context::tasks::SharedTaskQueue,
     task_io: Arc<super::task_io::TaskIo>,
     suspended: HashMap<u64, SuspendedCallback>,
+    suspended_publications: HashMap<u64, CallbackPublications>,
+}
+
+#[derive(Default)]
+struct CallbackPublications {
+    state_bytes: usize,
+    state: Option<BackendState>,
+    events: Vec<BackendScriptEvent>,
 }
 
 /// A host callback that suspended on a host operation; its task id settles it.
 enum SuspendedCallback {
     Start,
     Poll,
+    Stream,
+    Stop,
     Command { command: String, payload: JsonValue },
 }
 
@@ -99,6 +109,8 @@ pub struct BackendTaskRun {
     pub start: Option<Result<(), BackendScriptError>>,
     /// Suspended `on_poll` calls that finished.
     pub polls: Vec<Result<(), BackendScriptError>>,
+    pub streams: Vec<Result<(), BackendScriptError>>,
+    pub stop: Option<Result<(), BackendScriptError>>,
     /// Suspended commands that finished, by the task id
     /// [`BackendCommandRun::Suspended`] returned.
     pub commands: Vec<(u64, Result<BackendCommandOutcome, BackendScriptError>)>,
@@ -278,6 +290,7 @@ impl BackendScriptContext {
             tasks: Arc::default(),
             task_io: Arc::default(),
             suspended: HashMap::new(),
+            suspended_publications: HashMap::new(),
         }
     }
 
@@ -492,7 +505,8 @@ impl BackendScriptContext {
         }
     }
 
-    /// Call the backend script's optional `stop(self)` lifecycle hook.
+    /// Synchronous lifecycle helper for tests that do not drive Tokio.
+    #[cfg(test)]
     pub fn call_stop(&mut self) -> Result<(), BackendScriptError> {
         if self.stop_attempted {
             return Ok(());
@@ -543,6 +557,82 @@ impl BackendScriptContext {
         result
     }
 
+    /// Run the optional stop hook as a coroutine, cancelling earlier tasks and
+    /// bounding teardown to two seconds. Host I/O remains available to the hook.
+    pub async fn call_stop_async(&mut self) -> Result<(), BackendScriptError> {
+        if self.stop_attempted {
+            return Ok(());
+        }
+        self.stop_attempted = true;
+        self.clear_tasks();
+        let result = self.stop_coroutine().await;
+        self.task_io.close();
+        self.clear_tasks();
+        self.flush_storage();
+        let _ = self.session.finish_stop();
+        result
+    }
+
+    async fn stop_coroutine(&mut self) -> Result<(), BackendScriptError> {
+        let module_id = self.module_id.clone();
+        let runtime_error = |message: String| BackendScriptError::Runtime {
+            module_id: module_id.clone(),
+            message,
+        };
+        self.session
+            .begin_stop()
+            .map_err(|error| runtime_error(error.to_string()))?;
+        if !self.script_loaded {
+            return Ok(());
+        }
+        self.host_side_effects_enabled
+            .store(true, Ordering::Release);
+        self.reset_for_call(JsonValue::Null);
+        let globals = self.script_environment()?;
+        let Ok(handler) = globals.get::<Function>("stop") else {
+            return Ok(());
+        };
+        let current_self = self
+            .current_self_table()
+            .map_err(|error| runtime_error(error.to_string()))?;
+        let result = {
+            let _budget = self.policy.begin_callback();
+            self.invoke_callback(handler, current_self)
+        };
+        match result.map_err(|error| runtime_error(error.to_string()))? {
+            Driven::Finished(_) => return Ok(()),
+            Driven::Suspended(task) => {
+                self.suspended.insert(task, SuspendedCallback::Stop);
+            }
+        }
+        let limit = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+        let wakeup = self.task_wakeup();
+        loop {
+            let deadline = self
+                .next_task_deadline()
+                .map(tokio::time::Instant::from_std)
+                .unwrap_or(limit)
+                .min(limit);
+            tokio::select! {
+                _ = wakeup.notified() => {},
+                _ = tokio::time::sleep_until(deadline) => {},
+            }
+            if tokio::time::Instant::now() >= limit {
+                return Err(BackendScriptError::Runtime {
+                    module_id: self.module_id.clone(),
+                    message: "stop hook exceeded two-second shutdown deadline".into(),
+                });
+            }
+            let run = self.run_due_tasks(std::time::Instant::now());
+            if let Some(result) = run.stop {
+                return result;
+            }
+            if let Some(error) = run.errors.into_iter().next() {
+                return Err(error);
+            }
+        }
+    }
+
     /// Await termination and child reaping for every stream owned by this
     /// backend generation. This is the normal shutdown path; `Drop` keeps a
     /// synchronous abort fallback for cancellation and panic paths.
@@ -588,25 +678,99 @@ impl BackendScriptContext {
     /// Drop a suspended callback or task. Returns whether it was pending.
     pub fn cancel_task(&mut self, task: u64) -> bool {
         let removed = self.suspended.remove(&task).is_some();
+        if let Some(publications) = self.suspended_publications.remove(&task) {
+            self.discard_publications(publications);
+        }
         self.tasks.lock().unwrap().cancel(task) || removed
     }
 
     fn clear_tasks(&mut self) {
         self.tasks.lock().unwrap().clear();
         self.suspended.clear();
+        for (_, publications) in std::mem::take(&mut self.suspended_publications) {
+            self.discard_publications(publications);
+        }
+    }
+
+    fn discard_cancelled_publications(&mut self) {
+        let tasks = self.tasks.lock().unwrap();
+        let cancelled: Vec<_> = self
+            .suspended_publications
+            .keys()
+            .copied()
+            .filter(|id| !tasks.contains(*id))
+            .collect();
+        drop(tasks);
+        for id in cancelled {
+            if let Some(publications) = self.suspended_publications.remove(&id) {
+                self.discard_publications(publications);
+            }
+        }
+    }
+
+    fn take_publications(&self) -> CallbackPublications {
+        let mut runtime = self.runtime.lock().unwrap();
+        CallbackPublications {
+            state_bytes: 0,
+            state: runtime.pending_emit.take(),
+            events: std::mem::take(&mut runtime.pending_events),
+        }
+    }
+
+    fn restore_publications(&self, publications: CallbackPublications) {
+        self.policy
+            .budget()
+            .release_queued_output(publications.state_bytes);
+        let mut runtime = self.runtime.lock().unwrap();
+        runtime.pending_emit = publications.state;
+        runtime.pending_events = publications.events;
+    }
+
+    fn discard_publications(&self, publications: CallbackPublications) {
+        self.policy
+            .budget()
+            .release_queued_output(publications.state_bytes);
+        let count = publications.events.len();
+        let bytes = publications
+            .events
+            .iter()
+            .map(BackendScriptEvent::queued_output_bytes)
+            .sum();
+        self.policy.budget().release_event(count);
+        release_side_effect(&self.policy.budget(), count, bytes);
+    }
+
+    fn suspend_publications(&mut self, task: u64) -> mlua::Result<()> {
+        let mut publications = self.take_publications();
+        let bytes = publications
+            .state
+            .as_ref()
+            .map_or(0, |state| mesh_core_runtime::json_encoded_len(state));
+        if let Err(error) = self.policy.budget().reserve_queued_output(bytes) {
+            self.discard_publications(publications);
+            self.tasks.lock().unwrap().cancel(task);
+            return Err(mlua::Error::external(error.to_string()));
+        }
+        publications.state_bytes = bytes;
+        self.suspended_publications.insert(task, publications);
+        Ok(())
     }
 
     /// Run a lifecycle, poll or command handler as a coroutine, so host
     /// operations inside it suspend instead of blocking the backend thread.
     fn invoke_callback(
-        &self,
+        &mut self,
         handler: Function,
         args: impl mlua::IntoLuaMulti,
     ) -> mlua::Result<Driven> {
         let lua = self.lua_ref()?;
         let args = args.into_lua_multi(lua)?;
         let thread = lua.create_thread(handler)?;
-        drive(lua, &self.tasks, thread, args, None)
+        let result = drive(lua, &self.tasks, thread, args, None)?;
+        if let Driven::Suspended(task) = result {
+            self.suspend_publications(task)?;
+        }
+        Ok(result)
     }
 
     /// Resume due tasks under individual callback budgets. A failed task is
@@ -616,6 +780,7 @@ impl BackendScriptContext {
     pub fn run_due_tasks(&mut self, now: std::time::Instant) -> BackendTaskRun {
         use crate::context::tasks::TaskBody;
         let mut run = BackendTaskRun::default();
+        self.discard_cancelled_publications();
         for id in self.task_io.drain_completed() {
             self.tasks.lock().unwrap().wake_at(id, now);
         }
@@ -630,6 +795,10 @@ impl BackendScriptContext {
             let Some((id, body)) = self.tasks.lock().unwrap().pop_due(now) else {
                 break;
             };
+            let mut ready = self.take_publications();
+            if let Some(publications) = self.suspended_publications.remove(&id) {
+                self.restore_publications(publications);
+            }
             let payload = match self.suspended.get(&id) {
                 Some(SuspendedCallback::Command { payload, .. }) => payload.clone(),
                 _ => JsonValue::Null,
@@ -648,7 +817,13 @@ impl BackendScriptContext {
                 })
             };
             let finished = match result {
-                Ok(Driven::Suspended(_)) => continue,
+                Ok(Driven::Suspended(_)) => match self.suspend_publications(id) {
+                    Ok(()) => {
+                        self.restore_publications(ready);
+                        continue;
+                    }
+                    Err(error) => Err(error.to_string()),
+                },
                 Ok(Driven::Finished(values)) => {
                     Ok(values.into_iter().next().unwrap_or(LuaValue::Nil))
                 }
@@ -672,6 +847,14 @@ impl BackendScriptContext {
                 (Some(SuspendedCallback::Start), Err(message)) => {
                     let _ = self.session.mark_failed();
                     run.start = Some(Err(runtime_error(message)));
+                }
+                (Some(SuspendedCallback::Stop), finished) => {
+                    publish = false;
+                    run.stop = Some(finished.map(|_| ()).map_err(runtime_error));
+                }
+                (Some(SuspendedCallback::Stream), finished) => {
+                    run.streams
+                        .push(finished.map(|_| ()).map_err(runtime_error));
                 }
                 (Some(SuspendedCallback::Poll), finished) => {
                     run.polls.push(finished.map(|_| ()).map_err(runtime_error));
@@ -710,7 +893,12 @@ impl BackendScriptContext {
             } else {
                 self.reset_for_call(JsonValue::Null);
             }
+            let completed = self.take_publications();
+            ready.events.extend(completed.events);
+            ready.state = completed.state.or(ready.state);
+            self.restore_publications(ready);
         }
+        self.discard_cancelled_publications();
         self.runtime.lock().unwrap().current_payload = JsonValue::Null;
         run
     }
@@ -761,47 +949,67 @@ impl BackendScriptContext {
             .store(true, Ordering::Release);
         self.reset_for_call(JsonValue::Null);
         let globals = self.script_environment()?;
-        if let Ok(batch_handler) = globals.get::<Function>("on_stream_batch") {
-            let current_self =
-                self.current_self_table()
-                    .map_err(|err| BackendScriptError::Runtime {
-                        module_id: self.module_id.clone(),
-                        message: err.to_string(),
-                    })?;
-            let lines_table = self
-                .backend_lua()?
-                .create_sequence_from(lines.iter().cloned())
-                .map_err(|err| BackendScriptError::Runtime {
+        let handler = if let Ok(handler) = globals.get::<Function>("on_stream_batch") {
+            handler
+        } else if let Ok(line_handler) = globals.get::<Function>("on_stream_line") {
+            self.backend_lua()?
+                .load(
+                    r#"
+                local handler = ...
+                return function(self, program, lines)
+                    for _, line in ipairs(lines) do handler(self, program, line) end
+                end
+            "#,
+                )
+                .call(line_handler)
+                .map_err(|error| BackendScriptError::Runtime {
                     module_id: self.module_id.clone(),
-                    message: err.to_string(),
-                })?;
-            batch_handler
-                .call::<()>((current_self, program.to_string(), lines_table))
-                .map_err(|err| BackendScriptError::Runtime {
-                    module_id: self.module_id.clone(),
-                    message: err.to_string(),
-                })?;
-            return self.take_service_state_snapshot();
-        }
-        let line_handler = match globals.get::<Function>("on_stream_line") {
-            Ok(handler) => handler,
-            Err(_) => return Ok(None),
+                    message: error.to_string(),
+                })?
+        } else {
+            return Ok(None);
         };
-        for line in lines {
-            let current_self =
-                self.current_self_table()
-                    .map_err(|err| BackendScriptError::Runtime {
-                        module_id: self.module_id.clone(),
-                        message: err.to_string(),
-                    })?;
-            line_handler
-                .call::<()>((current_self, program.to_string(), line.clone()))
-                .map_err(|err| BackendScriptError::Runtime {
+        let current_self =
+            self.current_self_table()
+                .map_err(|error| BackendScriptError::Runtime {
                     module_id: self.module_id.clone(),
-                    message: err.to_string(),
+                    message: error.to_string(),
                 })?;
+        let lines = self
+            .backend_lua()?
+            .create_sequence_from(lines.iter().cloned())
+            .map_err(|error| BackendScriptError::Runtime {
+                module_id: self.module_id.clone(),
+                message: error.to_string(),
+            })?;
+        self.invoke_stream_callback(handler, (current_self, program.to_string(), lines))
+    }
+
+    pub fn stream_in_flight(&self) -> bool {
+        self.suspended
+            .values()
+            .any(|callback| matches!(callback, SuspendedCallback::Stream))
+    }
+
+    fn invoke_stream_callback(
+        &mut self,
+        handler: Function,
+        args: impl mlua::IntoLuaMulti,
+    ) -> Result<Option<BackendState>, BackendScriptError> {
+        match self.invoke_callback(handler, args) {
+            Ok(Driven::Finished(_)) => self.take_service_state_snapshot(),
+            Ok(Driven::Suspended(task)) => {
+                self.suspended.insert(task, SuspendedCallback::Stream);
+                Ok(None)
+            }
+            Err(error) => {
+                self.reset_for_call(JsonValue::Null);
+                Err(BackendScriptError::Runtime {
+                    module_id: self.module_id.clone(),
+                    message: error.to_string(),
+                })
+            }
         }
-        self.take_service_state_snapshot()
     }
 
     /// Notify a legacy-hook script that one stream ended, through
@@ -827,13 +1035,10 @@ impl BackendScriptContext {
                     module_id: self.module_id.clone(),
                     message: err.to_string(),
                 })?;
-        handler
-            .call::<()>((current_self, stream.program().to_string(), success))
-            .map_err(|err| BackendScriptError::Runtime {
-                module_id: self.module_id.clone(),
-                message: err.to_string(),
-            })?;
-        self.take_service_state_snapshot()
+        self.invoke_stream_callback(
+            handler,
+            (current_self, stream.program().to_string(), success),
+        )
     }
 
     /// Whether this script defines `on_poll`. Providers without one are
@@ -875,13 +1080,7 @@ impl BackendScriptContext {
                 message: err.to_string(),
             }
         })?;
-        handler
-            .call::<()>((current_self, event_table))
-            .map_err(|err| BackendScriptError::Runtime {
-                module_id: self.module_id.clone(),
-                message: err.to_string(),
-            })?;
-        self.take_service_state_snapshot()
+        self.invoke_stream_callback(handler, (current_self, event_table))
     }
 
     /// Kill every active `mesh.exec_stream` subprocess. Idempotent; safe to
@@ -1188,7 +1387,11 @@ impl BackendScriptContext {
             "set_poll_interval",
             self.lua_ref()?.create_function(move |_lua, ms: u64| {
                 require_started(&host_side_effects_enabled)?;
-                let poll_interval_ms = ms.max(MIN_POLL_INTERVAL_MS);
+                let poll_interval_ms = if ms == 0 {
+                    0
+                } else {
+                    ms.max(MIN_POLL_INTERVAL_MS)
+                };
                 if poll_interval_ms != ms {
                     tracing::warn!(
                         module_id = module_id,
@@ -1410,6 +1613,94 @@ impl BackendScriptContext {
 
     /// Fork-free event sources and socket exchanges. See `host_sources`.
     fn install_native_source_api(&mut self, mesh: &Table) -> mlua::Result<()> {
+        let streams = Arc::clone(&self.streams);
+        let started = Arc::clone(&self.host_side_effects_enabled);
+        mesh.set(
+            "close_stream",
+            self.lua_ref()?.create_function(move |_, handle: Table| {
+                require_started(&started)?;
+                let generation: u64 = handle.get("generation")?;
+                let id: u64 = handle.get("id")?;
+                if generation != streams.generation() {
+                    return Ok(false);
+                }
+                Ok(streams.request_stop(super::StreamId::from_raw(id)))
+            })?,
+        )?;
+        let capabilities = self.capabilities.clone();
+        let streams = Arc::clone(&self.streams);
+        let started = Arc::clone(&self.host_side_effects_enabled);
+        mesh.set(
+            "dbus_subscribe",
+            self.lua_ref()?
+                .create_function(move |lua, (bus, filter): (String, Table)| {
+                    require_started(&started)?;
+                    let capability = match bus.as_str() {
+                        "system" => "dbus.system",
+                        "session" => "dbus.session",
+                        _ => return Err(mlua::Error::runtime("bus must be system or session")),
+                    };
+                    if !capabilities.contains(capability) {
+                        return Ok(LuaValue::Boolean(false));
+                    }
+                    let filter = lua
+                        .from_value::<super::host_events::SignalFilter>(LuaValue::Table(filter))?;
+                    match super::host_events::spawn_dbus(&streams, &bus, filter) {
+                        Ok(handle) => Ok(LuaValue::Table(stream_handle_table(lua, &handle)?)),
+                        Err(error) => Err(mlua::Error::external(error)),
+                    }
+                })?,
+        )?;
+        let granted = self.capabilities.contains("net.netlink");
+        let streams = Arc::clone(&self.streams);
+        let started = Arc::clone(&self.host_side_effects_enabled);
+        mesh.set(
+            "netlink_subscribe",
+            self.lua_ref()?
+                .create_function(move |lua, groups: Vec<String>| {
+                    require_started(&started)?;
+                    if !granted {
+                        return Ok(LuaValue::Boolean(false));
+                    }
+                    match super::host_events::spawn_netlink(&streams, groups) {
+                        Ok(handle) => Ok(LuaValue::Table(stream_handle_table(lua, &handle)?)),
+                        Err(error) => Err(mlua::Error::external(error)),
+                    }
+                })?,
+        )?;
+        let granted = self.capabilities.contains("pipewire.observe");
+        let streams = Arc::clone(&self.streams);
+        let started = Arc::clone(&self.host_side_effects_enabled);
+        mesh.set(
+            "pipewire_subscribe",
+            self.lua_ref()?.create_function(move |lua, ()| {
+                require_started(&started)?;
+                if !granted {
+                    return Ok(LuaValue::Boolean(false));
+                }
+                match super::pipewire_source::spawn(&streams) {
+                    Ok(handle) => Ok(LuaValue::Table(stream_handle_table(lua, &handle)?)),
+                    Err(error) => Err(mlua::Error::external(error)),
+                }
+            })?,
+        )?;
+        let granted = self.capabilities.contains("wayland.observe");
+        let streams = Arc::clone(&self.streams);
+        let started = Arc::clone(&self.host_side_effects_enabled);
+        mesh.set(
+            "wayland_subscribe",
+            self.lua_ref()?
+                .create_function(move |lua, protocol: String| {
+                    require_started(&started)?;
+                    if !granted {
+                        return Ok(LuaValue::Boolean(false));
+                    }
+                    match super::wayland_source::spawn(&streams, &protocol) {
+                        Ok(handle) => Ok(LuaValue::Table(stream_handle_table(lua, &handle)?)),
+                        Err(error) => Err(mlua::Error::external(error)),
+                    }
+                })?,
+        )?;
         type SpawnSource = fn(&Arc<StreamState>, &str) -> std::io::Result<StreamHandle>;
         let sources: [(&str, &str, SpawnSource); 2] = [
             (
@@ -1653,6 +1944,7 @@ impl BackendScriptContext {
     }
 
     fn reset_for_call(&mut self, payload: JsonValue) {
+        self.discard_cancelled_publications();
         let mut runtime = self.runtime.lock().unwrap();
         runtime.pending_emit = None;
         let event_count = runtime.pending_events.len();

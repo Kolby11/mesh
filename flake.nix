@@ -14,6 +14,7 @@
         };
 
         runtimeLibs = with pkgs; [
+          pipewire
           fontconfig
           freetype
           libxkbcommon
@@ -29,6 +30,9 @@
             rustfmt
             clippy
             pkg-config
+            dbus
+            clang
+            rustPlatform.bindgenHook
           ] ++ lib.optionals stdenv.isLinux [
             cargo-flamegraph
             heaptrack

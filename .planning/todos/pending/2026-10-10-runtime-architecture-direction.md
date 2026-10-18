@@ -75,8 +75,10 @@ a deadline queue; `ticket:await()` parks frontend tasks on service calls.
 Backend `start`, `on_poll` and command handlers run as coroutines, and exec,
 socket and file reads suspend on a bounded host worker pool (64 process-wide).
 Readiness waits for `start`; polls never overlap; suspended commands reply
-late and honour cancellation. Stream hooks and `stop` still block, pending
-D8's event-driven host APIs.
+late and honour cancellation. D8 (2026-10-18) also runs stream hooks and `stop`
+as coroutines. Later stream callbacks remain in the bounded queue until the
+current callback settles; stop cancels previous tasks and has a two-second
+shutdown deadline.
 
 ## D3. Capabilities checked at acquisition (object capabilities)
 
@@ -143,6 +145,16 @@ menu typeahead/nesting remain open.
   Wayland protocols, built on D2's coroutines.
 - Polling and monitor subprocesses become fallbacks.
 - Extends the existing D-Bus signal subscription item.
+
+**Shipped D8 implementation (2026-10-18):** D-Bus signal filters, PipeWire
+Node/Metadata invalidations, route netlink groups and wlr foreign-toplevel
+observation join the existing inotify/socket streams. All use generation-owned,
+bounded handles, cancellation and readiness/error events. The three shipped
+power/network/audio providers prefer native events when granted and preserve
+monitor/poll fallbacks. Protocol interpretation and domain controls stay in Luau.
+The API contract is in [backend host events](../../../docs/modules/backend-events.md);
+measurements and verification are in the performance log. This establishes native
+observation, not arbitrary D-Bus methods, PipeWire control or every Wayland protocol.
 
 ## D9. Performance budgets per workload
 

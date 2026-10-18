@@ -1,8 +1,7 @@
 -- NetworkManager provider.
 --
--- `nmcli monitor` prints a line for every connectivity, device or connection
--- change; each line marks the state dirty and the next poll tick (kept short
--- while dirty) re-reads it, so a burst of monitor lines costs one refresh.
+-- Native D-Bus signals mark state dirty; a short poll coalesces bursts.
+-- nmcli remains the domain adapter and the monitor/poll fallback.
 
 local IDLE_POLL_MS = 60000
 local DIRTY_POLL_MS = 400
@@ -98,6 +97,8 @@ local function read_state()
 end
 
 local dirty = false
+local monitor_program = nil
+local native_monitor = false
 
 local function refresh()
     state = read_state() or {
@@ -108,24 +109,68 @@ end
 
 function start(self)
     mesh.service.set_poll_interval(IDLE_POLL_MS)
-    if not mesh.exec_stream("nmcli", { "monitor" }) then
-        mesh.service.set_poll_interval(5000)
+    local monitor = mesh.dbus_subscribe("system", {
+        sender = "org.freedesktop.NetworkManager",
+        path_namespace = "/org/freedesktop/NetworkManager",
+    })
+    if monitor then
+        monitor_program = monitor.program
+        native_monitor = true
+    else
+        monitor = mesh.exec_stream("nmcli", { "monitor" })
+        monitor_program = monitor and monitor.program or nil
+        if not monitor then mesh.service.set_poll_interval(5000) end
     end
     refresh()
 end
 
-function on_stream_line(self, program, _line)
-    if program ~= "nmcli" or dirty then
+local state_properties = {
+    State = true, Connectivity = true, WirelessEnabled = true,
+    PrimaryConnection = true, ActiveConnections = true, Devices = true,
+    Interface = true, DeviceType = true, ActiveConnection = true, Managed = true,
+    ActiveAccessPoint = true, AccessPoints = true, Strength = true,
+    Ssid = true, Flags = true, WpaFlags = true, RsnFlags = true,
+}
+local state_signals = {
+    StateChanged = true, DeviceAdded = true, DeviceRemoved = true,
+    AccessPointAdded = true, AccessPointRemoved = true,
+}
+
+local function changes_state(line)
+    local signal = mesh.json.decode(line)
+    if signal.member ~= "PropertiesChanged" then
+        return state_signals[signal.member] == true
+    end
+    local fields = signal.body or {}
+    local changed = fields[2] and fields[2].value or {}
+    for key in pairs(changed) do
+        if state_properties[key] then return true end
+    end
+    local invalidated = fields[3] and fields[3].value or {}
+    for _, key in ipairs(invalidated) do
+        if state_properties[key] then return true end
+    end
+    return false
+end
+
+function on_stream_line(self, program, line)
+    if program ~= monitor_program or dirty then
         return
     end
+    if native_monitor and not changes_state(line) then return end
     dirty = true
     mesh.service.set_poll_interval(DIRTY_POLL_MS)
 end
 
 function on_stream_closed(self, program, _success)
-    if program == "nmcli" then
-        mesh.service.set_poll_interval(5000)
+    if program ~= monitor_program then return end
+    monitor_program = nil
+    if native_monitor then
+        native_monitor = false
+        local monitor = mesh.exec_stream("nmcli", { "monitor" })
+        monitor_program = monitor and monitor.program or nil
     end
+    mesh.service.set_poll_interval(monitor_program and IDLE_POLL_MS or 5000)
 end
 
 function on_poll(self)

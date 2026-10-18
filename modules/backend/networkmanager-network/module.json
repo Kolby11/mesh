@@ -15,6 +15,7 @@
         "exec.argv:nmcli:[\"-t\",\"-f\",\"ACTIVE,SSID,SIGNAL,SECURITY\",\"device\",\"wifi\",\"list\",\"--rescan\",\"no\"]"
       ],
       "optionalCapabilities": [
+        "dbus.system",
         "exec.argv:nmcli:[\"radio\",\"wifi\",\"*\"]",
         "exec.argv:nmcli:[\"device\",\"wifi\",\"rescan\"]",
         "exec.argv:nmcli:[\"device\",\"wifi\",\"connect\",\"*\"]"

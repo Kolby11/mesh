@@ -4,7 +4,7 @@
 
 - Linux with a compatible Wayland compositor/session.
 - Rust `1.85` or newer.
-- Wayland, `libxkbcommon`, Fontconfig, FreeType, and `pkg-config` development
+- Wayland, `libxkbcommon`, Fontconfig, FreeType, PipeWire, Clang/libclang, and `pkg-config` development
   libraries.
 - Nix with flakes enabled is the supported repository setup path and provides
   the required development dependencies.

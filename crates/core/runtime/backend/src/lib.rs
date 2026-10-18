@@ -652,7 +652,7 @@ impl BackendLifecycleGuard {
     }
 
     async fn finish(&mut self, ctx: &mut BackendScriptContext) {
-        if let Err(err) = ctx.call_stop() {
+        if let Err(err) = ctx.call_stop_async().await {
             let _ = self
                 .tx
                 .send(BackendServiceEvent::Failed {
@@ -852,6 +852,13 @@ async fn run_backend_service(
                         consecutive_poll_failures = 0;
                     }
                 }
+                for result in run.streams {
+                    if !publish_stream_callback_result(
+                        result.map(|_| None), &tx, &service_name, &module_id,
+                        &mut last_state_fingerprint, ctx, &mut interval_ms,
+                        &mut tick, &identity_handle, &mut consecutive_stream_failures,
+                    ).await { stop = true; }
+                }
                 for (task, outcome) in run.commands {
                     let Some(pending) = suspended_commands.remove(&task) else { continue };
                     let (outcome, result) = match outcome {
@@ -871,8 +878,9 @@ async fn run_backend_service(
                 if !publish_script_events(&tx, &service_name, &module_id, ctx.drain_events(), &identity_handle).await { break; }
                 if stop { break; }
             }
-            _ = stream_state.wait_for_event() => {
-                let events = stream_state.drain_events();
+            _ = stream_state.wait_for_event(), if !ctx.stream_in_flight() => {
+                let typed = ctx.has_stream_event_handler();
+                let events = stream_state.drain_dispatch_batch(typed);
                 if !dispatch_stream_events(
                     ctx,
                     events,
@@ -892,7 +900,7 @@ async fn run_backend_service(
             // it never needs a periodic wakeup.
             // A poll suspended on a host operation finishes before the next
             // one starts.
-            _ = tick.tick(), if poll_enabled && !ctx.poll_in_flight() => {
+            _ = tick.tick(), if poll_enabled && ctx.poll_interval_ms() != 0 && !ctx.poll_in_flight() => {
                 let payload = match ctx.run_poll() {
                     Ok(payload) => {
                         if !ctx.poll_in_flight() {
@@ -1477,6 +1485,10 @@ async fn publish_stream_callback_result(
     identity_handle: &std::sync::Arc<std::sync::RwLock<mesh_core_runtime::BackendIdentity>>,
     stream_failures: &mut u32,
 ) -> bool {
+    if result.is_ok() && ctx.stream_in_flight() {
+        refresh_interval(ctx, active_interval_ms, tick);
+        return true;
+    }
     if result.is_ok() {
         *stream_failures = 0;
     }
@@ -3701,5 +3713,121 @@ end
             .unwrap()
             .unwrap();
         let _ = std::fs::remove_dir_all(root);
+    }
+    #[tokio::test]
+    async fn suspended_stream_callbacks_preserve_order_while_commands_run() {
+        for typed in [false, true] {
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            let (commands, command_rx) = mpsc::unbounded_channel();
+            let mut source = r#"
+state = { lines = "", command = false, closed = false }
+function start(self)
+    mesh.service.set_poll_interval(0)
+    mesh.exec_stream("sh", {"-c", "printf 'a\nb\n'"})
+end
+function on_stream_line(self, program, line)
+    task.sleep(20)
+    state.lines ..= line
+end
+function on_stream_closed(self, program, success)
+    task.sleep(0)
+    state.closed = true
+end
+function on_command_ping(self)
+    state.command = true
+    return { ok = true }
+end
+function on_poll(self) error("disabled poll ran") end
+"#
+            .to_string();
+            if typed {
+                source.push_str(
+                    r#"
+function on_stream_event(self, event)
+    if event.type == "line" then
+        on_stream_line(self, event.stream.program, event.line)
+    elseif event.type == "exited" then
+        on_stream_closed(self, event.stream.program, event.success)
+    end
+end
+"#,
+                );
+            }
+            let task = tokio::spawn(spawn_backend_service(
+                "@test/stream-coroutines".into(),
+                "test".into(),
+                CapabilitySet::from_ids(["exec.command"]),
+                serde_json::json!({}),
+                source,
+                tx,
+                command_rx,
+            ));
+            next_update(&mut rx, "initial stream provider state").await;
+            commands
+                .send(BackendServiceCommand {
+                    call_id: CallId::from_raw(0),
+                    command: "ping".into(),
+                    payload: serde_json::json!({}),
+                    coalesce: false,
+                })
+                .unwrap();
+            loop {
+                let update = next_update(&mut rx, "suspended stream callback should settle").await;
+                if update.payload["closed"] == true {
+                    assert_eq!(update.payload["lines"], "ab");
+                    assert_eq!(update.payload["command"], true);
+                    break;
+                }
+            }
+            drop(commands);
+            drop(rx);
+            tokio::time::timeout(Duration::from_secs(3), task)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+    }
+    #[tokio::test]
+    async fn three_suspended_stream_failures_stop_the_provider() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (_commands, command_rx) = mpsc::unbounded_channel();
+        let task = tokio::spawn(spawn_backend_service(
+            "@test/stream-failures".into(),
+            "test".into(),
+            CapabilitySet::from_ids(["exec.command"]),
+            serde_json::json!({}),
+            r#"
+function start(self)
+    mesh.service.set_poll_interval(0)
+    mesh.exec_stream("sh", {"-c", "printf 'a\nb\nc\n'"})
+end
+function on_stream_event(self, event)
+    if event.type == "line" then
+        task.sleep(0)
+        error("suspended stream failure")
+    end
+end
+"#
+            .into(),
+            tx,
+            command_rx,
+        ));
+        let mut failures = 0;
+        loop {
+            let event = tokio::time::timeout(Duration::from_secs(3), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            match event {
+                BackendServiceEvent::CallbackFailed { stage, count, .. } if stage == "stream" => {
+                    failures += 1;
+                    assert_eq!(count, failures);
+                }
+                BackendServiceEvent::Stopped { .. } => break,
+                _ => {}
+            }
+        }
+        assert_eq!(failures, 3);
+        task.await.unwrap();
     }
 }

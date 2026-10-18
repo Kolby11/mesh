@@ -223,6 +223,30 @@ impl StreamState {
         events
     }
 
+    /// Remove one typed event or one adjacent legacy line batch, leaving later
+    /// records budgeted while an authored stream callback is suspended.
+    pub fn drain_dispatch_batch(&self, typed: bool) -> Vec<StreamEvent> {
+        self.reap_finished();
+        let mut pending = self.pending.lock().unwrap();
+        let Some(first) = pending.pop_front() else {
+            return Vec::new();
+        };
+        let mut events = vec![first];
+        if !typed && matches!(events[0].kind, StreamEventKind::Line(_)) {
+            while pending.front().is_some_and(|event| {
+                event.stream == events[0].stream && matches!(event.kind, StreamEventKind::Line(_))
+            }) {
+                events.push(pending.pop_front().unwrap());
+            }
+        }
+        drop(pending);
+        self.resources.release_queue(events.len());
+        self.resources
+            .release_queued_output(events.iter().map(StreamEvent::queued_output_bytes).sum());
+        self.overflow_reported.lock().unwrap().clear();
+        events
+    }
+
     /// Drain the queue as legacy line records. Lifecycle events are consumed
     /// but remain available through [`Self::drain_events`] for new callers.
     pub fn drain_lines(&self) -> Vec<StreamLine> {
@@ -340,12 +364,14 @@ impl StreamState {
             .insert(process.stream.id(), process);
     }
 
-    pub(super) fn request_stop(&self, id: StreamId) {
+    pub(super) fn request_stop(&self, id: StreamId) -> bool {
         if let Some(process) = self.processes.lock().unwrap().get_mut(&id) {
             if let Some(stop) = process.stop.take() {
                 let _ = stop.send(());
+                return true;
             }
         }
+        false
     }
 
     pub(super) fn push_event(&self, event: StreamEvent) {

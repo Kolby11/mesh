@@ -140,9 +140,6 @@ Each needs a design and a measured prototype before it is adopted.
 [Direction note](../.planning/todos/pending/2026-10-10-runtime-architecture-direction.md)
 (suggested order inside).
 
-- [ ] **D2:** Backend stream hooks and `stop(self)` still block on host calls;
-      move stream delivery onto D8's event-driven APIs, then measure host-worker
-      pool pressure (64 process-wide) under a real provider set.
 - [ ] **D4:** Providers send typed field patches instead of whole snapshots, and
       no JSON on the frame path. Validation, ranges/defaults and `.d.luau`
       generation have shipped, and LSP proxy types use the same mapping.
@@ -155,8 +152,6 @@ Each needs a design and a measured prototype before it is adopted.
 - [ ] **D6:** Connect the immutable scene/render-thread handoff to frozen font/icon
       resources, GPU raster and presentation. The bounded handoff prototype is
       implemented; scroll-raster and blur plans are re-scoped around renderer ownership.
-- [ ] **D8:** Event-driven backend host APIs (D-Bus signals, PipeWire, netlink,
-      inotify) on D2 coroutines; polling becomes the fallback.
 - [ ] **D9:** CI performance gates per workload: idle wakeups, hover, service
       poll, scroll, popover open, theme switch.
 
@@ -336,9 +331,6 @@ of payoff.
 
 ### Runtime boundary
 
-- [ ] D-Bus signal subscription as a backend host primitive, so UPower and
-      NetworkManager providers stop adopting monitor subprocesses (C); then
-      re-measure the at-rest fork rate on a live session.
 - [ ] Handler sync still reads compound table globals, because nested in-place
       mutations never assign through `_ENV`. Eliminating those reads needs
       recursively tracked tables or Rust-owned reactive values (R).

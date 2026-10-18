@@ -185,3 +185,8 @@ pub(super) fn read_file(path: &str, limit: usize) -> Value {
         Err(error) => serde_json::json!({"success": false, "contents": "", "error": error}),
     }
 }
+
+#[cfg(test)]
+pub(super) fn active_workers() -> usize {
+    ACTIVE_HOST_WORKERS.load(Ordering::Acquire)
+}

@@ -36,7 +36,7 @@ All are `ui` modules. Placement is `surface` when the module declares default
 
 | Module | Kind | Entrypoint | Interface/integration |
 | --- | --- | --- | --- |
-| `@mesh/pipewire-audio` | backend | `src/main.luau` | `mesh.audio` through PipeWire tools |
+| `@mesh/pipewire-audio` | backend | `src/main.luau` | `mesh.audio` through native PipeWire events and control tools |
 | `@mesh/pulseaudio-audio` | backend | `src/main.luau` | `mesh.audio` through PulseAudio tools |
 | `@mesh/backlight-brightness` | backend | `src/main.luau` | `mesh.brightness` through `brightnessctl` |
 | `@mesh/upower-power` | backend | `src/main.luau` | Power state through UPower tooling |

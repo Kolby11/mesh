@@ -79,3 +79,5 @@ settings_scroll_shifted_fraction         lower      0.90      0
 typed_keyword_declaration_speedup        lower      5.00      0
 finalized_memo_speedup                   lower      1.50      0
 selector_dependency_update_speedup       lower      4.00      0
+native_subscription_helper_processes upper 0 0
+native_subscription_idle_events upper 0 0

@@ -8,6 +8,12 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Now
 
+- **D8 implemented:** native D-Bus, PipeWire, route netlink and wlr toplevel
+  sources share the bounded stream lifecycle with inotify/socket sources.
+  Stream callbacks and bounded shutdown yield through D2. NetworkManager,
+  UPower and audio prefer native sources with monitor/poll fallbacks.
+  Validation and live provider measurements are in the performance log.
+
 - **Finalized memo entries and D7 matching implemented:** component memo
   entries retain pre-animation styles and semantics; class/state reverse
   dependencies include component and theme rules. Rebuilds defer compiler
@@ -45,16 +51,16 @@ measurements are in [`log/`](log/README.md). Open work is in
 - **Runtime direction follow-ups:** D1 template patching/effects, D2 task
   scheduling with suspending backend callbacks, D3 grants, D4 typed
   contracts and D5 popover disclosure have landed (see
-  [October's log](log/2026-10.md)). Remaining D2 work (stream hooks, `stop`)
-  waits on D8. D5 disclosure still needs a check in a live compositor.
+  [October's log](log/2026-10.md)). D8 completes D2 stream hooks and `stop`.
+  D5 disclosure still needs a check in a live compositor.
 - **Scroll wave 4 item 15:** the [bounded scroll raster cache](todos/pending/2026-09-30-scroll-raster-cache.md).
   Production wiring is deferred by the revised D6 ownership and measurement contract.
 
 ## Next
 
 - Priority 6 dead code, duplication and small correctness fixes (starts with SH-07).
-- D8 event-driven backend host APIs, then the rest of D5 (dialog focus scope,
-  menu typeahead).
+- Remaining D5 (dialog focus scope, menu typeahead), D6 renderer integration
+  and D9 workload gates.
 - Wave 5: the [in-surface blur engine](todos/pending/2026-09-30-in-surface-blur-engine.md).
 
 ## Blocked / known baselines

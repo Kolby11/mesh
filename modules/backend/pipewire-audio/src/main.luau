@@ -29,9 +29,11 @@ end
 -- ourselves so on_stream_batch can swallow them.
 local pending_self_noise = 0
 local stream_active = false
+local native_stream = false
+local monitor_program = nil
 
 local function wpctl(args)
-    if stream_active then
+    if stream_active and not native_stream then
         pending_self_noise = pending_self_noise + 1
     end
     return mesh.exec("wpctl", args)
@@ -43,29 +45,42 @@ local SAFETY_POLL_MS = 30000
 function start(self)
     mesh.service.set_poll_interval(FALLBACK_POLL_MS)
 
-    local stream_args = { "--hide-props", "--hide-params", "--print-separator" }
-    if mesh.service.can_exec("pw-mon", stream_args) then
-        local started = mesh.exec_stream("pw-mon", stream_args)
-        if started then
-            stream_active = true
-            mesh.service.set_poll_interval(SAFETY_POLL_MS)
-            debug_info("subscribed to pw-mon for live volume events")
-        else
-            debug_warn("pw-mon stream unavailable; falling back to 250ms poll")
-        end
+    local started = mesh.pipewire_subscribe()
+    if started then
+        native_stream = true
+        stream_active = true
+        monitor_program = started.program
+        mesh.service.set_poll_interval(SAFETY_POLL_MS)
     else
-        mesh.log.debug("[pipewire-audio] pw-mon capability unavailable; using 250ms poll")
+        local args = { "--hide-props", "--hide-params", "--print-separator" }
+        if mesh.service.can_exec("pw-mon", args) then
+            started = mesh.exec_stream("pw-mon", args)
+            if started then
+                monitor_program = started.program
+                stream_active = true
+                mesh.service.set_poll_interval(SAFETY_POLL_MS)
+            end
+        end
     end
 end
 
 function on_stream_closed(self, program, _success)
-    if program ~= "pw-mon" then
-        return
-    end
-    debug_warn("pw-mon exited; falling back to 250ms poll")
+    if program ~= monitor_program then return end
+    monitor_program = nil
     stream_active = false
     pending_self_noise = 0
-    mesh.service.set_poll_interval(FALLBACK_POLL_MS)
+    if native_stream then
+        native_stream = false
+        local args = { "--hide-props", "--hide-params", "--print-separator" }
+        if mesh.service.can_exec("pw-mon", args) then
+            local started = mesh.exec_stream("pw-mon", args)
+            if started then
+                monitor_program = started.program
+                stream_active = true
+            end
+        end
+    end
+    mesh.service.set_poll_interval(stream_active and SAFETY_POLL_MS or FALLBACK_POLL_MS)
 end
 
 local function resolve_sink_id()
@@ -260,7 +275,10 @@ local function classify_pwmon_batch(lines)
 end
 
 function on_stream_batch(self, program, lines)
-    if program ~= "pw-mon" then
+    if program ~= monitor_program then return end
+    if native_stream then
+        refresh_state()
+        maybe_emit_volume_changed(self)
         return
     end
 

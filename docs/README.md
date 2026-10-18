@@ -52,6 +52,7 @@ keyboard behavior, automation, and MCP direction.
 - [Renderer contract](frontend/renderer-contract.md)
 - [CSS coverage](css-coverage.md)
 - [Shipped module index](modules/README.md)
+- [Backend host events](modules/backend-events.md)
 
 ## Maintainer reference
 

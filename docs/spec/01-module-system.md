@@ -1032,7 +1032,7 @@ default for a malformed argument.
   runtime JSON boundaries may impose stricter limits.
 - **Shipped — backend tasks.** Backends have the frontend `task` library
   (`task.spawn`, `task.delay`, `task.sleep`, `task.cancel`) once `start(self)`
-  runs. `start`, `on_poll` and `on_command_<method>` run as coroutines, as do
+  runs. `start`, `on_poll`, `on_command_<method>`, stream hooks and `stop` run as coroutines, as do
   tasks: inside them `mesh.exec`, `mesh.socket_request` and `mesh.read_file`
   (`fs.read`, absolute regular files up to the output limit) suspend the
   callback while a host worker runs, and other callbacks keep running. The
@@ -1041,9 +1041,20 @@ default for a malformed argument.
   handler returns and is dropped if the caller cancels. Only successful
   callback completion publishes a service snapshot. Failed callbacks discard
   pending publications while retaining private Luau mutations and table identity;
-  the next successful callback may publish those mutations. Stream hooks, `stop` and
-  calls from contexts Luau cannot yield from (metamethods, `table.sort`
-  comparators) still block.
+  the next successful callback may publish those mutations. Later stream callbacks
+  remain queued while a stream callback is suspended. Stop cancels previous tasks
+  and has a two-second teardown deadline. Calls from contexts Luau cannot yield
+  from (metamethods, `table.sort` comparators) still block.
+- **Shipped — native backend events.** Capability-gated D-Bus signals, PipeWire
+  Node/Metadata invalidations, route netlink groups, wlr foreign-toplevel events,
+  inotify watches and Unix socket streams use the bounded, generation-owned
+  stream lifecycle. Sources register asynchronously, report readiness/failure,
+  and are cancelled and awaited at shutdown; individual handles can be closed.
+  `mesh.service.set_poll_interval(0)` disables polling. Shipped NetworkManager,
+  UPower and PipeWire providers prefer native subscriptions and retain monitor
+  and safety-poll fallbacks. Domain state reads and controls remain module-owned.
+  API filters, record formats, limits and fallback behavior are in
+  [Backend host events](../modules/backend-events.md).
 - Core-triggered service actions use that same declared method and generic
   dispatcher. For example, startup playback calls `mesh.audio.play_sound`
   rather than sending directly to a known backend handler.

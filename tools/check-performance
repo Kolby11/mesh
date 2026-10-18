@@ -39,6 +39,7 @@ cargo test -p mesh-core-shell --release --lib shared_binding_and_structural_expr
 run_benchmark mesh-core-shell narrow_handler_damage_beats_forced_full_repaint
 run_benchmark mesh-core-shell coalesced_reload_wakeup_profile
 run_benchmark mesh-core-shell watcher_idle_wait_profile
+run_benchmark mesh-core-scripting native_subscription_idle_profile
 run_benchmark mesh-core-scripting validated_state_publication_profile
 run_benchmark mesh-core-render glass_raster_profile
 run_benchmark mesh-core-render frame_plan_derivation_and_visual_damage_profile

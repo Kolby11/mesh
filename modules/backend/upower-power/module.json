@@ -12,6 +12,7 @@
         "exec.argv:upower:[\"-i\",\"*\"]"
       ],
       "optionalCapabilities": [
+        "dbus.system",
         "exec.argv:upower:[\"--monitor\"]"
       ],
       "binaries": [

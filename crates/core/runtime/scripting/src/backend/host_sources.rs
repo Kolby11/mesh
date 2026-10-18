@@ -58,7 +58,7 @@ fn clean_exit() -> StreamExitStatus {
     }
 }
 
-fn spawn_source<F>(
+pub(super) fn spawn_source<F>(
     state: &Arc<StreamState>,
     program: String,
     path: &str,
@@ -196,7 +196,7 @@ pub fn spawn_path_watch(state: &Arc<StreamState>, path: &str) -> std::io::Result
     )
 }
 
-fn finish(state: &Arc<StreamState>, stream: StreamHandle, failure: Option<String>) {
+pub(super) fn finish(state: &Arc<StreamState>, stream: StreamHandle, failure: Option<String>) {
     let exit = match failure {
         Some(message) => {
             state.push_event(StreamEvent {
@@ -373,6 +373,11 @@ impl Inotify {
                 // read_unaligned tolerates the byte buffer's alignment.
                 let event: libc::inotify_event =
                     unsafe { std::ptr::read_unaligned(buffer.as_ptr().add(offset).cast()) };
+                if event.mask & libc::IN_Q_OVERFLOW != 0 {
+                    return Err(std::io::Error::other(
+                        "inotify queue overflow; resync required",
+                    ));
+                }
                 if event.mask & (libc::IN_MODIFY | libc::IN_CLOSE_WRITE | libc::IN_ATTRIB) != 0 {
                     summary.modified = true;
                 }

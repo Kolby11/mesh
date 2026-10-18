@@ -17,6 +17,7 @@
         "exec.argv:wpctl:[\"status\"]"
       ],
       "optionalCapabilities": [
+        "pipewire.observe",
         "exec.argv:aplay:[\"*\"]",
         "exec.argv:pw-mon:[\"--hide-props\",\"--hide-params\",\"--print-separator\"]"
       ],

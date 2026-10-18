@@ -138,6 +138,10 @@ impl TaskQueue {
         self.awaiting_calls.clear();
     }
 
+    pub(crate) fn contains(&self, id: u64) -> bool {
+        self.deadlines.contains_key(&id) || self.awaiting_calls.contains_key(&id)
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.deadlines.len() + self.awaiting.len()
     }

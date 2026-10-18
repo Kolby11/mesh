@@ -99,6 +99,14 @@ process crashes are outside that isolation guarantee.
 
 ## Service architecture
 
+Backend native event sources share a bounded, generation-owned stream lifecycle.
+D-Bus, PipeWire, route netlink, inotify, Unix sockets and wlr foreign-toplevel
+subscriptions wake backend coroutines; stream hooks can suspend without blocking
+commands. Providers retain domain interpretation and fallback policy. Native
+PipeWire loops own their protocol objects on an executor thread and wake on
+cancellation; the other subscriptions use Tokio readiness. See
+[backend host events](../modules/backend-events.md).
+
 A component depends on an interface name and compatible version rather than a
 provider module ID. Providers own their domain state and implement declared
 methods and events. The core validates and transports those records; it should

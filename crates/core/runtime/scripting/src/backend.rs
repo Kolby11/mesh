@@ -3,11 +3,14 @@ mod errors;
 mod event;
 mod exec;
 mod exec_stream;
+mod host_events;
 mod host_sources;
 mod logging;
+mod pipewire_source;
 mod runtime;
 mod state;
 mod task_io;
+mod wayland_source;
 
 pub const MIN_POLL_INTERVAL_MS: u64 = 50;
 
